@@ -1,0 +1,8 @@
+[package]
+name = "loop-example"
+version = "0.0.1"
+authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
+
+[dependencies]
+alsa = "0.4"
+
