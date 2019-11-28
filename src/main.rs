@@ -8,6 +8,12 @@ use std::sync::mpsc;
 
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
+mod filters;
+mod biquad;
+use biquad::*;
+//pub use crate::filters::*;
+//pub use crate::biquad::*;
+
 fn open_audio_dev_play(req_devname: String, req_samplerate: u32, req_bufsize: i64) -> Res<(alsa::PCM, u32)> {
 
     // Open the device
@@ -167,6 +173,8 @@ fn run() -> Res<()> {
     //let mut mmap = playback_dev.direct_mmap_playback::<SF>()?;
 
     thread::spawn(move || {
+        let coeffs = Coefficients::<f64>::new(-1.97984856, 0.98004953, 5.02413473e-5, 1.00482695e-4, 5.02413473e-5);
+        let filter = BiquadDF2T::<f64>::new(coeffs);
         loop {
             match rx_cap.recv() {
                 Ok(Message::Audio(chunk)) => {
@@ -174,6 +182,8 @@ fn run() -> Res<()> {
                     for (i, a) in buf.iter_mut().enumerate() {
                         *a = ((i as f32 * 2.0 * ::std::f32::consts::PI / 128.0).sin() * 8192.0) as i16
                     }
+                    buf = filter.process_multi(buf);
+
                     let chunk = AudioChunk{
                         frames: 1024,
                         channels: 2,
