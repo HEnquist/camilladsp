@@ -13,9 +13,9 @@ pub enum Waveforms {
 }
 
 pub struct AudioChunk {
-    frames: usize,
-    channels: usize,
-    waveforms: Waveforms,
+    pub frames: usize,
+    pub channels: usize,
+    pub waveforms: Waveforms,
 }
 
 

@@ -8,21 +8,21 @@ use audiodevice::*;
 
 pub struct AlsaPlaybackDevice<T> {
     devname: String,
-    samplerate: u32,
+    samplerate: usize,
     pcmdevice: alsa::PCM,
     //io: alsa::pcm::IO<'a, T>,
     buffer: Vec<T>,
-    bufferlength: i64,
-    channels: u32,
+    bufferlength: usize,
+    channels: usize,
 }
 pub struct AlsaCaptureDevice<T> {
     devname: String,
-    samplerate: u32,
+    samplerate: usize,
     pcmdevice: alsa::PCM,
     //io: alsa::pcm::IO<'a, T>,
     buffer: Vec<T>,
-    bufferlength: i64,
-    channels: u32,
+    bufferlength: usize,
+    channels: usize,
 }
 
 
@@ -42,7 +42,7 @@ impl PlaybackDevice<i16> for AlsaPlaybackDevice<i16> {
             Waveforms::Float32(waveforms) => {
                  for frame in 0..chunk.frames {
                     for chan in 0..chunk.channels {
-                        value = (chunk.waveforms[chan][frame] * 2<<15) as i16;
+                        value = (waveforms[chan][frame] * (1<<15) as f32) as i16;
                         buf.push(value);
                     }
                 }
@@ -50,7 +50,7 @@ impl PlaybackDevice<i16> for AlsaPlaybackDevice<i16> {
             Waveforms::Float64(waveforms) => {
                  for frame in 0..chunk.frames {
                     for chan in 0..chunk.channels {
-                        value = (chunk.waveforms[chan][frame] * 2<<15) as i16;
+                        value = (waveforms[chan][frame] * (1<<15) as f64) as i16;
                         buf.push(value);
                     }
                 }
@@ -61,7 +61,7 @@ impl PlaybackDevice<i16> for AlsaPlaybackDevice<i16> {
     }
     
     // play the buffer
-    fn play(&mut self) -> Res<u32> {
+    fn play(&mut self) -> Res<usize> {
         let playback_state = self.pcmdevice.state();
         //println!("playback state {:?}", playback_state);
         if playback_state == State::XRun {
@@ -70,7 +70,7 @@ impl PlaybackDevice<i16> for AlsaPlaybackDevice<i16> {
         }
         //let frames = self.io.writei(&self.buffer[..])?;
         let frames = self.pcmdevice.io_i16()?.writei(&self.buffer[..])?;
-        Ok(frames)
+        Ok(frames as usize)
     }
 }
 
@@ -81,7 +81,7 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
     }
 
     /// Send audio chunk for later playback
-    fn fetch_chunk(&mut self, datatype: Waveforms) -> Res<()> {
+    fn fetch_chunk(&mut self, datatype: Waveforms) -> Res<AudioChunk> {
         let num_samples = self.buffer.len();
         let num_frames = num_samples/self.channels;
         let waveforms = match datatype {
@@ -95,7 +95,7 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
                 let mut samples = self.buffer.iter();
                 for frame in 0..num_frames {
                     for chan in 0..self.channels {
-                        value = (*samples.next().unwrap() as f32) / (2<<15 as f32);
+                        value = (*samples.next().unwrap() as f32) / ((1<<15) as f32);
                         wfs[chan].push(value);
                     }
                 }
@@ -111,7 +111,7 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
                 let mut samples = self.buffer.iter();
                 for frame in 0..num_frames {
                     for chan in 0..self.channels {
-                        value = (*samples.next().unwrap() as f64) / (2<<15 as f64);
+                        value = (*samples.next().unwrap() as f64) / ((1<<15) as f64);
                         wfs[chan].push(value);
                     }
                 }
@@ -127,7 +127,7 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
     }
     
     //capure to internal buffer
-    fn capture(&mut self) -> Res<u32> {
+    fn capture(&mut self) -> Res<usize> {
         let mut buf: Vec<i16>;
         buf = vec![0; self.channels*self.bufferlength];
         let capture_state = self.pcmdevice.state();
@@ -137,7 +137,7 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
         //let frames = self.io.readi(&mut buf)?;
         let frames = self.pcmdevice.io_i16()?.readi(&mut buf)?;
         self.buffer = buf;
-        Ok(frames)
+        Ok(frames as usize)
     }
 }
 
@@ -174,12 +174,12 @@ impl AlsaPlaybackDevice<i16> {
         //let mut io = pcmdev.io_i16()?;
         let device = AlsaPlaybackDevice {
             devname: devname,
-            samplerate: rate,
+            samplerate: rate as usize,
             pcmdevice: pcmdev,
             //io: io,
             buffer: vec![0, 0],
-            bufferlength: act_bufsize,
-            channels: channels,
+            bufferlength: act_bufsize as usize,
+            channels: channels as usize,
         };
         Ok(())
     }
@@ -218,12 +218,12 @@ impl AlsaCaptureDevice<i16> {
         //let mut io = pcmdev.io_i16()?;
         let device = AlsaCaptureDevice {
             devname: devname,
-            samplerate: rate,
+            samplerate: rate as usize,
             pcmdevice: pcmdev,
             //io: io,
             buffer: vec![0, 0],
-            bufferlength: act_bufsize,
-            channels: channels,
+            bufferlength: act_bufsize as usize,
+            channels: channels as usize,
         };
         Ok(())
     }
