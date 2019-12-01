@@ -11,6 +11,12 @@ type Res<T> = Result<T, Box<dyn error::Error>>;
 mod filters;
 mod biquad;
 use biquad::*;
+
+mod audiodevice;
+mod alsadevice;
+use audiodevice::*;
+use alsadevice::*;
+
 //pub use crate::filters::*;
 //pub use crate::biquad::*;
 
@@ -80,12 +86,13 @@ fn open_audio_dev_capt(req_devname: String, req_samplerate: u32, req_bufsize: i6
 
 // Sample format
 type SF = i16;
+type PF = f64;
 
 
 struct AudioChunk {
     frames: usize,
     channels: usize,
-    waveforms: Vec<Vec<SF>>, //Waveform>,
+    waveforms: Vec<Vec<PF>>, //Waveform>,
 }
 
 
