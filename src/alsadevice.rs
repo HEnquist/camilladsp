@@ -81,11 +81,11 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
     }
 
     /// Send audio chunk for later playback
-    fn fetch_chunk(&mut self, datatype: Waveforms) -> Res<AudioChunk> {
+    fn fetch_chunk(&mut self, datatype: Datatype) -> Res<AudioChunk> {
         let num_samples = self.buffer.len();
         let num_frames = num_samples/self.channels;
         let waveforms = match datatype {
-            Waveforms::Float32(_) => {
+            Datatype::Float32 => {
                 let mut value: f32;
                 let mut wfs = Vec::with_capacity(self.channels);
                 for chan in 0..self.channels {
@@ -101,7 +101,7 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
                 }
                 Waveforms::Float32(wfs)
             },
-            Waveforms::Float64(_) => {
+            Datatype::Float64 => {
                 let mut value: f64;
                 let mut wfs = Vec::with_capacity(self.channels);
                 for chan in 0..self.channels {
@@ -143,7 +143,7 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
 
 
 impl AlsaPlaybackDevice<i16> {
-    fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<()> {
+    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaPlaybackDevice<i16>> {
         // Open the device
         let pcmdev = alsa::PCM::new(&devname, Direction::Playback, false)?;
 
@@ -181,13 +181,13 @@ impl AlsaPlaybackDevice<i16> {
             bufferlength: act_bufsize as usize,
             channels: channels as usize,
         };
-        Ok(())
+        Ok(device)
     }
 }
 
 
 impl AlsaCaptureDevice<i16> {
-    fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<()> {
+    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaCaptureDevice<i16>> {
         // Open the device
         let pcmdev = alsa::PCM::new(&devname, Direction::Capture, false)?;
 
@@ -225,7 +225,7 @@ impl AlsaCaptureDevice<i16> {
             bufferlength: act_bufsize as usize,
             channels: channels as usize,
         };
-        Ok(())
+        Ok(device)
     }
 }
 

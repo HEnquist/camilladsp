@@ -12,6 +12,11 @@ pub enum Waveforms {
     Float64(Vec<Vec<f64>>),
 }
 
+pub enum Datatype {
+    Float32,
+    Float64,
+}
+
 pub struct AudioChunk {
     pub frames: usize,
     pub channels: usize,
@@ -35,7 +40,7 @@ pub trait CaptureDevice<T> {
     fn get_bufsize(&mut self) -> usize;
 
     /// Filter a single point
-    fn fetch_chunk(&mut self, datatype: Waveforms) -> AudioChunk;
+    fn fetch_chunk(&mut self, datatype: Datatype) -> Res<AudioChunk>;
 
     // Filter a Vec
     fn capture(&mut self) -> Res<usize>;
