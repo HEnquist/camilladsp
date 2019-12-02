@@ -48,10 +48,15 @@ impl PlaybackDevice<i16> for AlsaPlaybackDevice<i16> {
                 }
             },
             Waveforms::Float64(waveforms) => {
-                 for frame in 0..chunk.frames {
+                //let mut buf = vec![0i16; num_samples];
+                let mut buf = Vec::with_capacity(num_samples);
+                //let mut idx = 0;
+                for frame in 0..chunk.frames {
                     for chan in 0..chunk.channels {
                         value = (waveforms[chan][frame] * (1<<15) as f64) as i16;
                         buf.push(value);
+                        //buf[idx] = value;
+                        //idx+=1;
                     }
                 }
             },
@@ -91,12 +96,14 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
                 for chan in 0..self.channels {
                     wfs.push(Vec::with_capacity(num_frames));
                 }
-        
+                //let mut idx = 0;
                 let mut samples = self.buffer.iter();
                 for frame in 0..num_frames {
                     for chan in 0..self.channels {
                         value = (*samples.next().unwrap() as f32) / ((1<<15) as f32);
+                        //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
                         wfs[chan].push(value);
+                        //idx += 1;
                     }
                 }
                 Waveforms::Float32(wfs)
@@ -106,6 +113,7 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
                 let mut wfs = Vec::with_capacity(self.channels);
                 for chan in 0..self.channels {
                     wfs.push(Vec::with_capacity(num_frames));
+                    //wfs.push(vec![0f64; num_frames]);
                 }
         
                 let mut samples = self.buffer.iter();
@@ -113,6 +121,7 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
                     for chan in 0..self.channels {
                         value = (*samples.next().unwrap() as f64) / ((1<<15) as f64);
                         wfs[chan].push(value);
+                        //wfs[chan][frame] = value;
                     }
                 }
                 Waveforms::Float64(wfs)

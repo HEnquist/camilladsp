@@ -36,8 +36,8 @@ enum Message {
 
 
 fn run() -> Res<()> {
-    let mut playback_dev = AlsaPlaybackDevice::<i16>::open("hw:PCH".to_string(), 44100, 1024, 2)?;
-    let mut capture_dev = AlsaCaptureDevice::<i16>::open("hw:PCH".to_string(), 44100, 1024, 2)?;
+    let mut playback_dev = AlsaPlaybackDevice::<i16>::open("hw:PCH".to_string(), 44100, 4096, 2)?;
+    let mut capture_dev = AlsaCaptureDevice::<i16>::open("hw:Loopback,0,0".to_string(), 44100, 4096, 2)?;
     //let (playback_dev, play_rate) = open_audio_dev_play("hw:PCH".to_string(), 44100, 1024)?;
     //let (capture_dev, capt_rate) = open_audio_dev_capt("hw:PCH".to_string(), 44100, 1024)?;
 
@@ -48,21 +48,47 @@ fn run() -> Res<()> {
     //let mut mmap = playback_dev.direct_mmap_playback::<SF>()?;
 
     thread::spawn(move || {
-        let coeffs = Coefficients::<f64>::new(-1.97984856, 0.98004953, 5.02413473e-5, 1.00482695e-4, 5.02413473e-5);
-        let mut filter = BiquadDF2T::<f64>::new(coeffs);
+        let coeffs_32 = Coefficients::<f32>::new(-1.79907162, 0.81748736, 0.00460394, 0.00920787, 0.00460394);
+        let mut filter_l_32 = BiquadDF2T::<f32>::new(coeffs_32);
+        let mut filter_r_32 = BiquadDF2T::<f32>::new(coeffs_32);
+        let coeffs_64 = Coefficients::<f64>::new(-1.79907162, 0.81748736, 0.00460394, 0.00920787, 0.00460394);
+        let mut filter_l_64 = BiquadDF2T::<f64>::new(coeffs_64);
+        let mut filter_r_64 = BiquadDF2T::<f64>::new(coeffs_64);
         loop {
             match rx_cap.recv() {
                 Ok(Message::Audio(chunk)) => {
-                    let mut buf = vec![0f64; 1024];
-                    for (i, a) in buf.iter_mut().enumerate() {
-                        *a = (i as f64 * 2.0 * ::std::f64::consts::PI / 128.0).sin();
-                    }
-                    buf = filter.process_multi(buf);
+                    //let mut buf = vec![0f64; 1024];
+                    //for (i, a) in buf.iter_mut().enumerate() {
+                    //    *a = (i as f64 * 2.0 * ::std::f64::consts::PI / 128.0).sin();
+                    //}
+                    let waveforms = match chunk.waveforms {
+                        Waveforms::Float32(mut wfs) => {
+                            let mut filtered_wfs = Vec::new();
+                            //for wave in wfs.iter() {
+                            let filtered_l = filter_l_32.process_multi(wfs[0].clone());
+                            filtered_wfs.push(filtered_l);
+                            let filtered_r = filter_r_32.process_multi(wfs[1].clone());
+                            filtered_wfs.push(filtered_r);
+                            Waveforms::Float32(filtered_wfs)
+                        },
+                        Waveforms::Float64(mut wfs) => {
+                            let mut filtered_wfs = Vec::new();
+                            //for wave in wfs.iter() {
+                            let filtered_l = filter_l_64.process_multi(wfs.pop().unwrap());
+                            //let filtered_l = wfs[0].clone();
+                            filtered_wfs.push(filtered_l);
+                            let filtered_r = filter_r_64.process_multi(wfs.pop().unwrap());
+                            //let filtered_r = wfs[1].clone();
+                            filtered_wfs.push(filtered_r);
+                            Waveforms::Float64(filtered_wfs)
+                        },
+                    };
 
                     let chunk = AudioChunk{
-                        frames: 1024,
+                        frames: 4096,
                         channels: 2,
-                        waveforms: Waveforms::Float64(vec![buf.clone(), buf]),
+                        waveforms: waveforms,
+                        //waveforms: Waveforms::Float64(vec![buf.clone(), buf]),
                     };
                     let msg = Message::Audio(chunk);
                     tx_pb.send(msg).unwrap();
@@ -73,17 +99,14 @@ fn run() -> Res<()> {
     });
 
     thread::spawn(move || {
-        let delay = time::Duration::from_millis(2*1000*1024/44100);
+        let delay = time::Duration::from_millis(8*1000*1024/44100);
         thread::sleep(delay);
-        //let mut io_play = playback_dev.io_i16().unwrap();
         let mut m = 0;
         loop {
             match rx_pb.recv() {
                 Ok(Message::Audio(chunk)) => {
-                    //let buf = chunk.to_interleaved();
                     playback_dev.put_chunk(chunk).unwrap();
                     let frames = playback_dev.play().unwrap();
-                    //let frames = play_from_buffer(&playback_dev, &mut io_play, buf);
                     println!("PB Chunk {}, wrote {:?} frames", m, frames);
                     m += 1;
                 }
@@ -93,13 +116,10 @@ fn run() -> Res<()> {
     });
 
     thread::spawn(move || {
-        //let mut io_capt = capture_dev.io_i16().unwrap();
         let mut m = 0;
         loop {
-            //let buf = capture_to_buffer(&capture_dev, &mut io_capt, 2, 1024).unwrap();
-            //let chunk = AudioChunk::from_interleaved(buf, 2);
             let frames = capture_dev.capture().unwrap();
-            let chunk = capture_dev.fetch_chunk(Datatype::Float64).unwrap();
+            let chunk = capture_dev.fetch_chunk(Datatype::Float32).unwrap();
             let msg = Message::Audio(chunk);
             tx_cap.send(msg).unwrap();
             println!("Capture chunk {}", m);
