@@ -2,31 +2,24 @@
 use std::error;
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
+type SampleFormat = i16;
+type ProcessingFormat = f64;
+
 pub type pcm16 = i16;
 pub type pcm24 = i32;
 pub type pcm32 = i32;
 
 
-pub enum Waveforms {
-    Float32(Vec<Vec<f32>>),
-    Float64(Vec<Vec<f64>>),
-}
-
-pub enum Datatype {
-    Float32,
-    Float64,
-}
-
 pub struct AudioChunk {
     pub frames: usize,
     pub channels: usize,
-    pub waveforms: Waveforms,
+    pub waveforms: Vec<Vec<ProcessingFormat>>,
 }
 
 
 
 
-pub trait PlaybackDevice<T> {
+pub trait PlaybackDevice {
     fn get_bufsize(&mut self) -> usize;
 
     /// Send audio chunk for later playback
@@ -36,11 +29,11 @@ pub trait PlaybackDevice<T> {
     fn play(&mut self) -> Res<usize>;
 }
 
-pub trait CaptureDevice<T> {
+pub trait CaptureDevice {
     fn get_bufsize(&mut self) -> usize;
 
     /// Filter a single point
-    fn fetch_chunk(&mut self, datatype: Datatype) -> Res<AudioChunk>;
+    fn fetch_chunk(&mut self) -> Res<AudioChunk>;
 
     // Filter a Vec
     fn capture(&mut self) -> Res<usize>;

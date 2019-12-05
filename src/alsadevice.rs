@@ -5,28 +5,31 @@ use alsa::pcm::{PCM, HwParams, Format, Access, State};
 
 //mod audiodevice;
 use audiodevice::*;
+// Sample format
+type SampleFormat = i16;
+type ProcessingFormat = f64;
 
-pub struct AlsaPlaybackDevice<T> {
+pub struct AlsaPlaybackDevice {
     devname: String,
     samplerate: usize,
     pcmdevice: alsa::PCM,
     //io: alsa::pcm::IO<'a, T>,
-    buffer: Vec<T>,
+    buffer: Vec<SampleFormat>,
     bufferlength: usize,
     channels: usize,
 }
-pub struct AlsaCaptureDevice<T> {
+pub struct AlsaCaptureDevice {
     devname: String,
     samplerate: usize,
     pcmdevice: alsa::PCM,
     //io: alsa::pcm::IO<'a, T>,
-    buffer: Vec<T>,
+    buffer: Vec<SampleFormat>,
     bufferlength: usize,
     channels: usize,
 }
 
 
-impl PlaybackDevice<i16> for AlsaPlaybackDevice<i16> {
+impl PlaybackDevice for AlsaPlaybackDevice {
     fn get_bufsize(&mut self) -> usize {
         self.bufferlength
     }
@@ -37,29 +40,12 @@ impl PlaybackDevice<i16> for AlsaPlaybackDevice<i16> {
         //buf
         let num_samples = chunk.channels*chunk.frames;
         let mut buf = Vec::with_capacity(num_samples);
-        let mut value: i16;
-        match chunk.waveforms {
-            Waveforms::Float32(waveforms) => {
-                 for frame in 0..chunk.frames {
-                    for chan in 0..chunk.channels {
-                        value = (waveforms[chan][frame] * (1<<15) as f32) as i16;
-                        buf.push(value);
-                    }
-                }
-            },
-            Waveforms::Float64(waveforms) => {
-                //let mut buf = vec![0i16; num_samples];
-                let mut buf = Vec::with_capacity(num_samples);
-                //let mut idx = 0;
-                for frame in 0..chunk.frames {
-                    for chan in 0..chunk.channels {
-                        value = (waveforms[chan][frame] * (1<<15) as f64) as i16;
-                        buf.push(value);
-                        //buf[idx] = value;
-                        //idx+=1;
-                    }
-                }
-            },
+        let mut value: SampleFormat;
+        for frame in 0..chunk.frames {
+            for chan in 0..chunk.channels {
+                value = (chunk.waveforms[chan][frame] * (1<<15) as ProcessingFormat) as SampleFormat;
+                buf.push(value);
+            }
         }
         self.buffer = buf;
         Ok(())
@@ -80,64 +66,41 @@ impl PlaybackDevice<i16> for AlsaPlaybackDevice<i16> {
 }
 
 
-impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
+impl CaptureDevice for AlsaCaptureDevice {
     fn get_bufsize(&mut self) -> usize {
         self.bufferlength
     }
 
     /// Send audio chunk for later playback
-    fn fetch_chunk(&mut self, datatype: Datatype) -> Res<AudioChunk> {
+    fn fetch_chunk(&mut self) -> Res<AudioChunk> {
         let num_samples = self.buffer.len();
         let num_frames = num_samples/self.channels;
-        let waveforms = match datatype {
-            Datatype::Float32 => {
-                let mut value: f32;
-                let mut wfs = Vec::with_capacity(self.channels);
-                for chan in 0..self.channels {
-                    wfs.push(Vec::with_capacity(num_frames));
-                }
-                //let mut idx = 0;
-                let mut samples = self.buffer.iter();
-                for frame in 0..num_frames {
-                    for chan in 0..self.channels {
-                        value = (*samples.next().unwrap() as f32) / ((1<<15) as f32);
-                        //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
-                        wfs[chan].push(value);
-                        //idx += 1;
-                    }
-                }
-                Waveforms::Float32(wfs)
-            },
-            Datatype::Float64 => {
-                let mut value: f64;
-                let mut wfs = Vec::with_capacity(self.channels);
-                for chan in 0..self.channels {
-                    wfs.push(Vec::with_capacity(num_frames));
-                    //wfs.push(vec![0f64; num_frames]);
-                }
-        
-                let mut samples = self.buffer.iter();
-                for frame in 0..num_frames {
-                    for chan in 0..self.channels {
-                        value = (*samples.next().unwrap() as f64) / ((1<<15) as f64);
-                        wfs[chan].push(value);
-                        //wfs[chan][frame] = value;
-                    }
-                }
-                Waveforms::Float64(wfs)
-            },
-        };
+        let mut value: ProcessingFormat;
+        let mut wfs = Vec::with_capacity(self.channels);
+        for chan in 0..self.channels {
+            wfs.push(Vec::with_capacity(num_frames));
+        }
+        //let mut idx = 0;
+        let mut samples = self.buffer.iter();
+        for frame in 0..num_frames {
+            for chan in 0..self.channels {
+                value = (*samples.next().unwrap() as ProcessingFormat) / ((1<<15) as ProcessingFormat);
+                //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
+                wfs[chan].push(value);
+                //idx += 1;
+            }
+        }
         let chunk = AudioChunk {
             channels: self.channels,
             frames: num_frames,
-            waveforms: waveforms,
+            waveforms: wfs,
         };
         Ok(chunk)
     }
     
     //capure to internal buffer
     fn capture(&mut self) -> Res<usize> {
-        let mut buf: Vec<i16>;
+        let mut buf: Vec<SampleFormat>;
         buf = vec![0; self.channels*self.bufferlength];
         let capture_state = self.pcmdevice.state();
         if capture_state == State::XRun {
@@ -151,8 +114,8 @@ impl CaptureDevice<i16> for AlsaCaptureDevice<i16> {
 }
 
 
-impl AlsaPlaybackDevice<i16> {
-    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaPlaybackDevice<i16>> {
+impl AlsaPlaybackDevice {
+    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaPlaybackDevice> {
         // Open the device
         let pcmdev = alsa::PCM::new(&devname, Direction::Playback, false)?;
 
@@ -195,8 +158,8 @@ impl AlsaPlaybackDevice<i16> {
 }
 
 
-impl AlsaCaptureDevice<i16> {
-    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaCaptureDevice<i16>> {
+impl AlsaCaptureDevice {
+    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaCaptureDevice> {
         // Open the device
         let pcmdev = alsa::PCM::new(&devname, Direction::Capture, false)?;
 
