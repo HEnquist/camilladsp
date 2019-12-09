@@ -1,68 +1,73 @@
-#[macro_use]
-extern crate serde_derive;
+//extern crate serde;
+use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
 
 type SampleFormat = i16;
 type ProcessingFormat = f64;
 
 
 #[derive(Debug, Deserialize)]
-enum DeviceType {
-    alsa,
+pub enum DeviceType {
+    Alsa,
 }
 
 
 #[derive(Debug, Deserialize)]
-struct Device {
-    type: DeviceType
+pub struct Device {
+    r#type: DeviceType,
     channels: usize,
     device: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct Devices {
+pub struct Devices {
     samplerate: usize,
     capture: Device,
     playback: Device,
 }
 
 #[derive(Debug, Deserialize)]
-struct Filter {
-    name: String,
-    type: FilterType,
+pub enum FilterType {
+    Biquad,
+    Conv,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Filter {
+    r#type: FilterType,
     coefficients: FilterCoefficients,
 }
 
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-enum FilterCoefficients {
+pub enum FilterCoefficients {
     File { values: String },
     Values { values: Vec<ProcessingFormat>},
 }
 
 
 #[derive(Debug, Deserialize)]
-struct MixerChannels {
-    in: usize,
+pub struct MixerChannels {
+    r#in: usize,
     out: usize,
 }
 
 #[derive(Debug, Deserialize)]
-struct MixerSource {
+pub struct MixerSource {
     channel: usize,
     gain: ProcessingFormat,
     inverted: bool,
 }
 
 #[derive(Debug, Deserialize)]
-struct MixerMapping {
+pub struct MixerMapping {
     dest: usize,
     sources: Vec<MixerSource>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Mixer {
-    name: String,
+pub struct Mixer {
     channels: MixerChannels,
     mapping: Vec<MixerMapping>,
 }
@@ -70,14 +75,15 @@ struct Mixer {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-enum PipelineStep {
+pub enum PipelineStep {
     Mixer { name: String },
     Filter { channel: usize, names: Vec<String>}
 }
 
-struct Configuration {
+#[derive(Debug, Deserialize)]
+pub struct Configuration {
     devices: Devices,
-    mixers: Vec<Mixer>,
-    filters: Vec<Filter>,
+    mixers: HashMap<String, Mixer>,
+    filters: HashMap<String, Filter>,
     pipeline: Vec<PipelineStep>,
 }

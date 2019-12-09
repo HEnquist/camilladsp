@@ -2,38 +2,38 @@
 devices:
   samplerate: 44100
   capture:
-    type: alsa
+    type: Alsa
     channels: 2
     device: "hw:0"
   playback:
-    type: alsa
+    type: Alsa
     channels: 2
     device: "hw:0"
 
 filters:
-  - name: notch_120
+  notch_120:
     type: Biquad
     coefficients:
-      type: values
+      type: Values
       values: [0, 1, 2, 3, 4]
-  - name: notch_80
+  notch_80:
     type: Biquad
     coefficients:
-      type: file 
+      type: File 
       values: bq80Hz.txt
-  - name: lowpass_2k
+  lowpass_2k:
     type: Conv
     coefficients:
-      type: file 
+      type: File 
       values: sometext.txt
-  - name: highpass_2k
+  highpass_2k:
     type: Conv
     coefficients:
-      type: file 
+      type: File 
       values: sometext2.txt
 
 mixers:
-  - name: mono
+  mono:
     channels:
       in: 2
       out: 4
@@ -57,7 +57,7 @@ mixers:
 
 pipeline:
   - type: Mixer
-    name: 2_to_4
+    name: mono
   - type: Filter
     channel: 0
     names:
@@ -68,14 +68,5 @@ pipeline:
     names:
       - lowpass_2k
       - notch_120 
-  - type: Filter
-    channel: 2
-    names:
-      - lowpass_2k
-      - notch_120 
-  - type: Filter
-    channel: 3
-    names:
-      - lowpass_2k
-      - notch_120      
+   
 

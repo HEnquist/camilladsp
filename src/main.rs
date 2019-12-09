@@ -1,4 +1,6 @@
 extern crate alsa;
+extern crate serde;
+
 use std::{iter, error};
 use alsa::{Direction, ValueOr};
 use alsa::pcm::{PCM, HwParams, Format, Access, State};
@@ -17,6 +19,17 @@ mod audiodevice;
 mod alsadevice;
 use audiodevice::*;
 use alsadevice::*;
+
+mod config;
+use config::*;
+
+use std::fs;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::prelude::*;
+use std::path::PathBuf;
+
+use serde::{Serialize, Deserialize};
 
 //pub use crate::filters::*;
 //pub use crate::biquad::*;
@@ -118,5 +131,16 @@ fn run() -> Res<()> {
 }
 
 fn main() {
-    if let Err(e) = run() { println!("Error ({}) {}", e.description(), e); }
+    let file = File::open("src/someconfig.yml")
+        .expect("could not open file");
+    let mut buffered_reader = BufReader::new(file);
+    let mut contents = String::new();
+    let _number_of_bytes: usize = match buffered_reader.read_to_string(&mut contents) {
+        Ok(number_of_bytes) => number_of_bytes,
+        Err(_err) => 0
+    };
+    let configuration: Configuration = serde_yaml::from_str(&contents).unwrap();
+    println!("config {:?}", configuration);
+
+    //if let Err(e) = run() { println!("Error ({}) {}", e.description(), e); }
 }
