@@ -1,5 +1,6 @@
 extern crate alsa;
 extern crate serde;
+extern crate rustfft;
 
 use std::{iter, error};
 use alsa::{Direction, ValueOr};
@@ -14,6 +15,8 @@ mod filters;
 use filters::*;
 mod biquad;
 use biquad::*;
+mod fftconv;
+use fftconv::*;
 
 mod audiodevice;
 mod alsadevice;
@@ -37,8 +40,8 @@ use serde::{Serialize, Deserialize};
 
 
 // Sample format
-type SampleFormat = i16;
-type ProcessingFormat = f64;
+type SmpFmt = i16;
+type PrcFmt = f64;
 
 
 enum Message {
@@ -61,9 +64,9 @@ fn run() -> Res<()> {
     //let mut mmap = playback_dev.direct_mmap_playback::<SF>()?;
 
     thread::spawn(move || {
-        let coeffs = Coefficients::new(-1.79907162, 0.81748736, 0.00460394, 0.00920787, 0.00460394);
-        let mut filter_l = BiquadDF2T::new(coeffs);
-        let mut filter_r = BiquadDF2T::new(coeffs);
+        let coeffs = BiquadCoefficients::new(-1.79907162, 0.81748736, 0.00460394, 0.00920787, 0.00460394);
+        let mut filter_l = Biquad::new(coeffs);
+        let mut filter_r = Biquad::new(coeffs);
         loop {
             match rx_cap.recv() {
                 Ok(Message::Audio(chunk)) => {
@@ -73,9 +76,9 @@ fn run() -> Res<()> {
                     //}
                     let mut filtered_wfs = Vec::new();
                     //for wave in wfs.iter() {
-                    let filtered_l = filter_l.process_multi(chunk.waveforms[0].clone());
+                    let filtered_l = filter_l.process_waveform(chunk.waveforms[0].clone());
                     filtered_wfs.push(filtered_l);
-                    let filtered_r = filter_r.process_multi(chunk.waveforms[1].clone());
+                    let filtered_r = filter_r.process_waveform(chunk.waveforms[1].clone());
                     filtered_wfs.push(filtered_r);
 
                     let chunk = AudioChunk{

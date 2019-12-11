@@ -6,15 +6,15 @@ use alsa::pcm::{PCM, HwParams, Format, Access, State};
 //mod audiodevice;
 use audiodevice::*;
 // Sample format
-type SampleFormat = i16;
-type ProcessingFormat = f64;
+type SmpFmt = i16;
+type PrcFmt = f64;
 
 pub struct AlsaPlaybackDevice {
     devname: String,
     samplerate: usize,
     pcmdevice: alsa::PCM,
     //io: alsa::pcm::IO<'a, T>,
-    buffer: Vec<SampleFormat>,
+    buffer: Vec<SmpFmt>,
     bufferlength: usize,
     channels: usize,
 }
@@ -23,7 +23,7 @@ pub struct AlsaCaptureDevice {
     samplerate: usize,
     pcmdevice: alsa::PCM,
     //io: alsa::pcm::IO<'a, T>,
-    buffer: Vec<SampleFormat>,
+    buffer: Vec<SmpFmt>,
     bufferlength: usize,
     channels: usize,
 }
@@ -40,10 +40,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         //buf
         let num_samples = chunk.channels*chunk.frames;
         let mut buf = Vec::with_capacity(num_samples);
-        let mut value: SampleFormat;
+        let mut value: SmpFmt;
         for frame in 0..chunk.frames {
             for chan in 0..chunk.channels {
-                value = (chunk.waveforms[chan][frame] * (1<<15) as ProcessingFormat) as SampleFormat;
+                value = (chunk.waveforms[chan][frame] * (1<<15) as PrcFmt) as SmpFmt;
                 buf.push(value);
             }
         }
@@ -75,7 +75,7 @@ impl CaptureDevice for AlsaCaptureDevice {
     fn fetch_chunk(&mut self) -> Res<AudioChunk> {
         let num_samples = self.buffer.len();
         let num_frames = num_samples/self.channels;
-        let mut value: ProcessingFormat;
+        let mut value: PrcFmt;
         let mut wfs = Vec::with_capacity(self.channels);
         for chan in 0..self.channels {
             wfs.push(Vec::with_capacity(num_frames));
@@ -84,7 +84,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let mut samples = self.buffer.iter();
         for frame in 0..num_frames {
             for chan in 0..self.channels {
-                value = (*samples.next().unwrap() as ProcessingFormat) / ((1<<15) as ProcessingFormat);
+                value = (*samples.next().unwrap() as PrcFmt) / ((1<<15) as PrcFmt);
                 //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
                 wfs[chan].push(value);
                 //idx += 1;
@@ -100,7 +100,7 @@ impl CaptureDevice for AlsaCaptureDevice {
     
     //capure to internal buffer
     fn capture(&mut self) -> Res<usize> {
-        let mut buf: Vec<SampleFormat>;
+        let mut buf: Vec<SmpFmt>;
         buf = vec![0; self.channels*self.bufferlength];
         let capture_state = self.pcmdevice.state();
         if capture_state == State::XRun {

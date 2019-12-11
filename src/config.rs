@@ -1,9 +1,8 @@
-//extern crate serde;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 
-type SampleFormat = i16;
-type ProcessingFormat = f64;
+type SmpFmt = i16;
+type PrcFmt = f64;
 
 
 #[derive(Debug, Deserialize)]
@@ -43,7 +42,7 @@ pub struct Filter {
 #[serde(tag = "type")]
 pub enum FilterCoefficients {
     File { values: String },
-    Values { values: Vec<ProcessingFormat>},
+    Values { values: Vec<PrcFmt>},
 }
 
 
@@ -56,7 +55,7 @@ pub struct MixerChannels {
 #[derive(Debug, Deserialize)]
 pub struct MixerSource {
     channel: usize,
-    gain: ProcessingFormat,
+    gain: PrcFmt,
     inverted: bool,
 }
 

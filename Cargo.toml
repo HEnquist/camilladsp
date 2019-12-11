@@ -7,4 +7,5 @@ authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 alsa = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
+rustfft = "3.0.0"
 
