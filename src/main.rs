@@ -64,9 +64,12 @@ fn run() -> Res<()> {
     //let mut mmap = playback_dev.direct_mmap_playback::<SF>()?;
 
     thread::spawn(move || {
-        let coeffs = BiquadCoefficients::new(-1.79907162, 0.81748736, 0.00460394, 0.00920787, 0.00460394);
-        let mut filter_l = Biquad::new(coeffs);
-        let mut filter_r = Biquad::new(coeffs);
+        //let coeffs = BiquadCoefficients::new(-1.79907162, 0.81748736, 0.00460394, 0.00920787, 0.00460394);
+        //let mut filter_l = Biquad::new(coeffs);
+        //let mut filter_r = Biquad::new(coeffs);
+        let coeffs = read_coeff_file("filter.txt").unwrap();
+        let mut filter_l = FFTConv::new(1024, &coeffs);
+        let mut filter_r = FFTConv::new(1024, &coeffs);
         loop {
             match rx_cap.recv() {
                 Ok(Message::Audio(chunk)) => {
@@ -145,5 +148,6 @@ fn main() {
     let configuration: Configuration = serde_yaml::from_str(&contents).unwrap();
     println!("config {:?}", configuration);
 
-    //if let Err(e) = run() { println!("Error ({}) {}", e.description(), e); }
+    //read_coeff_file("filter.txt");
+    if let Err(e) = run() { println!("Error ({}) {}", e.description(), e); }
 }

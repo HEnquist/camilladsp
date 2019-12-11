@@ -27,7 +27,7 @@ pub struct FFTConv {
 
 
 impl FFTConv {
-    pub fn new(data_length:  usize, coeffs: Vec<PrcFmt>) -> Self {
+    pub fn new(data_length:  usize, coeffs: &Vec<PrcFmt>) -> Self {
         let mut input:  Vec<Complex<PrcFmt>> = vec![Complex::zero(); data_length];
         let mut output: Vec<Complex<PrcFmt>> = vec![Complex::zero(); data_length];
         let mut coeffs_c: Vec<Complex<PrcFmt>> = vec![Complex::zero(); data_length];
