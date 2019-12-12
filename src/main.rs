@@ -52,8 +52,10 @@ enum Message {
 
 
 fn run() -> Res<()> {
-    let mut playback_dev = AlsaPlaybackDevice::open("hw:Generic_1".to_string(), 44100, 4096, 2)?;
-    let mut capture_dev = AlsaCaptureDevice::open("hw:Loopback,0,0".to_string(), 44100, 4096, 2)?;
+    let chunksize: i64 = 1024;
+
+    let mut playback_dev = AlsaPlaybackDevice::open("hw:Generic_1".to_string(), 44100, chunksize, 2)?;
+    let mut capture_dev = AlsaCaptureDevice::open("hw:Loopback,0,0".to_string(), 44100, chunksize, 2)?;
     //let (playback_dev, play_rate) = open_audio_dev_play("hw:PCH".to_string(), 44100, 1024)?;
     //let (capture_dev, capt_rate) = open_audio_dev_capt("hw:PCH".to_string(), 44100, 1024)?;
 
@@ -61,6 +63,7 @@ fn run() -> Res<()> {
     let (tx_pb, rx_pb) = mpsc::channel();
     let (tx_cap, rx_cap) = mpsc::channel();
 
+    
     //let mut mmap = playback_dev.direct_mmap_playback::<SF>()?;
 
     thread::spawn(move || {
@@ -68,8 +71,9 @@ fn run() -> Res<()> {
         //let mut filter_l = Biquad::new(coeffs);
         //let mut filter_r = Biquad::new(coeffs);
         let coeffs = read_coeff_file("filter.txt").unwrap();
-        let mut filter_l = FFTConv::new(1024, &coeffs);
-        let mut filter_r = FFTConv::new(1024, &coeffs);
+        let mut filter_l = FFTConv::new(chunksize as usize, &coeffs);
+        let mut filter_r = FFTConv::new(chunksize as usize, &coeffs);
+        println!("build filters, starting processing loop");
         loop {
             match rx_cap.recv() {
                 Ok(Message::Audio(chunk)) => {
@@ -85,7 +89,7 @@ fn run() -> Res<()> {
                     filtered_wfs.push(filtered_r);
 
                     let chunk = AudioChunk{
-                        frames: 4096,
+                        frames: chunksize as usize,
                         channels: 2,
                         waveforms: filtered_wfs,
                         //waveforms: Waveforms::Float64(vec![buf.clone(), buf]),
@@ -102,6 +106,7 @@ fn run() -> Res<()> {
         let delay = time::Duration::from_millis(8*1000*1024/44100);
         thread::sleep(delay);
         let mut m = 0;
+        println!("starting playback loop");
         loop {
             match rx_pb.recv() {
                 Ok(Message::Audio(chunk)) => {
@@ -117,6 +122,7 @@ fn run() -> Res<()> {
 
     thread::spawn(move || {
         let mut m = 0;
+        println!("starting capture loop");
         loop {
             let frames = capture_dev.capture().unwrap();
             let chunk = capture_dev.fetch_chunk().unwrap();
