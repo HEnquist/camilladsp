@@ -2,10 +2,10 @@ extern crate alsa;
 extern crate serde;
 extern crate rustfft;
 
-use std::{iter, error};
-use alsa::{Direction, ValueOr};
-use alsa::pcm::{PCM, HwParams, Format, Access, State};
-use alsa::direct::pcm::MmapPlayback;
+use std::error;
+//use alsa::{Direction, ValueOr};
+//use alsa::pcm::{PCM, HwParams, Format, Access, State};
+//use alsa::direct::pcm::MmapPlayback;
 use std::{thread, time};
 use std::sync::mpsc;
 
@@ -24,15 +24,15 @@ use audiodevice::*;
 use alsadevice::*;
 
 mod config;
-use config::*;
+//use config;
 
-use std::fs;
+//use std::fs;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::prelude::*;
-use std::path::PathBuf;
+//use std::path::PathBuf;
 
-use serde::{Serialize, Deserialize};
+//use serde::{Serialize, Deserialize};
 
 //pub use crate::filters::*;
 //pub use crate::biquad::*;
@@ -40,8 +40,8 @@ use serde::{Serialize, Deserialize};
 
 
 // Sample format
-type SmpFmt = i16;
-type PrcFmt = f64;
+//type SmpFmt = i16;
+//type PrcFmt = f64;
 
 
 enum Message {
@@ -76,24 +76,24 @@ fn run() -> Res<()> {
         println!("build filters, starting processing loop");
         loop {
             match rx_cap.recv() {
-                Ok(Message::Audio(chunk)) => {
+                Ok(Message::Audio(mut chunk)) => {
                     //let mut buf = vec![0f64; 1024];
                     //for (i, a) in buf.iter_mut().enumerate() {
                     //    *a = (i as f64 * 2.0 * ::std::f64::consts::PI / 128.0).sin();
                     //}
-                    let mut filtered_wfs = Vec::new();
+                    //let mut filtered_wfs = Vec::new();
                     //for wave in wfs.iter() {
-                    let filtered_l = filter_l.process_waveform(chunk.waveforms[0].clone());
-                    filtered_wfs.push(filtered_l);
-                    let filtered_r = filter_r.process_waveform(chunk.waveforms[1].clone());
-                    filtered_wfs.push(filtered_r);
+                    let _res_l = filter_l.process_waveform(&mut chunk.waveforms[0]);
+                    //filtered_wfs.push(filtered_l);
+                    let _res_r = filter_r.process_waveform(&mut chunk.waveforms[1]);
+                    //filtered_wfs.push(filtered_r);
 
-                    let chunk = AudioChunk{
-                        frames: chunksize as usize,
-                        channels: 2,
-                        waveforms: filtered_wfs,
-                        //waveforms: Waveforms::Float64(vec![buf.clone(), buf]),
-                    };
+                    //let chunk = AudioChunk{
+                    //    frames: chunksize as usize,
+                    //    channels: 2,
+                    //    waveforms: filtered_wfs,
+                    //    //waveforms: Waveforms::Float64(vec![buf.clone(), buf]),
+                    //};
                     let msg = Message::Audio(chunk);
                     tx_pb.send(msg).unwrap();
                 }
@@ -124,7 +124,7 @@ fn run() -> Res<()> {
         let mut m = 0;
         println!("starting capture loop");
         loop {
-            let frames = capture_dev.capture().unwrap();
+            let _frames = capture_dev.capture().unwrap();
             let chunk = capture_dev.fetch_chunk().unwrap();
             let msg = Message::Audio(chunk);
             tx_cap.send(msg).unwrap();
@@ -151,7 +151,7 @@ fn main() {
         Ok(number_of_bytes) => number_of_bytes,
         Err(_err) => 0
     };
-    let configuration: Configuration = serde_yaml::from_str(&contents).unwrap();
+    let configuration: config::Configuration = serde_yaml::from_str(&contents).unwrap();
     println!("config {:?}", configuration);
 
     //read_coeff_file("filter.txt");

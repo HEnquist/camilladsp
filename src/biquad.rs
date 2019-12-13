@@ -6,8 +6,11 @@
 use crate::filters::Filter;
 
 // Sample format
-type SmpFmt = i16;
+//type SmpFmt = i16;
 type PrcFmt = f64;
+
+use std::error;
+pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 /// Holder of the biquad coefficients, utilizes normalized form
 #[derive(Clone, Copy, Debug)]
@@ -63,8 +66,11 @@ impl Biquad {
 
 
 impl Filter for Biquad {
-    fn process_waveform(&mut self, input: Vec<PrcFmt>) -> Vec<PrcFmt> {
-        let out = input.iter().map(|s| self.process_single(*s)).collect::<Vec<PrcFmt>>();
-        out
+    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+        for n in 0..waveform.len() {
+            waveform[n] = self.process_single(waveform[n]);
+        }
+        //let out = input.iter().map(|s| self.process_single(*s)).collect::<Vec<PrcFmt>>();
+        Ok(())
     }
 }

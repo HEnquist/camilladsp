@@ -5,9 +5,9 @@ pub type Res<T> = Result<T, Box<dyn error::Error>>;
 type SmpFmt = i16;
 type PrcFmt = f64;
 
-pub type pcm16 = i16;
-pub type pcm24 = i32;
-pub type pcm32 = i32;
+pub type Pcm16 = i16;
+pub type Pcm24 = i32;
+pub type Pcm32 = i32;
 
 
 pub struct AudioChunk {

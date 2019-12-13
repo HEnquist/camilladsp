@@ -1,7 +1,7 @@
 extern crate alsa;
-use std::{iter, error};
+//use std::{iter, error};
 use alsa::{Direction, ValueOr};
-use alsa::pcm::{PCM, HwParams, Format, Access, State};
+use alsa::pcm::{HwParams, Format, Access, State};
 
 //mod audiodevice;
 use audiodevice::*;
@@ -77,12 +77,12 @@ impl CaptureDevice for AlsaCaptureDevice {
         let num_frames = num_samples/self.channels;
         let mut value: PrcFmt;
         let mut wfs = Vec::with_capacity(self.channels);
-        for chan in 0..self.channels {
+        for _chan in 0..self.channels {
             wfs.push(Vec::with_capacity(num_frames));
         }
         //let mut idx = 0;
         let mut samples = self.buffer.iter();
-        for frame in 0..num_frames {
+        for _frame in 0..num_frames {
             for chan in 0..self.channels {
                 value = (*samples.next().unwrap() as PrcFmt) / ((1<<15) as PrcFmt);
                 //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
