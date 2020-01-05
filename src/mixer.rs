@@ -1,19 +1,21 @@
 type PrcFmt = f64;
-mod config;
+use config;
 use std::error;
+use audiodevice::AudioChunk;
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 /// Holder of the biquad coefficients, utilizes normalized form
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone)]
 pub struct Mixer {
     pub channels_in: usize,
     pub channels_out: usize,
     pub mapping: Vec<Vec<MixerSource>>
 }
 
-struct MixerSource {
-    channel: usize,
-    gain: PrcFmt,
+#[derive(Clone)]
+pub struct MixerSource {
+    pub channel: usize,
+    pub gain: PrcFmt,
 }
 
 
@@ -43,26 +45,42 @@ struct MixerSource {
 // }
 
 impl Mixer {
-    /// Creates a Direct Form 2 Transposed biquad from a set of filter coefficients
+    /// Creates a Mixer from a config struct
     pub fn from_config(config: config::Mixer) -> Self {
-        let ch_in = config.channels.in;
+        let ch_in = config.channels.r#in;
         let ch_out = config.channels.out;
+        let mut mapping = vec![Vec::<MixerSource>::new(); ch_out];
+        for cfg_mapping in config.mapping {
+            let dest = cfg_mapping.dest;
+            for cfg_src in cfg_mapping.sources {
+                let mut gain: PrcFmt = 10.0;
+                gain = gain.powf(cfg_src.gain/20.0);
+                if cfg_src.inverted {
+                    gain = -gain;
+                }
+                let src = MixerSource {
+                    channel: cfg_src.channel,
+                    gain: gain,
+                };
+                mapping[dest].push(src);
+            }
+        }
         Mixer {
-            s1: 0.0,
-            s2: 0.0,
-            coeffs: coefficients,
+            channels_in: ch_in,
+            channels_out: ch_out,
+            mapping: mapping,
         }
     }
 
-    fn process_chunk(&mut self, input: AudioChunk) -> AudioChunk {
-        let mut waveforms = Vec::PrcFmt::with_capacity(self.channels_out);
+    pub fn process_chunk(&mut self, input: &AudioChunk) -> AudioChunk {
+        let mut waveforms = Vec::<Vec<PrcFmt>>::with_capacity(self.channels_out);
         for out_chan in 0..self.channels_out {
             waveforms.push(vec![0.0; input.frames]);
             for source in 0..self.mapping[out_chan].len() {
-                source_chan = self.mapping[out_chan][source].channel;
-                gain = self.mapping[out_chan][source].gain;
+                let source_chan = self.mapping[out_chan][source].channel;
+                let gain = self.mapping[out_chan][source].gain;
                 for n in 0..input.frames {
-                    waveforms[out_chan][n] = waveforms[out_chan][n] + gain*input.waveforms[source_chan];
+                    waveforms[out_chan][n] = waveforms[out_chan][n] + gain*input.waveforms[source_chan][n];
                 }
             }
         }
@@ -78,6 +96,7 @@ impl Mixer {
             channels: self.channels_out,
             waveforms: waveforms,
         //    //waveforms: Waveforms::Float64(vec![buf.clone(), buf]),
-        }
+        };
+        chunk
     }
 }

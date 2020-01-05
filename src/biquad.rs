@@ -35,9 +35,18 @@ impl BiquadCoefficients {
             b2: b2,
         }
     }
+
+    pub fn from_vec(coeffs: &Vec<PrcFmt>) -> Self {
+        BiquadCoefficients {
+            a1: coeffs[0],
+            a2: coeffs[1],
+            b0: coeffs[2],
+            b1: coeffs[3],
+            b2: coeffs[4],
+        }
+    }
 }
 
-/// Internal states and coefficients of the Direct Form 2 Transposed form
 #[derive(Copy, Clone, Debug)]
 pub struct Biquad {
     pub s1: PrcFmt,

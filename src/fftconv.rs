@@ -40,7 +40,7 @@ impl FFTConv {
         let ifft = Radix4::new(2*data_length, true);
 
         for n in 0..coeffs.len() {
-            coeffs_c[n] = Complex::from(coeffs[n]/2048.0);
+            coeffs_c[n] = Complex::from(coeffs[n]/(2 as PrcFmt * data_length as PrcFmt));
         }
         fft.process(&mut coeffs_c, &mut coeffs_f);
         //fft.process(&mut input, &mut output);

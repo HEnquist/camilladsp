@@ -24,6 +24,8 @@ use audiodevice::*;
 use alsadevice::*;
 
 mod config;
+
+mod mixer;
 //use config;
 
 //use std::fs;
@@ -153,6 +155,10 @@ fn main() {
     };
     let configuration: config::Configuration = serde_yaml::from_str(&contents).unwrap();
     println!("config {:?}", configuration);
+
+    for (name, mix) in configuration.mixers {
+        let newmix = mixer::Mixer::from_config(mix);
+    }
 
     //read_coeff_file("filter.txt");
     if let Err(e) = run() { println!("Error ({}) {}", e.description(), e); }

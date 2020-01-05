@@ -5,40 +5,41 @@ use std::collections::HashMap;
 type PrcFmt = f64;
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub enum DeviceType {
     Alsa,
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Device {
-    r#type: DeviceType,
-    channels: usize,
-    device: String,
+    pub r#type: DeviceType,
+    pub channels: usize,
+    pub device: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Devices {
-    samplerate: usize,
-    capture: Device,
-    playback: Device,
+    pub samplerate: usize,
+    pub buffersize: usize,
+    pub capture: Device,
+    pub playback: Device,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub enum FilterType {
     Biquad,
     Conv,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Filter {
-    r#type: FilterType,
-    coefficients: FilterCoefficients,
+    pub r#type: FilterType,
+    pub coefficients: FilterCoefficients,
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
 pub enum FilterCoefficients {
     File { values: String },
@@ -46,43 +47,43 @@ pub enum FilterCoefficients {
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct MixerChannels {
-    r#in: usize,
-    out: usize,
+    pub r#in: usize,
+    pub out: usize,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct MixerSource {
-    channel: usize,
-    gain: PrcFmt,
-    inverted: bool,
+    pub channel: usize,
+    pub gain: PrcFmt,
+    pub inverted: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct MixerMapping {
-    dest: usize,
-    sources: Vec<MixerSource>,
+    pub dest: usize,
+    pub sources: Vec<MixerSource>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Mixer {
-    channels: MixerChannels,
-    mapping: Vec<MixerMapping>,
+    pub channels: MixerChannels,
+    pub mapping: Vec<MixerMapping>,
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
 pub enum PipelineStep {
     Mixer { name: String },
     Filter { channel: usize, names: Vec<String>}
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Configuration {
-    devices: Devices,
-    mixers: HashMap<String, Mixer>,
-    filters: HashMap<String, Filter>,
-    pipeline: Vec<PipelineStep>,
+    pub devices: Devices,
+    pub mixers: HashMap<String, Mixer>,
+    pub filters: HashMap<String, Filter>,
+    pub pipeline: Vec<PipelineStep>,
 }
