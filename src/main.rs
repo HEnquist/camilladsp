@@ -53,14 +53,17 @@ enum Message {
 
 
 
-fn run() -> Res<()> {
+fn run(conf: config::Configuration) -> Res<()> {
     let chunksize: i64 = 1024;
 
-    let mut playback_dev = AlsaPlaybackDevice::open("hw:Generic_1".to_string(), 44100, chunksize, 2)?;
-    let mut capture_dev = AlsaCaptureDevice::open("hw:Loopback,0,0".to_string(), 44100, chunksize, 2)?;
+    //let mut playback_dev = AlsaPlaybackDevice::open("hw:Generic_1".to_string(), 44100, chunksize, 2)?;
+    let mut playback_dev = audiodevice::GetPlaybackDevice(conf.devices.clone());
+    //let mut capture_dev = AlsaCaptureDevice::open("hw:Loopback,0,0".to_string(), 44100, chunksize, 2)?;
+    let mut capture_dev = audiodevice::GetCaptureDevice(conf.devices.clone());
     //let (playback_dev, play_rate) = open_audio_dev_play("hw:PCH".to_string(), 44100, 1024)?;
     //let (capture_dev, capt_rate) = open_audio_dev_capt("hw:PCH".to_string(), 44100, 1024)?;
 
+    let pipeline = filters::Pipeline::from_config(conf);
     
     let (tx_pb, rx_pb) = mpsc::channel();
     let (tx_cap, rx_cap) = mpsc::channel();
@@ -145,7 +148,7 @@ fn run() -> Res<()> {
 }
 
 fn main() {
-    let file = File::open("src/someconfig.yml")
+    let file = File::open("src/simpleconfig.yml")
         .expect("could not open file");
     let mut buffered_reader = BufReader::new(file);
     let mut contents = String::new();
@@ -156,10 +159,10 @@ fn main() {
     let configuration: config::Configuration = serde_yaml::from_str(&contents).unwrap();
     println!("config {:?}", configuration);
 
-    for (name, mix) in configuration.mixers {
+    for (name, mix) in configuration.mixers.clone() {
         let newmix = mixer::Mixer::from_config(mix);
     }
 
     //read_coeff_file("filter.txt");
-    if let Err(e) = run() { println!("Error ({}) {}", e.description(), e); }
+    if let Err(e) = run(configuration) { println!("Error ({}) {}", e.description(), e); }
 }

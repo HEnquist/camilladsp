@@ -1,0 +1,56 @@
+---
+devices:
+  samplerate: 44100
+  buffersize: 1024
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,0"
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+
+filters:
+  lowpass_fir:
+    type: Conv
+    coefficients:
+      type: File 
+      values: filter.txt
+
+mixers:
+  mono:
+    channels:
+      in: 2
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -3
+            inverted: false
+          - channel: 1
+            gain: -3
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 0
+            gain: -3
+            inverted: false
+          - channel: 1
+            gain: -3
+            inverted: false
+
+pipeline:
+  - type: Mixer
+    name: mono
+  - type: Filter
+    channel: 0
+    names:
+      - lowpass_fir
+  - type: Filter
+    channel: 1
+    names:
+      - lowpass_fir
+   
+

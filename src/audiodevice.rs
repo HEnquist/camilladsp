@@ -1,5 +1,7 @@
 // Traits for audio devices
 use std::error;
+use config;
+use alsadevice;
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 type SmpFmt = i16;
@@ -37,5 +39,27 @@ pub trait CaptureDevice {
 
     // Filter a Vec
     fn capture(&mut self) -> Res<usize>;
+}
+
+pub fn GetCaptureDevice(conf: config::Devices) -> Box<dyn CaptureDevice + Send> {
+    match conf.capture.r#type {
+        config::DeviceType::Alsa => {
+            Box::new(alsadevice::AlsaCaptureDevice::open(conf.capture.device, 
+                                                         conf.samplerate as u32, 
+                                                         conf.buffersize as i64, 
+                                                         conf.capture.channels as u32).unwrap())
+        }
+    } 
+}
+
+pub fn GetPlaybackDevice(conf: config::Devices) -> Box<dyn PlaybackDevice + Send> {
+    match conf.playback.r#type {
+        config::DeviceType::Alsa => {
+            Box::new(alsadevice::AlsaPlaybackDevice::open(conf.playback.device, 
+                                                         conf.samplerate as u32, 
+                                                         conf.buffersize as i64, 
+                                                         conf.playback.channels as u32).unwrap())
+        }
+    } 
 }
 

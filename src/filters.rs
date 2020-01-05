@@ -91,7 +91,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    fn from_config(conf: config::Configuration) -> Self {
+    pub fn from_config(conf: config::Configuration) -> Self {
         let mut steps = Vec::<PipelineStep>::new();
         for step in conf.pipeline {
             match step {
