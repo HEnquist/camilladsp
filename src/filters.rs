@@ -115,7 +115,7 @@ impl Pipeline {
     //Mixer { name: String },
     //Filter { channel: usize, names: Vec<String>}
 
-    fn process_chunk(&mut self, mut chunk: AudioChunk) -> AudioChunk {
+    pub fn process_chunk(&mut self, mut chunk: AudioChunk) -> AudioChunk {
         for mut step in &mut self.steps {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {

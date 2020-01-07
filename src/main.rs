@@ -63,7 +63,7 @@ fn run(conf: config::Configuration) -> Res<()> {
     //let (playback_dev, play_rate) = open_audio_dev_play("hw:PCH".to_string(), 44100, 1024)?;
     //let (capture_dev, capt_rate) = open_audio_dev_capt("hw:PCH".to_string(), 44100, 1024)?;
 
-    let pipeline = filters::Pipeline::from_config(conf);
+    
     
     let (tx_pb, rx_pb) = mpsc::channel();
     let (tx_cap, rx_cap) = mpsc::channel();
@@ -75,9 +75,10 @@ fn run(conf: config::Configuration) -> Res<()> {
         //let coeffs = BiquadCoefficients::new(-1.79907162, 0.81748736, 0.00460394, 0.00920787, 0.00460394);
         //let mut filter_l = Biquad::new(coeffs);
         //let mut filter_r = Biquad::new(coeffs);
-        let coeffs = read_coeff_file("filter.txt").unwrap();
-        let mut filter_l = FFTConv::new(chunksize as usize, &coeffs);
-        let mut filter_r = FFTConv::new(chunksize as usize, &coeffs);
+        //let coeffs = read_coeff_file("filter.txt").unwrap();
+        //let mut filter_l = FFTConv::new(chunksize as usize, &coeffs);
+        //let mut filter_r = FFTConv::new(chunksize as usize, &coeffs);
+        let mut pipeline = filters::Pipeline::from_config(conf);
         println!("build filters, starting processing loop");
         loop {
             match rx_cap.recv() {
@@ -88,9 +89,9 @@ fn run(conf: config::Configuration) -> Res<()> {
                     //}
                     //let mut filtered_wfs = Vec::new();
                     //for wave in wfs.iter() {
-                    let _res_l = filter_l.process_waveform(&mut chunk.waveforms[0]);
+                    //let _res_l = filter_l.process_waveform(&mut chunk.waveforms[0]);
                     //filtered_wfs.push(filtered_l);
-                    let _res_r = filter_r.process_waveform(&mut chunk.waveforms[1]);
+                    //let _res_r = filter_r.process_waveform(&mut chunk.waveforms[1]);
                     //filtered_wfs.push(filtered_r);
 
                     //let chunk = AudioChunk{
@@ -99,6 +100,7 @@ fn run(conf: config::Configuration) -> Res<()> {
                     //    waveforms: filtered_wfs,
                     //    //waveforms: Waveforms::Float64(vec![buf.clone(), buf]),
                     //};
+                    chunk = pipeline.process_chunk(chunk);
                     let msg = Message::Audio(chunk);
                     tx_pb.send(msg).unwrap();
                 }
@@ -117,7 +119,7 @@ fn run(conf: config::Configuration) -> Res<()> {
                 Ok(Message::Audio(chunk)) => {
                     playback_dev.put_chunk(chunk).unwrap();
                     let frames = playback_dev.play().unwrap();
-                    println!("PB Chunk {}, wrote {:?} frames", m, frames);
+                    //println!("PB Chunk {}, wrote {:?} frames", m, frames);
                     m += 1;
                 }
                 _ => {}
@@ -133,7 +135,7 @@ fn run(conf: config::Configuration) -> Res<()> {
             let chunk = capture_dev.fetch_chunk().unwrap();
             let msg = Message::Audio(chunk);
             tx_cap.send(msg).unwrap();
-            println!("Capture chunk {}", m);
+            //println!("Capture chunk {}", m);
             m += 1;
         }
     });
