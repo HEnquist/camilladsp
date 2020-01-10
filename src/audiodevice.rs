@@ -7,10 +7,15 @@ pub type Res<T> = Result<T, Box<dyn error::Error>>;
 type SmpFmt = i16;
 type PrcFmt = f64;
 
-pub type Pcm16 = i16;
-pub type Pcm24 = i32;
-pub type Pcm32 = i32;
+//pub type S16LE = i16;
+//pub type S24LE = i32;
+//pub type S32LE = i32;
 
+pub enum SampleFormat {
+    S16LE,
+    S24LE,
+    S32LE,
+}
 
 pub struct AudioChunk {
     pub frames: usize,
@@ -42,9 +47,21 @@ pub trait CaptureDevice {
 }
 
 pub fn GetCaptureDevice(conf: config::Devices) -> Box<dyn CaptureDevice> {
-    match conf.capture.r#type {
-        config::DeviceType::Alsa => {
-            Box::new(alsadevice::AlsaCaptureDevice::open(conf.capture.device, 
+    match (conf.capture.r#type, conf.capture.format) {
+        (config::DeviceType::Alsa, config::SampleFormat::S16LE) => {
+            Box::new(alsadevice::AlsaCaptureDeviceS16LE::open(conf.capture.device, 
+                                                         conf.samplerate as u32, 
+                                                         conf.buffersize as i64, 
+                                                         conf.capture.channels as u32).unwrap())
+        }
+        (config::DeviceType::Alsa, config::SampleFormat::S24LE) => {
+            Box::new(alsadevice::AlsaCaptureDeviceS24LE::open(conf.capture.device, 
+                                                         conf.samplerate as u32, 
+                                                         conf.buffersize as i64, 
+                                                         conf.capture.channels as u32).unwrap())
+        }
+        (config::DeviceType::Alsa, config::SampleFormat::S32LE) => {
+            Box::new(alsadevice::AlsaCaptureDeviceS32LE::open(conf.capture.device, 
                                                          conf.samplerate as u32, 
                                                          conf.buffersize as i64, 
                                                          conf.capture.channels as u32).unwrap())
@@ -53,9 +70,21 @@ pub fn GetCaptureDevice(conf: config::Devices) -> Box<dyn CaptureDevice> {
 }
 
 pub fn GetPlaybackDevice(conf: config::Devices) -> Box<dyn PlaybackDevice> {
-    match conf.playback.r#type {
-        config::DeviceType::Alsa => {
-            Box::new(alsadevice::AlsaPlaybackDevice::open(conf.playback.device, 
+    match (conf.playback.r#type, conf.playback.format) {
+        (config::DeviceType::Alsa, config::SampleFormat::S16LE) => {
+            Box::new(alsadevice::AlsaPlaybackDeviceS16LE::open(conf.playback.device, 
+                                                         conf.samplerate as u32, 
+                                                         conf.buffersize as i64, 
+                                                         conf.playback.channels as u32).unwrap())
+        }
+        (config::DeviceType::Alsa, config::SampleFormat::S24LE) => {
+            Box::new(alsadevice::AlsaPlaybackDeviceS24LE::open(conf.playback.device, 
+                                                         conf.samplerate as u32, 
+                                                         conf.buffersize as i64, 
+                                                         conf.playback.channels as u32).unwrap())
+        }
+        (config::DeviceType::Alsa, config::SampleFormat::S32LE) => {
+            Box::new(alsadevice::AlsaPlaybackDeviceS32LE::open(conf.playback.device, 
                                                          conf.samplerate as u32, 
                                                          conf.buffersize as i64, 
                                                          conf.playback.channels as u32).unwrap())

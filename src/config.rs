@@ -10,12 +10,19 @@ pub enum DeviceType {
     Alsa,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub enum SampleFormat {
+    S16LE,
+    S24LE,
+    S32LE,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Device {
     pub r#type: DeviceType,
     pub channels: usize,
     pub device: String,
+    pub format: SampleFormat,
 }
 
 #[derive(Clone, Debug, Deserialize)]

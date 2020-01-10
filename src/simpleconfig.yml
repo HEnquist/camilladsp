@@ -6,10 +6,12 @@ devices:
     type: Alsa
     channels: 2
     device: "hw:Loopback,0,0"
+    format: S16LE
   playback:
     type: Alsa
     channels: 2
     device: "hw:Generic_1"
+    format: S32LE
 
 filters:
   lowpass_fir:
