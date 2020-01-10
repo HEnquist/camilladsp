@@ -8,6 +8,8 @@ use std::error;
 //use alsa::direct::pcm::MmapPlayback;
 use std::{thread, time};
 use std::sync::mpsc;
+use std::sync::{Arc, Barrier};
+
 
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
@@ -51,55 +53,40 @@ enum Message {
     Audio(AudioChunk),
 }
 
+enum CtrlMessage {
+    Start,
+}
 
+enum StatusMessage {
+    PlaybackReady,
+    CaptureReady,
+    ProcessingReady,
+}
 
 fn run(conf: config::Configuration) -> Res<()> {
-    let chunksize: i64 = 1024;
 
-    //let mut playback_dev = AlsaPlaybackDevice::open("hw:Generic_1".to_string(), 44100, chunksize, 2)?;
-    let mut playback_dev = audiodevice::GetPlaybackDevice(conf.devices.clone());
-    //let mut capture_dev = AlsaCaptureDevice::open("hw:Loopback,0,0".to_string(), 44100, chunksize, 2)?;
-    let mut capture_dev = audiodevice::GetCaptureDevice(conf.devices.clone());
-    //let (playback_dev, play_rate) = open_audio_dev_play("hw:PCH".to_string(), 44100, 1024)?;
-    //let (capture_dev, capt_rate) = open_audio_dev_capt("hw:PCH".to_string(), 44100, 1024)?;
-
-    
-    
     let (tx_pb, rx_pb) = mpsc::channel();
     let (tx_cap, rx_cap) = mpsc::channel();
 
-    
+    let barrier = Arc::new(Barrier::new(3));
+    let barrier_pb = barrier.clone();
+    let barrier_cap = barrier.clone();
+    let barrier_proc = barrier.clone();
+
+    let conf_pb = conf.clone();
+    let conf_cap = conf.clone();
+    let conf_proc = conf.clone();
+
     //let mut mmap = playback_dev.direct_mmap_playback::<SF>()?;
 
+    // Processing thread
     thread::spawn(move || {
-        //let coeffs = BiquadCoefficients::new(-1.79907162, 0.81748736, 0.00460394, 0.00920787, 0.00460394);
-        //let mut filter_l = Biquad::new(coeffs);
-        //let mut filter_r = Biquad::new(coeffs);
-        //let coeffs = read_coeff_file("filter.txt").unwrap();
-        //let mut filter_l = FFTConv::new(chunksize as usize, &coeffs);
-        //let mut filter_r = FFTConv::new(chunksize as usize, &coeffs);
-        let mut pipeline = filters::Pipeline::from_config(conf);
-        println!("build filters, starting processing loop");
+        let mut pipeline = filters::Pipeline::from_config(conf_proc);
+        println!("build filters, waiting to start processing loop");
+        barrier_proc.wait();
         loop {
             match rx_cap.recv() {
                 Ok(Message::Audio(mut chunk)) => {
-                    //let mut buf = vec![0f64; 1024];
-                    //for (i, a) in buf.iter_mut().enumerate() {
-                    //    *a = (i as f64 * 2.0 * ::std::f64::consts::PI / 128.0).sin();
-                    //}
-                    //let mut filtered_wfs = Vec::new();
-                    //for wave in wfs.iter() {
-                    //let _res_l = filter_l.process_waveform(&mut chunk.waveforms[0]);
-                    //filtered_wfs.push(filtered_l);
-                    //let _res_r = filter_r.process_waveform(&mut chunk.waveforms[1]);
-                    //filtered_wfs.push(filtered_r);
-
-                    //let chunk = AudioChunk{
-                    //    frames: chunksize as usize,
-                    //    channels: 2,
-                    //    waveforms: filtered_wfs,
-                    //    //waveforms: Waveforms::Float64(vec![buf.clone(), buf]),
-                    //};
                     chunk = pipeline.process_chunk(chunk);
                     let msg = Message::Audio(chunk);
                     tx_pb.send(msg).unwrap();
@@ -109,10 +96,13 @@ fn run(conf: config::Configuration) -> Res<()> {
         }
     });
 
+
+    // Playback thread
     thread::spawn(move || {
+        let mut playback_dev = audiodevice::GetPlaybackDevice(conf_pb.devices);
         let delay = time::Duration::from_millis(8*1000*1024/44100);
+        barrier_pb.wait();
         thread::sleep(delay);
-        let mut m = 0;
         println!("starting playback loop");
         loop {
             match rx_pb.recv() {
@@ -120,15 +110,17 @@ fn run(conf: config::Configuration) -> Res<()> {
                     playback_dev.put_chunk(chunk).unwrap();
                     let frames = playback_dev.play().unwrap();
                     //println!("PB Chunk {}, wrote {:?} frames", m, frames);
-                    m += 1;
+                    //m += 1;
                 }
                 _ => {}
             }
         }
     });
 
+    // Capture thread
     thread::spawn(move || {
-        let mut m = 0;
+        let mut capture_dev = audiodevice::GetCaptureDevice(conf_cap.devices);
+        barrier_cap.wait();
         println!("starting capture loop");
         loop {
             let _frames = capture_dev.capture().unwrap();
@@ -136,7 +128,7 @@ fn run(conf: config::Configuration) -> Res<()> {
             let msg = Message::Audio(chunk);
             tx_cap.send(msg).unwrap();
             //println!("Capture chunk {}", m);
-            m += 1;
+            //m += 1;
         }
     });
 

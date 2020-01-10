@@ -9,11 +9,11 @@ use audiodevice::*;
 type SmpFmt = i16;
 type PrcFmt = f64;
 
-pub struct AlsaPlaybackDevice {
+pub struct AlsaPlaybackDevice<'a> {
     devname: String,
     samplerate: usize,
     pcmdevice: alsa::PCM,
-    //io: alsa::pcm::IO<'a, T>,
+    io: Option<alsa::pcm::IO<'a, SmpFmt>>,
     buffer: Vec<SmpFmt>,
     bufferlength: usize,
     channels: usize,
@@ -29,7 +29,7 @@ pub struct AlsaCaptureDevice {
 }
 
 
-impl PlaybackDevice for AlsaPlaybackDevice {
+impl PlaybackDevice for AlsaPlaybackDevice<'_> {
     fn get_bufsize(&mut self) -> usize {
         self.bufferlength
     }
@@ -60,7 +60,11 @@ impl PlaybackDevice for AlsaPlaybackDevice {
             self.pcmdevice.prepare()?;
         }
         //let frames = self.io.writei(&self.buffer[..])?;
-        let frames = self.pcmdevice.io_i16()?.writei(&self.buffer[..])?;
+        if self.io.is_none() {
+            self.io = Some(self.pcmdevice.io_i16()?);
+        }
+        //let frames = self.pcmdevice.io_i16()?.writei(&self.buffer[..])?;
+        let frames = self.io.unwrap().writei(&self.buffer[..])?;
         Ok(frames as usize)
     }
 }
@@ -114,8 +118,8 @@ impl CaptureDevice for AlsaCaptureDevice {
 }
 
 
-impl AlsaPlaybackDevice {
-    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaPlaybackDevice> {
+impl<'a> AlsaPlaybackDevice<'a> {
+    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaPlaybackDevice<'a>> {
         // Open the device
         let pcmdev = alsa::PCM::new(&devname, Direction::Playback, false)?;
 
@@ -144,15 +148,17 @@ impl AlsaPlaybackDevice {
         };
 
         //let mut io = pcmdev.io_i16()?;
-        let device = AlsaPlaybackDevice {
+        let mut device = AlsaPlaybackDevice {
             devname: devname,
             samplerate: rate as usize,
             pcmdevice: pcmdev,
-            //io: io,
+            io: None,
             buffer: vec![0, 0],
             bufferlength: act_bufsize as usize,
             channels: channels as usize,
         };
+        //let mut io = device.pcmdevice.io_i16()?;
+        //device.io = Some(io);
         Ok(device)
     }
 }

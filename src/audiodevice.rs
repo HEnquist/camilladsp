@@ -41,7 +41,7 @@ pub trait CaptureDevice {
     fn capture(&mut self) -> Res<usize>;
 }
 
-pub fn GetCaptureDevice(conf: config::Devices) -> Box<dyn CaptureDevice + Send> {
+pub fn GetCaptureDevice(conf: config::Devices) -> Box<dyn CaptureDevice> {
     match conf.capture.r#type {
         config::DeviceType::Alsa => {
             Box::new(alsadevice::AlsaCaptureDevice::open(conf.capture.device, 
@@ -52,7 +52,7 @@ pub fn GetCaptureDevice(conf: config::Devices) -> Box<dyn CaptureDevice + Send> 
     } 
 }
 
-pub fn GetPlaybackDevice(conf: config::Devices) -> Box<dyn PlaybackDevice + Send> {
+pub fn GetPlaybackDevice(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     match conf.playback.r#type {
         config::DeviceType::Alsa => {
             Box::new(alsadevice::AlsaPlaybackDevice::open(conf.playback.device, 
