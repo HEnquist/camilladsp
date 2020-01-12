@@ -162,6 +162,10 @@ impl PlaybackDevice for AlsaPlaybackDeviceS32LE {
         let mut value: i32;
         for frame in 0..chunk.frames {
             for chan in 0..chunk.channels {
+                // TODO
+                // check -1 .. 1
+                // warn if clipping ("Warning, 14 samples clipped, peak 107%")
+                // move 1<<31 factor before loop
                 value = (chunk.waveforms[chan][frame] * (1<<31) as PrcFmt) as i32;
                 buf.push(value);
             }
