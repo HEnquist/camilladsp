@@ -1,596 +1,234 @@
 extern crate alsa;
+extern crate num_traits;
 //use std::{iter, error};
 use alsa::{Direction, ValueOr};
 use alsa::pcm::{HwParams, Format, Access, State};
-
+use std::{thread, time};
+use std::sync::mpsc;
+use std::sync::{Arc, Barrier};
 //mod audiodevice;
 use audiodevice::*;
 // Sample format
+use config::SampleFormat;
 
 type PrcFmt = f64;
 
 
-pub struct AlsaPlaybackDeviceS16LE {
-    devname: String,
-    samplerate: usize,
-    pcmdevice: alsa::PCM,
-    //io: Option<alsa::pcm::IO<'a, SmpFmt>>,
-    buffer: Vec<i16>,
-    bufferlength: usize,
-    channels: usize,
+pub struct AlsaPlaybackDevice {
+    pub devname: String,
+    pub samplerate: usize,
+    pub bufferlength: usize,
+    pub channels: usize,
+    pub format: SampleFormat,
 }
 
-pub struct AlsaPlaybackDeviceS24LE {
-    devname: String,
-    samplerate: usize,
-    pcmdevice: alsa::PCM,
-    //io: Option<alsa::pcm::IO<'a, SmpFmt>>,
-    buffer: Vec<i32>,
-    bufferlength: usize,
-    channels: usize,
-}
-
-pub struct AlsaPlaybackDeviceS32LE {
-    devname: String,
-    samplerate: usize,
-    pcmdevice: alsa::PCM,
-    //io: Option<alsa::pcm::IO<'a, SmpFmt>>,
-    buffer: Vec<i32>,
-    bufferlength: usize,
-    channels: usize,
-}
-pub struct AlsaCaptureDeviceS16LE {
-    devname: String,
-    samplerate: usize,
-    pcmdevice: alsa::PCM,
-    //io: alsa::pcm::IO<'a, T>,
-    buffer: Vec<i16>,
-    bufferlength: usize,
-    channels: usize,
-}
-pub struct AlsaCaptureDeviceS24LE {
-    devname: String,
-    samplerate: usize,
-    pcmdevice: alsa::PCM,
-    //io: alsa::pcm::IO<'a, T>,
-    buffer: Vec<i32>,
-    bufferlength: usize,
-    channels: usize,
-}
-pub struct AlsaCaptureDeviceS32LE {
-    devname: String,
-    samplerate: usize,
-    pcmdevice: alsa::PCM,
-    //io: alsa::pcm::IO<'a, T>,
-    buffer: Vec<i32>,
-    bufferlength: usize,
-    channels: usize,
+pub struct AlsaCaptureDevice {
+    pub devname: String,
+    pub samplerate: usize,
+    pub bufferlength: usize,
+    pub channels: usize,
+    pub format: SampleFormat,
 }
 
 
-impl PlaybackDevice for AlsaPlaybackDeviceS16LE {
-    fn get_bufsize(&mut self) -> usize {
-        self.bufferlength
-    }
-
-    /// Send audio chunk for later playback
-    fn put_chunk(&mut self, chunk: AudioChunk) -> Res<()> {
-        //let buf = chunk.into_iter().collect::<Vec<SF>>();
-        //buf
-        let num_samples = chunk.channels*chunk.frames;
-        let mut buf = Vec::with_capacity(num_samples);
-        let mut value: i16;
-        for frame in 0..chunk.frames {
-            for chan in 0..chunk.channels {
-                value = (chunk.waveforms[chan][frame] * (1<<15) as PrcFmt) as i16;
-                buf.push(value);
-            }
+fn chunk_to_buffer<T: num_traits::cast::NumCast>(chunk: AudioChunk, scalefactor: PrcFmt) -> Vec<T> {
+    let num_samples = chunk.channels*chunk.frames;
+    let mut buf = Vec::with_capacity(num_samples);
+    let mut value: T;
+    for frame in 0..chunk.frames {
+        for chan in 0..chunk.channels {
+            value = num_traits::cast(chunk.waveforms[chan][frame] * scalefactor).unwrap();
+            buf.push(value);
         }
-        self.buffer = buf;
-        Ok(())
     }
-    
-    // play the buffer
-    fn play(&mut self) -> Res<usize> {
-        let playback_state = self.pcmdevice.state();
-        //println!("playback state {:?}", playback_state);
-        if playback_state == State::XRun {
-            println!("Prepare playback");
-            self.pcmdevice.prepare()?;
-        }
-        //let frames = self.io.writei(&self.buffer[..])?;
-        //if self.io.is_none() {
-        //    self.io = Some(self.pcmdevice.io_i16()?);
-        //}
-        let frames = self.pcmdevice.io_i16()?.writei(&self.buffer[..])?;
-        //let frames = self.io.unwrap().writei(&self.buffer[..])?;
-        Ok(frames as usize)
-    }
+    buf
 }
 
-impl PlaybackDevice for AlsaPlaybackDeviceS24LE {
-    fn get_bufsize(&mut self) -> usize {
-        self.bufferlength
+fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(buffer: Vec<T>, channels: usize, scalefactor: PrcFmt) -> AudioChunk {
+    let num_samples = buffer.len();
+    let num_frames = num_samples/channels;
+    let mut value: PrcFmt;
+    let mut wfs = Vec::with_capacity(channels);
+    for _chan in 0..channels {
+        wfs.push(Vec::with_capacity(num_frames));
     }
-
-    /// Send audio chunk for later playback
-    fn put_chunk(&mut self, chunk: AudioChunk) -> Res<()> {
-        //let buf = chunk.into_iter().collect::<Vec<SF>>();
-        //buf
-        let num_samples = chunk.channels*chunk.frames;
-        let mut buf = Vec::with_capacity(num_samples);
-        let mut value: i32;
-        for frame in 0..chunk.frames {
-            for chan in 0..chunk.channels {
-                value = (chunk.waveforms[chan][frame] * (1<<23) as PrcFmt) as i32;
-                buf.push(value);
-            }
+    //let mut idx = 0;
+    //let mut samples = buffer.iter();
+    let mut idx = 0;
+    for _frame in 0..num_frames {
+        for chan in 0..channels {
+            value = buffer[idx].as_();
+            idx+=1;
+            value = value / scalefactor;
+            //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
+            wfs[chan].push(value);
+            //idx += 1;
         }
-        self.buffer = buf;
-        Ok(())
     }
-    
-    // play the buffer
-    fn play(&mut self) -> Res<usize> {
-        let playback_state = self.pcmdevice.state();
-        //println!("playback state {:?}", playback_state);
-        if playback_state == State::XRun {
-            println!("Prepare playback");
-            self.pcmdevice.prepare()?;
-        }
-        //let frames = self.io.writei(&self.buffer[..])?;
-        //if self.io.is_none() {
-        //    self.io = Some(self.pcmdevice.io_i16()?);
-        //}
-        let frames = self.pcmdevice.io_i32()?.writei(&self.buffer[..])?;
-        //let frames = self.io.unwrap().writei(&self.buffer[..])?;
-        Ok(frames as usize)
-    }
+    let chunk = AudioChunk {
+        channels: channels,
+        frames: num_frames,
+        waveforms: wfs,
+    };
+    chunk
 }
 
-impl PlaybackDevice for AlsaPlaybackDeviceS32LE {
-    fn get_bufsize(&mut self) -> usize {
-        self.bufferlength
+fn open_pcm(devname: String, samplerate: u32, bufsize: i64, channels: u32, bits: usize, capture: bool) -> Res<alsa::PCM> {
+    // Open the device
+    let pcmdev;
+    if capture {
+        pcmdev = alsa::PCM::new(&devname, Direction::Capture, false)?;
+    }
+    else {
+        pcmdev = alsa::PCM::new(&devname, Direction::Playback, false)?;
+    }
+    // Set hardware parameters
+    {
+        let hwp = HwParams::any(&pcmdev)?;
+        hwp.set_channels(channels)?;
+        hwp.set_rate(samplerate, ValueOr::Nearest)?;
+        match bits {
+            16 => hwp.set_format(Format::s16())?,
+            24 => hwp.set_format(Format::s24())?,
+            32 => hwp.set_format(Format::s32())?,
+            _ => {},
+        }
+        
+        hwp.set_access(Access::RWInterleaved)?;
+        hwp.set_buffer_size(bufsize)?;
+        hwp.set_period_size(bufsize / 8, alsa::ValueOr::Nearest)?;
+        pcmdev.hw_params(&hwp)?;
     }
 
-    /// Send audio chunk for later playback
-    fn put_chunk(&mut self, chunk: AudioChunk) -> Res<()> {
-        //let buf = chunk.into_iter().collect::<Vec<SF>>();
-        //buf
-        let num_samples = chunk.channels*chunk.frames;
-        let mut buf = Vec::with_capacity(num_samples);
-        let mut value: i32;
-        for frame in 0..chunk.frames {
-            for chan in 0..chunk.channels {
-                // TODO
-                // check -1 .. 1
-                // warn if clipping ("Warning, 14 samples clipped, peak 107%")
-                // move 1<<31 factor before loop
-                value = (chunk.waveforms[chan][frame] * (1<<31) as PrcFmt) as i32;
-                buf.push(value);
-            }
-        }
-        self.buffer = buf;
-        Ok(())
-    }
-    
-    // play the buffer
-    fn play(&mut self) -> Res<usize> {
-        let playback_state = self.pcmdevice.state();
-        //println!("playback state {:?}", playback_state);
-        if playback_state == State::XRun {
-            println!("Prepare playback");
-            self.pcmdevice.prepare()?;
-        }
-        //let frames = self.io.writei(&self.buffer[..])?;
-        //if self.io.is_none() {
-        //    self.io = Some(self.pcmdevice.io_i16()?);
-        //}
-        let frames = self.pcmdevice.io_i32()?.writei(&self.buffer[..])?;
-        //let frames = self.io.unwrap().writei(&self.buffer[..])?;
-        Ok(frames as usize)
-    }
+    // Set software parameters
+    let (_rate, _act_bufsize) = {
+        let hwp = pcmdev.hw_params_current()?;
+        let swp = pcmdev.sw_params_current()?;
+        let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
+        swp.set_start_threshold(act_bufsize - act_periodsize)?;
+        //swp.set_avail_min(periodsize)?;
+        pcmdev.sw_params(&swp)?;
+        println!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
+        (hwp.get_rate()?, act_bufsize) 
+    };
+    Ok(pcmdev)
 }
 
-impl CaptureDevice for AlsaCaptureDeviceS16LE {
-    fn get_bufsize(&mut self) -> usize {
-        self.bufferlength
-    }
-
-    /// Send audio chunk for later playback
-    fn fetch_chunk(&mut self) -> Res<AudioChunk> {
-        let num_samples = self.buffer.len();
-        let num_frames = num_samples/self.channels;
-        let mut value: PrcFmt;
-        let mut wfs = Vec::with_capacity(self.channels);
-        for _chan in 0..self.channels {
-            wfs.push(Vec::with_capacity(num_frames));
-        }
-        //let mut idx = 0;
-        let mut samples = self.buffer.iter();
-        for _frame in 0..num_frames {
-            for chan in 0..self.channels {
-                value = (*samples.next().unwrap() as PrcFmt) / ((1<<15) as PrcFmt);
-                //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
-                wfs[chan].push(value);
-                //idx += 1;
-            }
-        }
-        let chunk = AudioChunk {
-            channels: self.channels,
-            frames: num_frames,
-            waveforms: wfs,
+impl PlaybackDevice for AlsaPlaybackDevice {
+    fn start(&mut self, channel: mpsc::Receiver<AudioMessage>, barrier: Arc<Barrier>) -> Res<Box<thread::JoinHandle<()>>> {
+        let devname = self.devname.clone();
+        let samplerate = self.samplerate.clone();
+        let bufferlength = self.bufferlength.clone();
+        let channels = self.channels.clone();
+        let bits = match self.format {
+            SampleFormat::S16LE => 16,
+            SampleFormat::S24LE => 24,
+            SampleFormat::S32LE => 32,
         };
-        Ok(chunk)
-    }
-    
-    //capure to internal buffer
-    fn capture(&mut self) -> Res<usize> {
-        let mut buf: Vec<i16>;
-        buf = vec![0; self.channels*self.bufferlength];
-        let capture_state = self.pcmdevice.state();
-        if capture_state == State::XRun {
-            self.pcmdevice.prepare()?;
-        }
-        //let frames = self.io.readi(&mut buf)?;
-        let frames = self.pcmdevice.io_i16()?.readi(&mut buf)?;
-        self.buffer = buf;
-        Ok(frames as usize)
-    }
-}
-
-impl CaptureDevice for AlsaCaptureDeviceS24LE {
-    fn get_bufsize(&mut self) -> usize {
-        self.bufferlength
-    }
-
-    /// Send audio chunk for later playback
-    fn fetch_chunk(&mut self) -> Res<AudioChunk> {
-        let num_samples = self.buffer.len();
-        let num_frames = num_samples/self.channels;
-        let mut value: PrcFmt;
-        let mut wfs = Vec::with_capacity(self.channels);
-        for _chan in 0..self.channels {
-            wfs.push(Vec::with_capacity(num_frames));
-        }
-        //let mut idx = 0;
-        let mut samples = self.buffer.iter();
-        for _frame in 0..num_frames {
-            for chan in 0..self.channels {
-                value = (*samples.next().unwrap() as PrcFmt) / ((1<<23) as PrcFmt);
-                //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
-                wfs[chan].push(value);
-                //idx += 1;
-            }
-        }
-        let chunk = AudioChunk {
-            channels: self.channels,
-            frames: num_frames,
-            waveforms: wfs,
-        };
-        Ok(chunk)
-    }
-    
-    //capure to internal buffer
-    fn capture(&mut self) -> Res<usize> {
-        let mut buf: Vec<i32>;
-        buf = vec![0; self.channels*self.bufferlength];
-        let capture_state = self.pcmdevice.state();
-        if capture_state == State::XRun {
-            self.pcmdevice.prepare()?;
-        }
-        //let frames = self.io.readi(&mut buf)?;
-        let frames = self.pcmdevice.io_i32()?.readi(&mut buf)?;
-        self.buffer = buf;
-        Ok(frames as usize)
+        let format = self.format.clone();
+        let handle = thread::spawn(move || {
+            let delay = time::Duration::from_millis((2*1000*bufferlength/samplerate) as u64);
+            let pcmdevice = open_pcm(devname, samplerate as u32, bufferlength as i64, channels as u32, bits, false).unwrap();
+            let scalefactor = (1<<bits-1) as PrcFmt;
+            barrier.wait();
+            thread::sleep(delay);
+            println!("starting playback loop");
+            match format {
+                SampleFormat::S16LE => {
+                    let io = pcmdevice.io_i16().unwrap();
+                    loop {
+                        match channel.recv() {
+                            Ok(AudioMessage::Audio(chunk)) => {
+                                let buffer = chunk_to_buffer(chunk, scalefactor);
+                                let playback_state = pcmdevice.state();
+                                //println!("playback state {:?}", playback_state);
+                                if playback_state == State::XRun {
+                                    println!("Prepare playback");
+                                    pcmdevice.prepare().unwrap();
+                                }
+                                let _frames = io.writei(&buffer[..]).unwrap();
+                            }
+                            _ => {}
+                        }
+                    }
+                },
+                SampleFormat::S24LE | SampleFormat::S32LE => {
+                    let io = pcmdevice.io_i32().unwrap();
+                    loop {
+                        match channel.recv() {
+                            Ok(AudioMessage::Audio(chunk)) => {
+                                let buffer = chunk_to_buffer(chunk, scalefactor);
+                                let playback_state = pcmdevice.state();
+                                //println!("playback state {:?}", playback_state);
+                                if playback_state == State::XRun {
+                                    println!("Prepare playback");
+                                    pcmdevice.prepare().unwrap();
+                                }
+                                let _frames = io.writei(&buffer[..]).unwrap();
+                            }
+                            _ => {}
+                        }
+                    }
+                },
+            };
+        });
+        Ok(Box::new(handle))
     }
 }
 
-impl CaptureDevice for AlsaCaptureDeviceS32LE {
-    fn get_bufsize(&mut self) -> usize {
-        self.bufferlength
-    }
-
-    /// Send audio chunk for later playback
-    fn fetch_chunk(&mut self) -> Res<AudioChunk> {
-        let num_samples = self.buffer.len();
-        let num_frames = num_samples/self.channels;
-        let mut value: PrcFmt;
-        let mut wfs = Vec::with_capacity(self.channels);
-        for _chan in 0..self.channels {
-            wfs.push(Vec::with_capacity(num_frames));
-        }
-        //let mut idx = 0;
-        let mut samples = self.buffer.iter();
-        for _frame in 0..num_frames {
-            for chan in 0..self.channels {
-                value = (*samples.next().unwrap() as PrcFmt) / ((1<<31) as PrcFmt);
-                //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
-                wfs[chan].push(value);
-                //idx += 1;
-            }
-        }
-        let chunk = AudioChunk {
-            channels: self.channels,
-            frames: num_frames,
-            waveforms: wfs,
+impl CaptureDevice for AlsaCaptureDevice {
+    fn start(&mut self, channel: mpsc::Sender<AudioMessage>, barrier: Arc<Barrier>) -> Res<Box<thread::JoinHandle<()>>> {
+        let devname = self.devname.clone();
+        let samplerate = self.samplerate.clone();
+        let bufferlength = self.bufferlength.clone();
+        let channels = self.channels.clone();
+        let bits = match self.format {
+            SampleFormat::S16LE => 16,
+            SampleFormat::S24LE => 24,
+            SampleFormat::S32LE => 32,
         };
-        Ok(chunk)
-    }
-    
-    //capure to internal buffer
-    fn capture(&mut self) -> Res<usize> {
-        let mut buf: Vec<i32>;
-        buf = vec![0; self.channels*self.bufferlength];
-        let capture_state = self.pcmdevice.state();
-        if capture_state == State::XRun {
-            self.pcmdevice.prepare()?;
-        }
-        //let frames = self.io.readi(&mut buf)?;
-        let frames = self.pcmdevice.io_i32()?.readi(&mut buf)?;
-        self.buffer = buf;
-        Ok(frames as usize)
-    }
-}
-
-impl AlsaPlaybackDeviceS16LE {
-    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaPlaybackDeviceS16LE> {
-        // Open the device
-        let pcmdev = alsa::PCM::new(&devname, Direction::Playback, false)?;
-        // Set hardware parameters
-        {
-            let hwp = HwParams::any(&pcmdev)?;
-            hwp.set_channels(channels)?;
-            hwp.set_rate(samplerate, ValueOr::Nearest)?;
-            hwp.set_format(Format::s16())?;
-            hwp.set_access(Access::RWInterleaved)?;
-            hwp.set_buffer_size(bufsize)?;
-            hwp.set_period_size(bufsize / 4, alsa::ValueOr::Nearest)?;
-            pcmdev.hw_params(&hwp)?;
-        }
-
-        // Set software parameters
-        let (rate, act_bufsize) = {
-            let hwp = pcmdev.hw_params_current()?;
-            let swp = pcmdev.sw_params_current()?;
-            let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
-            swp.set_start_threshold(act_bufsize - act_periodsize)?;
-            //swp.set_avail_min(periodsize)?;
-            pcmdev.sw_params(&swp)?;
-            println!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
-            (hwp.get_rate()?, act_bufsize) 
-        };
-
-        //let mut io = pcmdev.io_i16()?;
-        let mut device = AlsaPlaybackDeviceS16LE {
-            devname: devname,
-            samplerate: rate as usize,
-            pcmdevice: pcmdev,
-            //io: None,
-            buffer: vec![0, 0],
-            bufferlength: act_bufsize as usize,
-            channels: channels as usize,
-        };
-        //let mut io = device.pcmdevice.io_i16()?;
-        //device.io = Some(io);
-        Ok(device)
+        let format = self.format.clone();
+        let handle = thread::spawn(move || {
+            let pcmdevice = open_pcm(devname, samplerate as u32, bufferlength as i64, channels as u32, bits, true).unwrap();
+            let scalefactor = (1<<bits-1) as PrcFmt;
+            barrier.wait();
+            println!("starting captureloop");
+            match format {
+                SampleFormat::S16LE => {
+                    let io = pcmdevice.io_i16().unwrap();
+                    loop {
+                        let mut buf: Vec<i16>;
+                        buf = vec![0; channels*bufferlength];
+                        let capture_state = pcmdevice.state();
+                        if capture_state == State::XRun {
+                            pcmdevice.prepare().unwrap();
+                        }
+                        //let frames = self.io.readi(&mut buf)?;
+                        let _frames = io.readi(&mut buf).unwrap();
+                        let chunk = buffer_to_chunk(buf, channels, scalefactor);
+                        let msg = AudioMessage::Audio(chunk);
+                        channel.send(msg).unwrap();
+                    }
+                },
+                SampleFormat::S24LE | SampleFormat::S32LE => {
+                    let io = pcmdevice.io_i32().unwrap();
+                    loop {
+                        let mut buf: Vec<i32>;
+                        buf = vec![0; channels*bufferlength];
+                        let capture_state = pcmdevice.state();
+                        if capture_state == State::XRun {
+                            pcmdevice.prepare().unwrap();
+                        }
+                        //let frames = self.io.readi(&mut buf)?;
+                        let _frames = io.readi(&mut buf).unwrap();
+                        let chunk = buffer_to_chunk(buf, channels, scalefactor);
+                        let msg = AudioMessage::Audio(chunk);
+                        channel.send(msg).unwrap();
+                    }
+                },
+            };
+        });
+        Ok(Box::new(handle))
     }
 }
 
-impl AlsaPlaybackDeviceS24LE {
-    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaPlaybackDeviceS24LE> {
-        // Open the device
-        let pcmdev = alsa::PCM::new(&devname, Direction::Playback, false)?;
-        // Set hardware parameters
-        {
-            let hwp = HwParams::any(&pcmdev)?;
-            hwp.set_channels(channels)?;
-            hwp.set_rate(samplerate, ValueOr::Nearest)?;
-            hwp.set_format(Format::s24())?;
-            hwp.set_access(Access::RWInterleaved)?;
-            hwp.set_buffer_size(bufsize)?;
-            hwp.set_period_size(bufsize / 4, alsa::ValueOr::Nearest)?;
-            pcmdev.hw_params(&hwp)?;
-        }
-
-        // Set software parameters
-        let (rate, act_bufsize) = {
-            let hwp = pcmdev.hw_params_current()?;
-            let swp = pcmdev.sw_params_current()?;
-            let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
-            swp.set_start_threshold(act_bufsize - act_periodsize)?;
-            //swp.set_avail_min(periodsize)?;
-            pcmdev.sw_params(&swp)?;
-            println!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
-            (hwp.get_rate()?, act_bufsize) 
-        };
-
-        //let mut io = pcmdev.io_i16()?;
-        let mut device = AlsaPlaybackDeviceS24LE {
-            devname: devname,
-            samplerate: rate as usize,
-            pcmdevice: pcmdev,
-            //io: None,
-            buffer: vec![0, 0],
-            bufferlength: act_bufsize as usize,
-            channels: channels as usize,
-        };
-        //let mut io = device.pcmdevice.io_i16()?;
-        //device.io = Some(io);
-        Ok(device)
-    }
-}
-
-
-impl AlsaPlaybackDeviceS32LE {
-    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaPlaybackDeviceS32LE> {
-        // Open the device
-        let pcmdev = alsa::PCM::new(&devname, Direction::Playback, false)?;
-        // Set hardware parameters
-        {
-            let hwp = HwParams::any(&pcmdev)?;
-            hwp.set_channels(channels)?;
-            hwp.set_rate(samplerate, ValueOr::Nearest)?;
-            hwp.set_format(Format::s32())?;
-            hwp.set_access(Access::RWInterleaved)?;
-            hwp.set_buffer_size(bufsize)?;
-            hwp.set_period_size(bufsize / 4, alsa::ValueOr::Nearest)?;
-            pcmdev.hw_params(&hwp)?;
-        }
-
-        // Set software parameters
-        let (rate, act_bufsize) = {
-            let hwp = pcmdev.hw_params_current()?;
-            let swp = pcmdev.sw_params_current()?;
-            let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
-            swp.set_start_threshold(act_bufsize - act_periodsize)?;
-            //swp.set_avail_min(periodsize)?;
-            pcmdev.sw_params(&swp)?;
-            println!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
-            (hwp.get_rate()?, act_bufsize) 
-        };
-
-        //let mut io = pcmdev.io_i16()?;
-        let mut device = AlsaPlaybackDeviceS32LE {
-            devname: devname,
-            samplerate: rate as usize,
-            pcmdevice: pcmdev,
-            //io: None,
-            buffer: vec![0, 0],
-            bufferlength: act_bufsize as usize,
-            channels: channels as usize,
-        };
-        //let mut io = device.pcmdevice.io_i16()?;
-        //device.io = Some(io);
-        Ok(device)
-    }
-}
-impl AlsaCaptureDeviceS16LE {
-    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaCaptureDeviceS16LE> {
-        // Open the device
-        let pcmdev = alsa::PCM::new(&devname, Direction::Capture, false)?;
-
-        // Set hardware parameters
-        {
-            let hwp = HwParams::any(&pcmdev)?;
-            hwp.set_channels(channels)?;
-            hwp.set_rate(samplerate, ValueOr::Nearest)?;
-            hwp.set_format(Format::s16())?;
-            hwp.set_access(Access::RWInterleaved)?;
-            hwp.set_buffer_size(bufsize)?;
-            hwp.set_period_size(bufsize / 4, alsa::ValueOr::Nearest)?;
-            pcmdev.hw_params(&hwp)?;
-        }
-
-        // Set software parameters
-        let (rate, act_bufsize) = {
-            let hwp = pcmdev.hw_params_current()?;
-            let swp = pcmdev.sw_params_current()?;
-            let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
-            swp.set_start_threshold(act_bufsize - act_periodsize)?;
-            //swp.set_avail_min(periodsize)?;
-            pcmdev.sw_params(&swp)?;
-            println!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
-            (hwp.get_rate()?, act_bufsize) 
-        };
-
-        //let mut io = pcmdev.io_i16()?;
-        let device = AlsaCaptureDeviceS16LE {
-            devname: devname,
-            samplerate: rate as usize,
-            pcmdevice: pcmdev,
-            //io: io,
-            buffer: vec![0, 0],
-            bufferlength: act_bufsize as usize,
-            channels: channels as usize,
-        };
-        Ok(device)
-    }
-}
-
-
-impl AlsaCaptureDeviceS24LE {
-    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaCaptureDeviceS24LE> {
-        // Open the device
-        let pcmdev = alsa::PCM::new(&devname, Direction::Capture, false)?;
-
-        // Set hardware parameters
-        {
-            let hwp = HwParams::any(&pcmdev)?;
-            hwp.set_channels(channels)?;
-            hwp.set_rate(samplerate, ValueOr::Nearest)?;
-            hwp.set_format(Format::s24())?;
-            hwp.set_access(Access::RWInterleaved)?;
-            hwp.set_buffer_size(bufsize)?;
-            hwp.set_period_size(bufsize / 4, alsa::ValueOr::Nearest)?;
-            pcmdev.hw_params(&hwp)?;
-        }
-
-        // Set software parameters
-        let (rate, act_bufsize) = {
-            let hwp = pcmdev.hw_params_current()?;
-            let swp = pcmdev.sw_params_current()?;
-            let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
-            swp.set_start_threshold(act_bufsize - act_periodsize)?;
-            //swp.set_avail_min(periodsize)?;
-            pcmdev.sw_params(&swp)?;
-            println!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
-            (hwp.get_rate()?, act_bufsize) 
-        };
-
-        //let mut io = pcmdev.io_i16()?;
-        let device = AlsaCaptureDeviceS24LE {
-            devname: devname,
-            samplerate: rate as usize,
-            pcmdevice: pcmdev,
-            //io: io,
-            buffer: vec![0, 0],
-            bufferlength: act_bufsize as usize,
-            channels: channels as usize,
-        };
-        Ok(device)
-    }
-}
-
-impl AlsaCaptureDeviceS32LE {
-    pub fn open(devname: String, samplerate: u32, bufsize: i64, channels: u32) -> Res<AlsaCaptureDeviceS32LE> {
-        // Open the device
-        let pcmdev = alsa::PCM::new(&devname, Direction::Capture, false)?;
-
-        // Set hardware parameters
-        {
-            let hwp = HwParams::any(&pcmdev)?;
-            hwp.set_channels(channels)?;
-            hwp.set_rate(samplerate, ValueOr::Nearest)?;
-            hwp.set_format(Format::s32())?;
-            hwp.set_access(Access::RWInterleaved)?;
-            hwp.set_buffer_size(bufsize)?;
-            hwp.set_period_size(bufsize / 4, alsa::ValueOr::Nearest)?;
-            pcmdev.hw_params(&hwp)?;
-        }
-
-        // Set software parameters
-        let (rate, act_bufsize) = {
-            let hwp = pcmdev.hw_params_current()?;
-            let swp = pcmdev.sw_params_current()?;
-            let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
-            swp.set_start_threshold(act_bufsize - act_periodsize)?;
-            //swp.set_avail_min(periodsize)?;
-            pcmdev.sw_params(&swp)?;
-            println!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
-            (hwp.get_rate()?, act_bufsize) 
-        };
-
-        //let mut io = pcmdev.io_i16()?;
-        let device = AlsaCaptureDeviceS32LE {
-            devname: devname,
-            samplerate: rate as usize,
-            pcmdevice: pcmdev,
-            //io: io,
-            buffer: vec![0, 0],
-            bufferlength: act_bufsize as usize,
-            channels: channels as usize,
-        };
-        Ok(device)
-    }
-}

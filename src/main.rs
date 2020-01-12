@@ -14,16 +14,12 @@ use std::sync::{Arc, Barrier};
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
 mod filters;
-use filters::*;
 mod biquad;
-use biquad::*;
 mod fftconv;
-use fftconv::*;
 
 mod audiodevice;
 mod alsadevice;
 use audiodevice::*;
-use alsadevice::*;
 
 mod config;
 
@@ -36,32 +32,6 @@ use std::io::BufReader;
 use std::io::prelude::*;
 //use std::path::PathBuf;
 
-//use serde::{Serialize, Deserialize};
-
-//pub use crate::filters::*;
-//pub use crate::biquad::*;
-
-
-
-// Sample format
-//type SmpFmt = i16;
-//type PrcFmt = f64;
-
-
-enum Message {
-    Quit,
-    Audio(AudioChunk),
-}
-
-enum CtrlMessage {
-    Start,
-}
-
-enum StatusMessage {
-    PlaybackReady,
-    CaptureReady,
-    ProcessingReady,
-}
 
 fn run(conf: config::Configuration) -> Res<()> {
 
@@ -86,9 +56,9 @@ fn run(conf: config::Configuration) -> Res<()> {
         barrier_proc.wait();
         loop {
             match rx_cap.recv() {
-                Ok(Message::Audio(mut chunk)) => {
+                Ok(AudioMessage::Audio(mut chunk)) => {
                     chunk = pipeline.process_chunk(chunk);
-                    let msg = Message::Audio(chunk);
+                    let msg = AudioMessage::Audio(chunk);
                     tx_pb.send(msg).unwrap();
                 }
                 _ => {}
@@ -98,39 +68,13 @@ fn run(conf: config::Configuration) -> Res<()> {
 
 
     // Playback thread
-    thread::spawn(move || {
-        let mut playback_dev = audiodevice::GetPlaybackDevice(conf_pb.devices);
-        let delay = time::Duration::from_millis(8*1000*1024/44100);
-        barrier_pb.wait();
-        thread::sleep(delay);
-        println!("starting playback loop");
-        loop {
-            match rx_pb.recv() {
-                Ok(Message::Audio(chunk)) => {
-                    playback_dev.put_chunk(chunk).unwrap();
-                    let frames = playback_dev.play().unwrap();
-                    //println!("PB Chunk {}, wrote {:?} frames", m, frames);
-                    //m += 1;
-                }
-                _ => {}
-            }
-        }
-    });
+    let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
+    let _pb_handle = playback_dev.start(rx_pb, barrier_pb);
+
 
     // Capture thread
-    thread::spawn(move || {
-        let mut capture_dev = audiodevice::GetCaptureDevice(conf_cap.devices);
-        barrier_cap.wait();
-        println!("starting capture loop");
-        loop {
-            let _frames = capture_dev.capture().unwrap();
-            let chunk = capture_dev.fetch_chunk().unwrap();
-            let msg = Message::Audio(chunk);
-            tx_cap.send(msg).unwrap();
-            //println!("Capture chunk {}", m);
-            //m += 1;
-        }
-    });
+    let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
+    let _cap_handle = capture_dev.start(tx_cap, barrier_cap);
 
     let delay = time::Duration::from_millis(100);
     
@@ -138,7 +82,6 @@ fn run(conf: config::Configuration) -> Res<()> {
     loop {
         thread::sleep(delay);
     }
-    Ok(())
 }
 
 fn main() {
@@ -152,10 +95,6 @@ fn main() {
     };
     let configuration: config::Configuration = serde_yaml::from_str(&contents).unwrap();
     println!("config {:?}", configuration);
-
-    for (name, mix) in configuration.mixers.clone() {
-        let newmix = mixer::Mixer::from_config(mix);
-    }
 
     //read_coeff_file("filter.txt");
     if let Err(e) = run(configuration) { println!("Error ({}) {}", e.description(), e); }
