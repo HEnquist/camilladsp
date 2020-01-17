@@ -4,6 +4,7 @@
 //mod filters;
 
 use crate::filters::Filter;
+use config;
 
 // Sample format
 //type SmpFmt = i16;
@@ -36,6 +37,16 @@ impl BiquadCoefficients {
         }
     }
 
+    pub fn normalize(a0: PrcFmt, a1: PrcFmt, a2: PrcFmt, b0: PrcFmt, b1: PrcFmt, b2: PrcFmt) -> Self {
+        BiquadCoefficients {
+            a1: a1 / a0,
+            a2: a2 / a0,
+            b0: b0 / a0,
+            b1: b1 / a0,
+            b2: b2 / a0,
+        }
+    }
+
     pub fn from_vec(coeffs: &Vec<PrcFmt>) -> Self {
         BiquadCoefficients {
             a1: coeffs[0],
@@ -44,6 +55,90 @@ impl BiquadCoefficients {
             b1: coeffs[3],
             b2: coeffs[4],
         }
+    }
+
+    pub fn from_config(fs: usize, parameters: config::BiquadParameters) -> Self {
+        match parameters {
+            config::BiquadParameters::Free {a1, a2, b0, b1, b2} => {
+                BiquadCoefficients::new(a1, a2, b0, b1, b2)
+            }
+            config::BiquadParameters::Highpass { freq, Q} => {
+                let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
+                let sn = omega.sin();
+                let cs = omega.cos();
+                let alpha = sn / (2.0 * Q);
+                let b0 = (1.0 + cs) / 2.0;
+                let b1 = -(1.0 + cs);
+                let b2 = (1.0 + cs) / 2.0;
+                let a0 = 1.0 + alpha;
+                let a1 = -2.0 * cs;
+                let a2 = 1.0 - alpha;
+                BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
+            }
+            config::BiquadParameters::Lowpass { freq, Q } => {
+                let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
+                let sn = omega.sin();
+                let cs = omega.cos();
+                let alpha = sn / (2.0 * Q);
+                let b0 = (1.0 - cs) / 2.0;
+                let b1 = 1.0 - cs;
+                let b2 = (1.0 - cs) / 2.0;
+                let a0 = 1.0 + alpha;
+                let a1 = -2.0 * cs;
+                let a2 = 1.0 - alpha;
+                BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
+            }
+            config::BiquadParameters::Peaking { freq, gain, Q} => {
+                let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
+                let sn = omega.sin();
+                let cs = omega.cos();
+                let A = (10.0 as PrcFmt).powf(gain / 40.0);
+                let alpha = sn / (2.0 * Q);
+                let b0 = 1.0 + (alpha * A);
+                let b1 = -2.0 * cs;
+                let b2 = 1.0 - (alpha * A);
+                let a0 = 1.0 + (alpha / A);
+                let a1 = -2.0 * cs;
+                let a2 = 1.0 - (alpha / A);
+                BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
+            }
+
+            config::BiquadParameters::Highshelf { freq, slope, gain} => {
+                let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
+                let sn = omega.sin();
+                let cs = omega.cos();
+                let A = (10.0 as PrcFmt).powf(gain / 40.0);
+                let alpha = sn / 2.0 * ((A + 1.0 / A) * (1.0 / slope - 1.0) + 2.0).sqrt();
+                let beta = 2.0 * A.sqrt() * alpha;
+                let b0 = A * ((A + 1.0) + (A - 1.0) * cs + beta);
+                let b1 = -2.0 * A * ((A - 1.0) + (A + 1.0) * cs);
+                let b2 = A * ((A + 1.0) + (A - 1.0) * cs - beta);
+                let a0 = (A + 1.0) - (A - 1.0) * cs + beta;
+                let a1 = 2.0 * ((A - 1.0) - (A + 1.0) * cs);
+                let a2 = (A + 1.0) - (A - 1.0) * cs - beta;
+                BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
+            }
+            config::BiquadParameters::Lowshelf  { freq, slope, gain} => {
+                let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
+                let sn = omega.sin();
+                let cs = omega.cos();
+                let A = (10.0 as PrcFmt).powf(gain / 40.0);
+                let alpha = sn / 2.0 * ((A + 1.0 / A) * (1.0 / slope - 1.0) + 2.0).sqrt();
+                let beta = 2.0 * A.sqrt() * alpha;
+                let b0 = A * ((A + 1.0) - (A - 1.0) * cs + beta);
+                let b1 = 2.0 * A * ((A - 1.0) - (A + 1.0) * cs);
+                let b2 = A * ((A + 1.0) - (A - 1.0) * cs - beta);
+                let a0 = (A + 1.0) + (A - 1.0) * cs + beta;
+                let a1 = -2.0 * ((A - 1.0) + (A + 1.0) * cs);
+                let a2 = (A + 1.0) + (A - 1.0) * cs - beta;
+                BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
+            }
+                
+        }
+        //let omega = 2 * M_PI * freq / srate;
+        //double sn = sin(omega);
+        //double cs = cos(omega);
+    
     }
 }
 
@@ -63,6 +158,10 @@ impl Biquad {
             s2: 0.0,
             coeffs: coefficients,
         }
+    }
+
+    pub fn from_config(fs: usize, parameters: config::BiquadParameters) -> Self {
+        Biquad::new(BiquadCoefficients::from_config(fs, parameters))
     }
 
     fn process_single(&mut self, input: PrcFmt) -> PrcFmt {

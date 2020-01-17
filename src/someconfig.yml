@@ -5,33 +5,47 @@ devices:
   capture:
     type: Alsa
     channels: 2
-    device: "hw:0"
+    device: "hw:Loopback,0,0"
+    format: S16LE
   playback:
     type: Alsa
     channels: 2
-    device: "hw:0"
+    device: "hw:Generic_1"
+    format: S32LE
 
 filters:
-  notch_120:
+  free_nbr1:
     type: Biquad
-    coefficients:
-      type: Values
-      values: [0, 1, 2, 3, 4]
-  notch_80:
+    parameters:
+      type: Free
+      a1: 1.0
+      a2: 1.0
+      b0: 1.0
+      b1: 1.0
+      b2: 1.0
+  hp_80:
     type: Biquad
-    coefficients:
-      type: File 
-      values: bq80Hz.txt
+    parameters:
+      type: Highpass
+      freq: 80
+      Q: 0.5
+  peak_100:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 100
+      Q: 0.5
+      gain: -7.3
   lowpass_2k:
     type: Conv
-    coefficients:
-      type: File 
-      values: sometext.txt
+    parameters:
+      type: File
+      filename: sometext.txt
   highpass_2k:
     type: Conv
-    coefficients:
-      type: File 
-      values: sometext2.txt
+    parameters:
+      type: File
+      filename: sometext2.txt
 
 mixers:
   mono:

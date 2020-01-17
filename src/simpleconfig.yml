@@ -16,9 +16,9 @@ devices:
 filters:
   lowpass_fir:
     type: Conv
-    coefficients:
+    parameters:
       type: File 
-      values: filter.txt
+      filename: filter.txt
 
 mixers:
   mono:

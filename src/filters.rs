@@ -35,10 +35,10 @@ pub fn read_coeff_file(filename: &str) -> Res<Vec<PrcFmt>> {
     Ok(coefficients)
 }
 
-fn get_coefficients(coeffs: &config::FilterCoefficients) -> Vec<PrcFmt> {
+fn get_coefficients(coeffs: &config::ConvParameters) -> Vec<PrcFmt> {
     match coeffs {
-        config::FilterCoefficients::Values{values} => values.clone(),
-        config::FilterCoefficients::File{values} => read_coeff_file(&values).unwrap(),
+        config::ConvParameters::Values{values} => values.clone(),
+        config::ConvParameters::File{filename} => read_coeff_file(&filename).unwrap(),
     }
 }
 
@@ -50,18 +50,16 @@ pub struct FilterGroup {
 
 impl FilterGroup {
     /// Creates a group of filters to process a chunk
-    pub fn from_config(channel: usize, names: Vec<String>, filter_configs: HashMap<String, config::Filter>, waveform_length: usize) -> Self {
+    pub fn from_config(channel: usize, names: Vec<String>, filter_configs: HashMap<String, config::Filter>, waveform_length: usize, sample_freq: usize) -> Self {
         let mut filters = Vec::<Box<dyn Filter>>::new();
         for name in names {
-            let filter_cfg = &filter_configs[&name];
-            let filter: Box<dyn Filter> = match filter_cfg.r#type {
-                config::FilterType::Conv => {
-                    let coeffs = get_coefficients(&filter_cfg.coefficients);
-                    Box::new(fftconv::FFTConv::new(waveform_length, &coeffs))
+            let filter_cfg = filter_configs[&name].clone();
+            let filter: Box<dyn Filter> = match filter_cfg {
+                config::Filter::Conv{ parameters } => {
+                    Box::new(fftconv::FFTConv::from_config(waveform_length, parameters))
                 },
-                config::FilterType::Biquad => {
-                    let coeffs = get_coefficients(&filter_cfg.coefficients);
-                    Box::new(biquad::Biquad::new(biquad::BiquadCoefficients::from_vec(&coeffs)))
+                config::Filter::Biquad{ parameters } => {
+                    Box::new(biquad::Biquad::new(biquad::BiquadCoefficients::from_config(sample_freq, parameters)))
                 },
                 _ => panic!("unknown type")
             };
@@ -101,7 +99,7 @@ impl Pipeline {
                     steps.push(PipelineStep::MixerStep(mixer));
                 }
                 config::PipelineStep::Filter{channel, names} => {
-                    let fltgrp = FilterGroup::from_config(channel, names, conf.filters.clone(), conf.devices.buffersize);
+                    let fltgrp = FilterGroup::from_config(channel, names, conf.filters.clone(), conf.devices.buffersize, conf.devices.samplerate);
                     steps.push(PipelineStep::FilterStep(fltgrp));
                 }
             }

@@ -9,6 +9,8 @@ use rustfft::FFT;
 use rustfft::num_complex::Complex;
 use rustfft::num_traits::Zero;
 use std::error;
+use config;
+use filters;
 
 
 
@@ -54,6 +56,14 @@ impl FFTConv {
             output_buf: output_buf,
             temp_buf: temp_buf,
         }
+    }
+
+    pub fn from_config(data_length: usize, conf: config::ConvParameters) -> Self {
+        let values = match conf {
+            config::ConvParameters::Values{values} => values.clone(),
+            config::ConvParameters::File{filename} => filters::read_coeff_file(&filename).unwrap(),
+        };
+        FFTConv::new(data_length, &values)
     }
 }
 

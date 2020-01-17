@@ -10,6 +10,7 @@ use std::sync::{Arc, Barrier};
 use audiodevice::*;
 // Sample format
 use config::SampleFormat;
+use std::time::{Duration, Instant};
 
 type PrcFmt = f64;
 
@@ -31,20 +32,22 @@ pub struct AlsaCaptureDevice {
 }
 
 
-fn chunk_to_buffer<T: num_traits::cast::NumCast>(chunk: AudioChunk, scalefactor: PrcFmt) -> Vec<T> {
+fn chunk_to_buffer<T: num_traits::cast::NumCast>(chunk: AudioChunk, buf: &mut [T], scalefactor: PrcFmt) -> () {
     let num_samples = chunk.channels*chunk.frames;
-    let mut buf = Vec::with_capacity(num_samples);
+    //let mut buf = Vec::with_capacity(num_samples);
     let mut value: T;
+    let mut idx = 0;
     for frame in 0..chunk.frames {
         for chan in 0..chunk.channels {
             value = num_traits::cast(chunk.waveforms[chan][frame] * scalefactor).unwrap();
-            buf.push(value);
+            buf[idx] = value;
+            idx += 1;
         }
     }
-    buf
+    //buf
 }
 
-fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(buffer: Vec<T>, channels: usize, scalefactor: PrcFmt) -> AudioChunk {
+fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(buffer: &[T], channels: usize, scalefactor: PrcFmt) -> AudioChunk {
     let num_samples = buffer.len();
     let num_frames = num_samples/channels;
     let mut value: PrcFmt;
@@ -136,10 +139,14 @@ impl PlaybackDevice for AlsaPlaybackDevice {
             match format {
                 SampleFormat::S16LE => {
                     let io = pcmdevice.io_i16().unwrap();
+                    let mut buffer = vec![0i16; bufferlength*channels];
                     loop {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
-                                let buffer = chunk_to_buffer(chunk, scalefactor);
+                                //let before = Instant::now();
+                                chunk_to_buffer(chunk, &mut buffer, scalefactor);
+                                //let after = before.elapsed();
+                                //println!("chunk to buffer {} ns", after.as_nanos());
                                 let playback_state = pcmdevice.state();
                                 //println!("playback state {:?}", playback_state);
                                 if playback_state == State::XRun {
@@ -154,17 +161,25 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                 },
                 SampleFormat::S24LE | SampleFormat::S32LE => {
                     let io = pcmdevice.io_i32().unwrap();
+                    let mut buffer = vec![0i32; bufferlength*channels];
                     loop {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
-                                let buffer = chunk_to_buffer(chunk, scalefactor);
+                                //let before = Instant::now();
+                                chunk_to_buffer(chunk, &mut buffer, scalefactor);
+                                //let after = before.elapsed();
+                                //println!("chunk to buffer {} ns", after.as_nanos());
+                                //let before = Instant::now();
                                 let playback_state = pcmdevice.state();
                                 //println!("playback state {:?}", playback_state);
                                 if playback_state == State::XRun {
                                     println!("Prepare playback");
                                     pcmdevice.prepare().unwrap();
                                 }
+                                //let middle = before.elapsed();
                                 let _frames = io.writei(&buffer[..]).unwrap();
+                                //let after = before.elapsed();
+                                //println!("check {} ns, write {} ns", middle.as_nanos(), after.as_nanos());
                             }
                             _ => {}
                         }
@@ -196,32 +211,36 @@ impl CaptureDevice for AlsaCaptureDevice {
             match format {
                 SampleFormat::S16LE => {
                     let io = pcmdevice.io_i16().unwrap();
+                    let mut buf = vec![0i16; channels*bufferlength];
                     loop {
-                        let mut buf: Vec<i16>;
-                        buf = vec![0; channels*bufferlength];
+                        //let mut buf: Vec<i16>;
+                        //let mut buf: Vec<i16> = Vec::with_capacity(channels*bufferlength);
                         let capture_state = pcmdevice.state();
                         if capture_state == State::XRun {
                             pcmdevice.prepare().unwrap();
                         }
                         //let frames = self.io.readi(&mut buf)?;
                         let _frames = io.readi(&mut buf).unwrap();
-                        let chunk = buffer_to_chunk(buf, channels, scalefactor);
+                        //let before = Instant::now();
+                        let chunk = buffer_to_chunk(&buf, channels, scalefactor);
+                        //let after = before.elapsed();
+                        //println!("buffer to chunk {} ns", after.as_nanos());
                         let msg = AudioMessage::Audio(chunk);
                         channel.send(msg).unwrap();
                     }
                 },
                 SampleFormat::S24LE | SampleFormat::S32LE => {
                     let io = pcmdevice.io_i32().unwrap();
+                    let mut buf = vec![0i32; channels*bufferlength];
                     loop {
-                        let mut buf: Vec<i32>;
-                        buf = vec![0; channels*bufferlength];
+                        //let mut buf: Vec<i32>;
                         let capture_state = pcmdevice.state();
                         if capture_state == State::XRun {
                             pcmdevice.prepare().unwrap();
                         }
                         //let frames = self.io.readi(&mut buf)?;
                         let _frames = io.readi(&mut buf).unwrap();
-                        let chunk = buffer_to_chunk(buf, channels, scalefactor);
+                        let chunk = buffer_to_chunk(&buf, channels, scalefactor);
                         let msg = AudioMessage::Audio(chunk);
                         channel.send(msg).unwrap();
                     }

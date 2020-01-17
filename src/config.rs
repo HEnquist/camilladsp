@@ -37,21 +37,51 @@ pub struct Devices {
 pub enum FilterType {
     Biquad,
     Conv,
+    Gain,
+    Delay
 }
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct Filter {
-    pub r#type: FilterType,
-    pub coefficients: FilterCoefficients,
-}
-
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
-pub enum FilterCoefficients {
-    File { values: String },
+pub enum Filter {
+    Conv { parameters: ConvParameters },
+    Biquad { parameters: BiquadParameters },
+    Delay { parameters: DelayParameters },
+    Gain { parameters: GainParameters },
+}
+//    pub parameters: FilterParameters,
+//}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum ConvParameters {
+    File { filename: String },
     Values { values: Vec<PrcFmt>},
 }
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum BiquadParameters {
+    Free {a1: PrcFmt, a2: PrcFmt, b0: PrcFmt, b1: PrcFmt, b2: PrcFmt},
+    Highpass { freq: PrcFmt, Q: PrcFmt},
+    Lowpass { freq: PrcFmt, Q: PrcFmt},
+    Peaking { freq: PrcFmt, gain: PrcFmt, Q: PrcFmt},
+    Highshelf { freq: PrcFmt, slope: PrcFmt, gain: PrcFmt},
+    Lowshelf  { freq: PrcFmt, slope: PrcFmt, gain: PrcFmt},
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct GainParameters {
+    gain: PrcFmt, 
+    inverted: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DelayParameters {
+    delay: PrcFmt,
+}
+
+
 
 
 #[derive(Clone, Debug, Deserialize)]
