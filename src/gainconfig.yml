@@ -1,0 +1,53 @@
+---
+devices:
+  samplerate: 44100
+  buffersize: 1024
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,0"
+    format: S16LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+    format: S32LE
+
+filters:
+  delay1:
+    type: Delay
+    parameters:
+      delay: 500
+
+mixers:
+  mono:
+    channels:
+      in: 2
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -6
+            inverted: false
+          - channel: 1
+            gain: -6
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 0
+            gain: -6
+            inverted: false
+          - channel: 1
+            gain: -6
+            inverted: false
+
+pipeline:
+  - type: Mixer
+    name: mono
+  - type: Filter
+    channel: 0
+    names:
+      - delay1
+   
+

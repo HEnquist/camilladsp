@@ -9,6 +9,7 @@ use audiodevice::AudioChunk;
 use fftconv;
 use biquad;
 use mixer;
+use basicfilters;
 
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
@@ -61,6 +62,12 @@ impl FilterGroup {
                 config::Filter::Biquad{ parameters } => {
                     Box::new(biquad::Biquad::new(biquad::BiquadCoefficients::from_config(sample_freq, parameters)))
                 },
+                config::Filter::Delay { parameters } => {
+                    Box::new(basicfilters::Delay::from_config(sample_freq, waveform_length, parameters))
+                }
+                config::Filter::Gain { parameters } => {
+                    Box::new(basicfilters::Gain::from_config(parameters))
+                }
                 _ => panic!("unknown type")
             };
             filters.push(filter);

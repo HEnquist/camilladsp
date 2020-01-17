@@ -3,6 +3,7 @@ extern crate serde;
 extern crate rustfft;
 
 use std::error;
+use std::env;
 //use alsa::{Direction, ValueOr};
 //use alsa::pcm::{PCM, HwParams, Format, Access, State};
 //use alsa::direct::pcm::MmapPlayback;
@@ -16,6 +17,7 @@ type Res<T> = Result<T, Box<dyn error::Error>>;
 mod filters;
 mod biquad;
 mod fftconv;
+mod basicfilters;
 
 mod audiodevice;
 mod alsadevice;
@@ -85,7 +87,9 @@ fn run(conf: config::Configuration) -> Res<()> {
 }
 
 fn main() {
-    let file = File::open("src/simpleconfig.yml")
+    let args: Vec<String> = env::args().collect();
+    let configname = &args[1];
+    let file = File::open(configname)
         .expect("could not open file");
     let mut buffered_reader = BufReader::new(file);
     let mut contents = String::new();

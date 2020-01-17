@@ -21,6 +21,7 @@ pub struct Gain {
 pub struct Delay {
     pub delay: usize,
     pub buffer: Vec<PrcFmt>,
+    pub tempbuf: Vec<PrcFmt>,
 }
 
 
@@ -37,7 +38,11 @@ impl Gain {
         }
     }
 
-    pub fn from_config()
+    pub fn from_config(conf: config::GainParameters) -> Self {
+        let gain = conf.gain;
+        let inverted = conf.inverted;
+        Gain::new(gain, inverted)
+    }
 }
 
 impl Filter for Gain {
@@ -45,6 +50,43 @@ impl Filter for Gain {
         for n in 0..waveform.len() {
             waveform[n] = self.gain*waveform[n];
         }
+        //let out = input.iter().map(|s| self.process_single(*s)).collect::<Vec<PrcFmt>>();
+        Ok(())
+    }
+}
+
+impl Delay {
+    /// Creates a delay filter with delay in samples
+    pub fn new(delay: usize, datalength: usize) -> Self {
+        let mut buffer = vec![0.0; delay+datalength];
+        let mut tempbuf = vec![0.0; datalength];
+        Delay {
+            delay: delay,
+            buffer: buffer,
+            tempbuf: tempbuf,
+        }
+    }
+
+
+    pub fn from_config(samplerate: usize, datalength: usize, conf: config::DelayParameters) -> Self {
+        let delay_samples = (conf.delay/1000.0 * (samplerate as PrcFmt)) as usize;
+        Delay::new(delay_samples, datalength)
+    }
+}
+
+impl Filter for Delay {
+    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+        for n in 0..waveform.len() {
+            self.tempbuf[n] = waveform[n];
+            waveform[n] = self.buffer[n];
+        }
+        for n in 0..self.delay {
+            self.buffer[n] = self.buffer[n+waveform.len()];
+        }
+        for n in 0..waveform.len() {
+            self.buffer[n+self.delay] = self.tempbuf[n];
+        }
+
         //let out = input.iter().map(|s| self.process_single(*s)).collect::<Vec<PrcFmt>>();
         Ok(())
     }

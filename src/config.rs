@@ -72,13 +72,13 @@ pub enum BiquadParameters {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct GainParameters {
-    gain: PrcFmt, 
-    inverted: bool,
+    pub gain: PrcFmt, 
+    pub inverted: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DelayParameters {
-    delay: PrcFmt,
+    pub delay: PrcFmt,
 }
 
 
