@@ -1,9 +1,36 @@
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::error;
+use std::fmt;
 
 //type SmpFmt = i16;
 type PrcFmt = f64;
+type Res<T> = Result<T, Box<dyn error::Error>>;
 
+#[derive(Debug)]
+struct ConfigError {
+    desc: String,
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.desc)
+    }
+}
+
+impl error::Error for ConfigError {
+    fn description(&self) -> &str {
+        &self.desc
+    }
+}
+
+impl ConfigError {
+    pub fn new(desc: &str) -> Self {
+        ConfigError {
+            desc: desc.to_owned(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum DeviceType {
@@ -123,4 +150,39 @@ pub struct Configuration {
     pub mixers: HashMap<String, Mixer>,
     pub filters: HashMap<String, Filter>,
     pub pipeline: Vec<PipelineStep>,
+}
+
+pub fn validate_config(conf: Configuration) -> Res<()> {
+    let mut num_channels = conf.devices.capture.channels;
+    for step in conf.pipeline {
+        match step {
+            PipelineStep::Mixer { name } => {
+                if !conf.mixers.contains_key(&name) {
+                    return Err(Box::new(ConfigError::new(&format!("Use of missing mixer '{}'", name))));
+                }
+                else {
+                    let chan_in = conf.mixers.get(&name).unwrap().channels.r#in;
+                    if chan_in != num_channels {
+                        return Err(Box::new(ConfigError::new(&format!("Mixer '{}' has wrong number of input channels. Expected {}, found {}.", name, num_channels, chan_in))));
+                    }
+                    num_channels = conf.mixers.get(&name).unwrap().channels.out;
+                }
+            },
+            PipelineStep::Filter { channel, names } => {
+                if channel > num_channels {
+                    return Err(Box::new(ConfigError::new(&format!("Use of non existing channel {}", channel))));
+                }
+                for name in names {
+                    if !conf.filters.contains_key(&name) {
+                        return Err(Box::new(ConfigError::new(&format!("Use of missing filter '{}'", name))));
+                    }
+
+                }
+            },
+        }
+    }
+    if num_channels != conf.devices.playback.channels {
+        return Err(Box::new(ConfigError::new(&format!("Pipeline outputs {} channels, playback device has {}.", num_channels, conf.devices.playback.channels))));
+    }
+    Ok(())
 }

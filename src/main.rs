@@ -89,16 +89,40 @@ fn run(conf: config::Configuration) -> Res<()> {
 fn main() {
     let args: Vec<String> = env::args().collect();
     let configname = &args[1];
-    let file = File::open(configname)
-        .expect("could not open file");
+    let file = match File::open(configname) {
+        Ok(f) => f,
+        Err(_) => {
+            println!("Could not open config file!");
+            return ()
+        },
+    };
     let mut buffered_reader = BufReader::new(file);
     let mut contents = String::new();
     let _number_of_bytes: usize = match buffered_reader.read_to_string(&mut contents) {
         Ok(number_of_bytes) => number_of_bytes,
-        Err(_err) => 0
+        Err(_err) => {
+            println!("Could not read config file!");
+            return ()
+        },
     };
-    let configuration: config::Configuration = serde_yaml::from_str(&contents).unwrap();
-    println!("config {:?}", configuration);
+    let configuration: config::Configuration = match serde_yaml::from_str(&contents) {
+        Ok(config) => config,
+        Err(err) => {
+            println!("Invalid config file!");
+            println!("{}", err);
+            return ()
+        },
+    };
+
+    match config::validate_config(configuration.clone()) {
+        Ok(()) => {},
+        Err(err) => {
+            println!("Invalid config file!");
+            println!("{}", err);
+            return ()
+        },
+    }
+    //println!("config {:?}", configuration);
 
     //read_coeff_file("filter.txt");
     if let Err(e) = run(configuration) { println!("Error ({}) {}", e.description(), e); }
