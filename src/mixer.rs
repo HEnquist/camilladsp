@@ -1,8 +1,6 @@
 type PrcFmt = f64;
 use config;
-use std::error;
 use audiodevice::AudioChunk;
-pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 /// Holder of the biquad coefficients, utilizes normalized form
 #[derive(Clone)]

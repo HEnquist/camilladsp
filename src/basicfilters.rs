@@ -8,10 +8,10 @@ use config;
 
 // Sample format
 //type SmpFmt = i16;
-type PrcFmt = f64;
+use PrcFmt;
+use Res;
 
-use std::error;
-pub type Res<T> = Result<T, Box<dyn error::Error>>;
+
 
 #[derive(Copy, Clone, Debug)]
 pub struct Gain {
@@ -27,9 +27,9 @@ pub struct Delay {
 
 impl Gain {
     /// Creates a Direct Form 2 Transposed biquad from a set of filter coefficients
-    pub fn new(gain_dB: PrcFmt, inverted: bool) -> Self {
+    pub fn new(gain_db: PrcFmt, inverted: bool) -> Self {
         let mut gain: PrcFmt = 10.0;
-        gain = gain.powf(gain_dB/20.0);
+        gain = gain.powf(gain_db/20.0);
         if inverted {
             gain = -gain;
         }
@@ -58,8 +58,8 @@ impl Filter for Gain {
 impl Delay {
     /// Creates a delay filter with delay in samples
     pub fn new(delay: usize, datalength: usize) -> Self {
-        let mut buffer = vec![0.0; delay+datalength];
-        let mut tempbuf = vec![0.0; datalength];
+        let buffer = vec![0.0; delay+datalength];
+        let tempbuf = vec![0.0; datalength];
         Delay {
             delay: delay,
             buffer: buffer,

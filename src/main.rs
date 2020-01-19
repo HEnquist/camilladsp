@@ -11,8 +11,9 @@ use std::{thread, time};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 
-
-type Res<T> = Result<T, Box<dyn error::Error>>;
+// Sample format
+pub type PrcFmt = f64;
+pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 mod filters;
 mod biquad;
@@ -34,13 +35,23 @@ use std::io::BufReader;
 use std::io::prelude::*;
 //use std::path::PathBuf;
 
+pub enum StatusMessage {
+    PlaybackReady,
+    CaptureReady,
+    PlaybackError { message: String },
+    CaptureError { message: String },
+}
 
 fn run(conf: config::Configuration) -> Res<()> {
 
     let (tx_pb, rx_pb) = mpsc::channel();
     let (tx_cap, rx_cap) = mpsc::channel();
 
-    let barrier = Arc::new(Barrier::new(3));
+    let (tx_status, rx_status) = mpsc::channel();
+    let tx_status_pb = tx_status.clone();
+    let tx_status_cap = tx_status.clone();
+
+    let barrier = Arc::new(Barrier::new(4));
     let barrier_pb = barrier.clone();
     let barrier_cap = barrier.clone();
     let barrier_proc = barrier.clone();
@@ -71,18 +82,46 @@ fn run(conf: config::Configuration) -> Res<()> {
 
     // Playback thread
     let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
-    let _pb_handle = playback_dev.start(rx_pb, barrier_pb);
+    let _pb_handle = playback_dev.start(rx_pb, barrier_pb, tx_status_pb);
 
 
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
-    let _cap_handle = capture_dev.start(tx_cap, barrier_cap);
+    let _cap_handle = capture_dev.start(tx_cap, barrier_cap, tx_status_cap);
 
     let delay = time::Duration::from_millis(100);
     
-
+    let mut pb_ready = false;
+    let mut cap_ready = false;
     loop {
-        thread::sleep(delay);
+        match rx_status.recv_timeout(delay) {
+            Ok(msg) => {
+                match msg {
+                    StatusMessage::PlaybackReady => {
+                        pb_ready = true;
+                        if cap_ready {
+                            barrier.wait();
+                        }
+                    }
+                    StatusMessage::CaptureReady => {
+                        cap_ready = true;
+                        if pb_ready {
+                            barrier.wait();
+                        }
+                    }
+                    StatusMessage::PlaybackError { message } => {
+                        println!("Playback error: {}", message);
+                        return Ok(());
+                    }
+                    StatusMessage::CaptureError{ message } => {
+                        println!("Capture error: {}", message);
+                        return Ok(());
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            _ => {}
+        }
     }
 }
 

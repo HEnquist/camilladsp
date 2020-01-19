@@ -28,13 +28,13 @@ filters:
     parameters:
       type: Highpass
       freq: 80
-      Q: 0.5
+      q: 0.5
   peak_100:
     type: Biquad
     parameters:
       type: Peaking
       freq: 100
-      Q: 0.5
+      q: 0.5
       gain: -7.3
   lowpass_2k:
     type: Conv

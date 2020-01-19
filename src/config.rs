@@ -2,13 +2,14 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::error;
 use std::fmt;
+use filters;
 
 //type SmpFmt = i16;
 type PrcFmt = f64;
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
 #[derive(Debug)]
-struct ConfigError {
+pub struct ConfigError {
     desc: String,
 }
 
@@ -90,9 +91,9 @@ pub enum ConvParameters {
 #[serde(tag = "type")]
 pub enum BiquadParameters {
     Free {a1: PrcFmt, a2: PrcFmt, b0: PrcFmt, b1: PrcFmt, b2: PrcFmt},
-    Highpass { freq: PrcFmt, Q: PrcFmt},
-    Lowpass { freq: PrcFmt, Q: PrcFmt},
-    Peaking { freq: PrcFmt, gain: PrcFmt, Q: PrcFmt},
+    Highpass { freq: PrcFmt, q: PrcFmt},
+    Lowpass { freq: PrcFmt, q: PrcFmt},
+    Peaking { freq: PrcFmt, gain: PrcFmt, q: PrcFmt},
     Highshelf { freq: PrcFmt, slope: PrcFmt, gain: PrcFmt},
     Lowshelf  { freq: PrcFmt, slope: PrcFmt, gain: PrcFmt},
 }
@@ -176,7 +177,7 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
                     if !conf.filters.contains_key(&name) {
                         return Err(Box::new(ConfigError::new(&format!("Use of missing filter '{}'", name))));
                     }
-
+                    let _ = filters::validate_filter(&conf.filters.get(&name).unwrap())?;
                 }
             },
         }
@@ -186,3 +187,4 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
     }
     Ok(())
 }
+

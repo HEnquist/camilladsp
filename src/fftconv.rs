@@ -8,16 +8,14 @@ use rustfft::algorithm::Radix4;
 use rustfft::FFT;
 use rustfft::num_complex::Complex;
 use rustfft::num_traits::Zero;
-use std::error;
 use config;
 use filters;
 
 
 
 // Sample format
-type PrcFmt = f64;
-
-pub type Res<T> = Result<T, Box<dyn error::Error>>;
+use PrcFmt;
+use Res;
 
 pub struct FFTConv {
     npoints: usize,
@@ -65,16 +63,6 @@ impl FFTConv {
         };
         FFTConv::new(data_length, &values)
     }
-
-    pub fn validate_config(conf: config::ConvParameters) -> Res<()> {
-        match conf {
-            config::ConvParameters::Values{values: _} => Ok(()),
-            config::ConvParameters::File{filename} => {
-                let _ = filters::read_coeff_file(&filename)?;
-                Ok(())
-            }
-        }
-    }
 }
 
 
@@ -95,5 +83,16 @@ impl Filter for FFTConv {
             self.overlap[n] = self.output_buf[n+self.npoints].re;
         }
         Ok(())
+    }
+}
+
+
+pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
+    match conf {
+        config::ConvParameters::Values{values: _} => Ok(()),
+        config::ConvParameters::File{filename} => {
+            let _ = filters::read_coeff_file(&filename)?;
+            Ok(())
+        }
     }
 }

@@ -19,7 +19,7 @@ filters:
     parameters:
       type: Highpass
       freq: 1000
-      Q: 0.5
+      q: 0.5
 
 mixers:
   mono:

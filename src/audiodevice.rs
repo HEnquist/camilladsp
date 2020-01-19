@@ -1,21 +1,24 @@
 // Traits for audio devices
-use std::error;
 use std::thread;
 use config;
 use alsadevice;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
-pub type Res<T> = Result<T, Box<dyn error::Error>>;
+//pub type Res<T> = Result<T, Box<dyn error::Error>>;
+
+use Res;
+use PrcFmt;
+use StatusMessage;
+//type PrcFmt = f64;
 
 
-type PrcFmt = f64;
 
 //pub type S16LE = i16;
 //pub type S24LE = i32;
 //pub type S32LE = i32;
 
 pub enum AudioMessage {
-    Quit,
+    //Quit,
     Audio(AudioChunk),
 }
 
@@ -28,11 +31,11 @@ pub struct AudioChunk {
 
 
 pub trait PlaybackDevice {
-    fn start(&mut self, channel: mpsc::Receiver<AudioMessage>, barrier: Arc<Barrier>) -> Res<Box<thread::JoinHandle<()>>>;
+    fn start(&mut self, channel: mpsc::Receiver<AudioMessage>, barrier: Arc<Barrier>, status_channel: mpsc::Sender<StatusMessage>) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
 pub trait CaptureDevice {
-    fn start(&mut self, channel: mpsc::Sender<AudioMessage>, barrier: Arc<Barrier>) -> Res<Box<thread::JoinHandle<()>>>;
+    fn start(&mut self, channel: mpsc::Sender<AudioMessage>, barrier: Arc<Barrier>, status_channel: mpsc::Sender<StatusMessage>) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
 

@@ -2,7 +2,6 @@ use std::io::BufReader;
 use std::io::BufRead;
 use std::fs::File;
 //use std::path::Path;
-use std::error;
 use std::collections::HashMap;
 use config;
 use audiodevice::AudioChunk;
@@ -11,12 +10,9 @@ use biquad;
 use mixer;
 use basicfilters;
 
-pub type Res<T> = Result<T, Box<dyn error::Error>>;
+use Res;
+use PrcFmt;
 
-// Traits etc for filters
-// Sample format
-//type SmpFmt = i16;
-type PrcFmt = f64;
 
 pub trait Filter {
     // Filter a Vec
@@ -36,12 +32,6 @@ pub fn read_coeff_file(filename: &str) -> Res<Vec<PrcFmt>> {
     Ok(coefficients)
 }
 
-fn get_coefficients(coeffs: &config::ConvParameters) -> Vec<PrcFmt> {
-    match coeffs {
-        config::ConvParameters::Values{values} => values.clone(),
-        config::ConvParameters::File{filename} => read_coeff_file(&filename).unwrap(),
-    }
-}
 
 
 pub struct FilterGroup {
@@ -68,7 +58,7 @@ impl FilterGroup {
                 config::Filter::Gain { parameters } => {
                     Box::new(basicfilters::Gain::from_config(parameters))
                 }
-                _ => panic!("unknown type")
+                //_ => panic!("unknown type")
             };
             filters.push(filter);
         }
@@ -133,4 +123,27 @@ impl Pipeline {
         }
         chunk
     }
+}
+
+
+pub fn validate_filter(filter_config: &config::Filter) -> Res<()> {
+    let res = match filter_config {
+        config::Filter::Conv{ parameters } => {
+            fftconv::validate_config(&parameters)
+        },
+        config::Filter::Biquad{ parameters: _ } => {
+            Ok(())
+        },
+        config::Filter::Delay { parameters } => {
+            if parameters.delay < 0.0 {
+                return Err(Box::new(config::ConfigError::new("Negative delay specified")));
+            }
+            Ok(())
+        }
+        config::Filter::Gain { parameters: _ } => {
+            Ok(())
+        }
+        //_ => panic!("unknown type")
+    };
+    res
 }
