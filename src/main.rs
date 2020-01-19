@@ -127,6 +127,10 @@ fn run(conf: config::Configuration) -> Res<()> {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        println!("No config file given!");
+        return ()
+    }
     let configname = &args[1];
     let file = match File::open(configname) {
         Ok(f) => f,

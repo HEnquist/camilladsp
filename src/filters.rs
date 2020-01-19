@@ -28,7 +28,7 @@ pub fn read_coeff_file(filename: &str) -> Res<Vec<PrcFmt>> {
         coefficients.push(l.parse()?);
         
     }
-    println!("{:?}", coefficients); 
+    //println!("{:?}", coefficients); 
     Ok(coefficients)
 }
 
