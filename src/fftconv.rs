@@ -65,6 +65,16 @@ impl FFTConv {
         };
         FFTConv::new(data_length, &values)
     }
+
+    pub fn validate_config(conf: config::ConvParameters) -> Res<()> {
+        match conf {
+            config::ConvParameters::Values{values: _} => Ok(()),
+            config::ConvParameters::File{filename} => {
+                let _ = filters::read_coeff_file(&filename)?;
+                Ok(())
+            }
+        }
+    }
 }
 
 

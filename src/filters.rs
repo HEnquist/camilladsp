@@ -25,11 +25,11 @@ pub trait Filter {
 
 pub fn read_coeff_file(filename: &str) -> Res<Vec<PrcFmt>> {
     let mut coefficients = Vec::<PrcFmt>::new();
-    let f = File::open(filename).unwrap();
+    let f = File::open(filename)?;
     let file = BufReader::new(&f);
     for line in file.lines() {
-        let l = line.unwrap();
-        coefficients.push(l.parse().unwrap());
+        let l = line?;
+        coefficients.push(l.parse()?);
         
     }
     println!("{:?}", coefficients); 
