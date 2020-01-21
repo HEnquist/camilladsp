@@ -4,9 +4,6 @@ extern crate rustfft;
 
 use std::error;
 use std::env;
-//use alsa::{Direction, ValueOr};
-//use alsa::pcm::{PCM, HwParams, Format, Access, State};
-//use alsa::direct::pcm::MmapPlayback;
 use std::{thread, time};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
@@ -19,17 +16,12 @@ mod filters;
 mod biquad;
 mod fftconv;
 mod basicfilters;
-
 mod audiodevice;
 mod alsadevice;
 use audiodevice::*;
-
 mod config;
-
 mod mixer;
-//use config;
 
-//use std::fs;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::prelude::*;
@@ -60,8 +52,6 @@ fn run(conf: config::Configuration) -> Res<()> {
     let conf_cap = conf.clone();
     let conf_proc = conf.clone();
 
-    //let mut mmap = playback_dev.direct_mmap_playback::<SF>()?;
-
     // Processing thread
     thread::spawn(move || {
         let mut pipeline = filters::Pipeline::from_config(conf_proc);
@@ -89,7 +79,7 @@ fn run(conf: config::Configuration) -> Res<()> {
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
     let _cap_handle = capture_dev.start(tx_cap, barrier_cap, tx_status_cap);
 
-    let delay = time::Duration::from_millis(100);
+    let delay = time::Duration::from_millis(1000);
     
     let mut pb_ready = false;
     let mut cap_ready = false;
@@ -165,8 +155,5 @@ fn main() {
             return ()
         },
     }
-    //println!("config {:?}", configuration);
-
-    //read_coeff_file("filter.txt");
     if let Err(e) = run(configuration) { println!("Error ({}) {}", e.description(), e); }
 }

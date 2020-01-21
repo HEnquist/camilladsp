@@ -2,7 +2,7 @@ type PrcFmt = f64;
 use config;
 use audiodevice::AudioChunk;
 
-/// Holder of the biquad coefficients, utilizes normalized form
+
 #[derive(Clone)]
 pub struct Mixer {
     pub channels_in: usize,
@@ -16,31 +16,6 @@ pub struct MixerSource {
     pub gain: PrcFmt,
 }
 
-
-// #[derive(Debug, Deserialize)]
-// pub struct MixerChannels {
-//     r#in: usize,
-//     out: usize,
-// }
-// 
-// #[derive(Debug, Deserialize)]
-// pub struct MixerSource {
-//     channel: usize,
-//     gain: PrcFmt,
-//     inverted: bool,
-// }
-// 
-// #[derive(Debug, Deserialize)]
-// pub struct MixerMapping {
-//     dest: usize,
-//     sources: Vec<MixerSource>,
-// }
-// 
-// #[derive(Debug, Deserialize)]
-// pub struct Mixer {
-//     channels: MixerChannels,
-//     mapping: Vec<MixerMapping>,
-// }
 
 impl Mixer {
     /// Creates a Mixer from a config struct
@@ -70,6 +45,7 @@ impl Mixer {
         }
     }
 
+    /// Apply a Mixer to an AudioChunk, yielding a new AudioChunk with a possibly different number of channels.
     pub fn process_chunk(&mut self, input: &AudioChunk) -> AudioChunk {
         let mut waveforms = Vec::<Vec<PrcFmt>>::with_capacity(self.channels_out);
         for out_chan in 0..self.channels_out {
@@ -83,17 +59,10 @@ impl Mixer {
             }
         }
 
-        //for wave in wfs.iter() {
-        //let _res_l = filter_l.process_waveform(&mut chunk.waveforms[0]);
-        //filtered_wfs.push(filtered_l);
-        //let _res_r = filter_r.process_waveform(&mut chunk.waveforms[1]);
-        //filtered_wfs.push(filtered_r);
-        //
         let chunk = AudioChunk{
             frames: input.frames,
             channels: self.channels_out,
             waveforms: waveforms,
-        //    //waveforms: Waveforms::Float64(vec![buf.clone(), buf]),
         };
         chunk
     }

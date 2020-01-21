@@ -4,25 +4,17 @@ use config;
 use alsadevice;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
-//pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 use Res;
 use PrcFmt;
 use StatusMessage;
-//type PrcFmt = f64;
-
-
-
-//pub type S16LE = i16;
-//pub type S24LE = i32;
-//pub type S32LE = i32;
 
 pub enum AudioMessage {
     //Quit,
     Audio(AudioChunk),
 }
 
-
+/// Main container of audio data
 pub struct AudioChunk {
     pub frames: usize,
     pub channels: usize,
@@ -30,15 +22,17 @@ pub struct AudioChunk {
 }
 
 
+/// A playback device
 pub trait PlaybackDevice {
     fn start(&mut self, channel: mpsc::Receiver<AudioMessage>, barrier: Arc<Barrier>, status_channel: mpsc::Sender<StatusMessage>) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
+/// A capture device
 pub trait CaptureDevice {
     fn start(&mut self, channel: mpsc::Sender<AudioMessage>, barrier: Arc<Barrier>, status_channel: mpsc::Sender<StatusMessage>) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
-
+/// Create a playback device. Currently only Alsa is supported.
 pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     match conf.playback.r#type {
         config::DeviceType::Alsa => {
@@ -53,6 +47,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     }
 }
 
+/// Create a capture device. Currently only Alsa is supported.
 pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     match conf.capture.r#type {
         config::DeviceType::Alsa => {

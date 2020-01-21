@@ -1,8 +1,3 @@
-// Based on https://github.com/korken89/biquad-rs
-// coeffs: https://arachnoid.com/BiQuadDesigner/index.html
-
-//mod filters;
-
 use crate::filters::Filter;
 use rustfft::algorithm::Radix4;
 use rustfft::FFT;
@@ -30,6 +25,7 @@ pub struct FFTConv {
 
 
 impl FFTConv {
+    /// Create a new FFT colvolution filter.
     pub fn new(data_length:  usize, coeffs: &Vec<PrcFmt>) -> Self {
         let input_buf:  Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2*data_length];
         let temp_buf:  Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2*data_length];
@@ -39,11 +35,13 @@ impl FFTConv {
         let fft = Radix4::new(2*data_length, false);
         let ifft = Radix4::new(2*data_length, true);
 
+        if coeffs.len() > data_length {
+            println!("Warning! Filter impulse response is longer than buffer and will be truncated.")
+        }
         for n in 0..coeffs.len() {
             coeffs_c[n] = Complex::from(coeffs[n]/(2 as PrcFmt * data_length as PrcFmt));
         }
         fft.process(&mut coeffs_c, &mut coeffs_f);
-        //fft.process(&mut input, &mut output);
         FFTConv {
             npoints: data_length,
             overlap: vec![0.0; data_length],
@@ -67,6 +65,7 @@ impl FFTConv {
 
 
 impl Filter for FFTConv {
+    /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
         for n in 0..self.npoints {
             self.input_buf[n] = Complex::<PrcFmt>::from(waveform[n]);
@@ -86,7 +85,7 @@ impl Filter for FFTConv {
     }
 }
 
-
+/// Validate a FFT convolution config.
 pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {
         config::ConvParameters::Values{values: _} => Ok(()),

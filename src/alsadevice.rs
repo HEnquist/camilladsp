@@ -32,22 +32,51 @@ pub struct AlsaCaptureDevice {
     pub format: SampleFormat,
 }
 
-
+/// Convert an AudioChunk to an interleaved buffer of ints.
 fn chunk_to_buffer<T: num_traits::cast::NumCast>(chunk: AudioChunk, buf: &mut [T], scalefactor: PrcFmt) -> () {
     let _num_samples = chunk.channels*chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
     let mut value: T;
     let mut idx = 0;
+    let mut clipped = 0;
+    let mut peak = 0.0;
+    let maxval = (scalefactor - 1.0)/scalefactor;
+    let minval = -1.0;
     for frame in 0..chunk.frames {
         for chan in 0..chunk.channels {
-            value = num_traits::cast(chunk.waveforms[chan][frame] * scalefactor).unwrap();
+            let mut float_val = chunk.waveforms[chan][frame];
+            if float_val > maxval {
+                clipped += 1;
+                if float_val > peak {
+                    peak = float_val;
+                }
+                float_val = maxval;
+            }
+            else if float_val < minval {
+                clipped += 1;
+                if -float_val > peak {
+                    peak = -float_val;
+                }
+                float_val = minval;
+            }
+            value = match num_traits::cast(float_val*scalefactor) {
+                Some(val) => val,
+                None => {
+                    println!("bad {}", float_val);
+                    num_traits::cast(0.0).unwrap()
+                }
+            };
             buf[idx] = value;
             idx += 1;
         }
     }
+    if clipped > 0 {
+        println!("Clipping detected, {} samples clipped, peak {}%", clipped, peak*100.0);
+    }
     //buf
 }
 
+/// Convert a buffer of interleaved ints to an AudioChunk.
 fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(buffer: &[T], channels: usize, scalefactor: PrcFmt) -> AudioChunk {
     let num_samples = buffer.len();
     let num_frames = num_samples/channels;
@@ -77,6 +106,8 @@ fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(buffer: &[T], chann
     chunk
 }
 
+
+/// Open an Alsa PCM device
 fn open_pcm(devname: String, samplerate: u32, bufsize: i64, channels: u32, bits: usize, capture: bool) -> Res<alsa::PCM> {
     // Open the device
     let pcmdev;
@@ -118,6 +149,7 @@ fn open_pcm(devname: String, samplerate: u32, bufsize: i64, channels: u32, bits:
     Ok(pcmdev)
 }
 
+/// Start a playback thread listening for AudioMessages via a channel. 
 impl PlaybackDevice for AlsaPlaybackDevice {
     fn start(&mut self, channel: mpsc::Receiver<AudioMessage>, barrier: Arc<Barrier>, status_channel: mpsc::Sender<StatusMessage>) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
@@ -131,14 +163,15 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         };
         let format = self.format.clone();
         let handle = thread::spawn(move || {
-            let delay = time::Duration::from_millis((2*1000*bufferlength/samplerate) as u64);
+            let delay = time::Duration::from_millis((4*1000*bufferlength/samplerate) as u64);
             match open_pcm(devname, samplerate as u32, bufferlength as i64, channels as u32, bits, false) {
                 Ok(pcmdevice) => {
                     match status_channel.send(StatusMessage::PlaybackReady) {
                         Ok(()) => {},
                         Err(_err) => {},
                     }
-                    let scalefactor = (1<<bits-1) as PrcFmt;
+                    //let scalefactor = (1<<bits-1) as PrcFmt;
+                    let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
                     barrier.wait();
                     thread::sleep(delay);
                     println!("starting playback loop");
@@ -159,7 +192,14 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                             println!("Prepare playback");
                                             pcmdevice.prepare().unwrap();
                                         }
-                                        let _frames = io.writei(&buffer[..]).unwrap();
+                                        let _frames = match io.writei(&buffer[..]) {
+                                            Ok(frames) => frames,
+                                            Err(_err) => {
+                                                println!("retrying playback");
+                                                pcmdevice.prepare().unwrap();
+                                                io.writei(&buffer[..]).unwrap()
+                                            },
+                                        };
                                     }
                                     _ => {}
                                 }
@@ -171,6 +211,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             loop {
                                 match channel.recv() {
                                     Ok(AudioMessage::Audio(chunk)) => {
+                                        //println!("p");
                                         //let before = Instant::now();
                                         chunk_to_buffer(chunk, &mut buffer, scalefactor);
                                         //let after = before.elapsed();
@@ -183,7 +224,14 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                             pcmdevice.prepare().unwrap();
                                         }
                                         //let middle = before.elapsed();
-                                        let _frames = io.writei(&buffer[..]).unwrap();
+                                        let _frames = match io.writei(&buffer[..]) {
+                                            Ok(frames) => frames,
+                                            Err(_err) => {
+                                                println!("retrying playback");
+                                                pcmdevice.prepare().unwrap();
+                                                io.writei(&buffer[..]).unwrap()
+                                            },
+                                        };
                                         //let after = before.elapsed();
                                         //println!("check {} ns, write {} ns", middle.as_nanos(), after.as_nanos());
                                     }
@@ -202,6 +250,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
     }
 }
 
+
+/// Start a capture thread providing AudioMessages via a channel
 impl CaptureDevice for AlsaCaptureDevice {
     fn start(&mut self, channel: mpsc::Sender<AudioMessage>, barrier: Arc<Barrier>, status_channel: mpsc::Sender<StatusMessage>) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
@@ -221,7 +271,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                         Ok(()) => {},
                         Err(_err) => {},
                     }
-                    let scalefactor = (1<<bits-1) as PrcFmt;
+                    let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
                     barrier.wait();
                     println!("starting captureloop");
                     match format {
@@ -233,10 +283,18 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 //let mut buf: Vec<i16> = Vec::with_capacity(channels*bufferlength);
                                 let capture_state = pcmdevice.state();
                                 if capture_state == State::XRun {
+                                    println!("prepare capture");
                                     pcmdevice.prepare().unwrap();
                                 }
                                 //let frames = self.io.readi(&mut buf)?;
-                                let _frames = io.readi(&mut buf).unwrap();
+                                let _frames = match io.readi(&mut buf) {
+                                    Ok(frames) => frames,
+                                    Err(_err) => {
+                                        println!("retrying capture");
+                                        pcmdevice.prepare().unwrap();
+                                        io.readi(&mut buf).unwrap()
+                                    },
+                                };
                                 //let before = Instant::now();
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor);
                                 //let after = before.elapsed();

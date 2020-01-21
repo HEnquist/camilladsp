@@ -11,14 +11,11 @@ use config;
 use PrcFmt;
 use Res;
 
-/// Holder of the biquad coefficients, utilizes normalized form
+/// Struct to hold the biquad coefficients
 #[derive(Clone, Copy, Debug)]
 pub struct BiquadCoefficients {
-    // Denominator coefficients
     pub a1: PrcFmt,
     pub a2: PrcFmt,
-
-    // Nominator coefficients
     pub b0: PrcFmt,
     pub b1: PrcFmt,
     pub b2: PrcFmt,
@@ -45,7 +42,16 @@ impl BiquadCoefficients {
         }
     }
 
-
+    /// Create biquad filters from config.
+    /// Filter types
+    /// - Free: just coefficients
+    /// - Highpass: second order highpass specified by frequency and Q-value.
+    /// - Lowpass: second order lowpass specified by frequency and Q-value.
+    /// - Peaking: parametric peaking filter specified by gain, frequency and Q-value.
+    /// - Highshelf: shelving filter affecting high frequencies with arbitrary slope in between. 
+    ///   The frequency specified is the middle of the slope
+    /// - Lowshelf: shelving filter affecting low frequencies with arbitrary slope in between. 
+    ///   The frequency specified is the middle of the slope
     pub fn from_config(fs: usize, parameters: config::BiquadParameters) -> Self {
         match parameters {
             config::BiquadParameters::Free {a1, a2, b0, b1, b2} => {
@@ -124,9 +130,6 @@ impl BiquadCoefficients {
             }
                 
         }
-        //let omega = 2 * M_PI * freq / srate;
-        //double sn = sin(omega);
-        //double cs = cos(omega);
     
     }
 }
@@ -140,7 +143,7 @@ pub struct Biquad {
 
 
 impl Biquad {
-    /// Creates a Direct Form 2 Transposed biquad from a set of filter coefficients
+    /// Creates a Direct Form 2 Transposed biquad filter from a set of coefficients
     pub fn new(coefficients: BiquadCoefficients) -> Self {
         Biquad {
             s1: 0.0,
@@ -149,6 +152,7 @@ impl Biquad {
         }
     }
 
+    /// Process a single sample
     fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
         let out = self.s1 + self.coeffs.b0 * input;
         self.s1 = self.s2 + self.coeffs.b1 * input - self.coeffs.a1 * out;

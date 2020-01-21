@@ -17,9 +17,10 @@ filters:
   lp1:
     type: Biquad
     parameters:
-      type: Highpass
+      type: Highshelf
       freq: 1000
-      q: 0.5
+      gain: -3
+      slope: 6
 
 mixers:
   mono:

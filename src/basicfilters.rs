@@ -1,17 +1,8 @@
-// Based on https://github.com/korken89/biquad-rs
-// coeffs: https://arachnoid.com/BiQuadDesigner/index.html
-
-//mod filters;
-
 use crate::filters::Filter;
 use config;
 
-// Sample format
-//type SmpFmt = i16;
 use PrcFmt;
 use Res;
-
-
 
 #[derive(Copy, Clone, Debug)]
 pub struct Gain {
@@ -26,7 +17,7 @@ pub struct Delay {
 
 
 impl Gain {
-    /// Creates a Direct Form 2 Transposed biquad from a set of filter coefficients
+    /// A simple filter providing gain in dB, and can also invert the signal.
     pub fn new(gain_db: PrcFmt, inverted: bool) -> Self {
         let mut gain: PrcFmt = 10.0;
         gain = gain.powf(gain_db/20.0);
@@ -50,13 +41,13 @@ impl Filter for Gain {
         for n in 0..waveform.len() {
             waveform[n] = self.gain*waveform[n];
         }
-        //let out = input.iter().map(|s| self.process_single(*s)).collect::<Vec<PrcFmt>>();
         Ok(())
     }
 }
 
 impl Delay {
     /// Creates a delay filter with delay in samples
+    /// Will be improved as it gets slow for long delays
     pub fn new(delay: usize, datalength: usize) -> Self {
         let buffer = vec![0.0; delay+datalength];
         let tempbuf = vec![0.0; datalength];
@@ -86,8 +77,6 @@ impl Filter for Delay {
         for n in 0..waveform.len() {
             self.buffer[n+self.delay] = self.tempbuf[n];
         }
-
-        //let out = input.iter().map(|s| self.process_single(*s)).collect::<Vec<PrcFmt>>();
         Ok(())
     }
 }

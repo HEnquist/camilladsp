@@ -1,7 +1,6 @@
 use std::io::BufReader;
 use std::io::BufRead;
 use std::fs::File;
-//use std::path::Path;
 use std::collections::HashMap;
 use config;
 use audiodevice::AudioChunk;
@@ -25,10 +24,8 @@ pub fn read_coeff_file(filename: &str) -> Res<Vec<PrcFmt>> {
     let file = BufReader::new(&f);
     for line in file.lines() {
         let l = line?;
-        coefficients.push(l.parse()?);
-        
+        coefficients.push(l.parse()?);       
     }
-    //println!("{:?}", coefficients); 
     Ok(coefficients)
 }
 
@@ -40,7 +37,7 @@ pub struct FilterGroup {
 }
 
 impl FilterGroup {
-    /// Creates a group of filters to process a chunk
+    /// Creates a group of filters to process a chunk.
     pub fn from_config(channel: usize, names: Vec<String>, filter_configs: HashMap<String, config::Filter>, waveform_length: usize, sample_freq: usize) -> Self {
         let mut filters = Vec::<Box<dyn Filter>>::new();
         for name in names {
@@ -69,6 +66,7 @@ impl FilterGroup {
 
     }
 
+    /// Apply all the filters to an AudioChunk.
     fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
         for filter in &mut self.filters {
             filter.process_waveform(&mut input.waveforms[self.channel])?;
@@ -77,15 +75,19 @@ impl FilterGroup {
     }
 }
 
+/// A Pipeline is made up of a series of PipelineSteps,
+/// each one can be a single Mixer of a group of Filters
 pub enum PipelineStep {
     MixerStep(mixer::Mixer),
     FilterStep(FilterGroup),
 }
+
 pub struct Pipeline {
     steps: Vec<PipelineStep>,
 }
 
 impl Pipeline {
+    /// Create a new pipeline from a configuration structure.
     pub fn from_config(conf: config::Configuration) -> Self {
         let mut steps = Vec::<PipelineStep>::new();
         for step in conf.pipeline {
@@ -106,10 +108,7 @@ impl Pipeline {
         }
     }
 
-//pub enum PipelineStep {
-    //Mixer { name: String },
-    //Filter { channel: usize, names: Vec<String>}
-
+    /// Process an AudioChunk by calling either a MixerStep or a FilterStep
     pub fn process_chunk(&mut self, mut chunk: AudioChunk) -> AudioChunk {
         for mut step in &mut self.steps {
             match &mut step {
@@ -125,7 +124,7 @@ impl Pipeline {
     }
 }
 
-
+/// Validate the filter config, to give a helpful message intead of a panic. 
 pub fn validate_filter(filter_config: &config::Filter) -> Res<()> {
     let res = match filter_config {
         config::Filter::Conv{ parameters } => {

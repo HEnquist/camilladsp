@@ -77,8 +77,7 @@ pub enum Filter {
     Delay { parameters: DelayParameters },
     Gain { parameters: GainParameters },
 }
-//    pub parameters: FilterParameters,
-//}
+
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
@@ -153,6 +152,8 @@ pub struct Configuration {
     pub pipeline: Vec<PipelineStep>,
 }
 
+
+/// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
     let mut num_channels = conf.devices.capture.channels;
     for step in conf.pipeline {
