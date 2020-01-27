@@ -17,10 +17,22 @@ filters:
   lp1:
     type: Biquad
     parameters:
+      type: Lowshelf
+      freq: 2000
+      gain: -6
+      slope: 15
+  peak1:
+    type: Biquad
+    parameters:
       type: Highshelf
       freq: 1000
-      gain: -3
-      slope: 6
+      slope: 15
+      gain: -6
+  atten:
+    type: Gain
+    parameters:
+      gain: -6
+      inverted: false
 
 mixers:
   mono:
@@ -46,15 +58,15 @@ mixers:
             inverted: false
 
 pipeline:
-  - type: Mixer
-    name: mono
   - type: Filter
     channel: 0
     names:
-      - lp1
+      - atten
+      - peak1
   - type: Filter
     channel: 1
     names:
+      - atten
       - lp1
    
 

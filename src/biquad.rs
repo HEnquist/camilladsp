@@ -33,12 +33,18 @@ impl BiquadCoefficients {
     }
 
     pub fn normalize(a0: PrcFmt, a1: PrcFmt, a2: PrcFmt, b0: PrcFmt, b1: PrcFmt, b2: PrcFmt) -> Self {
+        let a1n = a1 / a0;
+        let a2n = a2 / a0;
+        let b0n = b0 / a0;
+        let b1n = b1 / a0;
+        let b2n = b2 / a0;
+        // println!("a1={}\na2={}\nb0={}\nb1={}\nb2={}", a1n, a2n, b0n, b1n, b2n);
         BiquadCoefficients {
-            a1: a1 / a0,
-            a2: a2 / a0,
-            b0: b0 / a0,
-            b1: b1 / a0,
-            b2: b2 / a0,
+            a1: a1n,
+            a2: a2n,
+            b0: b0n,
+            b1: b1n,
+            b2: b2n,
         }
     }
 
@@ -103,7 +109,7 @@ impl BiquadCoefficients {
                 let sn = omega.sin();
                 let cs = omega.cos();
                 let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
-                let alpha = sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / slope - 1.0) + 2.0).sqrt();
+                let alpha = sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope/12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
                 let b0 = ampl * ((ampl + 1.0) + (ampl - 1.0) * cs + beta);
                 let b1 = -2.0 * ampl * ((ampl - 1.0) + (ampl + 1.0) * cs);
@@ -118,7 +124,7 @@ impl BiquadCoefficients {
                 let sn = omega.sin();
                 let cs = omega.cos();
                 let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
-                let alpha = sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / slope - 1.0) + 2.0).sqrt();
+                let alpha = sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope/12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
                 let b0 = ampl * ((ampl + 1.0) - (ampl - 1.0) * cs + beta);
                 let b1 = 2.0 * ampl * ((ampl - 1.0) - (ampl + 1.0) * cs);
