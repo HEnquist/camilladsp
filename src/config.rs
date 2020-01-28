@@ -36,6 +36,7 @@ impl ConfigError {
 #[derive(Clone, Debug, Deserialize)]
 pub enum DeviceType {
     Alsa,
+    Pulse,
 }
 
 #[derive(Clone, Debug, Deserialize)]

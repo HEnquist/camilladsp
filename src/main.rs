@@ -1,6 +1,9 @@
 extern crate alsa;
 extern crate serde;
 extern crate rustfft;
+extern crate libpulse_binding as pulse;
+extern crate libpulse_simple_binding as psimple;
+
 
 use std::error;
 use std::env;
@@ -18,6 +21,7 @@ mod fftconv;
 mod basicfilters;
 mod audiodevice;
 mod alsadevice;
+mod pulsedevice;
 use audiodevice::*;
 mod config;
 mod mixer;

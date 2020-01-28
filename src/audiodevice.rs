@@ -2,6 +2,7 @@
 use std::thread;
 use config;
 use alsadevice;
+use pulsedevice;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 
@@ -44,6 +45,15 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
                 format: conf.playback.format,
             })
         },
+        config::DeviceType::Pulse => {
+            Box::new(pulsedevice::PulsePlaybackDevice {
+                devname: conf.playback.device, 
+                samplerate: conf.samplerate, 
+                bufferlength: conf.buffersize, 
+                channels: conf.playback.channels,
+                format: conf.playback.format,
+            })
+        },
     }
 }
 
@@ -52,6 +62,15 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     match conf.capture.r#type {
         config::DeviceType::Alsa => {
             Box::new(alsadevice::AlsaCaptureDevice {
+                devname: conf.capture.device, 
+                samplerate: conf.samplerate, 
+                bufferlength: conf.buffersize, 
+                channels: conf.capture.channels,
+                format: conf.capture.format,
+            })
+        },
+        config::DeviceType::Pulse => {
+            Box::new(pulsedevice::PulseCaptureDevice {
                 devname: conf.capture.device, 
                 samplerate: conf.samplerate, 
                 bufferlength: conf.buffersize, 
