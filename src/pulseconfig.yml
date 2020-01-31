@@ -1,0 +1,72 @@
+---
+devices:
+  samplerate: 44100
+  buffersize: 1024
+  capture:
+    type: Pulse
+    channels: 2
+    device: "MySink.monitor"
+    format: S16LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+    format: S32LE
+
+filters:
+  lp1:
+    type: Biquad
+    parameters:
+      type: Lowshelf
+      freq: 2000
+      gain: -6
+      slope: 15
+  peak1:
+    type: Biquad
+    parameters:
+      type: Highshelf
+      freq: 1000
+      slope: 15
+      gain: -6
+  atten:
+    type: Gain
+    parameters:
+      gain: -6
+      inverted: false
+
+mixers:
+  mono:
+    channels:
+      in: 2
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -6
+            inverted: false
+          - channel: 1
+            gain: -6
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 0
+            gain: -6
+            inverted: false
+          - channel: 1
+            gain: -6
+            inverted: false
+
+pipeline:
+  - type: Filter
+    channel: 0
+    names:
+      - atten
+      - peak1
+  - type: Filter
+    channel: 1
+    names:
+      - atten
+      - lp1
+   
+

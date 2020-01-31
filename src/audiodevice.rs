@@ -1,48 +1,82 @@
 // Traits for audio devices
-use std::error;
-pub type Res<T> = Result<T, Box<dyn error::Error>>;
+use std::thread;
+use config;
+use alsadevice;
+use pulsedevice;
+use std::sync::mpsc;
+use std::sync::{Arc, Barrier};
 
-pub type pcm16 = i16;
-pub type pcm24 = i32;
-pub type pcm32 = i32;
+use Res;
+use PrcFmt;
+use StatusMessage;
 
-
-pub enum Waveforms {
-    Float32(Vec<Vec<f32>>),
-    Float64(Vec<Vec<f64>>),
+pub enum AudioMessage {
+    //Quit,
+    Audio(AudioChunk),
 }
 
-pub enum Datatype {
-    Float32,
-    Float64,
-}
-
+/// Main container of audio data
 pub struct AudioChunk {
     pub frames: usize,
     pub channels: usize,
-    pub waveforms: Waveforms,
+    pub waveforms: Vec<Vec<PrcFmt>>,
 }
 
 
-
-
-pub trait PlaybackDevice<T> {
-    fn get_bufsize(&mut self) -> usize;
-
-    /// Send audio chunk for later playback
-    fn put_chunk(&mut self, chunk: AudioChunk) -> Res<()>;
-
-    // Filter a Vec
-    fn play(&mut self) -> Res<usize>;
+/// A playback device
+pub trait PlaybackDevice {
+    fn start(&mut self, channel: mpsc::Receiver<AudioMessage>, barrier: Arc<Barrier>, status_channel: mpsc::Sender<StatusMessage>) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
-pub trait CaptureDevice<T> {
-    fn get_bufsize(&mut self) -> usize;
-
-    /// Filter a single point
-    fn fetch_chunk(&mut self, datatype: Datatype) -> Res<AudioChunk>;
-
-    // Filter a Vec
-    fn capture(&mut self) -> Res<usize>;
+/// A capture device
+pub trait CaptureDevice {
+    fn start(&mut self, channel: mpsc::Sender<AudioMessage>, barrier: Arc<Barrier>, status_channel: mpsc::Sender<StatusMessage>) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
+/// Create a playback device. Currently only Alsa is supported.
+pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
+    match conf.playback.r#type {
+        config::DeviceType::Alsa => {
+            Box::new(alsadevice::AlsaPlaybackDevice {
+                devname: conf.playback.device, 
+                samplerate: conf.samplerate, 
+                bufferlength: conf.buffersize, 
+                channels: conf.playback.channels,
+                format: conf.playback.format,
+            })
+        },
+        config::DeviceType::Pulse => {
+            Box::new(pulsedevice::PulsePlaybackDevice {
+                devname: conf.playback.device, 
+                samplerate: conf.samplerate, 
+                bufferlength: conf.buffersize, 
+                channels: conf.playback.channels,
+                format: conf.playback.format,
+            })
+        },
+    }
+}
+
+/// Create a capture device. Currently only Alsa is supported.
+pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
+    match conf.capture.r#type {
+        config::DeviceType::Alsa => {
+            Box::new(alsadevice::AlsaCaptureDevice {
+                devname: conf.capture.device, 
+                samplerate: conf.samplerate, 
+                bufferlength: conf.buffersize, 
+                channels: conf.capture.channels,
+                format: conf.capture.format,
+            })
+        },
+        config::DeviceType::Pulse => {
+            Box::new(pulsedevice::PulseCaptureDevice {
+                devname: conf.capture.device, 
+                samplerate: conf.samplerate, 
+                bufferlength: conf.buffersize, 
+                channels: conf.capture.channels,
+                format: conf.capture.format,
+            })
+        },
+    }
+}

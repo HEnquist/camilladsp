@@ -1,96 +1,71 @@
 extern crate alsa;
-use std::{iter, error};
-use alsa::{Direction, ValueOr};
-use alsa::pcm::{PCM, HwParams, Format, Access, State};
-use alsa::direct::pcm::MmapPlayback;
+extern crate serde;
+extern crate rustfft;
+extern crate libpulse_binding as pulse;
+extern crate libpulse_simple_binding as psimple;
+
+
+use std::error;
+use std::env;
 use std::{thread, time};
 use std::sync::mpsc;
-
-type Res<T> = Result<T, Box<dyn error::Error>>;
-
-mod filters;
-use filters::*;
-mod biquad;
-use biquad::*;
-
-mod audiodevice;
-mod alsadevice;
-use audiodevice::*;
-use alsadevice::*;
-
-//pub use crate::filters::*;
-//pub use crate::biquad::*;
-
-
+use std::sync::{Arc, Barrier};
 
 // Sample format
-type SF = i16;
-type PF = f64;
+pub type PrcFmt = f64;
+pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
+mod filters;
+mod biquad;
+mod fftconv;
+mod basicfilters;
+mod audiodevice;
+mod alsadevice;
+mod pulsedevice;
+use audiodevice::*;
+mod config;
+mod mixer;
 
-enum Message {
-    Quit,
-    Audio(AudioChunk),
+use std::fs::File;
+use std::io::BufReader;
+use std::io::prelude::*;
+//use std::path::PathBuf;
+
+pub enum StatusMessage {
+    PlaybackReady,
+    CaptureReady,
+    PlaybackError { message: String },
+    CaptureError { message: String },
 }
 
+fn run(conf: config::Configuration) -> Res<()> {
 
-
-fn run() -> Res<()> {
-    let mut playback_dev = AlsaPlaybackDevice::<i16>::open("hw:PCH".to_string(), 44100, 4096, 2)?;
-    let mut capture_dev = AlsaCaptureDevice::<i16>::open("hw:Loopback,0,0".to_string(), 44100, 4096, 2)?;
-    //let (playback_dev, play_rate) = open_audio_dev_play("hw:PCH".to_string(), 44100, 1024)?;
-    //let (capture_dev, capt_rate) = open_audio_dev_capt("hw:PCH".to_string(), 44100, 1024)?;
-
-    
     let (tx_pb, rx_pb) = mpsc::channel();
     let (tx_cap, rx_cap) = mpsc::channel();
 
-    //let mut mmap = playback_dev.direct_mmap_playback::<SF>()?;
+    let (tx_status, rx_status) = mpsc::channel();
+    let tx_status_pb = tx_status.clone();
+    let tx_status_cap = tx_status.clone();
 
+    let barrier = Arc::new(Barrier::new(4));
+    let barrier_pb = barrier.clone();
+    let barrier_cap = barrier.clone();
+    let barrier_proc = barrier.clone();
+
+    let conf_pb = conf.clone();
+    let conf_cap = conf.clone();
+    let conf_proc = conf.clone();
+
+    // Processing thread
     thread::spawn(move || {
-        let coeffs_32 = Coefficients::<f32>::new(-1.79907162, 0.81748736, 0.00460394, 0.00920787, 0.00460394);
-        let mut filter_l_32 = BiquadDF2T::<f32>::new(coeffs_32);
-        let mut filter_r_32 = BiquadDF2T::<f32>::new(coeffs_32);
-        let coeffs_64 = Coefficients::<f64>::new(-1.79907162, 0.81748736, 0.00460394, 0.00920787, 0.00460394);
-        let mut filter_l_64 = BiquadDF2T::<f64>::new(coeffs_64);
-        let mut filter_r_64 = BiquadDF2T::<f64>::new(coeffs_64);
+        let mut pipeline = filters::Pipeline::from_config(conf_proc);
+        println!("build filters, waiting to start processing loop");
+        barrier_proc.wait();
         loop {
             match rx_cap.recv() {
-                Ok(Message::Audio(chunk)) => {
-                    //let mut buf = vec![0f64; 1024];
-                    //for (i, a) in buf.iter_mut().enumerate() {
-                    //    *a = (i as f64 * 2.0 * ::std::f64::consts::PI / 128.0).sin();
-                    //}
-                    let waveforms = match chunk.waveforms {
-                        Waveforms::Float32(mut wfs) => {
-                            let mut filtered_wfs = Vec::new();
-                            //for wave in wfs.iter() {
-                            let filtered_l = filter_l_32.process_multi(wfs[0].clone());
-                            filtered_wfs.push(filtered_l);
-                            let filtered_r = filter_r_32.process_multi(wfs[1].clone());
-                            filtered_wfs.push(filtered_r);
-                            Waveforms::Float32(filtered_wfs)
-                        },
-                        Waveforms::Float64(mut wfs) => {
-                            let mut filtered_wfs = Vec::new();
-                            //for wave in wfs.iter() {
-                            let filtered_l = filter_l_64.process_multi(wfs.pop().unwrap());
-                            //let filtered_l = wfs[0].clone();
-                            filtered_wfs.push(filtered_l);
-                            let filtered_r = filter_r_64.process_multi(wfs.pop().unwrap());
-                            //let filtered_r = wfs[1].clone();
-                            filtered_wfs.push(filtered_r);
-                            Waveforms::Float64(filtered_wfs)
-                        },
-                    };
-
-                    let chunk = AudioChunk{
-                        frames: 4096,
-                        channels: 2,
-                        waveforms: waveforms,
-                        //waveforms: Waveforms::Float64(vec![buf.clone(), buf]),
-                    };
-                    let msg = Message::Audio(chunk);
+                Ok(AudioMessage::Audio(mut chunk)) => {
+                    chunk = pipeline.process_chunk(chunk);
+                    let msg = AudioMessage::Audio(chunk);
                     tx_pb.send(msg).unwrap();
                 }
                 _ => {}
@@ -98,44 +73,91 @@ fn run() -> Res<()> {
         }
     });
 
-    thread::spawn(move || {
-        let delay = time::Duration::from_millis(8*1000*1024/44100);
-        thread::sleep(delay);
-        let mut m = 0;
-        loop {
-            match rx_pb.recv() {
-                Ok(Message::Audio(chunk)) => {
-                    playback_dev.put_chunk(chunk).unwrap();
-                    let frames = playback_dev.play().unwrap();
-                    println!("PB Chunk {}, wrote {:?} frames", m, frames);
-                    m += 1;
-                }
-                _ => {}
-            }
-        }
-    });
 
-    thread::spawn(move || {
-        let mut m = 0;
-        loop {
-            let frames = capture_dev.capture().unwrap();
-            let chunk = capture_dev.fetch_chunk(Datatype::Float32).unwrap();
-            let msg = Message::Audio(chunk);
-            tx_cap.send(msg).unwrap();
-            println!("Capture chunk {}", m);
-            m += 1;
-        }
-    });
+    // Playback thread
+    let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
+    let _pb_handle = playback_dev.start(rx_pb, barrier_pb, tx_status_pb);
 
-    let delay = time::Duration::from_millis(100);
+
+    // Capture thread
+    let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
+    let _cap_handle = capture_dev.start(tx_cap, barrier_cap, tx_status_cap);
+
+    let delay = time::Duration::from_millis(1000);
     
-
+    let mut pb_ready = false;
+    let mut cap_ready = false;
     loop {
-        thread::sleep(delay);
+        match rx_status.recv_timeout(delay) {
+            Ok(msg) => {
+                match msg {
+                    StatusMessage::PlaybackReady => {
+                        pb_ready = true;
+                        if cap_ready {
+                            barrier.wait();
+                        }
+                    }
+                    StatusMessage::CaptureReady => {
+                        cap_ready = true;
+                        if pb_ready {
+                            barrier.wait();
+                        }
+                    }
+                    StatusMessage::PlaybackError { message } => {
+                        println!("Playback error: {}", message);
+                        return Ok(());
+                    }
+                    StatusMessage::CaptureError{ message } => {
+                        println!("Capture error: {}", message);
+                        return Ok(());
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            _ => {}
+        }
     }
-    Ok(())
 }
 
 fn main() {
-    if let Err(e) = run() { println!("Error ({}) {}", e.description(), e); }
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        println!("No config file given!");
+        return ()
+    }
+    let configname = &args[1];
+    let file = match File::open(configname) {
+        Ok(f) => f,
+        Err(_) => {
+            println!("Could not open config file!");
+            return ()
+        },
+    };
+    let mut buffered_reader = BufReader::new(file);
+    let mut contents = String::new();
+    let _number_of_bytes: usize = match buffered_reader.read_to_string(&mut contents) {
+        Ok(number_of_bytes) => number_of_bytes,
+        Err(_err) => {
+            println!("Could not read config file!");
+            return ()
+        },
+    };
+    let configuration: config::Configuration = match serde_yaml::from_str(&contents) {
+        Ok(config) => config,
+        Err(err) => {
+            println!("Invalid config file!");
+            println!("{}", err);
+            return ()
+        },
+    };
+
+    match config::validate_config(configuration.clone()) {
+        Ok(()) => {},
+        Err(err) => {
+            println!("Invalid config file!");
+            println!("{}", err);
+            return ()
+        },
+    }
+    if let Err(e) = run(configuration) { println!("Error ({}) {}", e.description(), e); }
 }
