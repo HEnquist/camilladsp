@@ -1,5 +1,5 @@
 [package]
-name = "loop-example"
+name = "camilladsp"
 version = "0.0.1"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 
