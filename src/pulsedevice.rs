@@ -2,7 +2,6 @@
 extern crate num_traits;
 //use std::{iter, error};
 use pulse;
-use psimple;
 use std::convert::TryInto;
 
 use psimple::Simple;
@@ -220,9 +219,15 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                     Ok(AudioMessage::Audio(chunk)) => {
                                         chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
                                         // let _frames = match io.writei(&buffer[..]) {
-                                        pulsedevice.write(&buffer).unwrap();    
+                                        let write_res = pulsedevice.write(&buffer);
+                                        match write_res {
+                                            Ok(_) => {},
+                                            Err(msg) => {
+                                                status_channel.send(StatusMessage::PlaybackError{ message: format!("{}", msg) }).unwrap();
+                                            }
+                                        };
                                     }
-                                    _ => {}
+                                    Err(_) => {}
                                 }
                             }
                         },
@@ -233,7 +238,13 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                     Ok(AudioMessage::Audio(chunk)) => {
                                         chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
                                         // let _frames = match io.writei(&buffer[..]) {
-                                        pulsedevice.write(&buffer).unwrap();    
+                                        let write_res = pulsedevice.write(&buffer);
+                                        match write_res {
+                                            Ok(_) => {},
+                                            Err(msg) => {
+                                                status_channel.send(StatusMessage::PlaybackError{ message: format!("{}", msg) }).unwrap();
+                                            }
+                                        };    
                                     }
                                     _ => {}
                                 }
@@ -279,7 +290,13 @@ impl CaptureDevice for PulseCaptureDevice {
                             let mut buf = vec![0u8; channels*bufferlength*2];
                             loop {
                                 //let frames = self.io.readi(&mut buf)?;
-                                pulsedevice.read(&mut buf).unwrap();
+                                let read_res = pulsedevice.read(&mut buf);
+                                match read_res {
+                                    Ok(_) => {},
+                                    Err(msg) => {
+                                        status_channel.send(StatusMessage::CaptureError{ message: format!("{}", msg) }).unwrap();
+                                    }
+                                };
                                 //let before = Instant::now();
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor, bits);
                                 //let after = before.elapsed();
@@ -291,7 +308,13 @@ impl CaptureDevice for PulseCaptureDevice {
                         SampleFormat::S24LE | SampleFormat::S32LE => {
                             let mut buf = vec![0u8; channels*bufferlength*4];
                             loop {
-                                pulsedevice.read(&mut buf).unwrap();
+                                let read_res = pulsedevice.read(&mut buf);
+                                match read_res {
+                                    Ok(_) => {},
+                                    Err(msg) => {
+                                        status_channel.send(StatusMessage::CaptureError{ message: format!("{}", msg) }).unwrap();
+                                    }
+                                };
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor, bits);
                                 let msg = AudioMessage::Audio(chunk);
                                 channel.send(msg).unwrap();

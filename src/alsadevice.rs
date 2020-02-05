@@ -107,6 +107,44 @@ fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(buffer: &[T], chann
 }
 
 
+/// Play a buffer.
+fn play_buffer<T: std::marker::Copy>(buffer: &[T], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<T>) -> Res<()> {
+    let playback_state = pcmdevice.state();
+    //println!("playback state {:?}", playback_state);
+    if playback_state == State::XRun {
+        println!("Prepare playback");
+        pcmdevice.prepare()?;
+    }
+    let _frames = match io.writei(&buffer[..]) {
+        Ok(frames) => frames,
+        Err(_err) => {
+            println!("retrying playback");
+            pcmdevice.prepare()?;
+            io.writei(&buffer[..])?
+        },
+    };
+    Ok(())
+}
+
+/// Play a buffer.
+fn capture_buffer<T: std::marker::Copy>(buffer: &mut [T], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<T>) -> Res<()> {
+    let capture_state = pcmdevice.state();
+    if capture_state == State::XRun {
+        println!("prepare capture");
+        pcmdevice.prepare()?;
+    }
+    let _frames = match io.readi(buffer) {
+        Ok(frames) => frames,
+        Err(_err) => {
+            println!("retrying capture");
+            pcmdevice.prepare()?;
+            io.readi(buffer)?
+        },
+    };
+    Ok(())
+}
+
+
 /// Open an Alsa PCM device
 fn open_pcm(devname: String, samplerate: u32, bufsize: i64, channels: u32, bits: usize, capture: bool) -> Res<alsa::PCM> {
     // Open the device
@@ -182,24 +220,15 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             loop {
                                 match channel.recv() {
                                     Ok(AudioMessage::Audio(chunk)) => {
-                                        //let before = Instant::now();
                                         chunk_to_buffer(chunk, &mut buffer, scalefactor);
-                                        //let after = before.elapsed();
-                                        //println!("chunk to buffer {} ns", after.as_nanos());
-                                        let playback_state = pcmdevice.state();
-                                        //println!("playback state {:?}", playback_state);
-                                        if playback_state == State::XRun {
-                                            println!("Prepare playback");
-                                            pcmdevice.prepare().unwrap();
-                                        }
-                                        let _frames = match io.writei(&buffer[..]) {
-                                            Ok(frames) => frames,
-                                            Err(_err) => {
-                                                println!("retrying playback");
-                                                pcmdevice.prepare().unwrap();
-                                                io.writei(&buffer[..]).unwrap()
-                                            },
+                                        let playback_res = play_buffer(&buffer, &pcmdevice, &io);
+                                        match playback_res {
+                                            Ok(_) => {},
+                                            Err(msg) => {
+                                                status_channel.send(StatusMessage::PlaybackError{ message: format!("{}", msg) }).unwrap();
+                                            }
                                         };
+
                                     }
                                     _ => {}
                                 }
@@ -211,29 +240,14 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             loop {
                                 match channel.recv() {
                                     Ok(AudioMessage::Audio(chunk)) => {
-                                        //println!("p");
-                                        //let before = Instant::now();
                                         chunk_to_buffer(chunk, &mut buffer, scalefactor);
-                                        //let after = before.elapsed();
-                                        //println!("chunk to buffer {} ns", after.as_nanos());
-                                        //let before = Instant::now();
-                                        let playback_state = pcmdevice.state();
-                                        //println!("playback state {:?}", playback_state);
-                                        if playback_state == State::XRun {
-                                            println!("Prepare playback");
-                                            pcmdevice.prepare().unwrap();
-                                        }
-                                        //let middle = before.elapsed();
-                                        let _frames = match io.writei(&buffer[..]) {
-                                            Ok(frames) => frames,
-                                            Err(_err) => {
-                                                println!("retrying playback");
-                                                pcmdevice.prepare().unwrap();
-                                                io.writei(&buffer[..]).unwrap()
-                                            },
+                                        let playback_res = play_buffer(&buffer, &pcmdevice, &io);
+                                        match playback_res {
+                                            Ok(_) => {},
+                                            Err(msg) => {
+                                                status_channel.send(StatusMessage::PlaybackError{ message: format!("{}", msg) }).unwrap();
+                                            }
                                         };
-                                        //let after = before.elapsed();
-                                        //println!("check {} ns, write {} ns", middle.as_nanos(), after.as_nanos());
                                     }
                                     _ => {}
                                 }
@@ -279,26 +293,14 @@ impl CaptureDevice for AlsaCaptureDevice {
                             let io = pcmdevice.io_i16().unwrap();
                             let mut buf = vec![0i16; channels*bufferlength];
                             loop {
-                                //let mut buf: Vec<i16>;
-                                //let mut buf: Vec<i16> = Vec::with_capacity(channels*bufferlength);
-                                let capture_state = pcmdevice.state();
-                                if capture_state == State::XRun {
-                                    println!("prepare capture");
-                                    pcmdevice.prepare().unwrap();
-                                }
-                                //let frames = self.io.readi(&mut buf)?;
-                                let _frames = match io.readi(&mut buf) {
-                                    Ok(frames) => frames,
-                                    Err(_err) => {
-                                        println!("retrying capture");
-                                        pcmdevice.prepare().unwrap();
-                                        io.readi(&mut buf).unwrap()
-                                    },
+                                let capture_res = capture_buffer(&mut buf, &pcmdevice, &io);
+                                match capture_res {
+                                    Ok(_) => {},
+                                    Err(msg) => {
+                                        status_channel.send(StatusMessage::CaptureError{ message: format!("{}", msg) }).unwrap();
+                                    }
                                 };
-                                //let before = Instant::now();
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor);
-                                //let after = before.elapsed();
-                                //println!("buffer to chunk {} ns", after.as_nanos());
                                 let msg = AudioMessage::Audio(chunk);
                                 channel.send(msg).unwrap();
                             }
@@ -307,13 +309,13 @@ impl CaptureDevice for AlsaCaptureDevice {
                             let io = pcmdevice.io_i32().unwrap();
                             let mut buf = vec![0i32; channels*bufferlength];
                             loop {
-                                //let mut buf: Vec<i32>;
-                                let capture_state = pcmdevice.state();
-                                if capture_state == State::XRun {
-                                    pcmdevice.prepare().unwrap();
-                                }
-                                //let frames = self.io.readi(&mut buf)?;
-                                let _frames = io.readi(&mut buf).unwrap();
+                                let capture_res = capture_buffer(&mut buf, &pcmdevice, &io);
+                                match capture_res {
+                                    Ok(_) => {},
+                                    Err(msg) => {
+                                        status_channel.send(StatusMessage::CaptureError{ message: format!("{}", msg) }).unwrap();
+                                    }
+                                };
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor);
                                 let msg = AudioMessage::Audio(chunk);
                                 channel.send(msg).unwrap();

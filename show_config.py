@@ -7,6 +7,7 @@ import yaml
 import sys
 from matplotlib import pyplot as plt
 from matplotlib.patches import Rectangle
+import math
 
 class Conv(object):
     def __init__(self, conf, fs):
@@ -155,7 +156,7 @@ def draw_arrow(ax, p0, p1, label=None):
 
 def draw_box(ax, level, size, label=None):
     x0 = 2*level-0.75
-    y0 = -size/2 -0.5
+    y0 = -size/2
     rect = Rectangle((x0, y0), 1.5, size, linewidth=1,edgecolor='g',facecolor='none', linestyle='--')
     ax.add_patch(rect)
     if label is not None:
@@ -202,7 +203,7 @@ def main():
     for n in range(capture_channels):
         label = "ch {}".format(n) 
         b = Block(label)
-        b.place(0, -capture_channels/2 + n)
+        b.place(0, -capture_channels/2 + 0.5 + n)
         b.draw(ax)
         channels.append([b])
     draw_box(ax, 0, capture_channels, label=conf['devices']['capture']['device'])
@@ -223,7 +224,7 @@ def main():
             for n in range(active_channels):
                 label = "ch {}".format(n)
                 b = Block(label)
-                b.place(total_length*2, -active_channels/2 + n)
+                b.place(total_length*2, -active_channels/2 + 0.5 + n)
                 b.draw(ax)
                 channels[n] = [b]
             for mapping in mixconf['mapping']:
@@ -245,7 +246,7 @@ def main():
                 b = Block(name)
                 ch_step = stage_start + len(stages[-1][ch_nbr])
                 total_length = max((total_length, ch_step))
-                b.place(ch_step*2, -active_channels/2 + ch_nbr)
+                b.place(ch_step*2, -active_channels/2 + 0.5 + ch_nbr)
                 b.draw(ax)
                 src_p = stages[-1][ch_nbr][-1].output_point()
                 dest_p = b.input_point()
@@ -254,10 +255,11 @@ def main():
 
 
     total_length += 1
+    channels = []
     for n in range(active_channels):
         label = "ch {}".format(n) 
         b = Block(label)
-        b.place(2*total_length, -active_channels/2 + n)
+        b.place(2*total_length, -active_channels/2 + 0.5 + n)
         b.draw(ax)
         src_p = stages[-1][n][-1].output_point()
         dest_p = b.input_point()
@@ -266,8 +268,10 @@ def main():
     draw_box(ax, total_length, active_channels, label=conf['devices']['playback']['device'])
     stages.append(channels)
     
-    ax.set(xlim=(-1, 2*total_length+1), ylim=(-3, 3))
-
+    nbr_chan = [len(s) for s in stages]
+    ylim = math.ceil(max(nbr_chan)/2.0) + 0.5
+    ax.set(xlim=(-1, 2*total_length+1), ylim=(-ylim, ylim))
+    plt.axis('off')
     plt.show()
 
 if __name__ == "__main__":
