@@ -136,7 +136,7 @@ fn buffer_to_chunk(buffer: &[u8], channels: usize, scalefactor: PrcFmt, bits: us
 }
 
 
-/// Open an Alsa PCM device
+/// Open a PulseAudio device
 fn open_pulse(devname: String, samplerate: u32, bufsize: i64, channels: u8, bits: usize, capture: bool) -> Res<Simple> {
     // Open the device
     let dir = match capture {
