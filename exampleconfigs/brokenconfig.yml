@@ -24,7 +24,7 @@ filters:
 mixers:
   mono:
     channels:
-      in: 2
+      in: 3
       out: 2
     mapping:
       - dest: 0

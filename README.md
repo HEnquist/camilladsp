@@ -8,6 +8,23 @@ Audio data is captured from a capture device and sent to a playback device. Alsa
 The processing pipeline consists of any number of filters and mixers. Mixers are used to route audio between channels and to change the number of channels in the stream. Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT. A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples. A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
 The full configuration is given in a yaml file.
 
+## Building
+
+Use recent versions of rustc and cargo. No need to use nightly.
+* Clone the repository
+* Build with `cargo build --release`
+* The binary is now available at ./target/release/camilladsp
+* Optionally install with `cargo install --path .`
+
+## How to run
+
+The command is simply:
+```
+camilladsp /path/to/config.yml
+```
+This starts the processing define in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is valid with. When an error is found it displays an error message describing the problem.
+
+
 ## Usage example: crossover for 2-way speakers
 A crossover must filter all sound being played on the system. This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device. CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
 The simplest possible processing pipeline would then consist of:
@@ -164,3 +181,32 @@ The available types are:
 * Peaking
   * A parametric peaking filter with selectable gain af a given frequency with a bandwidth given by the Q-value.
 
+
+## Pipeline
+The pipeline section defines the processing steps between input and output. The input and output devices are automatically added to the start and end. 
+The pipeline is essentially a list of filters and/or mixers. There are no rules for ordering or how many are added. For each mixer and for the output device the number of channels from the previous step must match the number of input channels.
+Example:
+```
+pipeline:
+  - type: Mixer
+    name: to4channels
+  - type: Filter
+    channel: 0
+    names:
+      - lowpass_fir
+      - peak1
+  - type: Filter
+    channel: 1
+    names:
+      - lowpass_fir
+      - peak1
+  - type: Filter
+    channel: 2
+    names:
+      - highpass_fir
+  - type: Filter
+    channel: 3
+    names:
+      - highpass_fir
+```
+In this config first a mixer is used to copy a stereo input to four channels. Then for each channel a filter step is added. A filter block can contain one or several filters that must be define in the "Filters" section. Here channel 0 and 1 get filtered by "lowpass_fir" and "peak1", while 2 and 3 get filtered by just "highpass_fir". 
