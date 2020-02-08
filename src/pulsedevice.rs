@@ -167,7 +167,7 @@ fn open_pulse(devname: String, samplerate: u32, bufsize: i64, channels: u8, bits
     let attr = pulse::def::BufferAttr {
         maxlength: std::u32::MAX,
         tlength: std::u32::MAX,
-        prebuf: std::u32::MAX,
+        prebuf: bytes as u32,
         minreq: std::u32::MAX,
         fragsize: bytes as u32,
     };

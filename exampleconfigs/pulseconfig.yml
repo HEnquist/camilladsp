@@ -8,9 +8,9 @@ devices:
     device: "MySink.monitor"
     format: S16LE
   playback:
-    type: Alsa
+    type: Pulse
     channels: 2
-    device: "hw:Generic_1"
+    device: "alsa_output.pci-0000_03_00.6.analog-stereo"
     format: S32LE
 
 filters:

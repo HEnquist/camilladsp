@@ -22,7 +22,7 @@ The command is simply:
 ```
 camilladsp /path/to/config.yml
 ```
-This starts the processing define in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is valid with. When an error is found it displays an error message describing the problem.
+This starts the processing defined in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is complete and valid. When an error is found it displays an error message describing the problem.
 
 
 ## Usage example: crossover for 2-way speakers
