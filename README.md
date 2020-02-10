@@ -1,12 +1,26 @@
-CamillaDSP
----
+# CamillaDSP
 
-A tool to create audio processing pipelines for applications such as active crossovers or room correction.
+
+A tool to create audio processing pipelines for applications such as active crossovers or room correction. It is written in Rust to benefit from the safety and elegant handling of threading that this language provides. 
 
 Audio data is captured from a capture device and sent to a playback device. Alsa and PulseAudio are currently supported for both capture and playback.
 
 The processing pipeline consists of any number of filters and mixers. Mixers are used to route audio between channels and to change the number of channels in the stream. Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT. A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples. A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
 The full configuration is given in a yaml file.
+
+### Background
+The purpose of CamillaDSP is to enable audio processing with combinations of FIR and IIR filters. This functionality is available in EqualizerAPO, but for Windows only. For Linux the best known FIR filter engine is probably BruteFIR, which works very well but doesn't support IIR filters.
+
+* BruteFIR: https://www.ludd.ltu.se/~torger/brutefir.html
+* EqualizerAPO: https://sourceforge.net/projects/equalizerapo/
+* The IIR filtering is heavily inspired by biquad-rs: https://github.com/korken89/biquad-rs 
+
+### Dependencies
+* https://crates.io/crates/rustfft - FFT used for FIR filters
+* https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
+* https://crates.io/crates/alsa - Alsa audio backend
+* https://crates.io/crates/serde_yaml - Config file reading
+* https://crates.io/crates/num-traits - Converting between number types
 
 ## Building
 
@@ -32,7 +46,36 @@ The simplest possible processing pipeline would then consist of:
 - A Mixer to go from 2 to four channels (2 for woofers, 2 for tweeters)
 - High pass filters on the tweeter channels
 - Low pass filter on the woofer channels
-- An output device with 4 analog channels
+- An output device with 4 analog channel
+
+
+# Capturing audio
+In order to insert CamillaDSP between applications and the sound card, a virtual sound card is required. This works with both Alsa and PulseAudio.
+## Alsa
+An Alsa Loopback device can be used. This device behaves like a sound card with two devices playback and capture. The sound being send to the playback side on one device can then be captured from the capture side on the other device. To load the kernel device type:
+```
+sudo modprobe snd-aloop
+```
+Find the name of the device:
+```
+aplay -l
+```
+Play a track on card 2, device 1, subdevice 0 (the audio can then be captured from card 2, device 0, subdevice 0):
+```
+aplay -D hw:2,1,0 sometrack.wav
+```
+
+## PulseAudio
+PulseAudio provides a null-sink that can be used to capture audio from applications. To create a null sink type:
+```
+pacmd load-module module-null-sink sink_name=MySink
+```
+This device can be set as the default output, meaning any application using PulseAudio will use it. The audio sent to this device can then be captured from the monitor output named MySink.monitor.
+All available sinks and sources can be listed with the commands:
+```
+pacmd list-sinks
+pacmd list-sources
+```
 
 
 # Configuration
@@ -210,3 +253,15 @@ pipeline:
       - highpass_fir
 ```
 In this config first a mixer is used to copy a stereo input to four channels. Then for each channel a filter step is added. A filter block can contain one or several filters that must be define in the "Filters" section. Here channel 0 and 1 get filtered by "lowpass_fir" and "peak1", while 2 and 3 get filtered by just "highpass_fir". 
+
+## Vislualizing the config
+A Python script is included to view the configuration. This plots the transfer functions of all included filters, as well as plots a flow chart of the entire processing pipeline. Run it with:
+```
+python show_config.py /path/to/config.yml
+```
+Note that the script assumes a valid configuration file and will not give any helpful error messages if it's not, so it's a good idea to first use CamillaDSP to validate the file.
+The script requires the following:
+* Python 3
+* Numpy
+* Matplotlib
+* PyYAML

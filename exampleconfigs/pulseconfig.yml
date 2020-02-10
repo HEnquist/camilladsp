@@ -19,19 +19,19 @@ filters:
     parameters:
       type: Lowshelf
       freq: 2000
-      gain: -6
-      slope: 15
+      gain: -1
+      slope: 3
   peak1:
     type: Biquad
     parameters:
       type: Highshelf
       freq: 1000
-      slope: 15
+      slope: 3
       gain: -6
   atten:
     type: Gain
     parameters:
-      gain: -6
+      gain: -3
       inverted: false
 
 mixers:
