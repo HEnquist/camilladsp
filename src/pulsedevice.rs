@@ -8,7 +8,7 @@ use psimple::Simple;
 use pulse::stream::Direction;
 use pulse::sample;
 
-use std::{thread, time};
+use std::thread;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 //mod audiodevice;

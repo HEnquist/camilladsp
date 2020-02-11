@@ -3,7 +3,7 @@ extern crate num_traits;
 //use std::{iter, error};
 use alsa::{Direction, ValueOr};
 use alsa::pcm::{HwParams, Format, Access, State};
-use std::{thread, time};
+use std::thread;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 //mod audiodevice;
@@ -347,8 +347,22 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     }
                                 };
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor);
-                                let msg = AudioMessage::Audio(chunk);
-                                channel.send(msg).unwrap();
+                                if (chunk.maxval - chunk.minval) > silence {
+                                    if silent_nbr > silent_limit {
+                                        println!("Resuming processing");
+                                    }
+                                    silent_nbr = 0;
+                                }
+                                else if silent_limit > 0 {
+                                    if silent_nbr == silent_limit {
+                                        println!("Pausing processing");
+                                    }
+                                    silent_nbr += 1;
+                                }
+                                if silent_nbr <= silent_limit {
+                                    let msg = AudioMessage::Audio(chunk);
+                                    channel.send(msg).unwrap();
+                                }
                             }
                         },
                     };
