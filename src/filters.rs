@@ -24,7 +24,7 @@ pub fn read_coeff_file(filename: &str) -> Res<Vec<PrcFmt>> {
     let file = BufReader::new(&f);
     for line in file.lines() {
         let l = line?;
-        coefficients.push(l.parse()?);       
+        coefficients.push(l.trim().parse()?);       
     }
     Ok(coefficients)
 }
