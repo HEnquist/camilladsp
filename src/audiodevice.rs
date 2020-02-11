@@ -19,6 +19,8 @@ pub enum AudioMessage {
 pub struct AudioChunk {
     pub frames: usize,
     pub channels: usize,
+    pub maxval: PrcFmt,
+    pub minval: PrcFmt,
     pub waveforms: Vec<Vec<PrcFmt>>,
 }
 
@@ -33,7 +35,7 @@ pub trait CaptureDevice {
     fn start(&mut self, channel: mpsc::Sender<AudioMessage>, barrier: Arc<Barrier>, status_channel: mpsc::Sender<StatusMessage>) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
-/// Create a playback device. Currently only Alsa is supported.
+/// Create a playback device.
 pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     match conf.playback.r#type {
         config::DeviceType::Alsa => {
@@ -67,6 +69,8 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
                 bufferlength: conf.buffersize, 
                 channels: conf.capture.channels,
                 format: conf.capture.format,
+                silence_threshold: conf.silence_threshold,
+                silence_timeout: conf.silence_timeout,
             })
         },
         config::DeviceType::Pulse => {
@@ -76,6 +80,8 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
                 bufferlength: conf.buffersize, 
                 channels: conf.capture.channels,
                 format: conf.capture.format,
+                silence_threshold: conf.silence_threshold,
+                silence_timeout: conf.silence_timeout,
             })
         },
     }

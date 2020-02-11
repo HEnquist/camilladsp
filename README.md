@@ -83,11 +83,15 @@ pacmd list-sources
 ## Devices
 Input and output devices are define in the same way. A device needs a type (Alsa or Pulse), number of channels, a device name, and a sample format. Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE). 
 There is also a common samplerate that decides the samplerate that everythng will run at. The buffersize is the number of samples each chunk will have per channel. 
+The fields silence_trheshold and silence_timeout are optional and used to pause processing if the input is silent. The threshold is the threshold level in dB, and the level is calculated as the difference between the minimum and maximum sample values for all channels in the capture buffer. 0 dB is full level. Some experimantation might be needed to find the right threshold.
+The timeout (in seconds) is for how long the signal should be silent before pausing pprocessing. Set this to zero, or leave it out, to never pause. 
 Example:
 ```
 devices:
   samplerate: 44100
   buffersize: 1024
+  silence_threshold: -60
+  silence_timeout: 3.0
   capture:
     type: Pulse
     channels: 2

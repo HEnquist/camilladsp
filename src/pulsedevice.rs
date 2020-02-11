@@ -35,6 +35,8 @@ pub struct PulseCaptureDevice {
     pub bufferlength: usize,
     pub channels: usize,
     pub format: SampleFormat,
+    pub silence_threshold: PrcFmt,
+    pub silence_timeout: PrcFmt,
 }
 
 /// Convert an AudioChunk to an interleaved buffer of ints.
@@ -98,6 +100,8 @@ fn buffer_to_chunk(buffer: &[u8], channels: usize, scalefactor: PrcFmt, bits: us
     };
     let num_frames = num_samples/channels;
     let mut value: PrcFmt;
+    let mut maxvalue: PrcFmt = 0.0;
+    let mut minvalue: PrcFmt = 0.0;
     let mut wfs = Vec::with_capacity(channels);
     for _chan in 0..channels {
         wfs.push(Vec::with_capacity(num_frames));
@@ -109,6 +113,12 @@ fn buffer_to_chunk(buffer: &[u8], channels: usize, scalefactor: PrcFmt, bits: us
                 value = i16::from_le_bytes(buffer[idx..idx+2].try_into().unwrap()) as PrcFmt;
                 idx+=2;
                 value = value / scalefactor;
+                if value > maxvalue {
+                    maxvalue = value;
+                }
+                if value < minvalue {
+                    minvalue = value;
+                }
                 //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
                 wfs[chan].push(value);
                 //idx += 1;
@@ -121,6 +131,12 @@ fn buffer_to_chunk(buffer: &[u8], channels: usize, scalefactor: PrcFmt, bits: us
                 value = i32::from_le_bytes(buffer[idx..idx+4].try_into().unwrap()) as PrcFmt;
                 idx+=4;
                 value = value / scalefactor;
+                if value > maxvalue {
+                    maxvalue = value;
+                }
+                if value < minvalue {
+                    minvalue = value;
+                }
                 //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
                 wfs[chan].push(value);
                 //idx += 1;
@@ -130,6 +146,8 @@ fn buffer_to_chunk(buffer: &[u8], channels: usize, scalefactor: PrcFmt, bits: us
     let chunk = AudioChunk {
         channels: channels,
         frames: num_frames,
+        maxval: maxvalue,
+        minval: minvalue,
         waveforms: wfs,
     };
     chunk
@@ -199,7 +217,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
         };
         let format = self.format.clone();
         let handle = thread::spawn(move || {
-            let delay = time::Duration::from_millis((4*1000*bufferlength/samplerate) as u64);
+            //let delay = time::Duration::from_millis((4*1000*bufferlength/samplerate) as u64);
             match open_pulse(devname, samplerate as u32, bufferlength as i64, channels as u8, bits, false) {
                 Ok(pulsedevice) => {
                     match status_channel.send(StatusMessage::PlaybackReady) {
@@ -209,7 +227,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                     //let scalefactor = (1<<bits-1) as PrcFmt;
                     let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
                     barrier.wait();
-                    thread::sleep(delay);
+                    //thread::sleep(delay);
                     println!("starting playback loop");
                     match format {
                         SampleFormat::S16LE => {
@@ -275,6 +293,9 @@ impl CaptureDevice for PulseCaptureDevice {
             SampleFormat::S32LE => 32,
         };
         let format = self.format.clone();
+        let mut silence: PrcFmt = 10.0;
+        silence = silence.powf(self.silence_threshold/20.0);
+        let silent_limit = (self.silence_timeout * ((samplerate / bufferlength) as PrcFmt)) as usize;
         let handle = thread::spawn(move || {
             match open_pulse(devname, samplerate as u32, bufferlength as i64, channels as u8, bits, true) {
                 Ok(pulsedevice) => {
@@ -283,6 +304,7 @@ impl CaptureDevice for PulseCaptureDevice {
                         Err(_err) => {},
                     }
                     let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
+                    let mut silent_nbr: usize = 0;  
                     barrier.wait();
                     println!("starting captureloop");
                     match format {
@@ -299,10 +321,22 @@ impl CaptureDevice for PulseCaptureDevice {
                                 };
                                 //let before = Instant::now();
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor, bits);
-                                //let after = before.elapsed();
-                                //println!("buffer to chunk {} ns", after.as_nanos());
-                                let msg = AudioMessage::Audio(chunk);
-                                channel.send(msg).unwrap();
+                                if (chunk.maxval - chunk.minval) > silence {
+                                    if silent_nbr > silent_limit {
+                                        println!("Resuming processing");
+                                    }
+                                    silent_nbr = 0;
+                                }
+                                else if silent_limit > 0 {
+                                    if silent_nbr == silent_limit {
+                                        println!("Pausing processing");
+                                    }
+                                    silent_nbr += 1;
+                                }
+                                if silent_nbr <= silent_limit {
+                                    let msg = AudioMessage::Audio(chunk);
+                                    channel.send(msg).unwrap();
+                                }
                             }
                         },
                         SampleFormat::S24LE | SampleFormat::S32LE => {
@@ -316,8 +350,22 @@ impl CaptureDevice for PulseCaptureDevice {
                                     }
                                 };
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor, bits);
-                                let msg = AudioMessage::Audio(chunk);
-                                channel.send(msg).unwrap();
+                                if (chunk.maxval - chunk.minval) > silence {
+                                    if silent_nbr > silent_limit {
+                                        println!("Resuming processing");
+                                    }
+                                    silent_nbr = 0;
+                                }
+                                else if silent_limit > 0 {
+                                    if silent_nbr == silent_limit {
+                                        println!("Pausing processing");
+                                    }
+                                    silent_nbr += 1;
+                                }
+                                if silent_nbr <= silent_limit {
+                                    let msg = AudioMessage::Audio(chunk);
+                                    channel.send(msg).unwrap();
+                                }
                             }
                         },
                     };
