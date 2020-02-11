@@ -58,6 +58,10 @@ pub struct Device {
 pub struct Devices {
     pub samplerate: usize,
     pub buffersize: usize,
+    #[serde(default)]
+    pub silence_threshold: PrcFmt,
+    #[serde(default)]
+    pub silence_timeout: PrcFmt,
     pub capture: Device,
     pub playback: Device,
 }
