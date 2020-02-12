@@ -263,6 +263,9 @@ A Python script is included to view the configuration. This plots the transfer f
 ```
 python show_config.py /path/to/config.yml
 ```
+
+Example flowchart:
+
 ![Example](pipeline.png)
 
 Note that the script assumes a valid configuration file and will not give any helpful error messages if it's not, so it's a good idea to first use CamillaDSP to validate the file.
