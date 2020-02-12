@@ -259,10 +259,12 @@ pipeline:
 In this config first a mixer is used to copy a stereo input to four channels. Then for each channel a filter step is added. A filter block can contain one or several filters that must be define in the "Filters" section. Here channel 0 and 1 get filtered by "lowpass_fir" and "peak1", while 2 and 3 get filtered by just "highpass_fir". 
 
 ## Vislualizing the config
-A Python script is included to view the configuration. This plots the transfer functions of all included filters, as well as plots a flow chart of the entire processing pipeline. Run it with:
+A Python script is included to view the configuration. This plots the transfer functions of all included filters, as well as plots a flowchart of the entire processing pipeline. Run it with:
 ```
 python show_config.py /path/to/config.yml
 ```
+![Example](pipeline.png)
+
 Note that the script assumes a valid configuration file and will not give any helpful error messages if it's not, so it's a good idea to first use CamillaDSP to validate the file.
 The script requires the following:
 * Python 3

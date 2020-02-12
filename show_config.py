@@ -151,8 +151,14 @@ def draw_arrow(ax, p0, p1, label=None):
     x0, y0 = p0
     x1, y1 = p1
     ax.arrow(x0, y0, x1-x0, y1-y0, width=0.01, length_includes_head=True, head_width=0.1)
+    if y1 > y0:
+        hal = 'right'
+        val = 'bottom'
+    else:
+        hal = 'right'
+        val = 'top'
     if label is not None:
-        ax.text((x0+x1)/2, (y0+y1)/2, label, horizontalalignment='right', verticalalignment='bottom')
+        ax.text(x0+(x1-x0)*2/3, y0+(y1-y0)*2/3, label, horizontalalignment=hal, verticalalignment=val)
 
 def draw_box(ax, level, size, label=None):
     x0 = 2*level-0.75
