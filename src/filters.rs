@@ -50,7 +50,7 @@ impl FilterGroup {
                     Box::new(biquad::Biquad::new(biquad::BiquadCoefficients::from_config(sample_freq, parameters)))
                 },
                 config::Filter::Delay { parameters } => {
-                    Box::new(basicfilters::Delay::from_config(sample_freq, waveform_length, parameters))
+                    Box::new(basicfilters::Delay::from_config(sample_freq, parameters))
                 }
                 config::Filter::Gain { parameters } => {
                     Box::new(basicfilters::Gain::from_config(parameters))

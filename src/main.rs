@@ -25,6 +25,7 @@ mod pulsedevice;
 use audiodevice::*;
 mod config;
 mod mixer;
+mod fifoqueue;
 
 use std::fs::File;
 use std::io::BufReader;

@@ -1,5 +1,6 @@
 use crate::filters::Filter;
 use config;
+use fifoqueue::FifoQueue;
 
 use PrcFmt;
 use Res;
@@ -10,9 +11,7 @@ pub struct Gain {
 }
 
 pub struct Delay {
-    pub delay: usize,
-    pub buffer: Vec<PrcFmt>,
-    pub tempbuf: Vec<PrcFmt>,
+    pub queue: FifoQueue<PrcFmt>,
 }
 
 
@@ -48,34 +47,26 @@ impl Filter for Gain {
 impl Delay {
     /// Creates a delay filter with delay in samples
     /// Will be improved as it gets slow for long delays
-    pub fn new(delay: usize, datalength: usize) -> Self {
-        let buffer = vec![0.0; delay+datalength];
-        let tempbuf = vec![0.0; datalength];
+    pub fn new(delay: usize) -> Self {
+        let mut queue = FifoQueue::filled_with(delay+1, 0.0);
+        let _elem = queue.pop();
         Delay {
-            delay: delay,
-            buffer: buffer,
-            tempbuf: tempbuf,
+            queue: queue,
         }
     }
 
 
-    pub fn from_config(samplerate: usize, datalength: usize, conf: config::DelayParameters) -> Self {
+    pub fn from_config(samplerate: usize, conf: config::DelayParameters) -> Self {
         let delay_samples = (conf.delay/1000.0 * (samplerate as PrcFmt)) as usize;
-        Delay::new(delay_samples, datalength)
+        Delay::new(delay_samples)
     }
 }
 
 impl Filter for Delay {
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
         for n in 0..waveform.len() {
-            self.tempbuf[n] = waveform[n];
-            waveform[n] = self.buffer[n];
-        }
-        for n in 0..self.delay {
-            self.buffer[n] = self.buffer[n+waveform.len()];
-        }
-        for n in 0..waveform.len() {
-            self.buffer[n+self.delay] = self.tempbuf[n];
+            self.queue.push(waveform[n])?;
+            waveform[n] = self.queue.pop().unwrap();
         }
         Ok(())
     }
@@ -109,7 +100,7 @@ mod tests {
     fn delay_small() {
         let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let waveform_delayed = vec![0.0, 0.0, 0.0, 0.0, -0.5, 1.0, 0.0, 0.0];
-        let mut delay = Delay::new(3, 8);
+        let mut delay = Delay::new(3);
         delay.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_delayed);
     }
@@ -119,9 +110,10 @@ mod tests {
         let mut waveform1 = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let mut waveform2 = vec![0.0; 8];
         let waveform_delayed = vec![0.0, 0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0];
-        let mut delay = Delay::new(9, 8);
+        let mut delay = Delay::new(9);
         delay.process_waveform(&mut waveform1).unwrap();
         delay.process_waveform(&mut waveform2).unwrap();
+        assert_eq!(waveform1, vec![0.0; 8]);
         assert_eq!(waveform2, waveform_delayed);
     }
 
