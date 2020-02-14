@@ -379,3 +379,118 @@ impl CaptureDevice for PulseCaptureDevice {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use pulsedevice::{chunk_to_buffer, buffer_to_chunk};
+    use audiodevice::AudioChunk;
+    use crate::PrcFmt;
+
+    #[test]
+    fn to_from_buffer_16() {
+        let bits = 16;
+        let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
+        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
+        let chunk = AudioChunk {
+            frames: 3,
+            channels: 1,
+            maxval: 0.0,
+            minval: 0.0,
+            waveforms: waveforms.clone(),
+        };
+        let mut buffer = vec![0u8; 3*2];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
+        assert_eq!(waveforms[0], chunk2.waveforms[0]);
+    }
+
+    #[test]
+    fn to_from_buffer_24() {
+        let bits = 24;
+        let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
+        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
+        let chunk = AudioChunk {
+            frames: 3,
+            channels: 1,
+            maxval: 0.0,
+            minval: 0.0,
+            waveforms: waveforms.clone(),
+        };
+        let mut buffer = vec![0u8; 3*4];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
+        assert_eq!(waveforms[0], chunk2.waveforms[0]);
+    }
+
+    #[test]
+    fn to_from_buffer_32() {
+        let bits = 32;
+        let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
+        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
+        let chunk = AudioChunk {
+            frames: 3,
+            channels: 1,
+            maxval: 0.0,
+            minval: 0.0,
+            waveforms: waveforms.clone(),
+        };
+        let mut buffer = vec![0u8; 3*4];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
+        assert_eq!(waveforms[0], chunk2.waveforms[0]);
+    }
+
+    #[test]
+    fn clipping_16() {
+        let bits = 16;
+        let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
+        let waveforms = vec![vec![-1.0, 0.0, 32767.0/32768.0]; 1];
+        let chunk = AudioChunk {
+            frames: 3,
+            channels: 1,
+            maxval: 0.0,
+            minval: 0.0,
+            waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
+        };
+        let mut buffer = vec![0u8; 3*2];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
+        assert_eq!(waveforms[0], chunk2.waveforms[0]);
+    }
+
+    #[test]
+    fn clipping_24() {
+        let bits = 24;
+        let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
+        let waveforms = vec![vec![-1.0, 0.0, 8388607.0/8388608.0]; 1];
+        let chunk = AudioChunk {
+            frames: 3,
+            channels: 1,
+            maxval: 0.0,
+            minval: 0.0,
+            waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
+        };
+        let mut buffer = vec![0u8; 3*4];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
+        assert_eq!(waveforms[0], chunk2.waveforms[0]);
+    }
+
+    #[test]
+    fn clipping_32() {
+        let bits = 32;
+        let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
+        let waveforms = vec![vec![-1.0, 0.0, 2147483647.0/2147483648.0]; 1];
+        let chunk = AudioChunk {
+            frames: 3,
+            channels: 1,
+            maxval: 0.0,
+            minval: 0.0,
+            waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
+        };
+        let mut buffer = vec![0u8; 3*4];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
+        assert_eq!(waveforms[0], chunk2.waveforms[0]);
+    }
+}
