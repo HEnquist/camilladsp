@@ -152,7 +152,9 @@ pub enum PipelineStep {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Configuration {
     pub devices: Devices,
+    #[serde(default)]
     pub mixers: HashMap<String, Mixer>,
+    #[serde(default)]
     pub filters: HashMap<String, Filter>,
     pub pipeline: Vec<PipelineStep>,
 }
