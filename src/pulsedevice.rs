@@ -245,6 +245,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                             }
                                         };
                                     }
+                                    Ok(AudioMessage::EndOfStream) => {
+                                        status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                    }
                                     Err(_) => {}
                                 }
                             }
@@ -263,6 +266,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                                 status_channel.send(StatusMessage::PlaybackError{ message: format!("{}", msg) }).unwrap();
                                             }
                                         };    
+                                    }
+                                    Ok(AudioMessage::EndOfStream) => {
+                                        status_channel.send(StatusMessage::PlaybackDone).unwrap();
                                     }
                                     _ => {}
                                 }

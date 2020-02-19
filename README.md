@@ -81,11 +81,11 @@ pacmd list-sources
 # Configuration
 
 ## Devices
-Input and output devices are define in the same way. A device needs a type (Alsa or Pulse), number of channels, a device name, and a sample format. Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE). 
+Input and output devices are define in the same way. A device needs a type (Alsa, Pulse or File), number of channels, a device name (or file name for File), and a sample format. Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE). 
 There is also a common samplerate that decides the samplerate that everythng will run at. The buffersize is the number of samples each chunk will have per channel. 
 The fields silence_trheshold and silence_timeout are optional and used to pause processing if the input is silent. The threshold is the threshold level in dB, and the level is calculated as the difference between the minimum and maximum sample values for all channels in the capture buffer. 0 dB is full level. Some experimantation might be needed to find the right threshold.
 The timeout (in seconds) is for how long the signal should be silent before pausing pprocessing. Set this to zero, or leave it out, to never pause. 
-Example:
+Example config:
 ```
 devices:
   samplerate: 44100
@@ -103,6 +103,13 @@ devices:
     device: "hw:Generic_1"
     format: S32LE
 ```
+
+The File device type reads or writes to a file. The format is raw interleaved samples, 2 bytes per sample for 16-bit, and 4 bytes per sample for 24 and 32 bits. If the capture device reaches the end of a file, the program will exit once all chunks have been played. Note that delayed sound that would end up in a later chunk will be cut off. By setting the filename to ```/dev/stdin``` for capture, or ```/dev/stdout``` for playback, the sound will be written to or read from stdio, so one can play with pipes:
+```
+camilladsp stdio_capt.yml > rawfile.dat
+cat rawfile.dat | camilladsp stdio_pb.yml
+```
+
 
 ## Mixers
 A mixer is used to route audio between channels, and to increase or decrease the number of channels in the pipeline.

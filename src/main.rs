@@ -22,6 +22,7 @@ mod basicfilters;
 mod audiodevice;
 mod alsadevice;
 mod pulsedevice;
+mod filedevice;
 use audiodevice::*;
 mod config;
 mod mixer;
@@ -37,6 +38,8 @@ pub enum StatusMessage {
     CaptureReady,
     PlaybackError { message: String },
     CaptureError { message: String },
+    PlaybackDone,
+    CaptureDone,
 }
 
 fn run(conf: config::Configuration) -> Res<()> {
@@ -67,6 +70,10 @@ fn run(conf: config::Configuration) -> Res<()> {
                 Ok(AudioMessage::Audio(mut chunk)) => {
                     chunk = pipeline.process_chunk(chunk);
                     let msg = AudioMessage::Audio(chunk);
+                    tx_pb.send(msg).unwrap();
+                }
+                Ok(AudioMessage::EndOfStream) => {
+                    let msg = AudioMessage::EndOfStream;
                     tx_pb.send(msg).unwrap();
                 }
                 _ => {}
@@ -111,6 +118,13 @@ fn run(conf: config::Configuration) -> Res<()> {
                     StatusMessage::CaptureError{ message } => {
                         eprintln!("Capture error: {}", message);
                         return Ok(());
+                    }
+                    StatusMessage::PlaybackDone => {
+                        eprintln!("Playback finished");
+                        return Ok(());
+                    }
+                    StatusMessage::CaptureDone => {
+                        eprintln!("Capture finished");
                     }
                 }
             }

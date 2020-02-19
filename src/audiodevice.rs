@@ -3,6 +3,7 @@ use std::thread;
 use config;
 use alsadevice;
 use pulsedevice;
+use filedevice;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 
@@ -13,6 +14,7 @@ use StatusMessage;
 pub enum AudioMessage {
     //Quit,
     Audio(AudioChunk),
+    EndOfStream,
 }
 
 /// Main container of audio data
@@ -57,7 +59,13 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             })
         },
         config::Device::File {channels, filename, format} => {
-            panic!();
+            Box::new(filedevice::FilePlaybackDevice {
+                filename: filename, 
+                samplerate: conf.samplerate, 
+                bufferlength: conf.buffersize, 
+                channels: channels,
+                format: format,
+            })
         }
     }
 }
@@ -88,7 +96,15 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             })
         },
         config::Device::File {channels, filename, format} => {
-            panic!();
+            Box::new(filedevice::FileCaptureDevice {
+                filename: filename, 
+                samplerate: conf.samplerate, 
+                bufferlength: conf.buffersize, 
+                channels: channels,
+                format: format,
+                silence_threshold: conf.silence_threshold,
+                silence_timeout: conf.silence_timeout,
+            })
         }
     }
 }

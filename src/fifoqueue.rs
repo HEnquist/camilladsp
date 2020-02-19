@@ -8,6 +8,7 @@ pub struct FifoQueue<T> {
 }
 
 impl<T: Clone + Default> FifoQueue<T> {
+    #[allow(dead_code)]
     pub fn new(capacity: usize) -> FifoQueue<T> {
         let data: Vec<T> = vec![Default::default(); capacity];
         let index_oldest = 0;
@@ -60,10 +61,12 @@ impl<T: Clone + Default> FifoQueue<T> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn length(&self) -> usize {
         self.length
     }
 
+    #[allow(dead_code)]
     pub fn capacity(&self) -> usize {
         self.capacity
     }
