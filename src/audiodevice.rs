@@ -37,52 +37,58 @@ pub trait CaptureDevice {
 
 /// Create a playback device.
 pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
-    match conf.playback.r#type {
-        config::DeviceType::Alsa => {
+    match conf.playback {
+        config::Device::Alsa {channels, device, format} => {
             Box::new(alsadevice::AlsaPlaybackDevice {
-                devname: conf.playback.device, 
+                devname: device, 
                 samplerate: conf.samplerate, 
                 bufferlength: conf.buffersize, 
-                channels: conf.playback.channels,
-                format: conf.playback.format,
+                channels: channels,
+                format: format,
             })
         },
-        config::DeviceType::Pulse => {
+        config::Device::Pulse {channels, device, format} => {
             Box::new(pulsedevice::PulsePlaybackDevice {
-                devname: conf.playback.device, 
+                devname: device, 
                 samplerate: conf.samplerate, 
                 bufferlength: conf.buffersize, 
-                channels: conf.playback.channels,
-                format: conf.playback.format,
+                channels: channels,
+                format: format,
             })
         },
+        config::Device::File {channels, filename, format} => {
+            panic!();
+        }
     }
 }
 
 /// Create a capture device. Currently only Alsa is supported.
 pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
-    match conf.capture.r#type {
-        config::DeviceType::Alsa => {
+    match conf.capture {
+        config::Device::Alsa {channels, device, format} => {
             Box::new(alsadevice::AlsaCaptureDevice {
-                devname: conf.capture.device, 
+                devname: device, 
                 samplerate: conf.samplerate, 
                 bufferlength: conf.buffersize, 
-                channels: conf.capture.channels,
-                format: conf.capture.format,
+                channels: channels,
+                format: format,
                 silence_threshold: conf.silence_threshold,
                 silence_timeout: conf.silence_timeout,
             })
         },
-        config::DeviceType::Pulse => {
+        config::Device::Pulse {channels, device, format} => {
             Box::new(pulsedevice::PulseCaptureDevice {
-                devname: conf.capture.device, 
+                devname: device, 
                 samplerate: conf.samplerate, 
                 bufferlength: conf.buffersize, 
-                channels: conf.capture.channels,
-                format: conf.capture.format,
+                channels: channels,
+                format: format,
                 silence_threshold: conf.silence_threshold,
                 silence_timeout: conf.silence_timeout,
             })
         },
+        config::Device::File {channels, filename, format} => {
+            panic!();
+        }
     }
 }

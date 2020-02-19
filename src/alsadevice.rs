@@ -64,7 +64,7 @@ fn chunk_to_buffer<T: num_traits::cast::NumCast>(chunk: AudioChunk, buf: &mut [T
             value = match num_traits::cast(float_val*scalefactor) {
                 Some(val) => val,
                 None => {
-                    println!("bad {}", float_val);
+                    eprintln!("bad {}", float_val);
                     num_traits::cast(0.0).unwrap()
                 }
             };
@@ -73,7 +73,7 @@ fn chunk_to_buffer<T: num_traits::cast::NumCast>(chunk: AudioChunk, buf: &mut [T
         }
     }
     if clipped > 0 {
-        println!("Clipping detected, {} samples clipped, peak {}%", clipped, peak*100.0);
+        eprintln!("Clipping detected, {} samples clipped, peak {}%", clipped, peak*100.0);
     }
     //buf
 }
@@ -122,15 +122,15 @@ fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(buffer: &[T], chann
 /// Play a buffer.
 fn play_buffer<T: std::marker::Copy>(buffer: &[T], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<T>) -> Res<()> {
     let playback_state = pcmdevice.state();
-    //println!("playback state {:?}", playback_state);
+    //eprintln!("playback state {:?}", playback_state);
     if playback_state == State::XRun {
-        println!("Prepare playback");
+        eprintln!("Prepare playback");
         pcmdevice.prepare()?;
     }
     let _frames = match io.writei(&buffer[..]) {
         Ok(frames) => frames,
         Err(_err) => {
-            println!("retrying playback");
+            eprintln!("retrying playback");
             pcmdevice.prepare()?;
             io.writei(&buffer[..])?
         },
@@ -142,13 +142,13 @@ fn play_buffer<T: std::marker::Copy>(buffer: &[T], pcmdevice: &alsa::PCM, io: &a
 fn capture_buffer<T: std::marker::Copy>(buffer: &mut [T], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<T>) -> Res<()> {
     let capture_state = pcmdevice.state();
     if capture_state == State::XRun {
-        println!("prepare capture");
+        eprintln!("prepare capture");
         pcmdevice.prepare()?;
     }
     let _frames = match io.readi(buffer) {
         Ok(frames) => frames,
         Err(_err) => {
-            println!("retrying capture");
+            eprintln!("retrying capture");
             pcmdevice.prepare()?;
             io.readi(buffer)?
         },
@@ -193,7 +193,7 @@ fn open_pcm(devname: String, samplerate: u32, bufsize: i64, channels: u32, bits:
         swp.set_start_threshold(act_bufsize - act_periodsize)?;
         //swp.set_avail_min(periodsize)?;
         pcmdev.sw_params(&swp)?;
-        //println!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
+        //eprintln!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
         (hwp.get_rate()?, act_bufsize) 
     };
     Ok(pcmdev)
@@ -224,7 +224,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
                     barrier.wait();
                     //thread::sleep(delay);
-                    println!("starting playback loop");
+                    eprintln!("starting playback loop");
                     match format {
                         SampleFormat::S16LE => {
                             let io = pcmdevice.io_i16().unwrap();
@@ -303,7 +303,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                     let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
                     let mut silent_nbr: usize = 0;
                     barrier.wait();
-                    println!("starting captureloop");
+                    eprintln!("starting captureloop");
                     match format {
                         SampleFormat::S16LE => {
                             let io = pcmdevice.io_i16().unwrap();
@@ -319,13 +319,13 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor);
                                 if (chunk.maxval - chunk.minval) > silence {
                                     if silent_nbr > silent_limit {
-                                        println!("Resuming processing");
+                                        eprintln!("Resuming processing");
                                     }
                                     silent_nbr = 0;
                                 }
                                 else if silent_limit > 0 {
                                     if silent_nbr == silent_limit {
-                                        println!("Pausing processing");
+                                        eprintln!("Pausing processing");
                                     }
                                     silent_nbr += 1;
                                 }
@@ -349,13 +349,13 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor);
                                 if (chunk.maxval - chunk.minval) > silence {
                                     if silent_nbr > silent_limit {
-                                        println!("Resuming processing");
+                                        eprintln!("Resuming processing");
                                     }
                                     silent_nbr = 0;
                                 }
                                 else if silent_limit > 0 {
                                     if silent_nbr == silent_limit {
-                                        println!("Pausing processing");
+                                        eprintln!("Pausing processing");
                                     }
                                     silent_nbr += 1;
                                 }

@@ -34,12 +34,6 @@ impl ConfigError {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub enum DeviceType {
-    Alsa,
-    Pulse,
-}
-
-#[derive(Clone, Debug, Deserialize)]
 pub enum SampleFormat {
     S16LE,
     S24LE,
@@ -47,11 +41,11 @@ pub enum SampleFormat {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct Device {
-    pub r#type: DeviceType,
-    pub channels: usize,
-    pub device: String,
-    pub format: SampleFormat,
+#[serde(tag = "type")]
+pub enum Device {
+    Alsa { channels: usize, device: String, format: SampleFormat },
+    Pulse { channels: usize, device: String, format: SampleFormat },
+    File { channels: usize, filename: String, format: SampleFormat },
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -156,13 +150,18 @@ pub struct Configuration {
     pub mixers: HashMap<String, Mixer>,
     #[serde(default)]
     pub filters: HashMap<String, Filter>,
+    #[serde(default)]
     pub pipeline: Vec<PipelineStep>,
 }
 
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
-    let mut num_channels = conf.devices.capture.channels;
+    let mut num_channels = match conf.devices.capture {
+        Device::Alsa {channels, device: _, format: _} => channels,
+        Device::Pulse {channels, device: _, format: _} => channels,
+        Device::File {channels, filename: _, format: _} => channels,
+    };
     for step in conf.pipeline {
         match step {
             PipelineStep::Mixer { name } => {
@@ -190,8 +189,13 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
             },
         }
     }
-    if num_channels != conf.devices.playback.channels {
-        return Err(Box::new(ConfigError::new(&format!("Pipeline outputs {} channels, playback device has {}.", num_channels, conf.devices.playback.channels))));
+    let num_channels_out = match conf.devices.playback {
+        Device::Alsa {channels, device: _, format: _} => channels,
+        Device::Pulse {channels, device: _, format: _} => channels,
+        Device::File {channels, filename: _, format: _} => channels,
+    };
+    if num_channels != num_channels_out {
+        return Err(Box::new(ConfigError::new(&format!("Pipeline outputs {} channels, playback device has {}.", num_channels, num_channels_out))));
     }
     Ok(())
 }

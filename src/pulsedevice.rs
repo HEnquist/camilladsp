@@ -86,7 +86,7 @@ fn chunk_to_buffer(chunk: AudioChunk, buf: &mut [u8], scalefactor: PrcFmt, bits:
         }
     }
     if clipped > 0 {
-        println!("Clipping detected, {} samples clipped, peak {}%", clipped, peak*100.0);
+        eprintln!("Clipping detected, {} samples clipped, peak {}%", clipped, peak*100.0);
     }
     //buf
 }
@@ -228,7 +228,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                     let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
                     barrier.wait();
                     //thread::sleep(delay);
-                    println!("starting playback loop");
+                    eprintln!("starting playback loop");
                     match format {
                         SampleFormat::S16LE => {
                             let mut buffer = vec![0u8; bufferlength*channels*2];
@@ -306,7 +306,7 @@ impl CaptureDevice for PulseCaptureDevice {
                     let scalefactor = (2.0 as PrcFmt).powf((bits-1) as PrcFmt);
                     let mut silent_nbr: usize = 0;  
                     barrier.wait();
-                    println!("starting captureloop");
+                    eprintln!("starting captureloop");
                     match format {
                         SampleFormat::S16LE => {
                             let mut buf = vec![0u8; channels*bufferlength*2];
@@ -323,13 +323,13 @@ impl CaptureDevice for PulseCaptureDevice {
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor, bits);
                                 if (chunk.maxval - chunk.minval) > silence {
                                     if silent_nbr > silent_limit {
-                                        println!("Resuming processing");
+                                        eprintln!("Resuming processing");
                                     }
                                     silent_nbr = 0;
                                 }
                                 else if silent_limit > 0 {
                                     if silent_nbr == silent_limit {
-                                        println!("Pausing processing");
+                                        eprintln!("Pausing processing");
                                     }
                                     silent_nbr += 1;
                                 }
@@ -352,13 +352,13 @@ impl CaptureDevice for PulseCaptureDevice {
                                 let chunk = buffer_to_chunk(&buf, channels, scalefactor, bits);
                                 if (chunk.maxval - chunk.minval) > silence {
                                     if silent_nbr > silent_limit {
-                                        println!("Resuming processing");
+                                        eprintln!("Resuming processing");
                                     }
                                     silent_nbr = 0;
                                 }
                                 else if silent_limit > 0 {
                                     if silent_nbr == silent_limit {
-                                        println!("Pausing processing");
+                                        eprintln!("Pausing processing");
                                     }
                                     silent_nbr += 1;
                                 }

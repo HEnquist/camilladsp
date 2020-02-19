@@ -60,7 +60,7 @@ fn run(conf: config::Configuration) -> Res<()> {
     // Processing thread
     thread::spawn(move || {
         let mut pipeline = filters::Pipeline::from_config(conf_proc);
-        println!("build filters, waiting to start processing loop");
+        eprintln!("build filters, waiting to start processing loop");
         barrier_proc.wait();
         loop {
             match rx_cap.recv() {
@@ -105,11 +105,11 @@ fn run(conf: config::Configuration) -> Res<()> {
                         }
                     }
                     StatusMessage::PlaybackError { message } => {
-                        println!("Playback error: {}", message);
+                        eprintln!("Playback error: {}", message);
                         return Ok(());
                     }
                     StatusMessage::CaptureError{ message } => {
-                        println!("Capture error: {}", message);
+                        eprintln!("Capture error: {}", message);
                         return Ok(());
                     }
                 }
@@ -123,14 +123,14 @@ fn run(conf: config::Configuration) -> Res<()> {
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        println!("No config file given!");
+        eprintln!("No config file given!");
         return ()
     }
     let configname = &args[1];
     let file = match File::open(configname) {
         Ok(f) => f,
         Err(_) => {
-            println!("Could not open config file!");
+            eprintln!("Could not open config file!");
             return ()
         },
     };
@@ -139,15 +139,15 @@ fn main() {
     let _number_of_bytes: usize = match buffered_reader.read_to_string(&mut contents) {
         Ok(number_of_bytes) => number_of_bytes,
         Err(_err) => {
-            println!("Could not read config file!");
+            eprintln!("Could not read config file!");
             return ()
         },
     };
     let configuration: config::Configuration = match serde_yaml::from_str(&contents) {
         Ok(config) => config,
         Err(err) => {
-            println!("Invalid config file!");
-            println!("{}", err);
+            eprintln!("Invalid config file!");
+            eprintln!("{}", err);
             return ()
         },
     };
@@ -155,10 +155,10 @@ fn main() {
     match config::validate_config(configuration.clone()) {
         Ok(()) => {},
         Err(err) => {
-            println!("Invalid config file!");
-            println!("{}", err);
+            eprintln!("Invalid config file!");
+            eprintln!("{}", err);
             return ()
         },
     }
-    if let Err(e) = run(configuration) { println!("Error ({}) {}", e.description(), e); }
+    if let Err(e) = run(configuration) { eprintln!("Error ({}) {}", e.description(), e); }
 }

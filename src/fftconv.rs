@@ -36,7 +36,7 @@ impl FFTConv {
         let ifft = Radix4::new(2*data_length, true);
 
         if coeffs.len() > data_length {
-            println!("Warning! Filter impulse response is longer than buffer and will be truncated.")
+            eprintln!("Warning! Filter impulse response is longer than buffer and will be truncated.")
         }
         for n in 0..coeffs.len() {
             coeffs_c[n] = Complex::from(coeffs[n]/(2 as PrcFmt * data_length as PrcFmt));
