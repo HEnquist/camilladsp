@@ -11,6 +11,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
+      - name: Update package list
+        run: apt-get update
+
       - name: Install utils
         run: apt-get install curl wget
 
@@ -37,6 +40,9 @@ jobs:
     runs-on: ubuntu-latest
     container: ubuntu:19.10
     steps:
+      - name: Update package list
+        run: apt-get update
+          
       - name: Install utils
         run: apt-get install curl wget
 
@@ -68,6 +74,9 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2'
+
+      - name: Update package list
+        run: apt-get update
 
       - name: Install utils
         run: apt-get install curl wget
