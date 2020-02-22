@@ -34,11 +34,10 @@ impl<T: Clone + Default> FifoQueue<T> {
     pub fn push(&mut self, value: T) -> Result<(), &str> {
         if self.length == self.capacity {
             Err("The queue is full")
-        }
-        else {
+        } else {
             let mut new_index = self.index_oldest + self.length;
             if new_index >= self.capacity {
-                new_index = new_index-self.capacity;
+                new_index = new_index - self.capacity;
             }
             self.data[new_index] = value;
             self.length += 1;
@@ -55,8 +54,7 @@ impl<T: Clone + Default> FifoQueue<T> {
             }
             self.length -= 1;
             Some(value)
-        }
-        else {
+        } else {
             None
         }
     }
@@ -72,11 +70,10 @@ impl<T: Clone + Default> FifoQueue<T> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use fifoqueue::FifoQueue;
- 
+
     #[test]
     fn make_empty() {
         let q: FifoQueue<usize> = FifoQueue::new(5);

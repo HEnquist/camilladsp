@@ -32,7 +32,14 @@ impl BiquadCoefficients {
         }
     }
 
-    pub fn normalize(a0: PrcFmt, a1: PrcFmt, a2: PrcFmt, b0: PrcFmt, b1: PrcFmt, b2: PrcFmt) -> Self {
+    pub fn normalize(
+        a0: PrcFmt,
+        a1: PrcFmt,
+        a2: PrcFmt,
+        b0: PrcFmt,
+        b1: PrcFmt,
+        b2: PrcFmt,
+    ) -> Self {
         let a1n = a1 / a0;
         let a2n = a2 / a0;
         let b0n = b0 / a0;
@@ -54,16 +61,16 @@ impl BiquadCoefficients {
     /// - Highpass: second order highpass specified by frequency and Q-value.
     /// - Lowpass: second order lowpass specified by frequency and Q-value.
     /// - Peaking: parametric peaking filter specified by gain, frequency and Q-value.
-    /// - Highshelf: shelving filter affecting high frequencies with arbitrary slope in between. 
+    /// - Highshelf: shelving filter affecting high frequencies with arbitrary slope in between.
     ///   The frequency specified is the middle of the slope
-    /// - Lowshelf: shelving filter affecting low frequencies with arbitrary slope in between. 
+    /// - Lowshelf: shelving filter affecting low frequencies with arbitrary slope in between.
     ///   The frequency specified is the middle of the slope
     pub fn from_config(fs: usize, parameters: config::BiquadParameters) -> Self {
         match parameters {
-            config::BiquadParameters::Free {a1, a2, b0, b1, b2} => {
+            config::BiquadParameters::Free { a1, a2, b0, b1, b2 } => {
                 BiquadCoefficients::new(a1, a2, b0, b1, b2)
             }
-            config::BiquadParameters::Highpass { freq, q} => {
+            config::BiquadParameters::Highpass { freq, q } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -89,7 +96,7 @@ impl BiquadCoefficients {
                 let a2 = 1.0 - alpha;
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
-            config::BiquadParameters::Peaking { freq, gain, q} => {
+            config::BiquadParameters::Peaking { freq, gain, q } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -104,12 +111,13 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
 
-            config::BiquadParameters::Highshelf { freq, slope, gain} => {
+            config::BiquadParameters::Highshelf { freq, slope, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
                 let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
-                let alpha = sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope/12.0) - 1.0) + 2.0).sqrt();
+                let alpha =
+                    sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope / 12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
                 let b0 = ampl * ((ampl + 1.0) + (ampl - 1.0) * cs + beta);
                 let b1 = -2.0 * ampl * ((ampl - 1.0) + (ampl + 1.0) * cs);
@@ -119,12 +127,13 @@ impl BiquadCoefficients {
                 let a2 = (ampl + 1.0) - (ampl - 1.0) * cs - beta;
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
-            config::BiquadParameters::Lowshelf  { freq, slope, gain} => {
+            config::BiquadParameters::Lowshelf { freq, slope, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
                 let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
-                let alpha = sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope/12.0) - 1.0) + 2.0).sqrt();
+                let alpha =
+                    sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope / 12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
                 let b0 = ampl * ((ampl + 1.0) - (ampl - 1.0) * cs + beta);
                 let b1 = 2.0 * ampl * ((ampl - 1.0) - (ampl + 1.0) * cs);
@@ -134,9 +143,7 @@ impl BiquadCoefficients {
                 let a2 = (ampl + 1.0) + (ampl - 1.0) * cs - beta;
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
-                
         }
-    
     }
 }
 
@@ -146,7 +153,6 @@ pub struct Biquad {
     pub s2: PrcFmt,
     coeffs: BiquadCoefficients,
 }
-
 
 impl Biquad {
     /// Creates a Direct Form 2 Transposed biquad filter from a set of coefficients
@@ -166,7 +172,6 @@ impl Biquad {
         out
     }
 }
-
 
 impl Filter for Biquad {
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {

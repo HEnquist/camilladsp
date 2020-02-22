@@ -1,17 +1,16 @@
-use std::io::BufReader;
-use std::io::BufRead;
-use std::fs::File;
-use std::collections::HashMap;
-use config;
 use audiodevice::AudioChunk;
-use fftconv;
-use biquad;
-use mixer;
 use basicfilters;
+use biquad;
+use config;
+use fftconv;
+use mixer;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufRead;
+use std::io::BufReader;
 
-use Res;
 use PrcFmt;
-
+use Res;
 
 pub trait Filter {
     // Filter a Vec
@@ -24,12 +23,10 @@ pub fn read_coeff_file(filename: &str) -> Res<Vec<PrcFmt>> {
     let file = BufReader::new(&f);
     for line in file.lines() {
         let l = line?;
-        coefficients.push(l.trim().parse()?);       
+        coefficients.push(l.trim().parse()?);
     }
     Ok(coefficients)
 }
-
-
 
 pub struct FilterGroup {
     channel: usize,
@@ -38,24 +35,29 @@ pub struct FilterGroup {
 
 impl FilterGroup {
     /// Creates a group of filters to process a chunk.
-    pub fn from_config(channel: usize, names: Vec<String>, filter_configs: HashMap<String, config::Filter>, waveform_length: usize, sample_freq: usize) -> Self {
+    pub fn from_config(
+        channel: usize,
+        names: Vec<String>,
+        filter_configs: HashMap<String, config::Filter>,
+        waveform_length: usize,
+        sample_freq: usize,
+    ) -> Self {
         let mut filters = Vec::<Box<dyn Filter>>::new();
         for name in names {
             let filter_cfg = filter_configs[&name].clone();
             let filter: Box<dyn Filter> = match filter_cfg {
-                config::Filter::Conv{ parameters } => {
+                config::Filter::Conv { parameters } => {
                     Box::new(fftconv::FFTConv::from_config(waveform_length, parameters))
-                },
-                config::Filter::Biquad{ parameters } => {
-                    Box::new(biquad::Biquad::new(biquad::BiquadCoefficients::from_config(sample_freq, parameters)))
-                },
+                }
+                config::Filter::Biquad { parameters } => Box::new(biquad::Biquad::new(
+                    biquad::BiquadCoefficients::from_config(sample_freq, parameters),
+                )),
                 config::Filter::Delay { parameters } => {
                     Box::new(basicfilters::Delay::from_config(sample_freq, parameters))
                 }
                 config::Filter::Gain { parameters } => {
                     Box::new(basicfilters::Gain::from_config(parameters))
-                }
-                //_ => panic!("unknown type")
+                } //_ => panic!("unknown type")
             };
             filters.push(filter);
         }
@@ -63,7 +65,6 @@ impl FilterGroup {
             channel: channel,
             filters: filters,
         }
-
     }
 
     /// Apply all the filters to an AudioChunk.
@@ -92,20 +93,24 @@ impl Pipeline {
         let mut steps = Vec::<PipelineStep>::new();
         for step in conf.pipeline {
             match step {
-                config::PipelineStep::Mixer{name} => {
+                config::PipelineStep::Mixer { name } => {
                     let mixconf = conf.mixers[&name].clone();
                     let mixer = mixer::Mixer::from_config(mixconf);
                     steps.push(PipelineStep::MixerStep(mixer));
                 }
-                config::PipelineStep::Filter{channel, names} => {
-                    let fltgrp = FilterGroup::from_config(channel, names, conf.filters.clone(), conf.devices.buffersize, conf.devices.samplerate);
+                config::PipelineStep::Filter { channel, names } => {
+                    let fltgrp = FilterGroup::from_config(
+                        channel,
+                        names,
+                        conf.filters.clone(),
+                        conf.devices.buffersize,
+                        conf.devices.samplerate,
+                    );
                     steps.push(PipelineStep::FilterStep(fltgrp));
                 }
             }
         }
-        Pipeline {
-            steps: steps,
-        }
+        Pipeline { steps: steps }
     }
 
     /// Process an AudioChunk by calling either a MixerStep or a FilterStep
@@ -124,25 +129,20 @@ impl Pipeline {
     }
 }
 
-/// Validate the filter config, to give a helpful message intead of a panic. 
+/// Validate the filter config, to give a helpful message intead of a panic.
 pub fn validate_filter(filter_config: &config::Filter) -> Res<()> {
     let res = match filter_config {
-        config::Filter::Conv{ parameters } => {
-            fftconv::validate_config(&parameters)
-        },
-        config::Filter::Biquad{ parameters: _ } => {
-            Ok(())
-        },
+        config::Filter::Conv { parameters } => fftconv::validate_config(&parameters),
+        config::Filter::Biquad { parameters: _ } => Ok(()),
         config::Filter::Delay { parameters } => {
             if parameters.delay < 0.0 {
-                return Err(Box::new(config::ConfigError::new("Negative delay specified")));
+                return Err(Box::new(config::ConfigError::new(
+                    "Negative delay specified",
+                )));
             }
             Ok(())
         }
-        config::Filter::Gain { parameters: _ } => {
-            Ok(())
-        }
-        //_ => panic!("unknown type")
+        config::Filter::Gain { parameters: _ } => Ok(()), //_ => panic!("unknown type")
     };
     res
 }
