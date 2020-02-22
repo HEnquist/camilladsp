@@ -189,20 +189,11 @@ pub struct Configuration {
 pub fn validate_config(conf: Configuration) -> Res<()> {
     let mut num_channels = match conf.devices.capture {
         Device::Alsa {
-            channels,
-            device: _,
-            format: _,
-        } => channels,
+            channels, .. } => channels,
         Device::Pulse {
-            channels,
-            device: _,
-            format: _,
-        } => channels,
+            channels, .. } => channels,
         Device::File {
-            channels,
-            filename: _,
-            format: _,
-        } => channels,
+            channels, .. } => channels,
     };
     for step in conf.pipeline {
         match step {
@@ -237,27 +228,15 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
                             name
                         ))));
                     }
-                    let _ = filters::validate_filter(&conf.filters.get(&name).unwrap())?;
+                    filters::validate_filter(&conf.filters.get(&name).unwrap())?;
                 }
             }
         }
     }
     let num_channels_out = match conf.devices.playback {
-        Device::Alsa {
-            channels,
-            device: _,
-            format: _,
-        } => channels,
-        Device::Pulse {
-            channels,
-            device: _,
-            format: _,
-        } => channels,
-        Device::File {
-            channels,
-            filename: _,
-            format: _,
-        } => channels,
+        Device::Alsa { channels, .. } => channels,
+        Device::Pulse { channels, .. } => channels,
+        Device::File { channels, .. } => channels,
     };
     if num_channels != num_channels_out {
         return Err(Box::new(ConfigError::new(&format!(

@@ -22,7 +22,7 @@ impl Gain {
         if inverted {
             gain = -gain;
         }
-        Gain { gain: gain }
+        Gain { gain }
     }
 
     pub fn from_config(conf: config::GainParameters) -> Self {
@@ -34,8 +34,8 @@ impl Gain {
 
 impl Filter for Gain {
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
-        for n in 0..waveform.len() {
-            waveform[n] = self.gain * waveform[n];
+        for item in waveform.iter_mut() {
+            *item *= self.gain;
         }
         Ok(())
     }
@@ -47,7 +47,7 @@ impl Delay {
     pub fn new(delay: usize) -> Self {
         let mut queue = FifoQueue::filled_with(delay + 1, 0.0);
         let _elem = queue.pop();
-        Delay { queue: queue }
+        Delay { queue }
     }
 
     pub fn from_config(samplerate: usize, conf: config::DelayParameters) -> Self {
@@ -58,9 +58,9 @@ impl Delay {
 
 impl Filter for Delay {
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
-        for n in 0..waveform.len() {
-            self.queue.push(waveform[n])?;
-            waveform[n] = self.queue.pop().unwrap();
+        for item in waveform.iter_mut() {
+            self.queue.push(*item)?;
+            *item = self.queue.pop().unwrap();
         }
         Ok(())
     }

@@ -23,7 +23,7 @@ pub struct FFTConv {
 
 impl FFTConv {
     /// Create a new FFT colvolution filter.
-    pub fn new(data_length: usize, coeffs: &Vec<PrcFmt>) -> Self {
+    pub fn new(data_length: usize, coeffs: &[PrcFmt]) -> Self {
         let input_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
         let temp_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
         let output_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
@@ -38,18 +38,18 @@ impl FFTConv {
             )
         }
         for n in 0..coeffs.len() {
-            coeffs_c[n] = Complex::from(coeffs[n] / (2 as PrcFmt * data_length as PrcFmt));
+            coeffs_c[n] = Complex::from(coeffs[n] / (2.0 * data_length as PrcFmt));
         }
         fft.process(&mut coeffs_c, &mut coeffs_f);
         FFTConv {
             npoints: data_length,
             overlap: vec![0.0; data_length],
-            coeffs_f: coeffs_f,
+            coeffs_f,
             fft: Box::new(fft),
             ifft: Box::new(ifft),
-            input_buf: input_buf,
-            output_buf: output_buf,
-            temp_buf: temp_buf,
+            input_buf,
+            output_buf,
+            temp_buf,
         }
     }
 
@@ -67,8 +67,9 @@ impl FFTConv {
 impl Filter for FFTConv {
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
-        for n in 0..self.npoints {
-            self.input_buf[n] = Complex::<PrcFmt>::from(waveform[n]);
+        //for n in 0..self.npoints {
+        for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
+            self.input_buf[n] = Complex::<PrcFmt>::from(*item);
             //self.input_buf[n+self.npoints] = Complex::zero();
         }
         self.fft.process(&mut self.input_buf, &mut self.output_buf);
@@ -77,8 +78,8 @@ impl Filter for FFTConv {
         }
         self.ifft.process(&mut self.temp_buf, &mut self.output_buf);
         //let mut filtered: Vec<PrcFmt> = vec![0.0; self.npoints];
-        for n in 0..self.npoints {
-            waveform[n] = self.output_buf[n].re + self.overlap[n];
+        for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
+            *item = self.output_buf[n].re + self.overlap[n];
             self.overlap[n] = self.output_buf[n + self.npoints].re;
         }
         Ok(())
@@ -88,7 +89,7 @@ impl Filter for FFTConv {
 /// Validate a FFT convolution config.
 pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {
-        config::ConvParameters::Values { values: _ } => Ok(()),
+        config::ConvParameters::Values { .. } => Ok(()),
         config::ConvParameters::File { filename } => {
             let _ = filters::read_coeff_file(&filename)?;
             Ok(())

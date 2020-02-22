@@ -132,14 +132,14 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("No config file given!");
-        return ();
+        return;
     }
     let configname = &args[1];
     let file = match File::open(configname) {
         Ok(f) => f,
         Err(_) => {
             eprintln!("Could not open config file!");
-            return ();
+            return;
         }
     };
     let mut buffered_reader = BufReader::new(file);
@@ -148,7 +148,7 @@ fn main() {
         Ok(number_of_bytes) => number_of_bytes,
         Err(_err) => {
             eprintln!("Could not read config file!");
-            return ();
+            return;
         }
     };
     let configuration: config::Configuration = match serde_yaml::from_str(&contents) {
@@ -156,7 +156,7 @@ fn main() {
         Err(err) => {
             eprintln!("Invalid config file!");
             eprintln!("{}", err);
-            return ();
+            return;
         }
     };
 
@@ -165,7 +165,7 @@ fn main() {
         Err(err) => {
             eprintln!("Invalid config file!");
             eprintln!("{}", err);
-            return ();
+            return;
         }
     }
     if let Err(e) = run(configuration) {

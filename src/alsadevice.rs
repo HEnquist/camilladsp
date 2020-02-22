@@ -38,7 +38,7 @@ fn chunk_to_buffer<T: num_traits::cast::NumCast>(
     chunk: AudioChunk,
     buf: &mut [T],
     scalefactor: PrcFmt,
-) -> () {
+) {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
     let mut value: T;
@@ -103,10 +103,10 @@ fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(
     //let mut samples = buffer.iter();
     let mut idx = 0;
     for _frame in 0..num_frames {
-        for chan in 0..channels {
+        for wf in wfs.iter_mut().take(channels) { 
             value = buffer[idx].as_();
             idx += 1;
-            value = value / scalefactor;
+            value /= scalefactor;
             if value > maxvalue {
                 maxvalue = value;
             }
@@ -114,18 +114,17 @@ fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(
                 minvalue = value;
             }
             //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
-            wfs[chan].push(value);
+            wf.push(value);
             //idx += 1;
         }
     }
-    let chunk = AudioChunk {
-        channels: channels,
+    AudioChunk {
+        channels,
         frames: num_frames,
         maxval: maxvalue,
         minval: minvalue,
         waveforms: wfs,
-    };
-    chunk
+    }
 }
 
 /// Play a buffer.
@@ -230,9 +229,9 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         status_channel: mpsc::Sender<StatusMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
-        let samplerate = self.samplerate.clone();
-        let bufferlength = self.bufferlength.clone();
-        let channels = self.channels.clone();
+        let samplerate = self.samplerate;
+        let bufferlength = self.bufferlength;
+        let channels = self.channels;
         let bits = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
@@ -336,9 +335,9 @@ impl CaptureDevice for AlsaCaptureDevice {
         status_channel: mpsc::Sender<StatusMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
-        let samplerate = self.samplerate.clone();
-        let bufferlength = self.bufferlength.clone();
-        let channels = self.channels.clone();
+        let samplerate = self.samplerate;
+        let bufferlength = self.bufferlength;
+        let channels = self.channels;
         let bits = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,

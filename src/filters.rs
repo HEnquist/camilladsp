@@ -62,8 +62,8 @@ impl FilterGroup {
             filters.push(filter);
         }
         FilterGroup {
-            channel: channel,
-            filters: filters,
+            channel,
+            filters,
         }
     }
 
@@ -110,7 +110,7 @@ impl Pipeline {
                 }
             }
         }
-        Pipeline { steps: steps }
+        Pipeline { steps }
     }
 
     /// Process an AudioChunk by calling either a MixerStep or a FilterStep
@@ -131,9 +131,9 @@ impl Pipeline {
 
 /// Validate the filter config, to give a helpful message intead of a panic.
 pub fn validate_filter(filter_config: &config::Filter) -> Res<()> {
-    let res = match filter_config {
+    match filter_config {
         config::Filter::Conv { parameters } => fftconv::validate_config(&parameters),
-        config::Filter::Biquad { parameters: _ } => Ok(()),
+        config::Filter::Biquad { .. } => Ok(()),
         config::Filter::Delay { parameters } => {
             if parameters.delay < 0.0 {
                 return Err(Box::new(config::ConfigError::new(
@@ -142,7 +142,6 @@ pub fn validate_filter(filter_config: &config::Filter) -> Res<()> {
             }
             Ok(())
         }
-        config::Filter::Gain { parameters: _ } => Ok(()), //_ => panic!("unknown type")
-    };
-    res
+        config::Filter::Gain { .. } => Ok(()), //_ => panic!("unknown type")
+    }
 }

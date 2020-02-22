@@ -13,10 +13,10 @@ impl<T: Clone + Default> FifoQueue<T> {
         let data: Vec<T> = vec![Default::default(); capacity];
         let index_oldest = 0;
         FifoQueue {
-            index_oldest: index_oldest,
+            index_oldest,
             length: 0,
-            capacity: capacity,
-            data: data,
+            capacity,
+            data,
         }
     }
 
@@ -24,10 +24,10 @@ impl<T: Clone + Default> FifoQueue<T> {
         let data: Vec<T> = vec![value; capacity];
         let index_oldest = 0;
         FifoQueue {
-            index_oldest: index_oldest,
+            index_oldest,
             length: capacity,
-            capacity: capacity,
-            data: data,
+            capacity,
+            data,
         }
     }
 
@@ -37,7 +37,7 @@ impl<T: Clone + Default> FifoQueue<T> {
         } else {
             let mut new_index = self.index_oldest + self.length;
             if new_index >= self.capacity {
-                new_index = new_index - self.capacity;
+                new_index -= self.capacity;
             }
             self.data[new_index] = value;
             self.length += 1;

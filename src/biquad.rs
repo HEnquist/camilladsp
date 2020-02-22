@@ -24,11 +24,11 @@ pub struct BiquadCoefficients {
 impl BiquadCoefficients {
     pub fn new(a1: PrcFmt, a2: PrcFmt, b0: PrcFmt, b1: PrcFmt, b2: PrcFmt) -> Self {
         BiquadCoefficients {
-            a1: a1,
-            a2: a2,
-            b0: b0,
-            b1: b1,
-            b2: b2,
+            a1,
+            a2,
+            b0,
+            b1,
+            b2,
         }
     }
 
@@ -175,8 +175,8 @@ impl Biquad {
 
 impl Filter for Biquad {
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
-        for n in 0..waveform.len() {
-            waveform[n] = self.process_single(waveform[n]);
+        for item in waveform.iter_mut() {
+            *item = self.process_single(*item);
         }
         //let out = input.iter().map(|s| self.process_single(*s)).collect::<Vec<PrcFmt>>();
         Ok(())

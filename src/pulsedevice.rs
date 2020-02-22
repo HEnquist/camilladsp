@@ -38,7 +38,7 @@ pub struct PulseCaptureDevice {
 }
 
 /// Convert an AudioChunk to an interleaved buffer of ints.
-fn chunk_to_buffer(chunk: AudioChunk, buf: &mut [u8], scalefactor: PrcFmt, bits: usize) -> () {
+fn chunk_to_buffer(chunk: AudioChunk, buf: &mut [u8], scalefactor: PrcFmt, bits: usize) {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
     let mut value16;
@@ -109,10 +109,10 @@ fn buffer_to_chunk(buffer: &[u8], channels: usize, scalefactor: PrcFmt, bits: us
     let mut idx = 0;
     if bits == 16 {
         for _frame in 0..num_frames {
-            for chan in 0..channels {
+            for wf in wfs.iter_mut().take(channels) { 
                 value = i16::from_le_bytes(buffer[idx..idx + 2].try_into().unwrap()) as PrcFmt;
                 idx += 2;
-                value = value / scalefactor;
+                value /= scalefactor;
                 if value > maxvalue {
                     maxvalue = value;
                 }
@@ -120,16 +120,16 @@ fn buffer_to_chunk(buffer: &[u8], channels: usize, scalefactor: PrcFmt, bits: us
                     minvalue = value;
                 }
                 //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
-                wfs[chan].push(value);
+                wf.push(value);
                 //idx += 1;
             }
         }
     } else {
         for _frame in 0..num_frames {
-            for chan in 0..channels {
+            for wf in wfs.iter_mut().take(channels) {    
                 value = i32::from_le_bytes(buffer[idx..idx + 4].try_into().unwrap()) as PrcFmt;
                 idx += 4;
-                value = value / scalefactor;
+                value /= scalefactor;
                 if value > maxvalue {
                     maxvalue = value;
                 }
@@ -137,19 +137,18 @@ fn buffer_to_chunk(buffer: &[u8], channels: usize, scalefactor: PrcFmt, bits: us
                     minvalue = value;
                 }
                 //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
-                wfs[chan].push(value);
+                wf.push(value);
                 //idx += 1;
             }
         }
     }
-    let chunk = AudioChunk {
-        channels: channels,
+    AudioChunk {
+        channels,
         frames: num_frames,
         maxval: maxvalue,
         minval: minvalue,
         waveforms: wfs,
-    };
-    chunk
+    }
 }
 
 /// Open a PulseAudio device
@@ -162,10 +161,7 @@ fn open_pulse(
     capture: bool,
 ) -> Res<Simple> {
     // Open the device
-    let dir = match capture {
-        true => Direction::Record,
-        false => Direction::Playback,
-    };
+    let dir = if capture { Direction::Record } else { Direction::Playback };
 
     let format = match bits {
         16 => sample::SAMPLE_S16NE,
@@ -182,8 +178,8 @@ fn open_pulse(
     };
 
     let spec = sample::Spec {
-        format: format,
-        channels: channels,
+        format,
+        channels,
         rate: samplerate,
     };
     //assert!(spec.is_valid());
@@ -218,9 +214,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
         status_channel: mpsc::Sender<StatusMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
-        let samplerate = self.samplerate.clone();
-        let bufferlength = self.bufferlength.clone();
-        let channels = self.channels.clone();
+        let samplerate = self.samplerate;
+        let bufferlength = self.bufferlength;
+        let channels = self.channels;
         let bits = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
@@ -324,9 +320,9 @@ impl CaptureDevice for PulseCaptureDevice {
         status_channel: mpsc::Sender<StatusMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
-        let samplerate = self.samplerate.clone();
-        let bufferlength = self.bufferlength.clone();
-        let channels = self.channels.clone();
+        let samplerate = self.samplerate;
+        let bufferlength = self.bufferlength;
+        let channels = self.channels;
         let bits = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
