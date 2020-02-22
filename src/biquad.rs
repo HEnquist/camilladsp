@@ -23,13 +23,7 @@ pub struct BiquadCoefficients {
 
 impl BiquadCoefficients {
     pub fn new(a1: PrcFmt, a2: PrcFmt, b0: PrcFmt, b1: PrcFmt, b2: PrcFmt) -> Self {
-        BiquadCoefficients {
-            a1,
-            a2,
-            b0,
-            b1,
-            b2,
-        }
+        BiquadCoefficients { a1, a2, b0, b1, b2 }
     }
 
     pub fn normalize(

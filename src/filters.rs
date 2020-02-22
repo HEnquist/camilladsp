@@ -61,10 +61,7 @@ impl FilterGroup {
             };
             filters.push(filter);
         }
-        FilterGroup {
-            channel,
-            filters,
-        }
+        FilterGroup { channel, filters }
     }
 
     /// Apply all the filters to an AudioChunk.

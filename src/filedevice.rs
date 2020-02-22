@@ -107,7 +107,7 @@ fn buffer_to_chunk(buffer: &[u8], channels: usize, scalefactor: PrcFmt, bits: us
     let mut idx = 0;
     if bits == 16 {
         for _frame in 0..num_frames {
-            for wf in wfs.iter_mut().take(channels) {   
+            for wf in wfs.iter_mut().take(channels) {
                 value = i16::from_le_bytes(buffer[idx..idx + 2].try_into().unwrap()) as PrcFmt;
                 idx += 2;
                 value /= scalefactor;
@@ -124,7 +124,7 @@ fn buffer_to_chunk(buffer: &[u8], channels: usize, scalefactor: PrcFmt, bits: us
         }
     } else {
         for _frame in 0..num_frames {
-            for wf in wfs.iter_mut().take(channels) {   
+            for wf in wfs.iter_mut().take(channels) {
                 value = i32::from_le_bytes(buffer[idx..idx + 4].try_into().unwrap()) as PrcFmt;
                 idx += 4;
                 value /= scalefactor;

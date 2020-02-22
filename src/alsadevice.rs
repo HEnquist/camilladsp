@@ -103,7 +103,7 @@ fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(
     //let mut samples = buffer.iter();
     let mut idx = 0;
     for _frame in 0..num_frames {
-        for wf in wfs.iter_mut().take(channels) { 
+        for wf in wfs.iter_mut().take(channels) {
             value = buffer[idx].as_();
             idx += 1;
             value /= scalefactor;

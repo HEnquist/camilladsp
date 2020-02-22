@@ -188,12 +188,9 @@ pub struct Configuration {
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
     let mut num_channels = match conf.devices.capture {
-        Device::Alsa {
-            channels, .. } => channels,
-        Device::Pulse {
-            channels, .. } => channels,
-        Device::File {
-            channels, .. } => channels,
+        Device::Alsa { channels, .. } => channels,
+        Device::Pulse { channels, .. } => channels,
+        Device::File { channels, .. } => channels,
     };
     for step in conf.pipeline {
         match step {
