@@ -25,10 +25,13 @@ The purpose of CamillaDSP is to enable audio processing with combinations of FIR
 ## Building
 
 Use recent versions of rustc and cargo. No need to use nightly.
-* Clone the repository
-* Build with `cargo build --release`
-* The binary is now available at ./target/release/camilladsp
-* Optionally install with `cargo install --path .`
+- Install dependencies:
+- - Fedora: ```sudo dnf install alsa-lib-devel```
+- - Debian/Ubuntu etc: ```sudo apt-get install libasound2-dev```
+- Clone the repository
+- Build with `cargo build --release`
+- The binary is now available at ./target/release/camilladsp
+- Optionally install with `cargo install --path .`
 
 ## How to run
 
