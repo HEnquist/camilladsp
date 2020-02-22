@@ -29,8 +29,8 @@ Use recent versions of rustc and cargo. No need to use nightly.
 - - Fedora: ```sudo dnf install alsa-lib-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libasound2-dev```
 - Install Pulse dependency:
-- - Fedora: ```sudo dnf install XXXX```
-- - Debian/Ubuntu etc: ```sudo apt-get install libpulse0 libpulse-dev```
+- - Fedora: ```sudo dnf install pulseaudio-libs-devel```
+- - Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
 - Clone the repository
 - Build with `cargo build --release`
 - The binary is now available at ./target/release/camilladsp
