@@ -15,7 +15,7 @@ jobs:
         run: apt-get update
 
       - name: Install utils
-        run: apt-get install curl wget
+        run: apt-get install curl wget -y
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
@@ -25,10 +25,10 @@ jobs:
           override: true
 
       - name: Install Alsa devel
-        run: apt-get install libasound2-dev
+        run: apt-get install libasound2-dev -y
 
       - name: Install PulseAudio
-        run: apt-get install libpulse0 libpulse-dev
+        run: apt-get install libpulse0 libpulse-dev -y
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
@@ -44,7 +44,7 @@ jobs:
         run: apt-get update
           
       - name: Install utils
-        run: apt-get install curl wget
+        run: apt-get install curl wget -y
 
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -57,10 +57,10 @@ jobs:
           override: true
 
       - name: Install Alsa devel
-        run: apt-get install libasound2-dev
+        run: apt-get install libasound2-dev -y
 
       - name: Install PulseAudio
-        run: apt-get install libpulse0 libpulse-dev
+        run: apt-get install libpulse0 libpulse-dev -y
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
@@ -79,7 +79,7 @@ jobs:
         run: apt-get update
 
       - name: Install utils
-        run: apt-get install curl wget
+        run: apt-get install curl wget -y
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
