@@ -6,6 +6,7 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
+    container: ubuntu:19.10
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -31,6 +32,7 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
+    container: ubuntu:19.10
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -56,6 +58,7 @@ jobs:
   lints:
     name: Lints
     runs-on: ubuntu-latest
+    container: ubuntu:19.10
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
