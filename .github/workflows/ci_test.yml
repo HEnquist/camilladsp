@@ -70,7 +70,14 @@ jobs:
   lints:
     name: Lints
     runs-on: ubuntu-latest
+    container: ubuntu:19.10
     steps:
+      - name: Update package list
+        run: apt-get update
+          
+      - name: Install utils
+        run: apt-get install curl wget -y
+
       - name: Checkout sources
         uses: actions/checkout@v2
 
@@ -81,6 +88,12 @@ jobs:
           toolchain: stable
           override: true
           components: rustfmt, clippy
+
+      - name: Install Alsa devel
+        run: apt-get install libasound2-dev -y
+
+      - name: Install PulseAudio
+        run: apt-get install libpulse0 libpulse-dev -y
 
       - name: Run cargo fmt
         uses: actions-rs/cargo@v1
