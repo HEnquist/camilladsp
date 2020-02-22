@@ -21,7 +21,7 @@ jobs:
         run: sudo apt-get install libasound2-dev
 
       - name: Install PulseAudio
-        run: sudo apt-get install libpulse0
+        run: sudo apt-get install libpulse0 libpulse-dev
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
@@ -46,7 +46,7 @@ jobs:
         run: sudo apt-get install libasound2-dev
 
       - name: Install PulseAudio
-        run: sudo apt-get install libpulse0
+        run: sudo apt-get install libpulse0 libpulse-dev
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
