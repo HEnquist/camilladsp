@@ -1,6 +1,6 @@
 on: [push, pull_request]
 
-name: CI_testing
+name: CI test and lint
 
 jobs:
   check:
@@ -70,16 +70,9 @@ jobs:
   lints:
     name: Lints
     runs-on: ubuntu-latest
-    container: ubuntu:19.10
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2'
-
-      - name: Update package list
-        run: apt-get update
-
-      - name: Install utils
-        run: apt-get install curl wget -y
+        uses: actions/checkout@v2
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
