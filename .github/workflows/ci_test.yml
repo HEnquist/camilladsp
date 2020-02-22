@@ -17,8 +17,11 @@ jobs:
           toolchain: stable
           override: true
 
-      - name: Install xmllint
+      - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev
+
+      - name: Install PulseAudio
+        run: sudo apt-get install libpulse0
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
@@ -39,9 +42,12 @@ jobs:
           toolchain: stable
           override: true
 
-      - name: Install xmllint
+      - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev
-        
+
+      - name: Install PulseAudio
+        run: sudo apt-get install libpulse0
+
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
