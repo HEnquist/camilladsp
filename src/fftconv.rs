@@ -55,7 +55,7 @@ impl FFTConv {
 
     pub fn from_config(data_length: usize, conf: config::ConvParameters) -> Self {
         let values = match conf {
-            config::ConvParameters::Values { values } => values.clone(),
+            config::ConvParameters::Values { values } => values,
             config::ConvParameters::File { filename } => {
                 filters::read_coeff_file(&filename).unwrap()
             }

@@ -47,7 +47,7 @@ fn run(conf: config::Configuration) -> Res<()> {
 
     let (tx_status, rx_status) = mpsc::channel();
     let tx_status_pb = tx_status.clone();
-    let tx_status_cap = tx_status.clone();
+    let tx_status_cap = tx_status;
 
     let barrier = Arc::new(Barrier::new(4));
     let barrier_pb = barrier.clone();
@@ -56,7 +56,7 @@ fn run(conf: config::Configuration) -> Res<()> {
 
     let conf_pb = conf.clone();
     let conf_cap = conf.clone();
-    let conf_proc = conf.clone();
+    let conf_proc = conf;
 
     // Processing thread
     thread::spawn(move || {
