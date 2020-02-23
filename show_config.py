@@ -179,25 +179,25 @@ def main():
     srate = conf['devices']['samplerate']
     buflen = conf['devices']['buffersize']
     print (srate)
-
-    fvect = np.linspace(0, srate/2.0, 10*buflen)
-
     fignbr = 1
-    for filter, fconf in conf['filters'].items():
-        if fconf['type'] == 'Biquad':
-            kladd = Biquad(fconf['parameters'], srate)
-            plt.figure(fignbr)
-            magn, phase = kladd.gain_and_phase(fvect)
-            plt.semilogx(fvect, magn)
-            plt.title(filter)
-            fignbr += 1
-        elif fconf['type'] == 'Conv':
-            kladd = Conv(fconf['parameters'], srate)
-            plt.figure(fignbr)
-            ftemp, magn, phase = kladd.gain_and_phase(len(fvect))
-            plt.semilogx(fvect, magn)
-            plt.title(filter)
-            fignbr += 1
+
+    if 'filters' in conf:
+        fvect = np.linspace(0, srate/2.0, 10*buflen)
+        for filter, fconf in conf['filters'].items():
+            if fconf['type'] == 'Biquad':
+                kladd = Biquad(fconf['parameters'], srate)
+                plt.figure(fignbr)
+                magn, phase = kladd.gain_and_phase(fvect)
+                plt.semilogx(fvect, magn)
+                plt.title(filter)
+                fignbr += 1
+            elif fconf['type'] == 'Conv':
+                kladd = Conv(fconf['parameters'], srate)
+                plt.figure(fignbr)
+                ftemp, magn, phase = kladd.gain_and_phase(len(fvect))
+                plt.semilogx(fvect, magn)
+                plt.title(filter)
+                fignbr += 1
 
     stages = []
     fig = plt.figure(fignbr)
@@ -205,59 +205,64 @@ def main():
     ax = fig.add_subplot(111, aspect='equal')
     # add input
     channels = []
-    capture_channels = int(conf['devices']['capture']['channels'])
-    for n in range(capture_channels):
+    active_channels = int(conf['devices']['capture']['channels'])
+    for n in range(active_channels):
         label = "ch {}".format(n) 
         b = Block(label)
-        b.place(0, -capture_channels/2 + 0.5 + n)
+        b.place(0, -active_channels/2 + 0.5 + n)
         b.draw(ax)
         channels.append([b])
-    draw_box(ax, 0, capture_channels, label=conf['devices']['capture']['device'])
+    if 'device' in conf['devices']['capture']:
+        capturename = conf['devices']['capture']['device']
+    else:
+        capturename = conf['devices']['capture']['filename']
+    draw_box(ax, 0, active_channels, label=capturename)
     stages.append(channels)
 
     # loop through pipeline
 
     total_length = 0
     stage_start = 0
-    for step in conf['pipeline']:
-        stage = len(stages)
-        if step['type'] == 'Mixer':
-            total_length += 1
-            name = step['name']
-            mixconf = conf['mixers'][name]
-            active_channels = int(mixconf['channels']['out'])
-            channels = [[]]*active_channels
-            for n in range(active_channels):
-                label = "ch {}".format(n)
-                b = Block(label)
-                b.place(total_length*2, -active_channels/2 + 0.5 + n)
-                b.draw(ax)
-                channels[n] = [b]
-            for mapping in mixconf['mapping']:
-                dest_ch = int(mapping['dest'])
-                for src in mapping['sources']:
-                    src_ch = int(src['channel'])
-                    label = "{} dB".format(src['gain'])
-                    if src['inverted'] == 'False':
-                        label = label + '\ninv.'
-                    src_p = stages[-1][src_ch][-1].output_point()
-                    dest_p = channels[dest_ch][0].input_point()
-                    draw_arrow(ax, src_p, dest_p, label=label)
-            draw_box(ax, total_length, active_channels, label=name)
-            stages.append(channels)
-            stage_start = total_length
-        elif step['type'] == 'Filter':
-            ch_nbr = step['channel']
-            for name in step['names']:
-                b = Block(name)
-                ch_step = stage_start + len(stages[-1][ch_nbr])
-                total_length = max((total_length, ch_step))
-                b.place(ch_step*2, -active_channels/2 + 0.5 + ch_nbr)
-                b.draw(ax)
-                src_p = stages[-1][ch_nbr][-1].output_point()
-                dest_p = b.input_point()
-                draw_arrow(ax, src_p, dest_p)
-                stages[-1][ch_nbr].append(b)
+    if 'pipeline' in conf:
+        for step in conf['pipeline']:
+            stage = len(stages)
+            if step['type'] == 'Mixer':
+                total_length += 1
+                name = step['name']
+                mixconf = conf['mixers'][name]
+                active_channels = int(mixconf['channels']['out'])
+                channels = [[]]*active_channels
+                for n in range(active_channels):
+                    label = "ch {}".format(n)
+                    b = Block(label)
+                    b.place(total_length*2, -active_channels/2 + 0.5 + n)
+                    b.draw(ax)
+                    channels[n] = [b]
+                for mapping in mixconf['mapping']:
+                    dest_ch = int(mapping['dest'])
+                    for src in mapping['sources']:
+                        src_ch = int(src['channel'])
+                        label = "{} dB".format(src['gain'])
+                        if src['inverted'] == 'False':
+                            label = label + '\ninv.'
+                        src_p = stages[-1][src_ch][-1].output_point()
+                        dest_p = channels[dest_ch][0].input_point()
+                        draw_arrow(ax, src_p, dest_p, label=label)
+                draw_box(ax, total_length, active_channels, label=name)
+                stages.append(channels)
+                stage_start = total_length
+            elif step['type'] == 'Filter':
+                ch_nbr = step['channel']
+                for name in step['names']:
+                    b = Block(name)
+                    ch_step = stage_start + len(stages[-1][ch_nbr])
+                    total_length = max((total_length, ch_step))
+                    b.place(ch_step*2, -active_channels/2 + 0.5 + ch_nbr)
+                    b.draw(ax)
+                    src_p = stages[-1][ch_nbr][-1].output_point()
+                    dest_p = b.input_point()
+                    draw_arrow(ax, src_p, dest_p)
+                    stages[-1][ch_nbr].append(b)
 
 
     total_length += 1
@@ -271,7 +276,11 @@ def main():
         dest_p = b.input_point()
         draw_arrow(ax, src_p, dest_p)
         channels.append([b])
-    draw_box(ax, total_length, active_channels, label=conf['devices']['playback']['device'])
+    if 'device' in conf['devices']['playback']:
+        playname = conf['devices']['playback']['device']
+    else:
+        playname = conf['devices']['playback']['filename']
+    draw_box(ax, total_length, active_channels, label=playname)
     stages.append(channels)
     
     nbr_chan = [len(s) for s in stages]
