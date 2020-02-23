@@ -1,0 +1,33 @@
+---
+devices:
+  samplerate: 44100
+  buffersize: 1024
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,0"
+    format: S16LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+    format: S32LE
+
+filters:
+  lowpass_fir:
+    type: Conv
+    parameters:
+      type: File 
+      filename: filter.txt
+
+pipeline:
+  - type: Filter
+    channel: 0
+    names:
+      - lowpass_fir
+  - type: Filter
+    channel: 1
+    names:
+      - lowpass_fir
+   
+

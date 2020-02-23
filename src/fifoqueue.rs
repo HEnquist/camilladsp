@@ -8,14 +8,15 @@ pub struct FifoQueue<T> {
 }
 
 impl<T: Clone + Default> FifoQueue<T> {
+    #[allow(dead_code)]
     pub fn new(capacity: usize) -> FifoQueue<T> {
         let data: Vec<T> = vec![Default::default(); capacity];
         let index_oldest = 0;
         FifoQueue {
-            index_oldest: index_oldest,
+            index_oldest,
             length: 0,
-            capacity: capacity,
-            data: data,
+            capacity,
+            data,
         }
     }
 
@@ -23,21 +24,20 @@ impl<T: Clone + Default> FifoQueue<T> {
         let data: Vec<T> = vec![value; capacity];
         let index_oldest = 0;
         FifoQueue {
-            index_oldest: index_oldest,
+            index_oldest,
             length: capacity,
-            capacity: capacity,
-            data: data,
+            capacity,
+            data,
         }
     }
 
     pub fn push(&mut self, value: T) -> Result<(), &str> {
         if self.length == self.capacity {
             Err("The queue is full")
-        }
-        else {
+        } else {
             let mut new_index = self.index_oldest + self.length;
             if new_index >= self.capacity {
-                new_index = new_index-self.capacity;
+                new_index -= self.capacity;
             }
             self.data[new_index] = value;
             self.length += 1;
@@ -54,26 +54,26 @@ impl<T: Clone + Default> FifoQueue<T> {
             }
             self.length -= 1;
             Some(value)
-        }
-        else {
+        } else {
             None
         }
     }
 
+    #[allow(dead_code)]
     pub fn length(&self) -> usize {
         self.length
     }
 
+    #[allow(dead_code)]
     pub fn capacity(&self) -> usize {
         self.capacity
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use fifoqueue::FifoQueue;
- 
+
     #[test]
     fn make_empty() {
         let q: FifoQueue<usize> = FifoQueue::new(5);

@@ -1,0 +1,16 @@
+---
+devices:
+  samplerate: 44100
+  buffersize: 1024
+  silence_threshold: -60
+  silence_timeout: 3.0
+  capture:
+    type: File
+    channels: 2
+    filename: "/home/henrik/test.raw"
+    format: S16LE
+  playback:
+    type: Pulse
+    channels: 2
+    device: "alsa_output.pci-0000_03_00.6.analog-stereo"
+    format: S32LE

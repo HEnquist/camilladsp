@@ -14,18 +14,15 @@ pub struct Delay {
     pub queue: FifoQueue<PrcFmt>,
 }
 
-
 impl Gain {
     /// A simple filter providing gain in dB, and can also invert the signal.
     pub fn new(gain_db: PrcFmt, inverted: bool) -> Self {
         let mut gain: PrcFmt = 10.0;
-        gain = gain.powf(gain_db/20.0);
+        gain = gain.powf(gain_db / 20.0);
         if inverted {
             gain = -gain;
         }
-        Gain {
-            gain: gain,
-        }
+        Gain { gain }
     }
 
     pub fn from_config(conf: config::GainParameters) -> Self {
@@ -37,8 +34,8 @@ impl Gain {
 
 impl Filter for Gain {
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
-        for n in 0..waveform.len() {
-            waveform[n] = self.gain*waveform[n];
+        for item in waveform.iter_mut() {
+            *item *= self.gain;
         }
         Ok(())
     }
@@ -48,34 +45,30 @@ impl Delay {
     /// Creates a delay filter with delay in samples
     /// Will be improved as it gets slow for long delays
     pub fn new(delay: usize) -> Self {
-        let mut queue = FifoQueue::filled_with(delay+1, 0.0);
+        let mut queue = FifoQueue::filled_with(delay + 1, 0.0);
         let _elem = queue.pop();
-        Delay {
-            queue: queue,
-        }
+        Delay { queue }
     }
 
-
     pub fn from_config(samplerate: usize, conf: config::DelayParameters) -> Self {
-        let delay_samples = (conf.delay/1000.0 * (samplerate as PrcFmt)) as usize;
+        let delay_samples = (conf.delay / 1000.0 * (samplerate as PrcFmt)) as usize;
         Delay::new(delay_samples)
     }
 }
 
 impl Filter for Delay {
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
-        for n in 0..waveform.len() {
-            self.queue.push(waveform[n])?;
-            waveform[n] = self.queue.pop().unwrap();
+        for item in waveform.iter_mut() {
+            self.queue.push(*item)?;
+            *item = self.queue.pop().unwrap();
         }
         Ok(())
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use basicfilters::{Gain, Delay};
+    use basicfilters::{Delay, Gain};
     use filters::Filter;
 
     #[test]
@@ -116,8 +109,4 @@ mod tests {
         assert_eq!(waveform1, vec![0.0; 8]);
         assert_eq!(waveform2, waveform_delayed);
     }
-
-
-
-
 }

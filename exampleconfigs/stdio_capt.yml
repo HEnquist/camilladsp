@@ -1,0 +1,16 @@
+---
+devices:
+  samplerate: 44100
+  buffersize: 1024
+  silence_threshold: -60
+  silence_timeout: 3.0
+  capture:
+    type: Pulse
+    channels: 2
+    device: "MySink.monitor"
+    format: S16LE
+  playback:
+    type: File
+    channels: 2
+    filename: "/dev/stdout"
+    format: S16LE

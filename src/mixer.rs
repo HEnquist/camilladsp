@@ -1,13 +1,12 @@
 type PrcFmt = f64;
-use config;
 use audiodevice::AudioChunk;
-
+use config;
 
 #[derive(Clone)]
 pub struct Mixer {
     pub channels_in: usize,
     pub channels_out: usize,
-    pub mapping: Vec<Vec<MixerSource>>
+    pub mapping: Vec<Vec<MixerSource>>,
 }
 
 #[derive(Clone)]
@@ -15,7 +14,6 @@ pub struct MixerSource {
     pub channel: usize,
     pub gain: PrcFmt,
 }
-
 
 impl Mixer {
     /// Creates a Mixer from a config struct
@@ -27,13 +25,13 @@ impl Mixer {
             let dest = cfg_mapping.dest;
             for cfg_src in cfg_mapping.sources {
                 let mut gain: PrcFmt = 10.0;
-                gain = gain.powf(cfg_src.gain/20.0);
+                gain = gain.powf(cfg_src.gain / 20.0);
                 if cfg_src.inverted {
                     gain = -gain;
                 }
                 let src = MixerSource {
                     channel: cfg_src.channel,
-                    gain: gain,
+                    gain,
                 };
                 mapping[dest].push(src);
             }
@@ -41,7 +39,7 @@ impl Mixer {
         Mixer {
             channels_in: ch_in,
             channels_out: ch_out,
-            mapping: mapping,
+            mapping,
         }
     }
 
@@ -54,18 +52,17 @@ impl Mixer {
                 let source_chan = self.mapping[out_chan][source].channel;
                 let gain = self.mapping[out_chan][source].gain;
                 for n in 0..input.frames {
-                    waveforms[out_chan][n] = waveforms[out_chan][n] + gain*input.waveforms[source_chan][n];
+                    waveforms[out_chan][n] += gain * input.waveforms[source_chan][n];
                 }
             }
         }
 
-        let chunk = AudioChunk{
+        AudioChunk {
             frames: input.frames,
             channels: self.channels_out,
             maxval: 0.0,
             minval: 0.0,
-            waveforms: waveforms,
-        };
-        chunk
+            waveforms,
+        }
     }
 }

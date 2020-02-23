@@ -1,6 +1,6 @@
 [package]
 name = "camilladsp"
-version = "0.0.1"
+version = "0.0.3"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 
 [dependencies]

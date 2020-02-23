@@ -1,8 +1,10 @@
-extern crate alsa;
 extern crate num_traits;
 //use std::{iter, error};
-use alsa::pcm::{Access, Format, HwParams, State};
-use alsa::{Direction, ValueOr};
+use std::convert::TryInto;
+
+use std::fs::File;
+use std::io::ErrorKind;
+use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -15,18 +17,18 @@ use PrcFmt;
 use Res;
 use StatusMessage;
 
-pub struct AlsaPlaybackDevice {
-    pub devname: String,
-    pub samplerate: usize,
+pub struct FilePlaybackDevice {
+    pub filename: String,
     pub bufferlength: usize,
+    pub samplerate: usize,
     pub channels: usize,
     pub format: SampleFormat,
 }
 
-pub struct AlsaCaptureDevice {
-    pub devname: String,
-    pub samplerate: usize,
+pub struct FileCaptureDevice {
+    pub filename: String,
     pub bufferlength: usize,
+    pub samplerate: usize,
     pub channels: usize,
     pub format: SampleFormat,
     pub silence_threshold: PrcFmt,
@@ -34,14 +36,11 @@ pub struct AlsaCaptureDevice {
 }
 
 /// Convert an AudioChunk to an interleaved buffer of ints.
-fn chunk_to_buffer<T: num_traits::cast::NumCast>(
-    chunk: AudioChunk,
-    buf: &mut [T],
-    scalefactor: PrcFmt,
-) {
+fn chunk_to_buffer(chunk: AudioChunk, buf: &mut [u8], scalefactor: PrcFmt, bits: usize) {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
-    let mut value: T;
+    let mut value16;
+    let mut value32;
     let mut idx = 0;
     let mut clipped = 0;
     let mut peak = 0.0;
@@ -63,15 +62,21 @@ fn chunk_to_buffer<T: num_traits::cast::NumCast>(
                 }
                 float_val = minval;
             }
-            value = match num_traits::cast(float_val * scalefactor) {
-                Some(val) => val,
-                None => {
-                    eprintln!("bad {}", float_val);
-                    num_traits::cast(0.0).unwrap()
+            if bits == 16 {
+                value16 = (float_val * scalefactor) as i16;
+                let bytes = value16.to_le_bytes();
+                for b in &bytes {
+                    buf[idx] = *b;
+                    idx += 1;
                 }
-            };
-            buf[idx] = value;
-            idx += 1;
+            } else {
+                value32 = (float_val * scalefactor) as i32;
+                let bytes = value32.to_le_bytes();
+                for b in &bytes {
+                    buf[idx] = *b;
+                    idx += 1;
+                }
+            }
         }
     }
     if clipped > 0 {
@@ -85,12 +90,12 @@ fn chunk_to_buffer<T: num_traits::cast::NumCast>(
 }
 
 /// Convert a buffer of interleaved ints to an AudioChunk.
-fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(
-    buffer: &[T],
-    channels: usize,
-    scalefactor: PrcFmt,
-) -> AudioChunk {
-    let num_samples = buffer.len();
+fn buffer_to_chunk(buffer: &[u8], channels: usize, scalefactor: PrcFmt, bits: usize) -> AudioChunk {
+    let num_samples = match bits {
+        16 => buffer.len() / 2,
+        24 | 32 => buffer.len() / 4,
+        _ => 0,
+    };
     let num_frames = num_samples / channels;
     let mut value: PrcFmt;
     let mut maxvalue: PrcFmt = 0.0;
@@ -99,23 +104,40 @@ fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(
     for _chan in 0..channels {
         wfs.push(Vec::with_capacity(num_frames));
     }
-    //let mut idx = 0;
-    //let mut samples = buffer.iter();
     let mut idx = 0;
-    for _frame in 0..num_frames {
-        for wf in wfs.iter_mut().take(channels) {
-            value = buffer[idx].as_();
-            idx += 1;
-            value /= scalefactor;
-            if value > maxvalue {
-                maxvalue = value;
+    if bits == 16 {
+        for _frame in 0..num_frames {
+            for wf in wfs.iter_mut().take(channels) {
+                value = i16::from_le_bytes(buffer[idx..idx + 2].try_into().unwrap()) as PrcFmt;
+                idx += 2;
+                value /= scalefactor;
+                if value > maxvalue {
+                    maxvalue = value;
+                }
+                if value < minvalue {
+                    minvalue = value;
+                }
+                //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
+                wf.push(value);
+                //idx += 1;
             }
-            if value < minvalue {
-                minvalue = value;
+        }
+    } else {
+        for _frame in 0..num_frames {
+            for wf in wfs.iter_mut().take(channels) {
+                value = i32::from_le_bytes(buffer[idx..idx + 4].try_into().unwrap()) as PrcFmt;
+                idx += 4;
+                value /= scalefactor;
+                if value > maxvalue {
+                    maxvalue = value;
+                }
+                if value < minvalue {
+                    minvalue = value;
+                }
+                //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
+                wf.push(value);
+                //idx += 1;
             }
-            //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
-            wf.push(value);
-            //idx += 1;
         }
     }
     AudioChunk {
@@ -127,109 +149,15 @@ fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(
     }
 }
 
-/// Play a buffer.
-fn play_buffer<T: std::marker::Copy>(
-    buffer: &[T],
-    pcmdevice: &alsa::PCM,
-    io: &alsa::pcm::IO<T>,
-) -> Res<()> {
-    let playback_state = pcmdevice.state();
-    //eprintln!("playback state {:?}", playback_state);
-    if playback_state == State::XRun {
-        eprintln!("Prepare playback");
-        pcmdevice.prepare()?;
-    }
-    let _frames = match io.writei(&buffer[..]) {
-        Ok(frames) => frames,
-        Err(_err) => {
-            eprintln!("retrying playback");
-            pcmdevice.prepare()?;
-            io.writei(&buffer[..])?
-        }
-    };
-    Ok(())
-}
-
-/// Play a buffer.
-fn capture_buffer<T: std::marker::Copy>(
-    buffer: &mut [T],
-    pcmdevice: &alsa::PCM,
-    io: &alsa::pcm::IO<T>,
-) -> Res<()> {
-    let capture_state = pcmdevice.state();
-    if capture_state == State::XRun {
-        eprintln!("prepare capture");
-        pcmdevice.prepare()?;
-    }
-    let _frames = match io.readi(buffer) {
-        Ok(frames) => frames,
-        Err(_err) => {
-            eprintln!("retrying capture");
-            pcmdevice.prepare()?;
-            io.readi(buffer)?
-        }
-    };
-    Ok(())
-}
-
-/// Open an Alsa PCM device
-fn open_pcm(
-    devname: String,
-    samplerate: u32,
-    bufsize: i64,
-    channels: u32,
-    bits: usize,
-    capture: bool,
-) -> Res<alsa::PCM> {
-    // Open the device
-    let pcmdev;
-    if capture {
-        pcmdev = alsa::PCM::new(&devname, Direction::Capture, false)?;
-    } else {
-        pcmdev = alsa::PCM::new(&devname, Direction::Playback, false)?;
-    }
-    // Set hardware parameters
-    {
-        let hwp = HwParams::any(&pcmdev)?;
-        hwp.set_channels(channels)?;
-        hwp.set_rate(samplerate, ValueOr::Nearest)?;
-        match bits {
-            16 => hwp.set_format(Format::s16())?,
-            24 => hwp.set_format(Format::s24())?,
-            32 => hwp.set_format(Format::s32())?,
-            _ => {}
-        }
-
-        hwp.set_access(Access::RWInterleaved)?;
-        hwp.set_buffer_size(bufsize)?;
-        hwp.set_period_size(bufsize / 8, alsa::ValueOr::Nearest)?;
-        pcmdev.hw_params(&hwp)?;
-    }
-
-    // Set software parameters
-    let (_rate, _act_bufsize) = {
-        let hwp = pcmdev.hw_params_current()?;
-        let swp = pcmdev.sw_params_current()?;
-        let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
-        swp.set_start_threshold(act_bufsize - act_periodsize)?;
-        //swp.set_avail_min(periodsize)?;
-        pcmdev.sw_params(&swp)?;
-        //eprintln!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
-        (hwp.get_rate()?, act_bufsize)
-    };
-    Ok(pcmdev)
-}
-
 /// Start a playback thread listening for AudioMessages via a channel.
-impl PlaybackDevice for AlsaPlaybackDevice {
+impl PlaybackDevice for FilePlaybackDevice {
     fn start(
         &mut self,
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
-        let devname = self.devname.clone();
-        let samplerate = self.samplerate;
+        let filename = self.filename.clone();
         let bufferlength = self.bufferlength;
         let channels = self.channels;
         let bits = match self.format {
@@ -240,15 +168,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let format = self.format.clone();
         let handle = thread::spawn(move || {
             //let delay = time::Duration::from_millis((4*1000*bufferlength/samplerate) as u64);
-            match open_pcm(
-                devname,
-                samplerate as u32,
-                bufferlength as i64,
-                channels as u32,
-                bits,
-                false,
-            ) {
-                Ok(pcmdevice) => {
+            match File::create(filename) {
+                Ok(mut file) => {
                     match status_channel.send(StatusMessage::PlaybackReady) {
                         Ok(()) => {}
                         Err(_err) => {}
@@ -260,14 +181,14 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     eprintln!("starting playback loop");
                     match format {
                         SampleFormat::S16LE => {
-                            let io = pcmdevice.io_i16().unwrap();
-                            let mut buffer = vec![0i16; bufferlength * channels];
+                            let mut buffer = vec![0u8; bufferlength * channels * 2];
                             loop {
                                 match channel.recv() {
                                     Ok(AudioMessage::Audio(chunk)) => {
-                                        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-                                        let playback_res = play_buffer(&buffer, &pcmdevice, &io);
-                                        match playback_res {
+                                        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+                                        // let _frames = match io.writei(&buffer[..]) {
+                                        let write_res = file.write(&buffer);
+                                        match write_res {
                                             Ok(_) => {}
                                             Err(msg) => {
                                                 status_channel
@@ -281,19 +202,19 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     Ok(AudioMessage::EndOfStream) => {
                                         status_channel.send(StatusMessage::PlaybackDone).unwrap();
                                     }
-                                    _ => {}
+                                    Err(_) => {}
                                 }
                             }
                         }
                         SampleFormat::S24LE | SampleFormat::S32LE => {
-                            let io = pcmdevice.io_i32().unwrap();
-                            let mut buffer = vec![0i32; bufferlength * channels];
+                            let mut buffer = vec![0u8; bufferlength * channels * 4];
                             loop {
                                 match channel.recv() {
                                     Ok(AudioMessage::Audio(chunk)) => {
-                                        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-                                        let playback_res = play_buffer(&buffer, &pcmdevice, &io);
-                                        match playback_res {
+                                        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+                                        // let _frames = match io.writei(&buffer[..]) {
+                                        let write_res = file.write(&buffer);
+                                        match write_res {
                                             Ok(_) => {}
                                             Err(msg) => {
                                                 status_channel
@@ -327,14 +248,14 @@ impl PlaybackDevice for AlsaPlaybackDevice {
 }
 
 /// Start a capture thread providing AudioMessages via a channel
-impl CaptureDevice for AlsaCaptureDevice {
+impl CaptureDevice for FileCaptureDevice {
     fn start(
         &mut self,
         channel: mpsc::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
-        let devname = self.devname.clone();
+        let filename = self.filename.clone();
         let samplerate = self.samplerate;
         let bufferlength = self.bufferlength;
         let channels = self.channels;
@@ -343,21 +264,14 @@ impl CaptureDevice for AlsaCaptureDevice {
             SampleFormat::S24LE => 24,
             SampleFormat::S32LE => 32,
         };
+        let format = self.format.clone();
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit =
             (self.silence_timeout * ((samplerate / bufferlength) as PrcFmt)) as usize;
-        let format = self.format.clone();
         let handle = thread::spawn(move || {
-            match open_pcm(
-                devname,
-                samplerate as u32,
-                bufferlength as i64,
-                channels as u32,
-                bits,
-                true,
-            ) {
-                Ok(pcmdevice) => {
+            match File::open(filename) {
+                Ok(mut file) => {
                     match status_channel.send(StatusMessage::CaptureReady) {
                         Ok(()) => {}
                         Err(_err) => {}
@@ -368,21 +282,32 @@ impl CaptureDevice for AlsaCaptureDevice {
                     eprintln!("starting captureloop");
                     match format {
                         SampleFormat::S16LE => {
-                            let io = pcmdevice.io_i16().unwrap();
-                            let mut buf = vec![0i16; channels * bufferlength];
+                            let mut buf = vec![0u8; channels * bufferlength * 2];
                             loop {
-                                let capture_res = capture_buffer(&mut buf, &pcmdevice, &io);
-                                match capture_res {
+                                //let frames = self.io.readi(&mut buf)?;
+                                let read_res = file.read_exact(&mut buf);
+                                match read_res {
                                     Ok(_) => {}
-                                    Err(msg) => {
-                                        status_channel
-                                            .send(StatusMessage::CaptureError {
-                                                message: format!("{}", msg),
-                                            })
-                                            .unwrap();
+                                    Err(err) => {
+                                        match err.kind() {
+                                            ErrorKind::UnexpectedEof => {
+                                                let msg = AudioMessage::EndOfStream;
+                                                channel.send(msg).unwrap();
+                                                status_channel
+                                                    .send(StatusMessage::CaptureDone)
+                                                    .unwrap();
+                                                break;
+                                            }
+                                            _ => status_channel
+                                                .send(StatusMessage::CaptureError {
+                                                    message: format!("{}", err),
+                                                })
+                                                .unwrap(),
+                                        };
                                     }
                                 };
-                                let chunk = buffer_to_chunk(&buf, channels, scalefactor);
+                                //let before = Instant::now();
+                                let chunk = buffer_to_chunk(&buf, channels, scalefactor, bits);
                                 if (chunk.maxval - chunk.minval) > silence {
                                     if silent_nbr > silent_limit {
                                         eprintln!("Resuming processing");
@@ -401,21 +326,30 @@ impl CaptureDevice for AlsaCaptureDevice {
                             }
                         }
                         SampleFormat::S24LE | SampleFormat::S32LE => {
-                            let io = pcmdevice.io_i32().unwrap();
-                            let mut buf = vec![0i32; channels * bufferlength];
+                            let mut buf = vec![0u8; channels * bufferlength * 4];
                             loop {
-                                let capture_res = capture_buffer(&mut buf, &pcmdevice, &io);
-                                match capture_res {
+                                let read_res = file.read_exact(&mut buf);
+                                match read_res {
                                     Ok(_) => {}
-                                    Err(msg) => {
-                                        status_channel
-                                            .send(StatusMessage::CaptureError {
-                                                message: format!("{}", msg),
-                                            })
-                                            .unwrap();
+                                    Err(err) => {
+                                        match err.kind() {
+                                            ErrorKind::UnexpectedEof => {
+                                                let msg = AudioMessage::EndOfStream;
+                                                channel.send(msg).unwrap();
+                                                status_channel
+                                                    .send(StatusMessage::CaptureDone)
+                                                    .unwrap();
+                                                break;
+                                            }
+                                            _ => status_channel
+                                                .send(StatusMessage::CaptureError {
+                                                    message: format!("{}", err),
+                                                })
+                                                .unwrap(),
+                                        };
                                     }
                                 };
-                                let chunk = buffer_to_chunk(&buf, channels, scalefactor);
+                                let chunk = buffer_to_chunk(&buf, channels, scalefactor, bits);
                                 if (chunk.maxval - chunk.minval) > silence {
                                     if silent_nbr > silent_limit {
                                         eprintln!("Resuming processing");
@@ -451,8 +385,8 @@ impl CaptureDevice for AlsaCaptureDevice {
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use alsadevice::{buffer_to_chunk, chunk_to_buffer};
     use audiodevice::AudioChunk;
+    use filedevice::{buffer_to_chunk, chunk_to_buffer};
 
     #[test]
     fn to_from_buffer_16() {
@@ -466,9 +400,9 @@ mod tests {
             minval: 0.0,
             waveforms: waveforms.clone(),
         };
-        let mut buffer = vec![0i16; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
+        let mut buffer = vec![0u8; 3 * 2];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -484,9 +418,9 @@ mod tests {
             minval: 0.0,
             waveforms: waveforms.clone(),
         };
-        let mut buffer = vec![0i32; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
+        let mut buffer = vec![0u8; 3 * 4];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -502,9 +436,9 @@ mod tests {
             minval: 0.0,
             waveforms: waveforms.clone(),
         };
-        let mut buffer = vec![0i32; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
+        let mut buffer = vec![0u8; 3 * 4];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -520,9 +454,9 @@ mod tests {
             minval: 0.0,
             waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
         };
-        let mut buffer = vec![0i16; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
+        let mut buffer = vec![0u8; 3 * 2];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -538,9 +472,9 @@ mod tests {
             minval: 0.0,
             waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
         };
-        let mut buffer = vec![0i32; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
+        let mut buffer = vec![0u8; 3 * 4];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -556,9 +490,9 @@ mod tests {
             minval: 0.0,
             waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
         };
-        let mut buffer = vec![0i32; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
+        let mut buffer = vec![0u8; 3 * 4];
+        chunk_to_buffer(chunk, &mut buffer, scalefactor, bits);
+        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor, bits);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 }
