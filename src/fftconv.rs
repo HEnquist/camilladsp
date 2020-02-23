@@ -96,3 +96,36 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::PrcFmt;
+    use config::ConvParameters;
+    use fftconv::FFTConv;
+    use filters::Filter;
+
+    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
+        println!("{} - {}", left, right);
+        (left - right).abs() < maxdiff
+    }
+
+    fn compare_waveforms(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
+        for (val_l, val_r) in left.iter().zip(right.iter()) {
+            if !is_close(*val_l, *val_r, maxdiff) {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[test]
+    fn check_result() {
+        let coeffs = vec![0.5, 0.5];
+        let conf = ConvParameters::Values { values: coeffs };
+        let mut filter = FFTConv::from_config(8, conf);
+        let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
+        let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
+        filter.process_waveform(&mut wave1).unwrap();
+        assert!(compare_waveforms(wave1, expected, 1e-9));
+    }
+}
