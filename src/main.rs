@@ -1,5 +1,8 @@
+#[cfg(feature = "alsa-backend")]
 extern crate alsa;
+#[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
+#[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
 extern crate rustfft;
 extern crate serde;
@@ -14,6 +17,7 @@ use std::{thread, time};
 pub type PrcFmt = f64;
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
+#[cfg(feature = "alsa-backend")]
 mod alsadevice;
 mod audiodevice;
 mod basicfilters;
@@ -21,12 +25,13 @@ mod biquad;
 mod fftconv;
 mod filedevice;
 mod filters;
+#[cfg(feature = "pulse-backend")]
 mod pulsedevice;
-use audiodevice::*;
 mod config;
 mod fifoqueue;
 mod mixer;
 
+use audiodevice::*;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;

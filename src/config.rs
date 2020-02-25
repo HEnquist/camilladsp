@@ -43,11 +43,13 @@ pub enum SampleFormat {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
 pub enum Device {
+    #[cfg(feature = "alsa-backend")]
     Alsa {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
+    #[cfg(feature = "pulse-backend")]
     Pulse {
         channels: usize,
         device: String,
@@ -188,7 +190,9 @@ pub struct Configuration {
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
     let mut num_channels = match conf.devices.capture {
+        #[cfg(feature = "alsa-backend")]
         Device::Alsa { channels, .. } => channels,
+        #[cfg(feature = "pulse-backend")]
         Device::Pulse { channels, .. } => channels,
         Device::File { channels, .. } => channels,
     };
@@ -231,7 +235,9 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         }
     }
     let num_channels_out = match conf.devices.playback {
+        #[cfg(feature = "alsa-backend")]
         Device::Alsa { channels, .. } => channels,
+        #[cfg(feature = "pulse-backend")]
         Device::Pulse { channels, .. } => channels,
         Device::File { channels, .. } => channels,
     };

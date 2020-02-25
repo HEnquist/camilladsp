@@ -1,13 +1,18 @@
 [package]
 name = "camilladsp"
-version = "0.0.3"
+version = "0.0.4"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 
+[features]
+default = ["alsa-backend", "pulse-backend"]
+alsa-backend = ["alsa"]
+pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
+
 [dependencies]
-alsa = "0.4"
+alsa = { version = "0.4", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 rustfft = "3.0.0"
 num-traits = "0.2"
-libpulse-binding = "2.0"
-libpulse-simple-binding = "2.0"
+libpulse-binding = { version = "2.0", optional = true }
+libpulse-simple-binding = { version = "2.0", optional = true }
