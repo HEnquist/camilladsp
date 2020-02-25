@@ -22,14 +22,14 @@ mod alsadevice;
 mod audiodevice;
 mod basicfilters;
 mod biquad;
+mod config;
 mod fftconv;
+mod fifoqueue;
 mod filedevice;
 mod filters;
+mod mixer;
 #[cfg(feature = "pulse-backend")]
 mod pulsedevice;
-mod config;
-mod fifoqueue;
-mod mixer;
 
 use audiodevice::*;
 use std::fs::File;
