@@ -27,6 +27,8 @@ The purpose of CamillaDSP is to enable audio processing with combinations of FIR
 Use recent versions of rustc and cargo. No need to use nightly.
 
 By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
+
+There is also a possibility to switch the processing to 32-bit floats. This might be good if running on a 32-bit CPU, but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
@@ -37,9 +39,10 @@ By default both the Alsa and PulseAudio backends are enabled, but they can be di
 - - Fedora: ```sudo dnf install pulseaudio-libs-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
 - Clone the repository
-- Build with ```cargo build --release```
-- - Or building without Alsa: ```cargo build --release --no-default-features --features pulse-backend```
-- - Or building without Pulse: ```cargo build --release --no-default-features --features alsa-backend``` 
+- Build with standard options: ```cargo build --release```
+- - without Alsa: ```cargo build --release --no-default-features --features pulse-backend```
+- - without Pulse: ```cargo build --release --no-default-features --features alsa-backend```
+- - with 32 bit float: ```cargo build --release --features 32bit```
 - The binary is now available at ./target/release/camilladsp
 - Optionally install with `cargo install --path .`
 
