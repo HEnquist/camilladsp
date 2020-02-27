@@ -16,10 +16,11 @@ pub fn chunk_to_buffer_bytes(chunk: AudioChunk, buf: &mut [u8], scalefactor: Prc
     let mut idx = 0;
     let mut clipped = 0;
     let mut peak = 0.0;
-    let mut maxval = (scalefactor - 1.0) / scalefactor;
-    if (bits == 32) && cfg!(feature = "32bit") {
-        maxval = (scalefactor - 128.0) / scalefactor;
-    }
+    let maxval = if (bits == 32) && cfg!(feature = "32bit") {
+        (scalefactor - 128.0) / scalefactor
+    } else {
+        (scalefactor - 1.0) / scalefactor
+    };
     let minval = -1.0;
     for frame in 0..chunk.frames {
         for chan in 0..chunk.channels {
@@ -141,10 +142,11 @@ pub fn chunk_to_buffer_int<T: num_traits::cast::NumCast>(
     let mut idx = 0;
     let mut clipped = 0;
     let mut peak = 0.0;
-    let mut maxval = (scalefactor - 1.0) / scalefactor;
-    if (scalefactor == 2147483648.0) && cfg!(feature = "32bit") {
-        maxval = (scalefactor - 128.0) / scalefactor;
-    }
+    let maxval = if (scalefactor >= 2_147_483_648.0) && cfg!(feature = "32bit") {
+        (scalefactor - 128.0) / scalefactor
+    } else {
+        (scalefactor - 1.0) / scalefactor
+    };
     let minval = -1.0;
     for frame in 0..chunk.frames {
         for chan in 0..chunk.channels {
