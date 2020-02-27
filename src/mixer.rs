@@ -1,6 +1,6 @@
-type PrcFmt = f64;
 use audiodevice::AudioChunk;
 use config;
+use PrcFmt;
 
 #[derive(Clone)]
 pub struct Mixer {

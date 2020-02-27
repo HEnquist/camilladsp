@@ -7,6 +7,7 @@ authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 default = ["alsa-backend", "pulse-backend"]
 alsa-backend = ["alsa"]
 pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
+32bit = []
 
 [dependencies]
 alsa = { version = "0.4", optional = true }

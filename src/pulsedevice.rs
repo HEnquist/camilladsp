@@ -46,7 +46,10 @@ fn chunk_to_buffer(chunk: AudioChunk, buf: &mut [u8], scalefactor: PrcFmt, bits:
     let mut idx = 0;
     let mut clipped = 0;
     let mut peak = 0.0;
-    let maxval = (scalefactor - 1.0) / scalefactor;
+    let mut maxval = (scalefactor - 1.0) / scalefactor;
+    if (bits == 32) && cfg!(feature = "32bit") {
+        maxval = (scalefactor - 256.0) / scalefactor;
+    }
     let minval = -1.0;
     for frame in 0..chunk.frames {
         for chan in 0..chunk.channels {
@@ -537,6 +540,9 @@ mod tests {
     fn clipping_32() {
         let bits = 32;
         let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+        #[cfg(feature = "32bit")]
+        let waveforms = vec![vec![-1.0, 0.0, 2147483392.0 / 2147483648.0]; 1];
+        #[cfg(not(feature = "32bit"))]
         let waveforms = vec![vec![-1.0, 0.0, 2147483647.0 / 2147483648.0]; 1];
         let chunk = AudioChunk {
             frames: 3,

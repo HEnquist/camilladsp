@@ -14,6 +14,9 @@ use std::sync::{Arc, Barrier};
 use std::{thread, time};
 
 // Sample format
+#[cfg(feature = "32bit")]
+pub type PrcFmt = f32;
+#[cfg(not(feature = "32bit"))]
 pub type PrcFmt = f64;
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
@@ -23,6 +26,7 @@ mod audiodevice;
 mod basicfilters;
 mod biquad;
 mod config;
+mod conversions;
 mod fftconv;
 mod fifoqueue;
 mod filedevice;
@@ -35,7 +39,6 @@ use audiodevice::*;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
-//use std::path::PathBuf;
 
 pub enum StatusMessage {
     PlaybackReady,

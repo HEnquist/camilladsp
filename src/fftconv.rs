@@ -126,6 +126,6 @@ mod tests {
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
         filter.process_waveform(&mut wave1).unwrap();
-        assert!(compare_waveforms(wave1, expected, 1e-9));
+        assert!(compare_waveforms(wave1, expected, 1e-7));
     }
 }

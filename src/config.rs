@@ -5,7 +5,7 @@ use std::error;
 use std::fmt;
 
 //type SmpFmt = i16;
-type PrcFmt = f64;
+use PrcFmt;
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
 #[derive(Debug)]
