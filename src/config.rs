@@ -33,14 +33,14 @@ impl ConfigError {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub enum SampleFormat {
     S16LE,
     S24LE,
     S32LE,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum Device {
     #[cfg(feature = "alsa-backend")]
@@ -62,7 +62,7 @@ pub enum Device {
     },
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct Devices {
     pub samplerate: usize,
     pub buffersize: usize,
@@ -74,7 +74,7 @@ pub struct Devices {
     pub playback: Device,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub enum FilterType {
     Biquad,
     Conv,
@@ -82,7 +82,7 @@ pub enum FilterType {
     Delay,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum Filter {
     Conv { parameters: ConvParameters },
@@ -91,14 +91,14 @@ pub enum Filter {
     Gain { parameters: GainParameters },
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum ConvParameters {
     File { filename: String },
     Values { values: Vec<PrcFmt> },
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum BiquadParameters {
     Free {
@@ -133,50 +133,50 @@ pub enum BiquadParameters {
     },
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct GainParameters {
     pub gain: PrcFmt,
     pub inverted: bool,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct DelayParameters {
     pub delay: PrcFmt,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct MixerChannels {
     pub r#in: usize,
     pub out: usize,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct MixerSource {
     pub channel: usize,
     pub gain: PrcFmt,
     pub inverted: bool,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct MixerMapping {
     pub dest: usize,
     pub sources: Vec<MixerSource>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct Mixer {
     pub channels: MixerChannels,
     pub mapping: Vec<MixerMapping>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum PipelineStep {
     Mixer { name: String },
     Filter { channel: usize, names: Vec<String> },
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct Configuration {
     pub devices: Devices,
     #[serde(default)]
