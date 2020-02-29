@@ -94,7 +94,7 @@ impl Filter for FFTConv {
     fn update_parameters(&mut self, conf: config::Filter) {
         match conf {
             config::Filter::Conv{ parameters: conf } => {
-                let data_length = self.npoints/2;
+                let data_length = self.npoints;
                 let coeffs = match conf {
                     config::ConvParameters::Values { values } => values,
                     config::ConvParameters::File { filename } => {

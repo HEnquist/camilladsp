@@ -98,7 +98,7 @@ fn run(conf: config::Configuration, configname: &str) -> Res<()> {
                             pipeline = new_pipeline;
                         },
                         config::ConfigChange::FilterParameters { filters, mixers } => {
-                            //pipeline.update_parameters(new_config, filters, mixers);
+                            pipeline.update_parameters(new_config, filters, mixers);
                         },
                         _ => {},
                     };

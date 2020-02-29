@@ -31,7 +31,7 @@ filters:
     type: Conv
     parameters:
       type: File 
-      filename: filter.txt
+      filename: filter2.txt
 
 mixers:
   mono:
@@ -42,7 +42,7 @@ mixers:
       - dest: 0
         sources:
           - channel: 0
-            gain: -6
+            gain: -7
             inverted: false
           - channel: 1
             gain: -6
@@ -61,11 +61,11 @@ pipeline:
     channel: 0
     names:
       - atten
-      - lp1
+      - lowpass_fir
   - type: Filter
     channel: 1
     names:
       - atten
-      - lp1
+      - lowpass_fir
    
 
