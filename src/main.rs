@@ -6,12 +6,14 @@ extern crate libpulse_binding as pulse;
 extern crate libpulse_simple_binding as psimple;
 extern crate rustfft;
 extern crate serde;
+extern crate signal_hook;
 
 use std::env;
 use std::error;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::{thread, time};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // Sample format
 #[cfg(feature = "32bit")]
@@ -49,13 +51,15 @@ pub enum StatusMessage {
     CaptureDone,
 }
 
-fn run(conf: config::Configuration) -> Res<()> {
+fn run(conf: config::Configuration, configname: &str) -> Res<()> {
     let (tx_pb, rx_pb) = mpsc::channel();
     let (tx_cap, rx_cap) = mpsc::channel();
 
     let (tx_status, rx_status) = mpsc::channel();
     let tx_status_pb = tx_status.clone();
     let tx_status_cap = tx_status;
+
+    let (tx_reload, rx_reload) = mpsc::channel();
 
     let barrier = Arc::new(Barrier::new(4));
     let barrier_pb = barrier.clone();
@@ -64,7 +68,9 @@ fn run(conf: config::Configuration) -> Res<()> {
 
     let conf_pb = conf.clone();
     let conf_cap = conf.clone();
-    let conf_proc = conf;
+    let conf_proc = conf.clone();
+
+    let mut active_config = conf;
 
     // Processing thread
     thread::spawn(move || {
@@ -84,6 +90,22 @@ fn run(conf: config::Configuration) -> Res<()> {
                 }
                 _ => {}
             }
+            match rx_reload.try_recv() {
+                Ok((diff, new_config)) => {
+                    match diff {
+                        config::ConfigChange::Pipeline => {
+                            let mut new_pipeline = filters::Pipeline::from_config(new_config);
+                            pipeline = new_pipeline;
+                        },
+                        config::ConfigChange::FilterParameters { filters, mixers } => {
+                            //pipeline.update_parameters(new_config, filters, mixers);
+                        },
+                        _ => {},
+                    };
+                    
+                },
+                _ => {},
+            };
         }
     });
 
@@ -99,7 +121,37 @@ fn run(conf: config::Configuration) -> Res<()> {
 
     let mut pb_ready = false;
     let mut cap_ready = false;
+    let reload = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::SIGHUP, Arc::clone(&reload))?;
+    
     loop {
+        if reload.load(Ordering::Relaxed) {
+            eprintln!("Time to reload!");
+            reload.store(false, Ordering::Relaxed);
+            match config::load_config(&configname) {
+                Ok(new_config) => {
+                    match config::validate_config(new_config.clone()) {
+                        Ok(()) => {
+                            let comp = config::config_diff(&active_config, &new_config);
+                            eprintln!("diff {:?}", comp);
+                            if new_config.devices == active_config.devices {
+                                eprintln!("Ok to reload");
+                                tx_reload.send((comp, new_config.clone())).unwrap();
+                                active_config = new_config;
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("Invalid config file!");
+                            eprintln!("{}", err);
+                        }
+                    }
+                }
+                Err(err) => {
+                    eprintln!("Config file error:");
+                    eprintln!("{}", err);
+                }
+            };
+        }    
         match rx_status.recv_timeout(delay) {
             Ok(msg) => match msg {
                 StatusMessage::PlaybackReady => {
@@ -143,26 +195,10 @@ fn main() {
         return;
     }
     let configname = &args[1];
-    let file = match File::open(configname) {
-        Ok(f) => f,
-        Err(_) => {
-            eprintln!("Could not open config file!");
-            return;
-        }
-    };
-    let mut buffered_reader = BufReader::new(file);
-    let mut contents = String::new();
-    let _number_of_bytes: usize = match buffered_reader.read_to_string(&mut contents) {
-        Ok(number_of_bytes) => number_of_bytes,
-        Err(_err) => {
-            eprintln!("Could not read config file!");
-            return;
-        }
-    };
-    let configuration: config::Configuration = match serde_yaml::from_str(&contents) {
-        Ok(config) => config,
+    let configuration = match config::load_config(&configname) {
+        Ok(config) => {config}
         Err(err) => {
-            eprintln!("Invalid config file!");
+            eprintln!("Config file error:");
             eprintln!("{}", err);
             return;
         }
@@ -176,7 +212,7 @@ fn main() {
             return;
         }
     }
-    if let Err(e) = run(configuration) {
+    if let Err(e) = run(configuration, &configname) {
         eprintln!("Error ({}) {}", e.description(), e);
     }
 }

@@ -5,64 +5,105 @@ use fifoqueue::FifoQueue;
 use PrcFmt;
 use Res;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Gain {
+    pub name: String,
     pub gain: PrcFmt,
 }
 
 pub struct Delay {
+    pub name: String,
+    samplerate: usize,
     pub queue: FifoQueue<PrcFmt>,
 }
 
 impl Gain {
     /// A simple filter providing gain in dB, and can also invert the signal.
-    pub fn new(gain_db: PrcFmt, inverted: bool) -> Self {
+    pub fn new(name: String, gain_db: PrcFmt, inverted: bool) -> Self {
         let mut gain: PrcFmt = 10.0;
         gain = gain.powf(gain_db / 20.0);
         if inverted {
             gain = -gain;
         }
-        Gain { gain }
+        Gain { name, gain }
     }
 
-    pub fn from_config(conf: config::GainParameters) -> Self {
+    pub fn from_config(name: String, conf: config::GainParameters) -> Self {
         let gain = conf.gain;
         let inverted = conf.inverted;
-        Gain::new(gain, inverted)
+        Gain::new(name, gain, inverted)
     }
+
 }
 
 impl Filter for Gain {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
         for item in waveform.iter_mut() {
             *item *= self.gain;
         }
         Ok(())
     }
+
+    fn update_parameters(&mut self, conf: config::Filter) {
+        match conf {
+            config::Filter::Gain{ parameters: conf } => {
+                let gain_db = conf.gain;
+                let inverted = conf.inverted;
+                let mut gain: PrcFmt = 10.0;
+                gain = gain.powf(gain_db / 20.0);
+                if inverted {
+                    gain = -gain;
+                }
+                self.gain = gain;
+            },
+            _ => {},
+        };
+    }
 }
 
 impl Delay {
     /// Creates a delay filter with delay in samples
     /// Will be improved as it gets slow for long delays
-    pub fn new(delay: usize) -> Self {
+    pub fn new(name: String, samplerate: usize, delay: usize) -> Self {
         let mut queue = FifoQueue::filled_with(delay + 1, 0.0);
         let _elem = queue.pop();
-        Delay { queue }
+        Delay { name, samplerate, queue }
     }
 
-    pub fn from_config(samplerate: usize, conf: config::DelayParameters) -> Self {
+    pub fn from_config(name: String, samplerate: usize, conf: config::DelayParameters) -> Self {
         let delay_samples = (conf.delay / 1000.0 * (samplerate as PrcFmt)) as usize;
-        Delay::new(delay_samples)
+        Delay::new(name, samplerate, delay_samples)
     }
+
 }
 
 impl Filter for Delay {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
         for item in waveform.iter_mut() {
             self.queue.push(*item)?;
             *item = self.queue.pop().unwrap();
         }
         Ok(())
+    }
+
+    fn update_parameters(&mut self, conf: config::Filter) {
+        match conf {
+            config::Filter::Delay{ parameters: conf } => {
+                let delay_samples = (conf.delay / 1000.0 * (self.samplerate as PrcFmt)) as usize;
+                let mut queue = FifoQueue::filled_with(delay_samples + 1, 0.0);
+                let _elem = queue.pop();
+                self.queue = queue;
+            },
+            _ => {},
+        };
     }
 }
 

@@ -141,20 +141,24 @@ impl BiquadCoefficients {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Biquad {
+    samplerate: usize,
     pub s1: PrcFmt,
     pub s2: PrcFmt,
     coeffs: BiquadCoefficients,
+    pub name: String,
 }
 
 impl Biquad {
     /// Creates a Direct Form 2 Transposed biquad filter from a set of coefficients
-    pub fn new(coefficients: BiquadCoefficients) -> Self {
+    pub fn new(name: String, samplerate: usize, coefficients: BiquadCoefficients) -> Self {
         Biquad {
+            samplerate,
             s1: 0.0,
             s2: 0.0,
             coeffs: coefficients,
+            name,
         }
     }
 
@@ -165,15 +169,30 @@ impl Biquad {
         self.s2 = self.coeffs.b2 * input - self.coeffs.a2 * out;
         out
     }
+
 }
 
 impl Filter for Biquad {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
         for item in waveform.iter_mut() {
             *item = self.process_single(*item);
         }
         //let out = input.iter().map(|s| self.process_single(*s)).collect::<Vec<PrcFmt>>();
         Ok(())
+    }
+
+    fn update_parameters(&mut self, conf: config::Filter) {
+        match conf {
+            config::Filter::Biquad{ parameters: conf } => {
+                let coeffs = BiquadCoefficients::from_config(self.samplerate, conf);
+                self.coeffs = coeffs;
+            },
+            _ => {},
+        };
     }
 }
 

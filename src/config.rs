@@ -3,6 +3,9 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::error;
 use std::fmt;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::Read;
 
 //type SmpFmt = i16;
 use PrcFmt;
@@ -74,13 +77,13 @@ pub struct Devices {
     pub playback: Device,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-pub enum FilterType {
-    Biquad,
-    Conv,
-    Gain,
-    Delay,
-}
+//#[derive(Clone, Debug, Deserialize, PartialEq)]
+//pub enum FilterType {
+//    Biquad,
+//    Conv,
+//    Gain,
+//    Delay,
+//}
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
@@ -185,6 +188,75 @@ pub struct Configuration {
     pub filters: HashMap<String, Filter>,
     #[serde(default)]
     pub pipeline: Vec<PipelineStep>,
+}
+
+pub fn load_config(filename: &str) -> Res<Configuration> {
+    let file = match File::open(filename) {
+        Ok(f) => f,
+        Err(_) => {
+            return Err(Box::new(ConfigError::new("Could not open config file!")));
+        }
+    };
+    let mut buffered_reader = BufReader::new(file);
+    let mut contents = String::new();
+    let _number_of_bytes: usize = match buffered_reader.read_to_string(&mut contents) {
+        Ok(number_of_bytes) => number_of_bytes,
+        Err(_err) => {
+            return Err(Box::new(ConfigError::new("Could not read config file!")));
+        }
+    };
+    let configuration: Configuration = match serde_yaml::from_str(&contents) {
+        Ok(config) => config,
+        Err(err) => {
+            return Err(Box::new(ConfigError::new(&format!("Invalid config file!\n{}", err))));
+        }
+    };
+    Ok(configuration)
+}
+
+#[derive(Debug)]
+pub enum ConfigChange {
+    FilterParameters{ filters: Vec<String>, mixers: Vec<String>},
+    Pipeline,
+    Devices,
+    None,
+}
+
+pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> ConfigChange {
+    if currentconf == newconf {
+        return ConfigChange::None;
+    }
+    if currentconf.devices != newconf.devices {
+        return ConfigChange::Devices;
+    }
+    if currentconf.pipeline != newconf.pipeline {
+        return ConfigChange::Pipeline;
+    }
+    let mut filters = Vec::<String>::new();
+    let mut mixers = Vec::<String>::new();
+    for (filter, params) in &newconf.filters {
+        match (params, currentconf.filters.get(filter).unwrap()) {
+            (Filter::Biquad{..}, Filter::Biquad{..} ) |
+            (Filter::Conv{..}, Filter::Conv{..} ) |
+            (Filter::Delay{..}, Filter::Delay{..} ) |
+            (Filter::Gain{..}, Filter::Gain{..} ) => {},
+            _ => {
+                return ConfigChange::Pipeline;
+            },
+        };
+        if params != currentconf.filters.get(filter).unwrap() {
+            filters.push(filter.to_string());
+        }
+    }
+    for (mixer, params) in &newconf.mixers {
+        if params != currentconf.mixers.get(mixer).unwrap() {
+            mixers.push(mixer.to_string());
+        }
+    }
+    ConfigChange::FilterParameters {
+        filters,
+        mixers,
+    }
 }
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.

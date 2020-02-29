@@ -19,22 +19,19 @@ filters:
   lp1:
     type: Biquad
     parameters:
-      type: Lowshelf
-      freq: 2000
-      gain: -1
-      slope: 3
-  peak1:
-    type: Biquad
-    parameters:
-      type: Highshelf
-      freq: 1000
-      slope: 3
-      gain: -6
+      type: Lowpass
+      freq: 15000
+      q: 0.5
   atten:
     type: Gain
     parameters:
       gain: -3
       inverted: false
+  lowpass_fir:
+    type: Conv
+    parameters:
+      type: File 
+      filename: filter.txt
 
 mixers:
   mono:
@@ -64,7 +61,7 @@ pipeline:
     channel: 0
     names:
       - atten
-      - peak1
+      - lp1
   - type: Filter
     channel: 1
     names:
