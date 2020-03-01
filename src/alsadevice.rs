@@ -12,10 +12,10 @@ use audiodevice::*;
 use config::SampleFormat;
 use conversions::{buffer_to_chunk_int, chunk_to_buffer_int};
 
+use CommandMessage;
 use PrcFmt;
 use Res;
 use StatusMessage;
-use CommandMessage;
 
 pub struct AlsaPlaybackDevice {
     pub devname: String,
@@ -282,13 +282,11 @@ impl CaptureDevice for AlsaCaptureDevice {
                             let io = pcmdevice.io_i16().unwrap();
                             let mut buf = vec![0i16; channels * bufferlength];
                             loop {
-                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() { 
+                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
                                     let msg = AudioMessage::EndOfStream;
                                     channel.send(msg).unwrap();
-                                    status_channel
-                                        .send(StatusMessage::CaptureDone)
-                                        .unwrap();
-                                        break;
+                                    status_channel.send(StatusMessage::CaptureDone).unwrap();
+                                    break;
                                 }
                                 let capture_res = capture_buffer(&mut buf, &pcmdevice, &io);
                                 match capture_res {
@@ -323,13 +321,11 @@ impl CaptureDevice for AlsaCaptureDevice {
                             let io = pcmdevice.io_i32().unwrap();
                             let mut buf = vec![0i32; channels * bufferlength];
                             loop {
-                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() { 
+                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
                                     let msg = AudioMessage::EndOfStream;
                                     channel.send(msg).unwrap();
-                                    status_channel
-                                        .send(StatusMessage::CaptureDone)
-                                        .unwrap();
-                                        break;
+                                    status_channel.send(StatusMessage::CaptureDone).unwrap();
+                                    break;
                                 }
                                 let capture_res = capture_buffer(&mut buf, &pcmdevice, &io);
                                 match capture_res {

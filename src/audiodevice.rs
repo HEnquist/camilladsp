@@ -9,10 +9,10 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
+use CommandMessage;
 use PrcFmt;
 use Res;
 use StatusMessage;
-use CommandMessage;
 
 pub enum AudioMessage {
     //Quit,

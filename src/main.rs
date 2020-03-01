@@ -116,8 +116,8 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
                         let msg = AudioMessage::EndOfStream;
                         tx_pb.send(msg).unwrap();
                         break;
-                    },
-                    _ => {},
+                    }
+                    _ => {}
                 };
             };
         }
@@ -129,7 +129,9 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
 
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
-    let cap_handle = capture_dev.start(tx_cap, barrier_cap, tx_status_cap, rx_command_cap).unwrap();
+    let cap_handle = capture_dev
+        .start(tx_cap, barrier_cap, tx_status_cap, rx_command_cap)
+        .unwrap();
 
     let delay = time::Duration::from_millis(100);
 
@@ -147,10 +149,11 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
                     Ok(()) => {
                         let comp = config::config_diff(&active_config, &new_config);
                         match comp {
-                            config::ConfigChange::Pipeline | config::ConfigChange::FilterParameters { .. } => {
+                            config::ConfigChange::Pipeline
+                            | config::ConfigChange::FilterParameters { .. } => {
                                 tx_pipeconf.send((comp, new_config.clone())).unwrap();
                                 active_config = new_config;
-                            },
+                            }
                             config::ConfigChange::Devices => {
                                 eprintln!("Devices changed, restart required.");
                                 //tx_pipeconf.send((comp, new_config.clone())).unwrap();
@@ -161,10 +164,10 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
                                 eprintln!("Wait for cap..");
                                 cap_handle.join().unwrap();
                                 return Ok(ExitStatus::Restart(Box::new(new_config)));
-                            },
+                            }
                             config::ConfigChange::None => {
                                 eprintln!("No changes in config.");
-                            },
+                            }
                         };
                     }
                     Err(err) => {
@@ -244,9 +247,11 @@ fn main() {
             Err(e) => {
                 eprintln!("Error ({}) {}", e.description(), e);
                 break;
-            },
-            Ok(ExitStatus::Exit) => { break; },
-            Ok(ExitStatus::Restart(conf)) => { configuration = *conf },
+            }
+            Ok(ExitStatus::Exit) => {
+                break;
+            }
+            Ok(ExitStatus::Restart(conf)) => configuration = *conf,
         };
     }
 }
