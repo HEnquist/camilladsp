@@ -48,7 +48,16 @@ pub enum StatusMessage {
     CaptureDone,
 }
 
-fn run(conf: config::Configuration, configname: &str) -> Res<()> {
+pub enum CommandMessage {
+    Exit,
+}
+
+enum ExitStatus {
+    Restart(Box<config::Configuration>),
+    Exit,
+}
+
+fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
     let (tx_pb, rx_pb) = mpsc::channel();
     let (tx_cap, rx_cap) = mpsc::channel();
 
@@ -56,7 +65,8 @@ fn run(conf: config::Configuration, configname: &str) -> Res<()> {
     let tx_status_pb = tx_status.clone();
     let tx_status_cap = tx_status;
 
-    let (tx_reload, rx_reload) = mpsc::channel();
+    let (tx_command_cap, rx_command_cap) = mpsc::channel();
+    let (tx_pipeconf, rx_pipeconf) = mpsc::channel();
 
     let barrier = Arc::new(Barrier::new(4));
     let barrier_pb = barrier.clone();
@@ -84,10 +94,11 @@ fn run(conf: config::Configuration, configname: &str) -> Res<()> {
                 Ok(AudioMessage::EndOfStream) => {
                     let msg = AudioMessage::EndOfStream;
                     tx_pb.send(msg).unwrap();
+                    break;
                 }
                 _ => {}
             }
-            if let Ok((diff, new_config)) = rx_reload.try_recv() {
+            if let Ok((diff, new_config)) = rx_pipeconf.try_recv() {
                 match diff {
                     config::ConfigChange::Pipeline => {
                         eprintln!("Rebuilding pipeline.");
@@ -102,11 +113,11 @@ fn run(conf: config::Configuration, configname: &str) -> Res<()> {
                         pipeline.update_parameters(new_config, filters, mixers);
                     }
                     config::ConfigChange::Devices => {
-                        eprintln!("Devices changed, restart required.");
-                    }
-                    config::ConfigChange::None => {
-                        eprintln!("No changes in config.");
-                    }
+                        let msg = AudioMessage::EndOfStream;
+                        tx_pb.send(msg).unwrap();
+                        break;
+                    },
+                    _ => {},
                 };
             };
         }
@@ -114,33 +125,47 @@ fn run(conf: config::Configuration, configname: &str) -> Res<()> {
 
     // Playback thread
     let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
-    let _pb_handle = playback_dev.start(rx_pb, barrier_pb, tx_status_pb);
+    let pb_handle = playback_dev.start(rx_pb, barrier_pb, tx_status_pb).unwrap();
 
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
-    let _cap_handle = capture_dev.start(tx_cap, barrier_cap, tx_status_cap);
+    let cap_handle = capture_dev.start(tx_cap, barrier_cap, tx_status_cap, rx_command_cap).unwrap();
 
-    let delay = time::Duration::from_millis(1000);
+    let delay = time::Duration::from_millis(100);
 
     let mut pb_ready = false;
     let mut cap_ready = false;
-    let reload = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::SIGHUP, Arc::clone(&reload))?;
+    let signal_reload = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::SIGHUP, Arc::clone(&signal_reload))?;
 
     loop {
-        if reload.load(Ordering::Relaxed) {
-            eprintln!("Time to reload!");
-            reload.store(false, Ordering::Relaxed);
+        if signal_reload.load(Ordering::Relaxed) {
+            eprintln!("Reloading configuration...");
+            signal_reload.store(false, Ordering::Relaxed);
             match config::load_config(&configname) {
                 Ok(new_config) => match config::validate_config(new_config.clone()) {
                     Ok(()) => {
                         let comp = config::config_diff(&active_config, &new_config);
-                        eprintln!("diff {:?}", comp);
-                        if new_config.devices == active_config.devices {
-                            eprintln!("Ok to reload");
-                            tx_reload.send((comp, new_config.clone())).unwrap();
-                            active_config = new_config;
-                        }
+                        match comp {
+                            config::ConfigChange::Pipeline | config::ConfigChange::FilterParameters { .. } => {
+                                tx_pipeconf.send((comp, new_config.clone())).unwrap();
+                                active_config = new_config;
+                            },
+                            config::ConfigChange::Devices => {
+                                eprintln!("Devices changed, restart required.");
+                                //tx_pipeconf.send((comp, new_config.clone())).unwrap();
+                                tx_command_cap.send(CommandMessage::Exit).unwrap();
+                                //tx_command_pb.send(CommandMessage::Exit).unwrap();
+                                eprintln!("Wait for pb..");
+                                pb_handle.join().unwrap();
+                                eprintln!("Wait for cap..");
+                                cap_handle.join().unwrap();
+                                return Ok(ExitStatus::Restart(Box::new(new_config)));
+                            },
+                            config::ConfigChange::None => {
+                                eprintln!("No changes in config.");
+                            },
+                        };
                     }
                     Err(err) => {
                         eprintln!("Invalid config file!");
@@ -169,15 +194,15 @@ fn run(conf: config::Configuration, configname: &str) -> Res<()> {
                 }
                 StatusMessage::PlaybackError { message } => {
                     eprintln!("Playback error: {}", message);
-                    return Ok(());
+                    return Ok(ExitStatus::Exit);
                 }
                 StatusMessage::CaptureError { message } => {
                     eprintln!("Capture error: {}", message);
-                    return Ok(());
+                    return Ok(ExitStatus::Exit);
                 }
                 StatusMessage::PlaybackDone => {
                     eprintln!("Playback finished");
-                    return Ok(());
+                    return Ok(ExitStatus::Exit);
                 }
                 StatusMessage::CaptureDone => {
                     eprintln!("Capture finished");
@@ -196,7 +221,7 @@ fn main() {
         return;
     }
     let configname = &args[1];
-    let configuration = match config::load_config(&configname) {
+    let mut configuration = match config::load_config(&configname) {
         Ok(config) => config,
         Err(err) => {
             eprintln!("Config file error:");
@@ -213,7 +238,15 @@ fn main() {
             return;
         }
     }
-    if let Err(e) = run(configuration, &configname) {
-        eprintln!("Error ({}) {}", e.description(), e);
+    loop {
+        let exitstatus = run(configuration, &configname);
+        match exitstatus {
+            Err(e) => {
+                eprintln!("Error ({}) {}", e.description(), e);
+                break;
+            },
+            Ok(ExitStatus::Exit) => { break; },
+            Ok(ExitStatus::Restart(conf)) => { configuration = *conf },
+        };
     }
 }

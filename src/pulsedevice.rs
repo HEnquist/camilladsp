@@ -18,6 +18,7 @@ use conversions::{buffer_to_chunk_bytes, chunk_to_buffer_bytes};
 use PrcFmt;
 use Res;
 use StatusMessage;
+use CommandMessage;
 
 pub struct PulsePlaybackDevice {
     pub devname: String,
@@ -160,6 +161,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                     }
                                     Ok(AudioMessage::EndOfStream) => {
                                         status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                        break;
                                     }
                                     Err(_) => {}
                                 }
@@ -191,6 +193,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                     }
                                     Ok(AudioMessage::EndOfStream) => {
                                         status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                        break;
                                     }
                                     _ => {}
                                 }
@@ -218,6 +221,7 @@ impl CaptureDevice for PulseCaptureDevice {
         channel: mpsc::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
+        command_channel: mpsc::Receiver<CommandMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -255,6 +259,14 @@ impl CaptureDevice for PulseCaptureDevice {
                         SampleFormat::S16LE => {
                             let mut buf = vec![0u8; channels * bufferlength * 2];
                             loop {
+                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() { 
+                                    let msg = AudioMessage::EndOfStream;
+                                    channel.send(msg).unwrap();
+                                    status_channel
+                                        .send(StatusMessage::CaptureDone)
+                                        .unwrap();
+                                        break;
+                                }
                                 //let frames = self.io.readi(&mut buf)?;
                                 let read_res = pulsedevice.read(&mut buf);
                                 match read_res {
@@ -290,6 +302,14 @@ impl CaptureDevice for PulseCaptureDevice {
                         SampleFormat::S24LE | SampleFormat::S32LE => {
                             let mut buf = vec![0u8; channels * bufferlength * 4];
                             loop {
+                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() { 
+                                    let msg = AudioMessage::EndOfStream;
+                                    channel.send(msg).unwrap();
+                                    status_channel
+                                        .send(StatusMessage::CaptureDone)
+                                        .unwrap();
+                                        break;
+                                }
                                 let read_res = pulsedevice.read(&mut buf);
                                 match read_res {
                                     Ok(_) => {}

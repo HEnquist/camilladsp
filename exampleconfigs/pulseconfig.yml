@@ -2,7 +2,7 @@
 devices:
   samplerate: 44100
   buffersize: 1024
-  silence_threshold: -60
+  silence_threshold: -61
   silence_timeout: 3.0
   capture:
     type: Pulse
@@ -20,7 +20,7 @@ filters:
     type: Biquad
     parameters:
       type: Lowpass
-      freq: 15000
+      freq: 1500
       q: 0.5
   atten:
     type: Gain

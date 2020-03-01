@@ -12,6 +12,7 @@ use std::thread;
 use PrcFmt;
 use Res;
 use StatusMessage;
+use CommandMessage;
 
 pub enum AudioMessage {
     //Quit,
@@ -45,6 +46,7 @@ pub trait CaptureDevice {
         channel: mpsc::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
+        command_channel: mpsc::Receiver<CommandMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
 }
 

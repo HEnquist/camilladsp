@@ -15,6 +15,7 @@ use conversions::{buffer_to_chunk_int, chunk_to_buffer_int};
 use PrcFmt;
 use Res;
 use StatusMessage;
+use CommandMessage;
 
 pub struct AlsaPlaybackDevice {
     pub devname: String,
@@ -187,6 +188,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     }
                                     Ok(AudioMessage::EndOfStream) => {
                                         status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                        break;
                                     }
                                     _ => {}
                                 }
@@ -213,6 +215,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     }
                                     Ok(AudioMessage::EndOfStream) => {
                                         status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                        break;
                                     }
                                     _ => {}
                                 }
@@ -240,6 +243,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         channel: mpsc::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
+        command_channel: mpsc::Receiver<CommandMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -278,6 +282,14 @@ impl CaptureDevice for AlsaCaptureDevice {
                             let io = pcmdevice.io_i16().unwrap();
                             let mut buf = vec![0i16; channels * bufferlength];
                             loop {
+                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() { 
+                                    let msg = AudioMessage::EndOfStream;
+                                    channel.send(msg).unwrap();
+                                    status_channel
+                                        .send(StatusMessage::CaptureDone)
+                                        .unwrap();
+                                        break;
+                                }
                                 let capture_res = capture_buffer(&mut buf, &pcmdevice, &io);
                                 match capture_res {
                                     Ok(_) => {}
@@ -311,6 +323,14 @@ impl CaptureDevice for AlsaCaptureDevice {
                             let io = pcmdevice.io_i32().unwrap();
                             let mut buf = vec![0i32; channels * bufferlength];
                             loop {
+                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() { 
+                                    let msg = AudioMessage::EndOfStream;
+                                    channel.send(msg).unwrap();
+                                    status_channel
+                                        .send(StatusMessage::CaptureDone)
+                                        .unwrap();
+                                        break;
+                                }
                                 let capture_res = capture_buffer(&mut buf, &pcmdevice, &io);
                                 match capture_res {
                                     Ok(_) => {}
