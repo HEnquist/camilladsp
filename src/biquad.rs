@@ -186,13 +186,14 @@ impl Filter for Biquad {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        match conf {
-            config::Filter::Biquad{ parameters: conf } => {
-                let coeffs = BiquadCoefficients::from_config(self.samplerate, conf);
-                self.coeffs = coeffs;
-            },
-            _ => {},
-        };
+        if let config::Filter::Biquad{ parameters: conf } = conf {
+            let coeffs = BiquadCoefficients::from_config(self.samplerate, conf);
+            self.coeffs = coeffs;
+        }
+        else {
+            // This should never happen unless there is a bug somewhere else
+            panic!("Invalid config change!");
+        }
     }
 }
 
@@ -238,7 +239,7 @@ mod tests {
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         let mut wave = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let expected = vec![0.215, 0.461, 0.281, 0.039, 0.004, 0.0, 0.0, 0.0];
-        let mut filter = Biquad::new(coeffs);
+        let mut filter = Biquad::new("test".to_string(), 44100, coeffs);
         filter.process_waveform(&mut wave).unwrap();
         assert!(compare_waveforms(wave, expected, 1e-3));
     }

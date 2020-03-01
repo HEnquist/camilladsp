@@ -38,9 +38,6 @@ mod mixer;
 mod pulsedevice;
 
 use audiodevice::*;
-use std::fs::File;
-use std::io::prelude::*;
-use std::io::BufReader;
 
 pub enum StatusMessage {
     PlaybackReady,
@@ -90,21 +87,24 @@ fn run(conf: config::Configuration, configname: &str) -> Res<()> {
                 }
                 _ => {}
             }
-            match rx_reload.try_recv() {
-                Ok((diff, new_config)) => {
-                    match diff {
-                        config::ConfigChange::Pipeline => {
-                            let mut new_pipeline = filters::Pipeline::from_config(new_config);
-                            pipeline = new_pipeline;
-                        },
-                        config::ConfigChange::FilterParameters { filters, mixers } => {
-                            pipeline.update_parameters(new_config, filters, mixers);
-                        },
-                        _ => {},
-                    };
-                    
-                },
-                _ => {},
+            if let Ok((diff, new_config)) = rx_reload.try_recv() {
+                match diff {
+                    config::ConfigChange::Pipeline => {
+                        eprintln!("Rebuilding pipeline.");
+                        let new_pipeline = filters::Pipeline::from_config(new_config);
+                        pipeline = new_pipeline;
+                    },
+                    config::ConfigChange::FilterParameters { filters, mixers } => {
+                        eprintln!("Updating parameters of filters: {:?}, mixers: {:?}.", filters, mixers);
+                        pipeline.update_parameters(new_config, filters, mixers);
+                    },
+                    config::ConfigChange::Devices => {
+                        eprintln!("Devices changed, restart required.");
+                    },
+                    config::ConfigChange::None => {
+                        eprintln!("No changes in config.");
+                    },
+                };
             };
         }
     });

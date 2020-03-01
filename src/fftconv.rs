@@ -92,30 +92,31 @@ impl Filter for FFTConv {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        match conf {
-            config::Filter::Conv{ parameters: conf } => {
-                let data_length = self.npoints;
-                let coeffs = match conf {
-                    config::ConvParameters::Values { values } => values,
-                    config::ConvParameters::File { filename } => {
-                        filters::read_coeff_file(&filename).unwrap()
-                    }
-                };
-                let mut coeffs_c: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
-                let mut coeffs_f: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
-                if coeffs.len() > data_length {
-                    eprintln!(
-                        "Warning! Filter impulse response is longer than buffer and will be truncated."
-                    )
+        if let config::Filter::Conv{ parameters: conf } = conf {
+            let data_length = self.npoints;
+            let coeffs = match conf {
+                config::ConvParameters::Values { values } => values,
+                config::ConvParameters::File { filename } => {
+                    filters::read_coeff_file(&filename).unwrap()
                 }
-                for n in 0..coeffs.len() {
-                    coeffs_c[n] = Complex::from(coeffs[n] / (2.0 * data_length as PrcFmt));
-                }
-                self.fft.process(&mut coeffs_c, &mut coeffs_f);
-                self.coeffs_f = coeffs_f;
-            },
-            _ => {},
-        };
+            };
+            let mut coeffs_c: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
+            let mut coeffs_f: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
+            if coeffs.len() > data_length {
+                eprintln!(
+                    "Warning! Filter impulse response is longer than buffer and will be truncated."
+                )
+            }
+            for n in 0..coeffs.len() {
+                coeffs_c[n] = Complex::from(coeffs[n] / (2.0 * data_length as PrcFmt));
+            }
+            self.fft.process(&mut coeffs_c, &mut coeffs_f);
+            self.coeffs_f = coeffs_f;
+        }
+        else {
+            // This should never happen unless there is a bug somewhere else
+            panic!("Invalid config change!");
+        }
     }
 }
 
@@ -155,7 +156,7 @@ mod tests {
     fn check_result() {
         let coeffs = vec![0.5, 0.5];
         let conf = ConvParameters::Values { values: coeffs };
-        let mut filter = FFTConv::from_config(8, conf);
+        let mut filter = FFTConv::from_config("test".to_string(), 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
         filter.process_waveform(&mut wave1).unwrap();

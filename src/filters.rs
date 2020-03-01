@@ -70,7 +70,7 @@ impl FilterGroup {
 
     pub fn update_parameters(&mut self, filterconfigs: HashMap<String, config::Filter>, changed: Vec<String>) {
         for filter in &mut self.filters {
-            if changed.iter().find(|&n| n == &filter.name()).is_some() {
+            if changed.iter().any(|n| n == &filter.name()) {
                 filter.update_parameters(filterconfigs[&filter.name()].clone());
             }
         }
@@ -127,7 +127,7 @@ impl Pipeline {
         for mut step in &mut self.steps {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {
-                    if mixers.iter().find(|&n| n == &mix.name).is_some() {
+                    if mixers.iter().any(|n| n == &mix.name) {
                         mix.update_parameters(conf.mixers[&mix.name].clone());
                     }
                 }
