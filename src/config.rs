@@ -208,7 +208,10 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
     let configuration: Configuration = match serde_yaml::from_str(&contents) {
         Ok(config) => config,
         Err(err) => {
-            return Err(Box::new(ConfigError::new(&format!("Invalid config file!\n{}", err))));
+            return Err(Box::new(ConfigError::new(&format!(
+                "Invalid config file!\n{}",
+                err
+            ))));
         }
     };
     Ok(configuration)
@@ -216,7 +219,10 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
 
 #[derive(Debug)]
 pub enum ConfigChange {
-    FilterParameters{ filters: Vec<String>, mixers: Vec<String>},
+    FilterParameters {
+        filters: Vec<String>,
+        mixers: Vec<String>,
+    },
     Pipeline,
     Devices,
     None,
@@ -236,13 +242,13 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     let mut mixers = Vec::<String>::new();
     for (filter, params) in &newconf.filters {
         match (params, currentconf.filters.get(filter).unwrap()) {
-            (Filter::Biquad{..}, Filter::Biquad{..} ) |
-            (Filter::Conv{..}, Filter::Conv{..} ) |
-            (Filter::Delay{..}, Filter::Delay{..} ) |
-            (Filter::Gain{..}, Filter::Gain{..} ) => {},
+            (Filter::Biquad { .. }, Filter::Biquad { .. })
+            | (Filter::Conv { .. }, Filter::Conv { .. })
+            | (Filter::Delay { .. }, Filter::Delay { .. })
+            | (Filter::Gain { .. }, Filter::Gain { .. }) => {}
             _ => {
                 return ConfigChange::Pipeline;
-            },
+            }
         };
         if params != currentconf.filters.get(filter).unwrap() {
             filters.push(filter.to_string());
@@ -253,10 +259,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
             mixers.push(mixer.to_string());
         }
     }
-    ConfigChange::FilterParameters {
-        filters,
-        mixers,
-    }
+    ConfigChange::FilterParameters { filters, mixers }
 }
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.

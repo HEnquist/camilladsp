@@ -169,7 +169,6 @@ impl Biquad {
         self.s2 = self.coeffs.b2 * input - self.coeffs.a2 * out;
         out
     }
-
 }
 
 impl Filter for Biquad {
@@ -186,11 +185,10 @@ impl Filter for Biquad {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Biquad{ parameters: conf } = conf {
+        if let config::Filter::Biquad { parameters: conf } = conf {
             let coeffs = BiquadCoefficients::from_config(self.samplerate, conf);
             self.coeffs = coeffs;
-        }
-        else {
+        } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
         }

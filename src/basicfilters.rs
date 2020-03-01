@@ -33,7 +33,6 @@ impl Gain {
         let inverted = conf.inverted;
         Gain::new(name, gain, inverted)
     }
-
 }
 
 impl Filter for Gain {
@@ -49,7 +48,7 @@ impl Filter for Gain {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Gain{ parameters: conf } = conf {
+        if let config::Filter::Gain { parameters: conf } = conf {
             let gain_db = conf.gain;
             let inverted = conf.inverted;
             let mut gain: PrcFmt = 10.0;
@@ -58,8 +57,7 @@ impl Filter for Gain {
                 gain = -gain;
             }
             self.gain = gain;
-        }
-        else {
+        } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
         }
@@ -72,14 +70,17 @@ impl Delay {
     pub fn new(name: String, samplerate: usize, delay: usize) -> Self {
         let mut queue = FifoQueue::filled_with(delay + 1, 0.0);
         let _elem = queue.pop();
-        Delay { name, samplerate, queue }
+        Delay {
+            name,
+            samplerate,
+            queue,
+        }
     }
 
     pub fn from_config(name: String, samplerate: usize, conf: config::DelayParameters) -> Self {
         let delay_samples = (conf.delay / 1000.0 * (samplerate as PrcFmt)) as usize;
         Delay::new(name, samplerate, delay_samples)
     }
-
 }
 
 impl Filter for Delay {
@@ -96,13 +97,12 @@ impl Filter for Delay {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Delay{ parameters: conf } = conf {
+        if let config::Filter::Delay { parameters: conf } = conf {
             let delay_samples = (conf.delay / 1000.0 * (self.samplerate as PrcFmt)) as usize;
             let mut queue = FifoQueue::filled_with(delay_samples + 1, 0.0);
             let _elem = queue.pop();
             self.queue = queue;
-        }
-        else {
+        } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
         }

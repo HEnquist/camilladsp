@@ -18,7 +18,7 @@ pub struct MixerSource {
 
 impl Mixer {
     /// Creates a Mixer from a config struct
-    pub fn from_config(name:String, config: config::Mixer) -> Self {
+    pub fn from_config(name: String, config: config::Mixer) -> Self {
         let ch_in = config.channels.r#in;
         let ch_out = config.channels.out;
         let mut mapping = vec![Vec::<MixerSource>::new(); ch_out];

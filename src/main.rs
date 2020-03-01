@@ -10,10 +10,10 @@ extern crate signal_hook;
 
 use std::env;
 use std::error;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::{thread, time};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 // Sample format
 #[cfg(feature = "32bit")]
@@ -93,17 +93,20 @@ fn run(conf: config::Configuration, configname: &str) -> Res<()> {
                         eprintln!("Rebuilding pipeline.");
                         let new_pipeline = filters::Pipeline::from_config(new_config);
                         pipeline = new_pipeline;
-                    },
+                    }
                     config::ConfigChange::FilterParameters { filters, mixers } => {
-                        eprintln!("Updating parameters of filters: {:?}, mixers: {:?}.", filters, mixers);
+                        eprintln!(
+                            "Updating parameters of filters: {:?}, mixers: {:?}.",
+                            filters, mixers
+                        );
                         pipeline.update_parameters(new_config, filters, mixers);
-                    },
+                    }
                     config::ConfigChange::Devices => {
                         eprintln!("Devices changed, restart required.");
-                    },
+                    }
                     config::ConfigChange::None => {
                         eprintln!("No changes in config.");
-                    },
+                    }
                 };
             };
         }
@@ -123,35 +126,33 @@ fn run(conf: config::Configuration, configname: &str) -> Res<()> {
     let mut cap_ready = false;
     let reload = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::SIGHUP, Arc::clone(&reload))?;
-    
+
     loop {
         if reload.load(Ordering::Relaxed) {
             eprintln!("Time to reload!");
             reload.store(false, Ordering::Relaxed);
             match config::load_config(&configname) {
-                Ok(new_config) => {
-                    match config::validate_config(new_config.clone()) {
-                        Ok(()) => {
-                            let comp = config::config_diff(&active_config, &new_config);
-                            eprintln!("diff {:?}", comp);
-                            if new_config.devices == active_config.devices {
-                                eprintln!("Ok to reload");
-                                tx_reload.send((comp, new_config.clone())).unwrap();
-                                active_config = new_config;
-                            }
-                        }
-                        Err(err) => {
-                            eprintln!("Invalid config file!");
-                            eprintln!("{}", err);
+                Ok(new_config) => match config::validate_config(new_config.clone()) {
+                    Ok(()) => {
+                        let comp = config::config_diff(&active_config, &new_config);
+                        eprintln!("diff {:?}", comp);
+                        if new_config.devices == active_config.devices {
+                            eprintln!("Ok to reload");
+                            tx_reload.send((comp, new_config.clone())).unwrap();
+                            active_config = new_config;
                         }
                     }
-                }
+                    Err(err) => {
+                        eprintln!("Invalid config file!");
+                        eprintln!("{}", err);
+                    }
+                },
                 Err(err) => {
                     eprintln!("Config file error:");
                     eprintln!("{}", err);
                 }
             };
-        }    
+        }
         match rx_status.recv_timeout(delay) {
             Ok(msg) => match msg {
                 StatusMessage::PlaybackReady => {
@@ -196,7 +197,7 @@ fn main() {
     }
     let configname = &args[1];
     let configuration = match config::load_config(&configname) {
-        Ok(config) => {config}
+        Ok(config) => config,
         Err(err) => {
             eprintln!("Config file error:");
             eprintln!("{}", err);

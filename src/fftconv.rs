@@ -92,7 +92,7 @@ impl Filter for FFTConv {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Conv{ parameters: conf } = conf {
+        if let config::Filter::Conv { parameters: conf } = conf {
             let data_length = self.npoints;
             let coeffs = match conf {
                 config::ConvParameters::Values { values } => values,
@@ -112,8 +112,7 @@ impl Filter for FFTConv {
             }
             self.fft.process(&mut coeffs_c, &mut coeffs_f);
             self.coeffs_f = coeffs_f;
-        }
-        else {
+        } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
         }
