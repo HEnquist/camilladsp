@@ -15,6 +15,10 @@ use Res;
 pub trait Filter {
     // Filter a Vec
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()>;
+
+    fn update_parameters(&mut self, config: config::Filter) -> ();
+
+    fn name(&self) -> String;
 }
 
 pub fn read_coeff_file(filename: &str) -> Res<Vec<PrcFmt>> {
@@ -45,23 +49,40 @@ impl FilterGroup {
         let mut filters = Vec::<Box<dyn Filter>>::new();
         for name in names {
             let filter_cfg = filter_configs[&name].clone();
-            let filter: Box<dyn Filter> = match filter_cfg {
-                config::Filter::Conv { parameters } => {
-                    Box::new(fftconv::FFTConv::from_config(waveform_length, parameters))
-                }
-                config::Filter::Biquad { parameters } => Box::new(biquad::Biquad::new(
-                    biquad::BiquadCoefficients::from_config(sample_freq, parameters),
-                )),
-                config::Filter::Delay { parameters } => {
-                    Box::new(basicfilters::Delay::from_config(sample_freq, parameters))
-                }
-                config::Filter::Gain { parameters } => {
-                    Box::new(basicfilters::Gain::from_config(parameters))
-                } //_ => panic!("unknown type")
-            };
+            let filter: Box<dyn Filter> =
+                match filter_cfg {
+                    config::Filter::Conv { parameters } => Box::new(fftconv::FFTConv::from_config(
+                        name,
+                        waveform_length,
+                        parameters,
+                    )),
+                    config::Filter::Biquad { parameters } => Box::new(biquad::Biquad::new(
+                        name,
+                        sample_freq,
+                        biquad::BiquadCoefficients::from_config(sample_freq, parameters),
+                    )),
+                    config::Filter::Delay { parameters } => Box::new(
+                        basicfilters::Delay::from_config(name, sample_freq, parameters),
+                    ),
+                    config::Filter::Gain { parameters } => {
+                        Box::new(basicfilters::Gain::from_config(name, parameters))
+                    } //_ => panic!("unknown type")
+                };
             filters.push(filter);
         }
         FilterGroup { channel, filters }
+    }
+
+    pub fn update_parameters(
+        &mut self,
+        filterconfigs: HashMap<String, config::Filter>,
+        changed: Vec<String>,
+    ) {
+        for filter in &mut self.filters {
+            if changed.iter().any(|n| n == &filter.name()) {
+                filter.update_parameters(filterconfigs[&filter.name()].clone());
+            }
+        }
     }
 
     /// Apply all the filters to an AudioChunk.
@@ -92,7 +113,7 @@ impl Pipeline {
             match step {
                 config::PipelineStep::Mixer { name } => {
                     let mixconf = conf.mixers[&name].clone();
-                    let mixer = mixer::Mixer::from_config(mixconf);
+                    let mixer = mixer::Mixer::from_config(name, mixconf);
                     steps.push(PipelineStep::MixerStep(mixer));
                 }
                 config::PipelineStep::Filter { channel, names } => {
@@ -108,6 +129,26 @@ impl Pipeline {
             }
         }
         Pipeline { steps }
+    }
+
+    pub fn update_parameters(
+        &mut self,
+        conf: config::Configuration,
+        filters: Vec<String>,
+        mixers: Vec<String>,
+    ) {
+        for mut step in &mut self.steps {
+            match &mut step {
+                PipelineStep::MixerStep(mix) => {
+                    if mixers.iter().any(|n| n == &mix.name) {
+                        mix.update_parameters(conf.mixers[&mix.name].clone());
+                    }
+                }
+                PipelineStep::FilterStep(flt) => {
+                    flt.update_parameters(conf.filters.clone(), filters.clone());
+                }
+            }
+        }
     }
 
     /// Process an AudioChunk by calling either a MixerStep or a FilterStep

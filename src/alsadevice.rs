@@ -10,7 +10,9 @@ use std::thread;
 use audiodevice::*;
 // Sample format
 use config::SampleFormat;
+use conversions::{buffer_to_chunk_int, chunk_to_buffer_int};
 
+use CommandMessage;
 use PrcFmt;
 use Res;
 use StatusMessage;
@@ -31,100 +33,6 @@ pub struct AlsaCaptureDevice {
     pub format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
-}
-
-/// Convert an AudioChunk to an interleaved buffer of ints.
-fn chunk_to_buffer<T: num_traits::cast::NumCast>(
-    chunk: AudioChunk,
-    buf: &mut [T],
-    scalefactor: PrcFmt,
-) {
-    let _num_samples = chunk.channels * chunk.frames;
-    //let mut buf = Vec::with_capacity(num_samples);
-    let mut value: T;
-    let mut idx = 0;
-    let mut clipped = 0;
-    let mut peak = 0.0;
-    let maxval = (scalefactor - 1.0) / scalefactor;
-    let minval = -1.0;
-    for frame in 0..chunk.frames {
-        for chan in 0..chunk.channels {
-            let mut float_val = chunk.waveforms[chan][frame];
-            if float_val > maxval {
-                clipped += 1;
-                if float_val > peak {
-                    peak = float_val;
-                }
-                float_val = maxval;
-            } else if float_val < minval {
-                clipped += 1;
-                if -float_val > peak {
-                    peak = -float_val;
-                }
-                float_val = minval;
-            }
-            value = match num_traits::cast(float_val * scalefactor) {
-                Some(val) => val,
-                None => {
-                    eprintln!("bad {}", float_val);
-                    num_traits::cast(0.0).unwrap()
-                }
-            };
-            buf[idx] = value;
-            idx += 1;
-        }
-    }
-    if clipped > 0 {
-        eprintln!(
-            "Clipping detected, {} samples clipped, peak {}%",
-            clipped,
-            peak * 100.0
-        );
-    }
-    //buf
-}
-
-/// Convert a buffer of interleaved ints to an AudioChunk.
-fn buffer_to_chunk<T: num_traits::cast::AsPrimitive<PrcFmt>>(
-    buffer: &[T],
-    channels: usize,
-    scalefactor: PrcFmt,
-) -> AudioChunk {
-    let num_samples = buffer.len();
-    let num_frames = num_samples / channels;
-    let mut value: PrcFmt;
-    let mut maxvalue: PrcFmt = 0.0;
-    let mut minvalue: PrcFmt = 0.0;
-    let mut wfs = Vec::with_capacity(channels);
-    for _chan in 0..channels {
-        wfs.push(Vec::with_capacity(num_frames));
-    }
-    //let mut idx = 0;
-    //let mut samples = buffer.iter();
-    let mut idx = 0;
-    for _frame in 0..num_frames {
-        for wf in wfs.iter_mut().take(channels) {
-            value = buffer[idx].as_();
-            idx += 1;
-            value /= scalefactor;
-            if value > maxvalue {
-                maxvalue = value;
-            }
-            if value < minvalue {
-                minvalue = value;
-            }
-            //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
-            wf.push(value);
-            //idx += 1;
-        }
-    }
-    AudioChunk {
-        channels,
-        frames: num_frames,
-        maxval: maxvalue,
-        minval: minvalue,
-        waveforms: wfs,
-    }
 }
 
 /// Play a buffer.
@@ -265,7 +173,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             loop {
                                 match channel.recv() {
                                     Ok(AudioMessage::Audio(chunk)) => {
-                                        chunk_to_buffer(chunk, &mut buffer, scalefactor);
+                                        chunk_to_buffer_int(chunk, &mut buffer, scalefactor);
                                         let playback_res = play_buffer(&buffer, &pcmdevice, &io);
                                         match playback_res {
                                             Ok(_) => {}
@@ -280,6 +188,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     }
                                     Ok(AudioMessage::EndOfStream) => {
                                         status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                        break;
                                     }
                                     _ => {}
                                 }
@@ -291,7 +200,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             loop {
                                 match channel.recv() {
                                     Ok(AudioMessage::Audio(chunk)) => {
-                                        chunk_to_buffer(chunk, &mut buffer, scalefactor);
+                                        chunk_to_buffer_int(chunk, &mut buffer, scalefactor);
                                         let playback_res = play_buffer(&buffer, &pcmdevice, &io);
                                         match playback_res {
                                             Ok(_) => {}
@@ -306,6 +215,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     }
                                     Ok(AudioMessage::EndOfStream) => {
                                         status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                        break;
                                     }
                                     _ => {}
                                 }
@@ -333,6 +243,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         channel: mpsc::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
+        command_channel: mpsc::Receiver<CommandMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -371,6 +282,12 @@ impl CaptureDevice for AlsaCaptureDevice {
                             let io = pcmdevice.io_i16().unwrap();
                             let mut buf = vec![0i16; channels * bufferlength];
                             loop {
+                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
+                                    let msg = AudioMessage::EndOfStream;
+                                    channel.send(msg).unwrap();
+                                    status_channel.send(StatusMessage::CaptureDone).unwrap();
+                                    break;
+                                }
                                 let capture_res = capture_buffer(&mut buf, &pcmdevice, &io);
                                 match capture_res {
                                     Ok(_) => {}
@@ -382,7 +299,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                             .unwrap();
                                     }
                                 };
-                                let chunk = buffer_to_chunk(&buf, channels, scalefactor);
+                                let chunk = buffer_to_chunk_int(&buf, channels, scalefactor);
                                 if (chunk.maxval - chunk.minval) > silence {
                                     if silent_nbr > silent_limit {
                                         eprintln!("Resuming processing");
@@ -404,6 +321,12 @@ impl CaptureDevice for AlsaCaptureDevice {
                             let io = pcmdevice.io_i32().unwrap();
                             let mut buf = vec![0i32; channels * bufferlength];
                             loop {
+                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
+                                    let msg = AudioMessage::EndOfStream;
+                                    channel.send(msg).unwrap();
+                                    status_channel.send(StatusMessage::CaptureDone).unwrap();
+                                    break;
+                                }
                                 let capture_res = capture_buffer(&mut buf, &pcmdevice, &io);
                                 match capture_res {
                                     Ok(_) => {}
@@ -415,7 +338,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                             .unwrap();
                                     }
                                 };
-                                let chunk = buffer_to_chunk(&buf, channels, scalefactor);
+                                let chunk = buffer_to_chunk_int(&buf, channels, scalefactor);
                                 if (chunk.maxval - chunk.minval) > silence {
                                     if silent_nbr > silent_limit {
                                         eprintln!("Resuming processing");
@@ -445,120 +368,5 @@ impl CaptureDevice for AlsaCaptureDevice {
             }
         });
         Ok(Box::new(handle))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::PrcFmt;
-    use alsadevice::{buffer_to_chunk, chunk_to_buffer};
-    use audiodevice::AudioChunk;
-
-    #[test]
-    fn to_from_buffer_16() {
-        let bits = 16;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
-        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: waveforms.clone(),
-        };
-        let mut buffer = vec![0i16; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
-        assert_eq!(waveforms[0], chunk2.waveforms[0]);
-    }
-
-    #[test]
-    fn to_from_buffer_24() {
-        let bits = 24;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
-        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: waveforms.clone(),
-        };
-        let mut buffer = vec![0i32; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
-        assert_eq!(waveforms[0], chunk2.waveforms[0]);
-    }
-
-    #[test]
-    fn to_from_buffer_32() {
-        let bits = 32;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
-        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: waveforms.clone(),
-        };
-        let mut buffer = vec![0i32; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
-        assert_eq!(waveforms[0], chunk2.waveforms[0]);
-    }
-
-    #[test]
-    fn clipping_16() {
-        let bits = 16;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
-        let waveforms = vec![vec![-1.0, 0.0, 32767.0 / 32768.0]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
-        };
-        let mut buffer = vec![0i16; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
-        assert_eq!(waveforms[0], chunk2.waveforms[0]);
-    }
-
-    #[test]
-    fn clipping_24() {
-        let bits = 24;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
-        let waveforms = vec![vec![-1.0, 0.0, 8388607.0 / 8388608.0]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
-        };
-        let mut buffer = vec![0i32; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
-        assert_eq!(waveforms[0], chunk2.waveforms[0]);
-    }
-
-    #[test]
-    fn clipping_32() {
-        let bits = 32;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
-        let waveforms = vec![vec![-1.0, 0.0, 2147483647.0 / 2147483648.0]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
-        };
-        let mut buffer = vec![0i32; 3];
-        chunk_to_buffer(chunk, &mut buffer, scalefactor);
-        let chunk2 = buffer_to_chunk(&buffer, 1, scalefactor);
-        assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 }

@@ -2,7 +2,7 @@
 devices:
   samplerate: 44100
   buffersize: 1024
-  silence_threshold: -60
+  silence_threshold: -61
   silence_timeout: 3.0
   capture:
     type: Pulse
@@ -19,22 +19,19 @@ filters:
   lp1:
     type: Biquad
     parameters:
-      type: Lowshelf
-      freq: 2000
-      gain: -1
-      slope: 3
-  peak1:
-    type: Biquad
-    parameters:
-      type: Highshelf
-      freq: 1000
-      slope: 3
-      gain: -6
+      type: Lowpass
+      freq: 1500
+      q: 0.5
   atten:
     type: Gain
     parameters:
       gain: -3
       inverted: false
+  lowpass_fir:
+    type: Conv
+    parameters:
+      type: File 
+      filename: filter2.txt
 
 mixers:
   mono:
@@ -45,7 +42,7 @@ mixers:
       - dest: 0
         sources:
           - channel: 0
-            gain: -6
+            gain: -7
             inverted: false
           - channel: 1
             gain: -6
@@ -64,11 +61,11 @@ pipeline:
     channel: 0
     names:
       - atten
-      - peak1
+      - lowpass_fir
   - type: Filter
     channel: 1
     names:
       - atten
-      - lp1
+      - lowpass_fir
    
 

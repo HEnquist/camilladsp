@@ -11,6 +11,7 @@ use PrcFmt;
 use Res;
 
 pub struct FFTConv {
+    name: String,
     npoints: usize,
     overlap: Vec<PrcFmt>,
     coeffs_f: Vec<Complex<PrcFmt>>,
@@ -23,7 +24,7 @@ pub struct FFTConv {
 
 impl FFTConv {
     /// Create a new FFT colvolution filter.
-    pub fn new(data_length: usize, coeffs: &[PrcFmt]) -> Self {
+    pub fn new(name: String, data_length: usize, coeffs: &[PrcFmt]) -> Self {
         let input_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
         let temp_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
         let output_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
@@ -42,6 +43,7 @@ impl FFTConv {
         }
         fft.process(&mut coeffs_c, &mut coeffs_f);
         FFTConv {
+            name,
             npoints: data_length,
             overlap: vec![0.0; data_length],
             coeffs_f,
@@ -53,18 +55,22 @@ impl FFTConv {
         }
     }
 
-    pub fn from_config(data_length: usize, conf: config::ConvParameters) -> Self {
+    pub fn from_config(name: String, data_length: usize, conf: config::ConvParameters) -> Self {
         let values = match conf {
             config::ConvParameters::Values { values } => values,
             config::ConvParameters::File { filename } => {
                 filters::read_coeff_file(&filename).unwrap()
             }
         };
-        FFTConv::new(data_length, &values)
+        FFTConv::new(name, data_length, &values)
     }
 }
 
 impl Filter for FFTConv {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
         //for n in 0..self.npoints {
@@ -83,6 +89,33 @@ impl Filter for FFTConv {
             self.overlap[n] = self.output_buf[n + self.npoints].re;
         }
         Ok(())
+    }
+
+    fn update_parameters(&mut self, conf: config::Filter) {
+        if let config::Filter::Conv { parameters: conf } = conf {
+            let data_length = self.npoints;
+            let coeffs = match conf {
+                config::ConvParameters::Values { values } => values,
+                config::ConvParameters::File { filename } => {
+                    filters::read_coeff_file(&filename).unwrap()
+                }
+            };
+            let mut coeffs_c: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
+            let mut coeffs_f: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
+            if coeffs.len() > data_length {
+                eprintln!(
+                    "Warning! Filter impulse response is longer than buffer and will be truncated."
+                )
+            }
+            for n in 0..coeffs.len() {
+                coeffs_c[n] = Complex::from(coeffs[n] / (2.0 * data_length as PrcFmt));
+            }
+            self.fft.process(&mut coeffs_c, &mut coeffs_f);
+            self.coeffs_f = coeffs_f;
+        } else {
+            // This should never happen unless there is a bug somewhere else
+            panic!("Invalid config change!");
+        }
     }
 }
 
@@ -122,10 +155,10 @@ mod tests {
     fn check_result() {
         let coeffs = vec![0.5, 0.5];
         let conf = ConvParameters::Values { values: coeffs };
-        let mut filter = FFTConv::from_config(8, conf);
+        let mut filter = FFTConv::from_config("test".to_string(), 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
         filter.process_waveform(&mut wave1).unwrap();
-        assert!(compare_waveforms(wave1, expected, 1e-9));
+        assert!(compare_waveforms(wave1, expected, 1e-7));
     }
 }

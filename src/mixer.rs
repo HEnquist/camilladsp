@@ -1,9 +1,10 @@
-type PrcFmt = f64;
 use audiodevice::AudioChunk;
 use config;
+use PrcFmt;
 
 #[derive(Clone)]
 pub struct Mixer {
+    pub name: String,
     pub channels_in: usize,
     pub channels_out: usize,
     pub mapping: Vec<Vec<MixerSource>>,
@@ -17,7 +18,7 @@ pub struct MixerSource {
 
 impl Mixer {
     /// Creates a Mixer from a config struct
-    pub fn from_config(config: config::Mixer) -> Self {
+    pub fn from_config(name: String, config: config::Mixer) -> Self {
         let ch_in = config.channels.r#in;
         let ch_out = config.channels.out;
         let mut mapping = vec![Vec::<MixerSource>::new(); ch_out];
@@ -37,10 +38,35 @@ impl Mixer {
             }
         }
         Mixer {
+            name,
             channels_in: ch_in,
             channels_out: ch_out,
             mapping,
         }
+    }
+
+    pub fn update_parameters(&mut self, config: config::Mixer) {
+        let ch_in = config.channels.r#in;
+        let ch_out = config.channels.out;
+        let mut mapping = vec![Vec::<MixerSource>::new(); ch_out];
+        for cfg_mapping in config.mapping {
+            let dest = cfg_mapping.dest;
+            for cfg_src in cfg_mapping.sources {
+                let mut gain: PrcFmt = 10.0;
+                gain = gain.powf(cfg_src.gain / 20.0);
+                if cfg_src.inverted {
+                    gain = -gain;
+                }
+                let src = MixerSource {
+                    channel: cfg_src.channel,
+                    gain,
+                };
+                mapping[dest].push(src);
+            }
+        }
+        self.channels_in = ch_in;
+        self.channels_out = ch_out;
+        self.mapping = mapping;
     }
 
     /// Apply a Mixer to an AudioChunk, yielding a new AudioChunk with a possibly different number of channels.

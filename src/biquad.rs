@@ -141,20 +141,24 @@ impl BiquadCoefficients {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Biquad {
+    samplerate: usize,
     pub s1: PrcFmt,
     pub s2: PrcFmt,
     coeffs: BiquadCoefficients,
+    pub name: String,
 }
 
 impl Biquad {
     /// Creates a Direct Form 2 Transposed biquad filter from a set of coefficients
-    pub fn new(coefficients: BiquadCoefficients) -> Self {
+    pub fn new(name: String, samplerate: usize, coefficients: BiquadCoefficients) -> Self {
         Biquad {
+            samplerate,
             s1: 0.0,
             s2: 0.0,
             coeffs: coefficients,
+            name,
         }
     }
 
@@ -168,12 +172,26 @@ impl Biquad {
 }
 
 impl Filter for Biquad {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
         for item in waveform.iter_mut() {
             *item = self.process_single(*item);
         }
         //let out = input.iter().map(|s| self.process_single(*s)).collect::<Vec<PrcFmt>>();
         Ok(())
+    }
+
+    fn update_parameters(&mut self, conf: config::Filter) {
+        if let config::Filter::Biquad { parameters: conf } = conf {
+            let coeffs = BiquadCoefficients::from_config(self.samplerate, conf);
+            self.coeffs = coeffs;
+        } else {
+            // This should never happen unless there is a bug somewhere else
+            panic!("Invalid config change!");
+        }
     }
 }
 
@@ -219,7 +237,7 @@ mod tests {
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         let mut wave = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let expected = vec![0.215, 0.461, 0.281, 0.039, 0.004, 0.0, 0.0, 0.0];
-        let mut filter = Biquad::new(coeffs);
+        let mut filter = Biquad::new("test".to_string(), 44100, coeffs);
         filter.process_waveform(&mut wave).unwrap();
         assert!(compare_waveforms(wave, expected, 1e-3));
     }

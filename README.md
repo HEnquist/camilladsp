@@ -25,6 +25,13 @@ The purpose of CamillaDSP is to enable audio processing with combinations of FIR
 ## Building
 
 Use recent versions of rustc and cargo. No need to use nightly.
+
+By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
+
+There is also a possibility to switch the processing to 32-bit floats. This might be good if running on a 32-bit CPU, but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
+- Install pkg-config (very likely already installed):
+- - Fedora: ```sudo dnf install pkgconf-pkg-config```
+- - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
 - Install Alsa dependency:
 - - Fedora: ```sudo dnf install alsa-lib-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libasound2-dev```
@@ -32,7 +39,10 @@ Use recent versions of rustc and cargo. No need to use nightly.
 - - Fedora: ```sudo dnf install pulseaudio-libs-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
 - Clone the repository
-- Build with `cargo build --release`
+- Build with standard options: ```cargo build --release```
+- - without Alsa: ```cargo build --release --no-default-features --features pulse-backend```
+- - without Pulse: ```cargo build --release --no-default-features --features alsa-backend```
+- - with 32 bit float: ```cargo build --release --features 32bit```
 - The binary is now available at ./target/release/camilladsp
 - Optionally install with `cargo install --path .`
 
@@ -43,6 +53,8 @@ The command is simply:
 camilladsp /path/to/config.yml
 ```
 This starts the processing defined in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is complete and valid. When an error is found it displays an error message describing the problem.
+
+The configuratin can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficents file needs to change.
 
 
 ## Usage example: crossover for 2-way speakers
