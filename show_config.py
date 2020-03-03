@@ -172,7 +172,7 @@ class Biquad(object):
             a0 = 1.0 + alpha
             a1 = -2.0 * cs
             a2 = 1.0 - alpha
-        elif ftype == "LT":
+        elif ftype == "LinkwitzTransform":
             f0 = conf['freq_act']
             q0 = conf['q_act']
             qt = conf['q_target']

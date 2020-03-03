@@ -78,7 +78,7 @@ filters:
   linkwitztrans:
     type: Biquad
     parameters:
-      type: LT
+      type: LinkwitzTransform
       freq_act: 100
       q_act: 1.2
       freq_target: 25

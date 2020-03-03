@@ -134,6 +134,30 @@ pub enum BiquadParameters {
         slope: PrcFmt,
         gain: PrcFmt,
     },
+    HighpassFO {
+        freq: PrcFmt,
+    },
+    LowpassFO {
+        freq: PrcFmt,
+    },
+    Allpass {
+        freq: PrcFmt,
+        q: PrcFmt,
+    },
+    Bandpass {
+        freq: PrcFmt,
+        q: PrcFmt,
+    },
+    Notch {
+        freq: PrcFmt,
+        q: PrcFmt,
+    },
+    LinkwitzTransform {
+        freq_act: PrcFmt,
+        q_act: PrcFmt,
+        freq_target: PrcFmt,
+        q_target: PrcFmt,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -271,6 +295,7 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         Device::Pulse { channels, .. } => channels,
         Device::File { channels, .. } => channels,
     };
+    let fs = conf.devices.samplerate;
     for step in conf.pipeline {
         match step {
             PipelineStep::Mixer { name } => {
@@ -304,7 +329,7 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
                             name
                         ))));
                     }
-                    filters::validate_filter(&conf.filters.get(&name).unwrap())?;
+                    filters::validate_filter(fs, &conf.filters.get(&name).unwrap())?;
                 }
             }
         }

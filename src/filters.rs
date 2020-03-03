@@ -168,10 +168,18 @@ impl Pipeline {
 }
 
 /// Validate the filter config, to give a helpful message intead of a panic.
-pub fn validate_filter(filter_config: &config::Filter) -> Res<()> {
+pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
     match filter_config {
         config::Filter::Conv { parameters } => fftconv::validate_config(&parameters),
-        config::Filter::Biquad { .. } => Ok(()),
+        config::Filter::Biquad { parameters } => {
+            let coeffs = biquad::BiquadCoefficients::from_config(fs, parameters.clone());
+            if !coeffs.is_stable() {
+                return Err(Box::new(config::ConfigError::new(
+                    "Unstable filter specified",
+                )));
+            }
+            Ok(())
+        }
         config::Filter::Delay { parameters } => {
             if parameters.delay < 0.0 {
                 return Err(Box::new(config::ConfigError::new(
