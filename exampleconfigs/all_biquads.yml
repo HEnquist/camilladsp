@@ -1,0 +1,88 @@
+---
+devices:
+  samplerate: 44100
+  buffersize: 1024
+  capture:
+    type: Alsa
+    channels: 2
+    device: "dummy"
+    format: S16LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "dummy"
+    format: S32LE
+
+filters:
+  lowshelf:
+    type: Biquad
+    parameters:
+      type: Lowshelf
+      freq: 1000
+      gain: -12
+      slope: 6
+  highshelf:
+    type: Biquad
+    parameters:
+      type: Highshelf
+      freq: 1000
+      slope: 6
+      gain: -12
+  lowpass:
+    type: Biquad
+    parameters:
+      type: Lowpass
+      freq: 1000
+      q: 1.0
+  highpass:
+    type: Biquad
+    parameters:
+      type: Highpass
+      freq: 1000
+      q: 1.0
+  lowpass_fo:
+    type: Biquad
+    parameters:
+      type: LowpassFO
+      freq: 1000
+  highpass_fo:
+    type: Biquad
+    parameters:
+      type: HighpassFO
+      freq: 1000
+  peaking:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 1000
+      q: 2.0
+      gain: 12.0
+  notch:
+    type: Biquad
+    parameters:
+      type: Notch
+      freq: 1000
+      q: 2.0
+  bandpass:
+    type: Biquad
+    parameters:
+      type: Bandpass
+      freq: 1000
+      q: 0.5
+  allpass:
+    type: Biquad
+    parameters:
+      type: Allpass
+      freq: 1000
+      q: 0.5
+  linkwitztrans:
+    type: Biquad
+    parameters:
+      type: LT
+      freq_act: 100
+      q_act: 1.2
+      freq_target: 25
+      q_target: 0.7
+
+   
+
