@@ -245,6 +245,9 @@ The available types are:
 * Highpass & Lowpass
   * Second order high/lowpass filters (12dB/oct)
   * Defined by cutoff frequency and Q-value
+* HighpassFO & LowpassFO
+  * First order high/lowpass filters (6dB/oct)
+  * Defined by cutoff frequency.
 * Highshelf & Lowshelf
   * High / Low uniformly affects the high / low frequencies respectively while leaving the low / high part unaffected. In between there is a slope of variable steepness.
   * "gain" gives the gain of the filter
@@ -252,6 +255,14 @@ The available types are:
   * "freq" is the center frequency of the sloping section.
 * Peaking
   * A parametric peaking filter with selectable gain af a given frequency with a bandwidth given by the Q-value.
+* Notch
+  * A notch filter to attenuate a given frequency with a bandwidth given by the Q-value.
+* Bandpass
+  * A second order bandpass filter for a given frequency with a bandwidth given by the Q-value. 
+* Allpass
+  * A second order allpass filter for a given frequency with a steepness given by the Q-value. 
+* LinkwitzTransform
+  * A Linkwitz transform to change a speaker with resonance frequency ```freq_act``` and Q-value ```q_act```, to a new resonance frequency ```freq_target``` and Q-value ```q_target```.
 
 
 ## Pipeline

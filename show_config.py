@@ -111,12 +111,97 @@ class Biquad(object):
             a0 = (ampl + 1.0) + (ampl - 1.0) * cs + beta
             a1 = -2.0 * ((ampl - 1.0) + (ampl + 1.0) * cs)
             a2 = (ampl + 1.0) + (ampl - 1.0) * cs - beta
+        elif ftype == "LowpassFO":
+            freq = conf['freq']
+            omega = 2.0 * np.pi * freq / fs
+            k = np.tan(omega/2.0)
+            alpha = 1 + k
+            a0 = 1.0
+            a1 = -((1 - k)/alpha)
+            a2 = 0.0
+            b0 = k/alpha
+            b1 = k/alpha
+            b2 = 0
+        elif ftype == "HighpassFO":
+            freq = conf['freq']
+            omega = 2.0 * np.pi * freq / fs
+            k = np.tan(omega/2.0)
+            alpha = 1 + k
+            a0 = 1.0
+            a1 = -((1 - k)/alpha)
+            a2 = 0.0
+            b0 = 1.0/alpha
+            b1 = -1.0/alpha
+            b2 = 0
+        elif ftype == "Notch":
+            freq = conf['freq']
+            q = conf['q']
+            omega = 2.0 * np.pi * freq / fs
+            sn = np.sin(omega)
+            cs = np.cos(omega)
+            alpha = sn / (2.0 * q)
+            b0 = 1.0
+            b1 = -2.0 * cs
+            b2 = 1.0
+            a0 = 1.0 + alpha
+            a1 = -2.0 * cs
+            a2 = 1.0 - alpha
+        elif ftype == "Bandpass":
+            freq = conf['freq']
+            q = conf['q']
+            omega = 2.0 * np.pi * freq / fs
+            sn = np.sin(omega)
+            cs = np.cos(omega)
+            alpha = sn / (2.0 * q)
+            b0 = alpha
+            b1 = 0.0
+            b2 = -alpha
+            a0 = 1.0 + alpha
+            a1 = -2.0 * cs
+            a2 = 1.0 - alpha
+        elif ftype == "Allpass":
+            freq = conf['freq']
+            q = conf['q']
+            omega = 2.0 * np.pi * freq / fs
+            sn = np.sin(omega)
+            cs = np.cos(omega)
+            alpha = sn / (2.0 * q)
+            b0 = 1.0 - alpha
+            b1 = -2.0 * cs
+            b2 = 1.0 + alpha
+            a0 = 1.0 + alpha
+            a1 = -2.0 * cs
+            a2 = 1.0 - alpha
+        elif ftype == "LinkwitzTransform":
+            f0 = conf['freq_act']
+            q0 = conf['q_act']
+            qt = conf['q_target']
+            ft = conf['freq_target']
+
+            d0i = (2.0 * np.pi * f0)**2
+            d1i = (2.0 * np.pi * f0)/q0
+            c0i = (2.0 * np.pi * ft)**2
+            c1i = (2.0 * np.pi * ft)/qt
+            fc = (ft+f0)/2.0
+
+            gn = 2 * np.pi * fc/math.tan(np.pi*fc/fs)
+            cci = c0i + gn * c1i + gn**2
+
+            b0 = (d0i+gn*d1i + gn**2)/cci 
+            b1 = 2*(d0i-gn**2)/cci
+            b2 = (d0i - gn*d1i + gn**2)/cci
+            a0 = 1.0
+            a1 = 2.0 * (c0i-gn**2)/cci
+            a2 = ((c0i-gn*c1i + gn**2)/cci)
+
+
         self.fs = fs
         self.a1 = a1 / a0
         self.a2 = a2 / a0
         self.b0 = b0 / a0
         self.b1 = b1 / a0
         self.b2 = b2 / a0
+        
 
     def gain_and_phase(self, f):
         z = np.exp(1j*2*np.pi*f/self.fs);
@@ -124,6 +209,9 @@ class Biquad(object):
         gain = 20*np.log10(np.abs(A))
         phase = 180/np.pi*np.angle(A)
         return gain, phase
+
+    def is_stable(self):
+        return abs(self.a2)<1.0 and abs(self.a1) < (self.a2+1.0)
         
 class Block(object):
     def __init__(self, label):
@@ -182,14 +270,15 @@ def main():
     fignbr = 1
 
     if 'filters' in conf:
-        fvect = np.linspace(0, srate/2.0, 10*buflen)
+        fvect = np.linspace(1, (srate*0.95)/2.0, 10*buflen)
         for filter, fconf in conf['filters'].items():
             if fconf['type'] == 'Biquad':
                 kladd = Biquad(fconf['parameters'], srate)
                 plt.figure(fignbr)
                 magn, phase = kladd.gain_and_phase(fvect)
+                stable = kladd.is_stable()
                 plt.semilogx(fvect, magn)
-                plt.title(filter)
+                plt.title("{}, stable: {}".format(filter, stable))
                 fignbr += 1
             elif fconf['type'] == 'Conv':
                 kladd = Conv(fconf['parameters'], srate)
