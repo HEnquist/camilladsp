@@ -17,6 +17,11 @@ use PrcFmt;
 use Res;
 use StatusMessage;
 
+#[cfg(target_pointer_width = "64")]
+pub type MachInt = i64;
+#[cfg(not(target_pointer_width = "64"))]
+pub type MachInt = i32;
+
 pub struct AlsaPlaybackDevice {
     pub devname: String,
     pub samplerate: usize,
@@ -84,7 +89,7 @@ fn capture_buffer<T: std::marker::Copy>(
 fn open_pcm(
     devname: String,
     samplerate: u32,
-    bufsize: i64,
+    bufsize: MachInt,
     channels: u32,
     bits: usize,
     capture: bool,
@@ -151,7 +156,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
             match open_pcm(
                 devname,
                 samplerate as u32,
-                bufferlength as i64,
+                bufferlength as MachInt,
                 channels as u32,
                 bits,
                 false,
@@ -263,7 +268,7 @@ impl CaptureDevice for AlsaCaptureDevice {
             match open_pcm(
                 devname,
                 samplerate as u32,
-                bufferlength as i64,
+                bufferlength as MachInt,
                 channels as u32,
                 bits,
                 true,
