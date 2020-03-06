@@ -182,7 +182,7 @@ mixers:
 
 ## Filters
 The filters section defines the filter configurations to use in the pipeline. It's enough to define each filter once even if it should be applied on several channels.
-The supported filter types are Biquad for IIR and Conv for FIR. There are also filters just providing gain and delay.
+The supported filter types are Biquad for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
 
 ### FIR
 A FIR filter is given by an impuse response provided as a list of coefficients. The coefficients are preferrably given in a separate file, but can be included directly in the config file. The number of coefficients (or taps) should be equal to or smaller than the buffersize setting. Otherwise the impulse response will be truncated.
@@ -263,6 +263,23 @@ The available types are:
   * A second order allpass filter for a given frequency with a steepness given by the Q-value. 
 * LinkwitzTransform
   * A Linkwitz transform to change a speaker with resonance frequency ```freq_act``` and Q-value ```q_act```, to a new resonance frequency ```freq_target``` and Q-value ```q_target```.
+
+### Dither
+The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several types, and the parameter "bits" sets the target bit depth. This should match the bit depth of the playback device. Example:
+```
+  dither_fancy:
+    type: Dither
+    parameters:
+      type: Lipshitz
+      bits: 16
+```
+The available types are 
+- Simple, simple noise shaping with increasing noise towards higher freqencies
+- Uniform, just digher, no shaping. Requires also the parameter "amplitude" to set the dither amplitude in bits.
+- Lipshitz, intended for 44.1 kHz, gives very little subjective noise
+- None, just quantize without dither. Only useful with small target bit depth for demonstation.
+
+To test the differenc types, set the target bit depth to something very small like 5 bits and try them all.
 
 
 ## Pipeline
