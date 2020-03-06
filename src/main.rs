@@ -4,6 +4,8 @@ extern crate alsa;
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
+extern crate rand;
+extern crate rand_distr;
 extern crate rustfft;
 extern crate serde;
 extern crate signal_hook;
@@ -29,6 +31,7 @@ mod basicfilters;
 mod biquad;
 mod config;
 mod conversions;
+mod dither;
 mod fftconv;
 mod fifoqueue;
 mod filedevice;

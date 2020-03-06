@@ -1,6 +1,7 @@
 use crate::filters::Filter;
 use config;
-use fifoqueue::FifoQueue;
+use rand::thread_rng;
+use rand_distr::{Distribution, Triangular};
 
 use PrcFmt;
 use Res;
@@ -8,25 +9,53 @@ use Res;
 #[derive(Clone, Debug)]
 pub struct Dither {
     pub name: String,
-    pub bits: usize,
+    pub scalefact: PrcFmt,
+    pub amplitude: PrcFmt,
+    buffer: Vec<PrcFmt>,
+    filter: Vec<PrcFmt>,
+    idx: usize,
+    filterlen: usize,
 }
 
-
 impl Dither {
-    /// A simple filter providing gain in dB, and can also invert the signal.
-    pub fn new(name: String, gain_db: PrcFmt, inverted: bool) -> Self {
-        let mut gain: PrcFmt = 10.0;
-        gain = gain.powf(gain_db / 20.0);
-        if inverted {
-            gain = -gain;
+    pub fn new(name: String, bits: usize, filter: Vec<PrcFmt>, amplitude: PrcFmt) -> Self {
+        let scalefact = (2.0 as PrcFmt).powi((bits - 1) as i32);
+        let buffer = vec![0.0; filter.len()];
+        let idx = 0;
+        let filterlen = filter.len();
+        Dither {
+            name,
+            scalefact,
+            amplitude,
+            buffer,
+            filter,
+            idx,
+            filterlen,
         }
-        Gain { name, gain }
     }
 
-    pub fn from_config(name: String, conf: config::GainParameters) -> Self {
-        let gain = conf.gain;
-        let inverted = conf.inverted;
-        Gain::new(name, gain, inverted)
+    pub fn from_config(name: String, conf: config::DitherParameters) -> Self {
+        match conf {
+            config::DitherParameters::Simple { bits } => {
+                let filter = vec![0.8];
+                let amplitude = 1.0;
+                Dither::new(name, bits, filter, amplitude)
+            }
+            config::DitherParameters::Uniform { bits, amplitude } => {
+                let filter = Vec::new();
+                Dither::new(name, bits, filter, amplitude)
+            }
+            config::DitherParameters::Lipshitz { bits } => {
+                let filter = vec![2.033, -2.165, 1.959, -1.590, 0.6149];
+                let amplitude = 1.0;
+                Dither::new(name, bits, filter, amplitude)
+            }
+            config::DitherParameters::None { bits } => {
+                let filter = Vec::new();
+                let amplitude = 0.0;
+                Dither::new(name, bits, filter, amplitude)
+            }
+        }
     }
 }
 
@@ -36,22 +65,53 @@ impl Filter for Dither {
     }
 
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
-        for item in waveform.iter_mut() {
-            *item *= self.gain;
+        //rand_nbrs = np.random.triangular(-1, 0, 1, len(wave_in))
+
+        if self.filterlen > 0 {
+            let rng = thread_rng();
+            let dith_rng = Triangular::new(-1.0, 1.0, 0.0).unwrap();
+            let dith_iter = dith_rng.sample_iter(rng);
+            for (item, dith) in waveform.iter_mut().zip(dith_iter) {
+                let scaled = *item * self.scalefact;
+                let mut filt_buf = 0.0;
+                for (n, coeff) in self.filter.iter().enumerate() {
+                    filt_buf += coeff * self.buffer[(n + self.idx) % self.filterlen];
+                }
+                if self.idx > 0 {
+                    self.idx -= 1;
+                } else {
+                    self.idx = self.filterlen - 1;
+                }
+                let scaled_plus_err = scaled + filt_buf;
+                let result = scaled_plus_err + dith;
+                //xe = scaled + (buf0 * fir[0] + buf1 * fir[1] + buf2 * fir[2] + buf3 * fir[3] + buf4 * fir[4])*2.0
+                //result = xe + d
+
+                let result_r = result.round();
+                self.buffer[self.idx] = scaled_plus_err - result_r;
+                *item = result_r / self.scalefact;
+            }
+        } else if self.amplitude > 0.0 {
+            let rng = thread_rng();
+            let dith_rng = Triangular::new(-self.amplitude, self.amplitude, 0.0).unwrap();
+            let dith_iter = dith_rng.sample_iter(rng);
+            for (item, dith) in waveform.iter_mut().zip(dith_iter) {
+                let scaled = *item * self.scalefact + dith;
+                *item = scaled.round() / self.scalefact;
+            }
+        } else {
+            for item in waveform.iter_mut() {
+                let scaled = *item * self.scalefact;
+                *item = scaled.round() / self.scalefact;
+            }
         }
         Ok(())
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Gain { parameters: conf } = conf {
-            let gain_db = conf.gain;
-            let inverted = conf.inverted;
-            let mut gain: PrcFmt = 10.0;
-            gain = gain.powf(gain_db / 20.0);
-            if inverted {
-                gain = -gain;
-            }
-            self.gain = gain;
+        if let config::Filter::Dither { parameters: conf } = conf {
+            let name = self.name.clone();
+            *self = Dither::from_config(name, conf);
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");

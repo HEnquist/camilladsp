@@ -92,6 +92,7 @@ pub enum Filter {
     Biquad { parameters: BiquadParameters },
     Delay { parameters: DelayParameters },
     Gain { parameters: GainParameters },
+    Dither { parameters: DitherParameters },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -169,6 +170,15 @@ pub struct GainParameters {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct DelayParameters {
     pub delay: PrcFmt,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+pub enum DitherParameters {
+    Simple { bits: usize },
+    Lipshitz { bits: usize },
+    Uniform { bits: usize, amplitude: PrcFmt },
+    None { bits: usize },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
