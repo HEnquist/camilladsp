@@ -1,6 +1,6 @@
 [package]
 name = "camilladsp"
-version = "0.0.5"
+version = "0.0.6"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 
 [features]

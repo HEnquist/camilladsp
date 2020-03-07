@@ -279,7 +279,8 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
             (Filter::Biquad { .. }, Filter::Biquad { .. })
             | (Filter::Conv { .. }, Filter::Conv { .. })
             | (Filter::Delay { .. }, Filter::Delay { .. })
-            | (Filter::Gain { .. }, Filter::Gain { .. }) => {}
+            | (Filter::Gain { .. }, Filter::Gain { .. })
+            | (Filter::Dither { .. }, Filter::Dither { .. }) => {}
             _ => {
                 return ConfigChange::Pipeline;
             }

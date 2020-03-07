@@ -1,0 +1,51 @@
+---
+devices:
+  samplerate: 44100
+  buffersize: 1024
+  silence_threshold: -61
+  silence_timeout: 3.0
+  capture:
+    type: Pulse
+    channels: 2
+    device: "MySink.monitor"
+    format: S16LE
+  playback:
+    type: Pulse
+    channels: 2
+    device: "alsa_output.pci-0000_03_00.6.analog-stereo"
+    format: S32LE
+
+filters:
+  quantize:
+    type: Dither
+    parameters:
+      type: None
+      bits: 8
+  dithereven:
+    type: Dither
+    parameters:
+      type: Uniform
+      bits: 6
+      amplitude: 1.0
+  dithersimple:
+    type: Dither
+    parameters:
+      type: Simple
+      bits: 8
+  ditherfancy:
+    type: Dither
+    parameters:
+      type: Lipshitz
+      bits: 10
+
+pipeline:
+  - type: Filter
+    channel: 0
+    names:
+      - ditherfancy
+  - type: Filter
+    channel: 1
+    names:
+      - ditherfancy
+   
+
