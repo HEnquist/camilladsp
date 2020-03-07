@@ -152,13 +152,13 @@ impl FFTConvSegmented {
         eprintln!("conv using {} segments", nsegments);
 
         for (n, coeff) in coeffs.iter().enumerate() {
-            coeffs_c[n/data_length][n%data_length] = Complex::from(coeff / (2.0 * data_length as PrcFmt));
+            coeffs_c[n / data_length][n % data_length] =
+                Complex::from(coeff / (2.0 * data_length as PrcFmt));
         }
 
         for (segment, segment_f) in coeffs_c.iter_mut().zip(coeffs_f.iter_mut()) {
             fft.process(segment, segment_f);
-        } 
-
+        }
 
         FFTConvSegmented {
             name,
@@ -176,15 +176,15 @@ impl FFTConvSegmented {
         }
     }
 
-    //pub fn from_config(name: String, data_length: usize, conf: config::ConvParameters) -> Self {
-    //    let values = match conf {
-    //        config::ConvParameters::Values { values } => values,
-    //        config::ConvParameters::File { filename } => {
-    //            filters::read_coeff_file(&filename).unwrap()
-    //        }
-    //    };
-    //    FFTConv::new(name, data_length, &values)
-    //}
+    pub fn from_config(name: String, data_length: usize, conf: config::ConvParameters) -> Self {
+        let values = match conf {
+            config::ConvParameters::Values { values } => values,
+            config::ConvParameters::File { filename } => {
+                filters::read_coeff_file(&filename).unwrap()
+            }
+        };
+        FFTConvSegmented::new(name, data_length, &values)
+    }
 }
 
 impl Filter for FFTConvSegmented {
@@ -194,7 +194,6 @@ impl Filter for FFTConvSegmented {
 
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
-
         // Copy to inut buffer and convert to complex
         for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
             self.input_buf[n] = Complex::<PrcFmt>::from(*item);
@@ -202,13 +201,14 @@ impl Filter for FFTConvSegmented {
         }
 
         // FFT and store result in history, update index
-        self.index = (self.index + 1)%self.nsegments;
-        self.fft.process(&mut self.input_buf, &mut self.input_f[self.index]);
+        self.index = (self.index + 1) % self.nsegments;
+        self.fft
+            .process(&mut self.input_buf, &mut self.input_f[self.index]);
 
         self.temp_buf = vec![Complex::zero(); 2 * self.npoints];
         // Loop through history of input FTs, multiply with filter FTs, accumulate result
         for segm in 0..self.nsegments {
-            let hist_idx = (self.index + self.nsegments - segm)%self.nsegments;
+            let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
             for n in 0..2 * self.npoints {
                 self.temp_buf[n] += self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
             }
@@ -225,30 +225,43 @@ impl Filter for FFTConvSegmented {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        //if let config::Filter::Conv { parameters: conf } = conf {
-        //    let data_length = self.npoints;
-        //    let coeffs = match conf {
-        //        config::ConvParameters::Values { values } => values,
-        //        config::ConvParameters::File { filename } => {
-        //            filters::read_coeff_file(&filename).unwrap()
-        //        }
-        //    };
-        //    let mut coeffs_c: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
-        //    let mut coeffs_f: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
-        //    if coeffs.len() > data_length {
-        //        eprintln!(
-        //            "Warning! Filter impulse response is longer than buffer and will be truncated."
-        //        )
-        //    }
-        //    for n in 0..coeffs.len() {
-        //        coeffs_c[n] = Complex::from(coeffs[n] / (2.0 * data_length as PrcFmt));
-        //    }
-        //    self.fft.process(&mut coeffs_c, &mut coeffs_f);
-        //    self.coeffs_f = coeffs_f;
-        //} else {
-        //    // This should never happen unless there is a bug somewhere else
-        //    panic!("Invalid config change!");
-        //}
+        if let config::Filter::Conv { parameters: conf } = conf {
+            let coeffs = match conf {
+                config::ConvParameters::Values { values } => values,
+                config::ConvParameters::File { filename } => {
+                    filters::read_coeff_file(&filename).unwrap()
+                }
+            };
+
+            let nsegments = ((coeffs.len() as PrcFmt) / (self.npoints as PrcFmt)).ceil() as usize;
+
+            if nsegments == self.nsegments {
+                // Same length, lets keep history
+            } else {
+                // length changed, clearing history
+                self.nsegments = nsegments;
+                let input_f = vec![vec![Complex::zero(); 2 * self.npoints]; nsegments];
+                self.input_f = input_f;
+            }
+
+            let mut coeffs_f = vec![vec![Complex::zero(); 2 * self.npoints]; nsegments];
+            let mut coeffs_c = vec![vec![Complex::zero(); 2 * self.npoints]; nsegments];
+
+            eprintln!("conv using {} segments", nsegments);
+
+            for (n, coeff) in coeffs.iter().enumerate() {
+                coeffs_c[n / self.npoints][n % self.npoints] =
+                    Complex::from(coeff / (2.0 * self.npoints as PrcFmt));
+            }
+
+            for (segment, segment_f) in coeffs_c.iter_mut().zip(coeffs_f.iter_mut()) {
+                self.fft.process(segment, segment_f);
+            }
+            self.coeffs_f = coeffs_f;
+        } else {
+            // This should never happen unless there is a bug somewhere else
+            panic!("Invalid config change!");
+        }
     }
 }
 
