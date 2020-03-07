@@ -118,3 +118,114 @@ impl Filter for Dither {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::PrcFmt;
+    use config::DitherParameters;
+    use dither::Dither;
+    use filters::Filter;
+
+    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
+        println!("{} - {}", left, right);
+        (left - right).abs() < maxdiff
+    }
+
+    fn compare_waveforms(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
+        for (val_l, val_r) in left.iter().zip(right.iter()) {
+            if !is_close(*val_l, *val_r, maxdiff) {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[test]
+    fn test_quantize() {
+        let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
+        let waveform2 = waveform.clone();
+        let mut dith = Dither::new("test".to_string(), 8, Vec::new(), 0.0);
+        dith.process_waveform(&mut waveform).unwrap();
+        assert!(compare_waveforms(
+            waveform.clone(),
+            waveform2.clone(),
+            1.0 / 128.0
+        ));
+        assert!(is_close(
+            (128.0 * waveform[2]).round(),
+            128.0 * waveform[2],
+            1e-9
+        ));
+    }
+
+    #[test]
+    fn test_uniform() {
+        let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
+        let waveform2 = waveform.clone();
+        let mut dith = Dither::new("test".to_string(), 8, Vec::new(), 1.0);
+        dith.process_waveform(&mut waveform).unwrap();
+        assert!(compare_waveforms(
+            waveform.clone(),
+            waveform2.clone(),
+            1.0 / 64.0
+        ));
+        assert!(!compare_waveforms(
+            waveform.clone(),
+            waveform2.clone(),
+            1.0 / 256.0
+        ));
+        assert!(is_close(
+            (128.0 * waveform[2]).round(),
+            128.0 * waveform[2],
+            1e-9
+        ));
+    }
+
+    #[test]
+    fn test_simple() {
+        let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
+        let waveform2 = waveform.clone();
+        let conf = DitherParameters::Simple { bits: 8 };
+        let mut dith = Dither::from_config("test".to_string(), conf);
+        dith.process_waveform(&mut waveform).unwrap();
+        assert!(compare_waveforms(
+            waveform.clone(),
+            waveform2.clone(),
+            1.0 / 32.0
+        ));
+        assert!(!compare_waveforms(
+            waveform.clone(),
+            waveform2.clone(),
+            1.0 / 256.0
+        ));
+        assert!(is_close(
+            (128.0 * waveform[2]).round(),
+            128.0 * waveform[2],
+            1e-9
+        ));
+    }
+
+    #[test]
+    fn test_lip() {
+        let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
+        let waveform2 = waveform.clone();
+        let conf = DitherParameters::Lipshitz { bits: 8 };
+        let mut dith = Dither::from_config("test".to_string(), conf);
+        dith.process_waveform(&mut waveform).unwrap();
+        assert!(compare_waveforms(
+            waveform.clone(),
+            waveform2.clone(),
+            1.0 / 16.0
+        ));
+        assert!(!compare_waveforms(
+            waveform.clone(),
+            waveform2.clone(),
+            1.0 / 256.0
+        ));
+        assert!(is_close(
+            (128.0 * waveform[2]).round(),
+            128.0 * waveform[2],
+            1e-9
+        ));
+    }
+}
