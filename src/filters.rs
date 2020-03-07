@@ -2,6 +2,7 @@ use audiodevice::AudioChunk;
 use basicfilters;
 use biquad;
 use config;
+use dither;
 use fftconv;
 use mixer;
 use std::collections::HashMap;
@@ -66,6 +67,9 @@ impl FilterGroup {
                     ),
                     config::Filter::Gain { parameters } => {
                         Box::new(basicfilters::Gain::from_config(name, parameters))
+                    }
+                    config::Filter::Dither { parameters } => {
+                        Box::new(dither::Dither::from_config(name, parameters))
                     } //_ => panic!("unknown type")
                 };
             filters.push(filter);
@@ -188,6 +192,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
             }
             Ok(())
         }
-        config::Filter::Gain { .. } => Ok(()), //_ => panic!("unknown type")
+        config::Filter::Gain { .. } => Ok(()),
+        config::Filter::Dither { .. } => Ok(()), //_ => panic!("unknown type")
     }
 }
