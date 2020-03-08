@@ -1,7 +1,7 @@
 ---
 devices:
   samplerate: 44100
-  buffersize: 1024
+  buffersize: 256
   capture:
     type: Alsa
     channels: 2

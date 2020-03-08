@@ -13,115 +13,6 @@ use Res;
 pub struct FFTConv {
     name: String,
     npoints: usize,
-    overlap: Vec<PrcFmt>,
-    coeffs_f: Vec<Complex<PrcFmt>>,
-    fft: Box<dyn rustfft::FFT<PrcFmt>>,
-    ifft: Box<dyn rustfft::FFT<PrcFmt>>,
-    input_buf: Vec<Complex<PrcFmt>>,
-    temp_buf: Vec<Complex<PrcFmt>>,
-    output_buf: Vec<Complex<PrcFmt>>,
-}
-
-impl FFTConv {
-    /// Create a new FFT colvolution filter.
-    pub fn new(name: String, data_length: usize, coeffs: &[PrcFmt]) -> Self {
-        let input_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
-        let temp_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
-        let output_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
-        let mut coeffs_c: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
-        let mut coeffs_f: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
-        let fft = Radix4::new(2 * data_length, false);
-        let ifft = Radix4::new(2 * data_length, true);
-
-        if coeffs.len() > data_length {
-            eprintln!(
-                "Warning! Filter impulse response is longer than buffer and will be truncated."
-            )
-        }
-        for n in 0..coeffs.len() {
-            coeffs_c[n] = Complex::from(coeffs[n] / (2.0 * data_length as PrcFmt));
-        }
-        fft.process(&mut coeffs_c, &mut coeffs_f);
-        FFTConv {
-            name,
-            npoints: data_length,
-            overlap: vec![0.0; data_length],
-            coeffs_f,
-            fft: Box::new(fft),
-            ifft: Box::new(ifft),
-            input_buf,
-            output_buf,
-            temp_buf,
-        }
-    }
-
-    pub fn from_config(name: String, data_length: usize, conf: config::ConvParameters) -> Self {
-        let values = match conf {
-            config::ConvParameters::Values { values } => values,
-            config::ConvParameters::File { filename } => {
-                filters::read_coeff_file(&filename).unwrap()
-            }
-        };
-        FFTConv::new(name, data_length, &values)
-    }
-}
-
-impl Filter for FFTConv {
-    fn name(&self) -> String {
-        self.name.clone()
-    }
-
-    /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
-        //for n in 0..self.npoints {
-        for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
-            self.input_buf[n] = Complex::<PrcFmt>::from(*item);
-            //self.input_buf[n+self.npoints] = Complex::zero();
-        }
-        self.fft.process(&mut self.input_buf, &mut self.output_buf);
-        for n in 0..2 * self.npoints {
-            self.temp_buf[n] = self.output_buf[n] * self.coeffs_f[n];
-        }
-        self.ifft.process(&mut self.temp_buf, &mut self.output_buf);
-        //let mut filtered: Vec<PrcFmt> = vec![0.0; self.npoints];
-        for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
-            *item = self.output_buf[n].re + self.overlap[n];
-            self.overlap[n] = self.output_buf[n + self.npoints].re;
-        }
-        Ok(())
-    }
-
-    fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Conv { parameters: conf } = conf {
-            let data_length = self.npoints;
-            let coeffs = match conf {
-                config::ConvParameters::Values { values } => values,
-                config::ConvParameters::File { filename } => {
-                    filters::read_coeff_file(&filename).unwrap()
-                }
-            };
-            let mut coeffs_c: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
-            let mut coeffs_f: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
-            if coeffs.len() > data_length {
-                eprintln!(
-                    "Warning! Filter impulse response is longer than buffer and will be truncated."
-                )
-            }
-            for n in 0..coeffs.len() {
-                coeffs_c[n] = Complex::from(coeffs[n] / (2.0 * data_length as PrcFmt));
-            }
-            self.fft.process(&mut coeffs_c, &mut coeffs_f);
-            self.coeffs_f = coeffs_f;
-        } else {
-            // This should never happen unless there is a bug somewhere else
-            panic!("Invalid config change!");
-        }
-    }
-}
-
-pub struct FFTConvSegmented {
-    name: String,
-    npoints: usize,
     nsegments: usize,
     overlap: Vec<PrcFmt>,
     coeffs_f: Vec<Vec<Complex<PrcFmt>>>,
@@ -134,7 +25,7 @@ pub struct FFTConvSegmented {
     index: usize,
 }
 
-impl FFTConvSegmented {
+impl FFTConv {
     /// Create a new FFT colvolution filter.
     pub fn new(name: String, data_length: usize, coeffs: &[PrcFmt]) -> Self {
         let input_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); 2 * data_length];
@@ -160,7 +51,7 @@ impl FFTConvSegmented {
             fft.process(segment, segment_f);
         }
 
-        FFTConvSegmented {
+        FFTConv {
             name,
             npoints: data_length,
             nsegments,
@@ -183,11 +74,11 @@ impl FFTConvSegmented {
                 filters::read_coeff_file(&filename).unwrap()
             }
         };
-        FFTConvSegmented::new(name, data_length, &values)
+        FFTConv::new(name, data_length, &values)
     }
 }
 
-impl Filter for FFTConvSegmented {
+impl Filter for FFTConv {
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -205,9 +96,14 @@ impl Filter for FFTConvSegmented {
         self.fft
             .process(&mut self.input_buf, &mut self.input_f[self.index]);
 
-        self.temp_buf = vec![Complex::zero(); 2 * self.npoints];
+        //self.temp_buf = vec![Complex::zero(); 2 * self.npoints];
         // Loop through history of input FTs, multiply with filter FTs, accumulate result
-        for segm in 0..self.nsegments {
+        let segm = 0;
+        let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
+        for n in 0..2 * self.npoints {
+            self.temp_buf[n] = self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
+        }
+        for segm in 1..self.nsegments {
             let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
             for n in 0..2 * self.npoints {
                 self.temp_buf[n] += self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
@@ -281,7 +177,6 @@ mod tests {
     use crate::PrcFmt;
     use config::ConvParameters;
     use fftconv::FFTConv;
-    use fftconv::FFTConvSegmented;
     use filters::Filter;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
@@ -315,7 +210,7 @@ mod tests {
         for m in 0..32 {
             coeffs.push(m as PrcFmt);
         }
-        let mut filter = FFTConvSegmented::new("test".to_owned(), 8, &coeffs);
+        let mut filter = FFTConv::new("test".to_owned(), 8, &coeffs);
         let mut wave1 = vec![0.0 as PrcFmt; 8];
         let mut wave2 = vec![0.0 as PrcFmt; 8];
         let mut wave3 = vec![0.0 as PrcFmt; 8];
@@ -340,15 +235,5 @@ mod tests {
         assert!(compare_waveforms(wave3, exp3, 1e-7));
         assert!(compare_waveforms(wave4, exp4, 1e-7));
         assert!(compare_waveforms(wave5, exp5, 1e-7));
-    }
-
-    #[test]
-    fn check_result2() {
-        let coeffs = vec![0.5, 0.5];
-        let mut filter = FFTConvSegmented::new("test".to_owned(), 8, &coeffs);
-        let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
-        let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
-        filter.process_waveform(&mut wave1).unwrap();
-        assert!(compare_waveforms(wave1, expected, 1e-7));
     }
 }
