@@ -185,7 +185,7 @@ The filters section defines the filter configurations to use in the pipeline. It
 The supported filter types are Biquad for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
 
 ### FIR
-A FIR filter is given by an impuse response provided as a list of coefficients. The coefficients are preferrably given in a separate file, but can be included directly in the config file. The number of coefficients (or taps) should be equal to or smaller than the buffersize setting. Otherwise the impulse response will be truncated.
+A FIR filter is given by an impuse response provided as a list of coefficients. The coefficients are preferrably given in a separate file, but can be included directly in the config file. If the number of coefficients (or taps) is larger than the buffersize setting it will use segmented convolution. The number of segments is the filter length divided by the buffersize, rounded up.
 ```
 filters:
   lowpass_fir:
