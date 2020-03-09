@@ -206,7 +206,7 @@ fn capture_loop_int<
     T: num_traits::NumCast + std::marker::Copy + num_traits::AsPrimitive<PrcFmt>,
 >(
     msg_channels: (
-        mpsc::Sender<AudioMessage>,
+        mpsc::SyncSender<AudioMessage>,
         mpsc::Sender<StatusMessage>,
         mpsc::Receiver<CommandMessage>,
     ),
@@ -259,7 +259,7 @@ fn capture_loop_float<
     T: num_traits::NumCast + std::marker::Copy + num_traits::AsPrimitive<PrcFmt>,
 >(
     msg_channels: (
-        mpsc::Sender<AudioMessage>,
+        mpsc::SyncSender<AudioMessage>,
         mpsc::Sender<StatusMessage>,
         mpsc::Receiver<CommandMessage>,
     ),
@@ -402,7 +402,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
 impl CaptureDevice for AlsaCaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::Sender<AudioMessage>,
+        channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,

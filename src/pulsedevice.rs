@@ -159,7 +159,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
                                 match format {
-                                    SampleFormat::S16LE |  SampleFormat::S24LE | SampleFormat::S32LE => {
+                                    SampleFormat::S16LE
+                                    | SampleFormat::S24LE
+                                    | SampleFormat::S32LE => {
                                         chunk_to_buffer_bytes(
                                             chunk,
                                             &mut buffer,
@@ -210,7 +212,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
 impl CaptureDevice for PulseCaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::Sender<AudioMessage>,
+        channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,

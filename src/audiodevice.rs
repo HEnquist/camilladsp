@@ -43,7 +43,7 @@ pub trait PlaybackDevice {
 pub trait CaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::Sender<AudioMessage>,
+        channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,

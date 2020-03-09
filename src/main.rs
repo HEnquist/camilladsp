@@ -61,8 +61,8 @@ enum ExitStatus {
 }
 
 fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
-    let (tx_pb, rx_pb) = mpsc::channel();
-    let (tx_cap, rx_cap) = mpsc::channel();
+    let (tx_pb, rx_pb) = mpsc::sync_channel(128);
+    let (tx_cap, rx_cap) = mpsc::sync_channel(128);
 
     let (tx_status, rx_status) = mpsc::channel();
     let tx_status_pb = tx_status.clone();

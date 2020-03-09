@@ -83,7 +83,9 @@ impl PlaybackDevice for FilePlaybackDevice {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
                                 match format {
-                                    SampleFormat::S16LE |  SampleFormat::S24LE | SampleFormat::S32LE => {
+                                    SampleFormat::S16LE
+                                    | SampleFormat::S24LE
+                                    | SampleFormat::S32LE => {
                                         chunk_to_buffer_bytes(
                                             chunk,
                                             &mut buffer,
@@ -132,7 +134,7 @@ impl PlaybackDevice for FilePlaybackDevice {
 impl CaptureDevice for FileCaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::Sender<AudioMessage>,
+        channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
@@ -188,9 +190,7 @@ impl CaptureDevice for FileCaptureDevice {
                                     ErrorKind::UnexpectedEof => {
                                         let msg = AudioMessage::EndOfStream;
                                         channel.send(msg).unwrap();
-                                        status_channel
-                                            .send(StatusMessage::CaptureDone)
-                                            .unwrap();
+                                        status_channel.send(StatusMessage::CaptureDone).unwrap();
                                         break;
                                     }
                                     _ => status_channel
