@@ -11,7 +11,10 @@ use std::thread;
 use audiodevice::*;
 // Sample format
 use config::SampleFormat;
-use conversions::{buffer_to_chunk_bytes, chunk_to_buffer_bytes};
+use conversions::{
+    buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
+    chunk_to_buffer_float_bytes,
+};
 
 use CommandMessage;
 use PrcFmt;
@@ -51,6 +54,8 @@ impl PlaybackDevice for FilePlaybackDevice {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
             SampleFormat::S32LE => 32,
+            SampleFormat::FLOAT32LE => 32,
+            SampleFormat::FLOAT64LE => 64,
         };
         let format = self.format.clone();
         let handle = thread::spawn(move || {
@@ -131,6 +136,60 @@ impl PlaybackDevice for FilePlaybackDevice {
                                 }
                             }
                         }
+                        SampleFormat::FLOAT32LE => {
+                            let mut buffer = vec![0u8; bufferlength * channels * 4];
+                            loop {
+                                match channel.recv() {
+                                    Ok(AudioMessage::Audio(chunk)) => {
+                                        chunk_to_buffer_float_bytes(chunk, &mut buffer, bits);
+                                        // let _frames = match io.writei(&buffer[..]) {
+                                        let write_res = file.write(&buffer);
+                                        match write_res {
+                                            Ok(_) => {}
+                                            Err(msg) => {
+                                                status_channel
+                                                    .send(StatusMessage::PlaybackError {
+                                                        message: format!("{}", msg),
+                                                    })
+                                                    .unwrap();
+                                            }
+                                        };
+                                    }
+                                    Ok(AudioMessage::EndOfStream) => {
+                                        status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                        break;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        SampleFormat::FLOAT64LE => {
+                            let mut buffer = vec![0u8; bufferlength * channels * 8];
+                            loop {
+                                match channel.recv() {
+                                    Ok(AudioMessage::Audio(chunk)) => {
+                                        chunk_to_buffer_float_bytes(chunk, &mut buffer, bits);
+                                        // let _frames = match io.writei(&buffer[..]) {
+                                        let write_res = file.write(&buffer);
+                                        match write_res {
+                                            Ok(_) => {}
+                                            Err(msg) => {
+                                                status_channel
+                                                    .send(StatusMessage::PlaybackError {
+                                                        message: format!("{}", msg),
+                                                    })
+                                                    .unwrap();
+                                            }
+                                        };
+                                    }
+                                    Ok(AudioMessage::EndOfStream) => {
+                                        status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                        break;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
                     };
                 }
                 Err(err) => {
@@ -163,6 +222,8 @@ impl CaptureDevice for FileCaptureDevice {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
             SampleFormat::S32LE => 32,
+            SampleFormat::FLOAT32LE => 32,
+            SampleFormat::FLOAT64LE => 64,
         };
         let format = self.format.clone();
         let mut silence: PrcFmt = 10.0;
@@ -264,6 +325,102 @@ impl CaptureDevice for FileCaptureDevice {
                                 };
                                 let chunk =
                                     buffer_to_chunk_bytes(&buf, channels, scalefactor, bits);
+                                if (chunk.maxval - chunk.minval) > silence {
+                                    if silent_nbr > silent_limit {
+                                        eprintln!("Resuming processing");
+                                    }
+                                    silent_nbr = 0;
+                                } else if silent_limit > 0 {
+                                    if silent_nbr == silent_limit {
+                                        eprintln!("Pausing processing");
+                                    }
+                                    silent_nbr += 1;
+                                }
+                                if silent_nbr <= silent_limit {
+                                    let msg = AudioMessage::Audio(chunk);
+                                    channel.send(msg).unwrap();
+                                }
+                            }
+                        }
+                        SampleFormat::FLOAT32LE => {
+                            let mut buf = vec![0u8; channels * bufferlength * 4];
+                            loop {
+                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
+                                    let msg = AudioMessage::EndOfStream;
+                                    channel.send(msg).unwrap();
+                                    status_channel.send(StatusMessage::CaptureDone).unwrap();
+                                    break;
+                                }
+                                let read_res = file.read_exact(&mut buf);
+                                match read_res {
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        match err.kind() {
+                                            ErrorKind::UnexpectedEof => {
+                                                let msg = AudioMessage::EndOfStream;
+                                                channel.send(msg).unwrap();
+                                                status_channel
+                                                    .send(StatusMessage::CaptureDone)
+                                                    .unwrap();
+                                                break;
+                                            }
+                                            _ => status_channel
+                                                .send(StatusMessage::CaptureError {
+                                                    message: format!("{}", err),
+                                                })
+                                                .unwrap(),
+                                        };
+                                    }
+                                };
+                                let chunk = buffer_to_chunk_float_bytes(&buf, channels, bits);
+                                if (chunk.maxval - chunk.minval) > silence {
+                                    if silent_nbr > silent_limit {
+                                        eprintln!("Resuming processing");
+                                    }
+                                    silent_nbr = 0;
+                                } else if silent_limit > 0 {
+                                    if silent_nbr == silent_limit {
+                                        eprintln!("Pausing processing");
+                                    }
+                                    silent_nbr += 1;
+                                }
+                                if silent_nbr <= silent_limit {
+                                    let msg = AudioMessage::Audio(chunk);
+                                    channel.send(msg).unwrap();
+                                }
+                            }
+                        }
+                        SampleFormat::FLOAT64LE => {
+                            let mut buf = vec![0u8; channels * bufferlength * 8];
+                            loop {
+                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
+                                    let msg = AudioMessage::EndOfStream;
+                                    channel.send(msg).unwrap();
+                                    status_channel.send(StatusMessage::CaptureDone).unwrap();
+                                    break;
+                                }
+                                let read_res = file.read_exact(&mut buf);
+                                match read_res {
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        match err.kind() {
+                                            ErrorKind::UnexpectedEof => {
+                                                let msg = AudioMessage::EndOfStream;
+                                                channel.send(msg).unwrap();
+                                                status_channel
+                                                    .send(StatusMessage::CaptureDone)
+                                                    .unwrap();
+                                                break;
+                                            }
+                                            _ => status_channel
+                                                .send(StatusMessage::CaptureError {
+                                                    message: format!("{}", err),
+                                                })
+                                                .unwrap(),
+                                        };
+                                    }
+                                };
+                                let chunk = buffer_to_chunk_float_bytes(&buf, channels, bits);
                                 if (chunk.maxval - chunk.minval) > silence {
                                     if silent_nbr > silent_limit {
                                         eprintln!("Resuming processing");

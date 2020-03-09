@@ -13,7 +13,10 @@ use std::thread;
 use audiodevice::*;
 // Sample format
 use config::SampleFormat;
-use conversions::{buffer_to_chunk_bytes, chunk_to_buffer_bytes};
+use conversions::{
+    buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
+    chunk_to_buffer_float_bytes,
+};
 
 use CommandMessage;
 use PrcFmt;
@@ -44,7 +47,7 @@ fn open_pulse(
     samplerate: u32,
     bufsize: i64,
     channels: u8,
-    bits: usize,
+    format: &SampleFormat,
     capture: bool,
 ) -> Res<Simple> {
     // Open the device
@@ -54,10 +57,18 @@ fn open_pulse(
         Direction::Playback
     };
 
-    let format = match bits {
-        16 => sample::SAMPLE_S16NE,
-        24 => sample::SAMPLE_S24_32NE,
-        32 => sample::SAMPLE_S32NE,
+    let bits = match format {
+        SampleFormat::S16LE => 16,
+        SampleFormat::S24LE => 24,
+        SampleFormat::S32LE => 32,
+        SampleFormat::FLOAT32LE => 32,
+        _ => panic!("invalid bits"),
+    };
+    let pulse_format = match format {
+        SampleFormat::S16LE => sample::SAMPLE_S16NE,
+        SampleFormat::S24LE => sample::SAMPLE_S24_32NE,
+        SampleFormat::S32LE => sample::SAMPLE_S32NE,
+        SampleFormat::FLOAT32LE => sample::SAMPLE_FLOAT32NE,
         _ => panic!("invalid bits"),
     };
 
@@ -69,7 +80,7 @@ fn open_pulse(
     };
 
     let spec = sample::Spec {
-        format,
+        format: pulse_format,
         channels,
         rate: samplerate,
     };
@@ -112,6 +123,15 @@ impl PlaybackDevice for PulsePlaybackDevice {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
             SampleFormat::S32LE => 32,
+            SampleFormat::FLOAT32LE => 32,
+            SampleFormat::FLOAT64LE => 64,
+        };
+        let store_bytes = match self.format {
+            SampleFormat::S16LE => 2,
+            SampleFormat::S24LE => 4,
+            SampleFormat::S32LE => 4,
+            SampleFormat::FLOAT32LE => 4,
+            SampleFormat::FLOAT64LE => 8,
         };
         let format = self.format.clone();
         let handle = thread::spawn(move || {
@@ -121,7 +141,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                 samplerate as u32,
                 bufferlength as i64,
                 channels as u8,
-                bits,
+                &format,
                 false,
             ) {
                 Ok(pulsedevice) => {
@@ -135,8 +155,8 @@ impl PlaybackDevice for PulsePlaybackDevice {
                     //thread::sleep(delay);
                     eprintln!("starting playback loop");
                     match format {
-                        SampleFormat::S16LE => {
-                            let mut buffer = vec![0u8; bufferlength * channels * 2];
+                        SampleFormat::S16LE |  SampleFormat::S24LE | SampleFormat::S32LE => {
+                            let mut buffer = vec![0u8; bufferlength * channels * store_bytes];
                             loop {
                                 match channel.recv() {
                                     Ok(AudioMessage::Audio(chunk)) => {
@@ -167,17 +187,12 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                 }
                             }
                         }
-                        SampleFormat::S24LE | SampleFormat::S32LE => {
-                            let mut buffer = vec![0u8; bufferlength * channels * 4];
+                        SampleFormat::FLOAT32LE => {
+                            let mut buffer = vec![0u8; bufferlength * channels * store_bytes];
                             loop {
                                 match channel.recv() {
                                     Ok(AudioMessage::Audio(chunk)) => {
-                                        chunk_to_buffer_bytes(
-                                            chunk,
-                                            &mut buffer,
-                                            scalefactor,
-                                            bits,
-                                        );
+                                        chunk_to_buffer_float_bytes(chunk, &mut buffer, bits);
                                         // let _frames = match io.writei(&buffer[..]) {
                                         let write_res = pulsedevice.write(&buffer);
                                         match write_res {
@@ -199,6 +214,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                 }
                             }
                         }
+                        _ => panic!("Unsupported sample format!"),
                     };
                 }
                 Err(err) => {
@@ -231,6 +247,15 @@ impl CaptureDevice for PulseCaptureDevice {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
             SampleFormat::S32LE => 32,
+            SampleFormat::FLOAT32LE => 32,
+            SampleFormat::FLOAT64LE => 64,
+        };
+        let store_bytes = match self.format {
+            SampleFormat::S16LE => 2,
+            SampleFormat::S24LE => 4,
+            SampleFormat::S32LE => 4,
+            SampleFormat::FLOAT32LE => 4,
+            SampleFormat::FLOAT64LE => 8,
         };
         let format = self.format.clone();
         let mut silence: PrcFmt = 10.0;
@@ -243,7 +268,7 @@ impl CaptureDevice for PulseCaptureDevice {
                 samplerate as u32,
                 bufferlength as i64,
                 channels as u8,
-                bits,
+                &format,
                 true,
             ) {
                 Ok(pulsedevice) => {
@@ -256,8 +281,8 @@ impl CaptureDevice for PulseCaptureDevice {
                     barrier.wait();
                     eprintln!("starting captureloop");
                     match format {
-                        SampleFormat::S16LE => {
-                            let mut buf = vec![0u8; channels * bufferlength * 2];
+                        SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
+                            let mut buf = vec![0u8; channels * bufferlength * store_bytes];
                             loop {
                                 if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
                                     let msg = AudioMessage::EndOfStream;
@@ -297,8 +322,8 @@ impl CaptureDevice for PulseCaptureDevice {
                                 }
                             }
                         }
-                        SampleFormat::S24LE | SampleFormat::S32LE => {
-                            let mut buf = vec![0u8; channels * bufferlength * 4];
+                        SampleFormat::FLOAT32LE => {
+                            let mut buf = vec![0u8; channels * bufferlength * store_bytes];
                             loop {
                                 if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
                                     let msg = AudioMessage::EndOfStream;
@@ -317,8 +342,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                             .unwrap();
                                     }
                                 };
-                                let chunk =
-                                    buffer_to_chunk_bytes(&buf, channels, scalefactor, bits);
+                                let chunk = buffer_to_chunk_float_bytes(&buf, channels, bits);
                                 if (chunk.maxval - chunk.minval) > silence {
                                     if silent_nbr > silent_limit {
                                         eprintln!("Resuming processing");
@@ -336,6 +360,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                 }
                             }
                         }
+                        _ => panic!("Unsupported sample format"),
                     };
                 }
                 Err(err) => {

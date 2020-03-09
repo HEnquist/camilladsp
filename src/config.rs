@@ -41,6 +41,8 @@ pub enum SampleFormat {
     S16LE,
     S24LE,
     S32LE,
+    FLOAT32LE,
+    FLOAT64LE,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
