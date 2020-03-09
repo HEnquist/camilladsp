@@ -1,7 +1,7 @@
 ---
 devices:
   samplerate: 44100
-  buffersize: 256
+  buffersize: 1024
   capture:
     type: Alsa
     channels: 2
@@ -10,7 +10,7 @@ devices:
   playback:
     type: Alsa
     channels: 2
-    device: "hw:Generic_1"
+    device: "hw:Loopback,0,5"
     format: S32LE
 
 filters:

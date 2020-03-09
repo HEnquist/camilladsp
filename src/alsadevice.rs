@@ -149,6 +149,8 @@ fn playback_loop_int<T: num_traits::NumCast + std::marker::Copy>(
         match channel.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
                 chunk_to_buffer_int(chunk, &mut buffer, scalefactor);
+                let delay = pcmdevice.status().unwrap().get_delay();
+                eprintln!("current delay {}", delay);
                 let playback_res = play_buffer(&buffer, pcmdevice, &io);
                 match playback_res {
                     Ok(_) => {}
@@ -181,6 +183,8 @@ fn playback_loop_float<T: num_traits::NumCast + std::marker::Copy>(
         match channel.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
                 chunk_to_buffer_float(chunk, &mut buffer);
+                let delay = pcmdevice.status().unwrap().get_delay();
+                eprintln!("current delay {}", delay);
                 let playback_res = play_buffer(&buffer, &pcmdevice, &io);
                 match playback_res {
                     Ok(_) => {}
