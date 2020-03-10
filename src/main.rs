@@ -49,9 +49,11 @@ pub enum StatusMessage {
     CaptureError { message: String },
     PlaybackDone,
     CaptureDone,
+    SetSpeed { speed: f32 },
 }
 
 pub enum CommandMessage {
+    SetSpeed { speed: f32 },
     Exit,
 }
 
@@ -212,6 +214,10 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
                 }
                 StatusMessage::CaptureDone => {
                     eprintln!("Capture finished");
+                }
+                StatusMessage::SetSpeed { speed } => {
+                    eprintln!("Change speed to: {}%", 100.0*speed);
+                    tx_command_cap.send(CommandMessage::SetSpeed{ speed }).unwrap();
                 }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {}

@@ -5,7 +5,7 @@ devices:
   capture:
     type: Alsa
     channels: 2
-    device: "hw:Loopback,0,0"
+    device: "hw:Loopback,0,1"
     format: S16LE
   playback:
     type: Alsa
