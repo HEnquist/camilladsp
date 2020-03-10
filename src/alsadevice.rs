@@ -4,6 +4,10 @@ extern crate num_traits;
 //use std::any::{Any, TypeId};
 use alsa::pcm::{Access, Format, HwParams, State};
 use alsa::{Direction, ValueOr};
+use alsa::ctl::{ElemId, ElemIface};
+use alsa::ctl::{ElemValue, ElemType};
+use std::ffi::CString;
+use alsa::hctl::HCtl;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -247,6 +251,19 @@ fn capture_loop_int<
     let mut silent_nbr: usize = 0;
     let (channel, status_channel, command_channel) = msg_channels;
     let (channels, scalefactor, silent_limit, silence) = capt_params;
+    let pcminfo = pcmdevice.info().unwrap();
+    let card = pcminfo.get_card();
+    let device = pcminfo.get_device();
+    let subdevice = pcminfo.get_subdevice();
+    let mut elid = ElemId::new(ElemIface::PCM);
+    elid.set_device(device);
+    elid.set_subdevice(subdevice);
+    elid.set_name(&CString::new("PCM Rate Shift 100000").unwrap());
+    let h = HCtl::new(&format!("hw:{}", card), false).unwrap();
+    h.load().unwrap();
+    let element = h.find_elem(&elid);
+    let mut elval = ElemValue::new(ElemType::Integer).unwrap();
+
     loop {
         match command_channel.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -257,6 +274,10 @@ fn capture_loop_int<
             },
             Ok(CommandMessage::SetSpeed{ speed }) => {
                 eprintln!("cap setting speed to {}", speed);
+                if let Some(elem) = &element {
+                    elval.set_integer(0, (100000.0*speed) as i32).unwrap();
+                    elem.write(&elval).unwrap();
+                }
             },
             Err(_) => {}
         };
