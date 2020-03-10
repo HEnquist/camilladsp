@@ -64,6 +64,8 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             bufferlength: conf.buffersize,
             channels,
             format,
+            target_level: conf.target_level,
+            adjust_period: conf.adjust_period,
         }),
         #[cfg(feature = "pulse-backend")]
         config::Device::Pulse {

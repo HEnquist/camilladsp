@@ -77,6 +77,10 @@ pub struct Devices {
     pub silence_timeout: PrcFmt,
     pub capture: Device,
     pub playback: Device,
+    #[serde(default)]
+    pub target_level: usize,
+    #[serde(default)]
+    pub adjust_period: f32,
 }
 
 //#[derive(Clone, Debug, Deserialize, PartialEq)]

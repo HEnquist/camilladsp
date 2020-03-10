@@ -36,6 +36,8 @@ pub struct AlsaPlaybackDevice {
     pub bufferlength: usize,
     pub channels: usize,
     pub format: SampleFormat,
+    pub target_level: usize,
+    pub adjust_period: f32,
 }
 
 pub struct AlsaCaptureDevice {
@@ -46,6 +48,12 @@ pub struct AlsaCaptureDevice {
     pub format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
+}
+
+struct AdjustParams {
+    buffersize: usize,
+    target_level: usize,
+    adjust_period: f32,
 }
 
 /// Play a buffer.
@@ -151,6 +159,7 @@ fn playback_loop_int<T: num_traits::NumCast + std::marker::Copy>(
     scalefactor: PrcFmt,
     chunksize: usize,
     target_fill: usize,
+    adjust_period: f32,
 ) {
     let srate = pcmdevice.hw_params_current().unwrap().get_rate().unwrap();
     let mut start = SystemTime::now();
@@ -373,6 +382,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         status_channel: mpsc::Sender<StatusMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
+        let target_level = self.target_level;
+        let adjust_period = self.adjust_period;
         let samplerate = self.samplerate;
         let bufferlength = self.bufferlength;
         let channels = self.channels;
@@ -401,6 +412,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     }
                     //let scalefactor = (1<<bits-1) as PrcFmt;
                     let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+
                     barrier.wait();
                     //thread::sleep(delay);
                     eprintln!("starting playback loop");
@@ -416,7 +428,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                 io,
                                 scalefactor,
                                 bufferlength,
-                                bufferlength/2,
+                                target_level,
+                                adjust_period,
                             );
                         }
                         SampleFormat::S24LE | SampleFormat::S32LE => {
@@ -430,7 +443,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                 io,
                                 scalefactor,
                                 bufferlength,
-                                bufferlength/2,
+                                target_level,
+                                adjust_period,
                             );
                         }
                         SampleFormat::FLOAT32LE => {
