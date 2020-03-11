@@ -2,6 +2,7 @@
 name = "camilladsp"
 version = "0.0.7"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
+description = "A flexible tool for processing audio"
 
 [features]
 default = ["alsa-backend", "pulse-backend"]
@@ -18,5 +19,6 @@ num-traits = "0.2"
 signal-hook = "0.1.13"
 rand = "0.7.3"
 rand_distr = "0.2.2"
+clap = "2.33.0"
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }

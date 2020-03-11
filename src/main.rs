@@ -1,5 +1,6 @@
 #[cfg(feature = "alsa-backend")]
 extern crate alsa;
+extern crate clap;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
@@ -10,6 +11,7 @@ extern crate rustfft;
 extern crate serde;
 extern crate signal_hook;
 
+use clap::{crate_authors, crate_description, crate_version, App, Arg};
 use std::env;
 use std::error;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -216,8 +218,9 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
                     eprintln!("Capture finished");
                 }
                 StatusMessage::SetSpeed { speed } => {
-                    eprintln!("Change speed to: {}%", 100.0*speed);
-                    tx_command_cap.send(CommandMessage::SetSpeed{ speed }).unwrap();
+                    tx_command_cap
+                        .send(CommandMessage::SetSpeed { speed })
+                        .unwrap();
                 }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -227,12 +230,25 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("No config file given!");
-        return;
-    }
-    let configname = &args[1];
+    let matches = App::new("CamillaDSP")
+        .version(crate_version!())
+        .about(crate_description!())
+        .author(crate_authors!())
+        .arg(
+            Arg::with_name("configfile")
+                .help("The configuration file to use")
+                .index(1)
+                .required(true),
+        )
+        .arg(
+            Arg::with_name("check")
+                .help("Check config file and exit")
+                .short("c")
+                .long("check"),
+        )
+        .get_matches();
+
+    let configname = matches.value_of("configfile").unwrap(); //&args[1];
     let mut configuration = match config::load_config(&configname) {
         Ok(config) => config,
         Err(err) => {
@@ -243,12 +259,17 @@ fn main() {
     };
 
     match config::validate_config(configuration.clone()) {
-        Ok(()) => {}
+        Ok(()) => {
+            eprintln!("Config is valid");
+        }
         Err(err) => {
             eprintln!("Invalid config file!");
             eprintln!("{}", err);
             return;
         }
+    }
+    if matches.is_present("check") {
+        return;
     }
     loop {
         let exitstatus = run(configuration, &configname);

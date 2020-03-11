@@ -2,16 +2,16 @@ extern crate alsa;
 extern crate num_traits;
 //use std::{iter, error};
 //use std::any::{Any, TypeId};
+use alsa::ctl::{ElemId, ElemIface};
+use alsa::ctl::{ElemType, ElemValue};
+use alsa::hctl::HCtl;
 use alsa::pcm::{Access, Format, HwParams, State};
 use alsa::{Direction, ValueOr};
-use alsa::ctl::{ElemId, ElemIface};
-use alsa::ctl::{ElemValue, ElemType};
 use std::ffi::CString;
-use alsa::hctl::HCtl;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 //mod audiodevice;
 use audiodevice::*;
 // Sample format
@@ -50,8 +50,26 @@ pub struct AlsaCaptureDevice {
     pub silence_timeout: PrcFmt,
 }
 
-struct AdjustParams {
-    buffersize: usize,
+struct CaptureChannels {
+    audio: mpsc::SyncSender<AudioMessage>,
+    status: mpsc::Sender<StatusMessage>,
+    command: mpsc::Receiver<CommandMessage>,
+}
+
+struct PlaybackChannels {
+    audio: mpsc::Receiver<AudioMessage>,
+    status: mpsc::Sender<StatusMessage>,
+}
+
+struct CaptureParams {
+    channels: usize,
+    scalefactor: PrcFmt,
+    silent_limit: usize,
+    silence: PrcFmt,
+}
+
+struct PlaybackParams {
+    scalefactor: PrcFmt,
     target_level: usize,
     adjust_period: f32,
 }
@@ -67,12 +85,16 @@ fn play_buffer<T: std::marker::Copy>(
     if playback_state == State::XRun {
         eprintln!("Prepare playback");
         pcmdevice.prepare()?;
+        let delay = Duration::from_millis(5);
+        thread::sleep(delay);
     }
     let _frames = match io.writei(&buffer[..]) {
         Ok(frames) => frames,
         Err(_err) => {
             eprintln!("retrying playback");
             pcmdevice.prepare()?;
+            let delay = Duration::from_millis(5);
+            thread::sleep(delay);
             io.writei(&buffer[..])?
         }
     };
@@ -131,7 +153,7 @@ fn open_pcm(
         }
 
         hwp.set_access(Access::RWInterleaved)?;
-        hwp.set_buffer_size(2*bufsize)?;
+        hwp.set_buffer_size(2 * bufsize)?;
         hwp.set_period_size(bufsize / 8, alsa::ValueOr::Nearest)?;
         pcmdev.hw_params(&hwp)?;
     }
@@ -141,7 +163,7 @@ fn open_pcm(
         let hwp = pcmdev.hw_params_current()?;
         let swp = pcmdev.sw_params_current()?;
         let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
-        swp.set_start_threshold(act_bufsize/2 - act_periodsize)?;
+        swp.set_start_threshold(act_bufsize / 2 - act_periodsize)?;
         //swp.set_avail_min(periodsize)?;
         pcmdev.sw_params(&swp)?;
         //eprintln!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
@@ -151,15 +173,11 @@ fn open_pcm(
 }
 
 fn playback_loop_int<T: num_traits::NumCast + std::marker::Copy>(
-    channel: mpsc::Receiver<AudioMessage>,
-    status_channel: mpsc::Sender<StatusMessage>,
+    channels: PlaybackChannels,
     mut buffer: Vec<T>,
     pcmdevice: &alsa::PCM,
     io: alsa::pcm::IO<T>,
-    scalefactor: PrcFmt,
-    chunksize: usize,
-    target_fill: usize,
-    adjust_period: f32,
+    params: PlaybackParams,
 ) {
     let srate = pcmdevice.hw_params_current().unwrap().get_rate().unwrap();
     let mut start = SystemTime::now();
@@ -168,31 +186,42 @@ fn playback_loop_int<T: num_traits::NumCast + std::marker::Copy>(
     let mut ndelays = 0;
     let mut speed;
     let mut diff: isize;
+    let adjust = params.adjust_period > 0.0 && params.target_level > 0;
     loop {
-        match channel.recv() {
+        match channels.audio.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
-                chunk_to_buffer_int(chunk, &mut buffer, scalefactor);
+                chunk_to_buffer_int(chunk, &mut buffer, params.scalefactor);
                 now = SystemTime::now();
                 delay += pcmdevice.status().unwrap().get_delay() as isize;
                 ndelays += 1;
-                if now.duration_since(start).unwrap().as_millis() > 1000 {
-                    let av_delay = delay/ndelays;
-                    diff = av_delay - target_fill as isize;
+                if adjust
+                    && (now.duration_since(start).unwrap().as_millis()
+                        > ((1000.0 * params.adjust_period) as u128))
+                {
+                    let av_delay = delay / ndelays;
+                    diff = av_delay - params.target_level as isize;
                     let rel_diff = (diff as f32) / (srate as f32);
-                    speed = 1.0 + rel_diff; 
-                    eprintln!("set speed to {}", speed);
-                    eprintln!("rate: {}, bufsize: {}, current delay {}", srate, chunksize, av_delay);
+                    speed = 1.0 + 0.5 * rel_diff / params.adjust_period;
+                    eprintln!(
+                        "Current buffer level {}, set capture rate to {}%",
+                        av_delay,
+                        100.0 * speed
+                    );
                     start = now;
-                    delay=0;
-                    ndelays=0;
-                    status_channel.send(StatusMessage::SetSpeed { speed }).unwrap();
+                    delay = 0;
+                    ndelays = 0;
+                    channels
+                        .status
+                        .send(StatusMessage::SetSpeed { speed })
+                        .unwrap();
                 }
-                
+
                 let playback_res = play_buffer(&buffer, pcmdevice, &io);
                 match playback_res {
                     Ok(_) => {}
                     Err(msg) => {
-                        status_channel
+                        channels
+                            .status
                             .send(StatusMessage::PlaybackError {
                                 message: format!("{}", msg),
                             })
@@ -201,7 +230,7 @@ fn playback_loop_int<T: num_traits::NumCast + std::marker::Copy>(
                 };
             }
             Ok(AudioMessage::EndOfStream) => {
-                status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                channels.status.send(StatusMessage::PlaybackDone).unwrap();
                 break;
             }
             _ => {}
@@ -210,24 +239,55 @@ fn playback_loop_int<T: num_traits::NumCast + std::marker::Copy>(
 }
 
 fn playback_loop_float<T: num_traits::NumCast + std::marker::Copy>(
-    channel: mpsc::Receiver<AudioMessage>,
-    status_channel: mpsc::Sender<StatusMessage>,
+    channels: PlaybackChannels,
     mut buffer: Vec<T>,
     pcmdevice: &alsa::PCM,
     io: alsa::pcm::IO<T>,
-    chunksize: usize,
+    params: PlaybackParams,
 ) {
+    let srate = pcmdevice.hw_params_current().unwrap().get_rate().unwrap();
+    let mut start = SystemTime::now();
+    let mut now;
+    let mut delay = 0;
+    let mut ndelays = 0;
+    let mut speed;
+    let mut diff: isize;
+    let adjust = params.adjust_period > 0.0 && params.target_level > 0;
     loop {
-        match channel.recv() {
+        match channels.audio.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
                 chunk_to_buffer_float(chunk, &mut buffer);
-                let delay = pcmdevice.status().unwrap().get_delay();
-                eprintln!("current delay {}", delay);
+                now = SystemTime::now();
+                delay += pcmdevice.status().unwrap().get_delay() as isize;
+                ndelays += 1;
+                if adjust
+                    && (now.duration_since(start).unwrap().as_millis()
+                        > ((1000.0 * params.adjust_period) as u128))
+                {
+                    let av_delay = delay / ndelays;
+                    diff = av_delay - params.target_level as isize;
+                    let rel_diff = (diff as f32) / (srate as f32);
+                    speed = 1.0 + 0.5 * rel_diff / params.adjust_period;
+                    eprintln!(
+                        "Current buffer level {}, set capture rate to {}%",
+                        av_delay,
+                        100.0 * speed
+                    );
+                    start = now;
+                    delay = 0;
+                    ndelays = 0;
+                    channels
+                        .status
+                        .send(StatusMessage::SetSpeed { speed })
+                        .unwrap();
+                }
+
                 let playback_res = play_buffer(&buffer, &pcmdevice, &io);
                 match playback_res {
                     Ok(_) => {}
                     Err(msg) => {
-                        status_channel
+                        channels
+                            .status
                             .send(StatusMessage::PlaybackError {
                                 message: format!("{}", msg),
                             })
@@ -236,7 +296,7 @@ fn playback_loop_float<T: num_traits::NumCast + std::marker::Copy>(
                 };
             }
             Ok(AudioMessage::EndOfStream) => {
-                status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                channels.status.send(StatusMessage::PlaybackDone).unwrap();
                 break;
             }
             _ => {}
@@ -247,19 +307,13 @@ fn playback_loop_float<T: num_traits::NumCast + std::marker::Copy>(
 fn capture_loop_int<
     T: num_traits::NumCast + std::marker::Copy + num_traits::AsPrimitive<PrcFmt>,
 >(
-    msg_channels: (
-        mpsc::SyncSender<AudioMessage>,
-        mpsc::Sender<StatusMessage>,
-        mpsc::Receiver<CommandMessage>,
-    ),
+    channels: CaptureChannels,
     mut buffer: Vec<T>,
     pcmdevice: &alsa::PCM,
     io: alsa::pcm::IO<T>,
-    capt_params: (usize, PrcFmt, usize, PrcFmt),
+    params: CaptureParams,
 ) {
     let mut silent_nbr: usize = 0;
-    let (channel, status_channel, command_channel) = msg_channels;
-    let (channels, scalefactor, silent_limit, silence) = capt_params;
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
@@ -272,50 +326,53 @@ fn capture_loop_int<
     h.load().unwrap();
     let element = h.find_elem(&elid);
     let mut elval = ElemValue::new(ElemType::Integer).unwrap();
+    if element.is_some() {
+        eprintln!("Capture device supports rate adjust");
+    }
 
     loop {
-        match command_channel.try_recv() {
+        match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
                 let msg = AudioMessage::EndOfStream;
-                channel.send(msg).unwrap();
-                status_channel.send(StatusMessage::CaptureDone).unwrap();
+                channels.audio.send(msg).unwrap();
+                channels.status.send(StatusMessage::CaptureDone).unwrap();
                 break;
-            },
-            Ok(CommandMessage::SetSpeed{ speed }) => {
-                eprintln!("cap setting speed to {}", speed);
+            }
+            Ok(CommandMessage::SetSpeed { speed }) => {
                 if let Some(elem) = &element {
-                    elval.set_integer(0, (100000.0*speed) as i32).unwrap();
+                    elval.set_integer(0, (100_000.0 * speed) as i32).unwrap();
                     elem.write(&elval).unwrap();
                 }
-            },
+            }
             Err(_) => {}
         };
         let capture_res = capture_buffer(&mut buffer, pcmdevice, &io);
         match capture_res {
             Ok(_) => {}
             Err(msg) => {
-                status_channel
+                channels
+                    .status
                     .send(StatusMessage::CaptureError {
                         message: format!("{}", msg),
                     })
                     .unwrap();
             }
         };
-        let chunk = buffer_to_chunk_int(&buffer, channels, scalefactor);
-        if (chunk.maxval - chunk.minval) > silence {
-            if silent_nbr > silent_limit {
+        let chunk = buffer_to_chunk_int(&buffer, params.channels, params.scalefactor);
+        if (chunk.maxval - chunk.minval) > params.silence {
+            if silent_nbr > params.silent_limit {
                 eprintln!("Resuming processing");
             }
             silent_nbr = 0;
-        } else if silent_limit > 0 {
-            if silent_nbr == silent_limit {
+        } else if params.silent_limit > 0 {
+            if silent_nbr == params.silent_limit {
                 eprintln!("Pausing processing");
             }
             silent_nbr += 1;
         }
-        if silent_nbr <= silent_limit {
+        if silent_nbr <= params.silent_limit {
             let msg = AudioMessage::Audio(chunk);
-            channel.send(msg).unwrap();
+            channels.audio.send(msg).unwrap();
         }
     }
 }
@@ -323,52 +380,71 @@ fn capture_loop_int<
 fn capture_loop_float<
     T: num_traits::NumCast + std::marker::Copy + num_traits::AsPrimitive<PrcFmt>,
 >(
-    msg_channels: (
-        mpsc::SyncSender<AudioMessage>,
-        mpsc::Sender<StatusMessage>,
-        mpsc::Receiver<CommandMessage>,
-    ),
+    channels: CaptureChannels,
     mut buffer: Vec<T>,
     pcmdevice: &alsa::PCM,
     io: alsa::pcm::IO<T>,
-    capt_params: (usize, usize, PrcFmt),
+    params: CaptureParams,
 ) {
     let mut silent_nbr: usize = 0;
-    let (channel, status_channel, command_channel) = msg_channels;
-    let (channels, silent_limit, silence) = capt_params;
+    let pcminfo = pcmdevice.info().unwrap();
+    let card = pcminfo.get_card();
+    let device = pcminfo.get_device();
+    let subdevice = pcminfo.get_subdevice();
+    let mut elid = ElemId::new(ElemIface::PCM);
+    elid.set_device(device);
+    elid.set_subdevice(subdevice);
+    elid.set_name(&CString::new("PCM Rate Shift 100000").unwrap());
+    let h = HCtl::new(&format!("hw:{}", card), false).unwrap();
+    h.load().unwrap();
+    let element = h.find_elem(&elid);
+    let mut elval = ElemValue::new(ElemType::Integer).unwrap();
+    if element.is_some() {
+        eprintln!("Capure device supports rate adjust");
+    }
     loop {
-        if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
-            let msg = AudioMessage::EndOfStream;
-            channel.send(msg).unwrap();
-            status_channel.send(StatusMessage::CaptureDone).unwrap();
-            break;
-        }
+        match channels.command.try_recv() {
+            Ok(CommandMessage::Exit) => {
+                let msg = AudioMessage::EndOfStream;
+                channels.audio.send(msg).unwrap();
+                channels.status.send(StatusMessage::CaptureDone).unwrap();
+                break;
+            }
+            Ok(CommandMessage::SetSpeed { speed }) => {
+                if let Some(elem) = &element {
+                    elval.set_integer(0, (100_000.0 * speed) as i32).unwrap();
+                    elem.write(&elval).unwrap();
+                }
+            }
+            Err(_) => {}
+        };
         let capture_res = capture_buffer(&mut buffer, pcmdevice, &io);
         match capture_res {
             Ok(_) => {}
             Err(msg) => {
-                status_channel
+                channels
+                    .status
                     .send(StatusMessage::CaptureError {
                         message: format!("{}", msg),
                     })
                     .unwrap();
             }
         };
-        let chunk = buffer_to_chunk_float(&buffer, channels);
-        if (chunk.maxval - chunk.minval) > silence {
-            if silent_nbr > silent_limit {
+        let chunk = buffer_to_chunk_float(&buffer, params.channels);
+        if (chunk.maxval - chunk.minval) > params.silence {
+            if silent_nbr > params.silent_limit {
                 eprintln!("Resuming processing");
             }
             silent_nbr = 0;
-        } else if silent_limit > 0 {
-            if silent_nbr == silent_limit {
+        } else if params.silent_limit > 0 {
+            if silent_nbr == params.silent_limit {
                 eprintln!("Pausing processing");
             }
             silent_nbr += 1;
         }
-        if silent_nbr <= silent_limit {
+        if silent_nbr <= params.silent_limit {
             let msg = AudioMessage::Audio(chunk);
-            channel.send(msg).unwrap();
+            channels.audio.send(msg).unwrap();
         }
     }
 }
@@ -416,46 +492,36 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     barrier.wait();
                     //thread::sleep(delay);
                     eprintln!("starting playback loop");
+                    let pb_params = PlaybackParams {
+                        scalefactor,
+                        target_level,
+                        adjust_period,
+                    };
+                    let pb_channels = PlaybackChannels {
+                        audio: channel,
+                        status: status_channel,
+                    };
                     match format {
                         SampleFormat::S16LE => {
                             let io = pcmdevice.io_i16().unwrap();
                             let buffer = vec![0i16; bufferlength * channels];
-                            playback_loop_int(
-                                channel,
-                                status_channel,
-                                buffer,
-                                &pcmdevice,
-                                io,
-                                scalefactor,
-                                bufferlength,
-                                target_level,
-                                adjust_period,
-                            );
+                            playback_loop_int(pb_channels, buffer, &pcmdevice, io, pb_params);
                         }
                         SampleFormat::S24LE | SampleFormat::S32LE => {
                             let io = pcmdevice.io_i32().unwrap();
                             let buffer = vec![0i32; bufferlength * channels];
-                            playback_loop_int(
-                                channel,
-                                status_channel,
-                                buffer,
-                                &pcmdevice,
-                                io,
-                                scalefactor,
-                                bufferlength,
-                                target_level,
-                                adjust_period,
-                            );
+                            playback_loop_int(pb_channels, buffer, &pcmdevice, io, pb_params);
                         }
                         SampleFormat::FLOAT32LE => {
                             let io = pcmdevice.io_f32().unwrap();
                             let buffer = vec![0f32; bufferlength * channels];
-                            playback_loop_float(channel, status_channel, buffer, &pcmdevice, io, bufferlength);
+
+                            playback_loop_float(pb_channels, buffer, &pcmdevice, io, pb_params);
                         }
                         SampleFormat::FLOAT64LE => {
                             let io = pcmdevice.io_f64().unwrap();
                             let buffer = vec![0f64; bufferlength * channels];
-                            playback_loop_float(channel, status_channel, buffer, &pcmdevice, io, bufferlength);
+                            playback_loop_float(pb_channels, buffer, &pcmdevice, io, pb_params);
                         }
                     };
                 }
@@ -514,34 +580,37 @@ impl CaptureDevice for AlsaCaptureDevice {
                     let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
                     barrier.wait();
                     eprintln!("starting captureloop");
+                    let cap_params = CaptureParams {
+                        channels,
+                        scalefactor,
+                        silent_limit,
+                        silence,
+                    };
+                    let cap_channels = CaptureChannels {
+                        audio: channel,
+                        status: status_channel,
+                        command: command_channel,
+                    };
                     match format {
                         SampleFormat::S16LE => {
-                            let msg_channels = (channel, status_channel, command_channel);
-                            let capt_params = (channels, scalefactor, silent_limit, silence);
                             let io = pcmdevice.io_i16().unwrap();
                             let buffer = vec![0i16; channels * bufferlength];
-                            capture_loop_int(msg_channels, buffer, &pcmdevice, io, capt_params);
+                            capture_loop_int(cap_channels, buffer, &pcmdevice, io, cap_params);
                         }
                         SampleFormat::S24LE | SampleFormat::S32LE => {
-                            let msg_channels = (channel, status_channel, command_channel);
-                            let capt_params = (channels, scalefactor, silent_limit, silence);
                             let io = pcmdevice.io_i32().unwrap();
                             let buffer = vec![0i32; channels * bufferlength];
-                            capture_loop_int(msg_channels, buffer, &pcmdevice, io, capt_params);
+                            capture_loop_int(cap_channels, buffer, &pcmdevice, io, cap_params);
                         }
                         SampleFormat::FLOAT32LE => {
-                            let msg_channels = (channel, status_channel, command_channel);
-                            let capt_params = (channels, silent_limit, silence);
                             let io = pcmdevice.io_f32().unwrap();
                             let buffer = vec![0f32; channels * bufferlength];
-                            capture_loop_float(msg_channels, buffer, &pcmdevice, io, capt_params);
+                            capture_loop_float(cap_channels, buffer, &pcmdevice, io, cap_params);
                         }
                         SampleFormat::FLOAT64LE => {
-                            let msg_channels = (channel, status_channel, command_channel);
-                            let capt_params = (channels, silent_limit, silence);
                             let io = pcmdevice.io_f64().unwrap();
                             let buffer = vec![0f64; channels * bufferlength];
-                            capture_loop_float(msg_channels, buffer, &pcmdevice, io, capt_params);
+                            capture_loop_float(cap_channels, buffer, &pcmdevice, io, cap_params);
                         }
                     };
                 }

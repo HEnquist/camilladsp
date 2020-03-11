@@ -79,8 +79,12 @@ pub struct Devices {
     pub playback: Device,
     #[serde(default)]
     pub target_level: usize,
-    #[serde(default)]
+    #[serde(default = "default_period")]
     pub adjust_period: f32,
+}
+
+fn default_period() -> f32 {
+    10.0
 }
 
 //#[derive(Clone, Debug, Deserialize, PartialEq)]

@@ -2,6 +2,8 @@
 devices:
   samplerate: 44100
   buffersize: 1024
+  target_level: 512
+  adjust_period: 10
   capture:
     type: Alsa
     channels: 2
