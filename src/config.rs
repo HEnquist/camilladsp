@@ -87,14 +87,6 @@ fn default_period() -> f32 {
     10.0
 }
 
-//#[derive(Clone, Debug, Deserialize, PartialEq)]
-//pub enum FilterType {
-//    Biquad,
-//    Conv,
-//    Gain,
-//    Delay,
-//}
-
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum Filter {
@@ -174,6 +166,7 @@ pub enum BiquadParameters {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct GainParameters {
     pub gain: PrcFmt,
+    #[serde(default)]
     pub inverted: bool,
 }
 
@@ -309,6 +302,12 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
+    if conf.devices.target_level >= 2*conf.devices.buffersize {
+        return Err(Box::new(ConfigError::new("target_level is too large.")));
+    }
+    if conf.devices.adjust_period <= 0.0 {
+        return Err(Box::new(ConfigError::new("adjust_period must be positive and > 0")));
+    }
     let mut num_channels = match conf.devices.capture {
         #[cfg(feature = "alsa-backend")]
         Device::Alsa { channels, .. } => channels,
