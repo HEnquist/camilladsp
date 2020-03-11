@@ -302,11 +302,13 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
-    if conf.devices.target_level >= 2*conf.devices.buffersize {
+    if conf.devices.target_level >= 2 * conf.devices.buffersize {
         return Err(Box::new(ConfigError::new("target_level is too large.")));
     }
     if conf.devices.adjust_period <= 0.0 {
-        return Err(Box::new(ConfigError::new("adjust_period must be positive and > 0")));
+        return Err(Box::new(ConfigError::new(
+            "adjust_period must be positive and > 0",
+        )));
     }
     let mut num_channels = match conf.devices.capture {
         #[cfg(feature = "alsa-backend")]
