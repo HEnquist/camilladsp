@@ -81,9 +81,9 @@ fn play_buffer<T: std::marker::Copy>(
     io: &alsa::pcm::IO<T>,
 ) -> Res<()> {
     let playback_state = pcmdevice.state();
-    //eprintln!("playback state {:?}", playback_state);
+    trace!("playback state {:?}", playback_state);
     if playback_state == State::XRun {
-        eprintln!("Prepare playback");
+        warn!("Prepare playback");
         pcmdevice.prepare()?;
         let delay = Duration::from_millis(5);
         thread::sleep(delay);
@@ -91,7 +91,7 @@ fn play_buffer<T: std::marker::Copy>(
     let _frames = match io.writei(&buffer[..]) {
         Ok(frames) => frames,
         Err(_err) => {
-            eprintln!("retrying playback");
+            warn!("Retrying playback");
             pcmdevice.prepare()?;
             let delay = Duration::from_millis(5);
             thread::sleep(delay);
@@ -109,13 +109,13 @@ fn capture_buffer<T: std::marker::Copy>(
 ) -> Res<()> {
     let capture_state = pcmdevice.state();
     if capture_state == State::XRun {
-        eprintln!("prepare capture");
+        warn!("prepare capture");
         pcmdevice.prepare()?;
     }
     let _frames = match io.readi(buffer) {
         Ok(frames) => frames,
         Err(_err) => {
-            eprintln!("retrying capture");
+            warn!("retrying capture");
             pcmdevice.prepare()?;
             io.readi(buffer)?
         }
@@ -166,7 +166,7 @@ fn open_pcm(
         swp.set_start_threshold(act_bufsize / 2 - act_periodsize)?;
         //swp.set_avail_min(periodsize)?;
         pcmdev.sw_params(&swp)?;
-        //eprintln!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
+        debug!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
         (hwp.get_rate()?, act_bufsize)
     };
     Ok(pcmdev)
@@ -202,7 +202,7 @@ fn playback_loop_int<T: num_traits::NumCast + std::marker::Copy>(
                     diff = av_delay - params.target_level as isize;
                     let rel_diff = (diff as f32) / (srate as f32);
                     speed = 1.0 + 0.5 * rel_diff / params.adjust_period;
-                    eprintln!(
+                    debug!(
                         "Current buffer level {}, set capture rate to {}%",
                         av_delay,
                         100.0 * speed
@@ -268,7 +268,7 @@ fn playback_loop_float<T: num_traits::NumCast + std::marker::Copy>(
                     diff = av_delay - params.target_level as isize;
                     let rel_diff = (diff as f32) / (srate as f32);
                     speed = 1.0 + 0.5 * rel_diff / params.adjust_period;
-                    eprintln!(
+                    debug!(
                         "Current buffer level {}, set capture rate to {}%",
                         av_delay,
                         100.0 * speed
@@ -327,7 +327,7 @@ fn capture_loop_int<
     let element = h.find_elem(&elid);
     let mut elval = ElemValue::new(ElemType::Integer).unwrap();
     if element.is_some() {
-        eprintln!("Capture device supports rate adjust");
+        info!("Capture device supports rate adjust");
     }
 
     loop {
@@ -361,12 +361,12 @@ fn capture_loop_int<
         let chunk = buffer_to_chunk_int(&buffer, params.channels, params.scalefactor);
         if (chunk.maxval - chunk.minval) > params.silence {
             if silent_nbr > params.silent_limit {
-                eprintln!("Resuming processing");
+                debug!("Resuming processing");
             }
             silent_nbr = 0;
         } else if params.silent_limit > 0 {
             if silent_nbr == params.silent_limit {
-                eprintln!("Pausing processing");
+                debug!("Pausing processing");
             }
             silent_nbr += 1;
         }
@@ -400,7 +400,7 @@ fn capture_loop_float<
     let element = h.find_elem(&elid);
     let mut elval = ElemValue::new(ElemType::Integer).unwrap();
     if element.is_some() {
-        eprintln!("Capure device supports rate adjust");
+        debug!("Capure device supports rate adjust");
     }
     loop {
         match channels.command.try_recv() {
@@ -433,12 +433,12 @@ fn capture_loop_float<
         let chunk = buffer_to_chunk_float(&buffer, params.channels);
         if (chunk.maxval - chunk.minval) > params.silence {
             if silent_nbr > params.silent_limit {
-                eprintln!("Resuming processing");
+                debug!("Resuming processing");
             }
             silent_nbr = 0;
         } else if params.silent_limit > 0 {
             if silent_nbr == params.silent_limit {
-                eprintln!("Pausing processing");
+                debug!("Pausing processing");
             }
             silent_nbr += 1;
         }
@@ -491,7 +491,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
 
                     barrier.wait();
                     //thread::sleep(delay);
-                    eprintln!("starting playback loop");
+                    debug!("Starting playback loop");
                     let pb_params = PlaybackParams {
                         scalefactor,
                         target_level,
@@ -579,7 +579,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                     }
                     let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
                     barrier.wait();
-                    eprintln!("starting captureloop");
+                    debug!("Starting captureloop");
                     let cap_params = CaptureParams {
                         channels,
                         scalefactor,

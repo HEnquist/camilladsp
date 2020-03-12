@@ -11,6 +11,10 @@ extern crate rustfft;
 extern crate serde;
 extern crate signal_hook;
 
+#[macro_use]
+extern crate log;
+extern crate stderrlog;
+
 use clap::{crate_authors, crate_description, crate_version, App, Arg};
 use std::env;
 use std::error;
@@ -89,7 +93,7 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
     // Processing thread
     thread::spawn(move || {
         let mut pipeline = filters::Pipeline::from_config(conf_proc);
-        eprintln!("build filters, waiting to start processing loop");
+        debug!("build filters, waiting to start processing loop");
         barrier_proc.wait();
         loop {
             match rx_cap.recv() {
@@ -108,12 +112,12 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
             if let Ok((diff, new_config)) = rx_pipeconf.try_recv() {
                 match diff {
                     config::ConfigChange::Pipeline => {
-                        eprintln!("Rebuilding pipeline.");
+                        debug!("Rebuilding pipeline.");
                         let new_pipeline = filters::Pipeline::from_config(new_config);
                         pipeline = new_pipeline;
                     }
                     config::ConfigChange::FilterParameters { filters, mixers } => {
-                        eprintln!(
+                        debug!(
                             "Updating parameters of filters: {:?}, mixers: {:?}.",
                             filters, mixers
                         );
@@ -149,7 +153,7 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
 
     loop {
         if signal_reload.load(Ordering::Relaxed) {
-            eprintln!("Reloading configuration...");
+            debug!("Reloading configuration...");
             signal_reload.store(false, Ordering::Relaxed);
             match config::load_config(&configname) {
                 Ok(new_config) => match config::validate_config(new_config.clone()) {
@@ -162,29 +166,29 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
                                 active_config = new_config;
                             }
                             config::ConfigChange::Devices => {
-                                eprintln!("Devices changed, restart required.");
+                                debug!("Devices changed, restart required.");
                                 //tx_pipeconf.send((comp, new_config.clone())).unwrap();
                                 tx_command_cap.send(CommandMessage::Exit).unwrap();
                                 //tx_command_pb.send(CommandMessage::Exit).unwrap();
-                                eprintln!("Wait for pb..");
+                                trace!("Wait for pb..");
                                 pb_handle.join().unwrap();
-                                eprintln!("Wait for cap..");
+                                trace!("Wait for cap..");
                                 cap_handle.join().unwrap();
                                 return Ok(ExitStatus::Restart(Box::new(new_config)));
                             }
                             config::ConfigChange::None => {
-                                eprintln!("No changes in config.");
+                                debug!("No changes in config.");
                             }
                         };
                     }
                     Err(err) => {
-                        eprintln!("Invalid config file!");
-                        eprintln!("{}", err);
+                        error!("Invalid config file!");
+                        error!("{}", err);
                     }
                 },
                 Err(err) => {
-                    eprintln!("Config file error:");
-                    eprintln!("{}", err);
+                    error!("Config file error:");
+                    error!("{}", err);
                 }
             };
         }
@@ -203,19 +207,19 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
                     }
                 }
                 StatusMessage::PlaybackError { message } => {
-                    eprintln!("Playback error: {}", message);
+                    error!("Playback error: {}", message);
                     return Ok(ExitStatus::Exit);
                 }
                 StatusMessage::CaptureError { message } => {
-                    eprintln!("Capture error: {}", message);
+                    error!("Capture error: {}", message);
                     return Ok(ExitStatus::Exit);
                 }
                 StatusMessage::PlaybackDone => {
-                    eprintln!("Playback finished");
+                    info!("Playback finished");
                     return Ok(ExitStatus::Exit);
                 }
                 StatusMessage::CaptureDone => {
-                    eprintln!("Capture finished");
+                    info!("Capture finished");
                 }
                 StatusMessage::SetSpeed { speed } => {
                     tx_command_cap
@@ -230,6 +234,7 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
 }
 
 fn main() {
+
     let matches = App::new("CamillaDSP")
         .version(crate_version!())
         .about(crate_description!())
@@ -246,25 +251,44 @@ fn main() {
                 .short("c")
                 .long("check"),
         )
+        .arg(
+            Arg::with_name("verbosity")
+                .short("v")
+                .multiple(true)
+                .help("Increase message verbosity"))
         .get_matches();
+
+    let verbose = matches.occurrences_of("verbosity") as usize;
+    stderrlog::new()
+        .module(module_path!())
+        .verbosity(verbose+2)
+        //.timestamp(stderrlog::Timestamp::Second)
+        .init()
+        .unwrap();
+    // logging examples    
+    //trace!("trace message"); with -vv
+    //debug!("debug message"); with -v
+    //info!("info message");
+    //warn!("warn message");
+    //error!("error message");
 
     let configname = matches.value_of("configfile").unwrap(); //&args[1];
     let mut configuration = match config::load_config(&configname) {
         Ok(config) => config,
         Err(err) => {
-            eprintln!("Config file error:");
-            eprintln!("{}", err);
+            error!("Config file error:");
+            error!("{}", err);
             return;
         }
     };
 
     match config::validate_config(configuration.clone()) {
         Ok(()) => {
-            eprintln!("Config is valid");
+            info!("Config is valid");
         }
         Err(err) => {
-            eprintln!("Invalid config file!");
-            eprintln!("{}", err);
+            error!("Invalid config file!");
+            error!("{}", err);
             return;
         }
     }
@@ -275,7 +299,7 @@ fn main() {
         let exitstatus = run(configuration, &configname);
         match exitstatus {
             Err(e) => {
-                eprintln!("Error ({}) {}", e.description(), e);
+                error!("({}) {}", e.description(), e);
                 break;
             }
             Ok(ExitStatus::Exit) => {
