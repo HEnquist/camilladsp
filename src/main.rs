@@ -13,15 +13,17 @@ extern crate signal_hook;
 
 #[macro_use]
 extern crate log;
-extern crate stderrlog;
+extern crate env_logger;
 
-use clap::{crate_authors, crate_description, crate_version, App, Arg};
+use clap::{crate_authors, crate_description, crate_version, App, Arg, AppSettings};
 use std::env;
 use std::error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::{thread, time};
+use log::LevelFilter;
+use env_logger::Builder;
 
 // Sample format
 #[cfg(feature = "32bit")]
@@ -98,11 +100,13 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
         loop {
             match rx_cap.recv() {
                 Ok(AudioMessage::Audio(mut chunk)) => {
+                    trace!("AudioMessage::Audio received");
                     chunk = pipeline.process_chunk(chunk);
                     let msg = AudioMessage::Audio(chunk);
                     tx_pb.send(msg).unwrap();
                 }
                 Ok(AudioMessage::EndOfStream) => {
+                    trace!("AudioMessage::EndOfStream received");
                     let msg = AudioMessage::EndOfStream;
                     tx_pb.send(msg).unwrap();
                     break;
@@ -110,6 +114,7 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
                 _ => {}
             }
             if let Ok((diff, new_config)) = rx_pipeconf.try_recv() {
+                trace!("Message received on config channel");
                 match diff {
                     config::ConfigChange::Pipeline => {
                         debug!("Rebuilding pipeline.");
@@ -195,12 +200,14 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
         match rx_status.recv_timeout(delay) {
             Ok(msg) => match msg {
                 StatusMessage::PlaybackReady => {
+                    debug!("Playback thread ready to start");
                     pb_ready = true;
                     if cap_ready {
                         barrier.wait();
                     }
                 }
                 StatusMessage::CaptureReady => {
+                    debug!("Capture thread ready to start");
                     cap_ready = true;
                     if pb_ready {
                         barrier.wait();
@@ -222,6 +229,7 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
                     info!("Capture finished");
                 }
                 StatusMessage::SetSpeed { speed } => {
+                    debug!("SetSpeed message reveiced");
                     tx_command_cap
                         .send(CommandMessage::SetSpeed { speed })
                         .unwrap();
@@ -239,6 +247,7 @@ fn main() {
         .version(crate_version!())
         .about(crate_description!())
         .author(crate_authors!())
+        .setting(AppSettings::ArgRequiredElseHelp)
         .arg(
             Arg::with_name("configfile")
                 .help("The configuration file to use")
@@ -258,16 +267,20 @@ fn main() {
                 .help("Increase message verbosity"))
         .get_matches();
 
-    let verbose = matches.occurrences_of("verbosity") as usize;
-    stderrlog::new()
-        .module(module_path!())
-        .verbosity(verbose+2)
-        //.timestamp(stderrlog::Timestamp::Second)
-        .init()
-        .unwrap();
+    let loglevel = match matches.occurrences_of("verbosity") {
+        0 => LevelFilter::Info,
+        1 => LevelFilter::Debug,
+        2 => LevelFilter::Trace,
+        _ => LevelFilter::Trace,
+    };
+
+    let mut builder = Builder::from_default_env();
+
+    builder.filter(None, loglevel)
+           .init();
     // logging examples    
-    //trace!("trace message"); with -vv
-    //debug!("debug message"); with -v
+    //trace!("trace message"); //with -vv
+    //debug!("debug message"); //with -v
     //info!("info message");
     //warn!("warn message");
     //error!("error message");
@@ -303,9 +316,13 @@ fn main() {
                 break;
             }
             Ok(ExitStatus::Exit) => {
+                debug!("Exiting");
                 break;
             }
-            Ok(ExitStatus::Restart(conf)) => configuration = *conf,
+            Ok(ExitStatus::Restart(conf)) => {
+                debug!("Restarting with new config");
+                configuration = *conf
+            },
         };
     }
 }
