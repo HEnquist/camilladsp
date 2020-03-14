@@ -12,13 +12,28 @@ import math
 class Conv(object):
     def __init__(self, conf, fs):
         fname = conf['filename']
-        with open(fname) as f:
-            values = [float(row[0]) for row in csv.reader(f)]
+        values = []
+        if conf['format'] == "text":
+            with open(fname) as f:
+                values = [float(row[0]) for row in csv.reader(f)]
+        elif conf['format'] == "FLOAT64LE":
+            values = np.fromfile(fname, dtype=float)
+        elif conf['format'] == "FLOAT32LE":
+            values = np.fromfile(fname, dtype=np.float32)
+        elif conf['format'] == "S16LE":
+            values = np.fromfile(fname, dtype=np.int16)/(2**15-1)
+        elif conf['format'] == "S24LE":
+            values = np.fromfile(fname, dtype=np.int32)/(2**23-1)
+        elif conf['format'] == "S32LE":
+            values = np.fromfile(fname, dtype=np.int32)/(2**31-1)
         self.impulse = values
         self.fs = fs
 
-    def gain_and_phase(self, npoints):
+    def gain_and_phase(self):
         impulselen = len(self.impulse)
+        npoints = impulselen
+        if npoints < 300:
+            npoints = 300
         impulse = np.zeros(npoints*2)
         impulse[0:impulselen] = self.impulse
         impfft = fft.fft(impulse)
@@ -27,6 +42,10 @@ class Conv(object):
         gain = 20*np.log10(np.abs(cut))
         phase = 180/np.pi*np.angle(cut)
         return f, gain, phase
+
+    def get_impulse(self):
+        t = np.linspace(0, len(self.impulse)/self.fs, len(self.impulse), endpoint=False)
+        return t, self.impulse
 
 class Biquad(object):
     def __init__(self, conf, fs):
@@ -283,9 +302,15 @@ def main():
             elif fconf['type'] == 'Conv':
                 kladd = Conv(fconf['parameters'], srate)
                 plt.figure(fignbr)
-                ftemp, magn, phase = kladd.gain_and_phase(len(fvect))
-                plt.semilogx(fvect, magn)
-                plt.title(filter)
+                ftemp, magn, phase = kladd.gain_and_phase()
+                plt.semilogx(ftemp, magn)
+                plt.title("FFT of {}".format(filter))
+                plt.gca().set(xlim=(10, srate/2.0))
+                fignbr += 1
+                plt.figure(fignbr)
+                t, imp = kladd.get_impulse()
+                plt.plot(t, imp)
+                plt.title("Impulse response of {}".format(filter))
                 fignbr += 1
 
     stages = []
