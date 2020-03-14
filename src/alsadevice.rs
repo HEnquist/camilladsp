@@ -166,7 +166,10 @@ fn open_pcm(
         swp.set_start_threshold(act_bufsize / 2 - act_periodsize)?;
         //swp.set_avail_min(periodsize)?;
         pcmdev.sw_params(&swp)?;
-        debug!("Opened audio output {:?} with parameters: {:?}, {:?}", devname, hwp, swp);
+        debug!(
+            "Opened audio output {:?} with parameters: {:?}, {:?}",
+            devname, hwp, swp
+        );
         (hwp.get_rate()?, act_bufsize)
     };
     Ok(pcmdev)

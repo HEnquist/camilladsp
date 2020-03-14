@@ -15,15 +15,15 @@ extern crate signal_hook;
 extern crate log;
 extern crate env_logger;
 
-use clap::{crate_authors, crate_description, crate_version, App, Arg, AppSettings};
+use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
+use env_logger::Builder;
+use log::LevelFilter;
 use std::env;
 use std::error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::{thread, time};
-use log::LevelFilter;
-use env_logger::Builder;
 
 // Sample format
 #[cfg(feature = "32bit")]
@@ -242,7 +242,6 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
 }
 
 fn main() {
-
     let matches = App::new("CamillaDSP")
         .version(crate_version!())
         .about(crate_description!())
@@ -264,7 +263,8 @@ fn main() {
             Arg::with_name("verbosity")
                 .short("v")
                 .multiple(true)
-                .help("Increase message verbosity"))
+                .help("Increase message verbosity"),
+        )
         .get_matches();
 
     let loglevel = match matches.occurrences_of("verbosity") {
@@ -276,9 +276,8 @@ fn main() {
 
     let mut builder = Builder::from_default_env();
 
-    builder.filter(None, loglevel)
-           .init();
-    // logging examples    
+    builder.filter(None, loglevel).init();
+    // logging examples
     //trace!("trace message"); //with -vv
     //debug!("debug message"); //with -v
     //info!("info message");
@@ -322,7 +321,7 @@ fn main() {
             Ok(ExitStatus::Restart(conf)) => {
                 debug!("Restarting with new config");
                 configuration = *conf
-            },
+            }
         };
     }
 }
