@@ -311,7 +311,7 @@ fn main() {
         let exitstatus = run(configuration, &configname);
         match exitstatus {
             Err(e) => {
-                error!("({}) {}", e.description(), e);
+                error!("({}) {}", e.to_string(), e);
                 break;
             }
             Ok(ExitStatus::Exit) => {
