@@ -47,6 +47,7 @@ impl FilterGroup {
         waveform_length: usize,
         sample_freq: usize,
     ) -> Self {
+        debug!("Build from config");
         let mut filters = Vec::<Box<dyn Filter>>::new();
         for name in names {
             let filter_cfg = filter_configs[&name].clone();
@@ -112,6 +113,7 @@ pub struct Pipeline {
 impl Pipeline {
     /// Create a new pipeline from a configuration structure.
     pub fn from_config(conf: config::Configuration) -> Self {
+        debug!("Build new pipeline");
         let mut steps = Vec::<PipelineStep>::new();
         for step in conf.pipeline {
             match step {
@@ -141,6 +143,7 @@ impl Pipeline {
         filters: Vec<String>,
         mixers: Vec<String>,
     ) {
+        debug!("Updating parameters");
         for mut step in &mut self.steps {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {

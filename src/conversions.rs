@@ -56,7 +56,7 @@ pub fn chunk_to_buffer_bytes(chunk: AudioChunk, buf: &mut [u8], scalefactor: Prc
         }
     }
     if clipped > 0 {
-        eprintln!(
+        warn!(
             "Clipping detected, {} samples clipped, peak {}%",
             clipped,
             peak * 100.0
@@ -175,7 +175,7 @@ pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: usiz
         }
     }
     if clipped > 0 {
-        eprintln!(
+        warn!(
             "Clipping detected, {} samples clipped, peak {}%",
             clipped,
             peak * 100.0

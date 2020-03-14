@@ -58,7 +58,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.0.7
+CamillaDSP 0.0.8
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
@@ -69,11 +69,14 @@ FLAGS:
     -c, --check      Check config file and exit
     -h, --help       Prints help information
     -V, --version    Prints version information
+    -v               Increase message verbosity
 
 ARGS:
     <configfile>    The configuration file to use
 ```
 If the "check" flag is given, the program will exit after checking the configuration file. Use this if you only want to verify that the configuration is ok, and not start any processing.
+
+The default logging setting prints messeges of levels "error", "warn" and "info". By passing the verbosity flag once, "-v" it also prints "debug". If and if's given twice, "-vv", it also prints "trace" messages. 
 
 
 ### Reloading the configuration
