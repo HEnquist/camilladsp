@@ -11,21 +11,28 @@ import math
 
 class Conv(object):
     def __init__(self, conf, fs):
-        fname = conf['filename']
-        values = []
-        if conf['format'] == "text":
-            with open(fname) as f:
-                values = [float(row[0]) for row in csv.reader(f)]
-        elif conf['format'] == "FLOAT64LE":
-            values = np.fromfile(fname, dtype=float)
-        elif conf['format'] == "FLOAT32LE":
-            values = np.fromfile(fname, dtype=np.float32)
-        elif conf['format'] == "S16LE":
-            values = np.fromfile(fname, dtype=np.int16)/(2**15-1)
-        elif conf['format'] == "S24LE":
-            values = np.fromfile(fname, dtype=np.int32)/(2**23-1)
-        elif conf['format'] == "S32LE":
-            values = np.fromfile(fname, dtype=np.int32)/(2**31-1)
+        if not conf:
+            conf = {values: [1.0]}
+        if 'filename' in conf:
+            fname = conf['filename']
+            values = []
+            if 'format' not in conf:
+                conf['format'] = "text"
+            if conf['format'] == "text":
+                with open(fname) as f:
+                    values = [float(row[0]) for row in csv.reader(f)]
+            elif conf['format'] == "FLOAT64LE":
+                values = np.fromfile(fname, dtype=float)
+            elif conf['format'] == "FLOAT32LE":
+                values = np.fromfile(fname, dtype=np.float32)
+            elif conf['format'] == "S16LE":
+                values = np.fromfile(fname, dtype=np.int16)/(2**15-1)
+            elif conf['format'] == "S24LE":
+                values = np.fromfile(fname, dtype=np.int32)/(2**23-1)
+            elif conf['format'] == "S32LE":
+                values = np.fromfile(fname, dtype=np.int32)/(2**31-1)
+        else:
+            values = conf['values']
         self.impulse = values
         self.fs = fs
 
@@ -300,7 +307,10 @@ def main():
                 plt.title("{}, stable: {}".format(filter, stable))
                 fignbr += 1
             elif fconf['type'] == 'Conv':
-                kladd = Conv(fconf['parameters'], srate)
+                if 'parameters' in fconf:
+                    kladd = Conv(fconf['parameters'], srate)
+                else:
+                    kladd = Conv(None, srate)
                 plt.figure(fignbr)
                 ftemp, magn, phase = kladd.gain_and_phase()
                 plt.semilogx(ftemp, magn)
