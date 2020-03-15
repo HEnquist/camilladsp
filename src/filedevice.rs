@@ -74,10 +74,10 @@ impl PlaybackDevice for FilePlaybackDevice {
                         Err(_err) => {}
                     }
                     //let scalefactor = (1<<bits-1) as PrcFmt;
-                    let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+                    let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
                     barrier.wait();
                     //thread::sleep(delay);
-                    eprintln!("starting playback loop");
+                    debug!("starting playback loop");
                     let mut buffer = vec![0u8; bufferlength * channels * store_bytes];
                     loop {
                         match channel.recv() {
@@ -169,10 +169,10 @@ impl CaptureDevice for FileCaptureDevice {
                         Ok(()) => {}
                         Err(_err) => {}
                     }
-                    let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+                    let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
                     let mut silent_nbr: usize = 0;
                     barrier.wait();
-                    eprintln!("starting captureloop");
+                    debug!("starting captureloop");
                     let mut buf = vec![0u8; channels * bufferlength * store_bytes];
                     loop {
                         if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
@@ -212,12 +212,12 @@ impl CaptureDevice for FileCaptureDevice {
                         };
                         if (chunk.maxval - chunk.minval) > silence {
                             if silent_nbr > silent_limit {
-                                eprintln!("Resuming processing");
+                                debug!("Resuming processing");
                             }
                             silent_nbr = 0;
                         } else if silent_limit > 0 {
                             if silent_nbr == silent_limit {
-                                eprintln!("Pausing processing");
+                                debug!("Pausing processing");
                             }
                             silent_nbr += 1;
                         }

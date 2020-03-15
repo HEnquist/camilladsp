@@ -70,8 +70,8 @@ impl FFTConv {
     pub fn from_config(name: String, data_length: usize, conf: config::ConvParameters) -> Self {
         let values = match conf {
             config::ConvParameters::Values { values } => values,
-            config::ConvParameters::File { filename } => {
-                filters::read_coeff_file(&filename).unwrap()
+            config::ConvParameters::File { filename, format } => {
+                filters::read_coeff_file(&filename, &format).unwrap()
             }
         };
         FFTConv::new(name, data_length, &values)
@@ -124,8 +124,8 @@ impl Filter for FFTConv {
         if let config::Filter::Conv { parameters: conf } = conf {
             let coeffs = match conf {
                 config::ConvParameters::Values { values } => values,
-                config::ConvParameters::File { filename } => {
-                    filters::read_coeff_file(&filename).unwrap()
+                config::ConvParameters::File { filename, format } => {
+                    filters::read_coeff_file(&filename, &format).unwrap()
                 }
             };
 
@@ -165,8 +165,8 @@ impl Filter for FFTConv {
 pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {
         config::ConvParameters::Values { .. } => Ok(()),
-        config::ConvParameters::File { filename } => {
-            let _ = filters::read_coeff_file(&filename)?;
+        config::ConvParameters::File { filename, format } => {
+            let _ = filters::read_coeff_file(&filename, &format)?;
             Ok(())
         }
     }

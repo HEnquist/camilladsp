@@ -466,7 +466,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let samplerate = self.samplerate;
         let bufferlength = self.bufferlength;
         let channels = self.channels;
-        let bits = match self.format {
+        let bits: i32 = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
             SampleFormat::S32LE => 32,
@@ -490,7 +490,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         Err(_err) => {}
                     }
                     //let scalefactor = (1<<bits-1) as PrcFmt;
-                    let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+                    let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
 
                     barrier.wait();
                     //thread::sleep(delay);
@@ -554,7 +554,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let samplerate = self.samplerate;
         let bufferlength = self.bufferlength;
         let channels = self.channels;
-        let bits = match self.format {
+        let bits: i32 = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
             SampleFormat::S32LE => 32,
@@ -580,7 +580,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                         Ok(()) => {}
                         Err(_err) => {}
                     }
-                    let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+                    let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
                     barrier.wait();
                     debug!("Starting captureloop");
                     let cap_params = CaptureParams {

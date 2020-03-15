@@ -150,7 +150,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         Err(_err) => {}
                     }
                     //let scalefactor = (1<<bits-1) as PrcFmt;
-                    let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+                    let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
                     barrier.wait();
                     //thread::sleep(delay);
                     debug!("starting playback loop");
@@ -254,7 +254,7 @@ impl CaptureDevice for PulseCaptureDevice {
                         Ok(()) => {}
                         Err(_err) => {}
                     }
-                    let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+                    let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
                     let mut silent_nbr: usize = 0;
                     barrier.wait();
                     debug!("starting captureloop");

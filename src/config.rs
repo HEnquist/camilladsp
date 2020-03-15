@@ -97,11 +97,30 @@ pub enum Filter {
     Dither { parameters: DitherParameters },
 }
 
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub enum FileFormat {
+    TEXT,
+    S16LE,
+    S24LE,
+    S32LE,
+    FLOAT32LE,
+    FLOAT64LE,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum ConvParameters {
-    File { filename: String },
+    File { 
+        filename: String, 
+        #[serde(default = "default_fileformat")]
+        format: FileFormat,
+    },
     Values { values: Vec<PrcFmt> },
+}
+
+fn default_fileformat() -> FileFormat {
+    FileFormat::TEXT
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
