@@ -58,7 +58,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.0.8
+CamillaDSP 0.0.9
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
@@ -244,8 +244,10 @@ filters:
     parameters:
       type: File 
       filename: path/to/filter.txt
+      format: TEXT
 ```
-The coeffients file is a simple text file with one value per row:
+For testing purposes the entire "parameters" block can be left out (or commented out with a # at the start of each line). This then becomes a dummy filter that does not affect the signal.
+The "format" parameter can be omitted, in which case it's assumed that the format is TEXT. This format is a simple text file with one value per row:
 ```
 -0.000021
 -0.000020
@@ -253,6 +255,13 @@ The coeffients file is a simple text file with one value per row:
 ...
 -0.000012
 ```
+The other possible formats are raw data:
+- S16LE: signed 16 bit little-endian integers
+- S24LE: signed 24 bit little-endian integers stored as 32 bits (with the data in the low 24)
+- S32LE: signed 32 bit little-endian integers
+- FLOAT32LE: 32 bit little endian float
+- FLOAT64LE: 64 bit little endian float
+
 
 ### IIR
 IIR filters are Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filter, or you can provide the coefficients directly.
