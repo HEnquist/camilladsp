@@ -7,8 +7,8 @@ use fftconv;
 use mixer;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, Read};
 use std::io::BufReader;
+use std::io::{BufRead, Read};
 
 use PrcFmt;
 use Res;
@@ -32,21 +32,21 @@ pub fn read_coeff_file(filename: &str, format: &config::FileFormat) -> Res<Vec<P
                 let l = line?;
                 coefficients.push(l.trim().parse()?);
             }
-        },
+        }
         config::FileFormat::FLOAT32LE => {
             let mut buffer = [0; 4];
             while let Ok(4) = file.read(&mut buffer) {
                 let value = f32::from_le_bytes(buffer) as PrcFmt;
                 coefficients.push(value);
             }
-        },
+        }
         config::FileFormat::FLOAT64LE => {
             let mut buffer = [0; 8];
             while let Ok(4) = file.read(&mut buffer) {
                 let value = f64::from_le_bytes(buffer) as PrcFmt;
                 coefficients.push(value);
             }
-        },
+        }
         config::FileFormat::S16LE => {
             let mut buffer = [0; 2];
             let scalefactor = (2.0 as PrcFmt).powi(15);
@@ -55,7 +55,7 @@ pub fn read_coeff_file(filename: &str, format: &config::FileFormat) -> Res<Vec<P
                 value /= scalefactor;
                 coefficients.push(value);
             }
-        },
+        }
         config::FileFormat::S24LE => {
             let mut buffer = [0; 4];
             let scalefactor = (2.0 as PrcFmt).powi(23);
@@ -64,7 +64,7 @@ pub fn read_coeff_file(filename: &str, format: &config::FileFormat) -> Res<Vec<P
                 value /= scalefactor;
                 coefficients.push(value);
             }
-        },
+        }
         config::FileFormat::S32LE => {
             let mut buffer = [0; 4];
             let scalefactor = (2.0 as PrcFmt).powi(31);
@@ -73,9 +73,13 @@ pub fn read_coeff_file(filename: &str, format: &config::FileFormat) -> Res<Vec<P
                 value /= scalefactor;
                 coefficients.push(value);
             }
-        },
+        }
     }
-    debug!("Read file: {}, number of coeffs: {}", filename, coefficients.len());
+    debug!(
+        "Read file: {}, number of coeffs: {}",
+        filename,
+        coefficients.len()
+    );
     Ok(coefficients)
 }
 
@@ -243,5 +247,60 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
         }
         config::Filter::Gain { .. } => Ok(()),
         config::Filter::Dither { .. } => Ok(()), //_ => panic!("unknown type")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::PrcFmt;
+    use config::FileFormat;
+    use filters::read_coeff_file;
+
+    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
+        println!("{} - {}", left, right);
+        (left - right).abs() < maxdiff
+    }
+
+    fn compare_waveforms(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
+        for (val_l, val_r) in left.iter().zip(right.iter()) {
+            if !is_close(*val_l, *val_r, maxdiff) {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[test]
+    fn read_float32() {
+        let loaded = read_coeff_file("testdata/float32.raw", &FileFormat::FLOAT32LE).unwrap();
+        let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
+        assert!(compare_waveforms(loaded, expected, 1e-15));
+    }
+
+    #[test]
+    fn read_float64() {
+        let loaded = read_coeff_file("testdata/float64.raw", &FileFormat::FLOAT64LE).unwrap();
+        let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
+        assert!(compare_waveforms(loaded, expected, 1e-15));
+    }
+
+    #[test]
+    fn read_int16() {
+        let loaded = read_coeff_file("testdata/int16.raw", &FileFormat::S16LE).unwrap();
+        let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
+        assert!(compare_waveforms(loaded, expected, 1e-15));
+    }
+
+    #[test]
+    fn read_int24() {
+        let loaded = read_coeff_file("testdata/int24.raw", &FileFormat::S24LE).unwrap();
+        let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
+        assert!(compare_waveforms(loaded, expected, 1e-6));
+    }
+    #[test]
+    fn read_int32() {
+        let loaded = read_coeff_file("testdata/int32.raw", &FileFormat::S32LE).unwrap();
+        let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
+        assert!(compare_waveforms(loaded, expected, 1e-9));
     }
 }
