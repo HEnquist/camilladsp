@@ -212,6 +212,21 @@ pub struct GainParameters {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct DelayParameters {
     pub delay: PrcFmt,
+    #[serde(default)]
+    pub unit: TimeUnit,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub enum TimeUnit {
+    #[serde(rename = "ms")]
+    Milliseconds,
+    #[serde(rename = "samples")]
+    Samples,
+}
+impl Default for TimeUnit {
+    fn default() -> Self {
+        TimeUnit::Milliseconds
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

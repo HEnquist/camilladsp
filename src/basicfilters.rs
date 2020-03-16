@@ -78,7 +78,14 @@ impl Delay {
     }
 
     pub fn from_config(name: String, samplerate: usize, conf: config::DelayParameters) -> Self {
-        let delay_samples = (conf.delay / 1000.0 * (samplerate as PrcFmt)) as usize;
+        let delay_samples = match conf.unit {
+            config::TimeUnit::Milliseconds => {
+                (conf.delay / 1000.0 * (samplerate as PrcFmt)) as usize
+            },
+            config::TimeUnit::Samples => {
+                conf.delay as usize
+            },
+        };
         Delay::new(name, samplerate, delay_samples)
     }
 }
