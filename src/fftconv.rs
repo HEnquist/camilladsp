@@ -166,7 +166,12 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {
         config::ConvParameters::Values { .. } => Ok(()),
         config::ConvParameters::File { filename, format } => {
-            let _ = filters::read_coeff_file(&filename, &format)?;
+            let coeffs = filters::read_coeff_file(&filename, &format)?;
+            if coeffs.is_empty() {
+                return Err(Box::new(config::ConfigError::new(
+                    "Conv coefficients are empty",
+                )));
+            }
             Ok(())
         }
     }

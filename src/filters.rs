@@ -42,7 +42,7 @@ pub fn read_coeff_file(filename: &str, format: &config::FileFormat) -> Res<Vec<P
         }
         config::FileFormat::FLOAT64LE => {
             let mut buffer = [0; 8];
-            while let Ok(4) = file.read(&mut buffer) {
+            while let Ok(8) = file.read(&mut buffer) {
                 let value = f64::from_le_bytes(buffer) as PrcFmt;
                 coefficients.push(value);
             }
@@ -50,7 +50,7 @@ pub fn read_coeff_file(filename: &str, format: &config::FileFormat) -> Res<Vec<P
         config::FileFormat::S16LE => {
             let mut buffer = [0; 2];
             let scalefactor = (2.0 as PrcFmt).powi(15);
-            while let Ok(4) = file.read(&mut buffer) {
+            while let Ok(2) = file.read(&mut buffer) {
                 let mut value = i16::from_le_bytes(buffer) as PrcFmt;
                 value /= scalefactor;
                 coefficients.push(value);
@@ -288,7 +288,7 @@ mod tests {
     fn read_int16() {
         let loaded = read_coeff_file("testdata/int16.raw", &FileFormat::S16LE).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
-        assert!(compare_waveforms(loaded, expected, 1e-15));
+        assert!(compare_waveforms(loaded, expected, 1e-4));
     }
 
     #[test]
