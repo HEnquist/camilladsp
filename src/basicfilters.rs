@@ -81,10 +81,8 @@ impl Delay {
         let delay_samples = match conf.unit {
             config::TimeUnit::Milliseconds => {
                 (conf.delay / 1000.0 * (samplerate as PrcFmt)) as usize
-            },
-            config::TimeUnit::Samples => {
-                conf.delay as usize
-            },
+            }
+            config::TimeUnit::Samples => conf.delay as usize,
         };
         Delay::new(name, samplerate, delay_samples)
     }
