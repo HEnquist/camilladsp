@@ -226,13 +226,14 @@ filters:
 ```
 
 ### Delay
-The delay filter provides a delay in milliseconds. The given value will be rounded to the nearest number of samples.
+The delay filter provides a delay in milliseconds or samples. The "unit" can be "ms" or "samples", and if left out it defaults to "ms". The millisecond value will be rounded to the nearest number of samples.
 ```
 filters:
   delayexample:
     type: Delay
     parameters:
       delay: 12.3
+      unit: ms
 ```
 
 ### FIR
