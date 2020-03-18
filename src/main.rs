@@ -10,6 +10,7 @@ extern crate rand_distr;
 extern crate rustfft;
 extern crate serde;
 extern crate signal_hook;
+extern crate ws;
 
 #[macro_use]
 extern crate log;
@@ -22,7 +23,7 @@ use std::env;
 use std::error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::{thread, time};
 
 // Sample format
@@ -45,6 +46,7 @@ mod fifoqueue;
 mod filedevice;
 mod filters;
 mod mixer;
+mod socketserver;
 #[cfg(feature = "pulse-backend")]
 mod pulsedevice;
 
@@ -70,7 +72,7 @@ enum ExitStatus {
     Exit,
 }
 
-fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
+fn run(conf: config::Configuration, configname: &str, signal_reload: Arc<AtomicBool>, active_config_yaml: Arc<Mutex<String>>) -> Res<ExitStatus> {
     let (tx_pb, rx_pb) = mpsc::sync_channel(128);
     let (tx_cap, rx_cap) = mpsc::sync_channel(128);
 
@@ -91,6 +93,8 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
     let conf_proc = conf.clone();
 
     let mut active_config = conf;
+    let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
+    *active_config_yaml.lock().unwrap() = conf_yaml;
 
     // Processing thread
     thread::spawn(move || {
@@ -153,7 +157,7 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
 
     let mut pb_ready = false;
     let mut cap_ready = false;
-    let signal_reload = Arc::new(AtomicBool::new(false));
+    //let signal_reload = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::SIGHUP, Arc::clone(&signal_reload))?;
 
     loop {
@@ -169,6 +173,8 @@ fn run(conf: config::Configuration, configname: &str) -> Res<ExitStatus> {
                             | config::ConfigChange::FilterParameters { .. } => {
                                 tx_pipeconf.send((comp, new_config.clone())).unwrap();
                                 active_config = new_config;
+                                let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
+                                *active_config_yaml.lock().unwrap() = conf_yaml;
                             }
                             config::ConfigChange::Devices => {
                                 debug!("Devices changed, restart required.");
@@ -307,8 +313,15 @@ fn main() {
     if matches.is_present("check") {
         return;
     }
+
+
+    let signal_reload = Arc::new(AtomicBool::new(false));
+    let active_config = Arc::new(Mutex::new(String::new()));
+
+    socketserver::start_server(3012, signal_reload.clone(), active_config.clone());
+
     loop {
-        let exitstatus = run(configuration, &configname);
+        let exitstatus = run(configuration, &configname, signal_reload.clone(), active_config.clone());
         match exitstatus {
             Err(e) => {
                 error!("({}) {}", e.to_string(), e);
