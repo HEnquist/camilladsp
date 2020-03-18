@@ -10,6 +10,7 @@ extern crate rand_distr;
 extern crate rustfft;
 extern crate serde;
 extern crate signal_hook;
+#[cfg(feature = "socketserver")]
 extern crate ws;
 
 #[macro_use]
@@ -46,6 +47,7 @@ mod fifoqueue;
 mod filedevice;
 mod filters;
 mod mixer;
+#[cfg(feature = "socketserver")]
 mod socketserver;
 #[cfg(feature = "pulse-backend")]
 mod pulsedevice;
@@ -72,7 +74,7 @@ enum ExitStatus {
     Exit,
 }
 
-fn run(conf: config::Configuration, configname: &str, signal_reload: Arc<AtomicBool>, active_config_yaml: Arc<Mutex<String>>) -> Res<ExitStatus> {
+fn run(conf: config::Configuration, signal_reload: Arc<AtomicBool>, active_config_yaml: Arc<Mutex<String>>, config_path: Arc<Mutex<String>>) -> Res<ExitStatus> {
     let (tx_pb, rx_pb) = mpsc::sync_channel(128);
     let (tx_cap, rx_cap) = mpsc::sync_channel(128);
 
@@ -164,7 +166,7 @@ fn run(conf: config::Configuration, configname: &str, signal_reload: Arc<AtomicB
         if signal_reload.load(Ordering::Relaxed) {
             debug!("Reloading configuration...");
             signal_reload.store(false, Ordering::Relaxed);
-            match config::load_config(&configname) {
+            match config::load_config(&config_path.lock().unwrap()) {
                 Ok(new_config) => match config::validate_config(new_config.clone()) {
                     Ok(()) => {
                         let comp = config::config_diff(&active_config, &new_config);
@@ -248,6 +250,7 @@ fn run(conf: config::Configuration, configname: &str, signal_reload: Arc<AtomicB
 }
 
 fn main() {
+    
     let matches = App::new("CamillaDSP")
         .version(crate_version!())
         .about(crate_description!())
@@ -270,8 +273,27 @@ fn main() {
                 .short("v")
                 .multiple(true)
                 .help("Increase message verbosity"),
-        )
-        .get_matches();
+        );
+    #[cfg(feature = "socketserver")]
+    let matches = matches.arg(
+            Arg::with_name("port")
+                .help("Port for websocket server")
+                .short("p")
+                .long("port")
+                .takes_value(true)
+                .default_value("0")
+                .validator(|v: String| -> Result<(), String> {
+                    if let Ok(port) = v.parse::<usize>() {
+                        if port < 65535 {
+                            return Ok(());
+                        } 
+                    }
+                    Err(String::from("Must be an integer between 0 and 65535"))
+                })
+                        
+        );
+    let matches = matches.get_matches();
+
 
     let loglevel = match matches.occurrences_of("verbosity") {
         0 => LevelFilter::Info,
@@ -318,10 +340,13 @@ fn main() {
     let signal_reload = Arc::new(AtomicBool::new(false));
     let active_config = Arc::new(Mutex::new(String::new()));
 
-    socketserver::start_server(3012, signal_reload.clone(), active_config.clone());
+    let active_config_path = Arc::new(Mutex::new(configname.to_string()));
+
+    #[cfg(feature = "socketserver")]
+    socketserver::start_server(3012, signal_reload.clone(), active_config.clone(), active_config_path.clone());
 
     loop {
-        let exitstatus = run(configuration, &configname, signal_reload.clone(), active_config.clone());
+        let exitstatus = run(configuration, signal_reload.clone(), active_config.clone(), active_config_path.clone());
         match exitstatus {
             Err(e) => {
                 error!("({}) {}", e.to_string(), e);

@@ -38,12 +38,13 @@ fn parse_command(cmd: ws::Message) -> WSCommand {
         WSCommand::Invalid
     }
 }
-//config_path: Arc<Mutex<String>>, 
-pub fn start_server(port: usize, signal_reload: Arc<AtomicBool>, active_config: Arc<Mutex<String>>) {
+
+pub fn start_server(port: usize, signal_reload: Arc<AtomicBool>, active_config: Arc<Mutex<String>>, active_config_path: Arc<Mutex<String>>) {
     thread::spawn(move || {
         ws::listen(format!("127.0.0.1:{}", port), |socket| {
             let signal_reload_inst = signal_reload.clone();
             let active_config_inst = active_config.clone();
+            let active_config_path_inst = active_config_path.clone();
             move |msg: ws::Message| {
                 let command = parse_command(msg);
                 match command {
@@ -55,7 +56,7 @@ pub fn start_server(port: usize, signal_reload: Arc<AtomicBool>, active_config: 
                         socket.send(format!("{}", active_config_inst.lock().unwrap()))
                     },
                     WSCommand::GetConfigName => {
-                        socket.send(format!("{}", active_config_inst.lock().unwrap()))
+                        socket.send(format!("{}", active_config_path_inst.lock().unwrap()))
                     },
                     WSCommand::SetConfigName(path) => {
                         socket.send(format!("Change to: {}", path))
