@@ -58,7 +58,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.0.8
+CamillaDSP 0.0.9
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
@@ -80,7 +80,7 @@ The default logging setting prints messeges of levels "error", "warn" and "info"
 
 
 ### Reloading the configuration
-The configuratin can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficents file needs to change.
+The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficents file needs to change.
 
 
 ## Usage example: crossover for 2-way speakers
@@ -125,9 +125,9 @@ pacmd list-sources
 # Configuration
 
 ## Devices
-Input and output devices are define in the same way. A device needs a type (Alsa, Pulse or File), number of channels, a device name (or file name for File), and a sample format. Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE) as well as floats of 32 and 64 bits (FLOAT32LE and FLOAT64LE). Note that PulseAudio does not support 64-bit float. 
-There is also a common samplerate that decides the samplerate that everythng will run at. The buffersize is the number of samples each chunk will have per channel. 
-The fields silence_trheshold and silence_timeout are optional and used to pause processing if the input is silent. The threshold is the threshold level in dB, and the level is calculated as the difference between the minimum and maximum sample values for all channels in the capture buffer. 0 dB is full level. Some experimantation might be needed to find the right threshold.
+Input and output devices are defined in the same way. A device needs a type (Alsa, Pulse or File), number of channels, a device name (or file name for File), and a sample format. Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE) as well as floats of 32 and 64 bits (FLOAT32LE and FLOAT64LE). Note that PulseAudio does not support 64-bit float. 
+There is also a common samplerate that decides the samplerate that everything will run at. The buffersize is the number of samples each chunk will have per channel. 
+The fields silence_threshold and silence_timeout are optional and used to pause processing if the input is silent. The threshold is the threshold level in dB, and the level is calculated as the difference between the minimum and maximum sample values for all channels in the capture buffer. 0 dB is full level. Some experimentation might be needed to find the right threshold.
 The timeout (in seconds) is for how long the signal should be silent before pausing processing. Set this to zero, or leave it out, to never pause.
 For the special case where the capture device is an Alsa Loopback device, and the playback device another Alsa device, there is a funtion to synchronize the Loopback device to the playback device. This avoids the problems of buffer underruns or slowly increasing delay. This function requires the parameter "target_level" to be set. It will take some experimentation to find the right number. If it's too small there will be buffer underruns from time to time, and making it too large might lead to a longer input-output delay than what is acceptable. Suitable values are in the range 1/2 to 1 times the buffersize. The "adjust_period" sets the interval between corrections and is optional. The default is 10 seconds.
 
@@ -226,13 +226,14 @@ filters:
 ```
 
 ### Delay
-The delay filter provides a delay in milliseconds. The given value will be rounded to the nearest number of samples.
+The delay filter provides a delay in milliseconds or samples. The "unit" can be "ms" or "samples", and if left out it defaults to "ms". The millisecond value will be rounded to the nearest number of samples.
 ```
 filters:
   delayexample:
     type: Delay
     parameters:
       delay: 12.3
+      unit: ms
 ```
 
 ### FIR
@@ -244,8 +245,10 @@ filters:
     parameters:
       type: File 
       filename: path/to/filter.txt
+      format: TEXT
 ```
-The coeffients file is a simple text file with one value per row:
+For testing purposes the entire "parameters" block can be left out (or commented out with a # at the start of each line). This then becomes a dummy filter that does not affect the signal.
+The "format" parameter can be omitted, in which case it's assumed that the format is TEXT. This format is a simple text file with one value per row:
 ```
 -0.000021
 -0.000020
@@ -253,6 +256,13 @@ The coeffients file is a simple text file with one value per row:
 ...
 -0.000012
 ```
+The other possible formats are raw data:
+- S16LE: signed 16 bit little-endian integers
+- S24LE: signed 24 bit little-endian integers stored as 32 bits (with the data in the low 24)
+- S32LE: signed 32 bit little-endian integers
+- FLOAT32LE: 32 bit little endian float
+- FLOAT64LE: 64 bit little endian float
+
 
 ### IIR
 IIR filters are Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filter, or you can provide the coefficients directly.

@@ -8,7 +8,7 @@ use audiodevice::*;
 use PrcFmt;
 
 /// Convert an AudioChunk to an interleaved buffer of u8.
-pub fn chunk_to_buffer_bytes(chunk: AudioChunk, buf: &mut [u8], scalefactor: PrcFmt, bits: usize) {
+pub fn chunk_to_buffer_bytes(chunk: AudioChunk, buf: &mut [u8], scalefactor: PrcFmt, bits: i32) {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
     let mut value16;
@@ -70,7 +70,7 @@ pub fn buffer_to_chunk_bytes(
     buffer: &[u8],
     channels: usize,
     scalefactor: PrcFmt,
-    bits: usize,
+    bits: i32,
 ) -> AudioChunk {
     let num_samples = match bits {
         16 => buffer.len() / 2,
@@ -131,7 +131,7 @@ pub fn buffer_to_chunk_bytes(
 }
 
 /// Convert an AudioChunk to an interleaved buffer of floats stored as u8.
-pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: usize) {
+pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: i32) {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
     let mut value64;
@@ -185,7 +185,7 @@ pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: usiz
 }
 
 /// Convert a buffer of interleaved u8 to an AudioChunk.
-pub fn buffer_to_chunk_float_bytes(buffer: &[u8], channels: usize, bits: usize) -> AudioChunk {
+pub fn buffer_to_chunk_float_bytes(buffer: &[u8], channels: usize, bits: i32) -> AudioChunk {
     let num_samples = match bits {
         32 => buffer.len() / 4,
         64 => buffer.len() / 8,
@@ -279,7 +279,7 @@ pub fn chunk_to_buffer_int<T: num_traits::cast::NumCast>(
             value = match num_traits::cast(float_val * scalefactor) {
                 Some(val) => val,
                 None => {
-                    eprintln!("bad {}", float_val);
+                    debug!("bad float {}", float_val);
                     num_traits::cast(0.0).unwrap()
                 }
             };
@@ -288,7 +288,7 @@ pub fn chunk_to_buffer_int<T: num_traits::cast::NumCast>(
         }
     }
     if clipped > 0 {
-        eprintln!(
+        warn!(
             "Clipping detected, {} samples clipped, peak {}%",
             clipped,
             peak * 100.0
@@ -369,7 +369,7 @@ pub fn chunk_to_buffer_float<T: num_traits::cast::NumCast>(chunk: AudioChunk, bu
             value = match num_traits::cast(float_val) {
                 Some(val) => val,
                 None => {
-                    eprintln!("bad {}", float_val);
+                    debug!("bad float{}", float_val);
                     num_traits::cast(0.0).unwrap()
                 }
             };
@@ -378,7 +378,7 @@ pub fn chunk_to_buffer_float<T: num_traits::cast::NumCast>(chunk: AudioChunk, bu
         }
     }
     if clipped > 0 {
-        eprintln!(
+        warn!(
             "Clipping detected, {} samples clipped, peak {}%",
             clipped,
             peak * 100.0
@@ -440,7 +440,7 @@ mod tests {
     #[test]
     fn to_from_buffer_16() {
         let bits = 16;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk {
             frames: 3,
@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn to_from_buffer_24() {
         let bits = 24;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk {
             frames: 3,
@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn to_from_buffer_32() {
         let bits = 32;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk {
             frames: 3,
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn clipping_16() {
         let bits = 16;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
         let waveforms = vec![vec![-1.0, 0.0, 32767.0 / 32768.0]; 1];
         let chunk = AudioChunk {
             frames: 3,
@@ -512,7 +512,7 @@ mod tests {
     #[test]
     fn clipping_24() {
         let bits = 24;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
         let waveforms = vec![vec![-1.0, 0.0, 8388607.0 / 8388608.0]; 1];
         let chunk = AudioChunk {
             frames: 3,
@@ -530,7 +530,7 @@ mod tests {
     #[test]
     fn clipping_32() {
         let bits = 32;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
         #[cfg(feature = "32bit")]
         let waveforms = vec![vec![-1.0, 0.0, 2147483520.0 / 2147483648.0]; 1];
         #[cfg(not(feature = "32bit"))]

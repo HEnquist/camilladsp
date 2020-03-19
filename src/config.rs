@@ -90,18 +90,57 @@ fn default_period() -> f32 {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum Filter {
-    Conv { parameters: ConvParameters },
-    Biquad { parameters: BiquadParameters },
-    Delay { parameters: DelayParameters },
-    Gain { parameters: GainParameters },
-    Dither { parameters: DitherParameters },
+    Conv {
+        #[serde(default)]
+        parameters: ConvParameters,
+    },
+    Biquad {
+        parameters: BiquadParameters,
+    },
+    Delay {
+        parameters: DelayParameters,
+    },
+    Gain {
+        parameters: GainParameters,
+    },
+    Dither {
+        parameters: DitherParameters,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub enum FileFormat {
+    TEXT,
+    S16LE,
+    S24LE,
+    S32LE,
+    FLOAT32LE,
+    FLOAT64LE,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum ConvParameters {
-    File { filename: String },
-    Values { values: Vec<PrcFmt> },
+    File {
+        filename: String,
+        #[serde(default)]
+        format: FileFormat,
+    },
+    Values {
+        values: Vec<PrcFmt>,
+    },
+}
+
+impl Default for FileFormat {
+    fn default() -> Self {
+        FileFormat::TEXT
+    }
+}
+
+impl Default for ConvParameters {
+    fn default() -> Self {
+        ConvParameters::Values { values: vec![1.0] }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -173,6 +212,21 @@ pub struct GainParameters {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct DelayParameters {
     pub delay: PrcFmt,
+    #[serde(default)]
+    pub unit: TimeUnit,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub enum TimeUnit {
+    #[serde(rename = "ms")]
+    Milliseconds,
+    #[serde(rename = "samples")]
+    Samples,
+}
+impl Default for TimeUnit {
+    fn default() -> Self {
+        TimeUnit::Milliseconds
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
