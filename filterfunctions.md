@@ -7,7 +7,7 @@ Making a Bessel filter with a set of Biquads requires creating several Biquads, 
 
 ## Multiplication factor for frequency:
 | Order | Biquad 1   | Biquad 2  | Biquad 3  | Biquad 4 |
-|-----------|-----|----|----|----|----|
+|-----------|-----|----|----|----|
 | 1| 1.0*           |                |                |                |
 | 2| 1.27201964951  |                |                |                |
 | 3| 1.32267579991* | 1.44761713315  |                |                |
@@ -20,7 +20,7 @@ The asterisk (*) indicates that this is a 1st order filter.
 
 ## Q values:
 | Order | Biquad 1   | Biquad 2  | Biquad 3  | Biquad 4 |
-|-----------|-----|----|----|----|----|
+|-----------|-----|----|----|----|
 | 1 | (1st order)   |                |               |              |
 | 2 | 0.57735026919 |                |               |              |
 | 3 | (1st order)   | 0.691046625825 |               |              |
