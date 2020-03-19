@@ -319,6 +319,12 @@ pub enum ConfigChange {
     None,
 }
 
+pub fn load_validate_config(configname: &str) -> Res<Configuration> {
+    let configuration = load_config(configname)?;
+    validate_config(configuration.clone())?;
+    Ok(configuration)
+}
+
 pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> ConfigChange {
     if currentconf == newconf {
         return ConfigChange::None;

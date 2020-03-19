@@ -1,11 +1,11 @@
 [package]
 name = "camilladsp"
-version = "0.0.9"
+version = "0.0.10"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 description = "A flexible tool for processing audio"
 
 [features]
-default = ["alsa-backend", "pulse-backend"]
+default = ["alsa-backend", "pulse-backend", "socketserver"]
 alsa-backend = ["alsa"]
 pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
 32bit = []

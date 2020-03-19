@@ -74,7 +74,7 @@ enum ExitStatus {
     Exit,
 }
 
-fn run(conf: config::Configuration, signal_reload: Arc<AtomicBool>, active_config_yaml: Arc<Mutex<String>>, config_path: Arc<Mutex<String>>) -> Res<ExitStatus> {
+fn run(conf: config::Configuration, signal_reload: Arc<AtomicBool>, active_config_shared: Arc<Mutex<config::Configuration>>, config_path: Arc<Mutex<String>>) -> Res<ExitStatus> {
     let (tx_pb, rx_pb) = mpsc::sync_channel(128);
     let (tx_cap, rx_cap) = mpsc::sync_channel(128);
 
@@ -95,8 +95,8 @@ fn run(conf: config::Configuration, signal_reload: Arc<AtomicBool>, active_confi
     let conf_proc = conf.clone();
 
     let mut active_config = conf;
-    let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
-    *active_config_yaml.lock().unwrap() = conf_yaml;
+    //let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
+    *active_config_shared.lock().unwrap() = active_config.clone();
 
     // Processing thread
     thread::spawn(move || {
@@ -166,38 +166,69 @@ fn run(conf: config::Configuration, signal_reload: Arc<AtomicBool>, active_confi
         if signal_reload.load(Ordering::Relaxed) {
             debug!("Reloading configuration...");
             signal_reload.store(false, Ordering::Relaxed);
-            match config::load_config(&config_path.lock().unwrap()) {
-                Ok(new_config) => match config::validate_config(new_config.clone()) {
+            let new_config = if *config_path.lock().unwrap() == "none" {
+                debug!("Reload using config from websocket");
+                let conf = active_config_shared.lock().unwrap().clone();
+                match config::validate_config(conf.clone()) {
                     Ok(()) => {
-                        let comp = config::config_diff(&active_config, &new_config);
-                        match comp {
-                            config::ConfigChange::Pipeline
-                            | config::ConfigChange::FilterParameters { .. } => {
-                                tx_pipeconf.send((comp, new_config.clone())).unwrap();
-                                active_config = new_config;
-                                let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
-                                *active_config_yaml.lock().unwrap() = conf_yaml;
-                            }
-                            config::ConfigChange::Devices => {
-                                debug!("Devices changed, restart required.");
-                                //tx_pipeconf.send((comp, new_config.clone())).unwrap();
-                                tx_command_cap.send(CommandMessage::Exit).unwrap();
-                                //tx_command_pb.send(CommandMessage::Exit).unwrap();
-                                trace!("Wait for pb..");
-                                pb_handle.join().unwrap();
-                                trace!("Wait for cap..");
-                                cap_handle.join().unwrap();
-                                return Ok(ExitStatus::Restart(Box::new(new_config)));
-                            }
-                            config::ConfigChange::None => {
-                                debug!("No changes in config.");
-                            }
-                        };
+                        debug!("Config valid");
+                        Ok(conf.clone())
                     }
                     Err(err) => {
                         error!("Invalid config file!");
                         error!("{}", err);
+                        Err(err)
                     }
+                }
+            }
+            else {
+                match config::load_config(&config_path.lock().unwrap()) {
+                    Ok(conf) => match config::validate_config(conf.clone()) {
+                        Ok(()) => {
+                            debug!("Reload using config file");
+                            Ok(conf)
+                        }
+                        Err(err) => {
+                            error!("Invalid config file!");
+                            error!("{}", err);
+                            Err(err)
+                        }
+                    },
+                    Err(err) => {
+                        error!("Config file error:");
+                        error!("{}", err);
+                        Err(err)
+                    }
+                }
+            };
+
+            match new_config {
+                Ok(conf) => {
+                    let comp = config::config_diff(&active_config, &conf);
+                    match comp {
+                        config::ConfigChange::Pipeline
+                        | config::ConfigChange::FilterParameters { .. } => {
+                            tx_pipeconf.send((comp, conf.clone())).unwrap();
+                            active_config = conf;
+                            //let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
+                            *active_config_shared.lock().unwrap() = active_config.clone();
+                            debug!("Sent changes to pipeline");
+                        }
+                        config::ConfigChange::Devices => {
+                            debug!("Devices changed, restart required.");
+                            //tx_pipeconf.send((comp, new_config.clone())).unwrap();
+                            tx_command_cap.send(CommandMessage::Exit).unwrap();
+                            //tx_command_pb.send(CommandMessage::Exit).unwrap();
+                            trace!("Wait for pb..");
+                            pb_handle.join().unwrap();
+                            trace!("Wait for cap..");
+                            cap_handle.join().unwrap();
+                            return Ok(ExitStatus::Restart(Box::new(conf)));
+                        }
+                        config::ConfigChange::None => {
+                            debug!("No changes in config.");
+                        }
+                    };
                 },
                 Err(err) => {
                     error!("Config file error:");
@@ -251,7 +282,7 @@ fn run(conf: config::Configuration, signal_reload: Arc<AtomicBool>, active_confi
 
 fn main() {
     
-    let matches = App::new("CamillaDSP")
+    let clapapp = App::new("CamillaDSP")
         .version(crate_version!())
         .about(crate_description!())
         .author(crate_authors!())
@@ -275,13 +306,14 @@ fn main() {
                 .help("Increase message verbosity"),
         );
     #[cfg(feature = "socketserver")]
-    let matches = matches.arg(
+    let clapapp = clapapp.arg(
             Arg::with_name("port")
                 .help("Port for websocket server")
                 .short("p")
                 .long("port")
                 .takes_value(true)
                 .default_value("0")
+                .hide_default_value(true)
                 .validator(|v: String| -> Result<(), String> {
                     if let Ok(port) = v.parse::<usize>() {
                         if port < 65535 {
@@ -292,7 +324,7 @@ fn main() {
                 })
                         
         );
-    let matches = matches.get_matches();
+    let matches = clapapp.get_matches();
 
 
     let loglevel = match matches.occurrences_of("verbosity") {
@@ -313,37 +345,47 @@ fn main() {
     //error!("error message");
 
     let configname = matches.value_of("configfile").unwrap(); //&args[1];
-    let mut configuration = match config::load_config(&configname) {
-        Ok(config) => config,
-        Err(err) => {
-            error!("Config file error:");
-            error!("{}", err);
-            return;
-        }
+
+    //let mut configuration = match config::load_config(&configname) {
+    //    Ok(config) => config,
+    //    Err(err) => {
+    //        error!("Config file error:");
+    //        error!("{}", err);
+    //        return;
+    //    }
+    //};
+//
+    //match config::validate_config(configuration.clone()) {
+    //    Ok(()) => {
+    //        info!("Config is valid");
+    //    }
+    //    Err(err) => {
+    //        error!("Invalid config file!");
+    //        error!("{}", err);
+    //        return;
+    //    }
+    //}
+
+    let mut configuration = match config::load_validate_config(&configname) {
+        Ok(conf) => conf,
+        _ => return,
     };
 
-    match config::validate_config(configuration.clone()) {
-        Ok(()) => {
-            info!("Config is valid");
-        }
-        Err(err) => {
-            error!("Invalid config file!");
-            error!("{}", err);
-            return;
-        }
-    }
     if matches.is_present("check") {
         return;
     }
 
 
     let signal_reload = Arc::new(AtomicBool::new(false));
-    let active_config = Arc::new(Mutex::new(String::new()));
+    //let active_config = Arc::new(Mutex::new(String::new()));
+    let active_config = Arc::new(Mutex::new(configuration.clone()));
 
     let active_config_path = Arc::new(Mutex::new(configname.to_string()));
 
     #[cfg(feature = "socketserver")]
-    socketserver::start_server(3012, signal_reload.clone(), active_config.clone(), active_config_path.clone());
+    let serverport = matches.value_of("port").unwrap().parse::<usize>().unwrap();
+    #[cfg(feature = "socketserver")]
+    socketserver::start_server(serverport, signal_reload.clone(), active_config.clone(), active_config_path.clone());
 
     loop {
         let exitstatus = run(configuration, signal_reload.clone(), active_config.clone(), active_config_path.clone());

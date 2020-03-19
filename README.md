@@ -29,6 +29,9 @@ Use recent stable versions of rustc and cargo. The minimum rustc version is 1.36
 By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
 
 By default the internal processing is done using 64-bit floats. There is a possibility to switch this to 32-bit floats. This might be useful for speeding up the processing when running on a 32-bit CPU (or a 64-bit CPU running in 32-bit mode), but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
+
+CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "socketserver". For usage see the section "Controlling via websocket".
+
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
@@ -58,12 +61,12 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.0.9
+CamillaDSP 0.0.10
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
 USAGE:
-    camilladsp [FLAGS] <configfile>
+    camilladsp [FLAGS] [OPTIONS] <configfile>
 
 FLAGS:
     -c, --check      Check config file and exit
@@ -71,16 +74,36 @@ FLAGS:
     -V, --version    Prints version information
     -v               Increase message verbosity
 
+OPTIONS:
+    -p, --port <port>    Port for websocket server
+
 ARGS:
     <configfile>    The configuration file to use
 ```
 If the "check" flag is given, the program will exit after checking the configuration file. Use this if you only want to verify that the configuration is ok, and not start any processing.
+
+To enable the websocket server, provide a port number with the -p option. Leave it out, or give 0 to disable.
 
 The default logging setting prints messeges of levels "error", "warn" and "info". By passing the verbosity flag once, "-v" it also prints "debug". If and if's given twice, "-vv", it also prints "trace" messages. 
 
 
 ### Reloading the configuration
 The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficents file needs to change.
+
+## Controlling via websocket
+If the sebsocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
+The available commands are:
+- `getconfig` : read the current configuration as yaml
+  * response is the config in yaml format.
+- `getconfigname` : get name and path of current config file
+  * response is `OK:/path/to/current.yml`
+- `reload` : reload current config file (same as SIGHUP)
+  * response is `OK:RELOAD` or `ERROR:RELOAD` 
+- `exit` : exit (not yet implemented)
+- `setconfigname:/path/to/file.yml` : change config file name, not applied until `reload` is called
+  * response is `OK:/path/to/file.yml` or `ERROR:/path/to/file.yml`
+- `setconfig:<new config in yaml format>` : provide a new config as a yaml string. Applied directly.
+  * response is `OK:SETCONFIG` or `ERROR:SETCONFIG`
 
 
 ## Usage example: crossover for 2-way speakers
