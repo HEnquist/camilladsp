@@ -47,10 +47,10 @@ mod fifoqueue;
 mod filedevice;
 mod filters;
 mod mixer;
-#[cfg(feature = "socketserver")]
-mod socketserver;
 #[cfg(feature = "pulse-backend")]
 mod pulsedevice;
+#[cfg(feature = "socketserver")]
+mod socketserver;
 
 use audiodevice::*;
 
@@ -74,7 +74,12 @@ enum ExitStatus {
     Exit,
 }
 
-fn run(conf: config::Configuration, signal_reload: Arc<AtomicBool>, active_config_shared: Arc<Mutex<config::Configuration>>, config_path: Arc<Mutex<String>>) -> Res<ExitStatus> {
+fn run(
+    conf: config::Configuration,
+    signal_reload: Arc<AtomicBool>,
+    active_config_shared: Arc<Mutex<config::Configuration>>,
+    config_path: Arc<Mutex<String>>,
+) -> Res<ExitStatus> {
     let (tx_pb, rx_pb) = mpsc::sync_channel(128);
     let (tx_cap, rx_cap) = mpsc::sync_channel(128);
 
@@ -180,8 +185,7 @@ fn run(conf: config::Configuration, signal_reload: Arc<AtomicBool>, active_confi
                         Err(err)
                     }
                 }
-            }
-            else {
+            } else {
                 match config::load_config(&config_path.lock().unwrap()) {
                     Ok(conf) => match config::validate_config(conf.clone()) {
                         Ok(()) => {
@@ -229,7 +233,7 @@ fn run(conf: config::Configuration, signal_reload: Arc<AtomicBool>, active_confi
                             debug!("No changes in config.");
                         }
                     };
-                },
+                }
                 Err(err) => {
                     error!("Config file error:");
                     error!("{}", err);
@@ -281,7 +285,6 @@ fn run(conf: config::Configuration, signal_reload: Arc<AtomicBool>, active_confi
 }
 
 fn main() {
-    
     let clapapp = App::new("CamillaDSP")
         .version(crate_version!())
         .about(crate_description!())
@@ -307,25 +310,23 @@ fn main() {
         );
     #[cfg(feature = "socketserver")]
     let clapapp = clapapp.arg(
-            Arg::with_name("port")
-                .help("Port for websocket server")
-                .short("p")
-                .long("port")
-                .takes_value(true)
-                .default_value("0")
-                .hide_default_value(true)
-                .validator(|v: String| -> Result<(), String> {
-                    if let Ok(port) = v.parse::<usize>() {
-                        if port < 65535 {
-                            return Ok(());
-                        } 
+        Arg::with_name("port")
+            .help("Port for websocket server")
+            .short("p")
+            .long("port")
+            .takes_value(true)
+            .default_value("0")
+            .hide_default_value(true)
+            .validator(|v: String| -> Result<(), String> {
+                if let Ok(port) = v.parse::<usize>() {
+                    if port < 65535 {
+                        return Ok(());
                     }
-                    Err(String::from("Must be an integer between 0 and 65535"))
-                })
-                        
-        );
+                }
+                Err(String::from("Must be an integer between 0 and 65535"))
+            }),
+    );
     let matches = clapapp.get_matches();
-
 
     let loglevel = match matches.occurrences_of("verbosity") {
         0 => LevelFilter::Info,
@@ -354,7 +355,7 @@ fn main() {
     //        return;
     //    }
     //};
-//
+    //
     //match config::validate_config(configuration.clone()) {
     //    Ok(()) => {
     //        info!("Config is valid");
@@ -375,7 +376,6 @@ fn main() {
         return;
     }
 
-
     let signal_reload = Arc::new(AtomicBool::new(false));
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(configuration.clone()));
@@ -385,10 +385,20 @@ fn main() {
     #[cfg(feature = "socketserver")]
     let serverport = matches.value_of("port").unwrap().parse::<usize>().unwrap();
     #[cfg(feature = "socketserver")]
-    socketserver::start_server(serverport, signal_reload.clone(), active_config.clone(), active_config_path.clone());
+    socketserver::start_server(
+        serverport,
+        signal_reload.clone(),
+        active_config.clone(),
+        active_config_path.clone(),
+    );
 
     loop {
-        let exitstatus = run(configuration, signal_reload.clone(), active_config.clone(), active_config_path.clone());
+        let exitstatus = run(
+            configuration,
+            signal_reload.clone(),
+            active_config.clone(),
+            active_config_path.clone(),
+        );
         match exitstatus {
             Err(e) => {
                 error!("({}) {}", e.to_string(), e);
