@@ -41,6 +41,8 @@ pub enum SampleFormat {
     S16LE,
     S24LE,
     S32LE,
+    FLOAT32LE,
+    FLOAT64LE,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -75,31 +77,70 @@ pub struct Devices {
     pub silence_timeout: PrcFmt,
     pub capture: Device,
     pub playback: Device,
+    #[serde(default)]
+    pub target_level: usize,
+    #[serde(default = "default_period")]
+    pub adjust_period: f32,
 }
 
-//#[derive(Clone, Debug, Deserialize, PartialEq)]
-//pub enum FilterType {
-//    Biquad,
-//    Conv,
-//    Gain,
-//    Delay,
-//}
+fn default_period() -> f32 {
+    10.0
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum Filter {
-    Conv { parameters: ConvParameters },
-    Biquad { parameters: BiquadParameters },
-    Delay { parameters: DelayParameters },
-    Gain { parameters: GainParameters },
-    Dither { parameters: DitherParameters },
+    Conv {
+        #[serde(default)]
+        parameters: ConvParameters,
+    },
+    Biquad {
+        parameters: BiquadParameters,
+    },
+    Delay {
+        parameters: DelayParameters,
+    },
+    Gain {
+        parameters: GainParameters,
+    },
+    Dither {
+        parameters: DitherParameters,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub enum FileFormat {
+    TEXT,
+    S16LE,
+    S24LE,
+    S32LE,
+    FLOAT32LE,
+    FLOAT64LE,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum ConvParameters {
-    File { filename: String },
-    Values { values: Vec<PrcFmt> },
+    File {
+        filename: String,
+        #[serde(default)]
+        format: FileFormat,
+    },
+    Values {
+        values: Vec<PrcFmt>,
+    },
+}
+
+impl Default for FileFormat {
+    fn default() -> Self {
+        FileFormat::TEXT
+    }
+}
+
+impl Default for ConvParameters {
+    fn default() -> Self {
+        ConvParameters::Values { values: vec![1.0] }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -164,12 +205,28 @@ pub enum BiquadParameters {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct GainParameters {
     pub gain: PrcFmt,
+    #[serde(default)]
     pub inverted: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct DelayParameters {
     pub delay: PrcFmt,
+    #[serde(default)]
+    pub unit: TimeUnit,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub enum TimeUnit {
+    #[serde(rename = "ms")]
+    Milliseconds,
+    #[serde(rename = "samples")]
+    Samples,
+}
+impl Default for TimeUnit {
+    fn default() -> Self {
+        TimeUnit::Milliseconds
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -299,6 +356,14 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
+    if conf.devices.target_level >= 2 * conf.devices.buffersize {
+        return Err(Box::new(ConfigError::new("target_level is too large.")));
+    }
+    if conf.devices.adjust_period <= 0.0 {
+        return Err(Box::new(ConfigError::new(
+            "adjust_period must be positive and > 0",
+        )));
+    }
     let mut num_channels = match conf.devices.capture {
         #[cfg(feature = "alsa-backend")]
         Device::Alsa { channels, .. } => channels,

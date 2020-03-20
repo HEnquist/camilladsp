@@ -28,7 +28,7 @@ Use recent stable versions of rustc and cargo. The minimum rustc version is 1.36
 
 By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
 
-There is also a possibility to switch the processing to 32-bit floats. This might be good if running on a 32-bit CPU, but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
+By default the internal processing is done using 64-bit floats. There is a possibility to switch this to 32-bit floats. This might be useful for speeding up the processing when running on a 32-bit CPU (or a 64-bit CPU running in 32-bit mode), but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
@@ -54,7 +54,33 @@ camilladsp /path/to/config.yml
 ```
 This starts the processing defined in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is complete and valid. When an error is found it displays an error message describing the problem.
 
-The configuratin can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficents file needs to change.
+### Command line options
+Starting with the --help flag prints a short help message:
+```
+> camilladsp --help
+CamillaDSP 0.0.9
+Henrik Enquist <henrik.enquist@gmail.com>
+A flexible tool for processing audio
+
+USAGE:
+    camilladsp [FLAGS] <configfile>
+
+FLAGS:
+    -c, --check      Check config file and exit
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+    -v               Increase message verbosity
+
+ARGS:
+    <configfile>    The configuration file to use
+```
+If the "check" flag is given, the program will exit after checking the configuration file. Use this if you only want to verify that the configuration is ok, and not start any processing.
+
+The default logging setting prints messeges of levels "error", "warn" and "info". By passing the verbosity flag once, "-v" it also prints "debug". If and if's given twice, "-vv", it also prints "trace" messages. 
+
+
+### Reloading the configuration
+The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficents file needs to change.
 
 
 ## Usage example: crossover for 2-way speakers
@@ -99,17 +125,21 @@ pacmd list-sources
 # Configuration
 
 ## Devices
-Input and output devices are define in the same way. A device needs a type (Alsa, Pulse or File), number of channels, a device name (or file name for File), and a sample format. Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE). 
-There is also a common samplerate that decides the samplerate that everythng will run at. The buffersize is the number of samples each chunk will have per channel. 
-The fields silence_trheshold and silence_timeout are optional and used to pause processing if the input is silent. The threshold is the threshold level in dB, and the level is calculated as the difference between the minimum and maximum sample values for all channels in the capture buffer. 0 dB is full level. Some experimantation might be needed to find the right threshold.
-The timeout (in seconds) is for how long the signal should be silent before pausing pprocessing. Set this to zero, or leave it out, to never pause. 
-Example config:
+Input and output devices are defined in the same way. A device needs a type (Alsa, Pulse or File), number of channels, a device name (or file name for File), and a sample format. Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE) as well as floats of 32 and 64 bits (FLOAT32LE and FLOAT64LE). Note that PulseAudio does not support 64-bit float. 
+There is also a common samplerate that decides the samplerate that everything will run at. The buffersize is the number of samples each chunk will have per channel. 
+The fields silence_threshold and silence_timeout are optional and used to pause processing if the input is silent. The threshold is the threshold level in dB, and the level is calculated as the difference between the minimum and maximum sample values for all channels in the capture buffer. 0 dB is full level. Some experimentation might be needed to find the right threshold.
+The timeout (in seconds) is for how long the signal should be silent before pausing processing. Set this to zero, or leave it out, to never pause.
+For the special case where the capture device is an Alsa Loopback device, and the playback device another Alsa device, there is a funtion to synchronize the Loopback device to the playback device. This avoids the problems of buffer underruns or slowly increasing delay. This function requires the parameter "target_level" to be set. It will take some experimentation to find the right number. If it's too small there will be buffer underruns from time to time, and making it too large might lead to a longer input-output delay than what is acceptable. Suitable values are in the range 1/2 to 1 times the buffersize. The "adjust_period" sets the interval between corrections and is optional. The default is 10 seconds.
+
+Example config (note that parameters marked (*) can be left out to use their default values):
 ```
 devices:
   samplerate: 44100
   buffersize: 1024
-  silence_threshold: -60
-  silence_timeout: 3.0
+  silence_threshold: -60 (*)
+  silence_timeout: 3.0 (*)
+  target_level: 500 (*)
+  adjust_period: 10 (*)
   capture:
     type: Pulse
     channels: 2
@@ -184,8 +214,30 @@ mixers:
 The filters section defines the filter configurations to use in the pipeline. It's enough to define each filter once even if it should be applied on several channels.
 The supported filter types are Biquad for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
 
+### Gain
+The gain filter simply changes the amplitude of the signal. The "inverted" parameter simply inverts the signal. This parameter is optional and the default is to not invert.
+```
+filters:
+  gainexample:
+    type: Gain
+    parameters:
+      gain: -6.0 
+      inverted: false
+```
+
+### Delay
+The delay filter provides a delay in milliseconds or samples. The "unit" can be "ms" or "samples", and if left out it defaults to "ms". The millisecond value will be rounded to the nearest number of samples.
+```
+filters:
+  delayexample:
+    type: Delay
+    parameters:
+      delay: 12.3
+      unit: ms
+```
+
 ### FIR
-A FIR filter is given by an impuse response provided as a list of coefficients. The coefficients are preferrably given in a separate file, but can be included directly in the config file. The number of coefficients (or taps) should be equal to or smaller than the buffersize setting. Otherwise the impulse response will be truncated.
+A FIR filter is given by an impuse response provided as a list of coefficients. The coefficients are preferrably given in a separate file, but can be included directly in the config file. If the number of coefficients (or taps) is larger than the buffersize setting it will use segmented convolution. The number of segments is the filter length divided by the buffersize, rounded up.
 ```
 filters:
   lowpass_fir:
@@ -193,8 +245,10 @@ filters:
     parameters:
       type: File 
       filename: path/to/filter.txt
+      format: TEXT
 ```
-The coeffients file is a simple text file with one value per row:
+For testing purposes the entire "parameters" block can be left out (or commented out with a # at the start of each line). This then becomes a dummy filter that does not affect the signal.
+The "format" parameter can be omitted, in which case it's assumed that the format is TEXT. This format is a simple text file with one value per row:
 ```
 -0.000021
 -0.000020
@@ -202,6 +256,13 @@ The coeffients file is a simple text file with one value per row:
 ...
 -0.000012
 ```
+The other possible formats are raw data:
+- S16LE: signed 16 bit little-endian integers
+- S24LE: signed 24 bit little-endian integers stored as 32 bits (with the data in the low 24)
+- S32LE: signed 32 bit little-endian integers
+- FLOAT32LE: 32 bit little endian float
+- FLOAT64LE: 64 bit little endian float
+
 
 ### IIR
 IIR filters are Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filter, or you can provide the coefficients directly.
@@ -311,7 +372,7 @@ pipeline:
 ```
 In this config first a mixer is used to copy a stereo input to four channels. Then for each channel a filter step is added. A filter block can contain one or several filters that must be define in the "Filters" section. Here channel 0 and 1 get filtered by "lowpass_fir" and "peak1", while 2 and 3 get filtered by just "highpass_fir". 
 
-## Vislualizing the config
+## Visualizing the config
 A Python script is included to view the configuration. This plots the transfer functions of all included filters, as well as plots a flowchart of the entire processing pipeline. Run it with:
 ```
 python show_config.py /path/to/config.yml

@@ -2,15 +2,17 @@
 devices:
   samplerate: 44100
   buffersize: 1024
+  target_level: 512
+  adjust_period: 10
   capture:
     type: Alsa
     channels: 2
-    device: "hw:Loopback,0,0"
+    device: "hw:Loopback,0,1"
     format: S16LE
   playback:
     type: Alsa
     channels: 2
-    device: "hw:Generic_1"
+    device: "hw:Loopback,0,5"
     format: S32LE
 
 filters:

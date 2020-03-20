@@ -11,7 +11,10 @@ use std::thread;
 use audiodevice::*;
 // Sample format
 use config::SampleFormat;
-use conversions::{buffer_to_chunk_bytes, chunk_to_buffer_bytes};
+use conversions::{
+    buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
+    chunk_to_buffer_float_bytes,
+};
 
 use CommandMessage;
 use PrcFmt;
@@ -51,6 +54,15 @@ impl PlaybackDevice for FilePlaybackDevice {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
             SampleFormat::S32LE => 32,
+            SampleFormat::FLOAT32LE => 32,
+            SampleFormat::FLOAT64LE => 64,
+        };
+        let store_bytes = match self.format {
+            SampleFormat::S16LE => 2,
+            SampleFormat::S24LE => 4,
+            SampleFormat::S32LE => 4,
+            SampleFormat::FLOAT32LE => 4,
+            SampleFormat::FLOAT64LE => 8,
         };
         let format = self.format.clone();
         let handle = thread::spawn(move || {
@@ -62,76 +74,48 @@ impl PlaybackDevice for FilePlaybackDevice {
                         Err(_err) => {}
                     }
                     //let scalefactor = (1<<bits-1) as PrcFmt;
-                    let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+                    let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
                     barrier.wait();
                     //thread::sleep(delay);
-                    eprintln!("starting playback loop");
-                    match format {
-                        SampleFormat::S16LE => {
-                            let mut buffer = vec![0u8; bufferlength * channels * 2];
-                            loop {
-                                match channel.recv() {
-                                    Ok(AudioMessage::Audio(chunk)) => {
+                    debug!("starting playback loop");
+                    let mut buffer = vec![0u8; bufferlength * channels * store_bytes];
+                    loop {
+                        match channel.recv() {
+                            Ok(AudioMessage::Audio(chunk)) => {
+                                match format {
+                                    SampleFormat::S16LE
+                                    | SampleFormat::S24LE
+                                    | SampleFormat::S32LE => {
                                         chunk_to_buffer_bytes(
                                             chunk,
                                             &mut buffer,
                                             scalefactor,
                                             bits,
                                         );
-                                        // let _frames = match io.writei(&buffer[..]) {
-                                        let write_res = file.write(&buffer);
-                                        match write_res {
-                                            Ok(_) => {}
-                                            Err(msg) => {
-                                                status_channel
-                                                    .send(StatusMessage::PlaybackError {
-                                                        message: format!("{}", msg),
-                                                    })
-                                                    .unwrap();
-                                            }
-                                        };
                                     }
-                                    Ok(AudioMessage::EndOfStream) => {
-                                        status_channel.send(StatusMessage::PlaybackDone).unwrap();
-                                        break;
+                                    SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
+                                        chunk_to_buffer_float_bytes(chunk, &mut buffer, bits);
                                     }
-                                    Err(_) => {}
-                                }
+                                };
+                                let write_res = file.write(&buffer);
+                                match write_res {
+                                    Ok(_) => {}
+                                    Err(msg) => {
+                                        status_channel
+                                            .send(StatusMessage::PlaybackError {
+                                                message: format!("{}", msg),
+                                            })
+                                            .unwrap();
+                                    }
+                                };
                             }
-                        }
-                        SampleFormat::S24LE | SampleFormat::S32LE => {
-                            let mut buffer = vec![0u8; bufferlength * channels * 4];
-                            loop {
-                                match channel.recv() {
-                                    Ok(AudioMessage::Audio(chunk)) => {
-                                        chunk_to_buffer_bytes(
-                                            chunk,
-                                            &mut buffer,
-                                            scalefactor,
-                                            bits,
-                                        );
-                                        // let _frames = match io.writei(&buffer[..]) {
-                                        let write_res = file.write(&buffer);
-                                        match write_res {
-                                            Ok(_) => {}
-                                            Err(msg) => {
-                                                status_channel
-                                                    .send(StatusMessage::PlaybackError {
-                                                        message: format!("{}", msg),
-                                                    })
-                                                    .unwrap();
-                                            }
-                                        };
-                                    }
-                                    Ok(AudioMessage::EndOfStream) => {
-                                        status_channel.send(StatusMessage::PlaybackDone).unwrap();
-                                        break;
-                                    }
-                                    _ => {}
-                                }
+                            Ok(AudioMessage::EndOfStream) => {
+                                status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                break;
                             }
+                            Err(_) => {}
                         }
-                    };
+                    }
                 }
                 Err(err) => {
                     status_channel
@@ -150,7 +134,7 @@ impl PlaybackDevice for FilePlaybackDevice {
 impl CaptureDevice for FileCaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::Sender<AudioMessage>,
+        channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
@@ -163,6 +147,15 @@ impl CaptureDevice for FileCaptureDevice {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
             SampleFormat::S32LE => 32,
+            SampleFormat::FLOAT32LE => 32,
+            SampleFormat::FLOAT64LE => 64,
+        };
+        let store_bytes = match self.format {
+            SampleFormat::S16LE => 2,
+            SampleFormat::S24LE => 4,
+            SampleFormat::S32LE => 4,
+            SampleFormat::FLOAT32LE => 4,
+            SampleFormat::FLOAT64LE => 8,
         };
         let format = self.format.clone();
         let mut silence: PrcFmt = 10.0;
@@ -176,112 +169,63 @@ impl CaptureDevice for FileCaptureDevice {
                         Ok(()) => {}
                         Err(_err) => {}
                     }
-                    let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+                    let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
                     let mut silent_nbr: usize = 0;
                     barrier.wait();
-                    eprintln!("starting captureloop");
-                    match format {
-                        SampleFormat::S16LE => {
-                            let mut buf = vec![0u8; channels * bufferlength * 2];
-                            loop {
-                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
-                                    let msg = AudioMessage::EndOfStream;
-                                    channel.send(msg).unwrap();
-                                    status_channel.send(StatusMessage::CaptureDone).unwrap();
-                                    break;
-                                }
-                                //let frames = self.io.readi(&mut buf)?;
-                                let read_res = file.read_exact(&mut buf);
-                                match read_res {
-                                    Ok(_) => {}
-                                    Err(err) => {
-                                        match err.kind() {
-                                            ErrorKind::UnexpectedEof => {
-                                                let msg = AudioMessage::EndOfStream;
-                                                channel.send(msg).unwrap();
-                                                status_channel
-                                                    .send(StatusMessage::CaptureDone)
-                                                    .unwrap();
-                                                break;
-                                            }
-                                            _ => status_channel
-                                                .send(StatusMessage::CaptureError {
-                                                    message: format!("{}", err),
-                                                })
-                                                .unwrap(),
-                                        };
-                                    }
-                                };
-                                //let before = Instant::now();
-                                let chunk =
-                                    buffer_to_chunk_bytes(&buf, channels, scalefactor, bits);
-                                if (chunk.maxval - chunk.minval) > silence {
-                                    if silent_nbr > silent_limit {
-                                        eprintln!("Resuming processing");
-                                    }
-                                    silent_nbr = 0;
-                                } else if silent_limit > 0 {
-                                    if silent_nbr == silent_limit {
-                                        eprintln!("Pausing processing");
-                                    }
-                                    silent_nbr += 1;
-                                }
-                                if silent_nbr <= silent_limit {
-                                    let msg = AudioMessage::Audio(chunk);
-                                    channel.send(msg).unwrap();
-                                }
-                            }
+                    debug!("starting captureloop");
+                    let mut buf = vec![0u8; channels * bufferlength * store_bytes];
+                    loop {
+                        if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
+                            let msg = AudioMessage::EndOfStream;
+                            channel.send(msg).unwrap();
+                            status_channel.send(StatusMessage::CaptureDone).unwrap();
+                            break;
                         }
-                        SampleFormat::S24LE | SampleFormat::S32LE => {
-                            let mut buf = vec![0u8; channels * bufferlength * 4];
-                            loop {
-                                if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
-                                    let msg = AudioMessage::EndOfStream;
-                                    channel.send(msg).unwrap();
-                                    status_channel.send(StatusMessage::CaptureDone).unwrap();
-                                    break;
-                                }
-                                let read_res = file.read_exact(&mut buf);
-                                match read_res {
-                                    Ok(_) => {}
-                                    Err(err) => {
-                                        match err.kind() {
-                                            ErrorKind::UnexpectedEof => {
-                                                let msg = AudioMessage::EndOfStream;
-                                                channel.send(msg).unwrap();
-                                                status_channel
-                                                    .send(StatusMessage::CaptureDone)
-                                                    .unwrap();
-                                                break;
-                                            }
-                                            _ => status_channel
-                                                .send(StatusMessage::CaptureError {
-                                                    message: format!("{}", err),
-                                                })
-                                                .unwrap(),
-                                        };
+                        //let frames = self.io.readi(&mut buf)?;
+                        let read_res = file.read_exact(&mut buf);
+                        match read_res {
+                            Ok(_) => {}
+                            Err(err) => {
+                                match err.kind() {
+                                    ErrorKind::UnexpectedEof => {
+                                        let msg = AudioMessage::EndOfStream;
+                                        channel.send(msg).unwrap();
+                                        status_channel.send(StatusMessage::CaptureDone).unwrap();
+                                        break;
                                     }
+                                    _ => status_channel
+                                        .send(StatusMessage::CaptureError {
+                                            message: format!("{}", err),
+                                        })
+                                        .unwrap(),
                                 };
-                                let chunk =
-                                    buffer_to_chunk_bytes(&buf, channels, scalefactor, bits);
-                                if (chunk.maxval - chunk.minval) > silence {
-                                    if silent_nbr > silent_limit {
-                                        eprintln!("Resuming processing");
-                                    }
-                                    silent_nbr = 0;
-                                } else if silent_limit > 0 {
-                                    if silent_nbr == silent_limit {
-                                        eprintln!("Pausing processing");
-                                    }
-                                    silent_nbr += 1;
-                                }
-                                if silent_nbr <= silent_limit {
-                                    let msg = AudioMessage::Audio(chunk);
-                                    channel.send(msg).unwrap();
-                                }
                             }
+                        };
+                        //let before = Instant::now();
+                        let chunk = match format {
+                            SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
+                                buffer_to_chunk_bytes(&buf, channels, scalefactor, bits)
+                            }
+                            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
+                                buffer_to_chunk_float_bytes(&buf, channels, bits)
+                            }
+                        };
+                        if (chunk.maxval - chunk.minval) > silence {
+                            if silent_nbr > silent_limit {
+                                debug!("Resuming processing");
+                            }
+                            silent_nbr = 0;
+                        } else if silent_limit > 0 {
+                            if silent_nbr == silent_limit {
+                                debug!("Pausing processing");
+                            }
+                            silent_nbr += 1;
                         }
-                    };
+                        if silent_nbr <= silent_limit {
+                            let msg = AudioMessage::Audio(chunk);
+                            channel.send(msg).unwrap();
+                        }
+                    }
                 }
                 Err(err) => {
                     status_channel

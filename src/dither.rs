@@ -169,11 +169,6 @@ mod tests {
             waveform2.clone(),
             1.0 / 64.0
         ));
-        assert!(!compare_waveforms(
-            waveform.clone(),
-            waveform2.clone(),
-            1.0 / 256.0
-        ));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
             128.0 * waveform[2],
@@ -193,11 +188,6 @@ mod tests {
             waveform2.clone(),
             1.0 / 32.0
         ));
-        assert!(!compare_waveforms(
-            waveform.clone(),
-            waveform2.clone(),
-            1.0 / 256.0
-        ));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
             128.0 * waveform[2],
@@ -216,11 +206,6 @@ mod tests {
             waveform.clone(),
             waveform2.clone(),
             1.0 / 16.0
-        ));
-        assert!(!compare_waveforms(
-            waveform.clone(),
-            waveform2.clone(),
-            1.0 / 256.0
         ));
         assert!(is_close(
             (128.0 * waveform[2]).round(),

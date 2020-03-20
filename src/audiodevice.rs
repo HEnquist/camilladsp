@@ -43,7 +43,7 @@ pub trait PlaybackDevice {
 pub trait CaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::Sender<AudioMessage>,
+        channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
@@ -64,6 +64,8 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             bufferlength: conf.buffersize,
             channels,
             format,
+            target_level: conf.target_level,
+            adjust_period: conf.adjust_period,
         }),
         #[cfg(feature = "pulse-backend")]
         config::Device::Pulse {
