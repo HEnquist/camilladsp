@@ -64,7 +64,14 @@ jobs:
         with:
           command: check
           use-cross: true
-          args: --target armv7-unknown-linux-gnueabihf
+          args: --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features socketserver
+
+      - name: Run cargo test for arm
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          use-cross: true
+          args: --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features socketserver
 
 
   test:
