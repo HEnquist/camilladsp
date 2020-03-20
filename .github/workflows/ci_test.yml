@@ -57,7 +57,7 @@ jobs:
           override: true
 
       - name: Build image
-        run: docker build -t cross/armv7:v1 Armv7Dockerfile
+        run: docker build -t cross/armv7:v1 ./
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
