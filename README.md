@@ -91,29 +91,16 @@ The default logging setting prints messeges of levels "error", "warn" and "info"
 The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficents file needs to change.
 
 ## Controlling via websocket
-If the sebsocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
-The available commands are:
-- `getconfig` : read the current configuration as yaml
-  * response is the config in yaml format.
-- `getconfigname` : get name and path of current config file
-  * response is `OK:/path/to/current.yml`
-- `reload` : reload current config file (same as SIGHUP)
-  * response is `OK:RELOAD` or `ERROR:RELOAD` 
-- `exit` : exit (not yet implemented)
-- `setconfigname:/path/to/file.yml` : change config file name, not applied until `reload` is called
-  * response is `OK:/path/to/file.yml` or `ERROR:/path/to/file.yml`
-- `setconfig:<new config in yaml format>` : provide a new config as a yaml string. Applied directly.
-  * response is `OK:SETCONFIG` or `ERROR:SETCONFIG`
+See the [separate readme for the websocket server](./websocket.md)
+
+If the websocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
+
 
 
 ## Usage example: crossover for 2-way speakers
 A crossover must filter all sound being played on the system. This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device. CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
-The simplest possible processing pipeline would then consist of:
-- A source, for example a Pulse null sink
-- A Mixer to go from 2 to four channels (2 for woofers, 2 for tweeters)
-- High pass filters on the tweeter channels
-- Low pass filter on the woofer channels
-- An output device with 4 analog channel
+
+See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
 
 # Capturing audio
@@ -347,6 +334,9 @@ The available types are:
   * A second order allpass filter for a given frequency with a steepness given by the Q-value. 
 * LinkwitzTransform
   * A Linkwitz transform to change a speaker with resonance frequency ```freq_act``` and Q-value ```q_act```, to a new resonance frequency ```freq_target``` and Q-value ```q_target```.
+
+Other types such as Linkwitz-Riley crossovers can be built by combining several Biquads. [See the separate readme for more filter functions.](./filterfunctions.md)
+
 
 ### Dither
 The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several types, and the parameter "bits" sets the target bit depth. This should match the bit depth of the playback device. Example:
