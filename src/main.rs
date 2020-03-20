@@ -76,12 +76,15 @@ enum ExitStatus {
 }
 
 fn get_new_config(
+    active_config: &config::Configuration,
     config_path: &Arc<Mutex<String>>,
     active_config_shared: &Arc<Mutex<config::Configuration>>,
 ) -> Res<config::Configuration> {
-    if *config_path.lock().unwrap() == "none" {
+    let conf = active_config_shared.lock().unwrap().clone();
+    //if *config_path.lock().unwrap() == "none" {
+    if &conf != active_config {
         debug!("Reload using config from websocket");
-        let conf = active_config_shared.lock().unwrap().clone();
+        //let conf = active_config_shared.lock().unwrap().clone();
         match config::validate_config(conf.clone()) {
             Ok(()) => {
                 debug!("Config valid");
@@ -167,7 +170,7 @@ fn run(
         if signal_reload.load(Ordering::Relaxed) {
             debug!("Reloading configuration...");
             signal_reload.store(false, Ordering::Relaxed);
-            let new_config = get_new_config(&config_path, &active_config_shared);
+            let new_config = get_new_config(&active_config, &config_path, &active_config_shared);
 
             match new_config {
                 Ok(conf) => {

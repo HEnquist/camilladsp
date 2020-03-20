@@ -86,7 +86,7 @@ pub fn start_server(
                         match serde_yaml::from_str::<config::Configuration>(&config_yml) {
                             Ok(conf) => match config::validate_config(conf.clone()) {
                                 Ok(()) => {
-                                    *active_config_path_inst.lock().unwrap() = String::from("none");
+                                    //*active_config_path_inst.lock().unwrap() = String::from("none");
                                     *active_config_inst.lock().unwrap() = conf;
                                     signal_reload_inst.store(true, Ordering::Relaxed);
                                     socket.send("OK:SETCONFIG")
