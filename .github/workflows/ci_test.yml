@@ -57,10 +57,10 @@ jobs:
           override: true
 
       - name: Install Alsa devel
-        run: apt-get install libasound2-dev -y
+        run: sudo apt-get install libasound2-dev -y
 
       - name: Install PulseAudio
-        run: apt-get install libpulse0 libpulse-dev -y
+        run: sudo apt-get install libpulse0 libpulse-dev -y
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
