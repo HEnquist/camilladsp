@@ -455,7 +455,7 @@ mod tests {
         assert!(is_close(gain_f0, 0.0, 0.1));
         assert!(is_close(gain_lf, 0.0, 0.1));
         assert!(is_close(gain_hf, 0.0, 0.1));
-        assert!(is_close(phase_f0, 180.0, 0.1));
+        assert!(is_close(phase_f0.abs(), 180.0, 0.5));
         assert!(is_close(phase_lf, 0.0, 0.5));
         assert!(is_close(phase_hf, 0.0, 0.5));
     }

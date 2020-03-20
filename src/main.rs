@@ -25,7 +25,7 @@ use std::error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
-use std::{thread, time};
+use std::time;
 
 // Sample format
 #[cfg(feature = "32bit")]
@@ -47,12 +47,13 @@ mod fifoqueue;
 mod filedevice;
 mod filters;
 mod mixer;
+mod processing;
 #[cfg(feature = "pulse-backend")]
 mod pulsedevice;
 #[cfg(feature = "socketserver")]
 mod socketserver;
 
-use audiodevice::*;
+//use audiodevice::*;
 
 pub enum StatusMessage {
     PlaybackReady,
@@ -72,6 +73,46 @@ pub enum CommandMessage {
 enum ExitStatus {
     Restart(Box<config::Configuration>),
     Exit,
+}
+
+fn get_new_config(
+    config_path: &Arc<Mutex<String>>,
+    active_config_shared: &Arc<Mutex<config::Configuration>>,
+) -> Res<config::Configuration> {
+    if *config_path.lock().unwrap() == "none" {
+        debug!("Reload using config from websocket");
+        let conf = active_config_shared.lock().unwrap().clone();
+        match config::validate_config(conf.clone()) {
+            Ok(()) => {
+                debug!("Config valid");
+                Ok(conf)
+            }
+            Err(err) => {
+                error!("Invalid config file!");
+                error!("{}", err);
+                Err(err)
+            }
+        }
+    } else {
+        match config::load_config(&config_path.lock().unwrap()) {
+            Ok(conf) => match config::validate_config(conf.clone()) {
+                Ok(()) => {
+                    debug!("Reload using config file");
+                    Ok(conf)
+                }
+                Err(err) => {
+                    error!("Invalid config file!");
+                    error!("{}", err);
+                    Err(err)
+                }
+            },
+            Err(err) => {
+                error!("Config file error:");
+                error!("{}", err);
+                Err(err)
+            }
+        }
+    }
 }
 
 fn run(
@@ -104,51 +145,7 @@ fn run(
     *active_config_shared.lock().unwrap() = active_config.clone();
 
     // Processing thread
-    thread::spawn(move || {
-        let mut pipeline = filters::Pipeline::from_config(conf_proc);
-        debug!("build filters, waiting to start processing loop");
-        barrier_proc.wait();
-        loop {
-            match rx_cap.recv() {
-                Ok(AudioMessage::Audio(mut chunk)) => {
-                    trace!("AudioMessage::Audio received");
-                    chunk = pipeline.process_chunk(chunk);
-                    let msg = AudioMessage::Audio(chunk);
-                    tx_pb.send(msg).unwrap();
-                }
-                Ok(AudioMessage::EndOfStream) => {
-                    trace!("AudioMessage::EndOfStream received");
-                    let msg = AudioMessage::EndOfStream;
-                    tx_pb.send(msg).unwrap();
-                    break;
-                }
-                _ => {}
-            }
-            if let Ok((diff, new_config)) = rx_pipeconf.try_recv() {
-                trace!("Message received on config channel");
-                match diff {
-                    config::ConfigChange::Pipeline => {
-                        debug!("Rebuilding pipeline.");
-                        let new_pipeline = filters::Pipeline::from_config(new_config);
-                        pipeline = new_pipeline;
-                    }
-                    config::ConfigChange::FilterParameters { filters, mixers } => {
-                        debug!(
-                            "Updating parameters of filters: {:?}, mixers: {:?}.",
-                            filters, mixers
-                        );
-                        pipeline.update_parameters(new_config, filters, mixers);
-                    }
-                    config::ConfigChange::Devices => {
-                        let msg = AudioMessage::EndOfStream;
-                        tx_pb.send(msg).unwrap();
-                        break;
-                    }
-                    _ => {}
-                };
-            };
-        }
-    });
+    processing::run_processing(conf_proc, barrier_proc, tx_pb, rx_cap, rx_pipeconf);
 
     // Playback thread
     let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
@@ -164,47 +161,13 @@ fn run(
 
     let mut pb_ready = false;
     let mut cap_ready = false;
-    //let signal_reload = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::SIGHUP, Arc::clone(&signal_reload))?;
 
     loop {
         if signal_reload.load(Ordering::Relaxed) {
             debug!("Reloading configuration...");
             signal_reload.store(false, Ordering::Relaxed);
-            let new_config = if *config_path.lock().unwrap() == "none" {
-                debug!("Reload using config from websocket");
-                let conf = active_config_shared.lock().unwrap().clone();
-                match config::validate_config(conf.clone()) {
-                    Ok(()) => {
-                        debug!("Config valid");
-                        Ok(conf.clone())
-                    }
-                    Err(err) => {
-                        error!("Invalid config file!");
-                        error!("{}", err);
-                        Err(err)
-                    }
-                }
-            } else {
-                match config::load_config(&config_path.lock().unwrap()) {
-                    Ok(conf) => match config::validate_config(conf.clone()) {
-                        Ok(()) => {
-                            debug!("Reload using config file");
-                            Ok(conf)
-                        }
-                        Err(err) => {
-                            error!("Invalid config file!");
-                            error!("{}", err);
-                            Err(err)
-                        }
-                    },
-                    Err(err) => {
-                        error!("Config file error:");
-                        error!("{}", err);
-                        Err(err)
-                    }
-                }
-            };
+            let new_config = get_new_config(&config_path, &active_config_shared);
 
             match new_config {
                 Ok(conf) => {
@@ -214,15 +177,12 @@ fn run(
                         | config::ConfigChange::FilterParameters { .. } => {
                             tx_pipeconf.send((comp, conf.clone())).unwrap();
                             active_config = conf;
-                            //let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
                             *active_config_shared.lock().unwrap() = active_config.clone();
                             debug!("Sent changes to pipeline");
                         }
                         config::ConfigChange::Devices => {
                             debug!("Devices changed, restart required.");
-                            //tx_pipeconf.send((comp, new_config.clone())).unwrap();
                             tx_command_cap.send(CommandMessage::Exit).unwrap();
-                            //tx_command_pb.send(CommandMessage::Exit).unwrap();
                             trace!("Wait for pb..");
                             pb_handle.join().unwrap();
                             trace!("Wait for cap..");

@@ -16,7 +16,9 @@ Making a Bessel filter with a set of Biquads requires creating several Biquads, 
 | 6| 1.9047076123   | 1.68916826762  | 1.60391912877  |                |
 | 7| 1.68436817927* | 2.04949090027  | 1.82241747886  | 1.71635604487  |
 | 8| 2.18872623053  | 1.95319575902  | 1.8320926012   | 1.77846591177  |
+
 The asterisk (*) indicates that this is a 1st order filter. 
+
 
 ## Q values:
 | Order | Biquad 1   | Biquad 2  | Biquad 3  | Biquad 4 |
@@ -43,9 +45,10 @@ Let's make a 5th order Lowpass at 1 kHz. Loking at the tables we see that we nee
   * q = 0.563535620851
 
 # Butterworth and Linkwitz-Riley
-For an Nth order Butterworth (N even or odd) you will have N/2 biquad
-sections ((N-1)/2 for odd N or floor(N/2) for either even or odd N),
-each will have the same resonant frequency w0 and will have Q:
+For an Nth order Butterworth you will have N/2 biquad
+sections if N is even, and ((N+1)/2 if N is odd.
+For odd filters one of the Biquads will be a first order filter.
+Each filter will have the same resonant frequency f0 and the second order filters will have Q according to this formula:
 ```
 Q = 1/( 2*sin((pi/N)*(n + 1/2)) )
 ```
