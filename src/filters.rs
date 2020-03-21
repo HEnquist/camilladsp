@@ -177,7 +177,7 @@ impl Pipeline {
                         channel,
                         names,
                         conf.filters.clone(),
-                        conf.devices.buffersize,
+                        conf.devices.chunksize,
                         conf.devices.samplerate,
                     );
                     steps.push(PipelineStep::FilterStep(fltgrp));

@@ -124,8 +124,8 @@ fn run(
     active_config_shared: Arc<Mutex<config::Configuration>>,
     config_path: Arc<Mutex<String>>,
 ) -> Res<ExitStatus> {
-    let (tx_pb, rx_pb) = mpsc::sync_channel(128);
-    let (tx_cap, rx_cap) = mpsc::sync_channel(128);
+    let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.queuelimit);
+    let (tx_cap, rx_cap) = mpsc::sync_channel(conf.devices.queuelimit);
 
     let (tx_status, rx_status) = mpsc::channel();
     let tx_status_pb = tx_status.clone();

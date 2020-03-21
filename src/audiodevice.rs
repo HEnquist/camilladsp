@@ -61,7 +61,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
         } => Box::new(alsadevice::AlsaPlaybackDevice {
             devname: device,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
             target_level: conf.target_level,
@@ -75,7 +75,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
         } => Box::new(pulsedevice::PulsePlaybackDevice {
             devname: device,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
         }),
@@ -86,7 +86,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
         } => Box::new(filedevice::FilePlaybackDevice {
             filename,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
         }),
@@ -104,7 +104,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(alsadevice::AlsaCaptureDevice {
             devname: device,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
             silence_threshold: conf.silence_threshold,
@@ -118,7 +118,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(pulsedevice::PulseCaptureDevice {
             devname: device,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
             silence_threshold: conf.silence_threshold,
@@ -131,7 +131,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(filedevice::FileCaptureDevice {
             filename,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
             silence_threshold: conf.silence_threshold,

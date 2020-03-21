@@ -55,7 +55,7 @@ The command is simply:
 ```
 camilladsp /path/to/config.yml
 ```
-This starts the processing defined in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is complete and valid. When an error is found it displays an error message describing the problem.
+This starts the processing defined in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is complete and valid. When an error is found it displays an error message describing the problem. See more about the configuration file below.
 
 ### Command line options
 Starting with the --help flag prints a short help message:
@@ -134,18 +134,28 @@ pacmd list-sources
 
 # Configuration
 
+## The YAML format
+CamillaDSP is using the YAML format for the configuration file. This is a standard format that was chosen because of its nice readable syntax. The Serde library is used for reading the configuration. 
+There are a few things to keep in mind with YAML. The configuration is a tree, and the level is determined by the indentation level. For YAML the indentation is as important as opening and closing brackets in other formats. If it's wrong, Serde might not be able to give a good description of what the error is, only that the file is invalid. 
+If you get strange errors, first check that the indentation is correct. Also check that you only use spaces and no tabs. Many text editors can help by highlighting syntax errors in the file. 
+
 ## Devices
-Input and output devices are defined in the same way. A device needs a type (Alsa, Pulse or File), number of channels, a device name (or file name for File), and a sample format. Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE) as well as floats of 32 and 64 bits (FLOAT32LE and FLOAT64LE). Note that PulseAudio does not support 64-bit float. 
-There is also a common samplerate that decides the samplerate that everything will run at. The buffersize is the number of samples each chunk will have per channel. 
-The fields silence_threshold and silence_timeout are optional and used to pause processing if the input is silent. The threshold is the threshold level in dB, and the level is calculated as the difference between the minimum and maximum sample values for all channels in the capture buffer. 0 dB is full level. Some experimentation might be needed to find the right threshold.
-The timeout (in seconds) is for how long the signal should be silent before pausing processing. Set this to zero, or leave it out, to never pause.
-For the special case where the capture device is an Alsa Loopback device, and the playback device another Alsa device, there is a funtion to synchronize the Loopback device to the playback device. This avoids the problems of buffer underruns or slowly increasing delay. This function requires the parameter "target_level" to be set. It will take some experimentation to find the right number. If it's too small there will be buffer underruns from time to time, and making it too large might lead to a longer input-output delay than what is acceptable. Suitable values are in the range 1/2 to 1 times the buffersize. The "adjust_period" sets the interval between corrections and is optional. The default is 10 seconds.
+Input and output devices are defined in the same way. A device needs a `type` (Alsa, Pulse or File), number of channels, a device name `device` (or `filename` for File), and a sample format (`format`). Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE) as well as floats of 32 and 64 bits (FLOAT32LE and FLOAT64LE). Note that PulseAudio does not support 64-bit float. 
+There is also a common `samplerate` that decides the samplerate that everything will run at. The `chunksize` is the number of samples each chunk will have per channel. (This was called  `buffersize` in early versions, and this name is still allowed for compatibility.)
+
+The field `queuelimit` shoudl normally be left out to use the default. It sets the limit for the length of the queues between the capture device and the processing thread, and between the processing thread and the playback device. The total queue size limit will be 2*`chunksize`*`queuelimit` samples per chanel. This should only be changed if the capture device provides data fast than the playback device can play it. This will only be the case when piping data in via the file capture device, and will lead to very high cpu usage while the queues are being filled. If this is a problem, set `queuelimit` to a low value like 1.
+
+The fields `silence_threshold` and `silence_timeout` are optional and used to pause processing if the input is silent. The threshold is the threshold level in dB, and the level is calculated as the difference between the minimum and maximum sample values for all channels in the capture buffer. 0 dB is full level. Some experimentation might be needed to find the right threshold.
+The `timeout` (in seconds) is for how long the signal should be silent before pausing processing. Set this to zero, or leave it out, to never pause.
+
+For the special case where the capture device is an Alsa Loopback device, and the playback device another Alsa device, there is a funtion to synchronize the Loopback device to the playback device. This avoids the problems of buffer underruns or slowly increasing delay. This function requires the parameter `target_level` to be set. It will take some experimentation to find the right number. If it's too small there will be buffer underruns from time to time, and making it too large might lead to a longer input-output delay than what is acceptable. Suitable values are in the range 1/2 to 1 times the `chunksize`. The `adjust_period` sets the interval between corrections and is optional. The default is 10 seconds.
 
 Example config (note that parameters marked (*) can be left out to use their default values):
 ```
 devices:
   samplerate: 44100
-  buffersize: 1024
+  chunksize: 1024
+  queuelimit: 128 (*)
   silence_threshold: -60 (*)
   silence_timeout: 3.0 (*)
   target_level: 500 (*)

@@ -70,7 +70,11 @@ pub enum Device {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Devices {
     pub samplerate: usize,
-    pub buffersize: usize,
+    // alias to allow old name buffersize
+    #[serde(alias = "buffersize")]
+    pub chunksize: usize,
+    #[serde(default = "default_queuelimit")]
+    pub queuelimit: usize,
     #[serde(default)]
     pub silence_threshold: PrcFmt,
     #[serde(default)]
@@ -85,6 +89,10 @@ pub struct Devices {
 
 fn default_period() -> f32 {
     10.0
+}
+
+fn default_queuelimit() -> usize {
+    100
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -362,7 +370,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
-    if conf.devices.target_level >= 2 * conf.devices.buffersize {
+    if conf.devices.target_level >= 2 * conf.devices.chunksize {
         return Err(Box::new(ConfigError::new("target_level is too large.")));
     }
     if conf.devices.adjust_period <= 0.0 {

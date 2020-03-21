@@ -291,7 +291,10 @@ def main():
     print(conf)
 
     srate = conf['devices']['samplerate']
-    buflen = conf['devices']['buffersize']
+    if "chunksize" in conf['devices']:
+        buflen = conf['devices']['chunksize']
+    else:
+        buflen = conf['devices']['buffersize']
     print (srate)
     fignbr = 1
 
