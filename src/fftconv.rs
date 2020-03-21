@@ -235,10 +235,10 @@ mod tests {
         let exp4 = Vec::from(&coeffs[24..32]);
         let exp5 = vec![0.0 as PrcFmt; 8];
 
-        assert!(compare_waveforms(wave1, exp1, 1e-7));
-        assert!(compare_waveforms(wave2, exp2, 1e-7));
-        assert!(compare_waveforms(wave3, exp3, 1e-7));
-        assert!(compare_waveforms(wave4, exp4, 1e-7));
-        assert!(compare_waveforms(wave5, exp5, 1e-7));
+        assert!(compare_waveforms(wave1, exp1, 1e-5));
+        assert!(compare_waveforms(wave2, exp2, 1e-5));
+        assert!(compare_waveforms(wave3, exp3, 1e-5));
+        assert!(compare_waveforms(wave4, exp4, 1e-5));
+        assert!(compare_waveforms(wave5, exp5, 1e-5));
     }
 }

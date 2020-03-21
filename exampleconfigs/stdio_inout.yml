@@ -1,0 +1,16 @@
+---
+devices:
+  samplerate: 44100
+  buffersize: 1024
+  silence_threshold: -60
+  silence_timeout: 3.0
+  capture:
+    type: File
+    channels: 2
+    filename: "/dev/stdin"
+    format: S16LE
+  playback:
+    type: File
+    channels: 2
+    filename: "/dev/stdout"
+    format: S16LE

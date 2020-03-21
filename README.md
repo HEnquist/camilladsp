@@ -29,6 +29,9 @@ Use recent stable versions of rustc and cargo. The minimum rustc version is 1.36
 By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
 
 By default the internal processing is done using 64-bit floats. There is a possibility to switch this to 32-bit floats. This might be useful for speeding up the processing when running on a 32-bit CPU (or a 64-bit CPU running in 32-bit mode), but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
+
+CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "socketserver". For usage see the section "Controlling via websocket".
+
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
@@ -58,12 +61,12 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.0.9
+CamillaDSP 0.0.10
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
 USAGE:
-    camilladsp [FLAGS] <configfile>
+    camilladsp [FLAGS] [OPTIONS] <configfile>
 
 FLAGS:
     -c, --check      Check config file and exit
@@ -71,10 +74,15 @@ FLAGS:
     -V, --version    Prints version information
     -v               Increase message verbosity
 
+OPTIONS:
+    -p, --port <port>    Port for websocket server
+
 ARGS:
     <configfile>    The configuration file to use
 ```
 If the "check" flag is given, the program will exit after checking the configuration file. Use this if you only want to verify that the configuration is ok, and not start any processing.
+
+To enable the websocket server, provide a port number with the -p option. Leave it out, or give 0 to disable.
 
 The default logging setting prints messeges of levels "error", "warn" and "info". By passing the verbosity flag once, "-v" it also prints "debug". If and if's given twice, "-vv", it also prints "trace" messages. 
 
@@ -82,15 +90,17 @@ The default logging setting prints messeges of levels "error", "warn" and "info"
 ### Reloading the configuration
 The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficents file needs to change.
 
+## Controlling via websocket
+See the [separate readme for the websocket server](./websocket.md)
+
+If the websocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
+
+
 
 ## Usage example: crossover for 2-way speakers
 A crossover must filter all sound being played on the system. This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device. CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
-The simplest possible processing pipeline would then consist of:
-- A source, for example a Pulse null sink
-- A Mixer to go from 2 to four channels (2 for woofers, 2 for tweeters)
-- High pass filters on the tweeter channels
-- Low pass filter on the woofer channels
-- An output device with 4 analog channel
+
+See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
 
 # Capturing audio
@@ -324,6 +334,9 @@ The available types are:
   * A second order allpass filter for a given frequency with a steepness given by the Q-value. 
 * LinkwitzTransform
   * A Linkwitz transform to change a speaker with resonance frequency ```freq_act``` and Q-value ```q_act```, to a new resonance frequency ```freq_target``` and Q-value ```q_target```.
+
+Other types such as Linkwitz-Riley crossovers can be built by combining several Biquads. [See the separate readme for more filter functions.](./filterfunctions.md)
+
 
 ### Dither
 The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several types, and the parameter "bits" sets the target bit depth. This should match the bit depth of the playback device. Example:
