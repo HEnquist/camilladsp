@@ -41,6 +41,7 @@ mod basicfilters;
 mod biquad;
 mod config;
 mod conversions;
+mod diffeq;
 mod dither;
 mod fftconv;
 mod fifoqueue;
