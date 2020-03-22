@@ -143,7 +143,7 @@ If you get strange errors, first check that the indentation is correct. Also che
 Input and output devices are defined in the same way. A device needs a `type` (Alsa, Pulse or File), number of channels, a device name `device` (or `filename` for File), and a sample format (`format`). Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE) as well as floats of 32 and 64 bits (FLOAT32LE and FLOAT64LE). Note that PulseAudio does not support 64-bit float. 
 There is also a common `samplerate` that decides the samplerate that everything will run at. The `chunksize` is the number of samples each chunk will have per channel. (This was called  `buffersize` in early versions, and this name is still allowed for compatibility.)
 
-The field `queuelimit` shoudl normally be left out to use the default. It sets the limit for the length of the queues between the capture device and the processing thread, and between the processing thread and the playback device. The total queue size limit will be 2*`chunksize`*`queuelimit` samples per chanel. This should only be changed if the capture device provides data fast than the playback device can play it. This will only be the case when piping data in via the file capture device, and will lead to very high cpu usage while the queues are being filled. If this is a problem, set `queuelimit` to a low value like 1.
+The field `queuelimit` should normally be left out to use the default. It sets the limit for the length of the queues between the capture device and the processing thread, and between the processing thread and the playback device. The total queue size limit will be 2*`chunksize`*`queuelimit` samples per channel. This should only be changed if the capture device provides data faster than the playback device can play it. This will only be the case when piping data in via the file capture device, and will lead to very high cpu usage while the queues are being filled. If this is a problem, set `queuelimit` to a low value like 1.
 
 The fields `silence_threshold` and `silence_timeout` are optional and used to pause processing if the input is silent. The threshold is the threshold level in dB, and the level is calculated as the difference between the minimum and maximum sample values for all channels in the capture buffer. 0 dB is full level. Some experimentation might be needed to find the right threshold.
 The `timeout` (in seconds) is for how long the signal should be silent before pausing processing. Set this to zero, or leave it out, to never pause.
@@ -364,6 +364,19 @@ The available types are
 - None, just quantize without dither. Only useful with small target bit depth for demonstation.
 
 To test the differenc types, set the target bit depth to something very small like 5 bits and try them all.
+
+
+### Difference equation
+The "DiffEq" filter implements a generic difference equation filter with transfer function:
+H(z) = (b0 + b1*z^-1 + .. + bn*z^-n)/(a0 + a1*z^-1 + .. + an*z^-n). The coeffients are given as a list a0..an in that order. Example:
+```
+  example_diffeq:
+    type: DiffEq
+    parameters:
+      a: [1.0, -0.1462978543780541, 0.005350765548905586]
+      b: [0.21476322779271284, 0.4295264555854257, 0.21476322779271284]
+```
+This example implements a Biquad lowpass, but for a Biquad the Free Biquad type is faster and should be preferred. Both a and b are optional. If left out, they defualt to [1.0].
 
 
 ## Pipeline
