@@ -6,7 +6,6 @@ use config;
 use PrcFmt;
 use Res;
 
-
 #[derive(Clone, Debug)]
 pub struct DiffEq {
     pub x: Vec<PrcFmt>,
@@ -21,20 +20,10 @@ pub struct DiffEq {
 }
 
 impl DiffEq {
-    pub fn new(name: String, a_in: Vec<PrcFmt>, b_in: Vec<PrcFmt>,) -> Self {
-        let a = if a_in.is_empty() {
-            vec![1.0]
-        }
-        else {
-            a_in
-        };
+    pub fn new(name: String, a_in: Vec<PrcFmt>, b_in: Vec<PrcFmt>) -> Self {
+        let a = if a_in.is_empty() { vec![1.0] } else { a_in };
 
-        let b = if b_in.is_empty() {
-            vec![1.0]
-        }
-        else {
-            b_in
-        };
+        let b = if b_in.is_empty() { vec![1.0] } else { b_in };
 
         let x = vec![0.0; b.len()];
         let y = vec![0.0; a.len()];
@@ -62,11 +51,11 @@ impl DiffEq {
         self.x[self.idx_x] = input;
         for n in 0..self.b_len {
             let n_idx = (self.idx_x + self.b_len - n) % self.b_len;
-            out += self.b[n]*self.x[n_idx];
+            out += self.b[n] * self.x[n_idx];
         }
         for p in 1..self.a_len {
             let p_idx = (self.idx_y + self.a_len - p) % self.a_len;
-            out -= self.a[p]*self.y[p_idx];
+            out -= self.a[p] * self.y[p_idx];
         }
         self.y[self.idx_y] = out;
         out
@@ -86,9 +75,9 @@ impl Filter for DiffEq {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        //if let config::Filter::Biquad { parameters: conf } = conf {
-        //    let coeffs = BiquadCoefficients::from_config(self.samplerate, conf);
-        //    self.coeffs = coeffs;
+        //if let config::Filter::DiffEq { parameters: conf } = conf {
+        //    let name = self.name.clone();
+        //    *self = DiffEq::from_config(name, conf);
         //} else {
         //    // This should never happen unless there is a bug somewhere else
         //    panic!("Invalid config change!");
@@ -118,12 +107,14 @@ mod tests {
 
     #[test]
     fn check_result() {
-        let mut filter = DiffEq::new("test".to_string(), vec![1.0, -0.1462978543780541, 0.005350765548905586], vec![0.21476322779271284, 0.4295264555854257, 0.21476322779271284]);
+        let mut filter = DiffEq::new(
+            "test".to_string(),
+            vec![1.0, -0.1462978543780541, 0.005350765548905586],
+            vec![0.21476322779271284, 0.4295264555854257, 0.21476322779271284],
+        );
         let mut wave = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let expected = vec![0.215, 0.461, 0.281, 0.039, 0.004, 0.0, 0.0, 0.0];
         filter.process_waveform(&mut wave).unwrap();
         assert!(compare_waveforms(wave, expected, 1e-3));
     }
-
- 
 }
