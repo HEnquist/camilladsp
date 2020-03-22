@@ -114,6 +114,9 @@ pub enum Filter {
     Dither {
         parameters: DitherParameters,
     },
+    DiffEq {
+        parameters: DiffEqParameters,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -247,6 +250,14 @@ pub enum DitherParameters {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DiffEqParameters {
+    #[serde(default)]
+    pub a: Vec<PrcFmt>,
+    #[serde(default)]
+    pub b: Vec<PrcFmt>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MixerChannels {
     pub r#in: usize,
     pub out: usize,
@@ -351,7 +362,8 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
             | (Filter::Conv { .. }, Filter::Conv { .. })
             | (Filter::Delay { .. }, Filter::Delay { .. })
             | (Filter::Gain { .. }, Filter::Gain { .. })
-            | (Filter::Dither { .. }, Filter::Dither { .. }) => {}
+            | (Filter::Dither { .. }, Filter::Dither { .. })
+            | (Filter::DiffEq { .. }, Filter::DiffEq { .. }) => {}
             _ => {
                 return ConfigChange::Pipeline;
             }

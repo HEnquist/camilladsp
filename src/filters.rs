@@ -2,6 +2,7 @@ use audiodevice::AudioChunk;
 use basicfilters;
 use biquad;
 use config;
+use diffeq;
 use dither;
 use fftconv;
 use mixer;
@@ -121,7 +122,10 @@ impl FilterGroup {
                     }
                     config::Filter::Dither { parameters } => {
                         Box::new(dither::Dither::from_config(name, parameters))
-                    } //_ => panic!("unknown type")
+                    }
+                    config::Filter::DiffEq { parameters } => {
+                        Box::new(diffeq::DiffEq::from_config(name, parameters))
+                    }
                 };
             filters.push(filter);
         }
@@ -246,7 +250,8 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
             Ok(())
         }
         config::Filter::Gain { .. } => Ok(()),
-        config::Filter::Dither { .. } => Ok(()), //_ => panic!("unknown type")
+        config::Filter::Dither { .. } => Ok(()),
+        config::Filter::DiffEq { .. } => Ok(()),
     }
 }
 

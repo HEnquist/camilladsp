@@ -43,6 +43,12 @@ impl DiffEq {
         }
     }
 
+    pub fn from_config(name: String, conf: config::DiffEqParameters) -> Self {
+        let a = conf.a;
+        let b = conf.b;
+        DiffEq::new(name, a, b)
+    }
+
     /// Process a single sample
     fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
         let mut out = 0.0;
@@ -75,13 +81,13 @@ impl Filter for DiffEq {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        //if let config::Filter::DiffEq { parameters: conf } = conf {
-        //    let name = self.name.clone();
-        //    *self = DiffEq::from_config(name, conf);
-        //} else {
-        //    // This should never happen unless there is a bug somewhere else
-        //    panic!("Invalid config change!");
-        //}
+        if let config::Filter::DiffEq { parameters: conf } = conf {
+            let name = self.name.clone();
+            *self = DiffEq::from_config(name, conf);
+        } else {
+            // This should never happen unless there is a bug somewhere else
+            panic!("Invalid config change!");
+        }
     }
 }
 
