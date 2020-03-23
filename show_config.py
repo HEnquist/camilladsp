@@ -54,6 +54,33 @@ class Conv(object):
         t = np.linspace(0, len(self.impulse)/self.fs, len(self.impulse), endpoint=False)
         return t, self.impulse
 
+class DiffEq(object):
+    def __init__(self, conf, fs):
+        self.fs = fs
+        self.a = conf['a']
+        self.b = conf['b']
+        if len(self.a)==0:
+            self.a=[1.0]
+        if len(self.b)==0:
+            self.b=[1.0]
+
+    def gain_and_phase(self, f):
+        z = np.exp(1j*2*np.pi*f/self.fs);
+        A1=np.zeros(z.shape)
+        for n, bn in enumerate(self.b):
+            A1 = A1 + bn*z**(-n)
+        A2=np.zeros(z.shape)
+        for n, an in enumerate(self.a):
+            A2 = A2 + an*z**(-n)  
+        A = A1/A2  
+        gain = 20*np.log10(np.abs(A))
+        phase = 180/np.pi*np.angle(A)
+        return gain, phase
+    
+    def is_stable(self):
+        # TODO
+        return None
+
 class Biquad(object):
     def __init__(self, conf, fs):
         ftype = conf['type']
@@ -105,6 +132,18 @@ class Biquad(object):
             a0 = 1.0 + (alpha / ampl)
             a1 = -2.0 * cs
             a2 = 1.0 - (alpha / ampl)
+        elif ftype == "HighshelfFO":
+            freq = conf['freq']
+            gain = conf['gain']
+            omega = 2.0 * np.pi * freq / fs
+            ampl = 10.0**(gain / 40.0)
+            tn = np.tan(omega/2)
+            b0 = ampl*tn + ampl**2
+            b1 = ampl*tn - ampl**2
+            b2 = 0.0
+            a0 = ampl*tn + 1
+            a1 = ampl*tn - 1
+            a2 = 0.0
         elif ftype == "Highshelf":
             freq = conf['freq']
             slope = conf['slope']
@@ -121,6 +160,18 @@ class Biquad(object):
             a0 = (ampl + 1.0) - (ampl - 1.0) * cs + beta
             a1 = 2.0 * ((ampl - 1.0) - (ampl + 1.0) * cs)
             a2 = (ampl + 1.0) - (ampl - 1.0) * cs - beta
+        elif ftype == "LowshelfFO":
+            freq = conf['freq']
+            gain = conf['gain']
+            omega = 2.0 * np.pi * freq / fs
+            ampl = 10.0**(gain / 40.0)
+            tn = np.tan(omega/2)
+            b0 = ampl**2*tn + ampl
+            b1 = ampl**2*tn - ampl
+            b2 = 0.0
+            a0 = tn + ampl
+            a1 = tn - ampl
+            a2 = 0.0
         elif ftype == "Lowshelf":
             freq = conf['freq']
             slope = conf['slope']
@@ -198,6 +249,17 @@ class Biquad(object):
             a0 = 1.0 + alpha
             a1 = -2.0 * cs
             a2 = 1.0 - alpha
+        elif ftype == "AllpassFO":
+            freq = conf['freq']
+            omega = 2.0 * np.pi * freq / fs
+            tn = np.tan(omega/2.0)
+            alpha = (tn + 1.0)/(tn - 1.0)
+            b0 = 1.0
+            b1 = alpha
+            b2 = 0.0
+            a0 = alpha
+            a1 = 1.0
+            a2 = 0.0
         elif ftype == "LinkwitzTransform":
             f0 = conf['freq_act']
             q0 = conf['q_act']
@@ -291,37 +353,46 @@ def main():
     print(conf)
 
     srate = conf['devices']['samplerate']
-    if "chunksize" in conf['devices']:
-        buflen = conf['devices']['chunksize']
-    else:
-        buflen = conf['devices']['buffersize']
-    print (srate)
+    #if "chunksize" in conf['devices']:
+    #    buflen = conf['devices']['chunksize']
+    #else:
+    #    buflen = conf['devices']['buffersize']
+    #print (srate)
     fignbr = 1
 
     if 'filters' in conf:
-        fvect = np.linspace(1, (srate*0.95)/2.0, 10*buflen)
+        fvect = np.linspace(1, (srate*0.95)/2.0, 10000)
         for filter, fconf in conf['filters'].items():
-            if fconf['type'] == 'Biquad':
-                kladd = Biquad(fconf['parameters'], srate)
-                plt.figure(fignbr)
+            if fconf['type'] in ('Biquad', 'DiffEq'):
+                if fconf['type'] == 'DiffEq':
+                    kladd = DiffEq(fconf['parameters'], srate)
+                else:
+                    kladd = Biquad(fconf['parameters'], srate)
+                plt.figure(num=filter)
                 magn, phase = kladd.gain_and_phase(fvect)
                 stable = kladd.is_stable()
+                plt.subplot(2,1,1)
                 plt.semilogx(fvect, magn)
-                plt.title("{}, stable: {}".format(filter, stable))
+                plt.title("{}, stable: {}\nMagnitude".format(filter, stable))
+                plt.subplot(2,1,2)
+                plt.semilogx(fvect, phase)
+                plt.title("Phase")
                 fignbr += 1
             elif fconf['type'] == 'Conv':
                 if 'parameters' in fconf:
                     kladd = Conv(fconf['parameters'], srate)
                 else:
                     kladd = Conv(None, srate)
-                plt.figure(fignbr)
+                plt.figure(num=filter)
                 ftemp, magn, phase = kladd.gain_and_phase()
+                plt.subplot(2,1,1)
                 plt.semilogx(ftemp, magn)
                 plt.title("FFT of {}".format(filter))
                 plt.gca().set(xlim=(10, srate/2.0))
-                fignbr += 1
-                plt.figure(fignbr)
+                #fignbr += 1
+                #plt.figure(fignbr)
                 t, imp = kladd.get_impulse()
+                plt.subplot(2,1,2)
                 plt.plot(t, imp)
                 plt.title("Impulse response of {}".format(filter))
                 fignbr += 1

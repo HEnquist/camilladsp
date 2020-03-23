@@ -140,16 +140,6 @@ There are a few things to keep in mind with YAML. The configuration is a tree, a
 If you get strange errors, first check that the indentation is correct. Also check that you only use spaces and no tabs. Many text editors can help by highlighting syntax errors in the file. 
 
 ## Devices
-Input and output devices are defined in the same way. A device needs a `type` (Alsa, Pulse or File), number of channels, a device name `device` (or `filename` for File), and a sample format (`format`). Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE) as well as floats of 32 and 64 bits (FLOAT32LE and FLOAT64LE). Note that PulseAudio does not support 64-bit float. 
-There is also a common `samplerate` that decides the samplerate that everything will run at. The `chunksize` is the number of samples each chunk will have per channel. (This was called  `buffersize` in early versions, and this name is still allowed for compatibility.)
-
-The field `queuelimit` should normally be left out to use the default. It sets the limit for the length of the queues between the capture device and the processing thread, and between the processing thread and the playback device. The total queue size limit will be 2*`chunksize`*`queuelimit` samples per channel. This should only be changed if the capture device provides data faster than the playback device can play it. This will only be the case when piping data in via the file capture device, and will lead to very high cpu usage while the queues are being filled. If this is a problem, set `queuelimit` to a low value like 1.
-
-The fields `silence_threshold` and `silence_timeout` are optional and used to pause processing if the input is silent. The threshold is the threshold level in dB, and the level is calculated as the difference between the minimum and maximum sample values for all channels in the capture buffer. 0 dB is full level. Some experimentation might be needed to find the right threshold.
-The `timeout` (in seconds) is for how long the signal should be silent before pausing processing. Set this to zero, or leave it out, to never pause.
-
-For the special case where the capture device is an Alsa Loopback device, and the playback device another Alsa device, there is a funtion to synchronize the Loopback device to the playback device. This avoids the problems of buffer underruns or slowly increasing delay. This function requires the parameter `target_level` to be set. It will take some experimentation to find the right number. If it's too small there will be buffer underruns from time to time, and making it too large might lead to a longer input-output delay than what is acceptable. Suitable values are in the range 1/2 to 1 times the `chunksize`. The `adjust_period` sets the interval between corrections and is optional. The default is 10 seconds.
-
 Example config (note that parameters marked (*) can be left out to use their default values):
 ```
 devices:
@@ -171,12 +161,88 @@ devices:
     device: "hw:Generic_1"
     format: S32LE
 ```
+* `samplerate`
 
-The File device type reads or writes to a file. The format is raw interleaved samples, 2 bytes per sample for 16-bit, and 4 bytes per sample for 24 and 32 bits. If the capture device reaches the end of a file, the program will exit once all chunks have been played. Note that delayed sound that would end up in a later chunk will be cut off. By setting the filename to ```/dev/stdin``` for capture, or ```/dev/stdout``` for playback, the sound will be written to or read from stdio, so one can play with pipes:
-```
-camilladsp stdio_capt.yml > rawfile.dat
-cat rawfile.dat | camilladsp stdio_pb.yml
-```
+  The `samplerate` setting decides the samplerate that everything will run at. 
+  This rate must be supported by both the capture and  playback device.
+
+* `chunksize`
+
+  All processing is done in chunks of data. The `chunksize` is the number of samples each chunk will have per channel. 
+  It's good if the number is an "easy" number like a power of two, since this speeds up the FFT in the Convolution filter. 
+  A good value to start at is 1024. 
+  If you have long FIR filters you can make this larger to reduce CPU usage. 
+  Try increasing in factors of two, to 2048, 4096 etc. 
+  The duration in seconds of a chunk is `chunksize/samplerate`, so a value of 1024 at 44.1kHz corresponds to 23 ms per chunk.
+
+* `queuelimit` (optional)
+
+  The field `queuelimit` should normally be left out to use the default of 128. 
+  It sets the limit for the length of the queues between the capture device and the processing thread, 
+  and between the processing thread and the playback device. 
+  The total queue size limit will be `2*chunksize*queuelimit` samples per channel. 
+  The maximum RAM usage is `8*2*chunksize*queuelimit` bytes. 
+  For example at the default setting of 128 and a chunksize of 1024, the total size limit of the queues 
+  is about 2MB (or 1MB if the 32bit compile option is used). 
+  The queues are allocated as needed, this value only sets an upper limit. 
+
+  The value should only be changed if the capture device provides data faster 
+  than the playback device can play it. 
+  This will only be the case when piping data in via the file capture device, 
+  and will lead to very high cpu usage while the queues are being filled. 
+  If this is a problem, set `queuelimit` to a low value like 1.
+
+* `target_level` & `adjust_period` (optional)
+  For the special case where the capture device is an Alsa Loopback device, 
+  and the playback device another Alsa device, there is a funtion to synchronize 
+  the Loopback device to the playback device. 
+  This avoids the problems of buffer underruns or slowly increasing delay. 
+  This function requires the parameter `target_level` to be set. 
+  The value is the number of samples that should be left in the buffer of the playback device
+  when the next chunk arrives. It works by fine tuning the sample rate of the virtual Loopback device.
+  It will take some experimentation to find the right number. 
+  If it's too small there will be buffer underruns from time to time, 
+  and making it too large might lead to a longer input-output delay than what is acceptable. 
+  Suitable values are in the range 1/2 to 1 times the `chunksize`. 
+
+  The `adjust_period` parameter is used to set the interval between corrections. 
+  The default is 10 seconds.
+
+* `silence_threshold` & `silence_timeout` (optional)
+  The fields `silence_threshold` and `silence_timeout` are optional 
+  and used to pause processing if the input is silent. 
+  The threshold is the threshold level in dB, and the level is calculated as the difference 
+  between the minimum and maximum sample values for all channels in the capture buffer. 
+  0 dB is full level. Some experimentation might be needed to find the right threshold.
+
+  The `silence_timeout` (in seconds) is for how long the signal should be silent before pausing processing. 
+  Set this to zero, or leave it out, to never pause.
+ 
+* `capture` and `playback`
+  Input and output devices are defined in the same way. 
+  A device needs:
+  * `type`: Alsa, Pulse or File 
+  * `channels`: number of channels
+  * `device`: device name (for Alsa and Pulse)
+  *  `filename` path the the file (for File)
+  * `format`: sample format.
+
+    Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
+    * S16LE
+    * S24LE
+    * S32LE 
+    * FLOAT32LE
+    * FLOAT64LE (not supported by PulseAudio)
+
+  The File device type reads or writes to a file. 
+  The format is raw interleaved samples, 2 bytes per sample for 16-bit, 
+  and 4 bytes per sample for 24 and 32 bits. 
+  If the capture device reaches the end of a file, the program will exit once all chunks have been played. 
+  Note that delayed sound that would end up in a later chunk will be cut off. By setting the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback, the sound will be written to or read from stdio, so one can play with pipes:
+  ```
+  > camilladsp stdio_capt.yml > rawfile.dat
+  > cat rawfile.dat | camilladsp stdio_pb.yml
+  ```
 
 
 ## Mixers
