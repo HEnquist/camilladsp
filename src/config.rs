@@ -205,8 +205,8 @@ pub enum BiquadParameters {
         freq: PrcFmt,
         q: PrcFmt,
     },
-    AllpassFO { 
-        freq: PrcFmt, 
+    AllpassFO {
+        freq: PrcFmt,
     },
     Bandpass {
         freq: PrcFmt,

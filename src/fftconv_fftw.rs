@@ -1,9 +1,9 @@
 use crate::filters::Filter;
 use config;
-use filters;
 use fftw::array::AlignedVec;
 use fftw::plan::*;
 use fftw::types::*;
+use filters;
 
 // Sample format
 use PrcFmt;
@@ -20,47 +20,46 @@ pub struct FFTConv {
     overlap: Vec<PrcFmt>,
     coeffs_f: Vec<AlignedVec<ComplexFmt>>,
     #[cfg(feature = "32bit")]
-    fft: C2CPlan32,
+    fft: R2CPlan32,
     #[cfg(not(feature = "32bit"))]
-    fft: C2CPlan64,
+    fft: R2CPlan64,
     #[cfg(feature = "32bit")]
-    ifft: C2CPlan32,
+    ifft: C2RPlan32,
     #[cfg(not(feature = "32bit"))]
-    ifft: C2CPlan64,
-    input_buf: AlignedVec<ComplexFmt>,
+    ifft: C2RPlan64,
+    input_buf: AlignedVec<PrcFmt>,
     input_f: Vec<AlignedVec<ComplexFmt>>,
     temp_buf: AlignedVec<ComplexFmt>,
-    output_buf: AlignedVec<ComplexFmt>,
+    output_buf: AlignedVec<PrcFmt>,
     index: usize,
 }
 
 impl FFTConv {
     /// Create a new FFT colvolution filter.
     pub fn new(name: String, data_length: usize, coeffs: &[PrcFmt]) -> Self {
-        let input_buf = AlignedVec::<ComplexFmt>::new(2 * data_length);
-        let temp_buf = AlignedVec::<ComplexFmt>::new(2 * data_length);
-        let output_buf = AlignedVec::<ComplexFmt>::new(2 * data_length);
+        let input_buf = AlignedVec::<PrcFmt>::new(2 * data_length);
+        let temp_buf = AlignedVec::<ComplexFmt>::new(data_length + 1);
+        let output_buf = AlignedVec::<PrcFmt>::new(2 * data_length);
         #[cfg(feature = "32bit")]
-        let mut fft: C2CPlan32 = C2CPlan::aligned(&[2*data_length], Sign::Forward, Flag::Measure).unwrap();
+        let mut fft: R2CPlan32 = R2CPlan::aligned(&[2 * data_length], Flag::Measure).unwrap();
         #[cfg(not(feature = "32bit"))]
-        let mut fft: C2CPlan64 = C2CPlan::aligned(&[2*data_length], Sign::Forward, Flag::Measure).unwrap();
-        let ifft = C2CPlan::aligned(&[2*data_length], Sign::Backward, Flag::Measure).unwrap();
+        let mut fft: R2CPlan64 = R2CPlan::aligned(&[2 * data_length], Flag::Measure).unwrap();
+        let ifft = C2RPlan::aligned(&[2 * data_length], Flag::Measure).unwrap();
 
         let nsegments = ((coeffs.len() as PrcFmt) / (data_length as PrcFmt)).ceil() as usize;
 
-        let input_f = vec![AlignedVec::<ComplexFmt>::new(2 * data_length); nsegments];
-        let mut coeffs_f = vec![AlignedVec::<ComplexFmt>::new(2 * data_length); nsegments];
-        let mut coeffs_c = vec![AlignedVec::<ComplexFmt>::new(2 * data_length); nsegments];
+        let input_f = vec![AlignedVec::<ComplexFmt>::new(data_length + 1); nsegments];
+        let mut coeffs_f = vec![AlignedVec::<ComplexFmt>::new(data_length + 1); nsegments];
+        let mut coeffs_al = vec![AlignedVec::<PrcFmt>::new(2 * data_length); nsegments];
 
         debug!("Conv {} is using {} segments", name, nsegments);
 
         for (n, coeff) in coeffs.iter().enumerate() {
-            coeffs_c[n / data_length][n % data_length] =
-                ComplexFmt::new(coeff / (2.0 * data_length as PrcFmt), 0.0);
+            coeffs_al[n / data_length][n % data_length] = coeff / (2.0 * data_length as PrcFmt);
         }
 
-        for (segment, segment_f) in coeffs_c.iter_mut().zip(coeffs_f.iter_mut()) {
-            fft.c2c(segment, segment_f).unwrap();
+        for (segment, segment_f) in coeffs_al.iter_mut().zip(coeffs_f.iter_mut()) {
+            fft.r2c(segment, segment_f).unwrap();
         }
 
         FFTConv {
@@ -69,8 +68,8 @@ impl FFTConv {
             nsegments,
             overlap: vec![0.0; data_length],
             coeffs_f,
-            fft: fft,
-            ifft: ifft,
+            fft,
+            ifft,
             input_f,
             input_buf,
             output_buf,
@@ -99,35 +98,38 @@ impl Filter for FFTConv {
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
         // Copy to inut buffer and convert to complex
         for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
-            self.input_buf[n] = ComplexFmt::new(*item, 0.0);
+            self.input_buf[n] = *item;
             //self.input_buf[n+self.npoints] = Complex::zero();
         }
 
         // FFT and store result in history, update index
         self.index = (self.index + 1) % self.nsegments;
         self.fft
-            .c2c(&mut self.input_buf, self.input_f[self.index].as_slice_mut()).unwrap();
+            .r2c(&mut self.input_buf, self.input_f[self.index].as_slice_mut())
+            .unwrap();
 
         //self.temp_buf = vec![Complex::zero(); 2 * self.npoints];
         // Loop through history of input FTs, multiply with filter FTs, accumulate result
         let segm = 0;
         let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-        for n in 0..2 * self.npoints {
+        for n in 0..(self.npoints + 1) {
             self.temp_buf[n] = self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
         }
         for segm in 1..self.nsegments {
             let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-            for n in 0..2 * self.npoints {
+            for n in 0..(self.npoints + 1) {
                 self.temp_buf[n] += self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
             }
         }
 
         // IFFT result, store result anv overlap
-        self.ifft.c2c(&mut self.temp_buf, &mut self.output_buf).unwrap();
+        self.ifft
+            .c2r(&mut self.temp_buf, &mut self.output_buf)
+            .unwrap();
         //let mut filtered: Vec<PrcFmt> = vec![0.0; self.npoints];
         for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
-            *item = self.output_buf[n].re + self.overlap[n];
-            self.overlap[n] = self.output_buf[n + self.npoints].re;
+            *item = self.output_buf[n] + self.overlap[n];
+            self.overlap[n] = self.output_buf[n + self.npoints];
         }
         Ok(())
     }
@@ -148,22 +150,22 @@ impl Filter for FFTConv {
             } else {
                 // length changed, clearing history
                 self.nsegments = nsegments;
-                let input_f = vec![AlignedVec::<ComplexFmt>::new(2 * self.npoints); nsegments];
+                let input_f = vec![AlignedVec::<ComplexFmt>::new(self.npoints + 1); nsegments];
                 self.input_f = input_f;
             }
 
-            let mut coeffs_f = vec![AlignedVec::<ComplexFmt>::new(2 * self.npoints); nsegments];
-            let mut coeffs_c = vec![AlignedVec::<ComplexFmt>::new(2 * self.npoints); nsegments];
+            let mut coeffs_f = vec![AlignedVec::<ComplexFmt>::new(self.npoints + 1); nsegments];
+            let mut coeffs_al = vec![AlignedVec::<PrcFmt>::new(2 * self.npoints); nsegments];
 
             debug!("conv using {} segments", nsegments);
 
             for (n, coeff) in coeffs.iter().enumerate() {
-                coeffs_c[n / self.npoints][n % self.npoints] =
-                    ComplexFmt::new(coeff / (2.0 * self.npoints as PrcFmt), 0.0);
+                coeffs_al[n / self.npoints][n % self.npoints] =
+                    coeff / (2.0 * self.npoints as PrcFmt);
             }
 
-            for (segment, segment_f) in coeffs_c.iter_mut().zip(coeffs_f.iter_mut()) {
-                self.fft.c2c(segment, segment_f).unwrap();
+            for (segment, segment_f) in coeffs_al.iter_mut().zip(coeffs_f.iter_mut()) {
+                self.fft.r2c(segment, segment_f).unwrap();
             }
             self.coeffs_f = coeffs_f;
         } else {

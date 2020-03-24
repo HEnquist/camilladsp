@@ -1,14 +1,16 @@
 #[cfg(feature = "alsa-backend")]
 extern crate alsa;
 extern crate clap;
+#[cfg(feature = "FFTW")]
+extern crate fftw;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
 extern crate rand;
 extern crate rand_distr;
+#[cfg(not(feature = "FFTW"))]
 extern crate rustfft;
-extern crate fftw;
 extern crate serde;
 extern crate signal_hook;
 #[cfg(feature = "socketserver")]
@@ -44,7 +46,9 @@ mod config;
 mod conversions;
 mod diffeq;
 mod dither;
+#[cfg(not(feature = "FFTW"))]
 mod fftconv;
+#[cfg(feature = "FFTW")]
 mod fftconv_fftw;
 mod fifoqueue;
 mod filedevice;
@@ -351,12 +355,16 @@ fn main() {
     #[cfg(feature = "socketserver")]
     let serverport = matches.value_of("port").unwrap().parse::<usize>().unwrap();
     #[cfg(feature = "socketserver")]
-    socketserver::start_server(
-        serverport,
-        signal_reload.clone(),
-        active_config.clone(),
-        active_config_path.clone(),
-    );
+    {
+        if serverport > 0 {
+            socketserver::start_server(
+                serverport,
+                signal_reload.clone(),
+                active_config.clone(),
+                active_config_path.clone(),
+            );
+        }
+    }
 
     loop {
         let exitstatus = run(

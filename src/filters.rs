@@ -4,7 +4,9 @@ use biquad;
 use config;
 use diffeq;
 use dither;
-//use fftconv;
+#[cfg(not(feature = "FFTW"))]
+use fftconv;
+#[cfg(feature = "FFTW")]
 use fftconv_fftw as fftconv;
 use mixer;
 use std::collections::HashMap;

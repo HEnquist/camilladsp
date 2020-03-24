@@ -127,13 +127,13 @@ impl BiquadCoefficients {
             }
             config::BiquadParameters::HighshelfFO { freq, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
-                let tn = (omega/2.0).tan();
+                let tn = (omega / 2.0).tan();
                 let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
                 let b0 = ampl * tn + ampl.powi(2);
                 let b1 = ampl * tn - ampl.powi(2);
                 let b2 = 0.0;
-                let a0 = ampl*tn + 1.0;
-                let a1 = ampl*tn - 1.0;
+                let a0 = ampl * tn + 1.0;
+                let a1 = ampl * tn - 1.0;
                 let a2 = 0.0;
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
@@ -155,7 +155,7 @@ impl BiquadCoefficients {
             }
             config::BiquadParameters::LowshelfFO { freq, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
-                let tn = (omega/2.0).tan();
+                let tn = (omega / 2.0).tan();
                 let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
                 let b0 = ampl.powi(2) * tn + ampl;
                 let b1 = ampl.powi(2) * tn - ampl;
@@ -230,8 +230,8 @@ impl BiquadCoefficients {
             }
             config::BiquadParameters::AllpassFO { freq } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
-                let tn = (omega/2.0).tan();
-                let alpha = (tn +1.0)/(tn-1.0);
+                let tn = (omega / 2.0).tan();
+                let alpha = (tn + 1.0) / (tn - 1.0);
                 let b0 = 1.0;
                 let b1 = alpha;
                 let b2 = 0.0;
@@ -498,9 +498,7 @@ mod tests {
 
     #[test]
     fn make_allpass_fo() {
-        let conf = BiquadParameters::AllpassFO {
-            freq: 100.0,
-        };
+        let conf = BiquadParameters::AllpassFO { freq: 100.0 };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
         let (gain_f0, phase_f0) = gain_and_phase(coeffs, 100.0, 44100);
