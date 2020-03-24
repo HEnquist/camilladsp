@@ -32,6 +32,8 @@ By default the internal processing is done using 64-bit floats. There is a possi
 
 CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "socketserver". For usage see the section "Controlling via websocket".
 
+The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". FFTW is about a factor two faster. It's a much larger and more complicated library though, so this is only recommended if your filters take too much CPU time with RustFFT.
+
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
@@ -46,6 +48,8 @@ CamillaDSP includes a Websocket server that can be used to pass commands to the 
 - - without Alsa: ```cargo build --release --no-default-features --features pulse-backend```
 - - without Pulse: ```cargo build --release --no-default-features --features alsa-backend```
 - - with 32 bit float: ```cargo build --release --features 32bit```
+- - with FFTW: ```cargo build --release --features FFTW```
+- - combine several features: ```cargo build --release --features FFTW --features 32bit```
 - The binary is now available at ./target/release/camilladsp
 - Optionally install with `cargo install --path .`
 
