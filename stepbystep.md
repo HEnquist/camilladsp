@@ -239,7 +239,7 @@ And we are done!
  ---
 devices:
   samplerate: 44100
-  buffersize: 1024
+  chunksize: 1024
   capture:
     type: Alsa
     channels: 2
