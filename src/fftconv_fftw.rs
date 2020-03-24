@@ -96,10 +96,12 @@ impl Filter for FFTConv {
 
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
-        // Copy to inut buffer and convert to complex
-        for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
-            self.input_buf[n] = *item;
-            //self.input_buf[n+self.npoints] = Complex::zero();
+        // Copy to input buffer
+        //for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
+        //    self.input_buf[n] = *item;
+        //}
+        for (wf, buf) in waveform.iter_mut().zip(self.input_buf.iter_mut()) {
+            *buf = *wf;
         }
 
         // FFT and store result in history, update index
@@ -108,7 +110,6 @@ impl Filter for FFTConv {
             .r2c(&mut self.input_buf, self.input_f[self.index].as_slice_mut())
             .unwrap();
 
-        //self.temp_buf = vec![Complex::zero(); 2 * self.npoints];
         // Loop through history of input FTs, multiply with filter FTs, accumulate result
         let segm = 0;
         let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
@@ -127,7 +128,7 @@ impl Filter for FFTConv {
             .c2r(&mut self.temp_buf, &mut self.output_buf)
             .unwrap();
         //let mut filtered: Vec<PrcFmt> = vec![0.0; self.npoints];
-        for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
+        for (n, item) in waveform.iter_mut().enumerate() {
             *item = self.output_buf[n] + self.overlap[n];
             self.overlap[n] = self.output_buf[n + self.npoints];
         }

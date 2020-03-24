@@ -195,8 +195,10 @@ fn playback_loop_int<T: num_traits::NumCast + std::marker::Copy>(
             Ok(AudioMessage::Audio(chunk)) => {
                 chunk_to_buffer_int(chunk, &mut buffer, params.scalefactor);
                 now = SystemTime::now();
-                delay += pcmdevice.status().unwrap().get_delay() as isize;
-                ndelays += 1;
+                if let Ok(status) = pcmdevice.status() {
+                    delay += status.get_delay() as isize;
+                    ndelays += 1;
+                }
                 if adjust
                     && (now.duration_since(start).unwrap().as_millis()
                         > ((1000.0 * params.adjust_period) as u128))
@@ -261,8 +263,10 @@ fn playback_loop_float<T: num_traits::NumCast + std::marker::Copy>(
             Ok(AudioMessage::Audio(chunk)) => {
                 chunk_to_buffer_float(chunk, &mut buffer);
                 now = SystemTime::now();
-                delay += pcmdevice.status().unwrap().get_delay() as isize;
-                ndelays += 1;
+                if let Ok(status) = pcmdevice.status() {
+                    delay += status.get_delay() as isize;
+                    ndelays += 1;
+                }
                 if adjust
                     && (now.duration_since(start).unwrap().as_millis()
                         > ((1000.0 * params.adjust_period) as u128))

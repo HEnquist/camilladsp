@@ -329,7 +329,7 @@ mod tests {
     use biquad::{Biquad, BiquadCoefficients};
     use config::BiquadParameters;
     use filters::Filter;
-    use rustfft::num_complex::Complex;
+    use num::complex::Complex;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);
