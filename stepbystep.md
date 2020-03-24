@@ -1,18 +1,18 @@
 # Building a config file step by step
 Here we'll build up a full CamillaDSP config file, step by step, to help
-making it easier to uderstand how things are connected.
+making it easier to understand how things are connected.
 This will be a simple 2-way crossover with 2 channels in and 4 out.
 
 
 ## Devices
 First we need to define the input and output devices. Here let's assume 
 we already figured out all the Loopbacks etc and already know the devices to use.
-We need to decide a sample rate, let's go with 44100. For buffersize 1024 is a good values to start at with not too much delay, and low risk of buffer underruns. The best sample format this playback device supports is 32 bit integer so let's put that. The Loopback capture device supports all sample formats so let's just pick a good one.
+We need to decide a sample rate, let's go with 44100. For chunksize 1024 is a good values to start at with not too much delay, and low risk of buffer underruns. The best sample format this playback device supports is 32 bit integer so let's put that. The Loopback capture device supports all sample formats so let's just pick a good one.
  ```yaml
  ---
 devices:
   samplerate: 44100
-  buffersize: 1024
+  chunksize: 1024
   capture:
     type: Alsa
     channels: 2
@@ -112,7 +112,7 @@ filters:
       freq: 2000
       q: 0.707
 ```
-Next we need to plut this into the pipeline after the mixer. Thus we need to extend the pipeline with two "Filter" steps, one for each tweeter channel.
+Next we need to plug this into the pipeline after the mixer. Thus we need to extend the pipeline with two "Filter" steps, one for each tweeter channel.
 
 ```yaml
 pipeline:

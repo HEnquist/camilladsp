@@ -81,6 +81,73 @@ class DiffEq(object):
         # TODO
         return None
 
+class BiquadCombo(object):
+
+    def Butterw_q(self, order):
+        odd = order%2 > 0
+        n_so = math.floor(order/2.0)
+        qvalues = []
+        for n in range(0, n_so):
+            q = 1/(2.0*math.sin((math.pi/order)*(n + 1/2)))
+            qvalues.append(q)
+        if odd:
+            qvalues.append(-1.0)
+        return qvalues
+
+    def __init__(self, conf, fs):
+        self.ftype = conf['type']
+        self.order = conf['order']
+        self.freq = conf['freq']
+        self.fs = fs
+        if self.ftype == "LinkwitzRileyHighpass":
+            #qvalues = self.LRtable[self.order]
+            q_temp = self.Butterw_q(self.order/2)
+            if (self.order/2)%2 > 0:
+                q_temp = q_temp[0:-1]
+                qvalues = q_temp + q_temp + [0.5]
+            else:
+                qvalues = q_temp + q_temp
+            type_so = "Highpass"
+            type_fo = "HighpassFO"
+
+        elif self.ftype == "LinkwitzRileyLowpass":
+            q_temp = self.Butterw_q(self.order/2)
+            if (self.order/2)%2 > 0:
+                q_temp = q_temp[0:-1]
+                qvalues = q_temp + q_temp + [0.5]
+            else:
+                qvalues = q_temp + q_temp
+            type_so = "Lowpass"
+            type_fo = "LowpassFO"
+        elif self.ftype == "ButterworthHighpass":
+            qvalues = self.Butterw_q(self.order)
+            type_so = "Highpass"
+            type_fo = "HighpassFO"
+        elif self.ftype == "ButterworthLowpass":
+            qvalues = self.Butterw_q(self.order)
+            type_so = "Lowpass"
+            type_fo = "LowpassFO"
+        self.biquads = []
+        print(qvalues)
+        for q in qvalues:
+            if q >= 0:
+                bqconf = {'freq': self.freq, 'q': q, 'type': type_so}
+            else:
+                bqconf = {'freq': self.freq, 'type': type_fo}
+            self.biquads.append(Biquad(bqconf, self.fs))
+
+    def is_stable(self):
+        # TODO
+        return None
+
+    def gain_and_phase(self, f):
+        A = np.ones(f.shape)
+        for bq in self.biquads:
+            A = A * bq.complex_gain(f)
+        gain = 20*np.log10(np.abs(A))
+        phase = 180/np.pi*np.angle(A)
+        return gain, phase
+
 class Biquad(object):
     def __init__(self, conf, fs):
         ftype = conf['type']
@@ -290,10 +357,13 @@ class Biquad(object):
         self.b1 = b1 / a0
         self.b2 = b2 / a0
         
-
-    def gain_and_phase(self, f):
+    def complex_gain(self, f):
         z = np.exp(1j*2*np.pi*f/self.fs);
         A = (self.b0 + self.b1*z**(-1) + self.b2*z**(-2))/(1.0 + self.a1*z**(-1) + self.a2*z**(-2))
+        return A
+
+    def gain_and_phase(self, f):
+        A = self.complex_gain(f)
         gain = 20*np.log10(np.abs(A))
         phase = 180/np.pi*np.angle(A)
         return gain, phase
@@ -363,9 +433,11 @@ def main():
     if 'filters' in conf:
         fvect = np.linspace(1, (srate*0.95)/2.0, 10000)
         for filter, fconf in conf['filters'].items():
-            if fconf['type'] in ('Biquad', 'DiffEq'):
+            if fconf['type'] in ('Biquad', 'DiffEq', 'BiquadCombo'):
                 if fconf['type'] == 'DiffEq':
                     kladd = DiffEq(fconf['parameters'], srate)
+                elif fconf['type'] == 'BiquadCombo':
+                    kladd = BiquadCombo(fconf['parameters'], srate)
                 else:
                     kladd = Biquad(fconf['parameters'], srate)
                 plt.figure(num=filter)

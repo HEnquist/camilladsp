@@ -1,6 +1,6 @@
 # Controlling via websocket
 
-If the sebsocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
+If the websocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
 The available commands are:
 - `getconfig` : read the current configuration as yaml
   * response is the config in yaml format.

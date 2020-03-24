@@ -84,11 +84,11 @@ If the "check" flag is given, the program will exit after checking the configura
 
 To enable the websocket server, provide a port number with the -p option. Leave it out, or give 0 to disable.
 
-The default logging setting prints messeges of levels "error", "warn" and "info". By passing the verbosity flag once, "-v" it also prints "debug". If and if's given twice, "-vv", it also prints "trace" messages. 
+The default logging setting prints messages of levels "error", "warn" and "info". By passing the verbosity flag once, "-v" it also prints "debug". If and if's given twice, "-vv", it also prints "trace" messages. 
 
 
 ### Reloading the configuration
-The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficents file needs to change.
+The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficients file needs to change.
 
 ## Controlling via websocket
 See the [separate readme for the websocket server](./websocket.md)
@@ -163,7 +163,7 @@ devices:
 ```
 * `samplerate`
 
-  The `samplerate` setting decides the samplerate that everything will run at. 
+  The `samplerate` setting decides the sample rate that everything will run at. 
   This rate must be supported by both the capture and  playback device.
 
 * `chunksize`
@@ -194,7 +194,7 @@ devices:
 
 * `target_level` & `adjust_period` (optional)
   For the special case where the capture device is an Alsa Loopback device, 
-  and the playback device another Alsa device, there is a funtion to synchronize 
+  and the playback device another Alsa device, there is a function to synchronize 
   the Loopback device to the playback device. 
   This avoids the problems of buffer underruns or slowly increasing delay. 
   This function requires the parameter `target_level` to be set. 
@@ -323,7 +323,7 @@ filters:
 ```
 
 ### FIR
-A FIR filter is given by an impuse response provided as a list of coefficients. The coefficients are preferrably given in a separate file, but can be included directly in the config file. If the number of coefficients (or taps) is larger than the buffersize setting it will use segmented convolution. The number of segments is the filter length divided by the buffersize, rounded up.
+A FIR filter is given by an impulse response provided as a list of coefficients. The coefficients are preferably given in a separate file, but can be included directly in the config file. If the number of coefficients (or taps) is larger than the chunksize setting it will use segmented convolution. The number of segments is the filter length divided by the chunksize, rounded up.
 ```
 filters:
   lowpass_fir:
@@ -424,17 +424,17 @@ The "Dither" filter should only be added at the very end of the pipeline for eac
       bits: 16
 ```
 The available types are 
-- Simple, simple noise shaping with increasing noise towards higher freqencies
-- Uniform, just digher, no shaping. Requires also the parameter "amplitude" to set the dither amplitude in bits.
+- Simple, simple noise shaping with increasing noise towards higher frequencies
+- Uniform, just dither, no shaping. Requires also the parameter "amplitude" to set the dither amplitude in bits.
 - Lipshitz, intended for 44.1 kHz, gives very little subjective noise
-- None, just quantize without dither. Only useful with small target bit depth for demonstation.
+- None, just quantize without dither. Only useful with small target bit depth for demonstration.
 
-To test the differenc types, set the target bit depth to something very small like 5 bits and try them all.
+To test the difference types, set the target bit depth to something very small like 5 bits and try them all.
 
 
 ### Difference equation
 The "DiffEq" filter implements a generic difference equation filter with transfer function:
-H(z) = (b0 + b1*z^-1 + .. + bn*z^-n)/(a0 + a1*z^-1 + .. + an*z^-n). The coeffients are given as a list a0..an in that order. Example:
+H(z) = (b0 + b1*z^-1 + .. + bn*z^-n)/(a0 + a1*z^-1 + .. + an*z^-n). The coefficients are given as a list a0..an in that order. Example:
 ```
   example_diffeq:
     type: DiffEq
@@ -442,7 +442,7 @@ H(z) = (b0 + b1*z^-1 + .. + bn*z^-n)/(a0 + a1*z^-1 + .. + an*z^-n). The coeffien
       a: [1.0, -0.1462978543780541, 0.005350765548905586]
       b: [0.21476322779271284, 0.4295264555854257, 0.21476322779271284]
 ```
-This example implements a Biquad lowpass, but for a Biquad the Free Biquad type is faster and should be preferred. Both a and b are optional. If left out, they defualt to [1.0].
+This example implements a Biquad lowpass, but for a Biquad the Free Biquad type is faster and should be preferred. Both a and b are optional. If left out, they default to [1.0].
 
 
 ## Pipeline
