@@ -8,6 +8,7 @@ extern crate libpulse_simple_binding as psimple;
 extern crate rand;
 extern crate rand_distr;
 extern crate rustfft;
+extern crate fftw;
 extern crate serde;
 extern crate signal_hook;
 #[cfg(feature = "socketserver")]
@@ -44,6 +45,7 @@ mod conversions;
 mod diffeq;
 mod dither;
 mod fftconv;
+mod fftconv_fftw;
 mod fifoqueue;
 mod filedevice;
 mod filters;

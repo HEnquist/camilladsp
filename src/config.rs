@@ -182,9 +182,17 @@ pub enum BiquadParameters {
         slope: PrcFmt,
         gain: PrcFmt,
     },
+    HighshelfFO {
+        freq: PrcFmt,
+        gain: PrcFmt,
+    },
     Lowshelf {
         freq: PrcFmt,
         slope: PrcFmt,
+        gain: PrcFmt,
+    },
+    LowshelfFO {
+        freq: PrcFmt,
         gain: PrcFmt,
     },
     HighpassFO {
@@ -196,6 +204,9 @@ pub enum BiquadParameters {
     Allpass {
         freq: PrcFmt,
         q: PrcFmt,
+    },
+    AllpassFO { 
+        freq: PrcFmt, 
     },
     Bandpass {
         freq: PrcFmt,

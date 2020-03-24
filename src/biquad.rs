@@ -125,6 +125,18 @@ impl BiquadCoefficients {
                 let a2 = (ampl + 1.0) - (ampl - 1.0) * cs - beta;
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
+            config::BiquadParameters::HighshelfFO { freq, gain } => {
+                let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
+                let tn = (omega/2.0).tan();
+                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let b0 = ampl * tn + ampl.powi(2);
+                let b1 = ampl * tn - ampl.powi(2);
+                let b2 = 0.0;
+                let a0 = ampl*tn + 1.0;
+                let a1 = ampl*tn - 1.0;
+                let a2 = 0.0;
+                BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
+            }
             config::BiquadParameters::Lowshelf { freq, slope, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
@@ -139,6 +151,18 @@ impl BiquadCoefficients {
                 let a0 = (ampl + 1.0) + (ampl - 1.0) * cs + beta;
                 let a1 = -2.0 * ((ampl - 1.0) + (ampl + 1.0) * cs);
                 let a2 = (ampl + 1.0) + (ampl - 1.0) * cs - beta;
+                BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
+            }
+            config::BiquadParameters::LowshelfFO { freq, gain } => {
+                let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
+                let tn = (omega/2.0).tan();
+                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let b0 = ampl.powi(2) * tn + ampl;
+                let b1 = ampl.powi(2) * tn - ampl;
+                let b2 = 0.0;
+                let a0 = tn + ampl;
+                let a1 = tn - ampl;
+                let a2 = 0.0;
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::LowpassFO { freq } => {
@@ -202,6 +226,18 @@ impl BiquadCoefficients {
                 let a0 = 1.0 + alpha;
                 let a1 = -2.0 * cs;
                 let a2 = 1.0 - alpha;
+                BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
+            }
+            config::BiquadParameters::AllpassFO { freq } => {
+                let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
+                let tn = (omega/2.0).tan();
+                let alpha = (tn +1.0)/(tn-1.0);
+                let b0 = 1.0;
+                let b1 = alpha;
+                let b2 = 0.0;
+                let a0 = alpha;
+                let a1 = 1.0;
+                let a2 = 0.0;
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::LinkwitzTransform {
@@ -461,6 +497,24 @@ mod tests {
     }
 
     #[test]
+    fn make_allpass_fo() {
+        let conf = BiquadParameters::AllpassFO {
+            freq: 100.0,
+        };
+        let coeffs = BiquadCoefficients::from_config(44100, conf);
+        assert!(coeffs.is_stable());
+        let (gain_f0, phase_f0) = gain_and_phase(coeffs, 100.0, 44100);
+        let (gain_hf, phase_hf) = gain_and_phase(coeffs, 10000.0, 44100);
+        let (gain_lf, phase_lf) = gain_and_phase(coeffs, 1.0, 44100);
+        assert!(is_close(gain_f0, 0.0, 0.1));
+        assert!(is_close(gain_lf, 0.0, 0.1));
+        assert!(is_close(gain_hf, 0.0, 0.1));
+        assert!(is_close(phase_f0.abs(), 90.0, 0.5));
+        assert!(is_close(phase_lf, 0.0, 2.0));
+        assert!(is_close(phase_hf.abs(), 180.0, 2.0));
+    }
+
+    #[test]
     fn make_highshelf() {
         let conf = BiquadParameters::Highshelf {
             freq: 100.0,
@@ -502,6 +556,37 @@ mod tests {
         assert!(is_close(gain_hf, -0.0, 0.1));
     }
 
+    #[test]
+    fn make_highshelf_fo() {
+        let conf = BiquadParameters::HighshelfFO {
+            freq: 100.0,
+            gain: -12.0,
+        };
+        let coeffs = BiquadCoefficients::from_config(44100, conf);
+        assert!(coeffs.is_stable());
+        let (gain_f0, _) = gain_and_phase(coeffs, 100.0, 44100);
+        let (gain_hf, _) = gain_and_phase(coeffs, 10000.0, 44100);
+        let (gain_lf, _) = gain_and_phase(coeffs, 1.0, 44100);
+        assert!(is_close(gain_f0, -6.0, 0.1));
+        assert!(is_close(gain_lf, 0.0, 0.1));
+        assert!(is_close(gain_hf, -12.0, 0.1));
+    }
+
+    #[test]
+    fn make_lowshelf_fo() {
+        let conf = BiquadParameters::LowshelfFO {
+            freq: 100.0,
+            gain: -12.0,
+        };
+        let coeffs = BiquadCoefficients::from_config(44100, conf);
+        assert!(coeffs.is_stable());
+        let (gain_f0, _) = gain_and_phase(coeffs, 100.0, 44100);
+        let (gain_hf, _) = gain_and_phase(coeffs, 10000.0, 44100);
+        let (gain_lf, _) = gain_and_phase(coeffs, 1.0, 44100);
+        assert!(is_close(gain_f0, -6.0, 0.1));
+        assert!(is_close(gain_lf, -12.0, 0.1));
+        assert!(is_close(gain_hf, -0.0, 0.1));
+    }
     #[test]
     fn make_lt() {
         let conf = BiquadParameters::LinkwitzTransform {
