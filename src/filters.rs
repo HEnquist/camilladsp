@@ -1,6 +1,7 @@
 use audiodevice::AudioChunk;
 use basicfilters;
 use biquad;
+use biquadcombo;
 use config;
 use diffeq;
 use dither;
@@ -117,6 +118,9 @@ impl FilterGroup {
                         sample_freq,
                         biquad::BiquadCoefficients::from_config(sample_freq, parameters),
                     )),
+                    config::Filter::BiquadCombo { parameters } => Box::new(
+                        biquadcombo::BiquadCombo::from_config(name, sample_freq, parameters),
+                    ),
                     config::Filter::Delay { parameters } => Box::new(
                         basicfilters::Delay::from_config(name, sample_freq, parameters),
                     ),
@@ -255,6 +259,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
         config::Filter::Gain { .. } => Ok(()),
         config::Filter::Dither { .. } => Ok(()),
         config::Filter::DiffEq { .. } => Ok(()),
+        config::Filter::BiquadCombo { .. } => Ok(()),
     }
 }
 

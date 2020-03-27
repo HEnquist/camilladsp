@@ -105,6 +105,9 @@ pub enum Filter {
     Biquad {
         parameters: BiquadParameters,
     },
+    BiquadCombo {
+        parameters: BiquadComboParameters,
+    },
     Delay {
         parameters: DelayParameters,
     },
@@ -221,6 +224,27 @@ pub enum BiquadParameters {
         q_act: PrcFmt,
         freq_target: PrcFmt,
         q_target: PrcFmt,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+pub enum BiquadComboParameters {
+    LinkwitzRileyHighpass {
+        freq: PrcFmt,
+        order: usize,
+    },
+    LinkwitzRileyLowpass {
+        freq: PrcFmt,
+        order: usize,
+    },
+    ButterworthHighpass {
+        freq: PrcFmt,
+        order: usize,
+    },
+    ButterworthLowpass {
+        freq: PrcFmt,
+        order: usize,
     },
 }
 

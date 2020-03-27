@@ -43,6 +43,7 @@ mod alsadevice;
 mod audiodevice;
 mod basicfilters;
 mod biquad;
+mod biquadcombo;
 mod config;
 mod conversions;
 mod diffeq;
