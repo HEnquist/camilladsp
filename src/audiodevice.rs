@@ -83,7 +83,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             filename,
             format,
-            extra_samples: _,
+            ..
         } => Box::new(filedevice::FilePlaybackDevice {
             filename,
             samplerate: conf.samplerate,
