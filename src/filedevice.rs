@@ -37,6 +37,7 @@ pub struct FileCaptureDevice {
     pub format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
+    pub extra_samples: usize,
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
@@ -158,6 +159,7 @@ impl CaptureDevice for FileCaptureDevice {
             SampleFormat::FLOAT64LE => 8,
         };
         let format = self.format.clone();
+        let extra_samples = self.extra_samples;
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit =
@@ -188,6 +190,12 @@ impl CaptureDevice for FileCaptureDevice {
                             Err(err) => {
                                 match err.kind() {
                                     ErrorKind::UnexpectedEof => {
+                                        send_silence(
+                                            extra_samples,
+                                            channels,
+                                            bufferlength,
+                                            &channel,
+                                        );
                                         let msg = AudioMessage::EndOfStream;
                                         channel.send(msg).unwrap();
                                         status_channel.send(StatusMessage::CaptureDone).unwrap();
@@ -237,5 +245,26 @@ impl CaptureDevice for FileCaptureDevice {
             }
         });
         Ok(Box::new(handle))
+    }
+}
+
+fn send_silence(
+    samples: usize,
+    channels: usize,
+    bufferlength: usize,
+    audio_channel: &mpsc::SyncSender<AudioMessage>,
+) {
+    let nchunks = (samples as f32 / bufferlength as f32).ceil() as usize;
+    for _ in 0..nchunks {
+        let waveforms = vec![vec![0.0; bufferlength]; channels];
+        let chunk = AudioChunk {
+            frames: bufferlength,
+            channels: 2,
+            maxval: 0.0,
+            minval: 0.0,
+            waveforms,
+        };
+        let msg = AudioMessage::Audio(chunk);
+        audio_channel.send(msg).unwrap();
     }
 }

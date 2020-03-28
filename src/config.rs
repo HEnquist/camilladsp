@@ -64,6 +64,8 @@ pub enum Device {
         channels: usize,
         filename: String,
         format: SampleFormat,
+        #[serde(default)]
+        extra_samples: usize,
     },
 }
 
