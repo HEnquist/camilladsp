@@ -45,8 +45,63 @@ impl Dither {
                 let filter = Vec::new();
                 Dither::new(name, bits, filter, amplitude)
             }
-            config::DitherParameters::Lipshitz { bits } => {
+            config::DitherParameters::Lipshitz441 { bits } => {
                 let filter = vec![2.033, -2.165, 1.959, -1.590, 0.6149];
+                let amplitude = 1.0;
+                Dither::new(name, bits, filter, amplitude)
+            }
+            config::DitherParameters::Fweighted441 { bits } => {
+                let filter = vec![
+                    2.412, -3.370, 3.937, -4.174, 3.353, -2.205, 1.281, -0.569, 0.0847,
+                ];
+                let amplitude = 1.0;
+                Dither::new(name, bits, filter, amplitude)
+            }
+            config::DitherParameters::Shibata441 { bits } => {
+                let filter = vec![
+                    2.6773197650909423828,
+                    -4.8308925628662109375,
+                    6.570110321044921875,
+                    -7.4572014808654785156,
+                    6.7263274192810058594,
+                    -4.8481650352478027344,
+                    2.0412089824676513672,
+                    0.7006359100341796875,
+                    -2.9537565708160400391,
+                    4.0800385475158691406,
+                    -4.1845216751098632812,
+                    3.3311812877655029297,
+                    -2.1179926395416259766,
+                    0.879302978515625,
+                    -0.031759146600961685181,
+                    -0.42382788658142089844,
+                    0.47882103919982910156,
+                    -0.35490813851356506348,
+                    0.17496839165687561035,
+                    -0.060908168554306030273,
+                ];
+                let amplitude = 1.0;
+                Dither::new(name, bits, filter, amplitude)
+            }
+            config::DitherParameters::Shibata48 { bits } => {
+                let filter = vec![
+                    2.8720729351043701172,
+                    -5.0413231849670410156,
+                    6.2442994117736816406,
+                    -5.8483986854553222656,
+                    3.7067542076110839844,
+                    -1.0495119094848632812,
+                    -1.1830236911773681641,
+                    2.1126792430877685547,
+                    -1.9094531536102294922,
+                    0.99913084506988525391,
+                    -0.17090806365013122559,
+                    -0.32615602016448974609,
+                    0.39127644896507263184,
+                    -0.26876461505889892578,
+                    0.097676105797290802002,
+                    -0.023473845794796943665,
+                ];
                 let amplitude = 1.0;
                 Dither::new(name, bits, filter, amplitude)
             }
@@ -199,7 +254,7 @@ mod tests {
     fn test_lip() {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
-        let conf = DitherParameters::Lipshitz { bits: 8 };
+        let conf = DitherParameters::Lipshitz441 { bits: 8 };
         let mut dith = Dither::from_config("test".to_string(), conf);
         dith.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(

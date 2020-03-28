@@ -267,7 +267,10 @@ impl Default for TimeUnit {
 #[serde(tag = "type")]
 pub enum DitherParameters {
     Simple { bits: usize },
-    Lipshitz { bits: usize },
+    Lipshitz441 { bits: usize },
+    Fweighted441 { bits: usize },
+    Shibata441 { bits: usize },
+    Shibata48 { bits: usize },
     Uniform { bits: usize, amplitude: PrcFmt },
     None { bits: usize },
 }
