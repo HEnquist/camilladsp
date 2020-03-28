@@ -4,15 +4,13 @@
 //mod filters;
 
 use crate::filters::Filter;
-use config;
 use biquad;
+use config;
 
 // Sample format
 //type SmpFmt = i16;
 use PrcFmt;
 use Res;
-
-
 
 #[derive(Clone, Debug)]
 pub struct BiquadCombo {
@@ -23,12 +21,12 @@ pub struct BiquadCombo {
 
 impl BiquadCombo {
     fn butterworth_q(order: usize) -> Vec<PrcFmt> {
-        let odd = order%2 > 0;
+        let odd = order % 2 > 0;
         let pi = std::f64::consts::PI as PrcFmt;
-        let n_so = order/2; 
+        let n_so = order / 2;
         let mut qvalues = Vec::new();
         for n in 0..n_so {
-            let q = 1.0/(2.0*(pi/(order as PrcFmt)*(n as PrcFmt + 0.5)).sin());
+            let q = 1.0 / (2.0 * (pi / (order as PrcFmt) * (n as PrcFmt + 0.5)).sin());
             qvalues.push(q);
         }
         if odd {
@@ -41,20 +39,14 @@ impl BiquadCombo {
         let mut filters = Vec::new();
         for q in qvalues.iter() {
             let filtconf = if q >= &0.0 {
-                config::BiquadParameters::Highpass {
-                    freq,
-                    q: *q,
-                }
-            }
-            else {
-                config::BiquadParameters::HighpassFO {
-                    freq,
-                }
+                config::BiquadParameters::Highpass { freq, q: *q }
+            } else {
+                config::BiquadParameters::HighpassFO { freq }
             };
             let coeffs = biquad::BiquadCoefficients::from_config(fs, filtconf);
             let filt = biquad::Biquad::new("".to_string(), fs, coeffs);
             filters.push(filt);
-        };
+        }
         filters
     }
 
@@ -62,15 +54,9 @@ impl BiquadCombo {
         let mut filters = Vec::new();
         for q in qvalues.iter() {
             let filtconf = if q >= &0.0 {
-                config::BiquadParameters::Lowpass {
-                    freq,
-                    q: *q,
-                }
-            }
-            else {
-                config::BiquadParameters::LowpassFO {
-                    freq,
-                }
+                config::BiquadParameters::Lowpass { freq, q: *q }
+            } else {
+                config::BiquadParameters::LowpassFO { freq }
             };
             let coeffs = biquad::BiquadCoefficients::from_config(fs, filtconf);
             let filt = biquad::Biquad::new("".to_string(), fs, coeffs);
@@ -80,23 +66,25 @@ impl BiquadCombo {
     }
 
     fn linkwitzriley_q(order: usize) -> Vec<PrcFmt> {
-        let mut q_temp = BiquadCombo::butterworth_q(order/2);
+        let mut q_temp = BiquadCombo::butterworth_q(order / 2);
         let mut qvalues;
-        if order%4 > 0 {
+        if order % 4 > 0 {
             q_temp.pop();
             qvalues = q_temp.clone();
             qvalues.append(&mut q_temp);
             qvalues.push(0.5);
-        }
-        else {
+        } else {
             qvalues = q_temp.clone();
             qvalues.append(&mut q_temp);
         }
         qvalues
     }
-    
 
-    pub fn from_config(name: String, samplerate: usize, parameters: config::BiquadComboParameters) -> Self {
+    pub fn from_config(
+        name: String,
+        samplerate: usize,
+        parameters: config::BiquadComboParameters,
+    ) -> Self {
         match parameters {
             config::BiquadComboParameters::LinkwitzRileyHighpass { order, freq } => {
                 let qvalues = BiquadCombo::linkwitzriley_q(order);
@@ -123,7 +111,7 @@ impl BiquadCombo {
                     name,
                     filters,
                     samplerate,
-                } 
+                }
             }
             config::BiquadComboParameters::ButterworthLowpass { order, freq } => {
                 let qvalues = BiquadCombo::butterworth_q(order);
@@ -132,9 +120,9 @@ impl BiquadCombo {
                     name,
                     filters,
                     samplerate,
-                } 
+                }
             }
-        }  
+        }
     }
 }
 
