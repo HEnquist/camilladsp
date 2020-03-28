@@ -382,6 +382,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     for (filter, params) in &newconf.filters {
         match (params, currentconf.filters.get(filter).unwrap()) {
             (Filter::Biquad { .. }, Filter::Biquad { .. })
+            | (Filter::BiquadCombo { .. }, Filter::BiquadCombo { .. })
             | (Filter::Conv { .. }, Filter::Conv { .. })
             | (Filter::Delay { .. }, Filter::Delay { .. })
             | (Filter::Gain { .. }, Filter::Gain { .. })

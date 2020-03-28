@@ -355,7 +355,7 @@ The other possible formats are raw data:
 
 
 ### IIR
-IIR filters are Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filter, or you can provide the coefficients directly.
+IIR filters are Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filters, or you can provide the coefficients directly.
 Examples:
 ```
 filters:
@@ -388,9 +388,15 @@ filters:
       freq: 1000
       slope: 6
       gain: -12
+  LR_highpass:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 1000
+      order: 4
 ```
 
-The available types are:
+Single Biquads are defined using the type "Biquad". The available filter types are:
 * Free
   * given by normalized coefficients a1, a2, b0, b1, b2.
 * Highpass & Lowpass
@@ -415,7 +421,14 @@ The available types are:
 * LinkwitzTransform
   * A Linkwitz transform to change a speaker with resonance frequency ```freq_act``` and Q-value ```q_act```, to a new resonance frequency ```freq_target``` and Q-value ```q_target```.
 
-Other types such as Linkwitz-Riley crossovers can be built by combining several Biquads. [See the separate readme for more filter functions.](./filterfunctions.md)
+To build more complex filters, use the type "BiquadCombo". This automatically adds several Biquads to build other filter types. The available types are:
+* ButterworthHighpass & ButterworthLowpass
+  * defined by frequency, `freq` and filter `order`.
+* LinkwitzRileyHighpass & LinkwitzRileyLowpass
+  * defined by frequency, `freq` and filter `order`.
+  * Note, the order must be even
+
+Other types such as Bessel filters can be built by combining several Biquads. [See the separate readme for more filter functions.](./filterfunctions.md)
 
 
 ### Dither

@@ -259,7 +259,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
         config::Filter::Gain { .. } => Ok(()),
         config::Filter::Dither { .. } => Ok(()),
         config::Filter::DiffEq { .. } => Ok(()),
-        config::Filter::BiquadCombo { .. } => Ok(()),
+        config::Filter::BiquadCombo { parameters } => biquadcombo::validate_config(&parameters),
     }
 }
 

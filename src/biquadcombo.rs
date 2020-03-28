@@ -149,6 +149,36 @@ impl Filter for BiquadCombo {
     }
 }
 
+/// Validate a FFT convolution config.
+pub fn validate_config(conf: &config::BiquadComboParameters) -> Res<()> {
+    match conf {
+        config::BiquadComboParameters::LinkwitzRileyHighpass { freq, order }
+        | config::BiquadComboParameters::LinkwitzRileyLowpass { freq, order } => {
+            if *freq <= 0.0 {
+                return Err(Box::new(config::ConfigError::new("Frequency must be > 0")));
+            }
+            if (*order % 2 > 0) && (*order == 0) {
+                return Err(Box::new(config::ConfigError::new(
+                    "LR order must be an even non-zero number",
+                )));
+            }
+            Ok(())
+        }
+        config::BiquadComboParameters::ButterworthHighpass { freq, order }
+        | config::BiquadComboParameters::ButterworthLowpass { freq, order } => {
+            if *freq <= 0.0 {
+                return Err(Box::new(config::ConfigError::new("Frequency must be > 0")));
+            }
+            if *order % 2 > 0 {
+                return Err(Box::new(config::ConfigError::new(
+                    "Butterworth order must be larger than zero",
+                )));
+            }
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
