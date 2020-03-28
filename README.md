@@ -443,10 +443,14 @@ The "Dither" filter should only be added at the very end of the pipeline for eac
 The available types are 
 - Simple, simple noise shaping with increasing noise towards higher frequencies
 - Uniform, just dither, no shaping. Requires also the parameter "amplitude" to set the dither amplitude in bits.
-- Lipshitz, intended for 44.1 kHz, gives very little subjective noise
+- Lipshitz441, for 44.1 kHz
+- Fweighted441, for 44.1 kHz
+- Shibata441, for 44.1 kHz
+- Shibata48, for 48 kHz
 - None, just quantize without dither. Only useful with small target bit depth for demonstration.
 
-To test the difference types, set the target bit depth to something very small like 5 bits and try them all.
+Lipshitz, Fweighted and Shibata give the least amount ofaudible noise. [See the SOX documentation for more details.](http://sox.sourceforge.net/SoX/NoiseShaping)
+To test the different types, set the target bit depth to something very small like 5 bits and try them all.
 
 
 ### Difference equation

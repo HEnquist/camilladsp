@@ -34,6 +34,7 @@ impl Dither {
         }
     }
 
+    // Some filters borrowed from SOX: http://sox.sourceforge.net/SoX/NoiseShaping
     pub fn from_config(name: String, conf: config::DitherParameters) -> Self {
         match conf {
             config::DitherParameters::Simple { bits } => {
