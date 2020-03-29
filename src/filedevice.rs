@@ -175,7 +175,8 @@ impl CaptureDevice for FileCaptureDevice {
                     let mut silent_nbr: usize = 0;
                     barrier.wait();
                     debug!("starting captureloop");
-                    let mut buf = vec![0u8; channels * bufferlength * store_bytes];
+                    let bufferlength_bytes = channels * bufferlength * store_bytes;
+                    let mut buf = vec![0u8; bufferlength_bytes];
                     loop {
                         if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
                             let msg = AudioMessage::EndOfStream;
@@ -184,32 +185,60 @@ impl CaptureDevice for FileCaptureDevice {
                             break;
                         }
                         //let frames = self.io.readi(&mut buf)?;
-                        let read_res = file.read_exact(&mut buf);
+                        //let read_res = file.read_exact(&mut buf);
+                        //match read_res {
+                        //    Ok(_) => {}
+                        //    Err(err) => {
+                        //        match err.kind() {
+                        //            ErrorKind::UnexpectedEof => {
+                        //                debug!("Reached end of file");
+                        //                send_silence(
+                        //                    extra_samples,
+                        //                    channels,
+                        //                    bufferlength,
+                        //                    &channel,
+                        //                );
+                        //                let msg = AudioMessage::EndOfStream;
+                        //                channel.send(msg).unwrap();
+                        //                status_channel.send(StatusMessage::CaptureDone).unwrap();
+                        //                break;
+                        //            }
+                        //            _ => status_channel
+                        //                .send(StatusMessage::CaptureError {
+                        //                    message: format!("{}", err),
+                        //                })
+                        //                .unwrap(),
+                        //        };
+                        //    }
+                        //};
+                        let read_res = read_retry(&mut file, &mut buf);
                         match read_res {
-                            Ok(_) => {}
-                            Err(err) => {
-                                match err.kind() {
-                                    ErrorKind::UnexpectedEof => {
-                                        debug!("Reached end of file");
-                                        send_silence(
-                                            extra_samples,
-                                            channels,
-                                            bufferlength,
-                                            &channel,
-                                        );
-                                        let msg = AudioMessage::EndOfStream;
-                                        channel.send(msg).unwrap();
-                                        status_channel.send(StatusMessage::CaptureDone).unwrap();
-                                        break;
+                            Ok(bytes) => {
+                                if bytes > 0 && bytes < bufferlength_bytes {
+                                    for item in buf.iter_mut().take(bufferlength_bytes).skip(bytes)
+                                    {
+                                        *item = 0;
                                     }
-                                    _ => status_channel
-                                        .send(StatusMessage::CaptureError {
-                                            message: format!("{}", err),
-                                        })
-                                        .unwrap(),
-                                };
+                                    debug!("Read only {} of {} bytes", bytes, bufferlength_bytes);
+                                } else if bytes == 0 {
+                                    debug!("Reached end of file");
+                                    send_silence(extra_samples, channels, bufferlength, &channel);
+                                    let msg = AudioMessage::EndOfStream;
+                                    channel.send(msg).unwrap();
+                                    status_channel.send(StatusMessage::CaptureDone).unwrap();
+                                    break;
+                                }
+                            }
+                            Err(err) => {
+                                debug!("Encountered a read error");
+                                status_channel
+                                    .send(StatusMessage::CaptureError {
+                                        message: format!("{}", err),
+                                    })
+                                    .unwrap();
                             }
                         };
+
                         //let before = Instant::now();
                         let chunk = match format {
                             SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
@@ -268,5 +297,25 @@ fn send_silence(
         };
         let msg = AudioMessage::Audio(chunk);
         audio_channel.send(msg).unwrap();
+    }
+}
+
+fn read_retry(file: &mut File, mut buf: &mut [u8]) -> Res<usize> {
+    let requested = buf.len();
+    while !buf.is_empty() {
+        match file.read(buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                let tmp = buf;
+                buf = &mut tmp[n..];
+            }
+            Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
+            Err(e) => return Err(Box::new(e)),
+        }
+    }
+    if !buf.is_empty() {
+        Ok(requested - buf.len())
+    } else {
+        Ok(requested)
     }
 }
