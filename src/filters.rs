@@ -1,9 +1,14 @@
 use audiodevice::AudioChunk;
 use basicfilters;
 use biquad;
+use biquadcombo;
 use config;
+use diffeq;
 use dither;
+#[cfg(not(feature = "FFTW"))]
 use fftconv;
+#[cfg(feature = "FFTW")]
+use fftconv_fftw as fftconv;
 use mixer;
 use std::collections::HashMap;
 use std::fs::File;
@@ -113,6 +118,9 @@ impl FilterGroup {
                         sample_freq,
                         biquad::BiquadCoefficients::from_config(sample_freq, parameters),
                     )),
+                    config::Filter::BiquadCombo { parameters } => Box::new(
+                        biquadcombo::BiquadCombo::from_config(name, sample_freq, parameters),
+                    ),
                     config::Filter::Delay { parameters } => Box::new(
                         basicfilters::Delay::from_config(name, sample_freq, parameters),
                     ),
@@ -121,7 +129,10 @@ impl FilterGroup {
                     }
                     config::Filter::Dither { parameters } => {
                         Box::new(dither::Dither::from_config(name, parameters))
-                    } //_ => panic!("unknown type")
+                    }
+                    config::Filter::DiffEq { parameters } => {
+                        Box::new(diffeq::DiffEq::from_config(name, parameters))
+                    }
                 };
             filters.push(filter);
         }
@@ -177,7 +188,7 @@ impl Pipeline {
                         channel,
                         names,
                         conf.filters.clone(),
-                        conf.devices.buffersize,
+                        conf.devices.chunksize,
                         conf.devices.samplerate,
                     );
                     steps.push(PipelineStep::FilterStep(fltgrp));
@@ -246,7 +257,9 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
             Ok(())
         }
         config::Filter::Gain { .. } => Ok(()),
-        config::Filter::Dither { .. } => Ok(()), //_ => panic!("unknown type")
+        config::Filter::Dither { .. } => Ok(()),
+        config::Filter::DiffEq { .. } => Ok(()),
+        config::Filter::BiquadCombo { parameters } => biquadcombo::validate_config(&parameters),
     }
 }
 

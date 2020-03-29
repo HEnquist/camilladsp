@@ -1,12 +1,16 @@
 #[cfg(feature = "alsa-backend")]
 extern crate alsa;
 extern crate clap;
+#[cfg(feature = "FFTW")]
+extern crate fftw;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
+extern crate num;
 extern crate rand;
 extern crate rand_distr;
+#[cfg(not(feature = "FFTW"))]
 extern crate rustfft;
 extern crate serde;
 extern crate signal_hook;
@@ -39,10 +43,15 @@ mod alsadevice;
 mod audiodevice;
 mod basicfilters;
 mod biquad;
+mod biquadcombo;
 mod config;
 mod conversions;
+mod diffeq;
 mod dither;
+#[cfg(not(feature = "FFTW"))]
 mod fftconv;
+#[cfg(feature = "FFTW")]
+mod fftconv_fftw;
 mod fifoqueue;
 mod filedevice;
 mod filters;
@@ -124,8 +133,8 @@ fn run(
     active_config_shared: Arc<Mutex<config::Configuration>>,
     config_path: Arc<Mutex<String>>,
 ) -> Res<ExitStatus> {
-    let (tx_pb, rx_pb) = mpsc::sync_channel(128);
-    let (tx_cap, rx_cap) = mpsc::sync_channel(128);
+    let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.queuelimit);
+    let (tx_cap, rx_cap) = mpsc::sync_channel(conf.devices.queuelimit);
 
     let (tx_status, rx_status) = mpsc::channel();
     let tx_status_pb = tx_status.clone();
@@ -248,9 +257,28 @@ fn run(
 }
 
 fn main() {
+    let mut features = Vec::new();
+    if cfg!(feature = "alsa-backend") {
+        features.push("alsa-backend");
+    }
+    if cfg!(feature = "pulse-backend") {
+        features.push("pulse-backend");
+    }
+    if cfg!(feature = "socketserver") {
+        features.push("socketserver");
+    }
+    if cfg!(feature = "FFTW") {
+        features.push("FFTW");
+    }
+    if cfg!(feature = "32bit") {
+        features.push("32bit");
+    }
+    let featurelist = format!("Built with features: {}", features.join(", "));
+    let longabout = format!("{}\n\n{}", crate_description!(), featurelist);
+
     let clapapp = App::new("CamillaDSP")
         .version(crate_version!())
-        .about(crate_description!())
+        .about(longabout.as_str())
         .author(crate_authors!())
         .setting(AppSettings::ArgRequiredElseHelp)
         .arg(
@@ -329,13 +357,22 @@ fn main() {
     //        return;
     //    }
     //}
+    debug!("Read config file {}", configname);
 
     let mut configuration = match config::load_validate_config(&configname) {
-        Ok(conf) => conf,
-        _ => return,
+        Ok(conf) => {
+            debug!("Config is valid");
+            conf
+        }
+        Err(err) => {
+            error!("{}", err);
+            debug!("Exiting due to config error");
+            return;
+        }
     };
 
     if matches.is_present("check") {
+        debug!("Check only, done!");
         return;
     }
 
@@ -348,12 +385,16 @@ fn main() {
     #[cfg(feature = "socketserver")]
     let serverport = matches.value_of("port").unwrap().parse::<usize>().unwrap();
     #[cfg(feature = "socketserver")]
-    socketserver::start_server(
-        serverport,
-        signal_reload.clone(),
-        active_config.clone(),
-        active_config_path.clone(),
-    );
+    {
+        if serverport > 0 {
+            socketserver::start_server(
+                serverport,
+                signal_reload.clone(),
+                active_config.clone(),
+                active_config_path.clone(),
+            );
+        }
+    }
 
     loop {
         let exitstatus = run(

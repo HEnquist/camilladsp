@@ -64,13 +64,19 @@ pub enum Device {
         channels: usize,
         filename: String,
         format: SampleFormat,
+        #[serde(default)]
+        extra_samples: usize,
     },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Devices {
     pub samplerate: usize,
-    pub buffersize: usize,
+    // alias to allow old name buffersize
+    #[serde(alias = "buffersize")]
+    pub chunksize: usize,
+    #[serde(default = "default_queuelimit")]
+    pub queuelimit: usize,
     #[serde(default)]
     pub silence_threshold: PrcFmt,
     #[serde(default)]
@@ -87,6 +93,10 @@ fn default_period() -> f32 {
     10.0
 }
 
+fn default_queuelimit() -> usize {
+    100
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum Filter {
@@ -97,6 +107,9 @@ pub enum Filter {
     Biquad {
         parameters: BiquadParameters,
     },
+    BiquadCombo {
+        parameters: BiquadComboParameters,
+    },
     Delay {
         parameters: DelayParameters,
     },
@@ -105,6 +118,9 @@ pub enum Filter {
     },
     Dither {
         parameters: DitherParameters,
+    },
+    DiffEq {
+        parameters: DiffEqParameters,
     },
 }
 
@@ -171,9 +187,17 @@ pub enum BiquadParameters {
         slope: PrcFmt,
         gain: PrcFmt,
     },
+    HighshelfFO {
+        freq: PrcFmt,
+        gain: PrcFmt,
+    },
     Lowshelf {
         freq: PrcFmt,
         slope: PrcFmt,
+        gain: PrcFmt,
+    },
+    LowshelfFO {
+        freq: PrcFmt,
         gain: PrcFmt,
     },
     HighpassFO {
@@ -185,6 +209,9 @@ pub enum BiquadParameters {
     Allpass {
         freq: PrcFmt,
         q: PrcFmt,
+    },
+    AllpassFO {
+        freq: PrcFmt,
     },
     Bandpass {
         freq: PrcFmt,
@@ -200,6 +227,15 @@ pub enum BiquadParameters {
         freq_target: PrcFmt,
         q_target: PrcFmt,
     },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+pub enum BiquadComboParameters {
+    LinkwitzRileyHighpass { freq: PrcFmt, order: usize },
+    LinkwitzRileyLowpass { freq: PrcFmt, order: usize },
+    ButterworthHighpass { freq: PrcFmt, order: usize },
+    ButterworthLowpass { freq: PrcFmt, order: usize },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -233,9 +269,20 @@ impl Default for TimeUnit {
 #[serde(tag = "type")]
 pub enum DitherParameters {
     Simple { bits: usize },
-    Lipshitz { bits: usize },
+    Lipshitz441 { bits: usize },
+    Fweighted441 { bits: usize },
+    Shibata441 { bits: usize },
+    Shibata48 { bits: usize },
     Uniform { bits: usize, amplitude: PrcFmt },
     None { bits: usize },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DiffEqParameters {
+    #[serde(default)]
+    pub a: Vec<PrcFmt>,
+    #[serde(default)]
+    pub b: Vec<PrcFmt>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -340,10 +387,12 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     for (filter, params) in &newconf.filters {
         match (params, currentconf.filters.get(filter).unwrap()) {
             (Filter::Biquad { .. }, Filter::Biquad { .. })
+            | (Filter::BiquadCombo { .. }, Filter::BiquadCombo { .. })
             | (Filter::Conv { .. }, Filter::Conv { .. })
             | (Filter::Delay { .. }, Filter::Delay { .. })
             | (Filter::Gain { .. }, Filter::Gain { .. })
-            | (Filter::Dither { .. }, Filter::Dither { .. }) => {}
+            | (Filter::Dither { .. }, Filter::Dither { .. })
+            | (Filter::DiffEq { .. }, Filter::DiffEq { .. }) => {}
             _ => {
                 return ConfigChange::Pipeline;
             }
@@ -362,7 +411,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
-    if conf.devices.target_level >= 2 * conf.devices.buffersize {
+    if conf.devices.target_level >= 2 * conf.devices.chunksize {
         return Err(Box::new(ConfigError::new("target_level is too large.")));
     }
     if conf.devices.adjust_period <= 0.0 {

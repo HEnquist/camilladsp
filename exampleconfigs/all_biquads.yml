@@ -1,7 +1,7 @@
 ---
 devices:
   samplerate: 44100
-  buffersize: 1024
+  chunksize: 1024
   capture:
     type: Alsa
     channels: 2
@@ -28,6 +28,18 @@ filters:
       freq: 1000
       slope: 6
       gain: -12
+  lowshelf_fo:
+    type: Biquad
+    parameters:
+      type: LowshelfFO
+      freq: 100
+      gain: -6
+  highshelf_fo:
+    type: Biquad
+    parameters:
+      type: HighshelfFO
+      freq: 100
+      gain: -6
   lowpass:
     type: Biquad
     parameters:
@@ -75,6 +87,11 @@ filters:
       type: Allpass
       freq: 1000
       q: 0.5
+  allpass_fo:
+    type: Biquad
+    parameters:
+      type: AllpassFO
+      freq: 100
   linkwitztrans:
     type: Biquad
     parameters:
