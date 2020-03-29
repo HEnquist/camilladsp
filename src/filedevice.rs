@@ -190,6 +190,7 @@ impl CaptureDevice for FileCaptureDevice {
                             Err(err) => {
                                 match err.kind() {
                                     ErrorKind::UnexpectedEof => {
+                                        debug!("Reached end of file");
                                         send_silence(
                                             extra_samples,
                                             channels,
@@ -255,11 +256,12 @@ fn send_silence(
     audio_channel: &mpsc::SyncSender<AudioMessage>,
 ) {
     let nchunks = (samples as f32 / bufferlength as f32).ceil() as usize;
+    debug!("Sending {} extra chunks", nchunks);
     for _ in 0..nchunks {
         let waveforms = vec![vec![0.0; bufferlength]; channels];
         let chunk = AudioChunk {
             frames: bufferlength,
-            channels: 2,
+            channels,
             maxval: 0.0,
             minval: 0.0,
             waveforms,

@@ -338,13 +338,22 @@ fn main() {
     //        return;
     //    }
     //}
+    debug!("Read config file {}", configname);
 
     let mut configuration = match config::load_validate_config(&configname) {
-        Ok(conf) => conf,
-        _ => return,
+        Ok(conf) => {
+            debug!("Config is valid");
+            conf
+        }
+        Err(err) => {
+            error!("{}", err);
+            debug!("Exiting due to config error");
+            return;
+        }
     };
 
     if matches.is_present("check") {
+        debug!("Check only, done!");
         return;
     }
 
