@@ -243,7 +243,7 @@ devices:
   and 4 bytes per sample for 24 and 32 bits. 
   If the capture device reaches the end of a file, the program will exit once all chunks have been played. 
   That delayed sound that would end up in a later chunk will be cut off. To avoid this, set the optional parameter `extra_samples` for the File capture device.
-  This causes the capture device to yield the given number of samples (rounded up to a number of complete chunks) after reaching end of file, allowing any delayed sound to be played back. Please note that this version has a known problem causing the last chunk (the one containing the end-of-file) to be discarded.
+  This causes the capture device to yield the given number of samples (rounded up to a number of complete chunks) after reaching end of file, allowing any delayed sound to be played back.
   By setting the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback, the sound will be written to or read from stdio, so one can play with pipes:
   ```
   > camilladsp stdio_capt.yml > rawfile.dat
