@@ -257,9 +257,28 @@ fn run(
 }
 
 fn main() {
+    let mut features = Vec::new();
+    if cfg!(feature = "alsa-backend") {
+        features.push("alsa-backend");
+    }
+    if cfg!(feature = "pulse-backend") {
+        features.push("pulse-backend");
+    }
+    if cfg!(feature = "socketserver") {
+        features.push("socketserver");
+    }
+    if cfg!(feature = "FFTW") {
+        features.push("FFTW");
+    }
+    if cfg!(feature = "32bit") {
+        features.push("32bit");
+    }
+    let featurelist = format!("Built with features: {}", features.join(", "));
+    let longabout = format!("{}\n\n{}", crate_description!(), featurelist);
+
     let clapapp = App::new("CamillaDSP")
         .version(crate_version!())
-        .about(crate_description!())
+        .about(longabout.as_str())
         .author(crate_authors!())
         .setting(AppSettings::ArgRequiredElseHelp)
         .arg(
