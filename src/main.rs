@@ -130,6 +130,7 @@ fn get_new_config(
 fn run(
     conf: config::Configuration,
     signal_reload: Arc<AtomicBool>,
+    signal_exit: Arc<AtomicBool>,
     active_config_shared: Arc<Mutex<config::Configuration>>,
     config_path: Arc<Mutex<String>>,
 ) -> Res<ExitStatus> {
@@ -211,6 +212,11 @@ fn run(
                     error!("{}", err);
                 }
             };
+        }
+        if signal_exit.load(Ordering::Relaxed) {
+            debug!("Exit requested...");
+            signal_exit.store(false, Ordering::Relaxed);
+            return Ok(ExitStatus::Exit);
         }
         match rx_status.recv_timeout(delay) {
             Ok(msg) => match msg {
@@ -377,6 +383,7 @@ fn main() {
     }
 
     let signal_reload = Arc::new(AtomicBool::new(false));
+    let signal_exit = Arc::new(AtomicBool::new(false));
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(configuration.clone()));
 
@@ -390,6 +397,7 @@ fn main() {
             socketserver::start_server(
                 serverport,
                 signal_reload.clone(),
+                signal_exit.clone(),
                 active_config.clone(),
                 active_config_path.clone(),
             );
@@ -400,6 +408,7 @@ fn main() {
         let exitstatus = run(
             configuration,
             signal_reload.clone(),
+            signal_exit.clone(),
             active_config.clone(),
             active_config_path.clone(),
         );

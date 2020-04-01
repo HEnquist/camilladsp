@@ -50,6 +50,7 @@ fn parse_command(cmd: ws::Message) -> WSCommand {
 pub fn start_server(
     port: usize,
     signal_reload: Arc<AtomicBool>,
+    signal_exit: Arc<AtomicBool>,
     active_config_shared: Arc<Mutex<config::Configuration>>,
     active_config_path: Arc<Mutex<String>>,
 ) {
@@ -57,6 +58,7 @@ pub fn start_server(
     thread::spawn(move || {
         ws::listen(format!("127.0.0.1:{}", port), |socket| {
             let signal_reload_inst = signal_reload.clone();
+            let signal_exit_inst = signal_exit.clone();
             let active_config_inst = active_config_shared.clone();
             let active_config_path_inst = active_config_path.clone();
             move |msg: ws::Message| {
@@ -96,7 +98,10 @@ pub fn start_server(
                             _ => socket.send("ERROR:SETCONFIG"),
                         }
                     }
-                    WSCommand::Exit => socket.send("OK:EXIT"),
+                    WSCommand::Exit => {
+                        signal_exit_inst.store(true, Ordering::Relaxed);
+                        socket.send("OK:EXIT")
+                    }
                     WSCommand::Invalid => socket.send("ERROR:INVALID"),
                 }
             }

@@ -8,7 +8,7 @@ The available commands are:
   * response is `OK:/path/to/current.yml`
 - `reload` : reload current config file (same as SIGHUP)
   * response is `OK:RELOAD` or `ERROR:RELOAD` 
-- `exit` : exit (not yet implemented)
+- `exit` : stop processing and exit
 - `setconfigname:/path/to/file.yml` : change config file name, not applied until `reload` is called
   * response is `OK:/path/to/file.yml` or `ERROR:/path/to/file.yml`
 - `setconfig:<new config in yaml format>` : provide a new config as a yaml string. Applied directly.
@@ -26,8 +26,7 @@ camilladsp -v -p1234 /path/to/someconfig.yml
 Start Ipython. Import the websocket client and make a connection:
 ```ipython
 In [1]: from websocket import create_connection
-In [2]: ws = create_connection("ws://127.0.0.1:3011")
-
+In [2]: ws = create_connection("ws://127.0.0.1:1234")
 ```
 
 ### Get the name of the current config file
