@@ -1,4 +1,4 @@
-# show_config.py
+# run example: python fft_file.py result_i32.raw S32LE 44100 2
 
 import numpy as np
 import numpy.fft as fft

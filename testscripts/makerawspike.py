@@ -1,3 +1,4 @@
+# Make a simple spike for testing purposes
 import numpy as np
 
 
