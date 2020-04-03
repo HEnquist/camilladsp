@@ -13,6 +13,7 @@ extern crate rand_distr;
 #[cfg(not(feature = "FFTW"))]
 extern crate rustfft;
 extern crate serde;
+extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "socketserver")]
 extern crate ws;
@@ -29,6 +30,7 @@ use std::error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
+use std::thread;
 use std::time;
 
 // Sample format
@@ -87,9 +89,9 @@ enum ExitStatus {
 fn get_new_config(
     active_config: &config::Configuration,
     config_path: &Arc<Mutex<String>>,
-    active_config_shared: &Arc<Mutex<config::Configuration>>,
+    active_config_shared: &Arc<Mutex<Option<config::Configuration>>>,
 ) -> Res<config::Configuration> {
-    let conf = active_config_shared.lock().unwrap().clone();
+    let conf = active_config_shared.lock().unwrap().clone().unwrap();
     //if *config_path.lock().unwrap() == "none" {
     if &conf != active_config {
         debug!("Reload using config from websocket");
@@ -131,7 +133,7 @@ fn run(
     conf: config::Configuration,
     signal_reload: Arc<AtomicBool>,
     signal_exit: Arc<AtomicBool>,
-    active_config_shared: Arc<Mutex<config::Configuration>>,
+    active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     config_path: Arc<Mutex<String>>,
 ) -> Res<ExitStatus> {
     let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.queuelimit);
@@ -155,7 +157,7 @@ fn run(
 
     let mut active_config = conf;
     //let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
-    *active_config_shared.lock().unwrap() = active_config.clone();
+    *active_config_shared.lock().unwrap() = Some(active_config.clone());
 
     // Processing thread
     processing::run_processing(conf_proc, barrier_proc, tx_pb, rx_cap, rx_pipeconf);
@@ -190,7 +192,7 @@ fn run(
                         | config::ConfigChange::FilterParameters { .. } => {
                             tx_pipeconf.send((comp, conf.clone())).unwrap();
                             active_config = conf;
-                            *active_config_shared.lock().unwrap() = active_config.clone();
+                            *active_config_shared.lock().unwrap() = Some(active_config.clone());
                             debug!("Sent changes to pipeline");
                         }
                         config::ConfigChange::Devices => {
@@ -291,7 +293,8 @@ fn main() {
             Arg::with_name("configfile")
                 .help("The configuration file to use")
                 .index(1)
-                .required(true),
+                //.required(true),
+                .required_unless("wait"),
         )
         .arg(
             Arg::with_name("check")
@@ -306,23 +309,30 @@ fn main() {
                 .help("Increase message verbosity"),
         );
     #[cfg(feature = "socketserver")]
-    let clapapp = clapapp.arg(
-        Arg::with_name("port")
-            .help("Port for websocket server")
-            .short("p")
-            .long("port")
-            .takes_value(true)
-            .default_value("0")
-            .hide_default_value(true)
-            .validator(|v: String| -> Result<(), String> {
-                if let Ok(port) = v.parse::<usize>() {
-                    if port < 65535 {
-                        return Ok(());
+    let clapapp = clapapp
+        .arg(
+            Arg::with_name("port")
+                .help("Port for websocket server")
+                .short("p")
+                .long("port")
+                .takes_value(true)
+                .default_value("0")
+                .hide_default_value(true)
+                .validator(|v: String| -> Result<(), String> {
+                    if let Ok(port) = v.parse::<usize>() {
+                        if port < 65535 {
+                            return Ok(());
+                        }
                     }
-                }
-                Err(String::from("Must be an integer between 0 and 65535"))
-            }),
-    );
+                    Err(String::from("Must be an integer between 0 and 65535"))
+                }),
+        )
+        .arg(
+            Arg::with_name("wait")
+                .short("w")
+                .long("wait")
+                .help("Wait for config from websocket"),
+        );
     let matches = clapapp.get_matches();
 
     let loglevel = match matches.occurrences_of("verbosity") {
@@ -342,39 +352,23 @@ fn main() {
     //warn!("warn message");
     //error!("error message");
 
-    let configname = matches.value_of("configfile").unwrap(); //&args[1];
+    let configname = matches.value_of("configfile");
 
-    //let mut configuration = match config::load_config(&configname) {
-    //    Ok(config) => config,
-    //    Err(err) => {
-    //        error!("Config file error:");
-    //        error!("{}", err);
-    //        return;
-    //    }
-    //};
-    //
-    //match config::validate_config(configuration.clone()) {
-    //    Ok(()) => {
-    //        info!("Config is valid");
-    //    }
-    //    Err(err) => {
-    //        error!("Invalid config file!");
-    //        error!("{}", err);
-    //        return;
-    //    }
-    //}
-    debug!("Read config file {}", configname);
+    debug!("Read config file {}", configname.unwrap_or("(none)"));
 
-    let mut configuration = match config::load_validate_config(&configname) {
-        Ok(conf) => {
-            debug!("Config is valid");
-            conf
-        }
-        Err(err) => {
-            error!("{}", err);
-            debug!("Exiting due to config error");
-            return;
-        }
+    let mut configuration = match configname {
+        Some(path) => match config::load_validate_config(&path) {
+            Ok(conf) => {
+                debug!("Config is valid");
+                Some(conf)
+            }
+            Err(err) => {
+                error!("{}", err);
+                debug!("Exiting due to config error");
+                return;
+            }
+        },
+        None => None,
     };
 
     if matches.is_present("check") {
@@ -387,7 +381,7 @@ fn main() {
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(configuration.clone()));
 
-    let active_config_path = Arc::new(Mutex::new(configname.to_string()));
+    let active_config_path = Arc::new(Mutex::new(configname.unwrap_or("").to_string()));
 
     #[cfg(feature = "socketserver")]
     let serverport = matches.value_of("port").unwrap().parse::<usize>().unwrap();
@@ -405,8 +399,16 @@ fn main() {
     }
 
     loop {
+        if configuration.is_none() {
+            info!("Waiting for config");
+            let delay = time::Duration::from_millis(100);
+            while active_config.lock().unwrap().is_none() {
+                thread::sleep(delay);
+            }
+            configuration = active_config.lock().unwrap().clone();
+        }
         let exitstatus = run(
-            configuration,
+            configuration.unwrap(),
             signal_reload.clone(),
             signal_exit.clone(),
             active_config.clone(),
@@ -423,7 +425,7 @@ fn main() {
             }
             Ok(ExitStatus::Restart(conf)) => {
                 debug!("Restarting with new config");
-                configuration = *conf
+                configuration = Some(*conf)
             }
         };
     }
