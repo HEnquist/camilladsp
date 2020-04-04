@@ -52,7 +52,7 @@ pub fn start_server(
     signal_reload: Arc<AtomicBool>,
     signal_exit: Arc<AtomicBool>,
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
-    active_config_path: Arc<Mutex<String>>,
+    active_config_path: Arc<Mutex<Option<String>>>,
 ) {
     debug!("Start websocket server on port {}", port);
     thread::spawn(move || {
@@ -74,12 +74,17 @@ pub fn start_server(
                             serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap(),
                         )
                     }
-                    WSCommand::GetConfigName => {
-                        socket.send(format!("{}", active_config_path_inst.lock().unwrap()))
-                    }
+                    WSCommand::GetConfigName => socket.send(
+                        active_config_path_inst
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .unwrap_or(&"NONE".to_string())
+                            .to_string(),
+                    ),
                     WSCommand::SetConfigName(path) => match config::load_validate_config(&path) {
                         Ok(_) => {
-                            *active_config_path_inst.lock().unwrap() = path.clone();
+                            *active_config_path_inst.lock().unwrap() = Some(path.clone());
                             socket.send(format!("OK:{}", path))
                         }
                         _ => socket.send(format!("ERROR:{}", path)),

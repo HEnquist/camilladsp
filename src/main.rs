@@ -88,7 +88,7 @@ enum ExitStatus {
 
 fn get_new_config(
     active_config: &config::Configuration,
-    config_path: &Arc<Mutex<String>>,
+    config_path: &Arc<Mutex<Option<String>>>,
     active_config_shared: &Arc<Mutex<Option<config::Configuration>>>,
 ) -> Res<config::Configuration> {
     let conf = active_config_shared.lock().unwrap().clone().unwrap();
@@ -108,7 +108,7 @@ fn get_new_config(
             }
         }
     } else {
-        match config::load_config(&config_path.lock().unwrap()) {
+        match config::load_config(&config_path.lock().unwrap().as_ref().unwrap()) {
             Ok(conf) => match config::validate_config(conf.clone()) {
                 Ok(()) => {
                     debug!("Reload using config file");
@@ -134,7 +134,7 @@ fn run(
     signal_reload: Arc<AtomicBool>,
     signal_exit: Arc<AtomicBool>,
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
-    config_path: Arc<Mutex<String>>,
+    config_path: Arc<Mutex<Option<String>>>,
 ) -> Res<ExitStatus> {
     let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.queuelimit);
     let (tx_cap, rx_cap) = mpsc::sync_channel(conf.devices.queuelimit);
@@ -352,12 +352,15 @@ fn main() {
     //warn!("warn message");
     //error!("error message");
 
-    let configname = matches.value_of("configfile");
+    let configname = match matches.value_of("configfile") {
+        Some(path) => Some(path.to_string()),
+        None => None,
+    };
 
-    debug!("Read config file {}", configname.unwrap_or("(none)"));
+    debug!("Read config file {:?}", configname);
 
-    let mut configuration = match configname {
-        Some(path) => match config::load_validate_config(&path) {
+    let mut configuration = match &configname {
+        Some(path) => match config::load_validate_config(&path.clone()) {
             Ok(conf) => {
                 debug!("Config is valid");
                 Some(conf)
@@ -381,7 +384,7 @@ fn main() {
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(configuration.clone()));
 
-    let active_config_path = Arc::new(Mutex::new(configname.unwrap_or("").to_string()));
+    let active_config_path = Arc::new(Mutex::new(configname));
 
     #[cfg(feature = "socketserver")]
     let serverport = matches.value_of("port").unwrap().parse::<usize>().unwrap();
