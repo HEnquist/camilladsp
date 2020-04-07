@@ -1,6 +1,9 @@
 # Controlling via websocket
 
-If the websocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
+If the websocket server is enabled with the `-p` option, CamillaDSP will listen to incoming websocket connections on the specified port.
+
+If additionally the "wait" flag is given, it will wait for a config to be uploaded via the websocket server before starting the processing.
+
 The available commands are:
 - `getconfig` : read the current configuration as yaml
   * response is the config in yaml format.
@@ -8,6 +11,7 @@ The available commands are:
   * response is `OK:/path/to/current.yml`
 - `reload` : reload current config file (same as SIGHUP)
   * response is `OK:RELOAD` or `ERROR:RELOAD` 
+- `stop` : stop processing and wait for a new config to be uploaded with `setconfig`
 - `exit` : stop processing and exit
 - `setconfigname:/path/to/file.yml` : change config file name, not applied until `reload` is called
   * response is `OK:/path/to/file.yml` or `ERROR:/path/to/file.yml`

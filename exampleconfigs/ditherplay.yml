@@ -1,7 +1,7 @@
 ---
 devices:
   samplerate: 44100
-  chunksize: 1024
+  chunksize: 4096
   silence_threshold: -61
   silence_timeout: 3.0
   capture:
@@ -16,6 +16,11 @@ devices:
     format: S32LE
 
 filters:
+  atten:
+    type: Gain
+    parameters:
+      gain: -12
+      inverted: false
   quantize:
     type: Dither
     parameters:
@@ -25,7 +30,7 @@ filters:
     type: Dither
     parameters:
       type: Uniform
-      bits: 6
+      bits: 8
       amplitude: 1.0
   dithersimple:
     type: Dither
@@ -35,17 +40,29 @@ filters:
   ditherfancy:
     type: Dither
     parameters:
-      type: Lipshitz
-      bits: 10
+      type: Lipshitz441
+      bits: 8
+  ditherfancy2:
+    type: Dither
+    parameters:
+      type: Fweighted441
+      bits: 8
+  ditherfancy3:
+    type: Dither
+    parameters:
+      type: Shibata441
+      bits: 8
 
 pipeline:
   - type: Filter
     channel: 0
     names:
-      - ditherfancy
+      - atten
+      - ditherfancy2
   - type: Filter
     channel: 1
     names:
-      - ditherfancy
+      - atten
+      - ditherfancy2
    
 
