@@ -46,11 +46,7 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 - - Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
 - Clone the repository
 - Build with standard options: ```cargo build --release```
-- - without Alsa: ```cargo build --release --no-default-features --features pulse-backend```
-- - without Pulse: ```cargo build --release --no-default-features --features alsa-backend```
-- - with 32 bit float: ```cargo build --release --features 32bit```
-- - with FFTW: ```cargo build --release --features FFTW```
-- - combine several features: ```cargo build --release --features FFTW --features 32bit```
+- - see below for other options
 - The binary is now available at ./target/release/camilladsp
 - Optionally install with `cargo install --path .`
 
