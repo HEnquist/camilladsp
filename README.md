@@ -49,6 +49,7 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 - - see below for other options
 - The binary is now available at ./target/release/camilladsp
 - Optionally install with `cargo install --path .`
+- - Note: the `install` command takes the same options for features as the `build` command. 
 
 ### Customized build
 All the available options, or "features" are:
@@ -64,11 +65,15 @@ Cargo doesn't allow disabling a single default feature, but you can disable the 
 Example 1: You want `alsa-backend`, `pulse-backend`, `socketserver` and `FFTW`. The first three are included by default so you only need to add `FFTW`:
 ```
 cargo build --release --features FFTW
+(or)
+cargo install --path . --features FFTW
 ```
 
 Example 2: You want `alsa-backend`, `socketserver`, `32bit` and `FFTW`. Since you don't want `pulse-backend` you have to disable the defaults, and then add both `alsa-backend` and `socketserver`:
 ```
 cargo build --release --no-default-features --features alsa-backend --features socketserver --features FFTW --features 32bit
+(or)
+cargo install --path . --no-default-features --features alsa-backend --features socketserver --features FFTW --features 32bit
 ```
 
 
