@@ -1,0 +1,66 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 1025
+  target_level: 512
+  adjust_period: 10
+  playback:
+    type: File
+    channels: 2
+    filename: "result_i32.raw"
+    format: S32LE
+  capture:
+    type: File
+    channels: 1
+    filename: "spike_i32.raw"
+    format: S32LE
+    extra_samples: 2500
+
+
+mixers:
+  splitter:
+    channels:
+      in: 1
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+
+
+filters:
+  testlp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 1000
+      order: 4
+  testhp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 1000
+      order: 4
+
+
+
+pipeline:
+  - type: Mixer
+    name: splitter
+  - type: Filter
+    channel: 0
+    names:
+      - testlp
+  - type: Filter
+    channel: 1
+    names:
+      - testhp
+   
+

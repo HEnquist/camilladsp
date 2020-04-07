@@ -61,7 +61,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
         } => Box::new(alsadevice::AlsaPlaybackDevice {
             devname: device,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
             target_level: conf.target_level,
@@ -75,7 +75,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
         } => Box::new(pulsedevice::PulsePlaybackDevice {
             devname: device,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
         }),
@@ -83,10 +83,11 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             filename,
             format,
+            ..
         } => Box::new(filedevice::FilePlaybackDevice {
             filename,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
         }),
@@ -104,7 +105,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(alsadevice::AlsaCaptureDevice {
             devname: device,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
             silence_threshold: conf.silence_threshold,
@@ -118,7 +119,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(pulsedevice::PulseCaptureDevice {
             devname: device,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
             silence_threshold: conf.silence_threshold,
@@ -128,12 +129,14 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels,
             filename,
             format,
+            extra_samples,
         } => Box::new(filedevice::FileCaptureDevice {
             filename,
             samplerate: conf.samplerate,
-            bufferlength: conf.buffersize,
+            bufferlength: conf.chunksize,
             channels,
             format,
+            extra_samples,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),

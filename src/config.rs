@@ -1,5 +1,5 @@
 use filters;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error;
 use std::fmt;
@@ -36,7 +36,7 @@ impl ConfigError {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum SampleFormat {
     S16LE,
     S24LE,
@@ -45,7 +45,7 @@ pub enum SampleFormat {
     FLOAT64LE,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum Device {
     #[cfg(feature = "alsa-backend")]
@@ -64,13 +64,19 @@ pub enum Device {
         channels: usize,
         filename: String,
         format: SampleFormat,
+        #[serde(default)]
+        extra_samples: usize,
     },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Devices {
     pub samplerate: usize,
-    pub buffersize: usize,
+    // alias to allow old name buffersize
+    #[serde(alias = "buffersize")]
+    pub chunksize: usize,
+    #[serde(default = "default_queuelimit")]
+    pub queuelimit: usize,
     #[serde(default)]
     pub silence_threshold: PrcFmt,
     #[serde(default)]
@@ -87,7 +93,11 @@ fn default_period() -> f32 {
     10.0
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+fn default_queuelimit() -> usize {
+    100
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum Filter {
     Conv {
@@ -96,6 +106,9 @@ pub enum Filter {
     },
     Biquad {
         parameters: BiquadParameters,
+    },
+    BiquadCombo {
+        parameters: BiquadComboParameters,
     },
     Delay {
         parameters: DelayParameters,
@@ -106,9 +119,12 @@ pub enum Filter {
     Dither {
         parameters: DitherParameters,
     },
+    DiffEq {
+        parameters: DiffEqParameters,
+    },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum FileFormat {
     TEXT,
     S16LE,
@@ -118,7 +134,7 @@ pub enum FileFormat {
     FLOAT64LE,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum ConvParameters {
     File {
@@ -143,7 +159,7 @@ impl Default for ConvParameters {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum BiquadParameters {
     Free {
@@ -171,9 +187,17 @@ pub enum BiquadParameters {
         slope: PrcFmt,
         gain: PrcFmt,
     },
+    HighshelfFO {
+        freq: PrcFmt,
+        gain: PrcFmt,
+    },
     Lowshelf {
         freq: PrcFmt,
         slope: PrcFmt,
+        gain: PrcFmt,
+    },
+    LowshelfFO {
+        freq: PrcFmt,
         gain: PrcFmt,
     },
     HighpassFO {
@@ -185,6 +209,9 @@ pub enum BiquadParameters {
     Allpass {
         freq: PrcFmt,
         q: PrcFmt,
+    },
+    AllpassFO {
+        freq: PrcFmt,
     },
     Bandpass {
         freq: PrcFmt,
@@ -202,21 +229,30 @@ pub enum BiquadParameters {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+pub enum BiquadComboParameters {
+    LinkwitzRileyHighpass { freq: PrcFmt, order: usize },
+    LinkwitzRileyLowpass { freq: PrcFmt, order: usize },
+    ButterworthHighpass { freq: PrcFmt, order: usize },
+    ButterworthLowpass { freq: PrcFmt, order: usize },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct GainParameters {
     pub gain: PrcFmt,
     #[serde(default)]
     pub inverted: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DelayParameters {
     pub delay: PrcFmt,
     #[serde(default)]
     pub unit: TimeUnit,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum TimeUnit {
     #[serde(rename = "ms")]
     Milliseconds,
@@ -229,48 +265,59 @@ impl Default for TimeUnit {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum DitherParameters {
     Simple { bits: usize },
-    Lipshitz { bits: usize },
+    Lipshitz441 { bits: usize },
+    Fweighted441 { bits: usize },
+    Shibata441 { bits: usize },
+    Shibata48 { bits: usize },
     Uniform { bits: usize, amplitude: PrcFmt },
     None { bits: usize },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DiffEqParameters {
+    #[serde(default)]
+    pub a: Vec<PrcFmt>,
+    #[serde(default)]
+    pub b: Vec<PrcFmt>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MixerChannels {
     pub r#in: usize,
     pub out: usize,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MixerSource {
     pub channel: usize,
     pub gain: PrcFmt,
     pub inverted: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MixerMapping {
     pub dest: usize,
     pub sources: Vec<MixerSource>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Mixer {
     pub channels: MixerChannels,
     pub mapping: Vec<MixerMapping>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum PipelineStep {
     Mixer { name: String },
     Filter { channel: usize, names: Vec<String> },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Configuration {
     pub devices: Devices,
     #[serde(default)]
@@ -319,6 +366,12 @@ pub enum ConfigChange {
     None,
 }
 
+pub fn load_validate_config(configname: &str) -> Res<Configuration> {
+    let configuration = load_config(configname)?;
+    validate_config(configuration.clone())?;
+    Ok(configuration)
+}
+
 pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> ConfigChange {
     if currentconf == newconf {
         return ConfigChange::None;
@@ -334,10 +387,12 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     for (filter, params) in &newconf.filters {
         match (params, currentconf.filters.get(filter).unwrap()) {
             (Filter::Biquad { .. }, Filter::Biquad { .. })
+            | (Filter::BiquadCombo { .. }, Filter::BiquadCombo { .. })
             | (Filter::Conv { .. }, Filter::Conv { .. })
             | (Filter::Delay { .. }, Filter::Delay { .. })
             | (Filter::Gain { .. }, Filter::Gain { .. })
-            | (Filter::Dither { .. }, Filter::Dither { .. }) => {}
+            | (Filter::Dither { .. }, Filter::Dither { .. })
+            | (Filter::DiffEq { .. }, Filter::DiffEq { .. }) => {}
             _ => {
                 return ConfigChange::Pipeline;
             }
@@ -356,7 +411,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
-    if conf.devices.target_level >= 2 * conf.devices.buffersize {
+    if conf.devices.target_level >= 2 * conf.devices.chunksize {
         return Err(Box::new(ConfigError::new("target_level is too large.")));
     }
     if conf.devices.adjust_period <= 0.0 {

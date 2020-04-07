@@ -29,6 +29,11 @@ Use recent stable versions of rustc and cargo. The minimum rustc version is 1.36
 By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
 
 By default the internal processing is done using 64-bit floats. There is a possibility to switch this to 32-bit floats. This might be useful for speeding up the processing when running on a 32-bit CPU (or a 64-bit CPU running in 32-bit mode), but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
+
+CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "socketserver". For usage see the section "Controlling via websocket".
+
+The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". FFTW is about a factor two faster. It's a much larger and more complicated library though, so this is only recommended if your filters take too much CPU time with RustFFT.
+
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
@@ -43,6 +48,8 @@ By default the internal processing is done using 64-bit floats. There is a possi
 - - without Alsa: ```cargo build --release --no-default-features --features pulse-backend```
 - - without Pulse: ```cargo build --release --no-default-features --features alsa-backend```
 - - with 32 bit float: ```cargo build --release --features 32bit```
+- - with FFTW: ```cargo build --release --features FFTW```
+- - combine several features: ```cargo build --release --features FFTW --features 32bit```
 - The binary is now available at ./target/release/camilladsp
 - Optionally install with `cargo install --path .`
 
@@ -52,18 +59,18 @@ The command is simply:
 ```
 camilladsp /path/to/config.yml
 ```
-This starts the processing defined in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is complete and valid. When an error is found it displays an error message describing the problem.
+This starts the processing defined in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is complete and valid. When an error is found it displays an error message describing the problem. See more about the configuration file below.
 
 ### Command line options
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.0.9
+CamillaDSP 0.0.10
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
 USAGE:
-    camilladsp [FLAGS] <configfile>
+    camilladsp [FLAGS] [OPTIONS] <configfile>
 
 FLAGS:
     -c, --check      Check config file and exit
@@ -71,26 +78,33 @@ FLAGS:
     -V, --version    Prints version information
     -v               Increase message verbosity
 
+OPTIONS:
+    -p, --port <port>    Port for websocket server
+
 ARGS:
     <configfile>    The configuration file to use
 ```
 If the "check" flag is given, the program will exit after checking the configuration file. Use this if you only want to verify that the configuration is ok, and not start any processing.
 
-The default logging setting prints messeges of levels "error", "warn" and "info". By passing the verbosity flag once, "-v" it also prints "debug". If and if's given twice, "-vv", it also prints "trace" messages. 
+To enable the websocket server, provide a port number with the -p option. Leave it out, or give 0 to disable.
+
+The default logging setting prints messages of levels "error", "warn" and "info". By passing the verbosity flag once, "-v" it also prints "debug". If and if's given twice, "-vv", it also prints "trace" messages. 
 
 
 ### Reloading the configuration
-The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficents file needs to change.
+The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficients file needs to change.
+
+## Controlling via websocket
+See the [separate readme for the websocket server](./websocket.md)
+
+If the websocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
+
 
 
 ## Usage example: crossover for 2-way speakers
 A crossover must filter all sound being played on the system. This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device. CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
-The simplest possible processing pipeline would then consist of:
-- A source, for example a Pulse null sink
-- A Mixer to go from 2 to four channels (2 for woofers, 2 for tweeters)
-- High pass filters on the tweeter channels
-- Low pass filter on the woofer channels
-- An output device with 4 analog channel
+
+See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
 
 # Capturing audio
@@ -124,18 +138,18 @@ pacmd list-sources
 
 # Configuration
 
-## Devices
-Input and output devices are defined in the same way. A device needs a type (Alsa, Pulse or File), number of channels, a device name (or file name for File), and a sample format. Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits (S16LE, S24LE and S32LE) as well as floats of 32 and 64 bits (FLOAT32LE and FLOAT64LE). Note that PulseAudio does not support 64-bit float. 
-There is also a common samplerate that decides the samplerate that everything will run at. The buffersize is the number of samples each chunk will have per channel. 
-The fields silence_threshold and silence_timeout are optional and used to pause processing if the input is silent. The threshold is the threshold level in dB, and the level is calculated as the difference between the minimum and maximum sample values for all channels in the capture buffer. 0 dB is full level. Some experimentation might be needed to find the right threshold.
-The timeout (in seconds) is for how long the signal should be silent before pausing processing. Set this to zero, or leave it out, to never pause.
-For the special case where the capture device is an Alsa Loopback device, and the playback device another Alsa device, there is a funtion to synchronize the Loopback device to the playback device. This avoids the problems of buffer underruns or slowly increasing delay. This function requires the parameter "target_level" to be set. It will take some experimentation to find the right number. If it's too small there will be buffer underruns from time to time, and making it too large might lead to a longer input-output delay than what is acceptable. Suitable values are in the range 1/2 to 1 times the buffersize. The "adjust_period" sets the interval between corrections and is optional. The default is 10 seconds.
+## The YAML format
+CamillaDSP is using the YAML format for the configuration file. This is a standard format that was chosen because of its nice readable syntax. The Serde library is used for reading the configuration. 
+There are a few things to keep in mind with YAML. The configuration is a tree, and the level is determined by the indentation level. For YAML the indentation is as important as opening and closing brackets in other formats. If it's wrong, Serde might not be able to give a good description of what the error is, only that the file is invalid. 
+If you get strange errors, first check that the indentation is correct. Also check that you only use spaces and no tabs. Many text editors can help by highlighting syntax errors in the file. 
 
+## Devices
 Example config (note that parameters marked (*) can be left out to use their default values):
 ```
 devices:
   samplerate: 44100
-  buffersize: 1024
+  chunksize: 1024
+  queuelimit: 128 (*)
   silence_threshold: -60 (*)
   silence_timeout: 3.0 (*)
   target_level: 500 (*)
@@ -151,12 +165,90 @@ devices:
     device: "hw:Generic_1"
     format: S32LE
 ```
+* `samplerate`
 
-The File device type reads or writes to a file. The format is raw interleaved samples, 2 bytes per sample for 16-bit, and 4 bytes per sample for 24 and 32 bits. If the capture device reaches the end of a file, the program will exit once all chunks have been played. Note that delayed sound that would end up in a later chunk will be cut off. By setting the filename to ```/dev/stdin``` for capture, or ```/dev/stdout``` for playback, the sound will be written to or read from stdio, so one can play with pipes:
-```
-camilladsp stdio_capt.yml > rawfile.dat
-cat rawfile.dat | camilladsp stdio_pb.yml
-```
+  The `samplerate` setting decides the sample rate that everything will run at. 
+  This rate must be supported by both the capture and  playback device.
+
+* `chunksize`
+
+  All processing is done in chunks of data. The `chunksize` is the number of samples each chunk will have per channel. 
+  It's good if the number is an "easy" number like a power of two, since this speeds up the FFT in the Convolution filter. 
+  A good value to start at is 1024. 
+  If you have long FIR filters you can make this larger to reduce CPU usage. 
+  Try increasing in factors of two, to 2048, 4096 etc. 
+  The duration in seconds of a chunk is `chunksize/samplerate`, so a value of 1024 at 44.1kHz corresponds to 23 ms per chunk.
+
+* `queuelimit` (optional)
+
+  The field `queuelimit` should normally be left out to use the default of 128. 
+  It sets the limit for the length of the queues between the capture device and the processing thread, 
+  and between the processing thread and the playback device. 
+  The total queue size limit will be `2*chunksize*queuelimit` samples per channel. 
+  The maximum RAM usage is `8*2*chunksize*queuelimit` bytes. 
+  For example at the default setting of 128 and a chunksize of 1024, the total size limit of the queues 
+  is about 2MB (or 1MB if the 32bit compile option is used). 
+  The queues are allocated as needed, this value only sets an upper limit. 
+
+  The value should only be changed if the capture device provides data faster 
+  than the playback device can play it. 
+  This will only be the case when piping data in via the file capture device, 
+  and will lead to very high cpu usage while the queues are being filled. 
+  If this is a problem, set `queuelimit` to a low value like 1.
+
+* `target_level` & `adjust_period` (optional)
+  For the special case where the capture device is an Alsa Loopback device, 
+  and the playback device another Alsa device, there is a function to synchronize 
+  the Loopback device to the playback device. 
+  This avoids the problems of buffer underruns or slowly increasing delay. 
+  This function requires the parameter `target_level` to be set. 
+  The value is the number of samples that should be left in the buffer of the playback device
+  when the next chunk arrives. It works by fine tuning the sample rate of the virtual Loopback device.
+  It will take some experimentation to find the right number. 
+  If it's too small there will be buffer underruns from time to time, 
+  and making it too large might lead to a longer input-output delay than what is acceptable. 
+  Suitable values are in the range 1/2 to 1 times the `chunksize`. 
+
+  The `adjust_period` parameter is used to set the interval between corrections. 
+  The default is 10 seconds.
+
+* `silence_threshold` & `silence_timeout` (optional)
+  The fields `silence_threshold` and `silence_timeout` are optional 
+  and used to pause processing if the input is silent. 
+  The threshold is the threshold level in dB, and the level is calculated as the difference 
+  between the minimum and maximum sample values for all channels in the capture buffer. 
+  0 dB is full level. Some experimentation might be needed to find the right threshold.
+
+  The `silence_timeout` (in seconds) is for how long the signal should be silent before pausing processing. 
+  Set this to zero, or leave it out, to never pause.
+ 
+* `capture` and `playback`
+  Input and output devices are defined in the same way. 
+  A device needs:
+  * `type`: Alsa, Pulse or File 
+  * `channels`: number of channels
+  * `device`: device name (for Alsa and Pulse)
+  * `filename` path the the file (for File)
+  * `format`: sample format.
+
+    Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
+    * S16LE
+    * S24LE
+    * S32LE 
+    * FLOAT32LE
+    * FLOAT64LE (not supported by PulseAudio)
+
+  The File device type reads or writes to a file. 
+  The format is raw interleaved samples, 2 bytes per sample for 16-bit, 
+  and 4 bytes per sample for 24 and 32 bits. 
+  If the capture device reaches the end of a file, the program will exit once all chunks have been played. 
+  That delayed sound that would end up in a later chunk will be cut off. To avoid this, set the optional parameter `extra_samples` for the File capture device.
+  This causes the capture device to yield the given number of samples (rounded up to a number of complete chunks) after reaching end of file, allowing any delayed sound to be played back.
+  By setting the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback, the sound will be written to or read from stdio, so one can play with pipes:
+  ```
+  > camilladsp stdio_capt.yml > rawfile.dat
+  > cat rawfile.dat | camilladsp stdio_pb.yml
+  ```
 
 
 ## Mixers
@@ -237,7 +329,7 @@ filters:
 ```
 
 ### FIR
-A FIR filter is given by an impuse response provided as a list of coefficients. The coefficients are preferrably given in a separate file, but can be included directly in the config file. If the number of coefficients (or taps) is larger than the buffersize setting it will use segmented convolution. The number of segments is the filter length divided by the buffersize, rounded up.
+A FIR filter is given by an impulse response provided as a list of coefficients. The coefficients are preferably given in a separate file, but can be included directly in the config file. If the number of coefficients (or taps) is larger than the chunksize setting it will use segmented convolution. The number of segments is the filter length divided by the chunksize, rounded up.
 ```
 filters:
   lowpass_fir:
@@ -265,7 +357,7 @@ The other possible formats are raw data:
 
 
 ### IIR
-IIR filters are Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filter, or you can provide the coefficients directly.
+IIR filters are Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filters, or you can provide the coefficients directly.
 Examples:
 ```
 filters:
@@ -298,9 +390,15 @@ filters:
       freq: 1000
       slope: 6
       gain: -12
+  LR_highpass:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 1000
+      order: 4
 ```
 
-The available types are:
+Single Biquads are defined using the type "Biquad". The available filter types are:
 * Free
   * given by normalized coefficients a1, a2, b0, b1, b2.
 * Highpass & Lowpass
@@ -325,6 +423,16 @@ The available types are:
 * LinkwitzTransform
   * A Linkwitz transform to change a speaker with resonance frequency ```freq_act``` and Q-value ```q_act```, to a new resonance frequency ```freq_target``` and Q-value ```q_target```.
 
+To build more complex filters, use the type "BiquadCombo". This automatically adds several Biquads to build other filter types. The available types are:
+* ButterworthHighpass & ButterworthLowpass
+  * defined by frequency, `freq` and filter `order`.
+* LinkwitzRileyHighpass & LinkwitzRileyLowpass
+  * defined by frequency, `freq` and filter `order`.
+  * Note, the order must be even
+
+Other types such as Bessel filters can be built by combining several Biquads. [See the separate readme for more filter functions.](./filterfunctions.md)
+
+
 ### Dither
 The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several types, and the parameter "bits" sets the target bit depth. This should match the bit depth of the playback device. Example:
 ```
@@ -335,12 +443,29 @@ The "Dither" filter should only be added at the very end of the pipeline for eac
       bits: 16
 ```
 The available types are 
-- Simple, simple noise shaping with increasing noise towards higher freqencies
-- Uniform, just digher, no shaping. Requires also the parameter "amplitude" to set the dither amplitude in bits.
-- Lipshitz, intended for 44.1 kHz, gives very little subjective noise
-- None, just quantize without dither. Only useful with small target bit depth for demonstation.
+- Simple, simple noise shaping with increasing noise towards higher frequencies
+- Uniform, just dither, no shaping. Requires also the parameter "amplitude" to set the dither amplitude in bits.
+- Lipshitz441, for 44.1 kHz
+- Fweighted441, for 44.1 kHz
+- Shibata441, for 44.1 kHz
+- Shibata48, for 48 kHz
+- None, just quantize without dither. Only useful with small target bit depth for demonstration.
 
-To test the differenc types, set the target bit depth to something very small like 5 bits and try them all.
+Lipshitz, Fweighted and Shibata give the least amount ofaudible noise. [See the SOX documentation for more details.](http://sox.sourceforge.net/SoX/NoiseShaping)
+To test the different types, set the target bit depth to something very small like 5 bits and try them all.
+
+
+### Difference equation
+The "DiffEq" filter implements a generic difference equation filter with transfer function:
+H(z) = (b0 + b1*z^-1 + .. + bn*z^-n)/(a0 + a1*z^-1 + .. + an*z^-n). The coefficients are given as a list a0..an in that order. Example:
+```
+  example_diffeq:
+    type: DiffEq
+    parameters:
+      a: [1.0, -0.1462978543780541, 0.005350765548905586]
+      b: [0.21476322779271284, 0.4295264555854257, 0.21476322779271284]
+```
+This example implements a Biquad lowpass, but for a Biquad the Free Biquad type is faster and should be preferred. Both a and b are optional. If left out, they default to [1.0].
 
 
 ## Pipeline

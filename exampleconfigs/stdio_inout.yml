@@ -5,12 +5,12 @@ devices:
   silence_threshold: -60
   silence_timeout: 3.0
   capture:
-    type: Pulse
+    type: File
     channels: 2
-    device: "MySink.monitor"
+    filename: "/dev/stdin"
     format: S16LE
   playback:
     type: File
     channels: 2
-    filename: "/home/henrik/test.raw"
+    filename: "/dev/stdout"
     format: S16LE

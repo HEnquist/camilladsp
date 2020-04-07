@@ -7,27 +7,29 @@ Making a Bessel filter with a set of Biquads requires creating several Biquads, 
 
 ## Multiplication factor for frequency:
 | Order | Biquad 1   | Biquad 2  | Biquad 3  | Biquad 4 |
-|-----------|-----|----|----|----|----|
-| 1| 1.0*           |
-| 2| 1.27201964951  |
-| 3| 1.32267579991* | 1.44761713315  |
-| 4| 1.60335751622  | 1.43017155999  |
-| 5| 1.50231627145* | 1.75537777664  | 1.5563471223   |
-| 6| 1.9047076123   | 1.68916826762  | 1.60391912877  |
+|-----------|-----|----|----|----|
+| 1| 1.0*           |                |                |                |
+| 2| 1.27201964951  |                |                |                |
+| 3| 1.32267579991* | 1.44761713315  |                |                |
+| 4| 1.60335751622  | 1.43017155999  |                |                |
+| 5| 1.50231627145* | 1.75537777664  | 1.5563471223   |                |
+| 6| 1.9047076123   | 1.68916826762  | 1.60391912877  |                |
 | 7| 1.68436817927* | 2.04949090027  | 1.82241747886  | 1.71635604487  |
 | 8| 2.18872623053  | 1.95319575902  | 1.8320926012   | 1.77846591177  |
+
 The asterisk (*) indicates that this is a 1st order filter. 
+
 
 ## Q values:
 | Order | Biquad 1   | Biquad 2  | Biquad 3  | Biquad 4 |
-|-----------|-----|----|----|----|----|
-| 1 | (1st order)|
-| 2 | 0.57735026919 |
-| 3 | (1st order)| 0.691046625825|
-| 4 | 0.805538281842| 0.521934581669|
-| 5 | (1st order)| 0.916477373948 |0.563535620851|
-| 6 | 1.02331395383 | 0.611194546878 |0.510317824749|
-| 7 | (1st order)| 1.12625754198  |0.660821389297 |0.5323556979  |
+|-----------|-----|----|----|----|
+| 1 | (1st order)   |                |               |              |
+| 2 | 0.57735026919 |                |               |              |
+| 3 | (1st order)   | 0.691046625825 |               |              |
+| 4 | 0.805538281842| 0.521934581669 |               |              |
+| 5 | (1st order)   | 0.916477373948 |0.563535620851 |              |
+| 6 | 1.02331395383 | 0.611194546878 |0.510317824749 |              |
+| 7 | (1st order)   | 1.12625754198  |0.660821389297 |0.5323556979  |
 | 8 | 1.22566942541 | 0.710852074442 |0.559609164796 |0.505991069397|
 
 ## Example Bessel filter
@@ -43,9 +45,10 @@ Let's make a 5th order Lowpass at 1 kHz. Loking at the tables we see that we nee
   * q = 0.563535620851
 
 # Butterworth and Linkwitz-Riley
-For an Nth order Butterworth (N even or odd) you will have N/2 biquad
-sections ((N-1)/2 for odd N or floor(N/2) for either even or odd N),
-each will have the same resonant frequency w0 and will have Q:
+For an Nth order Butterworth you will have N/2 biquad
+sections if N is even, and ((N+1)/2 if N is odd.
+For odd filters one of the Biquads will be a first order filter.
+Each filter will have the same resonant frequency f0 and the second order filters will have Q according to this formula:
 ```
 Q = 1/( 2*sin((pi/N)*(n + 1/2)) )
 ```

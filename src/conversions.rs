@@ -243,6 +243,7 @@ pub fn buffer_to_chunk_float_bytes(buffer: &[u8], channels: usize, bits: i32) ->
 }
 
 /// Convert an AudioChunk to an interleaved buffer of ints.
+#[allow(dead_code)]
 pub fn chunk_to_buffer_int<T: num_traits::cast::NumCast>(
     chunk: AudioChunk,
     buf: &mut [T],
@@ -298,6 +299,7 @@ pub fn chunk_to_buffer_int<T: num_traits::cast::NumCast>(
 }
 
 /// Convert a buffer of interleaved ints to an AudioChunk.
+#[allow(dead_code)]
 pub fn buffer_to_chunk_int<T: num_traits::cast::AsPrimitive<PrcFmt>>(
     buffer: &[T],
     channels: usize,
@@ -341,6 +343,7 @@ pub fn buffer_to_chunk_int<T: num_traits::cast::AsPrimitive<PrcFmt>>(
 }
 
 /// Convert an AudioChunk to an interleaved buffer of floats.
+#[allow(dead_code)]
 pub fn chunk_to_buffer_float<T: num_traits::cast::NumCast>(chunk: AudioChunk, buf: &mut [T]) {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
@@ -388,6 +391,7 @@ pub fn chunk_to_buffer_float<T: num_traits::cast::NumCast>(chunk: AudioChunk, bu
 }
 
 /// Convert a buffer of interleaved ints to an AudioChunk.
+#[allow(dead_code)]
 pub fn buffer_to_chunk_float<T: num_traits::cast::AsPrimitive<PrcFmt>>(
     buffer: &[T],
     channels: usize,

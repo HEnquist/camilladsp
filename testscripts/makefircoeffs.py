@@ -1,3 +1,4 @@
+# Make short FIR coeffs in different formats, for testing importing 
 import numpy as np
 
 start = np.linspace(0, 1, 16)
