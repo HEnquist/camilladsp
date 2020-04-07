@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -12,6 +12,7 @@ enum WSCommand {
     GetConfig,
     GetConfigName,
     Exit,
+    Stop,
     Invalid,
 }
 
@@ -21,11 +22,13 @@ fn parse_command(cmd: ws::Message) -> WSCommand {
         if cmdarg.is_empty() {
             return WSCommand::Invalid;
         }
+        debug!("Received: {}", cmdarg[0]);
         match cmdarg[0] {
             "reload" => WSCommand::Reload,
             "getconfig" => WSCommand::GetConfig,
             "getconfigname" => WSCommand::GetConfigName,
             "exit" => WSCommand::Exit,
+            "stop" => WSCommand::Stop,
             "setconfigname" => {
                 if cmdarg.len() == 2 {
                     WSCommand::SetConfigName(cmdarg[1].to_string())
@@ -50,7 +53,7 @@ fn parse_command(cmd: ws::Message) -> WSCommand {
 pub fn start_server(
     port: usize,
     signal_reload: Arc<AtomicBool>,
-    signal_exit: Arc<AtomicBool>,
+    signal_exit: Arc<AtomicUsize>,
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     active_config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
@@ -65,6 +68,7 @@ pub fn start_server(
             let active_config_path_inst = active_config_path.clone();
             move |msg: ws::Message| {
                 let command = parse_command(msg);
+                debug!("parsed command: {:?}", command);
                 match command {
                     WSCommand::Reload => {
                         signal_reload_inst.store(true, Ordering::Relaxed);
@@ -105,8 +109,13 @@ pub fn start_server(
                             _ => socket.send("ERROR:SETCONFIG"),
                         }
                     }
+                    WSCommand::Stop => {
+                        *new_config_inst.lock().unwrap() = None;
+                        signal_exit_inst.store(2, Ordering::Relaxed);
+                        socket.send("OK:STOP")
+                    }
                     WSCommand::Exit => {
-                        signal_exit_inst.store(true, Ordering::Relaxed);
+                        signal_exit_inst.store(1, Ordering::Relaxed);
                         socket.send("OK:EXIT")
                     }
                     WSCommand::Invalid => socket.send("ERROR:INVALID"),

@@ -27,7 +27,7 @@ use env_logger::Builder;
 use log::LevelFilter;
 use std::env;
 use std::error;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
@@ -138,7 +138,7 @@ fn get_new_config(
 
 fn run(
     signal_reload: Arc<AtomicBool>,
-    signal_exit: Arc<AtomicBool>,
+    signal_exit: Arc<AtomicUsize>,
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
@@ -218,6 +218,7 @@ fn run(
                             pb_handle.join().unwrap();
                             trace!("Wait for cap..");
                             cap_handle.join().unwrap();
+                            *new_config_shared.lock().unwrap() = Some(conf);
                             return Ok(ExitStatus::Restart);
                         }
                         config::ConfigChange::None => {
@@ -232,11 +233,30 @@ fn run(
                 }
             };
         }
-        if signal_exit.load(Ordering::Relaxed) {
-            debug!("Exit requested...");
-            signal_exit.store(false, Ordering::Relaxed);
-            return Ok(ExitStatus::Exit);
-        }
+        match signal_exit.load(Ordering::Relaxed) {
+            1 => {
+                debug!("Exit requested...");
+                signal_exit.store(0, Ordering::Relaxed);
+                tx_command_cap.send(CommandMessage::Exit).unwrap();
+                trace!("Wait for pb..");
+                pb_handle.join().unwrap();
+                trace!("Wait for cap..");
+                cap_handle.join().unwrap();
+                return Ok(ExitStatus::Exit);
+            }
+            2 => {
+                debug!("Stop requested...");
+                signal_exit.store(0, Ordering::Relaxed);
+                tx_command_cap.send(CommandMessage::Exit).unwrap();
+                trace!("Wait for pb..");
+                pb_handle.join().unwrap();
+                trace!("Wait for cap..");
+                cap_handle.join().unwrap();
+                *new_config_shared.lock().unwrap() = None;
+                return Ok(ExitStatus::Restart);
+            }
+            _ => {}
+        };
         match rx_status.recv_timeout(delay) {
             Ok(msg) => match msg {
                 StatusMessage::PlaybackReady => {
@@ -348,7 +368,8 @@ fn main() {
             Arg::with_name("wait")
                 .short("w")
                 .long("wait")
-                .help("Wait for config from websocket"),
+                .help("Wait for config from websocket")
+                .conflicts_with("configfile"),
         );
     let matches = clapapp.get_matches();
 
@@ -397,7 +418,7 @@ fn main() {
     }
 
     let signal_reload = Arc::new(AtomicBool::new(false));
-    let signal_exit = Arc::new(AtomicBool::new(false));
+    let signal_exit = Arc::new(AtomicUsize::new(0));
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
@@ -419,10 +440,11 @@ fn main() {
         }
     }
 
-    let delay = time::Duration::from_millis(100);
+    let delay = time::Duration::from_millis(1000);
     loop {
         debug!("Wait for config");
         while new_config.lock().unwrap().is_none() {
+            trace!("waiting...");
             thread::sleep(delay);
         }
         debug!("Config ready");
