@@ -53,6 +53,7 @@ pub fn start_server(
     signal_exit: Arc<AtomicBool>,
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     active_config_path: Arc<Mutex<Option<String>>>,
+    new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
 ) {
     debug!("Start websocket server on port {}", port);
     thread::spawn(move || {
@@ -60,6 +61,7 @@ pub fn start_server(
             let signal_reload_inst = signal_reload.clone();
             let signal_exit_inst = signal_exit.clone();
             let active_config_inst = active_config_shared.clone();
+            let new_config_inst = new_config_shared.clone();
             let active_config_path_inst = active_config_path.clone();
             move |msg: ws::Message| {
                 let command = parse_command(msg);
@@ -94,7 +96,7 @@ pub fn start_server(
                             Ok(conf) => match config::validate_config(conf.clone()) {
                                 Ok(()) => {
                                     //*active_config_path_inst.lock().unwrap() = String::from("none");
-                                    *active_config_inst.lock().unwrap() = Some(conf);
+                                    *new_config_inst.lock().unwrap() = Some(conf);
                                     signal_reload_inst.store(true, Ordering::Relaxed);
                                     socket.send("OK:SETCONFIG")
                                 }

@@ -82,18 +82,20 @@ pub enum CommandMessage {
 }
 
 enum ExitStatus {
-    Restart(Box<config::Configuration>),
+    Restart,
     Exit,
 }
 
 fn get_new_config(
-    active_config: &config::Configuration,
     config_path: &Arc<Mutex<Option<String>>>,
-    active_config_shared: &Arc<Mutex<Option<config::Configuration>>>,
+    new_config_shared: &Arc<Mutex<Option<config::Configuration>>>,
 ) -> Res<config::Configuration> {
-    let conf = active_config_shared.lock().unwrap().clone().unwrap();
-    //if *config_path.lock().unwrap() == "none" {
-    if &conf != active_config {
+    //let active_conf = active_config_shared.lock().unwrap().clone();
+    let new_conf = new_config_shared.lock().unwrap().clone();
+    let path = config_path.lock().unwrap().clone();
+
+    //new_config is not None, this is the one to use
+    if let Some(conf) = new_conf {
         debug!("Reload using config from websocket");
         //let conf = active_config_shared.lock().unwrap().clone();
         match config::validate_config(conf.clone()) {
@@ -107,8 +109,8 @@ fn get_new_config(
                 Err(err)
             }
         }
-    } else {
-        match config::load_config(&config_path.lock().unwrap().as_ref().unwrap()) {
+    } else if let Some(file) = path {
+        match config::load_config(&file) {
             Ok(conf) => match config::validate_config(conf.clone()) {
                 Ok(()) => {
                     debug!("Reload using config file");
@@ -126,16 +128,28 @@ fn get_new_config(
                 Err(err)
             }
         }
+    } else {
+        error!("No new config supplied and no path set");
+        Err(Box::new(config::ConfigError::new(
+            "No new config supplied and no path set",
+        )))
     }
 }
 
 fn run(
-    conf: config::Configuration,
     signal_reload: Arc<AtomicBool>,
     signal_exit: Arc<AtomicBool>,
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     config_path: Arc<Mutex<Option<String>>>,
+    new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
 ) -> Res<ExitStatus> {
+    let conf = match new_config_shared.lock().unwrap().clone() {
+        Some(cfg) => cfg,
+        None => {
+            error!("Tried to start without config!");
+            return Ok(ExitStatus::Exit);
+        }
+    };
     let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.queuelimit);
     let (tx_cap, rx_cap) = mpsc::sync_channel(conf.devices.queuelimit);
 
@@ -158,6 +172,7 @@ fn run(
     let mut active_config = conf;
     //let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
     *active_config_shared.lock().unwrap() = Some(active_config.clone());
+    *new_config_shared.lock().unwrap() = None;
 
     // Processing thread
     processing::run_processing(conf_proc, barrier_proc, tx_pb, rx_cap, rx_pipeconf);
@@ -182,7 +197,7 @@ fn run(
         if signal_reload.load(Ordering::Relaxed) {
             debug!("Reloading configuration...");
             signal_reload.store(false, Ordering::Relaxed);
-            let new_config = get_new_config(&active_config, &config_path, &active_config_shared);
+            let new_config = get_new_config(&config_path, &new_config_shared);
 
             match new_config {
                 Ok(conf) => {
@@ -193,6 +208,7 @@ fn run(
                             tx_pipeconf.send((comp, conf.clone())).unwrap();
                             active_config = conf;
                             *active_config_shared.lock().unwrap() = Some(active_config.clone());
+                            *new_config_shared.lock().unwrap() = None;
                             debug!("Sent changes to pipeline");
                         }
                         config::ConfigChange::Devices => {
@@ -202,10 +218,11 @@ fn run(
                             pb_handle.join().unwrap();
                             trace!("Wait for cap..");
                             cap_handle.join().unwrap();
-                            return Ok(ExitStatus::Restart(Box::new(conf)));
+                            return Ok(ExitStatus::Restart);
                         }
                         config::ConfigChange::None => {
                             debug!("No changes in config.");
+                            *new_config_shared.lock().unwrap() = None;
                         }
                     };
                 }
@@ -359,7 +376,7 @@ fn main() {
 
     debug!("Read config file {:?}", configname);
 
-    let mut configuration = match &configname {
+    let configuration = match &configname {
         Some(path) => match config::load_validate_config(&path.clone()) {
             Ok(conf) => {
                 debug!("Config is valid");
@@ -382,14 +399,14 @@ fn main() {
     let signal_reload = Arc::new(AtomicBool::new(false));
     let signal_exit = Arc::new(AtomicBool::new(false));
     //let active_config = Arc::new(Mutex::new(String::new()));
-    let active_config = Arc::new(Mutex::new(configuration.clone()));
+    let active_config = Arc::new(Mutex::new(None));
+    let new_config = Arc::new(Mutex::new(configuration));
 
     let active_config_path = Arc::new(Mutex::new(configname));
 
     #[cfg(feature = "socketserver")]
-    let serverport = matches.value_of("port").unwrap().parse::<usize>().unwrap();
-    #[cfg(feature = "socketserver")]
     {
+        let serverport = matches.value_of("port").unwrap().parse::<usize>().unwrap();
         if serverport > 0 {
             socketserver::start_server(
                 serverport,
@@ -397,25 +414,24 @@ fn main() {
                 signal_exit.clone(),
                 active_config.clone(),
                 active_config_path.clone(),
+                new_config.clone(),
             );
         }
     }
 
+    let delay = time::Duration::from_millis(100);
     loop {
-        if configuration.is_none() {
-            info!("Waiting for config");
-            let delay = time::Duration::from_millis(100);
-            while active_config.lock().unwrap().is_none() {
-                thread::sleep(delay);
-            }
-            configuration = active_config.lock().unwrap().clone();
+        debug!("Wait for config");
+        while new_config.lock().unwrap().is_none() {
+            thread::sleep(delay);
         }
+        debug!("Config ready");
         let exitstatus = run(
-            configuration.unwrap(),
             signal_reload.clone(),
             signal_exit.clone(),
             active_config.clone(),
             active_config_path.clone(),
+            new_config.clone(),
         );
         match exitstatus {
             Err(e) => {
@@ -426,9 +442,8 @@ fn main() {
                 debug!("Exiting");
                 break;
             }
-            Ok(ExitStatus::Restart(conf)) => {
+            Ok(ExitStatus::Restart) => {
                 debug!("Restarting with new config");
-                configuration = Some(*conf)
             }
         };
     }
