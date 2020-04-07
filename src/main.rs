@@ -440,7 +440,7 @@ fn main() {
         }
     }
 
-    let delay = time::Duration::from_millis(1000);
+    let delay = time::Duration::from_millis(100);
     loop {
         debug!("Wait for config");
         while new_config.lock().unwrap().is_none() {
