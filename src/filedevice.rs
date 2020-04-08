@@ -83,7 +83,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                     loop {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
-                                match format {
+                                let bytes = match format {
                                     SampleFormat::S16LE
                                     | SampleFormat::S24LE
                                     | SampleFormat::S32LE => {
@@ -92,13 +92,13 @@ impl PlaybackDevice for FilePlaybackDevice {
                                             &mut buffer,
                                             scalefactor,
                                             bits,
-                                        );
+                                        )
                                     }
                                     SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
-                                        chunk_to_buffer_float_bytes(chunk, &mut buffer, bits);
+                                        chunk_to_buffer_float_bytes(chunk, &mut buffer, bits)
                                     }
                                 };
-                                let write_res = file.write(&buffer);
+                                let write_res = file.write(&buffer[0..bytes]);
                                 match write_res {
                                     Ok(_) => {}
                                     Err(msg) => {
@@ -159,7 +159,8 @@ impl CaptureDevice for FileCaptureDevice {
             SampleFormat::FLOAT64LE => 8,
         };
         let format = self.format.clone();
-        let extra_samples = self.extra_samples;
+        let extra_bytes = self.extra_samples*store_bytes*channels;
+        let mut extra_bytes_left = extra_bytes;
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit =
@@ -177,6 +178,7 @@ impl CaptureDevice for FileCaptureDevice {
                     debug!("starting captureloop");
                     let bufferlength_bytes = channels * bufferlength * store_bytes;
                     let mut buf = vec![0u8; bufferlength_bytes];
+                    let mut bytes_read = 0;
                     loop {
                         if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
                             let msg = AudioMessage::EndOfStream;
@@ -184,44 +186,28 @@ impl CaptureDevice for FileCaptureDevice {
                             status_channel.send(StatusMessage::CaptureDone).unwrap();
                             break;
                         }
-                        //let frames = self.io.readi(&mut buf)?;
-                        //let read_res = file.read_exact(&mut buf);
-                        //match read_res {
-                        //    Ok(_) => {}
-                        //    Err(err) => {
-                        //        match err.kind() {
-                        //            ErrorKind::UnexpectedEof => {
-                        //                debug!("Reached end of file");
-                        //                send_silence(
-                        //                    extra_samples,
-                        //                    channels,
-                        //                    bufferlength,
-                        //                    &channel,
-                        //                );
-                        //                let msg = AudioMessage::EndOfStream;
-                        //                channel.send(msg).unwrap();
-                        //                status_channel.send(StatusMessage::CaptureDone).unwrap();
-                        //                break;
-                        //            }
-                        //            _ => status_channel
-                        //                .send(StatusMessage::CaptureError {
-                        //                    message: format!("{}", err),
-                        //                })
-                        //                .unwrap(),
-                        //        };
-                        //    }
-                        //};
                         let read_res = read_retry(&mut file, &mut buf);
                         match read_res {
                             Ok(bytes) => {
+                                bytes_read = bytes;
                                 if bytes > 0 && bytes < bufferlength_bytes {
                                     for item in buf.iter_mut().take(bufferlength_bytes).skip(bytes)
                                     {
                                         *item = 0;
                                     }
-                                    debug!("Read only {} of {} bytes", bytes, bufferlength_bytes);
+                                    debug!("End of file, read only {} of {} bytes", bytes, bufferlength_bytes);
+                                    let missing = bufferlength_bytes - bytes;
+                                    if extra_bytes_left > missing {
+                                        bytes_read = bufferlength_bytes;
+                                        extra_bytes_left -= missing;
+                                    }
+                                    else {
+                                        bytes_read += extra_bytes_left;
+                                        extra_bytes_left = 0;
+                                    }
                                 } else if bytes == 0 {
                                     debug!("Reached end of file");
+                                    let extra_samples = extra_bytes_left/store_bytes/channels;
                                     send_silence(extra_samples, channels, bufferlength, &channel);
                                     let msg = AudioMessage::EndOfStream;
                                     channel.send(msg).unwrap();
@@ -242,10 +228,10 @@ impl CaptureDevice for FileCaptureDevice {
                         //let before = Instant::now();
                         let chunk = match format {
                             SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
-                                buffer_to_chunk_bytes(&buf, channels, scalefactor, bits)
+                                buffer_to_chunk_bytes(&buf, channels, scalefactor, bits, bytes_read)
                             }
                             SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
-                                buffer_to_chunk_float_bytes(&buf, channels, bits)
+                                buffer_to_chunk_float_bytes(&buf, channels, bits, bytes_read)
                             }
                         };
                         if (chunk.maxval - chunk.minval) > silence {
@@ -284,19 +270,20 @@ fn send_silence(
     bufferlength: usize,
     audio_channel: &mpsc::SyncSender<AudioMessage>,
 ) {
-    let nchunks = (samples as f32 / bufferlength as f32).ceil() as usize;
-    debug!("Sending {} extra chunks", nchunks);
-    for _ in 0..nchunks {
-        let waveforms = vec![vec![0.0; bufferlength]; channels];
-        let chunk = AudioChunk {
-            frames: bufferlength,
-            channels,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms,
+    let mut samples_left = samples;
+    while samples_left>0 {
+        let chunk_samples = if samples_left>bufferlength {
+            bufferlength
+        }
+        else {
+            samples_left
         };
+        let waveforms = vec![vec![0.0; bufferlength]; channels];
+        let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunk_samples);
         let msg = AudioMessage::Audio(chunk);
+        debug!("Sending extra chunk of {} frames", chunk_samples);
         audio_channel.send(msg).unwrap();
+        samples_left -= chunk_samples;
     }
 }
 

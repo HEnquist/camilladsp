@@ -8,7 +8,7 @@ use audiodevice::*;
 use PrcFmt;
 
 /// Convert an AudioChunk to an interleaved buffer of u8.
-pub fn chunk_to_buffer_bytes(chunk: AudioChunk, buf: &mut [u8], scalefactor: PrcFmt, bits: i32) {
+pub fn chunk_to_buffer_bytes(chunk: AudioChunk, buf: &mut [u8], scalefactor: PrcFmt, bits: i32)  -> usize {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
     let mut value16;
@@ -21,6 +21,13 @@ pub fn chunk_to_buffer_bytes(chunk: AudioChunk, buf: &mut [u8], scalefactor: Prc
     } else {
         (scalefactor - 1.0) / scalefactor
     };
+    let bytes_per_sample = match bits {
+        16 => 2,
+        24 | 32 => 4,
+        _ => 1,
+    };
+    let num_valid_bytes = chunk.valid_frames * chunk.channels * bytes_per_sample;
+
     let minval = -1.0;
     for frame in 0..chunk.frames {
         for chan in 0..chunk.channels {
@@ -62,7 +69,7 @@ pub fn chunk_to_buffer_bytes(chunk: AudioChunk, buf: &mut [u8], scalefactor: Prc
             peak * 100.0
         );
     }
-    //buf
+    num_valid_bytes
 }
 
 /// Convert a buffer of interleaved u8 to an AudioChunk.
@@ -71,13 +78,15 @@ pub fn buffer_to_chunk_bytes(
     channels: usize,
     scalefactor: PrcFmt,
     bits: i32,
+    valid_bytes: usize,
 ) -> AudioChunk {
-    let num_samples = match bits {
-        16 => buffer.len() / 2,
-        24 | 32 => buffer.len() / 4,
-        _ => 0,
+    let bytes_per_sample = match bits {
+        16 => 2,
+        24 | 32 => 4,
+        _ => 1,
     };
-    let num_frames = num_samples / channels;
+    let num_frames = buffer.len()/bytes_per_sample/channels;
+    let num_valid_frames = valid_bytes/bytes_per_sample/channels;
     let mut value: PrcFmt;
     let mut maxvalue: PrcFmt = 0.0;
     let mut minvalue: PrcFmt = 0.0;
@@ -121,17 +130,11 @@ pub fn buffer_to_chunk_bytes(
             }
         }
     }
-    AudioChunk {
-        channels,
-        frames: num_frames,
-        maxval: maxvalue,
-        minval: minvalue,
-        waveforms: wfs,
-    }
+    AudioChunk::new(wfs, maxvalue, minvalue, num_valid_frames)
 }
 
 /// Convert an AudioChunk to an interleaved buffer of floats stored as u8.
-pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: i32) {
+pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: i32) -> usize {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
     let mut value64;
@@ -141,6 +144,8 @@ pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: i32)
     let mut peak = 0.0;
     let maxval = 1.0;
     let minval = -1.0;
+    let bytes_per_sample = bits as usize/8;
+    let num_valid_bytes = chunk.valid_frames * chunk.channels * bytes_per_sample;
     for frame in 0..chunk.frames {
         for chan in 0..chunk.channels {
             let mut float_val = chunk.waveforms[chan][frame];
@@ -181,17 +186,14 @@ pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: i32)
             peak * 100.0
         );
     }
-    //buf
+    num_valid_bytes
 }
 
 /// Convert a buffer of interleaved u8 to an AudioChunk.
-pub fn buffer_to_chunk_float_bytes(buffer: &[u8], channels: usize, bits: i32) -> AudioChunk {
-    let num_samples = match bits {
-        32 => buffer.len() / 4,
-        64 => buffer.len() / 8,
-        _ => 0,
-    };
-    let num_frames = num_samples / channels;
+pub fn buffer_to_chunk_float_bytes(buffer: &[u8], channels: usize, bits: i32, valid_bytes: usize) -> AudioChunk {
+    let bytes_per_sample = bits as usize/8;
+    let num_frames = buffer.len()/bytes_per_sample/channels;
+    let num_valid_frames = valid_bytes/bytes_per_sample/channels;
     let mut value: PrcFmt;
     let mut maxvalue: PrcFmt = 0.0;
     let mut minvalue: PrcFmt = 0.0;
@@ -233,13 +235,7 @@ pub fn buffer_to_chunk_float_bytes(buffer: &[u8], channels: usize, bits: i32) ->
             }
         }
     }
-    AudioChunk {
-        channels,
-        frames: num_frames,
-        maxval: maxvalue,
-        minval: minvalue,
-        waveforms: wfs,
-    }
+    AudioChunk::new(wfs, maxvalue, minvalue, num_valid_frames)
 }
 
 /// Convert an AudioChunk to an interleaved buffer of ints.
@@ -333,13 +329,7 @@ pub fn buffer_to_chunk_int<T: num_traits::cast::AsPrimitive<PrcFmt>>(
             //idx += 1;
         }
     }
-    AudioChunk {
-        channels,
-        frames: num_frames,
-        maxval: maxvalue,
-        minval: minvalue,
-        waveforms: wfs,
-    }
+    AudioChunk::new(wfs, maxvalue, minvalue, num_frames)
 }
 
 /// Convert an AudioChunk to an interleaved buffer of floats.
@@ -423,13 +413,7 @@ pub fn buffer_to_chunk_float<T: num_traits::cast::AsPrimitive<PrcFmt>>(
             //idx += 1;
         }
     }
-    AudioChunk {
-        channels,
-        frames: num_frames,
-        maxval: maxvalue,
-        minval: minvalue,
-        waveforms: wfs,
-    }
+    AudioChunk::new(wfs, maxvalue, minvalue, num_frames)
 }
 
 #[cfg(test)]
@@ -446,16 +430,10 @@ mod tests {
         let bits = 16;
         let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: waveforms.clone(),
-        };
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3);
         let mut buffer = vec![0u8; 3 * 2];
         chunk_to_buffer_bytes(chunk, &mut buffer, scalefactor, bits);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits);
+        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits, buffer.len());
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -464,16 +442,10 @@ mod tests {
         let bits = 24;
         let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: waveforms.clone(),
-        };
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3);
         let mut buffer = vec![0u8; 3 * 4];
         chunk_to_buffer_bytes(chunk, &mut buffer, scalefactor, bits);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits);
+        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits, buffer.len());
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -482,16 +454,10 @@ mod tests {
         let bits = 32;
         let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: waveforms.clone(),
-        };
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3);
         let mut buffer = vec![0u8; 3 * 4];
         chunk_to_buffer_bytes(chunk, &mut buffer, scalefactor, bits);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits);
+        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits, buffer.len());
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -500,16 +466,10 @@ mod tests {
         let bits = 16;
         let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
         let waveforms = vec![vec![-1.0, 0.0, 32767.0 / 32768.0]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
-        };
+        let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3);
         let mut buffer = vec![0u8; 3 * 2];
         chunk_to_buffer_bytes(chunk, &mut buffer, scalefactor, bits);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits);
+        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits, buffer.len());
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -518,16 +478,10 @@ mod tests {
         let bits = 24;
         let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
         let waveforms = vec![vec![-1.0, 0.0, 8388607.0 / 8388608.0]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
-        };
+        let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3);
         let mut buffer = vec![0u8; 3 * 4];
         chunk_to_buffer_bytes(chunk, &mut buffer, scalefactor, bits);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits);
+        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits, buffer.len());
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -539,16 +493,10 @@ mod tests {
         let waveforms = vec![vec![-1.0, 0.0, 2147483520.0 / 2147483648.0]; 1];
         #[cfg(not(feature = "32bit"))]
         let waveforms = vec![vec![-1.0, 0.0, 2147483647.0 / 2147483648.0]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: vec![vec![-2.0, 0.0, 2.0]; 1],
-        };
+        let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3);
         let mut buffer = vec![0u8; 3 * 4];
         chunk_to_buffer_bytes(chunk, &mut buffer, scalefactor, bits);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits);
+        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bits, buffer.len());
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -556,16 +504,10 @@ mod tests {
     fn to_from_buffer_float32() {
         let bits = 32;
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: waveforms.clone(),
-        };
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3);
         let mut buffer = vec![0u8; 3 * 4];
         chunk_to_buffer_float_bytes(chunk, &mut buffer, bits);
-        let chunk2 = buffer_to_chunk_float_bytes(&buffer, 1, bits);
+        let chunk2 = buffer_to_chunk_float_bytes(&buffer, 1, bits, buffer.len());
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -573,16 +515,10 @@ mod tests {
     fn to_from_buffer_float64() {
         let bits = 64;
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk {
-            frames: 3,
-            channels: 1,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms: waveforms.clone(),
-        };
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3);
         let mut buffer = vec![0u8; 3 * 8];
         chunk_to_buffer_float_bytes(chunk, &mut buffer, bits);
-        let chunk2 = buffer_to_chunk_float_bytes(&buffer, 1, bits);
+        let chunk2 = buffer_to_chunk_float_bytes(&buffer, 1, bits, buffer.len());
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 }
