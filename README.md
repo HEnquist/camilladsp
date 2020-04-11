@@ -272,7 +272,7 @@ devices:
   and 4 bytes per sample for 24 and 32 bits. 
   If the capture device reaches the end of a file, the program will exit once all chunks have been played. 
   That delayed sound that would end up in a later chunk will be cut off. To avoid this, set the optional parameter `extra_samples` for the File capture device.
-  This causes the capture device to yield the given number of samples (rounded up to a number of complete chunks) after reaching end of file, allowing any delayed sound to be played back.
+  This causes the capture device to yield the given number of samples (per channel) after reaching end of file, allowing any delayed sound to be played back.
   By setting the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback, the sound will be written to or read from stdio, so one can play with pipes:
   ```
   > camilladsp stdio_capt.yml > rawfile.dat
@@ -463,7 +463,9 @@ Other types such as Bessel filters can be built by combining several Biquads. [S
 
 
 ### Dither
-The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several types, and the parameter "bits" sets the target bit depth. This should match the bit depth of the playback device. Example:
+The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several types, and the parameter "bits" sets the target bit depth. For the best result this should match the bit depth of the playback device. Setting it to a higher value is not useful since then the applied dither will be rounded off. On the other hand, setting it to a much lower value, for example 5 or 6 bits, makes the noise very audible and can be useful for comparing the different types.
+
+Example:
 ```
   dither_fancy:
     type: Dither

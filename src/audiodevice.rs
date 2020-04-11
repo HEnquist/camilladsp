@@ -33,7 +33,12 @@ pub struct AudioChunk {
 }
 
 impl AudioChunk {
-    pub fn new(waveforms: Vec<Vec<PrcFmt>>, maxval: PrcFmt, minval: PrcFmt, valid_frames: usize) -> Self {
+    pub fn new(
+        waveforms: Vec<Vec<PrcFmt>>,
+        maxval: PrcFmt,
+        minval: PrcFmt,
+        valid_frames: usize,
+    ) -> Self {
         let timestamp = Instant::now();
         let channels = waveforms.len();
         let frames = waveforms[0].len();

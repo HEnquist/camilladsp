@@ -8,7 +8,12 @@ use audiodevice::*;
 use PrcFmt;
 
 /// Convert an AudioChunk to an interleaved buffer of u8.
-pub fn chunk_to_buffer_bytes(chunk: AudioChunk, buf: &mut [u8], scalefactor: PrcFmt, bits: i32)  -> usize {
+pub fn chunk_to_buffer_bytes(
+    chunk: AudioChunk,
+    buf: &mut [u8],
+    scalefactor: PrcFmt,
+    bits: i32,
+) -> usize {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
     let mut value16;
@@ -85,8 +90,8 @@ pub fn buffer_to_chunk_bytes(
         24 | 32 => 4,
         _ => 1,
     };
-    let num_frames = buffer.len()/bytes_per_sample/channels;
-    let num_valid_frames = valid_bytes/bytes_per_sample/channels;
+    let num_frames = buffer.len() / bytes_per_sample / channels;
+    let num_valid_frames = valid_bytes / bytes_per_sample / channels;
     let mut value: PrcFmt;
     let mut maxvalue: PrcFmt = 0.0;
     let mut minvalue: PrcFmt = 0.0;
@@ -144,7 +149,7 @@ pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: i32)
     let mut peak = 0.0;
     let maxval = 1.0;
     let minval = -1.0;
-    let bytes_per_sample = bits as usize/8;
+    let bytes_per_sample = bits as usize / 8;
     let num_valid_bytes = chunk.valid_frames * chunk.channels * bytes_per_sample;
     for frame in 0..chunk.frames {
         for chan in 0..chunk.channels {
@@ -190,10 +195,15 @@ pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: i32)
 }
 
 /// Convert a buffer of interleaved u8 to an AudioChunk.
-pub fn buffer_to_chunk_float_bytes(buffer: &[u8], channels: usize, bits: i32, valid_bytes: usize) -> AudioChunk {
-    let bytes_per_sample = bits as usize/8;
-    let num_frames = buffer.len()/bytes_per_sample/channels;
-    let num_valid_frames = valid_bytes/bytes_per_sample/channels;
+pub fn buffer_to_chunk_float_bytes(
+    buffer: &[u8],
+    channels: usize,
+    bits: i32,
+    valid_bytes: usize,
+) -> AudioChunk {
+    let bytes_per_sample = bits as usize / 8;
+    let num_frames = buffer.len() / bytes_per_sample / channels;
+    let num_valid_frames = valid_bytes / bytes_per_sample / channels;
     let mut value: PrcFmt;
     let mut maxvalue: PrcFmt = 0.0;
     let mut minvalue: PrcFmt = 0.0;

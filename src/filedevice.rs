@@ -87,12 +87,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                     SampleFormat::S16LE
                                     | SampleFormat::S24LE
                                     | SampleFormat::S32LE => {
-                                        chunk_to_buffer_bytes(
-                                            chunk,
-                                            &mut buffer,
-                                            scalefactor,
-                                            bits,
-                                        )
+                                        chunk_to_buffer_bytes(chunk, &mut buffer, scalefactor, bits)
                                     }
                                     SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
                                         chunk_to_buffer_float_bytes(chunk, &mut buffer, bits)
@@ -159,7 +154,7 @@ impl CaptureDevice for FileCaptureDevice {
             SampleFormat::FLOAT64LE => 8,
         };
         let format = self.format.clone();
-        let extra_bytes = self.extra_samples*store_bytes*channels;
+        let extra_bytes = self.extra_samples * store_bytes * channels;
         let mut extra_bytes_left = extra_bytes;
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
@@ -195,19 +190,21 @@ impl CaptureDevice for FileCaptureDevice {
                                     {
                                         *item = 0;
                                     }
-                                    debug!("End of file, read only {} of {} bytes", bytes, bufferlength_bytes);
+                                    debug!(
+                                        "End of file, read only {} of {} bytes",
+                                        bytes, bufferlength_bytes
+                                    );
                                     let missing = bufferlength_bytes - bytes;
                                     if extra_bytes_left > missing {
                                         bytes_read = bufferlength_bytes;
                                         extra_bytes_left -= missing;
-                                    }
-                                    else {
+                                    } else {
                                         bytes_read += extra_bytes_left;
                                         extra_bytes_left = 0;
                                     }
                                 } else if bytes == 0 {
                                     debug!("Reached end of file");
-                                    let extra_samples = extra_bytes_left/store_bytes/channels;
+                                    let extra_samples = extra_bytes_left / store_bytes / channels;
                                     send_silence(extra_samples, channels, bufferlength, &channel);
                                     let msg = AudioMessage::EndOfStream;
                                     channel.send(msg).unwrap();
@@ -271,11 +268,10 @@ fn send_silence(
     audio_channel: &mpsc::SyncSender<AudioMessage>,
 ) {
     let mut samples_left = samples;
-    while samples_left>0 {
-        let chunk_samples = if samples_left>bufferlength {
+    while samples_left > 0 {
+        let chunk_samples = if samples_left > bufferlength {
             bufferlength
-        }
-        else {
+        } else {
             samples_left
         };
         let waveforms = vec![vec![0.0; bufferlength]; channels];
