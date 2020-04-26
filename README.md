@@ -34,6 +34,7 @@ CamillaDSP includes a Websocket server that can be used to pass commands to the 
 
 The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". FFTW is about a factor two faster. It's a much larger and more complicated library though, so this is only recommended if your filters take too much CPU time with RustFFT.
 
+### Build with standard features
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
@@ -45,13 +46,36 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 - - Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
 - Clone the repository
 - Build with standard options: ```cargo build --release```
-- - without Alsa: ```cargo build --release --no-default-features --features pulse-backend```
-- - without Pulse: ```cargo build --release --no-default-features --features alsa-backend```
-- - with 32 bit float: ```cargo build --release --features 32bit```
-- - with FFTW: ```cargo build --release --features FFTW```
-- - combine several features: ```cargo build --release --features FFTW --features 32bit```
+- - see below for other options
 - The binary is now available at ./target/release/camilladsp
 - Optionally install with `cargo install --path .`
+- - Note: the `install` command takes the same options for features as the `build` command. 
+
+### Customized build
+All the available options, or "features" are:
+- `alsa-backend`
+- `pulse-backend`
+- `socketserver`
+- `FFTW`
+- `32bit`
+
+The first three (`alsa-backend`, `pulse-packend`, `socketserver`) are included in the default features, meaning if you don't specify anything you will get those three.
+Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
+
+Example 1: You want `alsa-backend`, `pulse-backend`, `socketserver` and `FFTW`. The first three are included by default so you only need to add `FFTW`:
+```
+cargo build --release --features FFTW
+(or)
+cargo install --path . --features FFTW
+```
+
+Example 2: You want `alsa-backend`, `socketserver`, `32bit` and `FFTW`. Since you don't want `pulse-backend` you have to disable the defaults, and then add both `alsa-backend` and `socketserver`:
+```
+cargo build --release --no-default-features --features alsa-backend --features socketserver --features FFTW --features 32bit
+(or)
+cargo install --path . --no-default-features --features alsa-backend --features socketserver --features FFTW --features 32bit
+```
+
 
 ## How to run
 
@@ -65,9 +89,11 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.0.10
+CamillaDSP 0.0.13
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
+
+Built with features: alsa-backend, pulse-backend, socketserver
 
 USAGE:
     camilladsp [FLAGS] [OPTIONS] <configfile>
@@ -77,6 +103,7 @@ FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
     -v               Increase message verbosity
+    -w, --wait       Wait for config from websocket
 
 OPTIONS:
     -p, --port <port>    Port for websocket server
@@ -86,9 +113,11 @@ ARGS:
 ```
 If the "check" flag is given, the program will exit after checking the configuration file. Use this if you only want to verify that the configuration is ok, and not start any processing.
 
-To enable the websocket server, provide a port number with the -p option. Leave it out, or give 0 to disable.
+To enable the websocket server, provide a port number with the `-p` option. Leave it out, or give 0 to disable. 
 
-The default logging setting prints messages of levels "error", "warn" and "info". By passing the verbosity flag once, "-v" it also prints "debug". If and if's given twice, "-vv", it also prints "trace" messages. 
+If the "wait" flag, `-w` is given, CamillaDSP will start the websocket server and wait for a configuration to be uploaded. Then the config file argument must be left out.
+
+The default logging setting prints messages of levels "error", "warn" and "info". By passing the verbosity flag once, `-v` it also prints "debug". If and if's given twice, `-vv`, it also prints "trace" messages. 
 
 
 ### Reloading the configuration

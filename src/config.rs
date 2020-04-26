@@ -1,5 +1,6 @@
 use filters;
 use serde::{Deserialize, Serialize};
+use serde_with;
 use std::collections::HashMap;
 use std::error;
 use std::fmt;
@@ -37,6 +38,7 @@ impl ConfigError {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub enum SampleFormat {
     S16LE,
     S24LE,
@@ -46,6 +48,7 @@ pub enum SampleFormat {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum Device {
     #[cfg(feature = "alsa-backend")]
@@ -70,6 +73,7 @@ pub enum Device {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Devices {
     pub samplerate: usize,
     // alias to allow old name buffersize
@@ -99,6 +103,7 @@ fn default_queuelimit() -> usize {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
 pub enum Filter {
     Conv {
         #[serde(default)]
@@ -125,6 +130,7 @@ pub enum Filter {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub enum FileFormat {
     TEXT,
     S16LE,
@@ -136,6 +142,7 @@ pub enum FileFormat {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
 pub enum ConvParameters {
     File {
         filename: String,
@@ -161,6 +168,7 @@ impl Default for ConvParameters {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
 pub enum BiquadParameters {
     Free {
         a1: PrcFmt,
@@ -231,6 +239,7 @@ pub enum BiquadParameters {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
 pub enum BiquadComboParameters {
     LinkwitzRileyHighpass { freq: PrcFmt, order: usize },
     LinkwitzRileyLowpass { freq: PrcFmt, order: usize },
@@ -239,6 +248,7 @@ pub enum BiquadComboParameters {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct GainParameters {
     pub gain: PrcFmt,
     #[serde(default)]
@@ -246,6 +256,7 @@ pub struct GainParameters {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct DelayParameters {
     pub delay: PrcFmt,
     #[serde(default)]
@@ -253,6 +264,7 @@ pub struct DelayParameters {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub enum TimeUnit {
     #[serde(rename = "ms")]
     Milliseconds,
@@ -267,6 +279,7 @@ impl Default for TimeUnit {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
 pub enum DitherParameters {
     Simple { bits: usize },
     Lipshitz441 { bits: usize },
@@ -278,6 +291,7 @@ pub enum DitherParameters {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct DiffEqParameters {
     #[serde(default)]
     pub a: Vec<PrcFmt>,
@@ -286,12 +300,14 @@ pub struct DiffEqParameters {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct MixerChannels {
     pub r#in: usize,
     pub out: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct MixerSource {
     pub channel: usize,
     pub gain: PrcFmt,
@@ -299,12 +315,14 @@ pub struct MixerSource {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct MixerMapping {
     pub dest: usize,
     pub sources: Vec<MixerSource>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Mixer {
     pub channels: MixerChannels,
     pub mapping: Vec<MixerMapping>,
@@ -312,17 +330,20 @@ pub struct Mixer {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
 pub enum PipelineStep {
     Mixer { name: String },
     Filter { channel: usize, names: Vec<String> },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Configuration {
     pub devices: Devices,
     #[serde(default)]
     pub mixers: HashMap<String, Mixer>,
     #[serde(default)]
+    #[serde(deserialize_with = "serde_with::rust::maps_duplicate_key_is_error::deserialize")]
     pub filters: HashMap<String, Filter>,
     #[serde(default)]
     pub pipeline: Vec<PipelineStep>,
