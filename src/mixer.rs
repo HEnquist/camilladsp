@@ -83,12 +83,6 @@ impl Mixer {
             }
         }
 
-        AudioChunk {
-            frames: input.frames,
-            channels: self.channels_out,
-            maxval: 0.0,
-            minval: 0.0,
-            waveforms,
-        }
+        AudioChunk::from(input, waveforms)
     }
 }

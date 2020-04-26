@@ -8,6 +8,7 @@ use pulsedevice;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
+use std::time::Instant;
 
 use CommandMessage;
 use PrcFmt;
@@ -26,7 +27,49 @@ pub struct AudioChunk {
     pub channels: usize,
     pub maxval: PrcFmt,
     pub minval: PrcFmt,
+    pub timestamp: Instant,
+    pub valid_frames: usize,
     pub waveforms: Vec<Vec<PrcFmt>>,
+}
+
+impl AudioChunk {
+    pub fn new(
+        waveforms: Vec<Vec<PrcFmt>>,
+        maxval: PrcFmt,
+        minval: PrcFmt,
+        valid_frames: usize,
+    ) -> Self {
+        let timestamp = Instant::now();
+        let channels = waveforms.len();
+        let frames = waveforms[0].len();
+        AudioChunk {
+            frames,
+            channels,
+            maxval,
+            minval,
+            timestamp,
+            valid_frames,
+            waveforms,
+        }
+    }
+
+    pub fn from(chunk: &AudioChunk, waveforms: Vec<Vec<PrcFmt>>) -> Self {
+        let timestamp = chunk.timestamp;
+        let maxval = chunk.maxval;
+        let minval = chunk.minval;
+        let frames = chunk.frames;
+        let valid_frames = chunk.valid_frames;
+        let channels = waveforms.len();
+        AudioChunk {
+            frames,
+            channels,
+            maxval,
+            minval,
+            timestamp,
+            valid_frames,
+            waveforms,
+        }
+    }
 }
 
 /// A playback device
