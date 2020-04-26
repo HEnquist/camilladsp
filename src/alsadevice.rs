@@ -7,6 +7,7 @@ use alsa::ctl::{ElemType, ElemValue};
 use alsa::hctl::HCtl;
 use alsa::pcm::{Access, Format, HwParams, State};
 use alsa::{Direction, ValueOr};
+use rubato::{Resampler};
 use std::ffi::CString;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
@@ -16,6 +17,7 @@ use std::time::{Duration, SystemTime};
 use audiodevice::*;
 // Sample format
 use config::SampleFormat;
+use config;
 use conversions::{
     buffer_to_chunk_float, buffer_to_chunk_int, chunk_to_buffer_float, chunk_to_buffer_int,
 };
@@ -33,7 +35,7 @@ pub type MachInt = i32;
 pub struct AlsaPlaybackDevice {
     pub devname: String,
     pub samplerate: usize,
-    pub bufferlength: usize,
+    pub chunksize: usize,
     pub channels: usize,
     pub format: SampleFormat,
     pub target_level: usize,
@@ -43,7 +45,11 @@ pub struct AlsaPlaybackDevice {
 pub struct AlsaCaptureDevice {
     pub devname: String,
     pub samplerate: usize,
-    pub bufferlength: usize,
+    //pub resampler: Option<Box<dyn Resampler<PrcFmt>>>,
+    pub enable_resampling: bool,
+    pub capture_samplerate: usize,
+    pub resampler_conf: config::Resampler,
+    pub chunksize: usize,
     pub channels: usize,
     pub format: SampleFormat,
     pub silence_threshold: PrcFmt,
@@ -66,6 +72,7 @@ struct CaptureParams {
     scalefactor: PrcFmt,
     silent_limit: usize,
     silence: PrcFmt,
+    chunksize: usize,
 }
 
 struct PlaybackParams {
@@ -154,8 +161,11 @@ fn open_pcm(
 
         hwp.set_access(Access::RWInterleaved)?;
         hwp.set_buffer_size(2 * bufsize)?;
-        hwp.set_period_size(bufsize / 8, alsa::ValueOr::Nearest)?;
+        println!("aaaaaa");
+        hwp.set_period_size(bufsize / 4, alsa::ValueOr::Nearest)?;
+        println!("bbbbbb");
         pcmdev.hw_params(&hwp)?;
+        println!("ccccccc");
     }
 
     // Set software parameters
@@ -167,7 +177,7 @@ fn open_pcm(
         //swp.set_avail_min(periodsize)?;
         pcmdev.sw_params(&swp)?;
         debug!(
-            "Opened audio output {:?} with parameters: {:?}, {:?}",
+            "Opened audio device {:?} with parameters: {:?}, {:?}",
             devname, hwp, swp
         );
         (hwp.get_rate()?, act_bufsize)
@@ -319,6 +329,7 @@ fn capture_loop_int<
     pcmdevice: &alsa::PCM,
     io: alsa::pcm::IO<T>,
     params: CaptureParams,
+    mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
 ) {
     let mut silent_nbr: usize = 0;
     let pcminfo = pcmdevice.info().unwrap();
@@ -336,7 +347,7 @@ fn capture_loop_int<
     if element.is_some() {
         info!("Capture device supports rate adjust");
     }
-
+    let mut capture_samples = params.chunksize*params.channels;
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -350,10 +361,16 @@ fn capture_loop_int<
                     elval.set_integer(0, (100_000.0 * speed) as i32).unwrap();
                     elem.write(&elval).unwrap();
                 }
+                else if let Some(resampl) = &mut resampler {
+                    resampl.set_resample_ratio_relative(speed).unwrap();
+                }
             }
             Err(_) => {}
         };
-        let capture_res = capture_buffer(&mut buffer, pcmdevice, &io);
+        if let Some(resampl) = &mut resampler {
+            capture_samples = resampl.nbr_frames_needed()*params.channels;
+        }
+        let capture_res = capture_buffer(&mut buffer[0..capture_samples], pcmdevice, &io);
         match capture_res {
             Ok(_) => {}
             Err(msg) => {
@@ -365,7 +382,7 @@ fn capture_loop_int<
                     .unwrap();
             }
         };
-        let chunk = buffer_to_chunk_int(&buffer, params.channels, params.scalefactor);
+        let mut chunk = buffer_to_chunk_int(&buffer[0..capture_samples], params.channels, params.scalefactor);
         if (chunk.maxval - chunk.minval) > params.silence {
             if silent_nbr > params.silent_limit {
                 debug!("Resuming processing");
@@ -378,6 +395,12 @@ fn capture_loop_int<
             silent_nbr += 1;
         }
         if silent_nbr <= params.silent_limit {
+            if let Some(resampl) = &mut resampler {
+                let new_waves = resampl.process(&chunk.waveforms).unwrap();
+                chunk.frames = new_waves[0].len();
+                chunk.valid_frames = new_waves[0].len();
+                chunk.waveforms = new_waves;
+            }
             let msg = AudioMessage::Audio(chunk);
             channels.audio.send(msg).unwrap();
         }
@@ -468,7 +491,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let target_level = self.target_level;
         let adjust_period = self.adjust_period;
         let samplerate = self.samplerate;
-        let bufferlength = self.bufferlength;
+        let chunksize = self.chunksize;
         let channels = self.channels;
         let bits: i32 = match self.format {
             SampleFormat::S16LE => 16,
@@ -479,11 +502,11 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         };
         let format = self.format.clone();
         let handle = thread::spawn(move || {
-            //let delay = time::Duration::from_millis((4*1000*bufferlength/samplerate) as u64);
+            //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
             match open_pcm(
                 devname,
                 samplerate as u32,
-                bufferlength as MachInt,
+                chunksize as MachInt,
                 channels as u32,
                 &format,
                 false,
@@ -511,23 +534,23 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     match format {
                         SampleFormat::S16LE => {
                             let io = pcmdevice.io_i16().unwrap();
-                            let buffer = vec![0i16; bufferlength * channels];
+                            let buffer = vec![0i16; chunksize * channels];
                             playback_loop_int(pb_channels, buffer, &pcmdevice, io, pb_params);
                         }
                         SampleFormat::S24LE | SampleFormat::S32LE => {
                             let io = pcmdevice.io_i32().unwrap();
-                            let buffer = vec![0i32; bufferlength * channels];
+                            let buffer = vec![0i32; chunksize * channels];
                             playback_loop_int(pb_channels, buffer, &pcmdevice, io, pb_params);
                         }
                         SampleFormat::FLOAT32LE => {
                             let io = pcmdevice.io_f32().unwrap();
-                            let buffer = vec![0f32; bufferlength * channels];
+                            let buffer = vec![0f32; chunksize * channels];
 
                             playback_loop_float(pb_channels, buffer, &pcmdevice, io, pb_params);
                         }
                         SampleFormat::FLOAT64LE => {
                             let io = pcmdevice.io_f64().unwrap();
-                            let buffer = vec![0f64; bufferlength * channels];
+                            let buffer = vec![0f64; chunksize * channels];
                             playback_loop_float(pb_channels, buffer, &pcmdevice, io, pb_params);
                         }
                     };
@@ -556,7 +579,15 @@ impl CaptureDevice for AlsaCaptureDevice {
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
-        let bufferlength = self.bufferlength;
+        let capture_samplerate = if self.capture_samplerate > 0 {
+            self.capture_samplerate
+        }
+        else {
+            self.samplerate
+        };
+        let chunksize = self.chunksize;
+        let buffer_frames = 2.0f32.powf((capture_samplerate as f32 / samplerate as f32 * chunksize as f32).log2().ceil()) as usize;
+        println!("Buffer frames {}", buffer_frames);
         let channels = self.channels;
         let bits: i32 = match self.format {
             SampleFormat::S16LE => 16,
@@ -568,13 +599,21 @@ impl CaptureDevice for AlsaCaptureDevice {
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit =
-            (self.silence_timeout * ((samplerate / bufferlength) as PrcFmt)) as usize;
+            (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
         let format = self.format.clone();
+        let enable_resampling = self.enable_resampling;
+        let resampler_conf = self.resampler_conf.clone();
         let handle = thread::spawn(move || {
+            let resampler = if enable_resampling {
+                get_resampler(&resampler_conf, channels, samplerate, capture_samplerate, chunksize)
+            }
+            else {
+                None
+            };
             match open_pcm(
                 devname,
-                samplerate as u32,
-                bufferlength as MachInt,
+                capture_samplerate as u32,
+                buffer_frames as MachInt,
                 channels as u32,
                 &format,
                 true,
@@ -592,6 +631,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                         scalefactor,
                         silent_limit,
                         silence,
+                        chunksize,
                     };
                     let cap_channels = CaptureChannels {
                         audio: channel,
@@ -601,22 +641,22 @@ impl CaptureDevice for AlsaCaptureDevice {
                     match format {
                         SampleFormat::S16LE => {
                             let io = pcmdevice.io_i16().unwrap();
-                            let buffer = vec![0i16; channels * bufferlength];
-                            capture_loop_int(cap_channels, buffer, &pcmdevice, io, cap_params);
+                            let buffer = vec![0i16; channels * buffer_frames];
+                            capture_loop_int(cap_channels, buffer, &pcmdevice, io, cap_params, resampler);
                         }
                         SampleFormat::S24LE | SampleFormat::S32LE => {
                             let io = pcmdevice.io_i32().unwrap();
-                            let buffer = vec![0i32; channels * bufferlength];
-                            capture_loop_int(cap_channels, buffer, &pcmdevice, io, cap_params);
+                            let buffer = vec![0i32; channels * buffer_frames];
+                            capture_loop_int(cap_channels, buffer, &pcmdevice, io, cap_params, resampler);
                         }
                         SampleFormat::FLOAT32LE => {
                             let io = pcmdevice.io_f32().unwrap();
-                            let buffer = vec![0f32; channels * bufferlength];
+                            let buffer = vec![0f32; channels * buffer_frames];
                             capture_loop_float(cap_channels, buffer, &pcmdevice, io, cap_params);
                         }
                         SampleFormat::FLOAT64LE => {
                             let io = pcmdevice.io_f64().unwrap();
-                            let buffer = vec![0f64; channels * bufferlength];
+                            let buffer = vec![0f64; channels * buffer_frames];
                             capture_loop_float(cap_channels, buffer, &pcmdevice, io, cap_params);
                         }
                     };

@@ -3,8 +3,10 @@
 use alsadevice;
 use config;
 use filedevice;
+use num::integer;
 #[cfg(feature = "pulse-backend")]
 use pulsedevice;
+use rubato::{SincFixedOut, Resampler, Interpolation};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -104,7 +106,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
         } => Box::new(alsadevice::AlsaPlaybackDevice {
             devname: device,
             samplerate: conf.samplerate,
-            bufferlength: conf.chunksize,
+            chunksize: conf.chunksize,
             channels,
             format,
             target_level: conf.target_level,
@@ -137,8 +139,114 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     }
 }
 
-/// Create a capture device. Currently only Alsa is supported.
+pub fn get_resampler(conf: &config::Resampler, num_channels: usize, samplerate: usize, capture_samplerate: usize, chunksize: usize) -> Option<Box<dyn Resampler<PrcFmt>>> {   
+    match &conf {
+        config::Resampler::FastAsync => {
+            let sinc_len = 64;
+            let f_cutoff = 0.5f32.powf(16.0 / sinc_len as f32);
+            let oversampling = 1024;
+            let interp = Interpolation::Linear;
+            let resampler = SincFixedOut::<PrcFmt>::new(
+                samplerate as f32 / capture_samplerate as f32,
+                sinc_len,
+                f_cutoff,
+                oversampling,
+                interp,
+                chunksize,
+                num_channels
+            );
+            Some(Box::new(resampler))
+        }
+        config::Resampler::BalancedAsync => {
+            let sinc_len = 128;
+            let f_cutoff = 0.5f32.powf(16.0 / sinc_len as f32);
+            let oversampling = 1024;
+            let interp = Interpolation::Cubic;
+            let resampler = SincFixedOut::<PrcFmt>::new(
+                samplerate as f32 / capture_samplerate as f32,
+                sinc_len,
+                f_cutoff,
+                oversampling,
+                interp,
+                chunksize,
+                num_channels
+            );
+            Some(Box::new(resampler))
+        }
+        config::Resampler::AccurateAsync => {
+            let sinc_len = 256;
+            let f_cutoff = 0.5f32.powf(16.0 / sinc_len as f32);
+            let oversampling = 256;
+            let interp = Interpolation::Cubic;
+            let resampler = SincFixedOut::<PrcFmt>::new(
+                samplerate as f32 / capture_samplerate as f32,
+                sinc_len,
+                f_cutoff,
+                oversampling,
+                interp,
+                chunksize,
+                num_channels
+            );
+            Some(Box::new(resampler))
+        }
+        config::Resampler::FastSync => {
+            let sinc_len = 128;
+            let f_cutoff = 0.5f32.powf(16.0 / sinc_len as f32);
+            let gcd = integer::gcd(samplerate, capture_samplerate);
+            let oversampling = samplerate/gcd;
+            let interp = Interpolation::Nearest;
+            let resampler = SincFixedOut::<PrcFmt>::new(
+                samplerate as f32 / capture_samplerate as f32,
+                sinc_len,
+                f_cutoff,
+                oversampling,
+                interp,
+                chunksize,
+                num_channels
+            );
+            Some(Box::new(resampler))
+        }
+        config::Resampler::AccurateSync => {
+            let sinc_len = 256;
+            let f_cutoff = 0.5f32.powf(16.0 / sinc_len as f32);
+            let gcd = integer::gcd(samplerate, capture_samplerate);
+            let oversampling = samplerate/gcd;
+            let interp = Interpolation::Nearest;
+            let resampler = SincFixedOut::<PrcFmt>::new(
+                samplerate as f32 / capture_samplerate as f32,
+                sinc_len,
+                f_cutoff,
+                oversampling,
+                interp,
+                chunksize,
+                num_channels
+            );
+            Some(Box::new(resampler))
+        }
+        config::Resampler::Free { sinc_len, oversampling_ratio, interpolation } => {
+            let f_cutoff = 0.5f32.powf(16.0 / *sinc_len as f32);
+            let interp = match interpolation {
+                config::InterpolationType::Cubic => Interpolation::Cubic,
+                config::InterpolationType::Linear => Interpolation::Linear,
+                config::InterpolationType::Nearest => Interpolation::Nearest,
+            };
+            let resampler = SincFixedOut::<PrcFmt>::new(
+                samplerate as f32 / capture_samplerate as f32,
+                *sinc_len,
+                f_cutoff,
+                *oversampling_ratio,
+                interp,
+                chunksize,
+                num_channels
+            );
+            Some(Box::new(resampler))
+        }
+    }
+}
+
+/// Create a capture device. 
 pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
+    //let resampler = get_resampler(&conf);
     match conf.capture {
         #[cfg(feature = "alsa-backend")]
         config::CaptureDevice::Alsa {
@@ -148,7 +256,10 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(alsadevice::AlsaCaptureDevice {
             devname: device,
             samplerate: conf.samplerate,
-            bufferlength: conf.chunksize,
+            enable_resampling: conf.enable_resampling,
+            capture_samplerate: conf.capture_samplerate,
+            resampler_conf: conf.resampler_type,
+            chunksize: conf.chunksize,
             channels,
             format,
             silence_threshold: conf.silence_threshold,
@@ -162,6 +273,8 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(pulsedevice::PulseCaptureDevice {
             devname: device,
             samplerate: conf.samplerate,
+            enable_resampling: conf.enable_resampling,
+            capture_samplerate: conf.capture_samplerate,
             bufferlength: conf.chunksize,
             channels,
             format,
@@ -176,6 +289,8 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(filedevice::FileCaptureDevice {
             filename,
             samplerate: conf.samplerate,
+            enable_resampling: conf.enable_resampling,
+            capture_samplerate: conf.capture_samplerate,
             bufferlength: conf.chunksize,
             channels,
             format,

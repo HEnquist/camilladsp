@@ -111,9 +111,17 @@ pub struct Devices {
     pub capture: CaptureDevice,
     pub playback: PlaybackDevice,
     #[serde(default)]
+    pub enable_rate_adjust: bool,
+    #[serde(default)]
     pub target_level: usize,
     #[serde(default = "default_period")]
     pub adjust_period: f32,
+    #[serde(default)]
+    pub enable_resampling: bool,
+    #[serde(default)]
+    pub resampler_type: Resampler,
+    #[serde(default)]
+    pub capture_samplerate: usize,
 }
 
 fn default_period() -> f32 {
@@ -123,6 +131,36 @@ fn default_period() -> f32 {
 fn default_queuelimit() -> usize {
     100
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub enum Resampler {
+    FastAsync,
+    BalancedAsync,
+    AccurateAsync,
+    FastSync,
+    AccurateSync,
+    Free {
+        sinc_len: usize, 
+        oversampling_ratio: usize,
+        interpolation: InterpolationType,
+    }
+}
+
+impl Default for Resampler {
+    fn default() -> Self {
+        Resampler::BalancedAsync
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub enum InterpolationType {
+    Cubic,
+    Linear,
+    Nearest,
+}
+
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]

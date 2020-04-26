@@ -1,6 +1,7 @@
 extern crate num_traits;
 //use std::{iter, error};
 
+use rubato::{Resampler};
 use std::fs::File;
 use std::io::ErrorKind;
 use std::io::{Read, Write};
@@ -33,6 +34,9 @@ pub struct FileCaptureDevice {
     pub filename: String,
     pub bufferlength: usize,
     pub samplerate: usize,
+    //pub resampler: Option<Box<dyn Resampler<PrcFmt>>>,
+    pub enable_resampling: bool,
+    pub capture_samplerate: usize,
     pub channels: usize,
     pub format: SampleFormat,
     pub silence_threshold: PrcFmt,

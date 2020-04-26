@@ -6,6 +6,8 @@ use psimple::Simple;
 use pulse::sample;
 use pulse::stream::Direction;
 
+use rubato::{Resampler};
+
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -34,6 +36,9 @@ pub struct PulsePlaybackDevice {
 pub struct PulseCaptureDevice {
     pub devname: String,
     pub samplerate: usize,
+    //pub resampler: Option<Box<dyn Resampler<PrcFmt>>>,
+    pub enable_resampling: bool,
+    pub capture_samplerate: usize,
     pub bufferlength: usize,
     pub channels: usize,
     pub format: SampleFormat,
