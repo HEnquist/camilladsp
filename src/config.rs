@@ -50,7 +50,7 @@ pub enum SampleFormat {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
-pub enum Device {
+pub enum CaptureDevice {
     #[cfg(feature = "alsa-backend")]
     Alsa {
         channels: usize,
@@ -74,6 +74,29 @@ pub enum Device {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[serde(tag = "type")]
+pub enum PlaybackDevice {
+    #[cfg(feature = "alsa-backend")]
+    Alsa {
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
+    #[cfg(feature = "pulse-backend")]
+    Pulse {
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
+    File {
+        channels: usize,
+        filename: String,
+        format: SampleFormat,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Devices {
     pub samplerate: usize,
     // alias to allow old name buffersize
@@ -85,8 +108,8 @@ pub struct Devices {
     pub silence_threshold: PrcFmt,
     #[serde(default)]
     pub silence_timeout: PrcFmt,
-    pub capture: Device,
-    pub playback: Device,
+    pub capture: CaptureDevice,
+    pub playback: PlaybackDevice,
     #[serde(default)]
     pub target_level: usize,
     #[serde(default = "default_period")]
@@ -442,10 +465,10 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
     }
     let mut num_channels = match conf.devices.capture {
         #[cfg(feature = "alsa-backend")]
-        Device::Alsa { channels, .. } => channels,
+        CaptureDevice::Alsa { channels, .. } => channels,
         #[cfg(feature = "pulse-backend")]
-        Device::Pulse { channels, .. } => channels,
-        Device::File { channels, .. } => channels,
+        CaptureDevice::Pulse { channels, .. } => channels,
+        CaptureDevice::File { channels, .. } => channels,
     };
     let fs = conf.devices.samplerate;
     for step in conf.pipeline {
@@ -488,10 +511,10 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
     }
     let num_channels_out = match conf.devices.playback {
         #[cfg(feature = "alsa-backend")]
-        Device::Alsa { channels, .. } => channels,
+        PlaybackDevice::Alsa { channels, .. } => channels,
         #[cfg(feature = "pulse-backend")]
-        Device::Pulse { channels, .. } => channels,
-        Device::File { channels, .. } => channels,
+        PlaybackDevice::Pulse { channels, .. } => channels,
+        PlaybackDevice::File { channels, .. } => channels,
     };
     if num_channels != num_channels_out {
         return Err(Box::new(ConfigError::new(&format!(
