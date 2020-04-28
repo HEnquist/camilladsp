@@ -1,0 +1,39 @@
+---
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  target_level: 1024
+  adjust_period: 3
+  enable_resampling: true
+  resampler_type: FastAsync
+  capture_samplerate: 44100
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,0"
+    format: S16LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+    format: S32LE
+
+filters:
+  some_gain:
+    type: Gain
+    parameters:
+      gain: -3 
+      inverted: false
+
+
+pipeline:
+  - type: Filter
+    channel: 0
+    names:
+      - some_gain
+  - type: Filter
+    channel: 1
+    names:
+      - some_gain
+   
+

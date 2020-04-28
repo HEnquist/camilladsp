@@ -139,12 +139,15 @@ pub enum Resampler {
     BalancedAsync,
     AccurateAsync,
     FastSync,
+    BalancedSync,
     AccurateSync,
     Free {
-        sinc_len: usize, 
+        sinc_len: usize,
         oversampling_ratio: usize,
         interpolation: InterpolationType,
-    }
+        window: WindowFunction,
+        f_cutoff: f32,
+    },
 }
 
 impl Default for Resampler {
@@ -155,12 +158,22 @@ impl Default for Resampler {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub enum WindowFunction {
+    Hann,
+    Hann2,
+    Blackman,
+    Blackman2,
+    BlackmanHarris,
+    BlackmanHarris2,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub enum InterpolationType {
     Cubic,
     Linear,
     Nearest,
 }
-
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]

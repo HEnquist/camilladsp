@@ -6,7 +6,7 @@ use psimple::Simple;
 use pulse::sample;
 use pulse::stream::Direction;
 
-use rubato::{Resampler};
+use rubato::Resampler;
 
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};

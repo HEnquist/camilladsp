@@ -1,7 +1,7 @@
 extern crate num_traits;
 //use std::{iter, error};
 
-use rubato::{Resampler};
+use rubato::Resampler;
 use std::fs::File;
 use std::io::ErrorKind;
 use std::io::{Read, Write};
