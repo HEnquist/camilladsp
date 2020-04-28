@@ -163,11 +163,8 @@ fn open_pcm(
 
         hwp.set_access(Access::RWInterleaved)?;
         hwp.set_buffer_size(2 * bufsize)?;
-        println!("aaaaaa");
         hwp.set_period_size(bufsize / 4, alsa::ValueOr::Nearest)?;
-        println!("bbbbbb");
         pcmdev.hw_params(&hwp)?;
-        println!("ccccccc");
     }
 
     // Set software parameters

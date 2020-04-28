@@ -28,7 +28,7 @@ use StatusMessage;
 pub struct PulsePlaybackDevice {
     pub devname: String,
     pub samplerate: usize,
-    pub bufferlength: usize,
+    pub chunksize: usize,
     pub channels: usize,
     pub format: SampleFormat,
 }
@@ -39,7 +39,7 @@ pub struct PulseCaptureDevice {
     //pub resampler: Option<Box<dyn Resampler<PrcFmt>>>,
     pub enable_resampling: bool,
     pub capture_samplerate: usize,
-    pub bufferlength: usize,
+    pub chunksize: usize,
     pub channels: usize,
     pub format: SampleFormat,
     pub silence_threshold: PrcFmt,
@@ -122,7 +122,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
-        let bufferlength = self.bufferlength;
+        let chunksize = self.chunksize;
         let channels = self.channels;
         let bits = match self.format {
             SampleFormat::S16LE => 16,
@@ -140,11 +140,11 @@ impl PlaybackDevice for PulsePlaybackDevice {
         };
         let format = self.format.clone();
         let handle = thread::spawn(move || {
-            //let delay = time::Duration::from_millis((4*1000*bufferlength/samplerate) as u64);
+            //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
             match open_pulse(
                 devname,
                 samplerate as u32,
-                bufferlength as i64,
+                chunksize as i64,
                 channels as u8,
                 &format,
                 false,
@@ -159,7 +159,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                     barrier.wait();
                     //thread::sleep(delay);
                     debug!("starting playback loop");
-                    let mut buffer = vec![0u8; bufferlength * channels * store_bytes];
+                    let mut buffer = vec![0u8; chunksize * channels * store_bytes];
                     loop {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
@@ -224,7 +224,7 @@ impl CaptureDevice for PulseCaptureDevice {
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
-        let bufferlength = self.bufferlength;
+        let chunksize = self.chunksize;
         let channels = self.channels;
         let bits = match self.format {
             SampleFormat::S16LE => 16,
@@ -244,12 +244,12 @@ impl CaptureDevice for PulseCaptureDevice {
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit =
-            (self.silence_timeout * ((samplerate / bufferlength) as PrcFmt)) as usize;
+            (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
         let handle = thread::spawn(move || {
             match open_pulse(
                 devname,
                 samplerate as u32,
-                bufferlength as i64,
+                chunksize as i64,
                 channels as u8,
                 &format,
                 true,
@@ -263,7 +263,7 @@ impl CaptureDevice for PulseCaptureDevice {
                     let mut silent_nbr: usize = 0;
                     barrier.wait();
                     debug!("starting captureloop");
-                    let mut buf = vec![0u8; channels * bufferlength * store_bytes];
+                    let mut buf = vec![0u8; channels * chunksize * store_bytes];
                     loop {
                         if let Ok(CommandMessage::Exit) = command_channel.try_recv() {
                             let msg = AudioMessage::EndOfStream;
