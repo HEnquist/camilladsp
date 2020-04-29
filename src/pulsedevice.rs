@@ -6,7 +6,7 @@ use psimple::Simple;
 use pulse::sample;
 use pulse::stream::Direction;
 
-use rubato::Resampler;
+//use rubato::Resampler;
 
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
@@ -243,8 +243,7 @@ impl CaptureDevice for PulseCaptureDevice {
         let format = self.format.clone();
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
-        let silent_limit =
-            (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
+        let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
         let handle = thread::spawn(move || {
             match open_pulse(
                 devname,

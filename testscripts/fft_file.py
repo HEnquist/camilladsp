@@ -13,6 +13,10 @@ fname = sys.argv[1]
 datafmt = sys.argv[2]
 srate = int(sys.argv[3])
 nchannels = int(sys.argv[4])
+try:
+    window = bool(sys.argv[5])
+except:
+    window = False
 
 if datafmt == "text":
     with open(fname) as f:
@@ -34,6 +38,10 @@ plt.figure(num="FFT of {}".format(fname))
 for chan in range(nchannels):
     chanvals = all_values[chan,:]
     npoints = len(chanvals)
+    if window:
+        chanvals = chanvals[1024:-1024]
+        npoints = len(chanvals)
+        chanvals = chanvals*np.hanning(npoints)
     print(npoints)
     t = np.linspace(0, npoints/srate, npoints, endpoint=False) 
     f = np.linspace(0, srate/2.0, math.floor(npoints/2))

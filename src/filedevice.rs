@@ -1,12 +1,6 @@
 extern crate num_traits;
 //use std::{iter, error};
 
-use std::fs::File;
-use std::io::ErrorKind;
-use std::io::{Read, Write};
-use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
-use std::thread;
 use audiodevice::*;
 use config;
 use config::SampleFormat;
@@ -14,6 +8,12 @@ use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
     chunk_to_buffer_float_bytes,
 };
+use std::fs::File;
+use std::io::ErrorKind;
+use std::io::{Read, Write};
+use std::sync::mpsc;
+use std::sync::{Arc, Barrier};
+use std::thread;
 
 use CommandMessage;
 use PrcFmt;
@@ -164,7 +164,9 @@ impl CaptureDevice for FileCaptureDevice {
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
                 .log2()
                 .ceil(),
-        ) as usize * channels * store_bytes;
+        ) as usize
+            * channels
+            * store_bytes;
         let format = self.format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
@@ -172,8 +174,7 @@ impl CaptureDevice for FileCaptureDevice {
         let mut extra_bytes_left = extra_bytes;
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
-        let silent_limit =
-            (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
+        let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
         let handle = thread::spawn(move || {
             let mut resampler = if enable_resampling {
                 get_resampler(
@@ -223,8 +224,7 @@ impl CaptureDevice for FileCaptureDevice {
                             Ok(bytes) => {
                                 bytes_read = bytes;
                                 if bytes > 0 && bytes < capture_bytes {
-                                    for item in buf.iter_mut().take(capture_bytes).skip(bytes)
-                                    {
+                                    for item in buf.iter_mut().take(capture_bytes).skip(bytes) {
                                         *item = 0;
                                     }
                                     debug!(
@@ -262,10 +262,21 @@ impl CaptureDevice for FileCaptureDevice {
                         //let before = Instant::now();
                         let mut chunk = match format {
                             SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
-                                buffer_to_chunk_bytes(&buf[0..capture_bytes], channels, scalefactor, bits, bytes_read)
+                                buffer_to_chunk_bytes(
+                                    &buf[0..capture_bytes],
+                                    channels,
+                                    scalefactor,
+                                    bits,
+                                    bytes_read,
+                                )
                             }
                             SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
-                                buffer_to_chunk_float_bytes(&buf[0..capture_bytes], channels, bits, bytes_read)
+                                buffer_to_chunk_float_bytes(
+                                    &buf[0..capture_bytes],
+                                    channels,
+                                    bits,
+                                    bytes_read,
+                                )
                             }
                         };
                         if (chunk.maxval - chunk.minval) > silence {
