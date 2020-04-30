@@ -147,27 +147,20 @@ pub fn get_resampler(
     capture_samplerate: usize,
     chunksize: usize,
 ) -> Option<Box<dyn Resampler<PrcFmt>>> {
-    match &conf {
+    let parameters = match &conf {
         config::Resampler::FastAsync => {
             let sinc_len = 64;
             let f_cutoff = 0.915_602_15;
             let oversampling_factor = 1024;
             let interpolation = InterpolationType::Linear;
             let window = WindowFunction::Hann2;
-            let parameters = InterpolationParameters {
+            InterpolationParameters {
                 sinc_len,
                 f_cutoff,
                 oversampling_factor,
                 interpolation,
                 window,
-            };
-            let resampler = SincFixedOut::<PrcFmt>::new(
-                samplerate as f32 / capture_samplerate as f32,
-                parameters,
-                chunksize,
-                num_channels,
-            );
-            Some(Box::new(resampler))
+            }
         }
         config::Resampler::BalancedAsync => {
             let sinc_len = 128;
@@ -175,20 +168,13 @@ pub fn get_resampler(
             let oversampling_factor = 1024;
             let interpolation = InterpolationType::Linear;
             let window = WindowFunction::Blackman2;
-            let parameters = InterpolationParameters {
+            InterpolationParameters {
                 sinc_len,
                 f_cutoff,
                 oversampling_factor,
                 interpolation,
                 window,
-            };
-            let resampler = SincFixedOut::<PrcFmt>::new(
-                samplerate as f32 / capture_samplerate as f32,
-                parameters,
-                chunksize,
-                num_channels,
-            );
-            Some(Box::new(resampler))
+            }
         }
         config::Resampler::AccurateAsync => {
             let sinc_len = 256;
@@ -196,20 +182,13 @@ pub fn get_resampler(
             let oversampling_factor = 256;
             let interpolation = InterpolationType::Cubic;
             let window = WindowFunction::BlackmanHarris2;
-            let parameters = InterpolationParameters {
+            InterpolationParameters {
                 sinc_len,
                 f_cutoff,
                 oversampling_factor,
                 interpolation,
                 window,
-            };
-            let resampler = SincFixedOut::<PrcFmt>::new(
-                samplerate as f32 / capture_samplerate as f32,
-                parameters,
-                chunksize,
-                num_channels,
-            );
-            Some(Box::new(resampler))
+            }
         }
         config::Resampler::FastSync => {
             let sinc_len = 64;
@@ -218,20 +197,13 @@ pub fn get_resampler(
             let oversampling_factor = samplerate / gcd;
             let interpolation = InterpolationType::Nearest;
             let window = WindowFunction::Hann2;
-            let parameters = InterpolationParameters {
+            InterpolationParameters {
                 sinc_len,
                 f_cutoff,
                 oversampling_factor,
                 interpolation,
                 window,
-            };
-            let resampler = SincFixedOut::<PrcFmt>::new(
-                samplerate as f32 / capture_samplerate as f32,
-                parameters,
-                chunksize,
-                num_channels,
-            );
-            Some(Box::new(resampler))
+            }
         }
         config::Resampler::BalancedSync => {
             let sinc_len = 128;
@@ -240,20 +212,13 @@ pub fn get_resampler(
             let oversampling_factor = samplerate / gcd;
             let interpolation = InterpolationType::Nearest;
             let window = WindowFunction::Blackman2;
-            let parameters = InterpolationParameters {
+            InterpolationParameters {
                 sinc_len,
                 f_cutoff,
                 oversampling_factor,
                 interpolation,
                 window,
-            };
-            let resampler = SincFixedOut::<PrcFmt>::new(
-                samplerate as f32 / capture_samplerate as f32,
-                parameters,
-                chunksize,
-                num_channels,
-            );
-            Some(Box::new(resampler))
+            }
         }
         config::Resampler::AccurateSync => {
             let sinc_len = 256;
@@ -262,20 +227,13 @@ pub fn get_resampler(
             let oversampling_factor = samplerate / gcd;
             let interpolation = InterpolationType::Nearest;
             let window = WindowFunction::BlackmanHarris2;
-            let parameters = InterpolationParameters {
+            InterpolationParameters {
                 sinc_len,
                 f_cutoff,
                 oversampling_factor,
                 interpolation,
                 window,
-            };
-            let resampler = SincFixedOut::<PrcFmt>::new(
-                samplerate as f32 / capture_samplerate as f32,
-                parameters,
-                chunksize,
-                num_channels,
-            );
-            Some(Box::new(resampler))
+            }
         }
         config::Resampler::Free {
             sinc_len,
@@ -297,22 +255,23 @@ pub fn get_resampler(
                 config::WindowFunction::BlackmanHarris => WindowFunction::BlackmanHarris,
                 config::WindowFunction::BlackmanHarris2 => WindowFunction::BlackmanHarris2,
             };
-            let parameters = InterpolationParameters {
+            InterpolationParameters {
                 sinc_len: *sinc_len,
                 f_cutoff: *f_cutoff,
                 oversampling_factor: *oversampling_ratio,
                 interpolation: interp,
                 window: wind,
-            };
-            let resampler = SincFixedOut::<PrcFmt>::new(
-                samplerate as f32 / capture_samplerate as f32,
-                parameters,
-                chunksize,
-                num_channels,
-            );
-            Some(Box::new(resampler))
+            }
         }
-    }
+    };
+    debug!("Creating resampler with parameters: {:?}", parameters);
+    let resampler = SincFixedOut::<PrcFmt>::new(
+        samplerate as f32 / capture_samplerate as f32,
+        parameters,
+        chunksize,
+        num_channels,
+    );
+    Some(Box::new(resampler))
 }
 
 /// Create a capture device.

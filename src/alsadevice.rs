@@ -367,10 +367,13 @@ fn capture_loop_int<
         };
         if let Some(resampl) = &mut resampler {
             capture_samples = resampl.nbr_frames_needed() * params.channels;
+            trace!("Resamper needs {} frames", resampl.nbr_frames_needed());
         }
         let capture_res = capture_buffer(&mut buffer[0..capture_samples], pcmdevice, &io);
         match capture_res {
-            Ok(_) => {}
+            Ok(_) => {
+                trace!("Captured {} samples", capture_samples);
+            }
             Err(msg) => {
                 channels
                     .status
@@ -456,10 +459,13 @@ fn capture_loop_float<
         };
         if let Some(resampl) = &mut resampler {
             capture_samples = resampl.nbr_frames_needed() * params.channels;
+            trace!("Resamper needs {} frames", resampl.nbr_frames_needed());
         }
         let capture_res = capture_buffer(&mut buffer[0..capture_samples], pcmdevice, &io);
         match capture_res {
-            Ok(_) => {}
+            Ok(_) => {
+                trace!("Captured {} samples", capture_samples);
+            }
             Err(msg) => {
                 channels
                     .status
@@ -628,6 +634,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let resampler_conf = self.resampler_conf.clone();
         let handle = thread::spawn(move || {
             let resampler = if enable_resampling {
+                debug!("Creating resampler");
                 get_resampler(
                     &resampler_conf,
                     channels,

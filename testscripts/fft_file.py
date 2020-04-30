@@ -48,15 +48,17 @@ for chan in range(nchannels):
     valfft = fft.fft(chanvals)
     cut = valfft[0:math.floor(npoints/2)]
     gain = 20*np.log10(np.abs(cut))
+    if window:
+        gain = gain-np.max(gain)
     phase = 180/np.pi*np.angle(cut)
-    plt.subplot(3,1,1)
+    #plt.subplot(3,1,1)
     plt.semilogx(f, gain)
-    plt.subplot(3,1,2)
-    plt.semilogx(f, phase)
+    #plt.subplot(3,1,2)
+    #plt.semilogx(f, phase)
 
     #plt.gca().set(xlim=(10, srate/2.0))
-    plt.subplot(3,1,3)
-    plt.plot(t, chanvals)
+    #plt.subplot(3,1,3)
+    #plt.plot(t, chanvals)
 
 
 plt.show()

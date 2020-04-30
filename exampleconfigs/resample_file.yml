@@ -1,9 +1,9 @@
 ---
 devices:
-  samplerate: 48000
+  samplerate: 96000
   chunksize: 1024
   enable_resampling: true
-  resampler_type: BalancedAsync
+  resampler_type: FastAsync
   capture_samplerate: 44100
   playback:
     type: File
@@ -13,7 +13,7 @@ devices:
   capture:
     type: File
     channels: 2
-    filename: "sine_f64_2ch.raw"
+    filename: "sine20k_f64_2ch.raw"
     format: FLOAT64LE
     extra_samples: 0
 
