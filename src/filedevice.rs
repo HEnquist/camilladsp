@@ -100,62 +100,68 @@ impl PlaybackDevice for FilePlaybackDevice {
             SampleFormat::FLOAT64LE => 8,
         };
         let format = self.format.clone();
-        let handle = thread::spawn(move || {
-            //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
-            match File::create(filename) {
-                Ok(mut file) => {
-                    match status_channel.send(StatusMessage::PlaybackReady) {
-                        Ok(()) => {}
-                        Err(_err) => {}
-                    }
-                    //let scalefactor = (1<<bits-1) as PrcFmt;
-                    let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
-                    barrier.wait();
-                    //thread::sleep(delay);
-                    debug!("starting playback loop");
-                    let mut buffer = vec![0u8; chunksize * channels * store_bytes];
-                    loop {
-                        match channel.recv() {
-                            Ok(AudioMessage::Audio(chunk)) => {
-                                let bytes = match format {
-                                    SampleFormat::S16LE
-                                    | SampleFormat::S24LE
-                                    | SampleFormat::S32LE => {
-                                        chunk_to_buffer_bytes(chunk, &mut buffer, scalefactor, bits)
-                                    }
-                                    SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
-                                        chunk_to_buffer_float_bytes(chunk, &mut buffer, bits)
-                                    }
-                                };
-                                let write_res = file.write(&buffer[0..bytes]);
-                                match write_res {
-                                    Ok(_) => {}
-                                    Err(msg) => {
-                                        status_channel
-                                            .send(StatusMessage::PlaybackError {
-                                                message: format!("{}", msg),
-                                            })
-                                            .unwrap();
-                                    }
-                                };
+        let handle = thread::Builder::new()
+            .name("FilePlayback".to_string())
+            .spawn(move || {
+                //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
+                match File::create(filename) {
+                    Ok(mut file) => {
+                        match status_channel.send(StatusMessage::PlaybackReady) {
+                            Ok(()) => {}
+                            Err(_err) => {}
+                        }
+                        //let scalefactor = (1<<bits-1) as PrcFmt;
+                        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+                        barrier.wait();
+                        //thread::sleep(delay);
+                        debug!("starting playback loop");
+                        let mut buffer = vec![0u8; chunksize * channels * store_bytes];
+                        loop {
+                            match channel.recv() {
+                                Ok(AudioMessage::Audio(chunk)) => {
+                                    let bytes = match format {
+                                        SampleFormat::S16LE
+                                        | SampleFormat::S24LE
+                                        | SampleFormat::S32LE => chunk_to_buffer_bytes(
+                                            chunk,
+                                            &mut buffer,
+                                            scalefactor,
+                                            bits,
+                                        ),
+                                        SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
+                                            chunk_to_buffer_float_bytes(chunk, &mut buffer, bits)
+                                        }
+                                    };
+                                    let write_res = file.write(&buffer[0..bytes]);
+                                    match write_res {
+                                        Ok(_) => {}
+                                        Err(msg) => {
+                                            status_channel
+                                                .send(StatusMessage::PlaybackError {
+                                                    message: format!("{}", msg),
+                                                })
+                                                .unwrap();
+                                        }
+                                    };
+                                }
+                                Ok(AudioMessage::EndOfStream) => {
+                                    status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                    break;
+                                }
+                                Err(_) => {}
                             }
-                            Ok(AudioMessage::EndOfStream) => {
-                                status_channel.send(StatusMessage::PlaybackDone).unwrap();
-                                break;
-                            }
-                            Err(_) => {}
                         }
                     }
+                    Err(err) => {
+                        status_channel
+                            .send(StatusMessage::PlaybackError {
+                                message: format!("{}", err),
+                            })
+                            .unwrap();
+                    }
                 }
-                Err(err) => {
-                    status_channel
-                        .send(StatusMessage::PlaybackError {
-                            message: format!("{}", err),
-                        })
-                        .unwrap();
-                }
-            }
-        });
+            })
+            .unwrap();
         Ok(Box::new(handle))
     }
 }
@@ -187,14 +193,23 @@ fn capture_loop(
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
                 if let Some(resampl) = &mut resampler {
-                    resampl.set_resample_ratio_relative(speed).unwrap();
+                    match resampl.set_resample_ratio_relative(speed) {
+                        Ok(()) => {}
+                        Err(_) => {
+                            debug!("Failed to set resampling speed to {}", speed);
+                        }
+                    }
                 }
             }
             Err(_) => {}
         };
         if let Some(resampl) = &mut resampler {
             capture_bytes = resampl.nbr_frames_needed() * params.channels * params.store_bytes;
-            trace!("Resamper needs {} frames", resampl.nbr_frames_needed());
+            trace!(
+                "Resampler needs {} frames, will read {} bytes",
+                resampl.nbr_frames_needed(),
+                capture_bytes
+            );
         }
         let read_res = read_retry(&mut file, &mut buf[0..capture_bytes]);
         match read_res {
@@ -324,6 +339,7 @@ impl CaptureDevice for FileCaptureDevice {
                 .log2()
                 .ceil(),
         ) as usize
+            * 2
             * channels
             * store_bytes;
         let format = self.format.clone();
@@ -334,54 +350,57 @@ impl CaptureDevice for FileCaptureDevice {
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
-        let handle = thread::spawn(move || {
-            let resampler = if enable_resampling {
-                debug!("Creating resampler");
-                get_resampler(
-                    &resampler_conf,
-                    channels,
-                    samplerate,
-                    capture_samplerate,
-                    chunksize,
-                )
-            } else {
-                None
-            };
-            match File::open(filename) {
-                Ok(file) => {
-                    match status_channel.send(StatusMessage::CaptureReady) {
-                        Ok(()) => {}
-                        Err(_err) => {}
-                    }
-                    barrier.wait();
-                    let params = CaptureParams {
+        let handle = thread::Builder::new()
+            .name("FileCapture".to_string())
+            .spawn(move || {
+                let resampler = if enable_resampling {
+                    debug!("Creating resampler");
+                    get_resampler(
+                        &resampler_conf,
                         channels,
-                        bits,
-                        format,
-                        store_bytes,
-                        extra_bytes,
-                        buffer_bytes,
-                        silent_limit,
-                        silence,
+                        samplerate,
+                        capture_samplerate,
                         chunksize,
-                    };
-                    let msg_channels = CaptureChannels {
-                        audio: channel,
-                        status: status_channel,
-                        command: command_channel,
-                    };
-                    debug!("starting captureloop");
-                    capture_loop(file, params, msg_channels, resampler);
+                    )
+                } else {
+                    None
+                };
+                match File::open(filename) {
+                    Ok(file) => {
+                        match status_channel.send(StatusMessage::CaptureReady) {
+                            Ok(()) => {}
+                            Err(_err) => {}
+                        }
+                        barrier.wait();
+                        let params = CaptureParams {
+                            channels,
+                            bits,
+                            format,
+                            store_bytes,
+                            extra_bytes,
+                            buffer_bytes,
+                            silent_limit,
+                            silence,
+                            chunksize,
+                        };
+                        let msg_channels = CaptureChannels {
+                            audio: channel,
+                            status: status_channel,
+                            command: command_channel,
+                        };
+                        debug!("starting captureloop");
+                        capture_loop(file, params, msg_channels, resampler);
+                    }
+                    Err(err) => {
+                        status_channel
+                            .send(StatusMessage::CaptureError {
+                                message: format!("{}", err),
+                            })
+                            .unwrap();
+                    }
                 }
-                Err(err) => {
-                    status_channel
-                        .send(StatusMessage::CaptureError {
-                            message: format!("{}", err),
-                        })
-                        .unwrap();
-                }
-            }
-        });
+            })
+            .unwrap();
         Ok(Box::new(handle))
     }
 }

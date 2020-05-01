@@ -1,10 +1,10 @@
 ---
 devices:
-  samplerate: 96000
+  samplerate: 192000
   chunksize: 1024
   enable_resampling: true
   resampler_type: FastAsync
-  capture_samplerate: 44100
+  capture_samplerate: 96000
   playback:
     type: File
     channels: 2

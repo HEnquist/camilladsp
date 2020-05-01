@@ -527,70 +527,73 @@ impl PlaybackDevice for AlsaPlaybackDevice {
             SampleFormat::FLOAT64LE => 64,
         };
         let format = self.format.clone();
-        let handle = thread::spawn(move || {
-            //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
-            match open_pcm(
-                devname,
-                samplerate as u32,
-                chunksize as MachInt,
-                channels as u32,
-                &format,
-                false,
-            ) {
-                Ok(pcmdevice) => {
-                    match status_channel.send(StatusMessage::PlaybackReady) {
-                        Ok(()) => {}
-                        Err(_err) => {}
+        let handle = thread::Builder::new()
+            .name("AlsaPlayback".to_string())
+            .spawn(move || {
+                //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
+                match open_pcm(
+                    devname,
+                    samplerate as u32,
+                    chunksize as MachInt,
+                    channels as u32,
+                    &format,
+                    false,
+                ) {
+                    Ok(pcmdevice) => {
+                        match status_channel.send(StatusMessage::PlaybackReady) {
+                            Ok(()) => {}
+                            Err(_err) => {}
+                        }
+                        //let scalefactor = (1<<bits-1) as PrcFmt;
+                        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+
+                        barrier.wait();
+                        //thread::sleep(delay);
+                        debug!("Starting playback loop");
+                        let pb_params = PlaybackParams {
+                            scalefactor,
+                            target_level,
+                            adjust_period,
+                            adjust_enabled,
+                        };
+                        let pb_channels = PlaybackChannels {
+                            audio: channel,
+                            status: status_channel,
+                        };
+                        match format {
+                            SampleFormat::S16LE => {
+                                let io = pcmdevice.io_i16().unwrap();
+                                let buffer = vec![0i16; chunksize * channels];
+                                playback_loop_int(pb_channels, buffer, &pcmdevice, io, pb_params);
+                            }
+                            SampleFormat::S24LE | SampleFormat::S32LE => {
+                                let io = pcmdevice.io_i32().unwrap();
+                                let buffer = vec![0i32; chunksize * channels];
+                                playback_loop_int(pb_channels, buffer, &pcmdevice, io, pb_params);
+                            }
+                            SampleFormat::FLOAT32LE => {
+                                let io = pcmdevice.io_f32().unwrap();
+                                let buffer = vec![0f32; chunksize * channels];
+
+                                playback_loop_float(pb_channels, buffer, &pcmdevice, io, pb_params);
+                            }
+                            SampleFormat::FLOAT64LE => {
+                                let io = pcmdevice.io_f64().unwrap();
+                                let buffer = vec![0f64; chunksize * channels];
+                                playback_loop_float(pb_channels, buffer, &pcmdevice, io, pb_params);
+                            }
+                        };
                     }
-                    //let scalefactor = (1<<bits-1) as PrcFmt;
-                    let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
-
-                    barrier.wait();
-                    //thread::sleep(delay);
-                    debug!("Starting playback loop");
-                    let pb_params = PlaybackParams {
-                        scalefactor,
-                        target_level,
-                        adjust_period,
-                        adjust_enabled,
-                    };
-                    let pb_channels = PlaybackChannels {
-                        audio: channel,
-                        status: status_channel,
-                    };
-                    match format {
-                        SampleFormat::S16LE => {
-                            let io = pcmdevice.io_i16().unwrap();
-                            let buffer = vec![0i16; chunksize * channels];
-                            playback_loop_int(pb_channels, buffer, &pcmdevice, io, pb_params);
-                        }
-                        SampleFormat::S24LE | SampleFormat::S32LE => {
-                            let io = pcmdevice.io_i32().unwrap();
-                            let buffer = vec![0i32; chunksize * channels];
-                            playback_loop_int(pb_channels, buffer, &pcmdevice, io, pb_params);
-                        }
-                        SampleFormat::FLOAT32LE => {
-                            let io = pcmdevice.io_f32().unwrap();
-                            let buffer = vec![0f32; chunksize * channels];
-
-                            playback_loop_float(pb_channels, buffer, &pcmdevice, io, pb_params);
-                        }
-                        SampleFormat::FLOAT64LE => {
-                            let io = pcmdevice.io_f64().unwrap();
-                            let buffer = vec![0f64; chunksize * channels];
-                            playback_loop_float(pb_channels, buffer, &pcmdevice, io, pb_params);
-                        }
-                    };
+                    Err(err) => {
+                        status_channel
+                            .send(StatusMessage::PlaybackError {
+                                message: format!("{}", err),
+                            })
+                            .unwrap();
+                    }
                 }
-                Err(err) => {
-                    status_channel
-                        .send(StatusMessage::PlaybackError {
-                            message: format!("{}", err),
-                        })
-                        .unwrap();
-                }
-            }
-        });
+            })
+            .unwrap();
         Ok(Box::new(handle))
     }
 }
@@ -616,7 +619,8 @@ impl CaptureDevice for AlsaCaptureDevice {
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
                 .log2()
                 .ceil(),
-        ) as usize;
+        ) as usize
+            * 2;
         println!("Buffer frames {}", buffer_frames);
         let channels = self.channels;
         let bits: i32 = match self.format {
@@ -632,107 +636,110 @@ impl CaptureDevice for AlsaCaptureDevice {
         let format = self.format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
-        let handle = thread::spawn(move || {
-            let resampler = if enable_resampling {
-                debug!("Creating resampler");
-                get_resampler(
-                    &resampler_conf,
-                    channels,
-                    samplerate,
-                    capture_samplerate,
-                    chunksize,
-                )
-            } else {
-                None
-            };
-            match open_pcm(
-                devname,
-                capture_samplerate as u32,
-                buffer_frames as MachInt,
-                channels as u32,
-                &format,
-                true,
-            ) {
-                Ok(pcmdevice) => {
-                    match status_channel.send(StatusMessage::CaptureReady) {
-                        Ok(()) => {}
-                        Err(_err) => {}
-                    }
-                    let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
-                    barrier.wait();
-                    debug!("Starting captureloop");
-                    let cap_params = CaptureParams {
+        let handle = thread::Builder::new()
+            .name("AlsaCapture".to_string())
+            .spawn(move || {
+                let resampler = if enable_resampling {
+                    debug!("Creating resampler");
+                    get_resampler(
+                        &resampler_conf,
                         channels,
-                        scalefactor,
-                        silent_limit,
-                        silence,
+                        samplerate,
+                        capture_samplerate,
                         chunksize,
-                    };
-                    let cap_channels = CaptureChannels {
-                        audio: channel,
-                        status: status_channel,
-                        command: command_channel,
-                    };
-                    match format {
-                        SampleFormat::S16LE => {
-                            let io = pcmdevice.io_i16().unwrap();
-                            let buffer = vec![0i16; channels * buffer_frames];
-                            capture_loop_int(
-                                cap_channels,
-                                buffer,
-                                &pcmdevice,
-                                io,
-                                cap_params,
-                                resampler,
-                            );
+                    )
+                } else {
+                    None
+                };
+                match open_pcm(
+                    devname,
+                    capture_samplerate as u32,
+                    buffer_frames as MachInt,
+                    channels as u32,
+                    &format,
+                    true,
+                ) {
+                    Ok(pcmdevice) => {
+                        match status_channel.send(StatusMessage::CaptureReady) {
+                            Ok(()) => {}
+                            Err(_err) => {}
                         }
-                        SampleFormat::S24LE | SampleFormat::S32LE => {
-                            let io = pcmdevice.io_i32().unwrap();
-                            let buffer = vec![0i32; channels * buffer_frames];
-                            capture_loop_int(
-                                cap_channels,
-                                buffer,
-                                &pcmdevice,
-                                io,
-                                cap_params,
-                                resampler,
-                            );
-                        }
-                        SampleFormat::FLOAT32LE => {
-                            let io = pcmdevice.io_f32().unwrap();
-                            let buffer = vec![0f32; channels * buffer_frames];
-                            capture_loop_float(
-                                cap_channels,
-                                buffer,
-                                &pcmdevice,
-                                io,
-                                cap_params,
-                                resampler,
-                            );
-                        }
-                        SampleFormat::FLOAT64LE => {
-                            let io = pcmdevice.io_f64().unwrap();
-                            let buffer = vec![0f64; channels * buffer_frames];
-                            capture_loop_float(
-                                cap_channels,
-                                buffer,
-                                &pcmdevice,
-                                io,
-                                cap_params,
-                                resampler,
-                            );
-                        }
-                    };
+                        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+                        barrier.wait();
+                        debug!("Starting captureloop");
+                        let cap_params = CaptureParams {
+                            channels,
+                            scalefactor,
+                            silent_limit,
+                            silence,
+                            chunksize,
+                        };
+                        let cap_channels = CaptureChannels {
+                            audio: channel,
+                            status: status_channel,
+                            command: command_channel,
+                        };
+                        match format {
+                            SampleFormat::S16LE => {
+                                let io = pcmdevice.io_i16().unwrap();
+                                let buffer = vec![0i16; channels * buffer_frames];
+                                capture_loop_int(
+                                    cap_channels,
+                                    buffer,
+                                    &pcmdevice,
+                                    io,
+                                    cap_params,
+                                    resampler,
+                                );
+                            }
+                            SampleFormat::S24LE | SampleFormat::S32LE => {
+                                let io = pcmdevice.io_i32().unwrap();
+                                let buffer = vec![0i32; channels * buffer_frames];
+                                capture_loop_int(
+                                    cap_channels,
+                                    buffer,
+                                    &pcmdevice,
+                                    io,
+                                    cap_params,
+                                    resampler,
+                                );
+                            }
+                            SampleFormat::FLOAT32LE => {
+                                let io = pcmdevice.io_f32().unwrap();
+                                let buffer = vec![0f32; channels * buffer_frames];
+                                capture_loop_float(
+                                    cap_channels,
+                                    buffer,
+                                    &pcmdevice,
+                                    io,
+                                    cap_params,
+                                    resampler,
+                                );
+                            }
+                            SampleFormat::FLOAT64LE => {
+                                let io = pcmdevice.io_f64().unwrap();
+                                let buffer = vec![0f64; channels * buffer_frames];
+                                capture_loop_float(
+                                    cap_channels,
+                                    buffer,
+                                    &pcmdevice,
+                                    io,
+                                    cap_params,
+                                    resampler,
+                                );
+                            }
+                        };
+                    }
+                    Err(err) => {
+                        status_channel
+                            .send(StatusMessage::CaptureError {
+                                message: format!("{}", err),
+                            })
+                            .unwrap();
+                    }
                 }
-                Err(err) => {
-                    status_channel
-                        .send(StatusMessage::CaptureError {
-                            message: format!("{}", err),
-                        })
-                        .unwrap();
-                }
-            }
-        });
+            })
+            .unwrap();
         Ok(Box::new(handle))
     }
 }
