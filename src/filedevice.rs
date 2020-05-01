@@ -166,6 +166,43 @@ impl PlaybackDevice for FilePlaybackDevice {
     }
 }
 
+fn get_nbr_capture_bytes(
+    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
+    capture_bytes: usize,
+    channels: usize,
+    store_bytes: usize,
+) -> usize {
+    if let Some(resampl) = &resampler {
+        let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes;
+        trace!(
+            "Resampler needs {} frames, will read {} bytes",
+            resampl.nbr_frames_needed(),
+            new_capture_bytes
+        );
+        new_capture_bytes
+    } else {
+        capture_bytes
+    }
+}
+
+fn build_chunk(
+    buf: &[u8],
+    format: &SampleFormat,
+    channels: usize,
+    bits: i32,
+    bytes_read: usize,
+    scalefactor: PrcFmt,
+) -> AudioChunk {
+    match format {
+        SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
+            buffer_to_chunk_bytes(&buf, channels, scalefactor, bits, bytes_read)
+        }
+        SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
+            buffer_to_chunk_float_bytes(&buf, channels, bits, bytes_read)
+        }
+    }
+}
+
 fn capture_loop(
     mut file: File,
     params: CaptureParams,
@@ -193,24 +230,19 @@ fn capture_loop(
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
                 if let Some(resampl) = &mut resampler {
-                    match resampl.set_resample_ratio_relative(speed) {
-                        Ok(()) => {}
-                        Err(_) => {
-                            debug!("Failed to set resampling speed to {}", speed);
-                        }
+                    if resampl.set_resample_ratio_relative(speed).is_err() {
+                        debug!("Failed to set resampling speed to {}", speed);
                     }
                 }
             }
             Err(_) => {}
         };
-        if let Some(resampl) = &mut resampler {
-            capture_bytes = resampl.nbr_frames_needed() * params.channels * params.store_bytes;
-            trace!(
-                "Resampler needs {} frames, will read {} bytes",
-                resampl.nbr_frames_needed(),
-                capture_bytes
-            );
-        }
+        capture_bytes = get_nbr_capture_bytes(
+            &resampler,
+            capture_bytes,
+            params.channels,
+            params.store_bytes,
+        );
         let read_res = read_retry(&mut file, &mut buf[0..capture_bytes]);
         match read_res {
             Ok(bytes) => {
@@ -261,23 +293,14 @@ fn capture_loop(
             }
         };
         //let before = Instant::now();
-        let mut chunk = match params.format {
-            SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
-                buffer_to_chunk_bytes(
-                    &buf[0..capture_bytes],
-                    params.channels,
-                    scalefactor,
-                    params.bits,
-                    bytes_read,
-                )
-            }
-            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => buffer_to_chunk_float_bytes(
-                &buf[0..capture_bytes],
-                params.channels,
-                params.bits,
-                bytes_read,
-            ),
-        };
+        let mut chunk = build_chunk(
+            &buf[0..capture_bytes],
+            &params.format,
+            params.channels,
+            params.bits,
+            bytes_read,
+            scalefactor,
+        );
         if (chunk.maxval - chunk.minval) > params.silence {
             if silent_nbr > params.silent_limit {
                 debug!("Resuming processing");
