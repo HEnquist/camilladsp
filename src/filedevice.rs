@@ -65,6 +65,7 @@ struct CaptureParams {
     silent_limit: usize,
     silence: PrcFmt,
     chunksize: usize,
+    resampling_ratio: f32,
 }
 
 //struct PlaybackParams {
@@ -256,12 +257,12 @@ fn capture_loop(
                         "End of file, read only {} of {} bytes",
                         bytes, capture_bytes
                     );
-                    let missing = capture_bytes - bytes;
+                    let missing = ((capture_bytes - bytes) as f32 * params.resampling_ratio) as usize;
                     if extra_bytes_left > missing {
                         bytes_read = capture_bytes;
                         extra_bytes_left -= missing;
                     } else {
-                        bytes_read += extra_bytes_left;
+                        bytes_read += (extra_bytes_left as f32 /params.resampling_ratio) as usize;
                         extra_bytes_left = 0;
                     }
                 } else if bytes == 0 {
@@ -316,7 +317,7 @@ fn capture_loop(
             if let Some(resampl) = &mut resampler {
                 let new_waves = resampl.process(&chunk.waveforms).unwrap();
                 chunk.frames = new_waves[0].len();
-                chunk.valid_frames = new_waves[0].len();
+                chunk.valid_frames = (new_waves[0].len() as f32 * (bytes_read as f32/capture_bytes as f32)) as usize;
                 chunk.waveforms = new_waves;
             }
             let msg = AudioMessage::Audio(chunk);
@@ -405,6 +406,7 @@ impl CaptureDevice for FileCaptureDevice {
                             silent_limit,
                             silence,
                             chunksize,
+                            resampling_ratio: samplerate as f32/capture_samplerate as f32,
                         };
                         let msg_channels = CaptureChannels {
                             audio: channel,

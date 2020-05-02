@@ -30,5 +30,5 @@ env_logger = "0.7.1"
 ws = { version = "0.9.1", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-rubato = { git = "https://github.com/HEnquist/rubato.git" }
+rubato = { git = "https://github.com/HEnquist/rubato.git", rev = "358f9ebdbf4ab3fbe5386045926144befbc6b697" }
 
