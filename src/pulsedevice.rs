@@ -295,7 +295,7 @@ impl CaptureDevice for PulseCaptureDevice {
                 };
                 match open_pulse(
                     devname,
-                    samplerate as u32,
+                    capture_samplerate as u32,
                     chunksize as i64,
                     channels as u8,
                     &format,
