@@ -172,7 +172,12 @@ fn open_pcm(
         let hwp = pcmdev.hw_params_current()?;
         let swp = pcmdev.sw_params_current()?;
         let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
-        swp.set_start_threshold(act_bufsize / 2 - act_periodsize)?;
+        if capture {
+            swp.set_start_threshold(act_bufsize / 8)?;
+        }
+        else {
+            swp.set_start_threshold(act_bufsize / 2 - act_periodsize)?;
+        }
         //swp.set_avail_min(periodsize)?;
         pcmdev.sw_params(&swp)?;
         debug!(
@@ -612,11 +617,10 @@ impl CaptureDevice for AlsaCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let buffer_frames = 2.0f32.powf(
-            (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
+            (1.2 * capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
                 .log2()
                 .ceil(),
-        ) as usize
-            * 2;
+        ) as usize;
         println!("Buffer frames {}", buffer_frames);
         let channels = self.channels;
         let bits: i32 = match self.format {
