@@ -277,6 +277,11 @@ pub fn get_resampler(
 /// Create a capture device.
 pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     //let resampler = get_resampler(&conf);
+    let capture_samplerate = if conf.capture_samplerate > 0 {
+        conf.capture_samplerate
+    } else {
+        conf.samplerate
+    };
     match conf.capture {
         #[cfg(feature = "alsa-backend")]
         config::CaptureDevice::Alsa {
@@ -287,7 +292,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             devname: device,
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
-            capture_samplerate: conf.capture_samplerate,
+            capture_samplerate,
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,
@@ -304,7 +309,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             devname: device,
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
-            capture_samplerate: conf.capture_samplerate,
+            capture_samplerate,
             chunksize: conf.chunksize,
             channels,
             format,
@@ -320,7 +325,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             filename,
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
-            capture_samplerate: conf.capture_samplerate,
+            capture_samplerate,
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,

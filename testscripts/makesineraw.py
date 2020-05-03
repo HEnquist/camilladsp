@@ -5,7 +5,7 @@ import numpy as np
 #wave64 = np.zeros((2,44100), dtype="float64")
 #wave32 = np.zeros((2,44100), dtype="float32")
 t = np.linspace(0, 1, num=44100, endpoint=False)
-wave = 0.5*np.sin(10000*2*np.pi*t)
+wave = 0.5*np.sin(1000*2*np.pi*t)
 wave= np.reshape(wave,(-1,1))
 wave = np.concatenate((wave, wave), axis=1)
 

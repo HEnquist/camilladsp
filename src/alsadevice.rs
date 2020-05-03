@@ -609,11 +609,7 @@ impl CaptureDevice for AlsaCaptureDevice {
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
-        let capture_samplerate = if self.capture_samplerate > 0 {
-            self.capture_samplerate
-        } else {
-            self.samplerate
-        };
+        let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let buffer_frames = 2.0f32.powf(
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
