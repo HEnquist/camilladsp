@@ -277,7 +277,7 @@ pub fn get_resampler(
 /// Create a capture device.
 pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     //let resampler = get_resampler(&conf);
-    let capture_samplerate = if conf.capture_samplerate > 0 {
+    let capture_samplerate = if conf.capture_samplerate > 0 && conf.enable_resampling {
         conf.capture_samplerate
     } else {
         conf.samplerate
@@ -309,6 +309,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             devname: device,
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
+            resampler_conf: conf.resampler_type,
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
