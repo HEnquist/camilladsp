@@ -339,12 +339,14 @@ But in order to use the rate adjust feature to match capture and playback device
 
 There is also a "Free" mode as well where all parameters can be set freely. The configuration is specified like this:
 ```
-Free:
-  sinc_len: 128
-  oversampling_ratio: 128
-  interpolation: Cubic
-  window: Hann
-  f_cutoff: 0.95
+...
+  resampler_type:
+    Free:
+      f_cutoff: 0.9
+      sinc_len: 128
+      window: Hann2
+      oversampling_ratio: 128
+      interpolation: Cubic
 ```
 See the library documentation for more details. (link to be added once the library has been published on crates.io)
 
