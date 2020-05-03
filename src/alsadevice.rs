@@ -174,8 +174,7 @@ fn open_pcm(
         let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
         if capture {
             swp.set_start_threshold(act_bufsize / 8)?;
-        }
-        else {
+        } else {
             swp.set_start_threshold(act_bufsize / 2 - act_periodsize)?;
         }
         //swp.set_avail_min(periodsize)?;
