@@ -249,10 +249,11 @@ fn capture_loop(
             params.channels,
             params.store_bytes,
         );
-        capture_bytes_temp = if params.read_bytes == 0 || (params.read_bytes > 0 && (nbr_bytes_read + capture_bytes) <= params.read_bytes) {
+        capture_bytes_temp = if params.read_bytes == 0
+            || (params.read_bytes > 0 && (nbr_bytes_read + capture_bytes) <= params.read_bytes)
+        {
             capture_bytes
-        }
-        else {
+        } else {
             debug!("Stopping capture, reached read_bytes limit");
             params.read_bytes - nbr_bytes_read
         };
