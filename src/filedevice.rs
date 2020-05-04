@@ -43,6 +43,7 @@ pub struct FileCaptureDevice {
     pub silence_timeout: PrcFmt,
     pub extra_samples: usize,
     pub skip_bytes: usize,
+    pub read_bytes: usize,
 }
 
 struct CaptureChannels {
@@ -67,6 +68,7 @@ struct CaptureParams {
     silence: PrcFmt,
     chunksize: usize,
     resampling_ratio: f32,
+    read_bytes: usize,
 }
 
 //struct PlaybackParams {
@@ -218,7 +220,9 @@ fn capture_loop(
     let mut buf = vec![0u8; params.buffer_bytes];
     let mut bytes_read = 0;
     let mut capture_bytes = chunksize_bytes;
+    let mut capture_bytes_temp;
     let mut extra_bytes_left = params.extra_bytes;
+    let mut nbr_bytes_read = 0;
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -245,11 +249,19 @@ fn capture_loop(
             params.channels,
             params.store_bytes,
         );
-        let read_res = read_retry(&mut file, &mut buf[0..capture_bytes]);
+        capture_bytes_temp = if params.read_bytes == 0 || (params.read_bytes > 0 && (nbr_bytes_read + capture_bytes) <= params.read_bytes) {
+            capture_bytes
+        }
+        else {
+            debug!("Stopping capture, reached read_bytes limit");
+            params.read_bytes - nbr_bytes_read
+        };
+        let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         match read_res {
             Ok(bytes) => {
                 trace!("Captured {} bytes", bytes);
                 bytes_read = bytes;
+                nbr_bytes_read += bytes;
                 if bytes > 0 && bytes < capture_bytes {
                     for item in buf.iter_mut().take(capture_bytes).skip(bytes) {
                         *item = 0;
@@ -371,6 +383,7 @@ impl CaptureDevice for FileCaptureDevice {
         let resampler_conf = self.resampler_conf.clone();
         let extra_bytes = self.extra_samples * store_bytes * channels;
         let skip_bytes = self.skip_bytes;
+        let read_bytes = self.read_bytes;
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
@@ -407,6 +420,7 @@ impl CaptureDevice for FileCaptureDevice {
                             silence,
                             chunksize,
                             resampling_ratio: samplerate as f32 / capture_samplerate as f32,
+                            read_bytes,
                         };
                         let msg_channels = CaptureChannels {
                             audio: channel,

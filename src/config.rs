@@ -71,6 +71,8 @@ pub enum CaptureDevice {
         extra_samples: usize,
         #[serde(default)]
         skip_bytes: usize,
+        #[serde(default)]
+        read_bytes: usize,
     },
 }
 

@@ -323,6 +323,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             format,
             extra_samples,
             skip_bytes,
+            read_bytes,
         } => Box::new(filedevice::FileCaptureDevice {
             filename,
             samplerate: conf.samplerate,
@@ -336,6 +337,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
             skip_bytes,
+            read_bytes,
         }),
     }
 }
