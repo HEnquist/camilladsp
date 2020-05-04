@@ -173,7 +173,7 @@ fn open_pcm(
         let swp = pcmdev.sw_params_current()?;
         let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
         if capture {
-            swp.set_start_threshold(act_bufsize / 8)?;
+            swp.set_start_threshold(0)?;
         } else {
             swp.set_start_threshold(act_bufsize / 2 - act_periodsize)?;
         }

@@ -42,6 +42,7 @@ pub struct FileCaptureDevice {
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub extra_samples: usize,
+    pub skip_bytes: usize,
 }
 
 struct CaptureChannels {
@@ -369,7 +370,7 @@ impl CaptureDevice for FileCaptureDevice {
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let extra_bytes = self.extra_samples * store_bytes * channels;
-
+        let skip_bytes = self.skip_bytes;
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
@@ -389,7 +390,7 @@ impl CaptureDevice for FileCaptureDevice {
                     None
                 };
                 match File::open(filename) {
-                    Ok(file) => {
+                    Ok(mut file) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
                             Ok(()) => {}
                             Err(_err) => {}
@@ -412,6 +413,11 @@ impl CaptureDevice for FileCaptureDevice {
                             status: status_channel,
                             command: command_channel,
                         };
+                        if skip_bytes > 0 {
+                            debug!("skipping the first {} bytes", skip_bytes);
+                            let mut tempbuf = vec![0u8; skip_bytes];
+                            let _ = file.read_exact(&mut tempbuf);
+                        }
                         debug!("starting captureloop");
                         capture_loop(file, params, msg_channels, resampler);
                     }
