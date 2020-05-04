@@ -297,6 +297,10 @@ devices:
     * FLOAT32LE
     * FLOAT64LE (not supported by PulseAudio)
 
+  The File capture device supports two additional optional parameters:
+  * `skip_bytes`: Number of bytes to skip at the beginning of the file. This can be used to skip over the header of some formats like .wav (which has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped.
+  * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file.
+
   The File device type reads or writes to a file. 
   The format is raw interleaved samples, 2 bytes per sample for 16-bit, 
   and 4 bytes per sample for 24 and 32 bits. 
