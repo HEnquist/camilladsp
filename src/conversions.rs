@@ -13,6 +13,7 @@ pub fn chunk_to_buffer_bytes(
     buf: &mut [u8],
     scalefactor: PrcFmt,
     bits: i32,
+    bytes_per_sample: usize,
 ) -> usize {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
@@ -25,11 +26,6 @@ pub fn chunk_to_buffer_bytes(
         (scalefactor - 128.0) / scalefactor
     } else {
         (scalefactor - 1.0) / scalefactor
-    };
-    let bytes_per_sample = match bits {
-        16 => 2,
-        24 | 32 => 4,
-        _ => 1,
     };
     let num_valid_bytes = chunk.valid_frames * chunk.channels * bytes_per_sample;
 
@@ -60,8 +56,8 @@ pub fn chunk_to_buffer_bytes(
             } else {
                 value32 = (float_val * scalefactor) as i32;
                 let bytes = value32.to_le_bytes();
-                for b in &bytes {
-                    buf[idx] = *b;
+                for n in 0..bytes_per_sample {
+                    buf[idx] = bytes[n];
                     idx += 1;
                 }
             }
@@ -83,13 +79,9 @@ pub fn buffer_to_chunk_bytes(
     channels: usize,
     scalefactor: PrcFmt,
     bits: i32,
+    bytes_per_sample: usize,
     valid_bytes: usize,
 ) -> AudioChunk {
-    let bytes_per_sample = match bits {
-        16 => 2,
-        24 | 32 => 4,
-        _ => 1,
-    };
     let num_frames = buffer.len() / bytes_per_sample / channels;
     let num_valid_frames = valid_bytes / bytes_per_sample / channels;
     let mut value: PrcFmt;
@@ -120,8 +112,8 @@ pub fn buffer_to_chunk_bytes(
     } else {
         for _frame in 0..num_frames {
             for wf in wfs.iter_mut().take(channels) {
-                value = i32::from_le_bytes(buffer[idx..idx + 4].try_into().unwrap()) as PrcFmt;
-                idx += 4;
+                value = i32::from_le_bytes(buffer[idx..idx + bytes_per_sample].try_into().unwrap()) as PrcFmt;
+                idx += bytes_per_sample;
                 value /= scalefactor;
                 if value > maxvalue {
                     maxvalue = value;

@@ -128,6 +128,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
         let bits = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
+            SampleFormat::S24LE3 => 24,
             SampleFormat::S32LE => 32,
             SampleFormat::FLOAT32LE => 32,
             SampleFormat::FLOAT64LE => 64,
@@ -135,6 +136,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
         let store_bytes = match self.format {
             SampleFormat::S16LE => 2,
             SampleFormat::S24LE => 4,
+            SampleFormat::S24LE3 => 3,
             SampleFormat::S32LE => 4,
             SampleFormat::FLOAT32LE => 4,
             SampleFormat::FLOAT64LE => 8,
@@ -175,6 +177,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                                 &mut buffer,
                                                 scalefactor,
                                                 bits,
+                                                store_bytes,
                                             );
                                         }
                                         SampleFormat::FLOAT32LE => {
@@ -253,12 +256,14 @@ impl CaptureDevice for PulseCaptureDevice {
         let bits = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
+            SampleFormat::S24LE3 => 24,
             SampleFormat::S32LE => 32,
             SampleFormat::FLOAT32LE => 32,
             SampleFormat::FLOAT64LE => 64,
         };
         let store_bytes = match self.format {
             SampleFormat::S16LE => 2,
+            SampleFormat::S24LE3 => 3,
             SampleFormat::S24LE => 4,
             SampleFormat::S32LE => 4,
             SampleFormat::FLOAT32LE => 4,
@@ -355,6 +360,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                         channels,
                                         scalefactor,
                                         bits,
+                                        store_bytes,
                                         capture_bytes,
                                     )
                                 }
