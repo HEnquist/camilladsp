@@ -359,7 +359,6 @@ impl CaptureDevice for PulseCaptureDevice {
                                         &buf[0..capture_bytes],
                                         channels,
                                         scalefactor,
-                                        bits,
                                         store_bytes,
                                         capture_bytes,
                                     )

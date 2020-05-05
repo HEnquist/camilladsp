@@ -205,7 +205,7 @@ fn build_chunk(
 ) -> AudioChunk {
     match format {
         SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S24LE3 | SampleFormat::S32LE => {
-            buffer_to_chunk_bytes(&buf, channels, scalefactor, bits, bytes_per_sample, bytes_read)
+            buffer_to_chunk_bytes(&buf, channels, scalefactor, bytes_per_sample, bytes_read)
         }
         SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
             buffer_to_chunk_float_bytes(&buf, channels, bits, bytes_read)
