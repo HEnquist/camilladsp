@@ -19,7 +19,7 @@ use audiodevice::*;
 use config;
 use config::SampleFormat;
 use conversions::{
-    buffer_to_chunk_float, buffer_to_chunk_int, chunk_to_buffer_bytes, chunk_to_buffer_float_bytes
+    buffer_to_chunk_float, buffer_to_chunk_int, chunk_to_buffer_bytes, chunk_to_buffer_float_bytes,
 };
 
 use CommandMessage;
@@ -192,7 +192,6 @@ fn open_pcm(
     Ok(pcmdev)
 }
 
-
 fn playback_loop_bytes(
     channels: PlaybackChannels,
     mut buffer: Vec<u8>,
@@ -213,9 +212,14 @@ fn playback_loop_bytes(
             Ok(AudioMessage::Audio(chunk)) => {
                 if params.floats {
                     chunk_to_buffer_float_bytes(chunk, &mut buffer, params.bits);
-                }
-                else {
-                    chunk_to_buffer_bytes(chunk, &mut buffer, params.scalefactor, params.bits as i32, params.bytes_per_sample);
+                } else {
+                    chunk_to_buffer_bytes(
+                        chunk,
+                        &mut buffer,
+                        params.scalefactor,
+                        params.bits as i32,
+                        params.bytes_per_sample,
+                    );
                 }
                 now = SystemTime::now();
                 if let Ok(status) = pcmdevice.status() {
@@ -482,7 +486,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
             SampleFormat::FLOAT64LE => 8,
         };
         let floats = match self.format {
-            SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S24LE3 | SampleFormat::S32LE => false,
+            SampleFormat::S16LE
+            | SampleFormat::S24LE
+            | SampleFormat::S24LE3
+            | SampleFormat::S32LE => false,
             SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => true,
         };
         let format = self.format.clone();

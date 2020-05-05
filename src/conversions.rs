@@ -95,9 +95,9 @@ pub fn buffer_to_chunk_bytes(
     for _frame in 0..num_frames {
         for wf in wfs.iter_mut().take(channels) {
             for (n, b) in buffer[idx..idx + bytes_per_sample].iter().enumerate() {
-                valbuf[n+4-bytes_per_sample] = *b;
+                valbuf[n + 4 - bytes_per_sample] = *b;
             }
-            value = (i32::from_le_bytes(valbuf)>>(8*(4-bytes_per_sample))) as PrcFmt;
+            value = (i32::from_le_bytes(valbuf) >> (8 * (4 - bytes_per_sample))) as PrcFmt;
             idx += bytes_per_sample;
             value /= scalefactor;
             if value > maxvalue {
