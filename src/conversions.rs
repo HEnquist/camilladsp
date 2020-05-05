@@ -222,62 +222,6 @@ pub fn buffer_to_chunk_float_bytes(
     AudioChunk::new(wfs, maxvalue, minvalue, num_valid_frames)
 }
 
-/// Convert an AudioChunk to an interleaved buffer of ints.
-#[allow(dead_code)]
-pub fn chunk_to_buffer_int<T: num_traits::cast::NumCast>(
-    chunk: AudioChunk,
-    buf: &mut [T],
-    scalefactor: PrcFmt,
-) {
-    let _num_samples = chunk.channels * chunk.frames;
-    //let mut buf = Vec::with_capacity(num_samples);
-    let mut value: T;
-    let mut idx = 0;
-    let mut clipped = 0;
-    let mut peak = 0.0;
-    let maxval = if (scalefactor >= 2_147_483_648.0) && cfg!(feature = "32bit") {
-        (scalefactor - 128.0) / scalefactor
-    } else {
-        (scalefactor - 1.0) / scalefactor
-    };
-    let minval = -1.0;
-    for frame in 0..chunk.frames {
-        for chan in 0..chunk.channels {
-            let mut float_val = chunk.waveforms[chan][frame];
-            if float_val > maxval {
-                clipped += 1;
-                if float_val > peak {
-                    peak = float_val;
-                }
-                float_val = maxval;
-            } else if float_val < minval {
-                clipped += 1;
-                if -float_val > peak {
-                    peak = -float_val;
-                }
-                float_val = minval;
-            }
-            value = match num_traits::cast(float_val * scalefactor) {
-                Some(val) => val,
-                None => {
-                    debug!("bad float {}", float_val);
-                    num_traits::cast(0.0).unwrap()
-                }
-            };
-            buf[idx] = value;
-            idx += 1;
-        }
-    }
-    if clipped > 0 {
-        warn!(
-            "Clipping detected, {} samples clipped, peak {}%",
-            clipped,
-            peak * 100.0
-        );
-    }
-    //buf
-}
-
 /// Convert a buffer of interleaved ints to an AudioChunk.
 #[allow(dead_code)]
 pub fn buffer_to_chunk_int<T: num_traits::cast::AsPrimitive<PrcFmt>>(
@@ -314,54 +258,6 @@ pub fn buffer_to_chunk_int<T: num_traits::cast::AsPrimitive<PrcFmt>>(
         }
     }
     AudioChunk::new(wfs, maxvalue, minvalue, num_frames)
-}
-
-/// Convert an AudioChunk to an interleaved buffer of floats.
-#[allow(dead_code)]
-pub fn chunk_to_buffer_float<T: num_traits::cast::NumCast>(chunk: AudioChunk, buf: &mut [T]) {
-    let _num_samples = chunk.channels * chunk.frames;
-    //let mut buf = Vec::with_capacity(num_samples);
-    let mut value: T;
-    let mut idx = 0;
-    let mut clipped = 0;
-    let mut peak = 0.0;
-    let maxval = 1.0;
-    let minval = -1.0;
-    for frame in 0..chunk.frames {
-        for chan in 0..chunk.channels {
-            let mut float_val = chunk.waveforms[chan][frame];
-            if float_val > maxval {
-                clipped += 1;
-                if float_val > peak {
-                    peak = float_val;
-                }
-                float_val = maxval;
-            } else if float_val < minval {
-                clipped += 1;
-                if -float_val > peak {
-                    peak = -float_val;
-                }
-                float_val = minval;
-            }
-            value = match num_traits::cast(float_val) {
-                Some(val) => val,
-                None => {
-                    debug!("bad float{}", float_val);
-                    num_traits::cast(0.0).unwrap()
-                }
-            };
-            buf[idx] = value;
-            idx += 1;
-        }
-    }
-    if clipped > 0 {
-        warn!(
-            "Clipping detected, {} samples clipped, peak {}%",
-            clipped,
-            peak * 100.0
-        );
-    }
-    //buf
 }
 
 /// Convert a buffer of interleaved ints to an AudioChunk.
