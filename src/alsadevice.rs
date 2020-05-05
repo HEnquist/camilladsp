@@ -19,7 +19,8 @@ use audiodevice::*;
 use config;
 use config::SampleFormat;
 use conversions::{
-    buffer_to_chunk_float, buffer_to_chunk_int, chunk_to_buffer_bytes, chunk_to_buffer_float_bytes,
+    buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
+    chunk_to_buffer_float_bytes,
 };
 
 use CommandMessage;
@@ -74,6 +75,9 @@ struct CaptureParams {
     silent_limit: usize,
     silence: PrcFmt,
     chunksize: usize,
+    bits: i32,
+    bytes_per_sample: usize,
+    floats: bool,
 }
 
 struct PlaybackParams {
@@ -87,11 +91,7 @@ struct PlaybackParams {
 }
 
 /// Play a buffer.
-fn play_buffer<T: std::marker::Copy>(
-    buffer: &[T],
-    pcmdevice: &alsa::PCM,
-    io: &alsa::pcm::IO<T>,
-) -> Res<()> {
+fn play_buffer(buffer: &[u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u8>) -> Res<()> {
     let playback_state = pcmdevice.state();
     trace!("playback state {:?}", playback_state);
     if playback_state == State::XRun {
@@ -270,13 +270,11 @@ fn playback_loop_bytes(
     }
 }
 
-fn capture_loop_int<
-    T: num_traits::NumCast + std::marker::Copy + num_traits::AsPrimitive<PrcFmt>,
->(
+fn capture_loop_bytes(
     channels: CaptureChannels,
-    mut buffer: Vec<T>,
+    mut buffer: Vec<u8>,
     pcmdevice: &alsa::PCM,
-    io: alsa::pcm::IO<T>,
+    io: alsa::pcm::IO<u8>,
     params: CaptureParams,
     mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
 ) {
@@ -296,7 +294,7 @@ fn capture_loop_int<
     if element.is_some() {
         info!("Capture device supports rate adjust");
     }
-    let mut capture_samples = params.chunksize * params.channels;
+    let mut capture_bytes = params.chunksize * params.channels * params.bytes_per_sample;
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -316,13 +314,13 @@ fn capture_loop_int<
             Err(_) => {}
         };
         if let Some(resampl) = &mut resampler {
-            capture_samples = resampl.nbr_frames_needed() * params.channels;
+            capture_bytes = resampl.nbr_frames_needed() * params.channels * params.bytes_per_sample;
             trace!("Resamper needs {} frames", resampl.nbr_frames_needed());
         }
-        let capture_res = capture_buffer(&mut buffer[0..capture_samples], pcmdevice, &io);
+        let capture_res = capture_buffer(&mut buffer[0..capture_bytes], pcmdevice, &io);
         match capture_res {
             Ok(_) => {
-                trace!("Captured {} samples", capture_samples);
+                trace!("Captured {} bytes", capture_bytes);
             }
             Err(msg) => {
                 channels
@@ -333,99 +331,22 @@ fn capture_loop_int<
                     .unwrap();
             }
         };
-        let mut chunk = buffer_to_chunk_int(
-            &buffer[0..capture_samples],
-            params.channels,
-            params.scalefactor,
-        );
-        if (chunk.maxval - chunk.minval) > params.silence {
-            if silent_nbr > params.silent_limit {
-                debug!("Resuming processing");
-            }
-            silent_nbr = 0;
-        } else if params.silent_limit > 0 {
-            if silent_nbr == params.silent_limit {
-                debug!("Pausing processing");
-            }
-            silent_nbr += 1;
-        }
-        if silent_nbr <= params.silent_limit {
-            if let Some(resampl) = &mut resampler {
-                let new_waves = resampl.process(&chunk.waveforms).unwrap();
-                chunk.frames = new_waves[0].len();
-                chunk.valid_frames = new_waves[0].len();
-                chunk.waveforms = new_waves;
-            }
-            let msg = AudioMessage::Audio(chunk);
-            channels.audio.send(msg).unwrap();
-        }
-    }
-}
-
-fn capture_loop_float<
-    T: num_traits::NumCast + std::marker::Copy + num_traits::AsPrimitive<PrcFmt>,
->(
-    channels: CaptureChannels,
-    mut buffer: Vec<T>,
-    pcmdevice: &alsa::PCM,
-    io: alsa::pcm::IO<T>,
-    params: CaptureParams,
-    mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
-) {
-    let mut silent_nbr: usize = 0;
-    let pcminfo = pcmdevice.info().unwrap();
-    let card = pcminfo.get_card();
-    let device = pcminfo.get_device();
-    let subdevice = pcminfo.get_subdevice();
-    let mut elid = ElemId::new(ElemIface::PCM);
-    elid.set_device(device);
-    elid.set_subdevice(subdevice);
-    elid.set_name(&CString::new("PCM Rate Shift 100000").unwrap());
-    let h = HCtl::new(&format!("hw:{}", card), false).unwrap();
-    h.load().unwrap();
-    let element = h.find_elem(&elid);
-    let mut elval = ElemValue::new(ElemType::Integer).unwrap();
-    if element.is_some() {
-        debug!("Capure device supports rate adjust");
-    }
-    let mut capture_samples = params.chunksize * params.channels;
-    loop {
-        match channels.command.try_recv() {
-            Ok(CommandMessage::Exit) => {
-                let msg = AudioMessage::EndOfStream;
-                channels.audio.send(msg).unwrap();
-                channels.status.send(StatusMessage::CaptureDone).unwrap();
-                break;
-            }
-            Ok(CommandMessage::SetSpeed { speed }) => {
-                if let Some(elem) = &element {
-                    elval.set_integer(0, (100_000.0 * speed) as i32).unwrap();
-                    elem.write(&elval).unwrap();
-                } else if let Some(resampl) = &mut resampler {
-                    resampl.set_resample_ratio_relative(speed).unwrap();
-                }
-            }
-            Err(_) => {}
+        let mut chunk = if params.floats {
+            buffer_to_chunk_float_bytes(
+                &buffer[0..capture_bytes],
+                params.channels,
+                params.bits,
+                capture_bytes,
+            )
+        } else {
+            buffer_to_chunk_bytes(
+                &buffer[0..capture_bytes],
+                params.channels,
+                params.scalefactor,
+                params.bytes_per_sample,
+                capture_bytes,
+            )
         };
-        if let Some(resampl) = &mut resampler {
-            capture_samples = resampl.nbr_frames_needed() * params.channels;
-            trace!("Resamper needs {} frames", resampl.nbr_frames_needed());
-        }
-        let capture_res = capture_buffer(&mut buffer[0..capture_samples], pcmdevice, &io);
-        match capture_res {
-            Ok(_) => {
-                trace!("Captured {} samples", capture_samples);
-            }
-            Err(msg) => {
-                channels
-                    .status
-                    .send(StatusMessage::CaptureError {
-                        message: format!("{}", msg),
-                    })
-                    .unwrap();
-            }
-        };
-        let mut chunk = buffer_to_chunk_float(&buffer[0..capture_samples], params.channels);
         if (chunk.maxval - chunk.minval) > params.silence {
             if silent_nbr > params.silent_limit {
                 debug!("Resuming processing");
@@ -576,6 +497,21 @@ impl CaptureDevice for AlsaCaptureDevice {
             SampleFormat::FLOAT32LE => 32,
             SampleFormat::FLOAT64LE => 64,
         };
+        let bytes_per_sample = match self.format {
+            SampleFormat::S16LE => 2,
+            SampleFormat::S24LE => 4,
+            SampleFormat::S24LE3 => 3,
+            SampleFormat::S32LE => 4,
+            SampleFormat::FLOAT32LE => 4,
+            SampleFormat::FLOAT64LE => 8,
+        };
+        let floats = match self.format {
+            SampleFormat::S16LE
+            | SampleFormat::S24LE
+            | SampleFormat::S24LE3
+            | SampleFormat::S32LE => false,
+            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => true,
+        };
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
@@ -619,74 +555,87 @@ impl CaptureDevice for AlsaCaptureDevice {
                             silent_limit,
                             silence,
                             chunksize,
+                            bits,
+                            bytes_per_sample,
+                            floats,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,
                             status: status_channel,
                             command: command_channel,
                         };
-                        match format {
-                            SampleFormat::S16LE => {
-                                let io = pcmdevice.io_i16().unwrap();
-                                let buffer = vec![0i16; channels * buffer_frames];
-                                capture_loop_int(
-                                    cap_channels,
-                                    buffer,
-                                    &pcmdevice,
-                                    io,
-                                    cap_params,
-                                    resampler,
-                                );
-                            }
-                            SampleFormat::S24LE | SampleFormat::S32LE => {
-                                let io = pcmdevice.io_i32().unwrap();
-                                let buffer = vec![0i32; channels * buffer_frames];
-                                capture_loop_int(
-                                    cap_channels,
-                                    buffer,
-                                    &pcmdevice,
-                                    io,
-                                    cap_params,
-                                    resampler,
-                                );
-                            }
-                            SampleFormat::S24LE3 => {
-                                let io = pcmdevice.io_u8().unwrap();
-                                let buffer = vec![0u8; channels * buffer_frames * 3];
-                                capture_loop_int(
-                                    cap_channels,
-                                    buffer,
-                                    &pcmdevice,
-                                    io,
-                                    cap_params,
-                                    resampler,
-                                );
-                            }
-                            SampleFormat::FLOAT32LE => {
-                                let io = pcmdevice.io_f32().unwrap();
-                                let buffer = vec![0f32; channels * buffer_frames];
-                                capture_loop_float(
-                                    cap_channels,
-                                    buffer,
-                                    &pcmdevice,
-                                    io,
-                                    cap_params,
-                                    resampler,
-                                );
-                            }
-                            SampleFormat::FLOAT64LE => {
-                                let io = pcmdevice.io_f64().unwrap();
-                                let buffer = vec![0f64; channels * buffer_frames];
-                                capture_loop_float(
-                                    cap_channels,
-                                    buffer,
-                                    &pcmdevice,
-                                    io,
-                                    cap_params,
-                                    resampler,
-                                );
-                            }
-                        };
+                        let io = pcmdevice.io();
+                        let buffer = vec![0u8; channels * buffer_frames * bytes_per_sample];
+                        capture_loop_bytes(
+                            cap_channels,
+                            buffer,
+                            &pcmdevice,
+                            io,
+                            cap_params,
+                            resampler,
+                        );
+                        //match format {
+                        //    SampleFormat::S16LE => {
+                        //        let io = pcmdevice.io_i16().unwrap();
+                        //        let buffer = vec![0i16; channels * buffer_frames];
+                        //        capture_loop_int(
+                        //            cap_channels,
+                        //            buffer,
+                        //            &pcmdevice,
+                        //            io,
+                        //            cap_params,
+                        //            resampler,
+                        //        );
+                        //    }
+                        //    SampleFormat::S24LE | SampleFormat::S32LE => {
+                        //        let io = pcmdevice.io_i32().unwrap();
+                        //        let buffer = vec![0i32; channels * buffer_frames];
+                        //        capture_loop_int(
+                        //            cap_channels,
+                        //            buffer,
+                        //            &pcmdevice,
+                        //            io,
+                        //            cap_params,
+                        //            resampler,
+                        //        );
+                        //    }
+                        //    SampleFormat::S24LE3 => {
+                        //        let io = pcmdevice.io_u8().unwrap();
+                        //        let buffer = vec![0u8; channels * buffer_frames * 3];
+                        //        capture_loop_int(
+                        //            cap_channels,
+                        //            buffer,
+                        //            &pcmdevice,
+                        //            io,
+                        //            cap_params,
+                        //            resampler,
+                        //        );
+                        //    }
+                        //    SampleFormat::FLOAT32LE => {
+                        //        let io = pcmdevice.io_f32().unwrap();
+                        //        let buffer = vec![0f32; channels * buffer_frames];
+                        //        capture_loop_float(
+                        //            cap_channels,
+                        //            buffer,
+                        //            &pcmdevice,
+                        //            io,
+                        //            cap_params,
+                        //            resampler,
+                        //        );
+                        //    }
+                        //    SampleFormat::FLOAT64LE => {
+                        //        let io = pcmdevice.io_f64().unwrap();
+                        //        let buffer = vec![0f64; channels * buffer_frames];
+                        //        capture_loop_float(
+                        //            cap_channels,
+                        //            buffer,
+                        //            &pcmdevice,
+                        //            io,
+                        //            cap_params,
+                        //            resampler,
+                        //        );
+                        //    }
+                        //};
                     }
                     Err(err) => {
                         status_channel
