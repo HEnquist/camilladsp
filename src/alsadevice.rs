@@ -114,11 +114,7 @@ fn play_buffer(buffer: &[u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u8>) -> 
 }
 
 /// Play a buffer.
-fn capture_buffer<T: std::marker::Copy>(
-    buffer: &mut [T],
-    pcmdevice: &alsa::PCM,
-    io: &alsa::pcm::IO<T>,
-) -> Res<()> {
+fn capture_buffer(buffer: &mut [u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u8>) -> Res<()> {
     let capture_state = pcmdevice.state();
     if capture_state == State::XRun {
         warn!("prepare capture");
