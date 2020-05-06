@@ -51,7 +51,6 @@ pub struct PulseCaptureDevice {
 fn open_pulse(
     devname: String,
     samplerate: u32,
-    bufsize: i64,
     channels: u8,
     format: &SampleFormat,
     capture: bool,
@@ -63,26 +62,22 @@ fn open_pulse(
         Direction::Playback
     };
 
-    let bits = match format {
-        SampleFormat::S16LE => 16,
-        SampleFormat::S24LE => 24,
-        SampleFormat::S32LE => 32,
-        SampleFormat::FLOAT32LE => 32,
-        _ => panic!("invalid bits"),
-    };
     let pulse_format = match format {
         SampleFormat::S16LE => sample::SAMPLE_S16NE,
         SampleFormat::S24LE => sample::SAMPLE_S24_32NE,
+        SampleFormat::S24LE3 => sample::SAMPLE_S24NE,
         SampleFormat::S32LE => sample::SAMPLE_S32NE,
         SampleFormat::FLOAT32LE => sample::SAMPLE_FLOAT32NE,
-        _ => panic!("invalid bits"),
+        _ => panic!("invalid format"),
     };
 
-    let bytes = match bits {
-        16 => bufsize * (channels as i64) * 2,
-        24 => bufsize * (channels as i64) * 4,
-        32 => bufsize * (channels as i64) * 4,
-        _ => panic!("invalid bits"),
+    let bytes = match format {
+        SampleFormat::S16LE => 2,
+        SampleFormat::S24LE => 4,
+        SampleFormat::S24LE3 => 3,
+        SampleFormat::S32LE => 4,
+        SampleFormat::FLOAT32LE => 4,
+        SampleFormat::FLOAT64LE => 8,
     };
 
     let spec = sample::Spec {
@@ -101,10 +96,10 @@ fn open_pulse(
 
     let pulsedev = Simple::new(
         None,           // Use the default server
-        "FooApp",       // Our application’s name
+        "CamillaDSP",   // Our application’s name
         dir,            // We want a playback stream
         Some(&devname), // Use the default device
-        "Music",        // Description of our stream
+        "ToDSP",        // Description of our stream
         &spec,          // Our sample format
         None,           // Use default channel map
         Some(&attr),    // Use default buffering attributes
@@ -146,14 +141,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
             .name("PulsePlayback".to_string())
             .spawn(move || {
                 //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
-                match open_pulse(
-                    devname,
-                    samplerate as u32,
-                    chunksize as i64,
-                    channels as u8,
-                    &format,
-                    false,
-                ) {
+                match open_pulse(devname, samplerate as u32, channels as u8, &format, false) {
                     Ok(pulsedevice) => {
                         match status_channel.send(StatusMessage::PlaybackReady) {
                             Ok(()) => {}
@@ -301,7 +289,6 @@ impl CaptureDevice for PulseCaptureDevice {
                 match open_pulse(
                     devname,
                     capture_samplerate as u32,
-                    chunksize as i64,
                     channels as u8,
                     &format,
                     true,
