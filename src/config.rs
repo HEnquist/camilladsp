@@ -42,6 +42,7 @@ impl ConfigError {
 pub enum SampleFormat {
     S16LE,
     S24LE,
+    S24LE3,
     S32LE,
     FLOAT32LE,
     FLOAT64LE,
@@ -213,6 +214,7 @@ pub enum FileFormat {
     TEXT,
     S16LE,
     S24LE,
+    S24LE3,
     S32LE,
     FLOAT32LE,
     FLOAT64LE,

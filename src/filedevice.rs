@@ -60,6 +60,7 @@ struct CaptureChannels {
 struct CaptureParams {
     channels: usize,
     bits: i32,
+    bytes_per_sample: usize,
     format: SampleFormat,
     store_bytes: usize,
     extra_bytes: usize,
@@ -92,6 +93,7 @@ impl PlaybackDevice for FilePlaybackDevice {
         let bits = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
+            SampleFormat::S24LE3 => 24,
             SampleFormat::S32LE => 32,
             SampleFormat::FLOAT32LE => 32,
             SampleFormat::FLOAT64LE => 64,
@@ -99,6 +101,7 @@ impl PlaybackDevice for FilePlaybackDevice {
         let store_bytes = match self.format {
             SampleFormat::S16LE => 2,
             SampleFormat::S24LE => 4,
+            SampleFormat::S24LE3 => 3,
             SampleFormat::S32LE => 4,
             SampleFormat::FLOAT32LE => 4,
             SampleFormat::FLOAT64LE => 8,
@@ -126,11 +129,13 @@ impl PlaybackDevice for FilePlaybackDevice {
                                     let bytes = match format {
                                         SampleFormat::S16LE
                                         | SampleFormat::S24LE
+                                        | SampleFormat::S24LE3
                                         | SampleFormat::S32LE => chunk_to_buffer_bytes(
                                             chunk,
                                             &mut buffer,
                                             scalefactor,
                                             bits,
+                                            store_bytes,
                                         ),
                                         SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
                                             chunk_to_buffer_float_bytes(chunk, &mut buffer, bits)
@@ -194,12 +199,13 @@ fn build_chunk(
     format: &SampleFormat,
     channels: usize,
     bits: i32,
+    bytes_per_sample: usize,
     bytes_read: usize,
     scalefactor: PrcFmt,
 ) -> AudioChunk {
     match format {
-        SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
-            buffer_to_chunk_bytes(&buf, channels, scalefactor, bits, bytes_read)
+        SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S24LE3 | SampleFormat::S32LE => {
+            buffer_to_chunk_bytes(&buf, channels, scalefactor, bytes_per_sample, bytes_read)
         }
         SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
             buffer_to_chunk_float_bytes(&buf, channels, bits, bytes_read)
@@ -314,6 +320,7 @@ fn capture_loop(
             &params.format,
             params.channels,
             params.bits,
+            params.bytes_per_sample,
             bytes_read,
             scalefactor,
         );
@@ -360,6 +367,7 @@ impl CaptureDevice for FileCaptureDevice {
         let bits = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
+            SampleFormat::S24LE3 => 24,
             SampleFormat::S32LE => 32,
             SampleFormat::FLOAT32LE => 32,
             SampleFormat::FLOAT64LE => 64,
@@ -367,6 +375,7 @@ impl CaptureDevice for FileCaptureDevice {
         let store_bytes = match self.format {
             SampleFormat::S16LE => 2,
             SampleFormat::S24LE => 4,
+            SampleFormat::S24LE3 => 3,
             SampleFormat::S32LE => 4,
             SampleFormat::FLOAT32LE => 4,
             SampleFormat::FLOAT64LE => 8,
@@ -413,6 +422,7 @@ impl CaptureDevice for FileCaptureDevice {
                         let params = CaptureParams {
                             channels,
                             bits,
+                            bytes_per_sample: store_bytes,
                             format,
                             store_bytes,
                             extra_bytes,
