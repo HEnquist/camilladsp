@@ -277,6 +277,11 @@ pub fn get_resampler(
 /// Create a capture device.
 pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     //let resampler = get_resampler(&conf);
+    let capture_samplerate = if conf.capture_samplerate > 0 && conf.enable_resampling {
+        conf.capture_samplerate
+    } else {
+        conf.samplerate
+    };
     match conf.capture {
         #[cfg(feature = "alsa-backend")]
         config::CaptureDevice::Alsa {
@@ -287,7 +292,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             devname: device,
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
-            capture_samplerate: conf.capture_samplerate,
+            capture_samplerate,
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,
@@ -304,7 +309,8 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             devname: device,
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
-            capture_samplerate: conf.capture_samplerate,
+            resampler_conf: conf.resampler_type,
+            capture_samplerate,
             chunksize: conf.chunksize,
             channels,
             format,
@@ -316,11 +322,13 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             filename,
             format,
             extra_samples,
+            skip_bytes,
+            read_bytes,
         } => Box::new(filedevice::FileCaptureDevice {
             filename,
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
-            capture_samplerate: conf.capture_samplerate,
+            capture_samplerate,
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,
@@ -328,6 +336,8 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             extra_samples,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
+            skip_bytes,
+            read_bytes,
         }),
     }
 }

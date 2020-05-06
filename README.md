@@ -291,11 +291,26 @@ devices:
   * `format`: sample format.
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
-    * S16LE
-    * S24LE
-    * S32LE 
-    * FLOAT32LE
-    * FLOAT64LE (not supported by PulseAudio)
+    * S16LE - Signed 16 bit int, stored as two bytes
+    * S24LE - Signed 24 bit int, stored as four bytes
+    * S24LE3 - Signed 24 bit int, stored as three bytes    
+    * S32LE - Signed 32 bit int, stored as four bytes
+    * FLOAT32LE - 32 bit float, stored as four bytes
+    * FLOAT64LE - 64 bit float, stored as eight bytes (not supported by PulseAudio)
+
+  Equivalent formats:
+  | CamillaDSP | Alsa       | Pulse     |
+  |------------|------------|-----------|
+  | S16LE      | S16_LE     | S16LE     |
+  | S24LE      | S24_LE     | S24_32LE  |
+  | S24LE3     | S24_3LE    | S24LE     |
+  | S32LE      | S32_LE     | S32LE     |
+  | FLOAT32LE  | FLOAT_LE   | FLOAT32LE |
+  | FLOAT64LE  | FLOAT64_LE | -         |
+
+  The File capture device supports two additional optional parameters, for advanced handling of raw files and testing:
+  * `skip_bytes`: Number of bytes to skip at the beginning of the file. This can be used to skip over the header of some formats like .wav (which typocally has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
+  * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file.
 
   The File device type reads or writes to a file. 
   The format is raw interleaved samples, 2 bytes per sample for 16-bit, 
@@ -311,7 +326,7 @@ devices:
 
 ## Resampling
 
-Resampling is provided by the "rubato" library: https://github.com/HEnquist/rubato. 
+Resampling is provided by the [Rubato library.](https://github.com/HEnquist/rubato)
 
 This library does asynchronous resampling with adjustable parameters. 
 The overall strategy is to use a sinc interpolation filter with a fixed oversampling ratio, 
@@ -339,14 +354,16 @@ But in order to use the rate adjust feature to match capture and playback device
 
 There is also a "Free" mode as well where all parameters can be set freely. The configuration is specified like this:
 ```
-Free:
-  sinc_len: 128
-  oversampling_ratio: 128
-  interpolation: Cubic
-  window: Hann
-  f_cutoff: 0.95
+...
+  resampler_type:
+    Free:
+      f_cutoff: 0.9
+      sinc_len: 128
+      window: Hann2
+      oversampling_ratio: 128
+      interpolation: Cubic
 ```
-See the library documentation for more details. (link to be added once the library has been published on crates.io)
+See the library documentation for more details. [Rubato on docs.rs](https://docs.rs/rubato/0.1.0/rubato/)
 
 For reference, the presets are defined according to this table:
 
@@ -459,6 +476,7 @@ The "format" parameter can be omitted, in which case it's assumed that the forma
 The other possible formats are raw data:
 - S16LE: signed 16 bit little-endian integers
 - S24LE: signed 24 bit little-endian integers stored as 32 bits (with the data in the low 24)
+- S24LE3: signed 24 bit little-endian integers stored as 24 bits
 - S32LE: signed 32 bit little-endian integers
 - FLOAT32LE: 32 bit little endian float
 - FLOAT64LE: 64 bit little endian float

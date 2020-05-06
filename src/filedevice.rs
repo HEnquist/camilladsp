@@ -42,6 +42,8 @@ pub struct FileCaptureDevice {
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub extra_samples: usize,
+    pub skip_bytes: usize,
+    pub read_bytes: usize,
 }
 
 struct CaptureChannels {
@@ -58,6 +60,7 @@ struct CaptureChannels {
 struct CaptureParams {
     channels: usize,
     bits: i32,
+    bytes_per_sample: usize,
     format: SampleFormat,
     store_bytes: usize,
     extra_bytes: usize,
@@ -66,6 +69,7 @@ struct CaptureParams {
     silence: PrcFmt,
     chunksize: usize,
     resampling_ratio: f32,
+    read_bytes: usize,
 }
 
 //struct PlaybackParams {
@@ -89,6 +93,7 @@ impl PlaybackDevice for FilePlaybackDevice {
         let bits = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
+            SampleFormat::S24LE3 => 24,
             SampleFormat::S32LE => 32,
             SampleFormat::FLOAT32LE => 32,
             SampleFormat::FLOAT64LE => 64,
@@ -96,6 +101,7 @@ impl PlaybackDevice for FilePlaybackDevice {
         let store_bytes = match self.format {
             SampleFormat::S16LE => 2,
             SampleFormat::S24LE => 4,
+            SampleFormat::S24LE3 => 3,
             SampleFormat::S32LE => 4,
             SampleFormat::FLOAT32LE => 4,
             SampleFormat::FLOAT64LE => 8,
@@ -123,11 +129,13 @@ impl PlaybackDevice for FilePlaybackDevice {
                                     let bytes = match format {
                                         SampleFormat::S16LE
                                         | SampleFormat::S24LE
+                                        | SampleFormat::S24LE3
                                         | SampleFormat::S32LE => chunk_to_buffer_bytes(
                                             chunk,
                                             &mut buffer,
                                             scalefactor,
                                             bits,
+                                            store_bytes,
                                         ),
                                         SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
                                             chunk_to_buffer_float_bytes(chunk, &mut buffer, bits)
@@ -191,12 +199,13 @@ fn build_chunk(
     format: &SampleFormat,
     channels: usize,
     bits: i32,
+    bytes_per_sample: usize,
     bytes_read: usize,
     scalefactor: PrcFmt,
 ) -> AudioChunk {
     match format {
-        SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
-            buffer_to_chunk_bytes(&buf, channels, scalefactor, bits, bytes_read)
+        SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S24LE3 | SampleFormat::S32LE => {
+            buffer_to_chunk_bytes(&buf, channels, scalefactor, bytes_per_sample, bytes_read)
         }
         SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
             buffer_to_chunk_float_bytes(&buf, channels, bits, bytes_read)
@@ -217,7 +226,9 @@ fn capture_loop(
     let mut buf = vec![0u8; params.buffer_bytes];
     let mut bytes_read = 0;
     let mut capture_bytes = chunksize_bytes;
+    let mut capture_bytes_temp;
     let mut extra_bytes_left = params.extra_bytes;
+    let mut nbr_bytes_read = 0;
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -244,11 +255,20 @@ fn capture_loop(
             params.channels,
             params.store_bytes,
         );
-        let read_res = read_retry(&mut file, &mut buf[0..capture_bytes]);
+        capture_bytes_temp = if params.read_bytes == 0
+            || (params.read_bytes > 0 && (nbr_bytes_read + capture_bytes) <= params.read_bytes)
+        {
+            capture_bytes
+        } else {
+            debug!("Stopping capture, reached read_bytes limit");
+            params.read_bytes - nbr_bytes_read
+        };
+        let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         match read_res {
             Ok(bytes) => {
                 trace!("Captured {} bytes", bytes);
                 bytes_read = bytes;
+                nbr_bytes_read += bytes;
                 if bytes > 0 && bytes < capture_bytes {
                     for item in buf.iter_mut().take(capture_bytes).skip(bytes) {
                         *item = 0;
@@ -257,12 +277,13 @@ fn capture_loop(
                         "End of file, read only {} of {} bytes",
                         bytes, capture_bytes
                     );
-                    let missing = ((capture_bytes - bytes) as f32 * params.resampling_ratio) as usize;
+                    let missing =
+                        ((capture_bytes - bytes) as f32 * params.resampling_ratio) as usize;
                     if extra_bytes_left > missing {
                         bytes_read = capture_bytes;
                         extra_bytes_left -= missing;
                     } else {
-                        bytes_read += (extra_bytes_left as f32 /params.resampling_ratio) as usize;
+                        bytes_read += (extra_bytes_left as f32 / params.resampling_ratio) as usize;
                         extra_bytes_left = 0;
                     }
                 } else if bytes == 0 {
@@ -299,6 +320,7 @@ fn capture_loop(
             &params.format,
             params.channels,
             params.bits,
+            params.bytes_per_sample,
             bytes_read,
             scalefactor,
         );
@@ -317,7 +339,9 @@ fn capture_loop(
             if let Some(resampl) = &mut resampler {
                 let new_waves = resampl.process(&chunk.waveforms).unwrap();
                 chunk.frames = new_waves[0].len();
-                chunk.valid_frames = (new_waves[0].len() as f32 * (bytes_read as f32/capture_bytes as f32)) as usize;
+                chunk.valid_frames = (new_waves[0].len() as f32
+                    * (bytes_read as f32 / capture_bytes as f32))
+                    as usize;
                 chunk.waveforms = new_waves;
             }
             let msg = AudioMessage::Audio(chunk);
@@ -338,15 +362,12 @@ impl CaptureDevice for FileCaptureDevice {
         let filename = self.filename.clone();
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
-        let capture_samplerate = if self.capture_samplerate > 0 {
-            self.capture_samplerate
-        } else {
-            self.samplerate
-        };
+        let capture_samplerate = self.capture_samplerate;
         let channels = self.channels;
         let bits = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
+            SampleFormat::S24LE3 => 24,
             SampleFormat::S32LE => 32,
             SampleFormat::FLOAT32LE => 32,
             SampleFormat::FLOAT64LE => 64,
@@ -354,6 +375,7 @@ impl CaptureDevice for FileCaptureDevice {
         let store_bytes = match self.format {
             SampleFormat::S16LE => 2,
             SampleFormat::S24LE => 4,
+            SampleFormat::S24LE3 => 3,
             SampleFormat::S32LE => 4,
             SampleFormat::FLOAT32LE => 4,
             SampleFormat::FLOAT64LE => 8,
@@ -370,7 +392,8 @@ impl CaptureDevice for FileCaptureDevice {
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let extra_bytes = self.extra_samples * store_bytes * channels;
-
+        let skip_bytes = self.skip_bytes;
+        let read_bytes = self.read_bytes;
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
@@ -390,7 +413,7 @@ impl CaptureDevice for FileCaptureDevice {
                     None
                 };
                 match File::open(filename) {
-                    Ok(file) => {
+                    Ok(mut file) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
                             Ok(()) => {}
                             Err(_err) => {}
@@ -399,6 +422,7 @@ impl CaptureDevice for FileCaptureDevice {
                         let params = CaptureParams {
                             channels,
                             bits,
+                            bytes_per_sample: store_bytes,
                             format,
                             store_bytes,
                             extra_bytes,
@@ -406,13 +430,19 @@ impl CaptureDevice for FileCaptureDevice {
                             silent_limit,
                             silence,
                             chunksize,
-                            resampling_ratio: samplerate as f32/capture_samplerate as f32,
+                            resampling_ratio: samplerate as f32 / capture_samplerate as f32,
+                            read_bytes,
                         };
                         let msg_channels = CaptureChannels {
                             audio: channel,
                             status: status_channel,
                             command: command_channel,
                         };
+                        if skip_bytes > 0 {
+                            debug!("skipping the first {} bytes", skip_bytes);
+                            let mut tempbuf = vec![0u8; skip_bytes];
+                            let _ = file.read_exact(&mut tempbuf);
+                        }
                         debug!("starting captureloop");
                         capture_loop(file, params, msg_channels, resampler);
                     }
