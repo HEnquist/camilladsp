@@ -1,7 +1,7 @@
 ---
 devices:
   samplerate: 44100
-  chunksize: 1025
+  chunksize: 1027
   target_level: 512
   adjust_period: 10
   playback:
@@ -14,7 +14,7 @@ devices:
     channels: 1
     filename: "spike_i32.raw"
     format: S32LE
-    extra_samples: 2500
+    extra_samples: 1
 
 
 mixers:

@@ -281,10 +281,10 @@ impl CaptureDevice for PulseCaptureDevice {
                         //let before = Instant::now();
                         let chunk = match format {
                             SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
-                                buffer_to_chunk_bytes(&buf, channels, scalefactor, bits)
+                                buffer_to_chunk_bytes(&buf, channels, scalefactor, bits, buf.len())
                             }
                             SampleFormat::FLOAT32LE => {
-                                buffer_to_chunk_float_bytes(&buf, channels, bits)
+                                buffer_to_chunk_float_bytes(&buf, channels, bits, buf.len())
                             }
                             _ => panic!("Unsupported sample format"),
                         };

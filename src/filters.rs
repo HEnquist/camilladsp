@@ -22,7 +22,7 @@ pub trait Filter {
     // Filter a Vec
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()>;
 
-    fn update_parameters(&mut self, config: config::Filter) -> ();
+    fn update_parameters(&mut self, config: config::Filter);
 
     fn name(&self) -> String;
 }
