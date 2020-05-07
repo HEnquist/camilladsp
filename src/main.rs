@@ -10,6 +10,7 @@ extern crate libpulse_simple_binding as psimple;
 extern crate num;
 extern crate rand;
 extern crate rand_distr;
+extern crate rubato;
 #[cfg(not(feature = "FFTW"))]
 extern crate rustfft;
 extern crate serde;
@@ -289,7 +290,7 @@ fn run(
                     info!("Capture finished");
                 }
                 StatusMessage::SetSpeed { speed } => {
-                    debug!("SetSpeed message reveiced");
+                    debug!("SetSpeed message received");
                     tx_command_cap
                         .send(CommandMessage::SetSpeed { speed })
                         .unwrap();

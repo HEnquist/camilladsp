@@ -89,7 +89,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.0.13
+CamillaDSP 0.1.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
@@ -176,13 +176,17 @@ If you get strange errors, first check that the indentation is correct. Also che
 Example config (note that parameters marked (*) can be left out to use their default values):
 ```
 devices:
-  samplerate: 44100
+  samplerate: 96000
   chunksize: 1024
   queuelimit: 128 (*)
   silence_threshold: -60 (*)
   silence_timeout: 3.0 (*)
   target_level: 500 (*)
   adjust_period: 10 (*)
+  enable_rate_adjust: true (*)
+  enable_resampling: true (*)
+  resampler_type: BalancedAsync (*)
+  capture_samplerate: 44100 (*)
   capture:
     type: Pulse
     channels: 2
@@ -208,7 +212,7 @@ devices:
   Try increasing in factors of two, to 2048, 4096 etc. 
   The duration in seconds of a chunk is `chunksize/samplerate`, so a value of 1024 at 44.1kHz corresponds to 23 ms per chunk.
 
-* `queuelimit` (optional)
+* `queuelimit` (optional, defaults to 128)
 
   The field `queuelimit` should normally be left out to use the default of 128. 
   It sets the limit for the length of the queues between the capture device and the processing thread, 
@@ -225,20 +229,26 @@ devices:
   and will lead to very high cpu usage while the queues are being filled. 
   If this is a problem, set `queuelimit` to a low value like 1.
 
-* `target_level` & `adjust_period` (optional)
-  For the special case where the capture device is an Alsa Loopback device, 
-  and the playback device another Alsa device, there is a function to synchronize 
-  the Loopback device to the playback device. 
-  This avoids the problems of buffer underruns or slowly increasing delay. 
-  This function requires the parameter `target_level` to be set. 
+* `enable_rate_adjust` (optional, defaults to false)
+
+  This enables the playback device to control the rate of the capture device, 
+  in order to avoid buffer underruns of a slowly increasing latency. This is currently only supported when using an Alsa playback device.
+  Setting the rate can be done in two ways.
+  * If the capture device is an Alsa Loopback device, the adjustment is done by tuning the virtual sample clock of the Loopback device. This avoids any need for resampling.
+  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` should then be one of the "Async" variants to minimize resampling artefacts.
+  
+
+* `target_level` (optional, defaults to the `chunksize` value)
   The value is the number of samples that should be left in the buffer of the playback device
   when the next chunk arrives. It works by fine tuning the sample rate of the virtual Loopback device.
   It will take some experimentation to find the right number. 
   If it's too small there will be buffer underruns from time to time, 
   and making it too large might lead to a longer input-output delay than what is acceptable. 
   Suitable values are in the range 1/2 to 1 times the `chunksize`. 
-
-  The `adjust_period` parameter is used to set the interval between corrections. 
+  
+* `adjust_period` (optional, defaults to 10)
+  
+  The `adjust_period` parameter is used to set the interval between corrections, in seconds. 
   The default is 10 seconds.
 
 * `silence_threshold` & `silence_timeout` (optional)
@@ -250,6 +260,26 @@ devices:
 
   The `silence_timeout` (in seconds) is for how long the signal should be silent before pausing processing. 
   Set this to zero, or leave it out, to never pause.
+
+* `enable_resampling` (optional, defaults to false)
+
+  Set this to `true` to enable resampling of the input signal. 
+  In addition to resampling the input to a different sample rate, 
+  this can be useful for rate-matching capture and playback devices with independant clocks.
+
+* `resampler_type` (optional, defaults to "BalancedAsync")
+
+  The resampler type to use. Valid choices are "FastSync", "BalancedSync", 
+  "AccurateSync", "FastAsync", "BalancedAsync", "AccurateAsync", "Free".
+
+  If used for rate matching with `enable_rate_adjust: true` the one of the "Async" variants should be used. 
+  See also the [Resampling section.](#resampling) 
+
+* `capture_samplerate` (optional, defaults to value of `samplerate`)
+
+  The capture samplerate. If the resampler is only used for rate-matching then the capture samplerate 
+  is the same as the overall samplerate, and this setting can be left out.
+
  
 * `capture` and `playback`
   Input and output devices are defined in the same way. 
@@ -261,11 +291,26 @@ devices:
   * `format`: sample format.
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
-    * S16LE
-    * S24LE
-    * S32LE 
-    * FLOAT32LE
-    * FLOAT64LE (not supported by PulseAudio)
+    * S16LE - Signed 16 bit int, stored as two bytes
+    * S24LE - Signed 24 bit int, stored as four bytes
+    * S24LE3 - Signed 24 bit int, stored as three bytes    
+    * S32LE - Signed 32 bit int, stored as four bytes
+    * FLOAT32LE - 32 bit float, stored as four bytes
+    * FLOAT64LE - 64 bit float, stored as eight bytes (not supported by PulseAudio)
+
+  Equivalent formats:
+  | CamillaDSP | Alsa       | Pulse     |
+  |------------|------------|-----------|
+  | S16LE      | S16_LE     | S16LE     |
+  | S24LE      | S24_LE     | S24_32LE  |
+  | S24LE3     | S24_3LE    | S24LE     |
+  | S32LE      | S32_LE     | S32LE     |
+  | FLOAT32LE  | FLOAT_LE   | FLOAT32LE |
+  | FLOAT64LE  | FLOAT64_LE | -         |
+
+  The File capture device supports two additional optional parameters, for advanced handling of raw files and testing:
+  * `skip_bytes`: Number of bytes to skip at the beginning of the file. This can be used to skip over the header of some formats like .wav (which typocally has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
+  * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file.
 
   The File device type reads or writes to a file. 
   The format is raw interleaved samples, 2 bytes per sample for 16-bit, 
@@ -278,6 +323,57 @@ devices:
   > camilladsp stdio_capt.yml > rawfile.dat
   > cat rawfile.dat | camilladsp stdio_pb.yml
   ```
+
+## Resampling
+
+Resampling is provided by the [Rubato library.](https://github.com/HEnquist/rubato)
+
+This library does asynchronous resampling with adjustable parameters. 
+The overall strategy is to use a sinc interpolation filter with a fixed oversampling ratio, 
+and then use polynomial interpolation to get values for arbitrary times between those fixed points.
+
+CamillaDSP provides six preset profiles for the resampler:
+* FastSync
+* BalancedSync
+* AccurateSync
+* FastAsync
+* BalancedAsync
+* AccurateAsync
+
+The "Balanced" presets are for most cases the best choice. 
+They provide good resampling quality with reasonable CPU usage. 
+The "Fast" presets are faster but have a little more high-frequency roll-off 
+and give a bit higher resampling artefacts. 
+The "Accurate" presets provide the highest quality result, 
+with all resampling artefacts below -200dB, at the expense of higher CPU usage.
+
+For performing fixed ratio resampling, choose one of the "Sync" variants. 
+This automatically calculates a suitable oversampling ratio 
+and avoids the need for polynomial interpolation, resulting in a speed-up of a factor 2 to 4. 
+But in order to use the rate adjust feature to match capture and playback devices, one of the "Async" variants should be used.
+
+There is also a "Free" mode as well where all parameters can be set freely. The configuration is specified like this:
+```
+...
+  resampler_type:
+    Free:
+      f_cutoff: 0.9
+      sinc_len: 128
+      window: Hann2
+      oversampling_ratio: 128
+      interpolation: Cubic
+```
+See the library documentation for more details. [Rubato on docs.rs](https://docs.rs/rubato/0.1.0/rubato/)
+
+For reference, the presets are defined according to this table:
+
+|                   | FastSync | BalancedSync | AccurateSync    | FastAsync | BalancedAsync | AccurateAsync |
+|-------------------|----------|--------------|-----------------|-----------|---------------|---------------|
+|sinc_len           | 64       | 128          | 256             | 64        | 128           | 256           |
+|oversampling_ratio | auto     | auto         | auto            | 1024      | 1024          | 256           |
+|interpolation      | Nearest  | Nearest      | Nearest         | Linear    | Linear        | Cubic         |
+|window             | Hann2    | Blackman2    | BlackmanHarris2 | Hann2     | Blackman2     | BlackmanHarris2 |
+|f_cutoff           | 0.915    | 0.925        | 0.947           | 0.915     | 0.925         | 0.947           |
 
 
 ## Mixers
@@ -380,6 +476,7 @@ The "format" parameter can be omitted, in which case it's assumed that the forma
 The other possible formats are raw data:
 - S16LE: signed 16 bit little-endian integers
 - S24LE: signed 24 bit little-endian integers stored as 32 bits (with the data in the low 24)
+- S24LE3: signed 24 bit little-endian integers stored as 24 bits
 - S32LE: signed 32 bit little-endian integers
 - FLOAT32LE: 32 bit little endian float
 - FLOAT64LE: 64 bit little endian float

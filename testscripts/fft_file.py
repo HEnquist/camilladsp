@@ -13,6 +13,10 @@ fname = sys.argv[1]
 datafmt = sys.argv[2]
 srate = int(sys.argv[3])
 nchannels = int(sys.argv[4])
+try:
+    window = bool(sys.argv[5])
+except:
+    window = False
 
 if datafmt == "text":
     with open(fname) as f:
@@ -27,6 +31,8 @@ elif datafmt == "S24LE":
     values = np.fromfile(fname, dtype=np.int32)/(2**23-1)
 elif datafmt == "S32LE":
     values = np.fromfile(fname, dtype=np.int32)/(2**31-1)
+elif datafmt == "S64LE":
+    values = np.fromfile(fname, dtype=np.int64)/(2**31-1)
 
 all_values = np.reshape(values, (nchannels, -1), order='F')
 
@@ -34,20 +40,26 @@ plt.figure(num="FFT of {}".format(fname))
 for chan in range(nchannels):
     chanvals = all_values[chan,:]
     npoints = len(chanvals)
+    if window:
+        chanvals = chanvals[1024:-1024]
+        npoints = len(chanvals)
+        chanvals = chanvals*np.hanning(npoints)
     print(npoints)
     t = np.linspace(0, npoints/srate, npoints, endpoint=False) 
     f = np.linspace(0, srate/2.0, math.floor(npoints/2))
     valfft = fft.fft(chanvals)
     cut = valfft[0:math.floor(npoints/2)]
     gain = 20*np.log10(np.abs(cut))
+    if window:
+        gain = gain-np.max(gain)
     phase = 180/np.pi*np.angle(cut)
-    plt.subplot(3,1,1)
-    plt.semilogx(f, gain)
-    plt.subplot(3,1,2)
-    plt.semilogx(f, phase)
+    #plt.subplot(2,1,1)
+    #plt.semilogx(f, gain)
+    #plt.subplot(3,1,2)
+    #plt.semilogx(f, phase)
 
     #plt.gca().set(xlim=(10, srate/2.0))
-    plt.subplot(3,1,3)
+    #plt.subplot(2,1,2)
     plt.plot(t, chanvals)
 
 
