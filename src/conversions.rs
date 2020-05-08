@@ -88,11 +88,11 @@ pub fn buffer_to_chunk_bytes(
     let mut minvalue: PrcFmt = 0.0;
     let mut wfs = Vec::with_capacity(channels);
     for _chan in 0..channels {
-        wfs.push(Vec::with_capacity(num_frames));
+        wfs.push(vec![0.0; num_frames]);
     }
     let mut idx = 0;
     let mut valbuf: [u8; 4] = [0; 4];
-    for _frame in 0..num_frames {
+    for frame in 0..num_frames {
         for wf in wfs.iter_mut().take(channels) {
             for (n, b) in buffer[idx..idx + bytes_per_sample].iter().enumerate() {
                 valbuf[n + 4 - bytes_per_sample] = *b;
@@ -106,7 +106,7 @@ pub fn buffer_to_chunk_bytes(
             if value < minvalue {
                 minvalue = value;
             }
-            wf.push(value);
+            wf[frame] = value;
         }
     }
     AudioChunk::new(wfs, maxvalue, minvalue, num_valid_frames)
@@ -183,11 +183,11 @@ pub fn buffer_to_chunk_float_bytes(
     let mut minvalue: PrcFmt = 0.0;
     let mut wfs = Vec::with_capacity(channels);
     for _chan in 0..channels {
-        wfs.push(Vec::with_capacity(num_frames));
+        wfs.push(vec![0.0; num_frames]);
     }
     let mut idx = 0;
     if bits == 32 {
-        for _frame in 0..num_frames {
+        for frame in 0..num_frames {
             for wf in wfs.iter_mut().take(channels) {
                 value = f32::from_le_bytes(buffer[idx..idx + 4].try_into().unwrap()) as PrcFmt;
                 idx += 4;
@@ -198,12 +198,12 @@ pub fn buffer_to_chunk_float_bytes(
                     minvalue = value;
                 }
                 //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
-                wf.push(value);
+                wf[frame] = value;
                 //idx += 1;
             }
         }
     } else {
-        for _frame in 0..num_frames {
+        for frame in 0..num_frames {
             for wf in wfs.iter_mut().take(channels) {
                 value = f64::from_le_bytes(buffer[idx..idx + 8].try_into().unwrap()) as PrcFmt;
                 idx += 8;
@@ -214,7 +214,7 @@ pub fn buffer_to_chunk_float_bytes(
                     minvalue = value;
                 }
                 //value = (self.buffer[idx] as f32) / ((1<<15) as f32);
-                wf.push(value);
+                wf[frame] = value;
                 //idx += 1;
             }
         }
