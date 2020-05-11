@@ -232,6 +232,67 @@ mod tests {
     };
 
     #[test]
+    fn to_buffer_int16() {
+        let bits = 16;
+        let bytes_per_sample = 2;
+        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+        let waveforms = vec![vec![0.1]; 1];
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 1);
+        let mut buffer = vec![0u8; 2];
+        chunk_to_buffer_bytes(chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
+        let expected = vec![0xCC, 0x0C];
+        assert_eq!(buffer, expected);
+    }
+
+    #[test]
+    fn to_buffer_int24() {
+        let bits = 24;
+        let bytes_per_sample = 3;
+        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+        let waveforms = vec![vec![0.1]; 1];
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 1);
+        let mut buffer = vec![0u8; 3];
+        chunk_to_buffer_bytes(chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
+        let expected = vec![0xCC, 0xCC, 0x0C];
+        assert_eq!(buffer, expected);
+    }
+
+    #[test]
+    fn to_buffer_int32() {
+        let bits = 32;
+        let bytes_per_sample = 4;
+        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+        let waveforms = vec![vec![0.1]; 1];
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 1);
+        let mut buffer = vec![0u8; 4];
+        chunk_to_buffer_bytes(chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
+        let expected = vec![0xCC, 0xCC, 0xCC, 0x0C];
+        assert_eq!(buffer, expected);
+    }
+
+    #[test]
+    fn to_buffer_float32() {
+        let bits = 32;
+        let waveforms = vec![vec![0.1]; 1];
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 1);
+        let mut buffer = vec![0u8; 4];
+        chunk_to_buffer_float_bytes(chunk, &mut buffer, bits);
+        let expected = vec![0xCD, 0xCC, 0xCC, 0x3D];
+        assert_eq!(buffer, expected);
+    }
+
+    #[test]
+    fn to_buffer_float64() {
+        let bits = 64;
+        let waveforms = vec![vec![0.1]; 1];
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 1);
+        let mut buffer = vec![0u8; 8];
+        chunk_to_buffer_float_bytes(chunk, &mut buffer, bits);
+        let expected = vec![0x9A, 0x99, 0x99, 0x99, 0x99, 0x99, 0xB9, 0x3F];
+        assert_eq!(buffer, expected);
+    }
+
+    #[test]
     fn to_from_buffer_16() {
         let bits = 16;
         let bytes_per_sample = 2;
