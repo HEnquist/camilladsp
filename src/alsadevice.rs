@@ -228,8 +228,8 @@ fn playback_loop_bytes(
                 {
                     let av_delay = delay / ndelays;
                     diff = av_delay - params.target_level as isize;
-                    let rel_diff = (diff as f32) / (srate as f32);
-                    speed = 1.0 + 0.5 * rel_diff / params.adjust_period;
+                    let rel_diff = (diff as f64) / (srate as f64);
+                    speed = 1.0 + 0.5 * rel_diff / params.adjust_period as f64;
                     debug!(
                         "Current buffer level {}, set capture rate to {}%",
                         av_delay,

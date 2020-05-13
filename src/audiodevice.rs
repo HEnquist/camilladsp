@@ -266,7 +266,7 @@ pub fn get_resampler(
     };
     debug!("Creating resampler with parameters: {:?}", parameters);
     let resampler = SincFixedOut::<PrcFmt>::new(
-        samplerate as f32 / capture_samplerate as f32,
+        samplerate as f64 / capture_samplerate as f64,
         parameters,
         chunksize,
         num_channels,
