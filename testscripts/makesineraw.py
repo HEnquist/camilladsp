@@ -1,9 +1,9 @@
-# Make a simple spike for testing purposes
+# Make a simple sine for testing purposes
 import numpy as np
 import sys
 f = float(sys.argv[2])
 fs = float(sys.argv[1])
-t = np.linspace(0, 1, num=44100, endpoint=False)
+t = np.linspace(0, 20, num=int(20*fs), endpoint=False)
 wave = 0.5*np.sin(f*2*np.pi*t)
 wave= np.reshape(wave,(-1,1))
 wave = np.concatenate((wave, wave), axis=1)

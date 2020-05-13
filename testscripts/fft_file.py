@@ -14,9 +14,9 @@ datafmt = sys.argv[2]
 srate = int(sys.argv[3])
 nchannels = int(sys.argv[4])
 try:
-    window = bool(sys.argv[5])
+    window = int(sys.argv[5])
 except:
-    window = False
+    window = 0
 
 if datafmt == "text":
     with open(fname) as f:
@@ -40,10 +40,11 @@ plt.figure(num="FFT of {}".format(fname))
 for chan in range(nchannels):
     chanvals = all_values[chan,:]
     npoints = len(chanvals)
-    if window:
-        chanvals = chanvals[1024:-1024]
+    if window>0:
+        #chanvals = chanvals[1024:700000]
         npoints = len(chanvals)
-        chanvals = chanvals*np.hanning(npoints)
+        for n in range(window):
+            chanvals = chanvals*np.blackman(npoints)
     print(npoints)
     t = np.linspace(0, npoints/srate, npoints, endpoint=False) 
     f = np.linspace(0, srate/2.0, math.floor(npoints/2))
@@ -53,13 +54,13 @@ for chan in range(nchannels):
     if window:
         gain = gain-np.max(gain)
     phase = 180/np.pi*np.angle(cut)
-    #plt.subplot(2,1,1)
-    #plt.semilogx(f, gain)
+    plt.subplot(2,1,1)
+    plt.semilogx(f, gain)
     #plt.subplot(3,1,2)
     #plt.semilogx(f, phase)
 
     #plt.gca().set(xlim=(10, srate/2.0))
-    #plt.subplot(2,1,2)
+    plt.subplot(2,1,2)
     plt.plot(t, chanvals)
 
 

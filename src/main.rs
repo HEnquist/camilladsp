@@ -74,11 +74,11 @@ pub enum StatusMessage {
     CaptureError { message: String },
     PlaybackDone,
     CaptureDone,
-    SetSpeed { speed: f32 },
+    SetSpeed { speed: f64 },
 }
 
 pub enum CommandMessage {
-    SetSpeed { speed: f32 },
+    SetSpeed { speed: f64 },
     Exit,
 }
 

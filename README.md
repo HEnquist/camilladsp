@@ -341,16 +341,31 @@ CamillaDSP provides six preset profiles for the resampler:
 * AccurateAsync
 
 The "Balanced" presets are for most cases the best choice. 
-They provide good resampling quality with reasonable CPU usage. 
+They provide good resampling quality with a noise threshold in the range 
+of -150 dB along with reasonable CPU usage. 
+As -150 dB is way beyond the resolution limit of even the best commercial DACs, 
+the "Balanced" presets are thus sufficient for all audio use.
 The "Fast" presets are faster but have a little more high-frequency roll-off 
 and give a bit higher resampling artefacts. 
 The "Accurate" presets provide the highest quality result, 
 with all resampling artefacts below -200dB, at the expense of higher CPU usage.
+The different quality presets provide same results in both "Sync" and "Async" 
+variants in terms of precision and artefacts.
 
-For performing fixed ratio resampling, choose one of the "Sync" variants. 
-This automatically calculates a suitable oversampling ratio 
-and avoids the need for polynomial interpolation, resulting in a speed-up of a factor 2 to 4. 
-But in order to use the rate adjust feature to match capture and playback devices, one of the "Async" variants should be used.
+For performing fixed ratio resampling, like resampling 
+from 44.1kHz to 96kHz (which corresponds to a precise ratio of 147/320)
+choose one of the "Sync" variants. 
+This automatically calculates a suitable oversampling ratio for the given sample rates
+and avoids the need for polynomial interpolation, 
+resulting in a speed-up of a factor 2 to 4 compared to "Async". 
+
+When using the rate adjust feature to match capture and playback devices, 
+one of the "Async" variants should be used. 
+These asynchronous presets do not rely on a fixed resampling ratio to produce high quality output.
+When rate adjust is enabled the resampling ratio is dynamically adjusted in order to compensate 
+for drifts and mismatches between the input and output sample clocks.  
+Using a "Sync" variant with rate adjust enabled is not recommended as it produces 
+much larger resampling artefacts.
 
 There is also a "Free" mode as well where all parameters can be set freely. The configuration is specified like this:
 ```
