@@ -13,7 +13,7 @@ devices:
   capture:
     type: File
     channels: 2
-    filename: "sine_30000_96000_f64_2ch.raw"
+    filename: "sine_120_44100_f64_2ch.raw"
     format: FLOAT64LE
     extra_samples: 0
 
