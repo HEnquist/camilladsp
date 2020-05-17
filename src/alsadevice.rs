@@ -78,6 +78,9 @@ struct CaptureParams {
     bits: i32,
     bytes_per_sample: usize,
     floats: bool,
+    samplerate: usize,
+    capture_samplerate: usize,
+    async_src: bool,
 }
 
 struct PlaybackParams {
@@ -289,6 +292,11 @@ fn capture_loop_bytes(
     let mut elval = ElemValue::new(ElemType::Integer).unwrap();
     if element.is_some() {
         info!("Capture device supports rate adjust");
+        if params.samplerate == params.capture_samplerate && resampler.is_some() {
+            warn!("Needless 1:1 sample rate conversion active. Not needed since capture device supports rate adjust");
+        } else if params.async_src && resampler.is_some() {
+            warn!("Async resampler not needed since capture device supports rate adjust. Switch to Sync type to save CPU time.");
+        }
     }
     let mut capture_bytes = params.chunksize * params.channels * params.bytes_per_sample;
     loop {
@@ -304,6 +312,9 @@ fn capture_loop_bytes(
                     elval.set_integer(0, (100_000.0 * speed) as i32).unwrap();
                     elem.write(&elval).unwrap();
                 } else if let Some(resampl) = &mut resampler {
+                    if !params.async_src {
+                        warn!("Adjusting rate of Sync type resampler. Switch to Async for much improved quality");
+                    }
                     resampl.set_resample_ratio_relative(speed).unwrap();
                 }
             }
@@ -514,6 +525,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let format = self.format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
+        let async_src = resampler_is_async(&resampler_conf);
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
             .spawn(move || {
@@ -554,6 +566,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                             bits,
                             bytes_per_sample,
                             floats,
+                            samplerate,
+                            capture_samplerate,
+                            async_src,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,

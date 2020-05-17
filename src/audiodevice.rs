@@ -140,6 +140,15 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     }
 }
 
+pub fn resampler_is_async(conf: &config::Resampler) -> bool {
+    match &conf {
+        config::Resampler::FastAsync
+        | config::Resampler::BalancedAsync
+        | config::Resampler::AccurateAsync => true,
+        _ => false,
+    }
+}
+
 pub fn get_resampler(
     conf: &config::Resampler,
     num_channels: usize,
@@ -282,6 +291,19 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     } else {
         conf.samplerate
     };
+    let diff_rates = capture_samplerate != conf.samplerate;
+    // Check for non-optimal resampling settings
+    if !diff_rates && conf.enable_resampling && !conf.enable_rate_adjust {
+        warn!(
+            "Needless 1:1 sample rate conversion active. Not needed since enable_rate_adjust=False"
+        );
+    } else if diff_rates
+        && conf.enable_resampling
+        && !conf.enable_rate_adjust
+        && resampler_is_async(&conf.resampler_type)
+    {
+        warn!("Using Async resampler for synchronous resampling. Switch to Sync type to save CPU time.");
+    }
     match conf.capture {
         #[cfg(feature = "alsa-backend")]
         config::CaptureDevice::Alsa {
