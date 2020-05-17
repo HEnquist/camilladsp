@@ -216,7 +216,7 @@ fn build_chunk(
 
 fn get_capture_bytes(bytes_to_read: usize, nbr_bytes_read: usize, capture_bytes: usize) -> usize {
     if bytes_to_read == 0
-            || (bytes_to_read > 0 && (nbr_bytes_read + capture_bytes) <= bytes_to_read)
+        || (bytes_to_read > 0 && (nbr_bytes_read + capture_bytes) <= bytes_to_read)
     {
         capture_bytes
     } else {
