@@ -37,7 +37,7 @@ cfg["devices"]["capture_samplerate"] = wav_info["SampleRate"]
 cfg["devices"]["enable_rate_adjust"] = False
 if cfg["devices"]["samplerate"] != cfg["devices"]["capture_samplerate"]:
     cfg["devices"]["enable_resampling"] = True
-    cfg["devices"]["resampler_type"] = "AccurateSync"
+    cfg["devices"]["resampler_type"] = "AccurateAsync"
 else:
     cfg["devices"]["enable_resampling"] = False
 cfg["devices"]["capture"] = capt_device
