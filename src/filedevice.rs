@@ -214,15 +214,25 @@ fn build_chunk(
     }
 }
 
-fn get_capture_bytes(bytes_to_read: usize, nbr_bytes_read: usize, capture_bytes: usize) -> usize {
-    if bytes_to_read == 0
+fn get_capture_bytes(
+    bytes_to_read: usize,
+    nbr_bytes_read: usize,
+    capture_bytes: usize,
+    buf: &mut Vec<u8>,
+) -> usize {
+    let capture_bytes = if bytes_to_read == 0
         || (bytes_to_read > 0 && (nbr_bytes_read + capture_bytes) <= bytes_to_read)
     {
         capture_bytes
     } else {
         debug!("Stopping capture, reached read_bytes limit");
         bytes_to_read - nbr_bytes_read
+    };
+    if capture_bytes > buf.len() {
+        debug!("Capture buffer too small, extending");
+        buf.append(&mut vec![0u8; capture_bytes - buf.len()]);
     }
+    capture_bytes
 }
 
 fn capture_loop(
@@ -270,11 +280,8 @@ fn capture_loop(
             params.channels,
             params.store_bytes,
         );
-        capture_bytes_temp = get_capture_bytes(params.read_bytes, nbr_bytes_read, capture_bytes);
-        if capture_bytes_temp > buf.len() {
-            debug!("Capture buffer too small, extending");
-            buf.append(&mut vec![0u8; capture_bytes_temp - buf.len()]);
-        }
+        capture_bytes_temp =
+            get_capture_bytes(params.read_bytes, nbr_bytes_read, capture_bytes, &mut buf);
         let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         match read_res {
             Ok(bytes) => {
