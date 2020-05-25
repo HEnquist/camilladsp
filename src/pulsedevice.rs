@@ -332,6 +332,10 @@ impl CaptureDevice for PulseCaptureDevice {
                                 channels,
                                 store_bytes,
                             );
+                            if capture_bytes > buf.len() {
+                                debug!("Capture buffer too small, extending");
+                                buf.append(&mut vec![0u8; capture_bytes - buf.len()]);
+                            }
                             let read_res = pulsedevice.read(&mut buf[0..capture_bytes]);
                             match read_res {
                                 Ok(()) => {}

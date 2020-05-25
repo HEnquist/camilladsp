@@ -271,6 +271,10 @@ fn capture_loop(
             params.store_bytes,
         );
         capture_bytes_temp = get_capture_bytes(params.read_bytes, nbr_bytes_read, capture_bytes);
+        if capture_bytes_temp > buf.len() {
+            debug!("Capture buffer too small, extending");
+            buf.append(&mut vec![0u8; capture_bytes_temp - buf.len()]);
+        }
         let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         match read_res {
             Ok(bytes) => {

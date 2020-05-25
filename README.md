@@ -8,21 +8,89 @@ Audio data is captured from a capture device and sent to a playback device. Alsa
 The processing pipeline consists of any number of filters and mixers. Mixers are used to route audio between channels and to change the number of channels in the stream. Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT. A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples. A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
 The full configuration is given in a yaml file.
 
-### Background
-The purpose of CamillaDSP is to enable audio processing with combinations of FIR and IIR filters. This functionality is available in EqualizerAPO, but for Windows only. For Linux the best known FIR filter engine is probably BruteFIR, which works very well but doesn't support IIR filters.
+### Table of Contents
+**[Introduction](#introduction)**
+- **[Background](#background)**
+- **[Usage example: crossover for 2-way speakers](#usage-example-crossover-for-2-way-speakers)**
+- **[Dependencies](#dependencies)**
+
+**[Building](#building)**
+- **[Build with standard features](#build-with-standard-features)**
+- **[Customized build](#customized-build)**
+- **[Optimize for your system](#optimize-for-your-system)**
+
+**[How to run](#how-to-run)**
+- **[Command line options](#commandline-options)**
+- **[Reloading the configuration](#reloading-the-configuration)**
+- **[Controlling via websocket](#controlling-via-websocket)**
+
+**[Capturing audio](#capturing-audio)**
+- **[Alsa](#alsa)**
+- **[PulseAudio](#pulseaudio)**
+
+**[Configuration](#configuration)**
+- **[The YAML format](#the-yaml-format)**
+- **[Devices](#devices)**
+- **[Resmpling](#resampling)**
+- **[Mixers](#mixers)**
+ - **[Filters](#filters)**
+   - **[Gain](#gain)**
+   - **[Delay](#delay)**
+   - **[FIR](#fir)**
+   - **[IIR](#iir)**
+   - **[Dither](#dither)**
+   - **[Difference equation](#difference-equation)**
+- **[Pipeline](#pipeline)**
+- **[Visualizing the config](#visualizing-the-config)**
+
+
+# Introduction
+
+## Background
+The purpose of CamillaDSP is to enable audio processing with combinations of FIR and IIR filters. This functionality is available in EqualizerAPO, but for Windows only. For Linux the best known FIR filter engine is probably BruteFIR, which works very well but doesn't support IIR filters. 
+The goal of CamillaDSP is to provide both FIR and IIR filtering for Linux, to be stable, fast and flexible, and be easy to use and configure.  
 
 * BruteFIR: https://www.ludd.ltu.se/~torger/brutefir.html
 * EqualizerAPO: https://sourceforge.net/projects/equalizerapo/
 * The IIR filtering is heavily inspired by biquad-rs: https://github.com/korken89/biquad-rs 
 
-### Dependencies
+## How it works
+The audio pipeline in CamillaDSP runs in three separate threads. One thread handles capturing audio, one handles the playback, and one does the processing in between.
+The capture thread passes audio to the processing thread via a message queue. Each message consists of a chunk of audio with a configurable size. The processing queue waits for audio messages, processes them in the order they arrive, and passes the processed audio via another message queue to the playback thread. There is also a supervisor thread for control.
+This chart shows the most important parts:
+
+![Overview](overview.png)
+
+### Capture
+The capture thread reads a chunk samples from the audio device in the selected format. It then converts the samples to 64-bit floats (or optionally 32-bit). If resampling is enabled, the audio data is sent to the resampler. At the end, the chunk of samples is packed as a message that is then posted to the input queue of the processing thread. After this the capture thread returns to reading he next shunk of samples from the device.
+
+### Processing
+The processing thread waits for audio chunk messages to arrive in the input queue. Once a message arrives, it's passed through all the defined filters and mixers of the pipeline. Once all processing is done, the audio data is posted to the input queue of the playback device.
+
+### Playback
+The playback thread simply waits for audio messages to appear in the queue. Once a message arrives, the audio data is converted to the right sample format for the device, and written to the playback device. The Alsa playback device supports monitoring the buffer level of the playback device. This is used to send requests for adjusting the capture speed to the supoervisor thread, on a separate message channel.
+
+### Supervisor
+The supervisor monitors all threads by listening to their status messages. The requests for capture rate adjust are passed on to the capture thread. It's also responsible for updating the configuration when requested to do so via the websocket server or a SIGHUP signal.
+
+### Websocket server
+The websocket server lauches a separate thread to handle each connected client. All commands to change the config are send to the supoervisor thread.
+
+
+## Usage example: crossover for 2-way speakers
+A crossover must filter all sound being played on the system. This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device. CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
+
+See the [tutorial for a step-by-step guide.](./stepbystep.md)
+
+## Dependencies
 * https://crates.io/crates/rustfft - FFT used for FIR filters
+* https://crates.io/crates/rubato - Sample rate conversion
 * https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
 * https://crates.io/crates/alsa - Alsa audio backend
 * https://crates.io/crates/serde_yaml - Config file reading
 * https://crates.io/crates/num-traits - Converting between number types
 
-## Building
+# Building
 
 Use recent stable versions of rustc and cargo. The minimum rustc version is 1.36.0.
 
@@ -34,7 +102,7 @@ CamillaDSP includes a Websocket server that can be used to pass commands to the 
 
 The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". FFTW is about a factor two faster. It's a much larger and more complicated library though, so this is only recommended if your filters take too much CPU time with RustFFT.
 
-### Build with standard features
+## Build with standard features
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
@@ -51,7 +119,7 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 - Optionally install with `cargo install --path .`
 - - Note: the `install` command takes the same options for features as the `build` command. 
 
-### Customized build
+## Customized build
 All the available options, or "features" are:
 - `alsa-backend`
 - `pulse-backend`
@@ -76,8 +144,25 @@ cargo build --release --no-default-features --features alsa-backend --features s
 cargo install --path . --no-default-features --features alsa-backend --features socketserver --features FFTW --features 32bit
 ```
 
+## Optimize for your system
+By default Cargo builds for a generic system, meaning the resulting binary might not run as fast as possible on your system.
+This means for example that it will not use AVX on an x86-64 CPU, or NEON on a Raspberry Pi.
 
-## How to run
+To make an optimized build for your system, you can specify this in your Cargo configuration file. 
+Or, just set the RUSTFLAGS environment variable by adding RUSTFLAGS='...' in from of the "cargo build" or "cargo install" command.
+
+Make an optimized build on x86-64:
+```
+RUSTFLAGS='-C target-cpu=native' cargo build --release
+```
+
+On a Raspberry Pi also state that NEON should be enabled:
+```
+RUSTFLAGS='-C target-feature=+neon -C target-cpu=native' cargo build --release 
+```
+
+
+# How to run
 
 The command is simply:
 ```
@@ -85,7 +170,7 @@ camilladsp /path/to/config.yml
 ```
 This starts the processing defined in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is complete and valid. When an error is found it displays an error message describing the problem. See more about the configuration file below.
 
-### Command line options
+## Command line options
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
@@ -120,7 +205,7 @@ If the "wait" flag, `-w` is given, CamillaDSP will start the websocket server an
 The default logging setting prints messages of levels "error", "warn" and "info". By passing the verbosity flag once, `-v` it also prints "debug". If and if's given twice, `-vv`, it also prints "trace" messages. 
 
 
-### Reloading the configuration
+## Reloading the configuration
 The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficients file needs to change.
 
 ## Controlling via websocket
@@ -129,14 +214,8 @@ See the [separate readme for the websocket server](./websocket.md)
 If the websocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
 
 
-
-## Usage example: crossover for 2-way speakers
-A crossover must filter all sound being played on the system. This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device. CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
-
-See the [tutorial for a step-by-step guide.](./stepbystep.md)
-
-
 # Capturing audio
+
 In order to insert CamillaDSP between applications and the sound card, a virtual sound card is required. This works with both Alsa and PulseAudio.
 ## Alsa
 An Alsa Loopback device can be used. This device behaves like a sound card with two devices playback and capture. The sound being send to the playback side on one device can then be captured from the capture side on the other device. To load the kernel device type:

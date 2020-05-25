@@ -324,6 +324,10 @@ fn capture_loop_bytes(
             capture_bytes = resampl.nbr_frames_needed() * params.channels * params.bytes_per_sample;
             trace!("Resamper needs {} frames", resampl.nbr_frames_needed());
         }
+        if capture_bytes > buffer.len() {
+            debug!("Capture buffer too small, extending");
+            buffer.append(&mut vec![0u8; capture_bytes - buffer.len()]);
+        }
         let capture_res = capture_buffer(&mut buffer[0..capture_bytes], pcmdevice, &io);
         match capture_res {
             Ok(_) => {
