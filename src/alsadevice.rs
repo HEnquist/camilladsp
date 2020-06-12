@@ -314,8 +314,7 @@ fn capture_loop_bytes(
                 } else if let Some(resampl) = &mut resampler {
                     if params.async_src {
                         resampl.set_resample_ratio_relative(speed).unwrap();
-                    }
-                    else {
+                    } else {
                         warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
                     }
                 }

@@ -268,8 +268,7 @@ fn capture_loop(
                         if resampl.set_resample_ratio_relative(speed).is_err() {
                             debug!("Failed to set resampling speed to {}", speed);
                         }
-                    }
-                    else {
+                    } else {
                         warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
                     }
                 }

@@ -6,7 +6,10 @@ use filedevice;
 use num::integer;
 #[cfg(feature = "pulse-backend")]
 use pulsedevice;
-use rubato::{InterpolationParameters, InterpolationType, Resampler, SincFixedOut, WindowFunction, FftFixedOut};
+use rubato::{
+    FftFixedOut, InterpolationParameters, InterpolationType, Resampler, SincFixedOut,
+    WindowFunction,
+};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -145,13 +148,16 @@ pub fn resampler_is_async(conf: &config::Resampler) -> bool {
         config::Resampler::FastAsync
         | config::Resampler::BalancedAsync
         | config::Resampler::AccurateAsync
-        | config::Resampler::FreeAsync{..} => true,
+        | config::Resampler::FreeAsync { .. } => true,
         _ => false,
     }
 }
 
-pub fn get_async_parameters(conf: &config::Resampler, samplerate: usize,
-    capture_samplerate: usize) -> InterpolationParameters {
+pub fn get_async_parameters(
+    conf: &config::Resampler,
+    samplerate: usize,
+    capture_samplerate: usize,
+) -> InterpolationParameters {
     match &conf {
         config::Resampler::FastAsync => {
             let sinc_len = 64;
@@ -241,7 +247,6 @@ pub fn get_async_parameters(conf: &config::Resampler, samplerate: usize,
     }
 }
 
-
 pub fn get_resampler(
     conf: &config::Resampler,
     num_channels: usize,
@@ -249,19 +254,26 @@ pub fn get_resampler(
     capture_samplerate: usize,
     chunksize: usize,
 ) -> Option<Box<dyn Resampler<PrcFmt>>> {
-    
     if resampler_is_async(&conf) {
         let parameters = get_async_parameters(&conf, samplerate, capture_samplerate);
-        debug!("Creating asynchronous resampler with parameters: {:?}", parameters);
+        debug!(
+            "Creating asynchronous resampler with parameters: {:?}",
+            parameters
+        );
         Some(Box::new(SincFixedOut::<PrcFmt>::new(
             samplerate as f64 / capture_samplerate as f64,
             parameters,
             chunksize,
             num_channels,
         )))
-    }
-    else {
-        Some(Box::new(FftFixedOut::<PrcFmt>::new(capture_samplerate, samplerate, chunksize, 2, num_channels)))
+    } else {
+        Some(Box::new(FftFixedOut::<PrcFmt>::new(
+            capture_samplerate,
+            samplerate,
+            chunksize,
+            2,
+            num_channels,
+        )))
     }
 }
 
