@@ -92,7 +92,7 @@ See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
 # Building
 
-Use recent stable versions of rustc and cargo. The minimum rustc version is 1.36.0.
+Use recent stable versions of rustc and cargo. The minimum rustc version is 1.40.0.
 
 By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
 

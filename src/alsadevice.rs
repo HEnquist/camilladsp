@@ -165,8 +165,8 @@ fn open_pcm(
         }
 
         hwp.set_access(Access::RWInterleaved)?;
-        hwp.set_buffer_size(2 * bufsize)?;
-        hwp.set_period_size(bufsize / 4, alsa::ValueOr::Nearest)?;
+        let _bufsize = hwp.set_buffer_size_near(2 * bufsize)?;
+        let _period = hwp.set_period_size_near(bufsize / 4, alsa::ValueOr::Nearest)?;
         pcmdev.hw_params(&hwp)?;
     }
 
