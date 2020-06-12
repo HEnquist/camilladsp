@@ -31,7 +31,7 @@ The full configuration is given in a yaml file.
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
 - **[Devices](#devices)**
-- **[Resmpling](#resampling)**
+- **[Resampling](#resampling)**
 - **[Mixers](#mixers)**
  - **[Filters](#filters)**
    - **[Gain](#gain)**
@@ -314,7 +314,7 @@ devices:
   in order to avoid buffer underruns of a slowly increasing latency. This is currently only supported when using an Alsa playback device.
   Setting the rate can be done in two ways.
   * If the capture device is an Alsa Loopback device, the adjustment is done by tuning the virtual sample clock of the Loopback device. This avoids any need for resampling.
-  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` should then be one of the "Async" variants to minimize resampling artefacts.
+  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` must then be one of the "Async" variants.
   
 
 * `target_level` (optional, defaults to the `chunksize` value)
@@ -348,10 +348,9 @@ devices:
 
 * `resampler_type` (optional, defaults to "BalancedAsync")
 
-  The resampler type to use. Valid choices are "FastSync", "BalancedSync", 
-  "AccurateSync", "FastAsync", "BalancedAsync", "AccurateAsync", "Free".
+  The resampler type to use. Valid choices are "Synchronous", "FastAsync", "BalancedAsync", "AccurateAsync", "FreeAsync".
 
-  If used for rate matching with `enable_rate_adjust: true` the one of the "Async" variants should be used. 
+  If used for rate matching with `enable_rate_adjust: true` the one of the "Async" variants must be used. 
   See also the [Resampling section.](#resampling) 
 
 * `capture_samplerate` (optional, defaults to value of `samplerate`)
@@ -407,46 +406,28 @@ devices:
 
 Resampling is provided by the [Rubato library.](https://github.com/HEnquist/rubato)
 
-This library does asynchronous resampling with adjustable parameters. 
-The overall strategy is to use a sinc interpolation filter with a fixed oversampling ratio, 
+This library does asynchronous and synchronous resampling with adjustable parameters. 
+For asynchronous resampling, the overall strategy is to use a sinc interpolation filter with a fixed oversampling ratio, 
 and then use polynomial interpolation to get values for arbitrary times between those fixed points.
+For synchronous resampling it instead works by transforming the waveform with FFT, modifying the spectrum, and then 
+getting the resampled waveform by inverse FFT.
 
 CamillaDSP provides six preset profiles for the resampler:
-* FastSync
-* BalancedSync
-* AccurateSync
+* Synchronous
 * FastAsync
 * BalancedAsync
 * AccurateAsync
 
-The "Balanced" presets are for most cases the best choice. 
-They provide good resampling quality with a noise threshold in the range 
+The "BalancedAsync" preset is the best choice in most cases, if an asynchronous resampler is needed. 
+It provides good resampling quality with a noise threshold in the range 
 of -150 dB along with reasonable CPU usage. 
 As -150 dB is way beyond the resolution limit of even the best commercial DACs, 
-the "Balanced" presets are thus sufficient for all audio use.
-The "Fast" presets are faster but have a little more high-frequency roll-off 
+this preset is thus sufficient for all audio use.
+The "FastAsync" preset is faster but have a little more high-frequency roll-off 
 and give a bit higher resampling artefacts. 
-The "Accurate" presets provide the highest quality result, 
+The "AccurateAsync" preset provide the highest quality result, 
 with all resampling artefacts below -200dB, at the expense of higher CPU usage.
-The different quality presets provide same results in both "Sync" and "Async" 
-variants in terms of precision and artefacts.
-
-For performing fixed ratio resampling, like resampling 
-from 44.1kHz to 96kHz (which corresponds to a precise ratio of 147/320)
-choose one of the "Sync" variants. 
-This automatically calculates a suitable oversampling ratio for the given sample rates
-and avoids the need for polynomial interpolation, 
-resulting in a speed-up of a factor 2 to 4 compared to "Async". 
-
-When using the rate adjust feature to match capture and playback devices, 
-one of the "Async" variants should be used. 
-These asynchronous presets do not rely on a fixed resampling ratio to produce high quality output.
-When rate adjust is enabled the resampling ratio is dynamically adjusted in order to compensate 
-for drifts and mismatches between the input and output sample clocks.  
-Using a "Sync" variant with rate adjust enabled is not recommended as it produces 
-much larger resampling artefacts.
-
-There is also a "Free" mode as well where all parameters can be set freely. The configuration is specified like this:
+There is also a "FreeAsync" mode as well where all parameters can be set freely. The configuration is specified like this:
 ```
 ...
   resampler_type:
@@ -457,17 +438,36 @@ There is also a "Free" mode as well where all parameters can be set freely. The 
       oversampling_ratio: 128
       interpolation: Cubic
 ```
+
+For reference, the asynchronous presets are defined according to this table:
+|                   | FastAsync | BalancedAsync | AccurateAsync |
+|-------------------|-----------|---------------|---------------|
+|sinc_len           | 64        | 128           | 256           |
+|oversampling_ratio | 1024      | 1024          | 256           |
+|interpolation      | Linear    | Linear        | Cubic         |
+|window             | Hann2     | Blackman2     | BlackmanHarris2 |
+|f_cutoff           | 0.915     | 0.925         | 0.947           |
+
+
+For performing fixed ratio resampling, like resampling 
+from 44.1kHz to 96kHz (which corresponds to a precise ratio of 147/320)
+choose the "Synchronous" variant. 
+This is considerably faster than the asynchronous variants, but does not support rate adjust.
+The quality is comparable to the "AccurateAsync" preset.
+
+When using the rate adjust feature to match capture and playback devices, 
+one of the "Async" variants must be used. 
+These asynchronous presets do not rely on a fixed resampling ratio.
+When rate adjust is enabled the resampling ratio is dynamically adjusted in order to compensate 
+for drifts and mismatches between the input and output sample clocks.  
+Using the "Synchronous" variant with rate adjust enabled will print warnings, 
+and any rate adjust request will be ignored.
+
 See the library documentation for more details. [Rubato on docs.rs](https://docs.rs/rubato/0.1.0/rubato/)
 
-For reference, the presets are defined according to this table:
 
-|                   | FastSync | BalancedSync | AccurateSync    | FastAsync | BalancedAsync | AccurateAsync |
-|-------------------|----------|--------------|-----------------|-----------|---------------|---------------|
-|sinc_len           | 64       | 128          | 256             | 64        | 128           | 256           |
-|oversampling_ratio | auto     | auto         | auto            | 1024      | 1024          | 256           |
-|interpolation      | Nearest  | Nearest      | Nearest         | Linear    | Linear        | Cubic         |
-|window             | Hann2    | Blackman2    | BlackmanHarris2 | Hann2     | Blackman2     | BlackmanHarris2 |
-|f_cutoff           | 0.915    | 0.925        | 0.947           | 0.915     | 0.925         | 0.947           |
+
+
 
 
 ## Mixers
