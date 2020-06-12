@@ -2,9 +2,9 @@
 import numpy as np
 
 
-spike = np.zeros(2**16, dtype="int32")
-spike[0] = 2**31-1
+spike = np.zeros(2**12, dtype="float64")
+spike[1024] = 1.0
 
-spike.tofile("spike_i32.raw")
+spike.tofile("spike_f64.raw")
 
 

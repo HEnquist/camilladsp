@@ -312,10 +312,12 @@ fn capture_loop_bytes(
                     elval.set_integer(0, (100_000.0 * speed) as i32).unwrap();
                     elem.write(&elval).unwrap();
                 } else if let Some(resampl) = &mut resampler {
-                    if !params.async_src {
-                        warn!("Adjusting rate of Sync type resampler. Switch to Async for much improved quality");
+                    if params.async_src {
+                        resampl.set_resample_ratio_relative(speed).unwrap();
                     }
-                    resampl.set_resample_ratio_relative(speed).unwrap();
+                    else {
+                        warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
+                    }
                 }
             }
             Err(_) => {}

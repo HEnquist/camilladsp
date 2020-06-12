@@ -264,11 +264,13 @@ fn capture_loop(
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
                 if let Some(resampl) = &mut resampler {
-                    if !params.async_src {
-                        warn!("Adjusting rate of Sync type resampler. Switch to Async for much improved quality");
+                    if params.async_src {
+                        if resampl.set_resample_ratio_relative(speed).is_err() {
+                            debug!("Failed to set resampling speed to {}", speed);
+                        }
                     }
-                    if resampl.set_resample_ratio_relative(speed).is_err() {
-                        debug!("Failed to set resampling speed to {}", speed);
+                    else {
+                        warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
                     }
                 }
             }
