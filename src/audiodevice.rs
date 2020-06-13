@@ -296,7 +296,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         && !conf.enable_rate_adjust
         && resampler_is_async(&conf.resampler_type)
     {
-        warn!("Using Async resampler for synchronous resampling. Switch to Sync type to save CPU time.");
+        info!("Using Async resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time.");
     }
     match conf.capture {
         #[cfg(feature = "alsa-backend")]
