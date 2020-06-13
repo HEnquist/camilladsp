@@ -306,7 +306,7 @@ fn capture_loop(
                         bytes_read += (extra_bytes_left as f32 / params.resampling_ratio) as usize;
                         extra_bytes_left = 0;
                     }
-                } else if bytes == 0 {
+                } else if bytes == 0 && capture_bytes > 0 {
                     debug!("Reached end of file");
                     let extra_samples = extra_bytes_left / params.store_bytes / params.channels;
                     send_silence(
