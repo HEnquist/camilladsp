@@ -268,6 +268,7 @@ impl CaptureDevice for PulseCaptureDevice {
         let format = self.format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
+        let async_src = resampler_is_async(&resampler_conf);
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
@@ -315,8 +316,13 @@ impl CaptureDevice for PulseCaptureDevice {
                                 }
                                 Ok(CommandMessage::SetSpeed { speed }) => {
                                     if let Some(resampl) = &mut resampler {
-                                        if resampl.set_resample_ratio_relative(speed).is_err() {
-                                            debug!("Failed to set resampling speed to {}", speed);
+                                        if async_src {
+                                            if resampl.set_resample_ratio_relative(speed).is_err() {
+                                                debug!("Failed to set resampling speed to {}", speed);
+                                            }
+                                        }
+                                        else {
+                                            warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
                                         }
                                     }
                                 }
@@ -328,6 +334,10 @@ impl CaptureDevice for PulseCaptureDevice {
                                 channels,
                                 store_bytes,
                             );
+                            if capture_bytes > buf.len() {
+                                debug!("Capture buffer too small, extending");
+                                buf.append(&mut vec![0u8; capture_bytes - buf.len()]);
+                            }
                             let read_res = pulsedevice.read(&mut buf[0..capture_bytes]);
                             match read_res {
                                 Ok(()) => {}

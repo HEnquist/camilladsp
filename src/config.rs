@@ -143,10 +143,8 @@ pub enum Resampler {
     FastAsync,
     BalancedAsync,
     AccurateAsync,
-    FastSync,
-    BalancedSync,
-    AccurateSync,
-    Free {
+    Synchronous,
+    FreeAsync {
         sinc_len: usize,
         oversampling_ratio: usize,
         interpolation: InterpolationType,

@@ -78,6 +78,9 @@ struct CaptureParams {
     bits: i32,
     bytes_per_sample: usize,
     floats: bool,
+    samplerate: usize,
+    capture_samplerate: usize,
+    async_src: bool,
 }
 
 struct PlaybackParams {
@@ -162,8 +165,8 @@ fn open_pcm(
         }
 
         hwp.set_access(Access::RWInterleaved)?;
-        hwp.set_buffer_size(2 * bufsize)?;
-        hwp.set_period_size(bufsize / 4, alsa::ValueOr::Nearest)?;
+        let _bufsize = hwp.set_buffer_size_near(2 * bufsize)?;
+        let _period = hwp.set_period_size_near(bufsize / 4, alsa::ValueOr::Nearest)?;
         pcmdev.hw_params(&hwp)?;
     }
 
@@ -289,6 +292,11 @@ fn capture_loop_bytes(
     let mut elval = ElemValue::new(ElemType::Integer).unwrap();
     if element.is_some() {
         info!("Capture device supports rate adjust");
+        if params.samplerate == params.capture_samplerate && resampler.is_some() {
+            warn!("Needless 1:1 sample rate conversion active. Not needed since capture device supports rate adjust");
+        } else if params.async_src && resampler.is_some() {
+            warn!("Async resampler not needed since capture device supports rate adjust. Switch to Sync type to save CPU time.");
+        }
     }
     let mut capture_bytes = params.chunksize * params.channels * params.bytes_per_sample;
     loop {
@@ -304,15 +312,18 @@ fn capture_loop_bytes(
                     elval.set_integer(0, (100_000.0 * speed) as i32).unwrap();
                     elem.write(&elval).unwrap();
                 } else if let Some(resampl) = &mut resampler {
-                    resampl.set_resample_ratio_relative(speed).unwrap();
+                    if params.async_src {
+                        if resampl.set_resample_ratio_relative(speed).is_err() {
+                            debug!("Failed to set resampling speed to {}", speed);
+                        }
+                    } else {
+                        warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
+                    }
                 }
             }
             Err(_) => {}
         };
-        if let Some(resampl) = &mut resampler {
-            capture_bytes = resampl.nbr_frames_needed() * params.channels * params.bytes_per_sample;
-            trace!("Resamper needs {} frames", resampl.nbr_frames_needed());
-        }
+        capture_bytes = get_nbr_capture_bytes(capture_bytes, &resampler, &params, &mut buffer);
         let capture_res = capture_buffer(&mut buffer[0..capture_bytes], pcmdevice, &io);
         match capture_res {
             Ok(_) => {
@@ -365,6 +376,25 @@ fn capture_loop_bytes(
             channels.audio.send(msg).unwrap();
         }
     }
+}
+
+fn get_nbr_capture_bytes(
+    capture_bytes: usize,
+    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
+    params: &CaptureParams,
+    buf: &mut Vec<u8>,
+) -> usize {
+    let capture_bytes_new = if let Some(resampl) = &resampler {
+        trace!("Resamper needs {} frames", resampl.nbr_frames_needed());
+        resampl.nbr_frames_needed() * params.channels * params.bytes_per_sample
+    } else {
+        capture_bytes
+    };
+    if capture_bytes > buf.len() {
+        debug!("Capture buffer too small, extending");
+        buf.append(&mut vec![0u8; capture_bytes_new - buf.len()]);
+    }
+    capture_bytes_new
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
@@ -514,6 +544,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let format = self.format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
+        let async_src = resampler_is_async(&resampler_conf);
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
             .spawn(move || {
@@ -554,6 +585,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                             bits,
                             bytes_per_sample,
                             floats,
+                            samplerate,
+                            capture_samplerate,
+                            async_src,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,
@@ -570,68 +604,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                             cap_params,
                             resampler,
                         );
-                        //match format {
-                        //    SampleFormat::S16LE => {
-                        //        let io = pcmdevice.io_i16().unwrap();
-                        //        let buffer = vec![0i16; channels * buffer_frames];
-                        //        capture_loop_int(
-                        //            cap_channels,
-                        //            buffer,
-                        //            &pcmdevice,
-                        //            io,
-                        //            cap_params,
-                        //            resampler,
-                        //        );
-                        //    }
-                        //    SampleFormat::S24LE | SampleFormat::S32LE => {
-                        //        let io = pcmdevice.io_i32().unwrap();
-                        //        let buffer = vec![0i32; channels * buffer_frames];
-                        //        capture_loop_int(
-                        //            cap_channels,
-                        //            buffer,
-                        //            &pcmdevice,
-                        //            io,
-                        //            cap_params,
-                        //            resampler,
-                        //        );
-                        //    }
-                        //    SampleFormat::S24LE3 => {
-                        //        let io = pcmdevice.io_u8().unwrap();
-                        //        let buffer = vec![0u8; channels * buffer_frames * 3];
-                        //        capture_loop_int(
-                        //            cap_channels,
-                        //            buffer,
-                        //            &pcmdevice,
-                        //            io,
-                        //            cap_params,
-                        //            resampler,
-                        //        );
-                        //    }
-                        //    SampleFormat::FLOAT32LE => {
-                        //        let io = pcmdevice.io_f32().unwrap();
-                        //        let buffer = vec![0f32; channels * buffer_frames];
-                        //        capture_loop_float(
-                        //            cap_channels,
-                        //            buffer,
-                        //            &pcmdevice,
-                        //            io,
-                        //            cap_params,
-                        //            resampler,
-                        //        );
-                        //    }
-                        //    SampleFormat::FLOAT64LE => {
-                        //        let io = pcmdevice.io_f64().unwrap();
-                        //        let buffer = vec![0f64; channels * buffer_frames];
-                        //        capture_loop_float(
-                        //            cap_channels,
-                        //            buffer,
-                        //            &pcmdevice,
-                        //            io,
-                        //            cap_params,
-                        //            resampler,
-                        //        );
-                        //    }
-                        //};
                     }
                     Err(err) => {
                         status_channel

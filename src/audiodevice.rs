@@ -6,7 +6,10 @@ use filedevice;
 use num::integer;
 #[cfg(feature = "pulse-backend")]
 use pulsedevice;
-use rubato::{InterpolationParameters, InterpolationType, Resampler, SincFixedOut, WindowFunction};
+use rubato::{
+    FftFixedOut, InterpolationParameters, InterpolationType, Resampler, SincFixedOut,
+    WindowFunction,
+};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -140,14 +143,22 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     }
 }
 
-pub fn get_resampler(
+pub fn resampler_is_async(conf: &config::Resampler) -> bool {
+    match &conf {
+        config::Resampler::FastAsync
+        | config::Resampler::BalancedAsync
+        | config::Resampler::AccurateAsync
+        | config::Resampler::FreeAsync { .. } => true,
+        _ => false,
+    }
+}
+
+pub fn get_async_parameters(
     conf: &config::Resampler,
-    num_channels: usize,
     samplerate: usize,
     capture_samplerate: usize,
-    chunksize: usize,
-) -> Option<Box<dyn Resampler<PrcFmt>>> {
-    let parameters = match &conf {
+) -> InterpolationParameters {
+    match &conf {
         config::Resampler::FastAsync => {
             let sinc_len = 64;
             let f_cutoff = 0.915_602_15;
@@ -190,7 +201,7 @@ pub fn get_resampler(
                 window,
             }
         }
-        config::Resampler::FastSync => {
+        config::Resampler::Synchronous => {
             let sinc_len = 64;
             let f_cutoff = 0.915_602_15;
             let gcd = integer::gcd(samplerate, capture_samplerate);
@@ -205,37 +216,7 @@ pub fn get_resampler(
                 window,
             }
         }
-        config::Resampler::BalancedSync => {
-            let sinc_len = 128;
-            let f_cutoff = 0.925_914_65;
-            let gcd = integer::gcd(samplerate, capture_samplerate);
-            let oversampling_factor = samplerate / gcd;
-            let interpolation = InterpolationType::Nearest;
-            let window = WindowFunction::Blackman2;
-            InterpolationParameters {
-                sinc_len,
-                f_cutoff,
-                oversampling_factor,
-                interpolation,
-                window,
-            }
-        }
-        config::Resampler::AccurateSync => {
-            let sinc_len = 256;
-            let f_cutoff = 0.947_337_15;
-            let gcd = integer::gcd(samplerate, capture_samplerate);
-            let oversampling_factor = samplerate / gcd;
-            let interpolation = InterpolationType::Nearest;
-            let window = WindowFunction::BlackmanHarris2;
-            InterpolationParameters {
-                sinc_len,
-                f_cutoff,
-                oversampling_factor,
-                interpolation,
-                window,
-            }
-        }
-        config::Resampler::Free {
+        config::Resampler::FreeAsync {
             sinc_len,
             oversampling_ratio,
             interpolation,
@@ -263,15 +244,37 @@ pub fn get_resampler(
                 window: wind,
             }
         }
-    };
-    debug!("Creating resampler with parameters: {:?}", parameters);
-    let resampler = SincFixedOut::<PrcFmt>::new(
-        samplerate as f64 / capture_samplerate as f64,
-        parameters,
-        chunksize,
-        num_channels,
-    );
-    Some(Box::new(resampler))
+    }
+}
+
+pub fn get_resampler(
+    conf: &config::Resampler,
+    num_channels: usize,
+    samplerate: usize,
+    capture_samplerate: usize,
+    chunksize: usize,
+) -> Option<Box<dyn Resampler<PrcFmt>>> {
+    if resampler_is_async(&conf) {
+        let parameters = get_async_parameters(&conf, samplerate, capture_samplerate);
+        debug!(
+            "Creating asynchronous resampler with parameters: {:?}",
+            parameters
+        );
+        Some(Box::new(SincFixedOut::<PrcFmt>::new(
+            samplerate as f64 / capture_samplerate as f64,
+            parameters,
+            chunksize,
+            num_channels,
+        )))
+    } else {
+        Some(Box::new(FftFixedOut::<PrcFmt>::new(
+            capture_samplerate,
+            samplerate,
+            chunksize,
+            2,
+            num_channels,
+        )))
+    }
 }
 
 /// Create a capture device.
@@ -282,6 +285,19 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     } else {
         conf.samplerate
     };
+    let diff_rates = capture_samplerate != conf.samplerate;
+    // Check for non-optimal resampling settings
+    if !diff_rates && conf.enable_resampling && !conf.enable_rate_adjust {
+        warn!(
+            "Needless 1:1 sample rate conversion active. Not needed since enable_rate_adjust=False"
+        );
+    } else if diff_rates
+        && conf.enable_resampling
+        && !conf.enable_rate_adjust
+        && resampler_is_async(&conf.resampler_type)
+    {
+        info!("Using Async resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time.");
+    }
     match conf.capture {
         #[cfg(feature = "alsa-backend")]
         config::CaptureDevice::Alsa {

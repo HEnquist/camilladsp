@@ -70,6 +70,7 @@ struct CaptureParams {
     chunksize: usize,
     resampling_ratio: f32,
     read_bytes: usize,
+    async_src: bool,
 }
 
 //struct PlaybackParams {
@@ -213,6 +214,27 @@ fn build_chunk(
     }
 }
 
+fn get_capture_bytes(
+    bytes_to_read: usize,
+    nbr_bytes_read: usize,
+    capture_bytes: usize,
+    buf: &mut Vec<u8>,
+) -> usize {
+    let capture_bytes = if bytes_to_read == 0
+        || (bytes_to_read > 0 && (nbr_bytes_read + capture_bytes) <= bytes_to_read)
+    {
+        capture_bytes
+    } else {
+        debug!("Stopping capture, reached read_bytes limit");
+        bytes_to_read - nbr_bytes_read
+    };
+    if capture_bytes > buf.len() {
+        debug!("Capture buffer too small, extending");
+        buf.append(&mut vec![0u8; capture_bytes - buf.len()]);
+    }
+    capture_bytes
+}
+
 fn capture_loop(
     mut file: File,
     params: CaptureParams,
@@ -242,8 +264,12 @@ fn capture_loop(
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
                 if let Some(resampl) = &mut resampler {
-                    if resampl.set_resample_ratio_relative(speed).is_err() {
-                        debug!("Failed to set resampling speed to {}", speed);
+                    if params.async_src {
+                        if resampl.set_resample_ratio_relative(speed).is_err() {
+                            debug!("Failed to set resampling speed to {}", speed);
+                        }
+                    } else {
+                        warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
                     }
                 }
             }
@@ -255,14 +281,8 @@ fn capture_loop(
             params.channels,
             params.store_bytes,
         );
-        capture_bytes_temp = if params.read_bytes == 0
-            || (params.read_bytes > 0 && (nbr_bytes_read + capture_bytes) <= params.read_bytes)
-        {
-            capture_bytes
-        } else {
-            debug!("Stopping capture, reached read_bytes limit");
-            params.read_bytes - nbr_bytes_read
-        };
+        capture_bytes_temp =
+            get_capture_bytes(params.read_bytes, nbr_bytes_read, capture_bytes, &mut buf);
         let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         match read_res {
             Ok(bytes) => {
@@ -286,7 +306,7 @@ fn capture_loop(
                         bytes_read += (extra_bytes_left as f32 / params.resampling_ratio) as usize;
                         extra_bytes_left = 0;
                     }
-                } else if bytes == 0 {
+                } else if bytes == 0 && capture_bytes > 0 {
                     debug!("Reached end of file");
                     let extra_samples = extra_bytes_left / params.store_bytes / params.channels;
                     send_silence(
@@ -391,6 +411,7 @@ impl CaptureDevice for FileCaptureDevice {
         let format = self.format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
+        let async_src = resampler_is_async(&resampler_conf);
         let extra_bytes = self.extra_samples * store_bytes * channels;
         let skip_bytes = self.skip_bytes;
         let read_bytes = self.read_bytes;
@@ -432,6 +453,7 @@ impl CaptureDevice for FileCaptureDevice {
                             chunksize,
                             resampling_ratio: samplerate as f32 / capture_samplerate as f32,
                             read_bytes,
+                            async_src,
                         };
                         let msg_channels = CaptureChannels {
                             audio: channel,
