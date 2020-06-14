@@ -354,11 +354,9 @@ fn main() {
                 .short("p")
                 .long("port")
                 .takes_value(true)
-                .default_value("0")
-                .hide_default_value(true)
                 .validator(|v: String| -> Result<(), String> {
                     if let Ok(port) = v.parse::<usize>() {
-                        if port < 65535 {
+                        if port > 0 && port < 65535 {
                             return Ok(());
                         }
                     }
@@ -370,7 +368,8 @@ fn main() {
                 .short("w")
                 .long("wait")
                 .help("Wait for config from websocket")
-                .conflicts_with("configfile"),
+                .conflicts_with("configfile")
+                .requires("port"),
         );
     let matches = clapapp.get_matches();
 
@@ -418,6 +417,8 @@ fn main() {
         return;
     }
 
+    let wait = matches.is_present("wait");
+
     let signal_reload = Arc::new(AtomicBool::new(false));
     let signal_exit = Arc::new(AtomicUsize::new(0));
     //let active_config = Arc::new(Mutex::new(String::new()));
@@ -428,8 +429,8 @@ fn main() {
 
     #[cfg(feature = "socketserver")]
     {
-        let serverport = matches.value_of("port").unwrap().parse::<usize>().unwrap();
-        if serverport > 0 {
+        if let Some(port_str) = matches.value_of("port") {
+            let serverport = port_str.parse::<usize>().unwrap();
             socketserver::start_server(
                 serverport,
                 signal_reload.clone(),
@@ -459,11 +460,15 @@ fn main() {
         match exitstatus {
             Err(e) => {
                 error!("({}) {}", e.to_string(), e);
-                break;
+                if !wait {
+                    break;
+                }
             }
             Ok(ExitStatus::Exit) => {
                 debug!("Exiting");
-                break;
+                if !wait {
+                    break;
+                }
             }
             Ok(ExitStatus::Restart) => {
                 debug!("Restarting with new config");

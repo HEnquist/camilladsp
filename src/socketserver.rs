@@ -16,7 +16,7 @@ enum WSCommand {
     Invalid,
 }
 
-fn parse_command(cmd: ws::Message) -> WSCommand {
+fn parse_command(cmd: &ws::Message) -> WSCommand {
     if let Ok(command) = cmd.as_text() {
         let cmdarg: Vec<&str> = command.splitn(2, ':').collect();
         if cmdarg.is_empty() {
@@ -67,7 +67,7 @@ pub fn start_server(
             let new_config_inst = new_config_shared.clone();
             let active_config_path_inst = active_config_path.clone();
             move |msg: ws::Message| {
-                let command = parse_command(msg);
+                let command = parse_command(&msg);
                 debug!("parsed command: {:?}", command);
                 match command {
                     WSCommand::Reload => {
@@ -106,7 +106,10 @@ pub fn start_server(
                                 }
                                 _ => socket.send("ERROR:SETCONFIG"),
                             },
-                            _ => socket.send("ERROR:SETCONFIG"),
+                            Err(error) => {
+                                error!("Config error: {}", error);
+                                socket.send("ERROR:SETCONFIG")
+                            },
                         }
                     }
                     WSCommand::Stop => {
@@ -118,7 +121,10 @@ pub fn start_server(
                         signal_exit_inst.store(1, Ordering::Relaxed);
                         socket.send("OK:EXIT")
                     }
-                    WSCommand::Invalid => socket.send("ERROR:INVALID"),
+                    WSCommand::Invalid => {
+                        error!("Invalid command {}", msg);
+                        socket.send("ERROR:INVALID")
+                    },
                 }
             }
         })
@@ -134,16 +140,16 @@ mod tests {
     #[test]
     fn parse_commands() {
         let cmd = Message::text("reload");
-        let res = parse_command(cmd);
+        let res = parse_command(&cmd);
         assert_eq!(res, WSCommand::Reload);
         let cmd = Message::text("asdfasdf");
-        let res = parse_command(cmd);
+        let res = parse_command(&cmd);
         assert_eq!(res, WSCommand::Invalid);
         let cmd = Message::text("");
-        let res = parse_command(cmd);
+        let res = parse_command(&cmd);
         assert_eq!(res, WSCommand::Invalid);
         let cmd = Message::text("setconfigname:somefile");
-        let res = parse_command(cmd);
+        let res = parse_command(&cmd);
         assert_eq!(res, WSCommand::SetConfigName("somefile".to_string()));
     }
 }
