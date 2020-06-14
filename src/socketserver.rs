@@ -109,7 +109,7 @@ pub fn start_server(
                             Err(error) => {
                                 error!("Config error: {}", error);
                                 socket.send("ERROR:SETCONFIG")
-                            },
+                            }
                         }
                     }
                     WSCommand::Stop => {
@@ -124,7 +124,7 @@ pub fn start_server(
                     WSCommand::Invalid => {
                         error!("Invalid command {}", msg);
                         socket.send("ERROR:INVALID")
-                    },
+                    }
                 }
             }
         })
