@@ -13,6 +13,7 @@ extern crate rand_distr;
 extern crate rubato;
 #[cfg(not(feature = "FFTW"))]
 extern crate rustfft;
+extern crate realfft;
 extern crate serde;
 extern crate serde_with;
 extern crate signal_hook;
