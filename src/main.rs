@@ -230,8 +230,7 @@ fn run(
                     };
                 }
                 Err(err) => {
-                    error!("Config file error:");
-                    error!("{}", err);
+                    error!("Config file error: {}", err);
                 }
             };
         }
