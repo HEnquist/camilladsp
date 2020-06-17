@@ -8,7 +8,6 @@ extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
 extern crate num;
-extern crate num_traits;
 extern crate rand;
 extern crate rand_distr;
 #[cfg(not(feature = "FFTW"))]

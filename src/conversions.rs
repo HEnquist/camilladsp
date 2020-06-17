@@ -1,10 +1,5 @@
-extern crate num_traits;
-//use std::{iter, error};
-use std::convert::TryInto;
-
-//mod audiodevice;
 use audiodevice::*;
-
+use std::convert::TryInto;
 use PrcFmt;
 
 /// Convert an AudioChunk to an interleaved buffer of u8.
@@ -16,7 +11,6 @@ pub fn chunk_to_buffer_bytes(
     bytes_per_sample: usize,
 ) -> usize {
     let _num_samples = chunk.channels * chunk.frames;
-    //let mut buf = Vec::with_capacity(num_samples);
     let mut value16;
     let mut value32;
     let mut idx = 0;

@@ -1,27 +1,22 @@
 extern crate alsa;
-extern crate num_traits;
-//use std::{iter, error};
-//use std::any::{Any, TypeId};
 use alsa::ctl::{ElemId, ElemIface};
 use alsa::ctl::{ElemType, ElemValue};
 use alsa::hctl::HCtl;
 use alsa::pcm::{Access, Format, HwParams, State};
 use alsa::{Direction, ValueOr};
-use rubato::Resampler;
-use std::ffi::CString;
-use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
-use std::thread;
-use std::time::{Duration, SystemTime};
-//mod audiodevice;
 use audiodevice::*;
-// Sample format
 use config;
 use config::SampleFormat;
 use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
     chunk_to_buffer_float_bytes,
 };
+use rubato::Resampler;
+use std::ffi::CString;
+use std::sync::mpsc;
+use std::sync::{Arc, Barrier};
+use std::thread;
+use std::time::{Duration, SystemTime};
 
 use CommandMessage;
 use PrcFmt;

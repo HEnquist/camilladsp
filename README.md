@@ -88,7 +88,6 @@ See the [tutorial for a step-by-step guide.](./stepbystep.md)
 * https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
 * https://crates.io/crates/alsa - Alsa audio backend
 * https://crates.io/crates/serde_yaml - Config file reading
-* https://crates.io/crates/num-traits - Converting between number types
 
 # Building
 

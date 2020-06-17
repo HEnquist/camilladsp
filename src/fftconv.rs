@@ -2,7 +2,8 @@ use crate::filters::Filter;
 use config;
 use filters;
 use num::Complex;
-use num_traits::Zero;
+//use num_traits::Zero;
+use num::traits::Zero;
 use realfft::{ComplexToReal, RealToComplex};
 
 // Sample format
