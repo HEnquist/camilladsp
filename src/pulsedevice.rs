@@ -1,25 +1,19 @@
-extern crate num_traits;
-//use std::{iter, error};
-use pulse;
-
 use psimple::Simple;
+use pulse;
 use pulse::sample;
 use pulse::stream::Direction;
 
-use rubato::Resampler;
-
-use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
-use std::thread;
-//mod audiodevice;
 use audiodevice::*;
-// Sample format
 use config;
 use config::SampleFormat;
 use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
     chunk_to_buffer_float_bytes,
 };
+use rubato::Resampler;
+use std::sync::mpsc;
+use std::sync::{Arc, Barrier};
+use std::thread;
 
 use CommandMessage;
 use PrcFmt;

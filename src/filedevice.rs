@@ -1,6 +1,3 @@
-extern crate num_traits;
-//use std::{iter, error};
-
 use audiodevice::*;
 use config;
 use config::SampleFormat;
