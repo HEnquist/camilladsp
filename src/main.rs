@@ -8,12 +8,12 @@ extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
 extern crate num;
+extern crate num_traits;
 extern crate rand;
 extern crate rand_distr;
-extern crate rubato;
 #[cfg(not(feature = "FFTW"))]
-extern crate rustfft;
 extern crate realfft;
+extern crate rubato;
 extern crate serde;
 extern crate serde_with;
 extern crate signal_hook;
@@ -175,6 +175,7 @@ fn run(
     //let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
     *active_config_shared.lock().unwrap() = Some(active_config.clone());
     *new_config_shared.lock().unwrap() = None;
+    signal_reload.store(false, Ordering::Relaxed);
 
     // Processing thread
     processing::run_processing(conf_proc, barrier_proc, tx_pb, rx_cap, rx_pipeconf);

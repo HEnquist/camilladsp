@@ -1,9 +1,9 @@
 use crate::filters::Filter;
 use config;
 use filters;
-use rustfft::num_complex::Complex;
-use rustfft::num_traits::Zero;
-use realfft::{RealToComplex, ComplexToReal};
+use num::Complex;
+use num_traits::Zero;
+use realfft::{ComplexToReal, RealToComplex};
 
 // Sample format
 use PrcFmt;
@@ -42,8 +42,7 @@ impl FFTConv {
         debug!("Conv {} is using {} segments", name, nsegments);
 
         for (n, coeff) in coeffs.iter().enumerate() {
-            coeffs_padded[n / data_length][n % data_length] =
-                coeff / (data_length as PrcFmt);
+            coeffs_padded[n / data_length][n % data_length] = coeff / (data_length as PrcFmt);
         }
 
         for (segment, segment_f) in coeffs_padded.iter().zip(coeffs_f.iter_mut()) {
@@ -93,13 +92,14 @@ impl Filter for FFTConv {
         // FFT and store result in history, update index
         self.index = (self.index + 1) % self.nsegments;
         self.fft
-            .process(&self.input_buf, &mut self.input_f[self.index]).unwrap();
+            .process(&self.input_buf, &mut self.input_f[self.index])
+            .unwrap();
 
         //self.temp_buf = vec![Complex::zero(); 2 * self.npoints];
         // Loop through history of input FTs, multiply with filter FTs, accumulate result
         let segm = 0;
         let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-        for n in 0..(self.npoints+1) {
+        for n in 0..(self.npoints + 1) {
             self.temp_buf[n] = self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
         }
         for segm in 1..self.nsegments {
@@ -110,7 +110,9 @@ impl Filter for FFTConv {
         }
 
         // IFFT result, store result anv overlap
-        self.ifft.process(&self.temp_buf, &mut self.output_buf).unwrap();
+        self.ifft
+            .process(&self.temp_buf, &mut self.output_buf)
+            .unwrap();
         //let mut filtered: Vec<PrcFmt> = vec![0.0; self.npoints];
         for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
             *item = self.output_buf[n] + self.overlap[n];
