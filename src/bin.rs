@@ -34,47 +34,13 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time;
 
-//// Sample format
-//#[cfg(feature = "32bit")]
-//pub type PrcFmt = f32;
-//#[cfg(not(feature = "32bit"))]
-//pub type PrcFmt = f64;
-//pub type Res<T> = Result<T, Box<dyn error::Error>>;
-
 use camillalib::Res;
 
-//#[cfg(feature = "alsa-backend")]
-//mod alsadevice;
-//mod audiodevice;
-//mod basicfilters;
-//mod biquad;
-//mod biquadcombo;
-//mod config;
-//mod conversions;
-//mod diffeq;
-//mod dither;
-//#[cfg(not(feature = "FFTW"))]
-//mod fftconv;
-//#[cfg(feature = "FFTW")]
-//mod fftconv_fftw;
-//mod fifoqueue;
-//mod filedevice;
-//mod filters;
-//mod mixer;
-//mod processing;
-//#[cfg(feature = "pulse-backend")]
-//mod pulsedevice;
-//#[cfg(feature = "socketserver")]
-//mod socketserver;
-
-//#[cfg(feature = "alsa-backend")]
 use camillalib::audiodevice;
 use camillalib::config;
 use camillalib::processing;
 #[cfg(feature = "socketserver")]
 use camillalib::socketserver;
-
-//use audiodevice::*;
 
 use camillalib::StatusMessage;
 
