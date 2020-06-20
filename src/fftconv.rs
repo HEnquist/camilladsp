@@ -1,9 +1,8 @@
 use crate::filters::Filter;
 use config;
 use filters;
-use num::Complex;
-//use num_traits::Zero;
 use num::traits::Zero;
+use num::Complex;
 use realfft::{ComplexToReal, RealToComplex};
 
 // Sample format
@@ -46,7 +45,7 @@ impl FFTConv {
             coeffs_padded[n / data_length][n % data_length] = coeff / (data_length as PrcFmt);
         }
 
-        for (segment, segment_f) in coeffs_padded.iter().zip(coeffs_f.iter_mut()) {
+        for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
             fft.process(segment, segment_f).unwrap();
         }
 
@@ -93,7 +92,7 @@ impl Filter for FFTConv {
         // FFT and store result in history, update index
         self.index = (self.index + 1) % self.nsegments;
         self.fft
-            .process(&self.input_buf, &mut self.input_f[self.index])
+            .process(&mut self.input_buf, &mut self.input_f[self.index])
             .unwrap();
 
         //self.temp_buf = vec![Complex::zero(); 2 * self.npoints];
@@ -152,7 +151,7 @@ impl Filter for FFTConv {
                     coeff / (2.0 * self.npoints as PrcFmt);
             }
 
-            for (segment, segment_f) in coeffs_padded.iter().zip(coeffs_f.iter_mut()) {
+            for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
                 self.fft.process(segment, segment_f).unwrap();
             }
             self.coeffs_f = coeffs_f;

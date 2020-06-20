@@ -91,7 +91,9 @@ See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
 # Building
 
-Use recent stable versions of rustc and cargo. The minimum rustc version is 1.40.0.
+Use recent stable versions of rustc and cargo. The minimum rustc version is 1.40.0. 
+
+The recommended way to install rustc and cargo is by using the "rustup" tool. Get it here: https://rustup.rs/
 
 By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
 
@@ -105,12 +107,15 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
+- - Arch: ```sudo pacman -S cargo pkg-config```
 - Install Alsa dependency:
 - - Fedora: ```sudo dnf install alsa-lib-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libasound2-dev```
+- - Arch: ```sudo pacman -S alsa-lib```
 - Install Pulse dependency:
 - - Fedora: ```sudo dnf install pulseaudio-libs-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
+- - Arch:  ```sudo pacman -S libpulse```
 - Clone the repository
 - Build with standard options: ```cargo build --release```
 - - see below for other options
