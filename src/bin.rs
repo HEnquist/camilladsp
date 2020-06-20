@@ -1,6 +1,6 @@
-extern crate camillalib; 
 #[cfg(feature = "alsa-backend")]
 extern crate alsa;
+extern crate camillalib;
 extern crate clap;
 #[cfg(feature = "FFTW")]
 extern crate fftw;

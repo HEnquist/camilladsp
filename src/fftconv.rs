@@ -86,7 +86,7 @@ impl Filter for FFTConv {
         // Copy to inut buffer and convert to complex
         for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
             self.input_buf[n] = *item;
-            self.input_buf[n+self.npoints] = 0.0;
+            self.input_buf[n + self.npoints] = 0.0;
         }
 
         // FFT and store result in history, update index
