@@ -41,10 +41,10 @@ impl FFTConv {
         let temp_buf = AlignedVec::<ComplexFmt>::new(data_length + 1);
         let output_buf = AlignedVec::<PrcFmt>::new(2 * data_length);
         #[cfg(feature = "32bit")]
-        let mut fft: R2CPlan32 = R2CPlan::aligned(&[2 * data_length], Flag::Measure).unwrap();
+        let mut fft: R2CPlan32 = R2CPlan::aligned(&[2 * data_length], Flag::MEASURE).unwrap();
         #[cfg(not(feature = "32bit"))]
-        let mut fft: R2CPlan64 = R2CPlan::aligned(&[2 * data_length], Flag::Measure).unwrap();
-        let ifft = C2RPlan::aligned(&[2 * data_length], Flag::Measure).unwrap();
+        let mut fft: R2CPlan64 = R2CPlan::aligned(&[2 * data_length], Flag::MEASURE).unwrap();
+        let ifft = C2RPlan::aligned(&[2 * data_length], Flag::MEASURE).unwrap();
 
         let nsegments = ((coeffs.len() as PrcFmt) / (data_length as PrcFmt)).ceil() as usize;
 
@@ -97,12 +97,7 @@ impl Filter for FFTConv {
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
         // Copy to input buffer
-        //for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
-        //    self.input_buf[n] = *item;
-        //}
-        for (wf, buf) in waveform.iter_mut().zip(self.input_buf.iter_mut()) {
-            *buf = *wf;
-        }
+        self.input_buf[0..self.npoints].copy_from_slice(waveform);
 
         // FFT and store result in history, update index
         self.index = (self.index + 1) % self.nsegments;
@@ -113,13 +108,34 @@ impl Filter for FFTConv {
         // Loop through history of input FTs, multiply with filter FTs, accumulate result
         let segm = 0;
         let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-        for n in 0..(self.npoints + 1) {
-            self.temp_buf[n] = self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
+        //for n in 0..(self.npoints + 1) {
+        //    self.temp_buf[n] = self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
+        //}
+        //for segm in 1..self.nsegments {
+        //    let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
+        //    for n in 0..(self.npoints + 1) {
+        //        self.temp_buf[n] += self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
+        //    }
+        //}
+        for ((buf, input), coeff) in self
+            .temp_buf
+            .iter_mut()
+            .take(self.npoints + 1)
+            .zip(self.input_f[hist_idx].iter())
+            .zip(self.coeffs_f[segm].iter())
+        {
+            *buf = *input * *coeff;
         }
         for segm in 1..self.nsegments {
             let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-            for n in 0..(self.npoints + 1) {
-                self.temp_buf[n] += self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
+            for ((buf, input), coeff) in self
+                .temp_buf
+                .iter_mut()
+                .take(self.npoints + 1)
+                .zip(self.input_f[hist_idx].iter())
+                .zip(self.coeffs_f[segm].iter())
+            {
+                *buf += *input * *coeff;
             }
         }
 
@@ -127,11 +143,11 @@ impl Filter for FFTConv {
         self.ifft
             .c2r(&mut self.temp_buf, &mut self.output_buf)
             .unwrap();
-        //let mut filtered: Vec<PrcFmt> = vec![0.0; self.npoints];
-        for (n, item) in waveform.iter_mut().enumerate() {
+        for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
             *item = self.output_buf[n] + self.overlap[n];
-            self.overlap[n] = self.output_buf[n + self.npoints];
         }
+        self.overlap
+            .copy_from_slice(&self.output_buf[self.npoints..]);
         Ok(())
     }
 
