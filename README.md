@@ -416,7 +416,7 @@ and then use polynomial interpolation to get values for arbitrary times between 
 For synchronous resampling it instead works by transforming the waveform with FFT, modifying the spectrum, and then 
 getting the resampled waveform by inverse FFT.
 
-CamillaDSP provides six preset profiles for the resampler:
+CamillaDSP provides four preset profiles for the resampler:
 * Synchronous
 * FastAsync
 * BalancedAsync
