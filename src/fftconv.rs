@@ -1,9 +1,9 @@
 use crate::filters::Filter;
 use config;
 use filters;
+use helpers::{multiply_add_elements, multiply_elements};
 use num::traits::Zero;
 use num::Complex;
-use helpers::{multiply_add_elements, multiply_elements};
 use realfft::{ComplexToReal, RealToComplex};
 
 // Sample format
