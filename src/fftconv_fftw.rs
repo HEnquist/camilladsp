@@ -4,6 +4,7 @@ use fftw::array::AlignedVec;
 use fftw::plan::*;
 use fftw::types::*;
 use filters;
+use helpers::{multiply_add_elements, multiply_elements};
 
 // Sample format
 use PrcFmt;
@@ -108,35 +109,18 @@ impl Filter for FFTConv {
         // Loop through history of input FTs, multiply with filter FTs, accumulate result
         let segm = 0;
         let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-        //for n in 0..(self.npoints + 1) {
-        //    self.temp_buf[n] = self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
-        //}
-        //for segm in 1..self.nsegments {
-        //    let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-        //    for n in 0..(self.npoints + 1) {
-        //        self.temp_buf[n] += self.input_f[hist_idx][n] * self.coeffs_f[segm][n];
-        //    }
-        //}
-        for ((buf, input), coeff) in self
-            .temp_buf
-            .iter_mut()
-            .take(self.npoints + 1)
-            .zip(self.input_f[hist_idx].iter())
-            .zip(self.coeffs_f[segm].iter())
-        {
-            *buf = *input * *coeff;
-        }
+        multiply_elements(
+            &mut self.temp_buf,
+            &self.input_f[hist_idx],
+            &self.coeffs_f[segm],
+        );
         for segm in 1..self.nsegments {
             let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-            for ((buf, input), coeff) in self
-                .temp_buf
-                .iter_mut()
-                .take(self.npoints + 1)
-                .zip(self.input_f[hist_idx].iter())
-                .zip(self.coeffs_f[segm].iter())
-            {
-                *buf += *input * *coeff;
-            }
+            multiply_add_elements(
+                &mut self.temp_buf,
+                &self.input_f[hist_idx],
+                &self.coeffs_f[segm],
+            );
         }
 
         // IFFT result, store result anv overlap

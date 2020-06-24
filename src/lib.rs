@@ -49,6 +49,7 @@ pub mod fftconv_fftw;
 pub mod fifoqueue;
 pub mod filedevice;
 pub mod filters;
+pub mod helpers;
 pub mod mixer;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
