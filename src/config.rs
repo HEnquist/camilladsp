@@ -42,6 +42,7 @@ impl ConfigError {
 pub enum SampleFormat {
     S16LE,
     S24LE,
+    S24LE3,
     S32LE,
     FLOAT32LE,
     FLOAT64LE,
@@ -50,7 +51,7 @@ pub enum SampleFormat {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
-pub enum Device {
+pub enum CaptureDevice {
     #[cfg(feature = "alsa-backend")]
     Alsa {
         channels: usize,
@@ -69,6 +70,33 @@ pub enum Device {
         format: SampleFormat,
         #[serde(default)]
         extra_samples: usize,
+        #[serde(default)]
+        skip_bytes: usize,
+        #[serde(default)]
+        read_bytes: usize,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[serde(tag = "type")]
+pub enum PlaybackDevice {
+    #[cfg(feature = "alsa-backend")]
+    Alsa {
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
+    #[cfg(feature = "pulse-backend")]
+    Pulse {
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
+    File {
+        channels: usize,
+        filename: String,
+        format: SampleFormat,
     },
 }
 
@@ -85,12 +113,20 @@ pub struct Devices {
     pub silence_threshold: PrcFmt,
     #[serde(default)]
     pub silence_timeout: PrcFmt,
-    pub capture: Device,
-    pub playback: Device,
+    pub capture: CaptureDevice,
+    pub playback: PlaybackDevice,
+    #[serde(default)]
+    pub enable_rate_adjust: bool,
     #[serde(default)]
     pub target_level: usize,
     #[serde(default = "default_period")]
     pub adjust_period: f32,
+    #[serde(default)]
+    pub enable_resampling: bool,
+    #[serde(default)]
+    pub resampler_type: Resampler,
+    #[serde(default)]
+    pub capture_samplerate: usize,
 }
 
 fn default_period() -> f32 {
@@ -99,6 +135,47 @@ fn default_period() -> f32 {
 
 fn default_queuelimit() -> usize {
     100
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub enum Resampler {
+    FastAsync,
+    BalancedAsync,
+    AccurateAsync,
+    Synchronous,
+    FreeAsync {
+        sinc_len: usize,
+        oversampling_ratio: usize,
+        interpolation: InterpolationType,
+        window: WindowFunction,
+        f_cutoff: f32,
+    },
+}
+
+impl Default for Resampler {
+    fn default() -> Self {
+        Resampler::BalancedAsync
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub enum WindowFunction {
+    Hann,
+    Hann2,
+    Blackman,
+    Blackman2,
+    BlackmanHarris,
+    BlackmanHarris2,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub enum InterpolationType {
+    Cubic,
+    Linear,
+    Nearest,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -135,6 +212,7 @@ pub enum FileFormat {
     TEXT,
     S16LE,
     S24LE,
+    S24LE3,
     S32LE,
     FLOAT32LE,
     FLOAT64LE,
@@ -442,10 +520,10 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
     }
     let mut num_channels = match conf.devices.capture {
         #[cfg(feature = "alsa-backend")]
-        Device::Alsa { channels, .. } => channels,
+        CaptureDevice::Alsa { channels, .. } => channels,
         #[cfg(feature = "pulse-backend")]
-        Device::Pulse { channels, .. } => channels,
-        Device::File { channels, .. } => channels,
+        CaptureDevice::Pulse { channels, .. } => channels,
+        CaptureDevice::File { channels, .. } => channels,
     };
     let fs = conf.devices.samplerate;
     for step in conf.pipeline {
@@ -488,10 +566,10 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
     }
     let num_channels_out = match conf.devices.playback {
         #[cfg(feature = "alsa-backend")]
-        Device::Alsa { channels, .. } => channels,
+        PlaybackDevice::Alsa { channels, .. } => channels,
         #[cfg(feature = "pulse-backend")]
-        Device::Pulse { channels, .. } => channels,
-        Device::File { channels, .. } => channels,
+        PlaybackDevice::Pulse { channels, .. } => channels,
+        PlaybackDevice::File { channels, .. } => channels,
     };
     if num_channels != num_channels_out {
         return Err(Box::new(ConfigError::new(&format!(

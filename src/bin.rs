@@ -1,5 +1,6 @@
 #[cfg(feature = "alsa-backend")]
 extern crate alsa;
+extern crate camillalib;
 extern crate clap;
 #[cfg(feature = "FFTW")]
 extern crate fftw;
@@ -11,7 +12,8 @@ extern crate num;
 extern crate rand;
 extern crate rand_distr;
 #[cfg(not(feature = "FFTW"))]
-extern crate rustfft;
+extern crate realfft;
+extern crate rubato;
 extern crate serde;
 extern crate serde_with;
 extern crate signal_hook;
@@ -26,65 +28,25 @@ use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Ar
 use env_logger::Builder;
 use log::LevelFilter;
 use std::env;
-use std::error;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time;
 
-// Sample format
-#[cfg(feature = "32bit")]
-pub type PrcFmt = f32;
-#[cfg(not(feature = "32bit"))]
-pub type PrcFmt = f64;
-pub type Res<T> = Result<T, Box<dyn error::Error>>;
+use camillalib::Res;
 
-#[cfg(feature = "alsa-backend")]
-mod alsadevice;
-mod audiodevice;
-mod basicfilters;
-mod biquad;
-mod biquadcombo;
-mod config;
-mod conversions;
-mod diffeq;
-mod dither;
-#[cfg(not(feature = "FFTW"))]
-mod fftconv;
-#[cfg(feature = "FFTW")]
-mod fftconv_fftw;
-mod fifoqueue;
-mod filedevice;
-mod filters;
-mod mixer;
-mod processing;
-#[cfg(feature = "pulse-backend")]
-mod pulsedevice;
+use camillalib::audiodevice;
+use camillalib::config;
+use camillalib::processing;
 #[cfg(feature = "socketserver")]
-mod socketserver;
+use camillalib::socketserver;
 
-//use audiodevice::*;
+use camillalib::StatusMessage;
 
-pub enum StatusMessage {
-    PlaybackReady,
-    CaptureReady,
-    PlaybackError { message: String },
-    CaptureError { message: String },
-    PlaybackDone,
-    CaptureDone,
-    SetSpeed { speed: f32 },
-}
+use camillalib::CommandMessage;
 
-pub enum CommandMessage {
-    SetSpeed { speed: f32 },
-    Exit,
-}
-
-enum ExitStatus {
-    Restart,
-    Exit,
-}
+use camillalib::ExitStatus;
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
@@ -173,6 +135,7 @@ fn run(
     //let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
     *active_config_shared.lock().unwrap() = Some(active_config.clone());
     *new_config_shared.lock().unwrap() = None;
+    signal_reload.store(false, Ordering::Relaxed);
 
     // Processing thread
     processing::run_processing(conf_proc, barrier_proc, tx_pb, rx_cap, rx_pipeconf);
@@ -228,8 +191,7 @@ fn run(
                     };
                 }
                 Err(err) => {
-                    error!("Config file error:");
-                    error!("{}", err);
+                    error!("Config file error: {}", err);
                 }
             };
         }
@@ -289,7 +251,7 @@ fn run(
                     info!("Capture finished");
                 }
                 StatusMessage::SetSpeed { speed } => {
-                    debug!("SetSpeed message reveiced");
+                    debug!("SetSpeed message received");
                     tx_command_cap
                         .send(CommandMessage::SetSpeed { speed })
                         .unwrap();
@@ -353,11 +315,9 @@ fn main() {
                 .short("p")
                 .long("port")
                 .takes_value(true)
-                .default_value("0")
-                .hide_default_value(true)
                 .validator(|v: String| -> Result<(), String> {
                     if let Ok(port) = v.parse::<usize>() {
-                        if port < 65535 {
+                        if port > 0 && port < 65535 {
                             return Ok(());
                         }
                     }
@@ -369,7 +329,8 @@ fn main() {
                 .short("w")
                 .long("wait")
                 .help("Wait for config from websocket")
-                .conflicts_with("configfile"),
+                .conflicts_with("configfile")
+                .requires("port"),
         );
     let matches = clapapp.get_matches();
 
@@ -417,6 +378,8 @@ fn main() {
         return;
     }
 
+    let wait = matches.is_present("wait");
+
     let signal_reload = Arc::new(AtomicBool::new(false));
     let signal_exit = Arc::new(AtomicUsize::new(0));
     //let active_config = Arc::new(Mutex::new(String::new()));
@@ -427,8 +390,8 @@ fn main() {
 
     #[cfg(feature = "socketserver")]
     {
-        let serverport = matches.value_of("port").unwrap().parse::<usize>().unwrap();
-        if serverport > 0 {
+        if let Some(port_str) = matches.value_of("port") {
+            let serverport = port_str.parse::<usize>().unwrap();
             socketserver::start_server(
                 serverport,
                 signal_reload.clone(),
@@ -458,11 +421,15 @@ fn main() {
         match exitstatus {
             Err(e) => {
                 error!("({}) {}", e.to_string(), e);
-                break;
+                if !wait {
+                    break;
+                }
             }
             Ok(ExitStatus::Exit) => {
                 debug!("Exiting");
-                break;
+                if !wait {
+                    break;
+                }
             }
             Ok(ExitStatus::Restart) => {
                 debug!("Restarting with new config");

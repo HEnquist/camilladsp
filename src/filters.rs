@@ -70,6 +70,15 @@ pub fn read_coeff_file(filename: &str, format: &config::FileFormat) -> Res<Vec<P
                 coefficients.push(value);
             }
         }
+        config::FileFormat::S24LE3 => {
+            let mut buffer = [0; 4];
+            let scalefactor = (2.0 as PrcFmt).powi(23);
+            while let Ok(3) = file.read(&mut buffer[0..3]) {
+                let mut value = i32::from_le_bytes(buffer) as PrcFmt;
+                value /= scalefactor;
+                coefficients.push(value);
+            }
+        }
         config::FileFormat::S32LE => {
             let mut buffer = [0; 4];
             let scalefactor = (2.0 as PrcFmt).powi(31);

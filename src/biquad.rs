@@ -308,7 +308,6 @@ impl Filter for Biquad {
         for item in waveform.iter_mut() {
             *item = self.process_single(*item);
         }
-        //let out = input.iter().map(|s| self.process_single(*s)).collect::<Vec<PrcFmt>>();
         Ok(())
     }
 

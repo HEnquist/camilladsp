@@ -8,23 +8,92 @@ Audio data is captured from a capture device and sent to a playback device. Alsa
 The processing pipeline consists of any number of filters and mixers. Mixers are used to route audio between channels and to change the number of channels in the stream. Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT. A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples. A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
 The full configuration is given in a yaml file.
 
-### Background
-The purpose of CamillaDSP is to enable audio processing with combinations of FIR and IIR filters. This functionality is available in EqualizerAPO, but for Windows only. For Linux the best known FIR filter engine is probably BruteFIR, which works very well but doesn't support IIR filters.
+### Table of Contents
+**[Introduction](#introduction)**
+- **[Background](#background)**
+- **[Usage example: crossover for 2-way speakers](#usage-example-crossover-for-2-way-speakers)**
+- **[Dependencies](#dependencies)**
+
+**[Building](#building)**
+- **[Build with standard features](#build-with-standard-features)**
+- **[Customized build](#customized-build)**
+- **[Optimize for your system](#optimize-for-your-system)**
+
+**[How to run](#how-to-run)**
+- **[Command line options](#commandline-options)**
+- **[Reloading the configuration](#reloading-the-configuration)**
+- **[Controlling via websocket](#controlling-via-websocket)**
+
+**[Capturing audio](#capturing-audio)**
+- **[Alsa](#alsa)**
+- **[PulseAudio](#pulseaudio)**
+
+**[Configuration](#configuration)**
+- **[The YAML format](#the-yaml-format)**
+- **[Devices](#devices)**
+- **[Resampling](#resampling)**
+- **[Mixers](#mixers)**
+ - **[Filters](#filters)**
+   - **[Gain](#gain)**
+   - **[Delay](#delay)**
+   - **[FIR](#fir)**
+   - **[IIR](#iir)**
+   - **[Dither](#dither)**
+   - **[Difference equation](#difference-equation)**
+- **[Pipeline](#pipeline)**
+- **[Visualizing the config](#visualizing-the-config)**
+
+
+# Introduction
+
+## Background
+The purpose of CamillaDSP is to enable audio processing with combinations of FIR and IIR filters. This functionality is available in EqualizerAPO, but for Windows only. For Linux the best known FIR filter engine is probably BruteFIR, which works very well but doesn't support IIR filters. 
+The goal of CamillaDSP is to provide both FIR and IIR filtering for Linux, to be stable, fast and flexible, and be easy to use and configure.  
 
 * BruteFIR: https://www.ludd.ltu.se/~torger/brutefir.html
 * EqualizerAPO: https://sourceforge.net/projects/equalizerapo/
 * The IIR filtering is heavily inspired by biquad-rs: https://github.com/korken89/biquad-rs 
 
-### Dependencies
+## How it works
+The audio pipeline in CamillaDSP runs in three separate threads. One thread handles capturing audio, one handles the playback, and one does the processing in between.
+The capture thread passes audio to the processing thread via a message queue. Each message consists of a chunk of audio with a configurable size. The processing queue waits for audio messages, processes them in the order they arrive, and passes the processed audio via another message queue to the playback thread. There is also a supervisor thread for control.
+This chart shows the most important parts:
+
+![Overview](overview.png)
+
+### Capture
+The capture thread reads a chunk samples from the audio device in the selected format. It then converts the samples to 64-bit floats (or optionally 32-bit). If resampling is enabled, the audio data is sent to the resampler. At the end, the chunk of samples is packed as a message that is then posted to the input queue of the processing thread. After this the capture thread returns to reading he next shunk of samples from the device.
+
+### Processing
+The processing thread waits for audio chunk messages to arrive in the input queue. Once a message arrives, it's passed through all the defined filters and mixers of the pipeline. Once all processing is done, the audio data is posted to the input queue of the playback device.
+
+### Playback
+The playback thread simply waits for audio messages to appear in the queue. Once a message arrives, the audio data is converted to the right sample format for the device, and written to the playback device. The Alsa playback device supports monitoring the buffer level of the playback device. This is used to send requests for adjusting the capture speed to the supoervisor thread, on a separate message channel.
+
+### Supervisor
+The supervisor monitors all threads by listening to their status messages. The requests for capture rate adjust are passed on to the capture thread. It's also responsible for updating the configuration when requested to do so via the websocket server or a SIGHUP signal.
+
+### Websocket server
+The websocket server lauches a separate thread to handle each connected client. All commands to change the config are send to the supoervisor thread.
+
+
+## Usage example: crossover for 2-way speakers
+A crossover must filter all sound being played on the system. This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device. CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
+
+See the [tutorial for a step-by-step guide.](./stepbystep.md)
+
+## Dependencies
 * https://crates.io/crates/rustfft - FFT used for FIR filters
+* https://crates.io/crates/rubato - Sample rate conversion
 * https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
 * https://crates.io/crates/alsa - Alsa audio backend
 * https://crates.io/crates/serde_yaml - Config file reading
-* https://crates.io/crates/num-traits - Converting between number types
 
-## Building
+# Building
 
-Use recent stable versions of rustc and cargo. The minimum rustc version is 1.36.0.
+Use recent stable versions of rustc and cargo. The minimum rustc version is 1.40.0. 
+
+The recommended way to install rustc and cargo is by using the "rustup" tool. Get it here: https://rustup.rs/
 
 By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
 
@@ -34,16 +103,19 @@ CamillaDSP includes a Websocket server that can be used to pass commands to the 
 
 The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". FFTW is about a factor two faster. It's a much larger and more complicated library though, so this is only recommended if your filters take too much CPU time with RustFFT.
 
-### Build with standard features
+## Build with standard features
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
+- - Arch: ```sudo pacman -S cargo pkg-config```
 - Install Alsa dependency:
 - - Fedora: ```sudo dnf install alsa-lib-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libasound2-dev```
+- - Arch: ```sudo pacman -S alsa-lib```
 - Install Pulse dependency:
 - - Fedora: ```sudo dnf install pulseaudio-libs-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
+- - Arch:  ```sudo pacman -S libpulse```
 - Clone the repository
 - Build with standard options: ```cargo build --release```
 - - see below for other options
@@ -51,7 +123,7 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 - Optionally install with `cargo install --path .`
 - - Note: the `install` command takes the same options for features as the `build` command. 
 
-### Customized build
+## Customized build
 All the available options, or "features" are:
 - `alsa-backend`
 - `pulse-backend`
@@ -76,8 +148,25 @@ cargo build --release --no-default-features --features alsa-backend --features s
 cargo install --path . --no-default-features --features alsa-backend --features socketserver --features FFTW --features 32bit
 ```
 
+## Optimize for your system
+By default Cargo builds for a generic system, meaning the resulting binary might not run as fast as possible on your system.
+This means for example that it will not use AVX on an x86-64 CPU, or NEON on a Raspberry Pi.
 
-## How to run
+To make an optimized build for your system, you can specify this in your Cargo configuration file. 
+Or, just set the RUSTFLAGS environment variable by adding RUSTFLAGS='...' in from of the "cargo build" or "cargo install" command.
+
+Make an optimized build on x86-64:
+```
+RUSTFLAGS='-C target-cpu=native' cargo build --release
+```
+
+On a Raspberry Pi also state that NEON should be enabled:
+```
+RUSTFLAGS='-C target-feature=+neon -C target-cpu=native' cargo build --release 
+```
+
+
+# How to run
 
 The command is simply:
 ```
@@ -85,11 +174,11 @@ camilladsp /path/to/config.yml
 ```
 This starts the processing defined in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is complete and valid. When an error is found it displays an error message describing the problem. See more about the configuration file below.
 
-### Command line options
+## Command line options
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.0.13
+CamillaDSP 0.1.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
@@ -120,7 +209,7 @@ If the "wait" flag, `-w` is given, CamillaDSP will start the websocket server an
 The default logging setting prints messages of levels "error", "warn" and "info". By passing the verbosity flag once, `-v` it also prints "debug". If and if's given twice, `-vv`, it also prints "trace" messages. 
 
 
-### Reloading the configuration
+## Reloading the configuration
 The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficients file needs to change.
 
 ## Controlling via websocket
@@ -129,14 +218,8 @@ See the [separate readme for the websocket server](./websocket.md)
 If the websocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
 
 
-
-## Usage example: crossover for 2-way speakers
-A crossover must filter all sound being played on the system. This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device. CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
-
-See the [tutorial for a step-by-step guide.](./stepbystep.md)
-
-
 # Capturing audio
+
 In order to insert CamillaDSP between applications and the sound card, a virtual sound card is required. This works with both Alsa and PulseAudio.
 ## Alsa
 An Alsa Loopback device can be used. This device behaves like a sound card with two devices playback and capture. The sound being send to the playback side on one device can then be captured from the capture side on the other device. To load the kernel device type:
@@ -176,13 +259,17 @@ If you get strange errors, first check that the indentation is correct. Also che
 Example config (note that parameters marked (*) can be left out to use their default values):
 ```
 devices:
-  samplerate: 44100
+  samplerate: 96000
   chunksize: 1024
   queuelimit: 128 (*)
   silence_threshold: -60 (*)
   silence_timeout: 3.0 (*)
   target_level: 500 (*)
   adjust_period: 10 (*)
+  enable_rate_adjust: true (*)
+  enable_resampling: true (*)
+  resampler_type: BalancedAsync (*)
+  capture_samplerate: 44100 (*)
   capture:
     type: Pulse
     channels: 2
@@ -208,7 +295,7 @@ devices:
   Try increasing in factors of two, to 2048, 4096 etc. 
   The duration in seconds of a chunk is `chunksize/samplerate`, so a value of 1024 at 44.1kHz corresponds to 23 ms per chunk.
 
-* `queuelimit` (optional)
+* `queuelimit` (optional, defaults to 128)
 
   The field `queuelimit` should normally be left out to use the default of 128. 
   It sets the limit for the length of the queues between the capture device and the processing thread, 
@@ -225,20 +312,26 @@ devices:
   and will lead to very high cpu usage while the queues are being filled. 
   If this is a problem, set `queuelimit` to a low value like 1.
 
-* `target_level` & `adjust_period` (optional)
-  For the special case where the capture device is an Alsa Loopback device, 
-  and the playback device another Alsa device, there is a function to synchronize 
-  the Loopback device to the playback device. 
-  This avoids the problems of buffer underruns or slowly increasing delay. 
-  This function requires the parameter `target_level` to be set. 
+* `enable_rate_adjust` (optional, defaults to false)
+
+  This enables the playback device to control the rate of the capture device, 
+  in order to avoid buffer underruns of a slowly increasing latency. This is currently only supported when using an Alsa playback device.
+  Setting the rate can be done in two ways.
+  * If the capture device is an Alsa Loopback device, the adjustment is done by tuning the virtual sample clock of the Loopback device. This avoids any need for resampling.
+  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` must then be one of the "Async" variants.
+  
+
+* `target_level` (optional, defaults to the `chunksize` value)
   The value is the number of samples that should be left in the buffer of the playback device
   when the next chunk arrives. It works by fine tuning the sample rate of the virtual Loopback device.
   It will take some experimentation to find the right number. 
   If it's too small there will be buffer underruns from time to time, 
   and making it too large might lead to a longer input-output delay than what is acceptable. 
   Suitable values are in the range 1/2 to 1 times the `chunksize`. 
-
-  The `adjust_period` parameter is used to set the interval between corrections. 
+  
+* `adjust_period` (optional, defaults to 10)
+  
+  The `adjust_period` parameter is used to set the interval between corrections, in seconds. 
   The default is 10 seconds.
 
 * `silence_threshold` & `silence_timeout` (optional)
@@ -250,6 +343,25 @@ devices:
 
   The `silence_timeout` (in seconds) is for how long the signal should be silent before pausing processing. 
   Set this to zero, or leave it out, to never pause.
+
+* `enable_resampling` (optional, defaults to false)
+
+  Set this to `true` to enable resampling of the input signal. 
+  In addition to resampling the input to a different sample rate, 
+  this can be useful for rate-matching capture and playback devices with independant clocks.
+
+* `resampler_type` (optional, defaults to "BalancedAsync")
+
+  The resampler type to use. Valid choices are "Synchronous", "FastAsync", "BalancedAsync", "AccurateAsync", "FreeAsync".
+
+  If used for rate matching with `enable_rate_adjust: true` the one of the "Async" variants must be used. 
+  See also the [Resampling section.](#resampling) 
+
+* `capture_samplerate` (optional, defaults to value of `samplerate`)
+
+  The capture samplerate. If the resampler is only used for rate-matching then the capture samplerate 
+  is the same as the overall samplerate, and this setting can be left out.
+
  
 * `capture` and `playback`
   Input and output devices are defined in the same way. 
@@ -261,11 +373,26 @@ devices:
   * `format`: sample format.
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
-    * S16LE
-    * S24LE
-    * S32LE 
-    * FLOAT32LE
-    * FLOAT64LE (not supported by PulseAudio)
+    * S16LE - Signed 16 bit int, stored as two bytes
+    * S24LE - Signed 24 bit int, stored as four bytes
+    * S24LE3 - Signed 24 bit int, stored as three bytes    
+    * S32LE - Signed 32 bit int, stored as four bytes
+    * FLOAT32LE - 32 bit float, stored as four bytes
+    * FLOAT64LE - 64 bit float, stored as eight bytes (not supported by PulseAudio)
+
+  Equivalent formats:
+  | CamillaDSP | Alsa       | Pulse     |
+  |------------|------------|-----------|
+  | S16LE      | S16_LE     | S16LE     |
+  | S24LE      | S24_LE     | S24_32LE  |
+  | S24LE3     | S24_3LE    | S24LE     |
+  | S32LE      | S32_LE     | S32LE     |
+  | FLOAT32LE  | FLOAT_LE   | FLOAT32LE |
+  | FLOAT64LE  | FLOAT64_LE | -         |
+
+  The File capture device supports two additional optional parameters, for advanced handling of raw files and testing:
+  * `skip_bytes`: Number of bytes to skip at the beginning of the file. This can be used to skip over the header of some formats like .wav (which typocally has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
+  * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file.
 
   The File device type reads or writes to a file. 
   The format is raw interleaved samples, 2 bytes per sample for 16-bit, 
@@ -278,6 +405,73 @@ devices:
   > camilladsp stdio_capt.yml > rawfile.dat
   > cat rawfile.dat | camilladsp stdio_pb.yml
   ```
+
+## Resampling
+
+Resampling is provided by the [Rubato library.](https://github.com/HEnquist/rubato)
+
+This library does asynchronous and synchronous resampling with adjustable parameters. 
+For asynchronous resampling, the overall strategy is to use a sinc interpolation filter with a fixed oversampling ratio, 
+and then use polynomial interpolation to get values for arbitrary times between those fixed points.
+For synchronous resampling it instead works by transforming the waveform with FFT, modifying the spectrum, and then 
+getting the resampled waveform by inverse FFT.
+
+CamillaDSP provides four preset profiles for the resampler:
+* Synchronous
+* FastAsync
+* BalancedAsync
+* AccurateAsync
+
+The "BalancedAsync" preset is the best choice in most cases, if an asynchronous resampler is needed. 
+It provides good resampling quality with a noise threshold in the range 
+of -150 dB along with reasonable CPU usage. 
+As -150 dB is way beyond the resolution limit of even the best commercial DACs, 
+this preset is thus sufficient for all audio use.
+The "FastAsync" preset is faster but have a little more high-frequency roll-off 
+and give a bit higher resampling artefacts. 
+The "AccurateAsync" preset provide the highest quality result, 
+with all resampling artefacts below -200dB, at the expense of higher CPU usage.
+There is also a "FreeAsync" mode as well where all parameters can be set freely. The configuration is specified like this:
+```
+...
+  resampler_type:
+    Free:
+      f_cutoff: 0.9
+      sinc_len: 128
+      window: Hann2
+      oversampling_ratio: 128
+      interpolation: Cubic
+```
+
+For reference, the asynchronous presets are defined according to this table:
+|                   | FastAsync | BalancedAsync | AccurateAsync |
+|-------------------|-----------|---------------|---------------|
+|sinc_len           | 64        | 128           | 256           |
+|oversampling_ratio | 1024      | 1024          | 256           |
+|interpolation      | Linear    | Linear        | Cubic         |
+|window             | Hann2     | Blackman2     | BlackmanHarris2 |
+|f_cutoff           | 0.915     | 0.925         | 0.947           |
+
+
+For performing fixed ratio resampling, like resampling 
+from 44.1kHz to 96kHz (which corresponds to a precise ratio of 147/320)
+choose the "Synchronous" variant. 
+This is considerably faster than the asynchronous variants, but does not support rate adjust.
+The quality is comparable to the "AccurateAsync" preset.
+
+When using the rate adjust feature to match capture and playback devices, 
+one of the "Async" variants must be used. 
+These asynchronous presets do not rely on a fixed resampling ratio.
+When rate adjust is enabled the resampling ratio is dynamically adjusted in order to compensate 
+for drifts and mismatches between the input and output sample clocks.  
+Using the "Synchronous" variant with rate adjust enabled will print warnings, 
+and any rate adjust request will be ignored.
+
+See the library documentation for more details. [Rubato on docs.rs](https://docs.rs/rubato/0.1.0/rubato/)
+
+
+
+
 
 
 ## Mixers
@@ -380,6 +574,7 @@ The "format" parameter can be omitted, in which case it's assumed that the forma
 The other possible formats are raw data:
 - S16LE: signed 16 bit little-endian integers
 - S24LE: signed 24 bit little-endian integers stored as 32 bits (with the data in the low 24)
+- S24LE3: signed 24 bit little-endian integers stored as 24 bits
 - S32LE: signed 32 bit little-endian integers
 - FLOAT32LE: 32 bit little endian float
 - FLOAT64LE: 64 bit little endian float
