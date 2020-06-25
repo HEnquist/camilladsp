@@ -1,6 +1,6 @@
 [package]
 name = "camilladsp"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 description = "A flexible tool for processing audio"
 
@@ -25,7 +25,7 @@ alsa = { version = "0.4", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 serde_with = "1.4.0"
-realfft = { git = "https://github.com/HEnquist/realfft.git", rev = "speedup" }
+realfft = "0.2.0"
 fftw = { version = "0.6.2", optional = true }
 num = "0.2"
 signal-hook = "0.1.13"
@@ -37,7 +37,7 @@ env_logger = "0.7.1"
 ws = { version = "0.9.1", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-rubato = { git = "https://github.com/HEnquist/rubato.git", rev = "realfft_update" }
+rubato = "0.4.3"
 
 [dev-dependencies]
 criterion = "0.3"
