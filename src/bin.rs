@@ -1,5 +1,6 @@
 #[cfg(feature = "alsa-backend")]
 extern crate alsa;
+extern crate camillalib;
 extern crate clap;
 #[cfg(feature = "FFTW")]
 extern crate fftw;
@@ -27,65 +28,25 @@ use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Ar
 use env_logger::Builder;
 use log::LevelFilter;
 use std::env;
-use std::error;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time;
 
-// Sample format
-#[cfg(feature = "32bit")]
-pub type PrcFmt = f32;
-#[cfg(not(feature = "32bit"))]
-pub type PrcFmt = f64;
-pub type Res<T> = Result<T, Box<dyn error::Error>>;
+use camillalib::Res;
 
-#[cfg(feature = "alsa-backend")]
-mod alsadevice;
-mod audiodevice;
-mod basicfilters;
-mod biquad;
-mod biquadcombo;
-mod config;
-mod conversions;
-mod diffeq;
-mod dither;
-#[cfg(not(feature = "FFTW"))]
-mod fftconv;
-#[cfg(feature = "FFTW")]
-mod fftconv_fftw;
-mod fifoqueue;
-mod filedevice;
-mod filters;
-mod mixer;
-mod processing;
-#[cfg(feature = "pulse-backend")]
-mod pulsedevice;
+use camillalib::audiodevice;
+use camillalib::config;
+use camillalib::processing;
 #[cfg(feature = "socketserver")]
-mod socketserver;
+use camillalib::socketserver;
 
-//use audiodevice::*;
+use camillalib::StatusMessage;
 
-pub enum StatusMessage {
-    PlaybackReady,
-    CaptureReady,
-    PlaybackError { message: String },
-    CaptureError { message: String },
-    PlaybackDone,
-    CaptureDone,
-    SetSpeed { speed: f64 },
-}
+use camillalib::CommandMessage;
 
-pub enum CommandMessage {
-    SetSpeed { speed: f64 },
-    Exit,
-}
-
-enum ExitStatus {
-    Restart,
-    Exit,
-}
+use camillalib::ExitStatus;
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
