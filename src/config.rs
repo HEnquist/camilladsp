@@ -52,7 +52,7 @@ pub enum SampleFormat {
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum CaptureDevice {
-    #[cfg(feature = "alsa-backend")]
+    #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
     Alsa {
         channels: usize,
         device: String,
@@ -81,7 +81,7 @@ pub enum CaptureDevice {
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum PlaybackDevice {
-    #[cfg(feature = "alsa-backend")]
+    #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
     Alsa {
         channels: usize,
         device: String,
@@ -519,7 +519,7 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         )));
     }
     let mut num_channels = match conf.devices.capture {
-        #[cfg(feature = "alsa-backend")]
+        #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
         CaptureDevice::Alsa { channels, .. } => channels,
         #[cfg(feature = "pulse-backend")]
         CaptureDevice::Pulse { channels, .. } => channels,
@@ -565,7 +565,7 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         }
     }
     let num_channels_out = match conf.devices.playback {
-        #[cfg(feature = "alsa-backend")]
+        #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
         PlaybackDevice::Alsa { channels, .. } => channels,
         #[cfg(feature = "pulse-backend")]
         PlaybackDevice::Pulse { channels, .. } => channels,

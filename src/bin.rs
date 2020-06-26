@@ -1,4 +1,4 @@
-#[cfg(feature = "alsa-backend")]
+#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 extern crate alsa;
 extern crate camillalib;
 extern crate clap;

@@ -1,4 +1,4 @@
-#[cfg(feature = "alsa-backend")]
+#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 extern crate alsa;
 extern crate clap;
 #[cfg(feature = "FFTW")]
@@ -32,7 +32,7 @@ pub type PrcFmt = f32;
 pub type PrcFmt = f64;
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
-#[cfg(feature = "alsa-backend")]
+#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 pub mod alsadevice;
 pub mod audiodevice;
 pub mod basicfilters;
