@@ -86,18 +86,21 @@ pub fn start_server(
                     }
                     WSCommand::GetConfig => {
                         //let conf_yaml = serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap();
-                        socket.send(format!("OK:GETCONFIG:{}",
+                        socket.send(format!(
+                            "OK:GETCONFIG:{}",
                             serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap(),
                         ))
                     }
                     WSCommand::GetConfigJson => {
                         //let conf_yaml = serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap();
-                        socket.send(format!("OK:GETCONFIGJSON:{}",
+                        socket.send(format!(
+                            "OK:GETCONFIGJSON:{}",
                             serde_json::to_string(&*active_config_inst.lock().unwrap()).unwrap(),
                         ))
                     }
-                    WSCommand::GetConfigName => socket.send(
-                        format!("OK:GETCONFIGNAME:{}", active_config_path_inst
+                    WSCommand::GetConfigName => socket.send(format!(
+                        "OK:GETCONFIGNAME:{}",
+                        active_config_path_inst
                             .lock()
                             .unwrap()
                             .as_ref()
