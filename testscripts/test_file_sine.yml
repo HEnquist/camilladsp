@@ -1,0 +1,41 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  playback:
+    type: File
+    channels: 2
+    filename: "result_f64.raw"
+    format: FLOAT64LE
+  capture:
+    type: File
+    channels: 2
+    filename: "sine_1000_44100_20s_f64_2ch.raw"
+    format: FLOAT64LE
+    extra_samples: 0
+
+
+
+
+filters:
+  dummy:
+    type: Conv
+    parameters:
+      type: File
+      filename: testscripts/spike_f64_65k.raw
+      format: FLOAT64LE
+
+
+
+pipeline:
+  - type: Filter
+    channel: 0
+    names:
+      - dummy
+  - type: Filter
+    channel: 1
+    names:
+      - dummy
+
+   
+
