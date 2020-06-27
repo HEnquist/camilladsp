@@ -8,8 +8,10 @@ use config;
 enum WSCommand {
     SetConfigName(String),
     SetConfig(String),
+    SetConfigJson(String),
     Reload,
     GetConfig,
+    GetConfigJson,
     GetConfigName,
     Exit,
     Stop,
@@ -26,6 +28,7 @@ fn parse_command(cmd: &ws::Message) -> WSCommand {
         match cmdarg[0] {
             "reload" => WSCommand::Reload,
             "getconfig" => WSCommand::GetConfig,
+            "getconfigjson" => WSCommand::GetConfigJson,
             "getconfigname" => WSCommand::GetConfigName,
             "exit" => WSCommand::Exit,
             "stop" => WSCommand::Stop,
@@ -39,6 +42,13 @@ fn parse_command(cmd: &ws::Message) -> WSCommand {
             "setconfig" => {
                 if cmdarg.len() == 2 {
                     WSCommand::SetConfig(cmdarg[1].to_string())
+                } else {
+                    WSCommand::Invalid
+                }
+            }
+            "setconfigjson" => {
+                if cmdarg.len() == 2 {
+                    WSCommand::SetConfigJson(cmdarg[1].to_string())
                 } else {
                     WSCommand::Invalid
                 }
@@ -76,18 +86,24 @@ pub fn start_server(
                     }
                     WSCommand::GetConfig => {
                         //let conf_yaml = serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap();
-                        socket.send(
+                        socket.send(format!("OK:GETCONFIG:{}",
                             serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap(),
-                        )
+                        ))
+                    }
+                    WSCommand::GetConfigJson => {
+                        //let conf_yaml = serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap();
+                        socket.send(format!("OK:GETCONFIGJSON:{}",
+                            serde_json::to_string(&*active_config_inst.lock().unwrap()).unwrap(),
+                        ))
                     }
                     WSCommand::GetConfigName => socket.send(
-                        active_config_path_inst
+                        format!("OK:GETCONFIGNAME:{}", active_config_path_inst
                             .lock()
                             .unwrap()
                             .as_ref()
                             .unwrap_or(&"NONE".to_string())
                             .to_string(),
-                    ),
+                    )),
                     WSCommand::SetConfigName(path) => match config::load_validate_config(&path) {
                         Ok(_) => {
                             *active_config_path_inst.lock().unwrap() = Some(path.clone());
@@ -109,6 +125,23 @@ pub fn start_server(
                             Err(error) => {
                                 error!("Config error: {}", error);
                                 socket.send("ERROR:SETCONFIG")
+                            }
+                        }
+                    }
+                    WSCommand::SetConfigJson(config_json) => {
+                        match serde_json::from_str::<config::Configuration>(&config_json) {
+                            Ok(conf) => match config::validate_config(conf.clone()) {
+                                Ok(()) => {
+                                    //*active_config_path_inst.lock().unwrap() = String::from("none");
+                                    *new_config_inst.lock().unwrap() = Some(conf);
+                                    signal_reload_inst.store(true, Ordering::Relaxed);
+                                    socket.send("OK:SETCONFIGJSON")
+                                }
+                                _ => socket.send("ERROR:SETCONFIGJSON"),
+                            },
+                            Err(error) => {
+                                error!("Config error: {}", error);
+                                socket.send("ERROR:SETCONFIGJSON")
                             }
                         }
                     }

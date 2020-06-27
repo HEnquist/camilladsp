@@ -28,6 +28,7 @@ alsa = { version = "0.4", optional = true }
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
+serde_json = "1.0"
 serde_with = "1.4.0"
 realfft = "0.2.0"
 fftw = { version = "0.6.2", optional = true }
