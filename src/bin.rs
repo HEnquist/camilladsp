@@ -154,6 +154,7 @@ fn run(
 
     let mut pb_ready = false;
     let mut cap_ready = false;
+    #[cfg(target_os = "linux")]
     signal_hook::flag::register(signal_hook::SIGHUP, Arc::clone(&signal_reload))?;
 
     loop {
