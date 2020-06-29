@@ -75,6 +75,18 @@ pub enum CaptureDevice {
         #[serde(default)]
         read_bytes: usize,
     },
+    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    CoreAudio {
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
+    #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    Wasapi {
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -96,6 +108,18 @@ pub enum PlaybackDevice {
     File {
         channels: usize,
         filename: String,
+        format: SampleFormat,
+    },
+    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    CoreAudio {
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
+    #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    Wasapi {
+        channels: usize,
+        device: String,
         format: SampleFormat,
     },
 }
@@ -524,6 +548,10 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         #[cfg(feature = "pulse-backend")]
         CaptureDevice::Pulse { channels, .. } => channels,
         CaptureDevice::File { channels, .. } => channels,
+        #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+        CaptureDevice::CoreAudio { channels, .. } => channels,
+        #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+        CaptureDevice::Wasapi { channels, .. } => channels,
     };
     let fs = conf.devices.samplerate;
     for step in conf.pipeline {
@@ -570,6 +598,10 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         #[cfg(feature = "pulse-backend")]
         PlaybackDevice::Pulse { channels, .. } => channels,
         PlaybackDevice::File { channels, .. } => channels,
+        #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+        PlaybackDevice::CoreAudio { channels, .. } => channels,
+        #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+        PlaybackDevice::Wasapi { channels, .. } => channels,
     };
     if num_channels != num_channels_out {
         return Err(Box::new(ConfigError::new(&format!(
