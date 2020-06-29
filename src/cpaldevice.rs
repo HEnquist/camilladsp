@@ -44,69 +44,10 @@ pub struct CpalCaptureDevice {
     pub silence_timeout: PrcFmt,
 }
 
-/// Open a PulseAudio device
-fn open_pulse(
-    devname: String,
-    samplerate: u32,
-    channels: u8,
-    format: &SampleFormat,
-    capture: bool,
-) -> Res<Simple> {
-    // Open the device
-    let dir = if capture {
-        Direction::Record
-    } else {
-        Direction::Playback
-    };
 
-    let pulse_format = match format {
-        SampleFormat::S16LE => sample::SAMPLE_S16NE,
-        SampleFormat::S24LE => sample::SAMPLE_S24_32NE,
-        SampleFormat::S24LE3 => sample::SAMPLE_S24NE,
-        SampleFormat::S32LE => sample::SAMPLE_S32NE,
-        SampleFormat::FLOAT32LE => sample::SAMPLE_FLOAT32NE,
-        _ => panic!("invalid format"),
-    };
-
-    let bytes = match format {
-        SampleFormat::S16LE => 2,
-        SampleFormat::S24LE => 4,
-        SampleFormat::S24LE3 => 3,
-        SampleFormat::S32LE => 4,
-        SampleFormat::FLOAT32LE => 4,
-        SampleFormat::FLOAT64LE => 8,
-    };
-
-    let spec = sample::Spec {
-        format: pulse_format,
-        channels,
-        rate: samplerate,
-    };
-    //assert!(spec.is_valid());
-    let attr = pulse::def::BufferAttr {
-        maxlength: std::u32::MAX,
-        tlength: std::u32::MAX,
-        prebuf: bytes as u32,
-        minreq: std::u32::MAX,
-        fragsize: bytes as u32,
-    };
-
-    let pulsedev = Simple::new(
-        None,           // Use the default server
-        "CamillaDSP",   // Our application’s name
-        dir,            // We want a playback stream
-        Some(&devname), // Use the default device
-        "ToDSP",        // Description of our stream
-        &spec,          // Our sample format
-        None,           // Use default channel map
-        Some(&attr),    // Use default buffering attributes
-    )
-    .unwrap();
-    Ok(pulsedev)
-}
 
 /// Start a playback thread listening for AudioMessages via a channel.
-impl PlaybackDevice for PulsePlaybackDevice {
+impl PlaybackDevice for CpalPlaybackDevice {
     fn start(
         &mut self,
         channel: mpsc::Receiver<AudioMessage>,
@@ -125,20 +66,11 @@ impl PlaybackDevice for PulsePlaybackDevice {
             SampleFormat::FLOAT32LE => 32,
             SampleFormat::FLOAT64LE => 64,
         };
-        let store_bytes = match self.format {
-            SampleFormat::S16LE => 2,
-            SampleFormat::S24LE => 4,
-            SampleFormat::S24LE3 => 3,
-            SampleFormat::S32LE => 4,
-            SampleFormat::FLOAT32LE => 4,
-            SampleFormat::FLOAT64LE => 8,
-        };
         let format = self.format.clone();
         let handle = thread::Builder::new()
-            .name("PulsePlayback".to_string())
+            .name("CpalPlayback".to_string())
             .spawn(move || {
-                //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
-                match open_pulse(devname, samplerate as u32, channels as u8, &format, false) {
+                match open_cpal(devname, samplerate as u32, channels as u8, &format, false) {
                     Ok(pulsedevice) => {
                         match status_channel.send(StatusMessage::PlaybackReady) {
                             Ok(()) => {}
