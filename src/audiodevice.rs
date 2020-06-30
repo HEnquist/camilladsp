@@ -142,7 +142,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             format,
         }),
-        #[cfg(feature = "cpal-backend")]
+        #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
         config::PlaybackDevice::CoreAudio {
             channels,
             device,
@@ -155,7 +155,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             format,
         }),
-        #[cfg(feature = "cpal-backend")]
+        #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
         config::PlaybackDevice::Wasapi {
             channels,
             device,
@@ -383,41 +383,42 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             skip_bytes,
             read_bytes,
         }),
-        #[cfg(feature = "cpal-backend")]
-        config::CaptureDevice::CoreAudio {
-            channels,
-            device,
-            format,
-        } => Box::new(cpaldevice::CpalCaptureDevice {
-            devname: device,
-            host: cpaldevice::CpalHost::CoreAudio,
-            samplerate: conf.samplerate,
-            enable_resampling: conf.enable_resampling,
-            resampler_conf: conf.resampler_type,
-            capture_samplerate,
-            chunksize: conf.chunksize,
-            channels,
-            format,
-            silence_threshold: conf.silence_threshold,
-            silence_timeout: conf.silence_timeout,
-        }),
-        #[cfg(feature = "cpal-backend")]
-        config::CaptureDevice::Wasapi {
-            channels,
-            device,
-            format,
-        } => Box::new(cpaldevice::CpalCaptureDevice {
-            devname: device,
-            host: cpaldevice::CpalHost::Wasapi,
-            samplerate: conf.samplerate,
-            enable_resampling: conf.enable_resampling,
-            resampler_conf: conf.resampler_type,
-            capture_samplerate,
-            chunksize: conf.chunksize,
-            channels,
-            format,
-            silence_threshold: conf.silence_threshold,
-            silence_timeout: conf.silence_timeout,
-        }),
+        //#[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+        //config::CaptureDevice::CoreAudio {
+        //    channels,
+        //    device,
+        //    format,
+        //} => Box::new(cpaldevice::CpalCaptureDevice {
+        //    devname: device,
+        //    host: cpaldevice::CpalHost::CoreAudio,
+        //    samplerate: conf.samplerate,
+        //    enable_resampling: conf.enable_resampling,
+        //    resampler_conf: conf.resampler_type,
+        //    capture_samplerate,
+        //    chunksize: conf.chunksize,
+        //    channels,
+        //    format,
+        //    silence_threshold: conf.silence_threshold,
+        //    silence_timeout: conf.silence_timeout,
+        //}),
+        //#[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+        //config::CaptureDevice::Wasapi {
+        //    channels,
+        //    device,
+        //    format,
+        //} => Box::new(cpaldevice::CpalCaptureDevice {
+        //    devname: device,
+        //    host: cpaldevice::CpalHost::Wasapi,
+        //    samplerate: conf.samplerate,
+        //    enable_resampling: conf.enable_resampling,
+        //    resampler_conf: conf.resampler_type,
+        //    capture_samplerate,
+        //    chunksize: conf.chunksize,
+        //    channels,
+        //    format,
+        //    silence_threshold: conf.silence_threshold,
+        //    silence_timeout: conf.silence_timeout,
+        //}),
+        _ => panic!("Not implemented.."),
     }
 }
