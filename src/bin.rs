@@ -272,6 +272,9 @@ fn main() {
     if cfg!(feature = "pulse-backend") {
         features.push("pulse-backend");
     }
+    if cfg!(feature = "cpal-backend") {
+        features.push("cpal-backend");
+    }
     if cfg!(feature = "socketserver") {
         features.push("socketserver");
     }
