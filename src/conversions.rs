@@ -1,8 +1,8 @@
 use audiodevice::*;
-use std::convert::TryInto;
-use PrcFmt;
 use num;
 use std::collections::VecDeque;
+use std::convert::TryInto;
+use PrcFmt;
 
 /// Convert an AudioChunk to an interleaved buffer of u8.
 pub fn chunk_to_buffer_bytes(
@@ -304,7 +304,10 @@ pub fn queue_to_chunk_int<T: num::traits::cast::AsPrimitive<PrcFmt>>(
 
 /// Convert an AudioChunk to an interleaved buffer of floats.
 #[allow(dead_code)]
-pub fn chunk_to_queue_float<T: num::traits::cast::NumCast>(chunk: AudioChunk, queue: &mut VecDeque<T>) {
+pub fn chunk_to_queue_float<T: num::traits::cast::NumCast>(
+    chunk: AudioChunk,
+    queue: &mut VecDeque<T>,
+) {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
     let mut value: T;
@@ -379,14 +382,14 @@ pub fn queue_to_chunk_float<T: num::traits::cast::AsPrimitive<PrcFmt>>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
     use crate::PrcFmt;
     use audiodevice::AudioChunk;
     use conversions::{
         buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
-        chunk_to_buffer_float_bytes, chunk_to_queue_float, queue_to_chunk_float,
-        chunk_to_queue_int, queue_to_chunk_int
+        chunk_to_buffer_float_bytes, chunk_to_queue_float, chunk_to_queue_int,
+        queue_to_chunk_float, queue_to_chunk_int,
     };
+    use std::collections::VecDeque;
 
     #[test]
     fn to_buffer_int16() {
