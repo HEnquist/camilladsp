@@ -286,6 +286,15 @@ The sample rate must match the default format of the device. To change this, ope
 
 
 ## CoreAudio
+CoreAudio is supported by the cpal library and should work, but hasn't actually been tested.
+
+To capture audio from applications a virtual sound card is needed. See for example [BlackHole](https://github.com/ExistentialAudio/BlackHole).
+
+Set the virtual sound card as the default playback device in the Sound preferences, and let CamillaDSP capture from the output of this card.
+
+The device name is the same as the one shown in System Preferences / Sound.
+
+The sample format appears to always be 32-bit float (FLOAT32LE).
 
 
 # Configuration
