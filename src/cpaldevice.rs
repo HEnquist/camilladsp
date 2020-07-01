@@ -61,14 +61,14 @@ fn open_cpal_playback(host_cfg: CpalHost, devname: &String, samplerate: usize, c
     };
     let host = cpal::host_from_id(host_id)?;
     let mut devices = host.devices()?;
-    let dev_idx = match devices.position(|dev| match dev.name() {
+    let device = match devices.find(|dev| match dev.name() {
             Ok(n) => &n == devname,
             _ => false,
         }) {
-            Some(idx) => idx,
+            Some(dev) => dev,
             None => return Err(Box::new(ConfigError::new(&format!("Could not find device: {}", devname)))),
         };
-    let device = devices.nth(dev_idx).unwrap();
+    //let device = devices.nth(dev_idx).unwrap();
     let format = device.default_output_format()?;
     let event_loop = host.event_loop();
     let stream_id = event_loop.build_output_stream(&device, &format)?;
