@@ -16,6 +16,8 @@ The full configuration is given in a yaml file.
 - **[Usage example: crossover for 2-way speakers](#usage-example-crossover-for-2-way-speakers)**
 - **[Dependencies](#dependencies)**
 
+**[Installing](#installing)**
+
 **[Building](#building)**
 - **[Build with standard features](#build-with-standard-features)**
 - **[Customized build](#customized-build)**
@@ -95,6 +97,27 @@ These are the key dependencies for CamillDSP.
 * https://crates.io/crates/alsa - Alsa audio backend
 * https://crates.io/crates/cpal - Wasapi and CoreAudio audio backends
 * https://crates.io/crates/serde_yaml - Config file reading
+
+
+# Installing
+
+The easiest way to install CamillaDSP is to download a pre-built binary. This is a single executable file that is ready to run. Binaries for each release are available for the most common systems. See the ["Releases"](https://github.com/HEnquist/camilladsp/releases) page. To see the files click "Assets".
+
+The following configurations are provided:
+
+- `camilladsp-linux-amd64`: Linux on 64-bit Intel or AMD cpu. Supports Alsa and Pulseaudio.
+- `camilladsp-linux-armv7`: Linux on armv7 with neon, intended for Raspberry Pi but should also work on others. Supports Alsa.
+- `camilladsp-macos-amd64`: macOS on 64-bit Intel cpu. Supports CoreAudio.
+- `camilladsp-windows-amd64.exe`: Windows on 64-bit Intel or AMD cpu. Supports Wasapi.
+
+All builds include the Websocket server.
+
+On Linux and macOS the file needs to be marked as executable after downloading. This can be done in the terminal with the `chmod` command, for example: 
+
+```sh 
+chmod a+x camilladsp-linux-amd64
+```
+
 
 # Building
 

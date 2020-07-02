@@ -71,12 +71,14 @@ jobs:
           command: build
           use-cross: true
           args: --release --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features socketserver
+        env:
+          RUSTFLAGS: "-C target-feature=+neon"
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v1-release
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target/release/camilladsp
+          file: target/armv7-unknown-linux-gnueabihf/release/camilladsp
           asset_name: camilladsp-linux-armv7
           tag: ${{ github.ref }}
 
@@ -105,7 +107,7 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target/release/camilladsp.exe
-          asset_name: camilladsp-windows-amd64
+          asset_name: camilladsp-windows-amd64.exe
           tag: ${{ github.ref }}
 
   macos:
