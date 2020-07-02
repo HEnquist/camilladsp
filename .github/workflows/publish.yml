@@ -77,7 +77,7 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target/release/camilladsp
-          asset_name: camilladsp-linux-amd64
+          asset_name: camilladsp-linux-armv7
           tag: ${{ github.ref }}
 
   windows:
