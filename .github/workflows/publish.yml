@@ -1,0 +1,41 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  publish:
+    name: Publish for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: camilladsp
+            asset_name: camilladsp-linux-amd64
+            build_arguments: 
+          - os: windows-latest
+            artifact_name: camilladsp.exe
+            asset_name: camilladsp-windows-amd64
+            build_arguments: --no-default-features --features cpal-backend --features socketserver
+          - os: macos-latest
+            artifact_name: camilladsp
+            asset_name: camilladsp-macos-amd64
+            build_arguments: --no-default-features --features cpal-backend --features socketserver
+
+    steps:
+    - uses: hecrj/setup-rust-action@v1
+      with:
+        rust-version: stable
+    - uses: actions/checkout@v1
+    - name: Build
+      run: cargo build --release --locked ${{ matrix.build_arguments }}
+    - name: Upload binaries to release
+      uses: svenstaro/upload-release-action@v1-release
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: target/release/${{ matrix.artifact_name }}
+        asset_name: ${{ matrix.asset_name }}
+        tag: ${{ github.ref }}
