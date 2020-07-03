@@ -370,7 +370,7 @@ impl CaptureDevice for CpalCaptureDevice {
                 } else {
                     None
                 };
-                match open_cpal_capture(host_cfg, &devname, samplerate, channels, &format) {
+                match open_cpal_capture(host_cfg, &devname, capture_samplerate, channels, &format) {
                     Ok((_host, _device, event_loop)) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
                             Ok(()) => {}
