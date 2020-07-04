@@ -215,6 +215,23 @@ brew install pulseaudio
 
 The FFTW feature can also be used on Windows. There is no need to install anything extra.
 
+### Building with ASIO on Windows
+A few things need to be in place to build with ASIO support. Follow the [guide in the CPAL readme.](https://github.com/RustAudio/cpal/blob/master/README.md)
+
+These are the steps on Windows 10, with Visual Studio 2019.
+
+In the terminal where you are going to build, type these commands to set up the environment:
+```
+"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat" amd64
+setx CPAL_ASIO_DIR "C:\Users\username\asiosdk\"
+setx LIBCLANG_PATH "C:\Program Files\LLVM\bin"
+```
+This assumes the ASIO SDK is at C:\Users\username\asiosdk\, and that VS 2019 and LLVM are installed at their default locations.
+
+Now it should be possible to build:
+```
+cargo build --release --no-default-features --features cpal-backend --features cpal-asio
+```
 
 
 

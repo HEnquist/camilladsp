@@ -87,6 +87,13 @@ pub enum CaptureDevice {
         device: String,
         format: SampleFormat,
     },
+    #[cfg(all(feature = "cpal-backend", feature = "cpal-asio", target_os = "windows"))]
+    Asio {
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
+    
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -118,6 +125,12 @@ pub enum PlaybackDevice {
     },
     #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
     Wasapi {
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
+    #[cfg(all(feature = "cpal-backend", feature = "cpal-asio", target_os = "windows"))]
+    Asio {
         channels: usize,
         device: String,
         format: SampleFormat,
@@ -552,6 +565,8 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         CaptureDevice::CoreAudio { channels, .. } => channels,
         #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
         CaptureDevice::Wasapi { channels, .. } => channels,
+        #[cfg(all(feature = "cpal-backend", feature = "cpal-asio", target_os = "windows"))]
+        CaptureDevice::Asio { channels, .. } => channels,
     };
     let fs = conf.devices.samplerate;
     for step in conf.pipeline {
@@ -602,6 +617,8 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         PlaybackDevice::CoreAudio { channels, .. } => channels,
         #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
         PlaybackDevice::Wasapi { channels, .. } => channels,
+        #[cfg(all(feature = "cpal-backend", feature = "cpal-asio", target_os = "windows"))]
+        PlaybackDevice::Asio { channels, .. } => channels,
     };
     if num_channels != num_channels_out {
         return Err(Box::new(ConfigError::new(&format!(

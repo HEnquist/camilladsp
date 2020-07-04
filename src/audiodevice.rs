@@ -176,6 +176,19 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
         }),
+        #[cfg(all(feature = "cpal-backend", feature = "cpal-asio", target_os = "windows"))]
+        config::PlaybackDevice::Asio {
+            channels,
+            device,
+            format,
+        } => Box::new(cpaldevice::CpalPlaybackDevice {
+            devname: device,
+            host: cpaldevice::CpalHost::Asio,
+            samplerate: conf.samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            format,
+        }),
     }
 }
 
@@ -417,6 +430,24 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(cpaldevice::CpalCaptureDevice {
             devname: device,
             host: cpaldevice::CpalHost::Wasapi,
+            samplerate: conf.samplerate,
+            enable_resampling: conf.enable_resampling,
+            resampler_conf: conf.resampler_type,
+            capture_samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            format,
+            silence_threshold: conf.silence_threshold,
+            silence_timeout: conf.silence_timeout,
+        }),
+        #[cfg(all(feature = "cpal-backend", feature = "cpal-asio", target_os = "windows"))]
+        config::CaptureDevice::Asio {
+            channels,
+            device,
+            format,
+        } => Box::new(cpaldevice::CpalCaptureDevice {
+            devname: device,
+            host: cpaldevice::CpalHost::Asio,
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
             resampler_conf: conf.resampler_type,
