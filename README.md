@@ -101,21 +101,24 @@ These are the key dependencies for CamillDSP.
 
 # Installing
 
-The easiest way to install CamillaDSP is to download a pre-built binary. This is a single executable file that is ready to run. Binaries for each release are available for the most common systems. See the ["Releases"](https://github.com/HEnquist/camilladsp/releases) page. To see the files click "Assets".
+The easiest way to install CamillaDSP is to download a pre-built binary. Binaries for each release are available for the most common systems. See the ["Releases"](https://github.com/HEnquist/camilladsp/releases) page. To see the files click "Assets".
+
+These are compressed files containing a single executable file that is ready to run. 
 
 The following configurations are provided:
-
-- `camilladsp-linux-amd64`: Linux on 64-bit Intel or AMD cpu. Supports Alsa and Pulseaudio.
-- `camilladsp-linux-armv7`: Linux on armv7 with neon, intended for Raspberry Pi but should also work on others. Supports Alsa.
-- `camilladsp-macos-amd64`: macOS on 64-bit Intel cpu. Supports CoreAudio.
-- `camilladsp-windows-amd64.exe`: Windows on 64-bit Intel or AMD cpu. Supports Wasapi.
+| Filename | Description | Backends |
+|----------|-------------|----------|
+| `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | Alsa, Pulseaudio |
+| `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon, intended for Raspberry Pi 2 and up but should also work on others | Alsa |
+| `camilladsp-macos-amd64.zip` | macOS on 64-bit Intel CPU | CoreAudio |
+| `camilladsp-windows-amd64.zip` | Windows on 64-bit Intel or AMD CPU | Wasapi |
 
 All builds include the Websocket server.
 
-On Linux and macOS the file needs to be marked as executable after downloading. This can be done in the terminal with the `chmod` command, for example: 
+The `.tar.gz`-files can be uncompressed with the `tar` comand: 
 
 ```sh 
-chmod a+x camilladsp-linux-amd64
+tar -xvf camilladsp-linux-amd64.tar.gz
 ```
 
 
