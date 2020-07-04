@@ -284,6 +284,9 @@ fn main() {
     if cfg!(feature = "cpal-backend") {
         features.push("cpal-backend");
     }
+    if cfg!(feature = "cpal-asio") {
+        features.push("cpal-asio");
+    }
     if cfg!(feature = "socketserver") {
         features.push("socketserver");
     }
