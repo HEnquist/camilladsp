@@ -25,6 +25,8 @@ pub enum CpalHost {
     CoreAudio,
     #[cfg(target_os = "windows")]
     Wasapi,
+    #[cfg(all(feature = "cpal-asio", target_os = "windows"))]
+    Asio,
 }
 
 #[derive(Clone, Debug)]
@@ -64,6 +66,8 @@ fn open_cpal_playback(
         CpalHost::CoreAudio => HostId::CoreAudio,
         #[cfg(target_os = "windows")]
         CpalHost::Wasapi => HostId::Wasapi,
+        #[cfg(all(feature = "cpal-asio", target_os = "windows"))]
+        CpalHost::Asio => HostId::Asio,
     };
     let host = cpal::host_from_id(host_id)?;
     let mut devices = host.devices()?;
@@ -108,6 +112,8 @@ fn open_cpal_capture(
         CpalHost::CoreAudio => HostId::CoreAudio,
         #[cfg(target_os = "windows")]
         CpalHost::Wasapi => HostId::Wasapi,
+        #[cfg(all(feature = "cpal-asio", target_os = "windows"))]
+        CpalHost::Asio => HostId::Asio,
     };
     let host = cpal::host_from_id(host_id)?;
     let mut devices = host.devices()?;

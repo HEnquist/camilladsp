@@ -12,6 +12,7 @@ cpal-backend = ["cpal"]
 32bit = []
 socketserver = ["ws"]
 FFTW = ["fftw"]
+cpal-asio = ["cpal/asio"]
 
 [lib]
 name = "camillalib"
