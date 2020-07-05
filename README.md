@@ -110,7 +110,7 @@ The following configurations are provided:
 |----------|-------------|----------|
 | `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | Alsa, Pulseaudio |
 | `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon, intended for Raspberry Pi 2 and up but should also work on others | Alsa |
-| `camilladsp-macos-amd64.zip` | macOS on 64-bit Intel CPU | CoreAudio |
+| `camilladsp-macos-amd64.tar.gz` | macOS on 64-bit Intel CPU | CoreAudio |
 | `camilladsp-windows-amd64.zip` | Windows on 64-bit Intel or AMD CPU | Wasapi |
 
 All builds include the Websocket server.
@@ -390,15 +390,16 @@ devices:
 * `enable_rate_adjust` (optional, defaults to false)
 
   This enables the playback device to control the rate of the capture device, 
-  in order to avoid buffer underruns of a slowly increasing latency. This is currently only supported when using an Alsa playback device.
+  in order to avoid buffer underruns of a slowly increasing latency. This is currently supported when using an Alsa, Wasapi or CoreAudio playback device.
   Setting the rate can be done in two ways.
   * If the capture device is an Alsa Loopback device, the adjustment is done by tuning the virtual sample clock of the Loopback device. This avoids any need for resampling.
   * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` must then be one of the "Async" variants.
   
 
 * `target_level` (optional, defaults to the `chunksize` value)
+
   The value is the number of samples that should be left in the buffer of the playback device
-  when the next chunk arrives. It works by fine tuning the sample rate of the virtual Loopback device.
+  when the next chunk arrives. Only applies when `enable_rate_adjust` is set to `true`.
   It will take some experimentation to find the right number. 
   If it's too small there will be buffer underruns from time to time, 
   and making it too large might lead to a longer input-output delay than what is acceptable. 
@@ -407,7 +408,7 @@ devices:
 * `adjust_period` (optional, defaults to 10)
   
   The `adjust_period` parameter is used to set the interval between corrections, in seconds. 
-  The default is 10 seconds.
+  The default is 10 seconds. Only applies when `enable_rate_adjust` is set to `true`.
 
 * `silence_threshold` & `silence_timeout` (optional)
   The fields `silence_threshold` and `silence_timeout` are optional 
@@ -554,10 +555,6 @@ Using the "Synchronous" variant with rate adjust enabled will print warnings,
 and any rate adjust request will be ignored.
 
 See the library documentation for more details. [Rubato on docs.rs](https://docs.rs/rubato/0.1.0/rubato/)
-
-
-
-
 
 
 ## Mixers
