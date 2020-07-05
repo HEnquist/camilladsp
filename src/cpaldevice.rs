@@ -12,7 +12,9 @@ use rubato::Resampler;
 use std::collections::VecDeque;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
+use std::time::SystemTime;
 
 use CommandMessage;
 use PrcFmt;
@@ -35,6 +37,9 @@ pub struct CpalPlaybackDevice {
     pub chunksize: usize,
     pub channels: usize,
     pub format: SampleFormat,
+    pub target_level: usize,
+    pub adjust_period: f32,
+    pub enable_rate_adjust: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -163,6 +168,16 @@ impl PlaybackDevice for CpalPlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
+        let target_level = if self.target_level > 0 {
+            self.target_level
+        } else {
+            self.chunksize
+        };
+        let adjust_period = self.adjust_period;
+        let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
+        let chunksize_clone = chunksize;
+        let channels_clone = channels;
+
         let bits = match self.format {
             SampleFormat::S16LE => 16,
             SampleFormat::S24LE => 24,
@@ -185,10 +200,19 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         barrier.wait();
                         debug!("Starting playback loop");
                         let (tx_dev, rx_dev) = mpsc::sync_channel(1);
+                        let buffer_fill = Arc::new(AtomicUsize::new(0));
+                        let buffer_fill_clone = buffer_fill.clone();
+                        let mut start = SystemTime::now();
+                        let mut now;
+                        let mut delay = 0;
+                        let mut ndelays = 0;
+                        let mut speed;
+                        let mut diff: isize;
+
                         match format {
                             SampleFormat::S16LE => {
                                 let mut sample_queue: VecDeque<i16> =
-                                    VecDeque::with_capacity(4 * chunksize * channels);
+                                    VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
                                 std::thread::spawn(move || {
                                     event_loop.run(move |id, result| {
                                         let data = match result {
@@ -223,6 +247,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                     &mut buffer,
                                                     &mut sample_queue,
                                                 );
+                                                buffer_fill_clone.store(sample_queue.len(), Ordering::Relaxed);
                                             }
                                             _ => (),
                                         };
@@ -231,7 +256,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             }
                             SampleFormat::FLOAT32LE => {
                                 let mut sample_queue: VecDeque<f32> =
-                                    VecDeque::with_capacity(4 * chunksize * channels);
+                                    VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
                                 std::thread::spawn(move || {
                                     event_loop.run(move |id, result| {
                                         let data = match result {
@@ -262,6 +287,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                     &mut buffer,
                                                     &mut sample_queue,
                                                 );
+                                                buffer_fill_clone.store(sample_queue.len(), Ordering::Relaxed);
                                             }
                                             _ => (),
                                         };
@@ -273,6 +299,29 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
+                                    now = SystemTime::now();
+                                    delay += buffer_fill.load(Ordering::Relaxed) as isize;
+                                    ndelays += 1;
+                                    if adjust
+                                        && (now.duration_since(start).unwrap().as_millis()
+                                            > ((1000.0 * adjust_period) as u128))
+                                    {
+                                        let av_delay = delay / ndelays;
+                                        diff = av_delay - target_level as isize;
+                                        let rel_diff = (diff as f64) / (samplerate as f64);
+                                        speed = 1.0 + 0.5 * rel_diff / adjust_period as f64;
+                                        debug!(
+                                            "Current buffer level {}, set capture rate to {}%",
+                                            av_delay,
+                                            100.0 * speed
+                                        );
+                                        start = now;
+                                        delay = 0;
+                                        ndelays = 0;
+                                        status_channel
+                                            .send(StatusMessage::SetSpeed { speed })
+                                            .unwrap();
+                                    }
                                     tx_dev.send(chunk).unwrap();
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
@@ -443,6 +492,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 }
                                 Ok(CommandMessage::SetSpeed { speed }) => {
                                     if let Some(resampl) = &mut resampler {
+                                        debug!("Adjusting resampler rate to {}", speed);
                                         if async_src {
                                             if resampl.set_resample_ratio_relative(speed).is_err() {
                                                 debug!("Failed to set resampling speed to {}", speed);

@@ -154,6 +154,9 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             chunksize: conf.chunksize,
             channels,
             format,
+            target_level: conf.target_level,
+            adjust_period: conf.adjust_period,
+            enable_rate_adjust: conf.enable_rate_adjust,
         }),
         #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
         config::PlaybackDevice::Wasapi {
@@ -167,6 +170,9 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             chunksize: conf.chunksize,
             channels,
             format,
+            target_level: conf.target_level,
+            adjust_period: conf.adjust_period,
+            enable_rate_adjust: conf.enable_rate_adjust,
         }),
     }
 }
