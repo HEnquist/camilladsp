@@ -10,9 +10,9 @@ use cpal::{ChannelCount, Format, HostId, SampleRate};
 use cpal::{Device, EventLoop, Host};
 use rubato::Resampler;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::SystemTime;
 
@@ -247,7 +247,8 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                     &mut buffer,
                                                     &mut sample_queue,
                                                 );
-                                                buffer_fill_clone.store(sample_queue.len(), Ordering::Relaxed);
+                                                buffer_fill_clone
+                                                    .store(sample_queue.len(), Ordering::Relaxed);
                                             }
                                             _ => (),
                                         };
@@ -287,7 +288,8 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                     &mut buffer,
                                                     &mut sample_queue,
                                                 );
-                                                buffer_fill_clone.store(sample_queue.len(), Ordering::Relaxed);
+                                                buffer_fill_clone
+                                                    .store(sample_queue.len(), Ordering::Relaxed);
                                             }
                                             _ => (),
                                         };
