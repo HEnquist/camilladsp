@@ -140,12 +140,12 @@ jobs:
           args: --release --no-default-features --features cpal-backend --features socketserver
 
       - name: Compress
-        run: zip -j camilladsp.zip target/release/camilladsp
+        run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v1-release
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: camilladsp.zip
-          asset_name: camilladsp-macos-amd64.zip
+          file: camilladsp.tar.gz
+          asset_name: camilladsp-macos-amd64.tar.gz
           tag: ${{ github.ref }}
