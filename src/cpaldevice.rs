@@ -309,7 +309,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         let av_delay = delay / ndelays;
                                         diff = av_delay - target_level as isize;
                                         let rel_diff = (diff as f64) / (samplerate as f64);
-                                        speed = 1.0 + 0.5 * rel_diff / adjust_period as f64;
+                                        speed = 1.0 - 0.5 * rel_diff / adjust_period as f64;
                                         debug!(
                                             "Current buffer level {}, set capture rate to {}%",
                                             av_delay,
