@@ -13,6 +13,7 @@ enum WSCommand {
     GetConfig,
     GetConfigJson,
     GetConfigName,
+    GetCaptureRate,
     Exit,
     Stop,
     Invalid,
@@ -32,6 +33,7 @@ fn parse_command(cmd: &ws::Message) -> WSCommand {
             "getconfigname" => WSCommand::GetConfigName,
             "exit" => WSCommand::Exit,
             "stop" => WSCommand::Stop,
+            "getcapturerate" => WSCommand::GetCaptureRate,
             "setconfigname" => {
                 if cmdarg.len() == 2 {
                     WSCommand::SetConfigName(cmdarg[1].to_string())
@@ -67,6 +69,7 @@ pub fn start_server(
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     active_config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
+    measured_rate: Arc<AtomicUsize>,
 ) {
     debug!("Start websocket server on port {}", port);
     thread::spawn(move || {
@@ -76,6 +79,7 @@ pub fn start_server(
             let active_config_inst = active_config_shared.clone();
             let new_config_inst = new_config_shared.clone();
             let active_config_path_inst = active_config_path.clone();
+            let measured_rate_inst = measured_rate.clone();
             move |msg: ws::Message| {
                 let command = parse_command(&msg);
                 debug!("parsed command: {:?}", command);
@@ -83,6 +87,12 @@ pub fn start_server(
                     WSCommand::Reload => {
                         signal_reload_inst.store(true, Ordering::Relaxed);
                         socket.send("OK:RELOAD")
+                    }
+                    WSCommand::GetCaptureRate => {
+                        socket.send(format!(
+                            "OK:GETCAPTURERATE:{}",
+                            measured_rate_inst.load(Ordering::Relaxed)
+                        ))
                     }
                     WSCommand::GetConfig => {
                         //let conf_yaml = serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap();

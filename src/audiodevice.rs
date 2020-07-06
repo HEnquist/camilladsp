@@ -14,6 +14,7 @@ use rubato::{
 };
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
+use std::sync::atomic::AtomicUsize;
 use std::thread;
 use std::time::Instant;
 
@@ -97,6 +98,7 @@ pub trait CaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
+        measured_rate: Arc<AtomicUsize>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
 }
 

@@ -104,6 +104,7 @@ fn run(
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
+    measured_rate: Arc<AtomicUsize>,
 ) -> Res<ExitStatus> {
     let conf = match new_config_shared.lock().unwrap().clone() {
         Some(cfg) => cfg,
@@ -147,7 +148,7 @@ fn run(
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
     let cap_handle = capture_dev
-        .start(tx_cap, barrier_cap, tx_status_cap, rx_command_cap)
+        .start(tx_cap, barrier_cap, tx_status_cap, rx_command_cap, measured_rate)
         .unwrap();
 
     let delay = time::Duration::from_millis(100);
@@ -386,6 +387,7 @@ fn main() {
 
     let signal_reload = Arc::new(AtomicBool::new(false));
     let signal_exit = Arc::new(AtomicUsize::new(0));
+    let measured_rate = Arc::new(AtomicUsize::new(0));
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
@@ -403,6 +405,7 @@ fn main() {
                 active_config.clone(),
                 active_config_path.clone(),
                 new_config.clone(),
+                measured_rate.clone()
             );
         }
     }
@@ -421,6 +424,7 @@ fn main() {
             active_config.clone(),
             active_config_path.clone(),
             new_config.clone(),
+            measured_rate.clone(),
         );
         match exitstatus {
             Err(e) => {

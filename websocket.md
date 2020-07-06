@@ -11,6 +11,8 @@ The available commands are:
   * response is `OK:GETCONFIG:(jsondata)` where yamldata is the config in JSON format.
 - `getconfigname` : get name and path of current config file
   * response is `OK:GETCONFIGNAME:/path/to/current.yml`
+- `getcapturerate` : get the measured sample rate of the capture device.
+  * response is `OK:GETCAPTURERATE:123456`
 - `reload` : reload current config file (same as SIGHUP)
   * response is `OK:RELOAD` or `ERROR:RELOAD` 
 - `stop` : stop processing and wait for a new config to be uploaded with `setconfig`

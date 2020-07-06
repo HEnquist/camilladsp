@@ -10,7 +10,9 @@ use std::io::ErrorKind;
 use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
+use std::time::SystemTime;
 
 use rubato::Resampler;
 
@@ -68,6 +70,7 @@ struct CaptureParams {
     resampling_ratio: f32,
     read_bytes: usize,
     async_src: bool,
+    measured_rate: Arc<AtomicUsize>,
 }
 
 //struct PlaybackParams {
@@ -248,6 +251,9 @@ fn capture_loop(
     let mut capture_bytes_temp;
     let mut extra_bytes_left = params.extra_bytes;
     let mut nbr_bytes_read = 0;
+    let mut start = SystemTime::now();
+    let mut now;
+    let mut bytes_counter = 0;
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -320,6 +326,21 @@ fn capture_loop(
                         .unwrap();
                     break;
                 }
+                now = SystemTime::now();
+                bytes_counter += bytes;
+                if now.duration_since(start).unwrap().as_millis() > 1000
+                {
+                    let meas_time = now.duration_since(start).unwrap().as_secs_f32();
+                    let bytes_per_sec = bytes_counter as f32 / meas_time;
+                    let measured_rate_f = bytes_per_sec / (params.channels * params.store_bytes) as f32;
+                    trace!(
+                        "Measured sample rate is {} Hz",
+                        measured_rate_f
+                    );
+                    params.measured_rate.store(measured_rate_f as usize, Ordering::Relaxed);
+                    start = now;
+                    bytes_counter = 0;
+                }
             }
             Err(err) => {
                 debug!("Encountered a read error");
@@ -375,6 +396,7 @@ impl CaptureDevice for FileCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
+        measured_rate: Arc<AtomicUsize>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let filename = self.filename.clone();
         let samplerate = self.samplerate;
@@ -451,6 +473,7 @@ impl CaptureDevice for FileCaptureDevice {
                             resampling_ratio: samplerate as f32 / capture_samplerate as f32,
                             read_bytes,
                             async_src,
+                            measured_rate,
                         };
                         let msg_channels = CaptureChannels {
                             audio: channel,

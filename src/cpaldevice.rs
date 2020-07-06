@@ -302,7 +302,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     now = SystemTime::now();
-                                    delay += buffer_fill.load(Ordering::Relaxed) as isize;
+                                    delay += (buffer_fill.load(Ordering::Relaxed)/channels_clone) as isize;
                                     ndelays += 1;
                                     if adjust
                                         && (now.duration_since(start).unwrap().as_millis()
@@ -384,6 +384,7 @@ impl CaptureDevice for CpalCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
+        measured_rate: Arc<AtomicUsize>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let host_cfg = self.host.clone();
         let devname = self.devname.clone();
@@ -484,6 +485,9 @@ impl CaptureDevice for CpalCaptureDevice {
                         let mut capture_samples = chunksize_samples;
                         let mut sample_queue_i: VecDeque<i16> = VecDeque::with_capacity(2*chunksize*channels);
                         let mut sample_queue_f: VecDeque<f32> = VecDeque::with_capacity(2*chunksize*channels);
+                        let mut start = SystemTime::now();
+                        let mut now;
+                        let mut sample_counter = 0;
                         loop {
                             match command_channel.try_recv() {
                                 Ok(CommandMessage::Exit) => {
@@ -561,6 +565,21 @@ impl CaptureDevice for CpalCaptureDevice {
                                 },
                                 _ => panic!("Unsupported sample format"),
                             };
+                            now = SystemTime::now();
+                            sample_counter += capture_samples;
+                            if now.duration_since(start).unwrap().as_millis() > 1000
+                            {
+                                let meas_time = now.duration_since(start).unwrap().as_secs_f32();
+                                let samples_per_sec = sample_counter as f32 / meas_time;
+                                let measured_rate_f = samples_per_sec / channels as f32;
+                                trace!(
+                                    "Measured sample rate is {} Hz",
+                                    measured_rate_f
+                                );
+                                measured_rate.store(measured_rate_f as usize, Ordering::Relaxed);
+                                start = now;
+                                sample_counter = 0;
+                            }
                             if (chunk.maxval - chunk.minval) > silence {
                                 if silent_nbr > silent_limit {
                                     debug!("Resuming processing");
