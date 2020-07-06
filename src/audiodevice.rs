@@ -12,9 +12,9 @@ use rubato::{
     FftFixedOut, InterpolationParameters, InterpolationType, Resampler, SincFixedOut,
     WindowFunction,
 };
+use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
-use std::sync::atomic::AtomicUsize;
 use std::thread;
 use std::time::Instant;
 

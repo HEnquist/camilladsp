@@ -302,7 +302,8 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     now = SystemTime::now();
-                                    delay += (buffer_fill.load(Ordering::Relaxed)/channels_clone) as isize;
+                                    delay += (buffer_fill.load(Ordering::Relaxed) / channels_clone)
+                                        as isize;
                                     ndelays += 1;
                                     if adjust
                                         && (now.duration_since(start).unwrap().as_millis()

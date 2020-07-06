@@ -11,9 +11,9 @@ use conversions::{
     chunk_to_buffer_float_bytes,
 };
 use rubato::Resampler;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::SystemTime;
 

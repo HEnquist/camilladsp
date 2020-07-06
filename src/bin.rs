@@ -148,7 +148,13 @@ fn run(
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
     let cap_handle = capture_dev
-        .start(tx_cap, barrier_cap, tx_status_cap, rx_command_cap, measured_rate)
+        .start(
+            tx_cap,
+            barrier_cap,
+            tx_status_cap,
+            rx_command_cap,
+            measured_rate,
+        )
         .unwrap();
 
     let delay = time::Duration::from_millis(100);
@@ -405,7 +411,7 @@ fn main() {
                 active_config.clone(),
                 active_config_path.clone(),
                 new_config.clone(),
-                measured_rate.clone()
+                measured_rate.clone(),
             );
         }
     }

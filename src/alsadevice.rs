@@ -13,9 +13,9 @@ use conversions::{
 };
 use rubato::Resampler;
 use std::ffi::CString;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
@@ -330,16 +330,15 @@ fn capture_loop_bytes(
                 trace!("Captured {} bytes", capture_bytes);
                 now = SystemTime::now();
                 bytes_counter += capture_bytes;
-                if now.duration_since(start).unwrap().as_millis() > 1000
-                {
+                if now.duration_since(start).unwrap().as_millis() > 1000 {
                     let meas_time = now.duration_since(start).unwrap().as_secs_f32();
                     let bytes_per_sec = bytes_counter as f32 / meas_time;
-                    let measured_rate_f = bytes_per_sec / (params.channels * params.bytes_per_sample) as f32;
-                    trace!(
-                        "Measured sample rate is {} Hz",
-                        measured_rate_f
-                    );
-                    params.measured_rate.store(measured_rate_f as usize, Ordering::Relaxed);
+                    let measured_rate_f =
+                        bytes_per_sec / (params.channels * params.bytes_per_sample) as f32;
+                    trace!("Measured sample rate is {} Hz", measured_rate_f);
+                    params
+                        .measured_rate
+                        .store(measured_rate_f as usize, Ordering::Relaxed);
                     start = now;
                     bytes_counter = 0;
                 }

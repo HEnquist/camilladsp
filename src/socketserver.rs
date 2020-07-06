@@ -88,12 +88,10 @@ pub fn start_server(
                         signal_reload_inst.store(true, Ordering::Relaxed);
                         socket.send("OK:RELOAD")
                     }
-                    WSCommand::GetCaptureRate => {
-                        socket.send(format!(
-                            "OK:GETCAPTURERATE:{}",
-                            measured_rate_inst.load(Ordering::Relaxed)
-                        ))
-                    }
+                    WSCommand::GetCaptureRate => socket.send(format!(
+                        "OK:GETCAPTURERATE:{}",
+                        measured_rate_inst.load(Ordering::Relaxed)
+                    )),
                     WSCommand::GetConfig => {
                         //let conf_yaml = serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap();
                         socket.send(format!(
