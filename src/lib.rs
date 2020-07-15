@@ -80,3 +80,10 @@ pub enum ExitStatus {
     Restart,
     Exit,
 }
+
+#[derive(Clone, Debug)]
+pub struct CaptureStatus {
+    pub update_interval: usize,
+    pub measured_samplerate: usize,
+    pub signal_range: PrcFmt,
+}

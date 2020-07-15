@@ -12,12 +12,12 @@ use rubato::{
     FftFixedOut, InterpolationParameters, InterpolationType, Resampler, SincFixedOut,
     WindowFunction,
 };
-use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Instant;
 
+use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
 use Res;
@@ -98,7 +98,7 @@ pub trait CaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        measured_rate: Arc<AtomicUsize>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
 }
 

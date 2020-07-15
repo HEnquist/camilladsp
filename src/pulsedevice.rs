@@ -11,12 +11,12 @@ use conversions::{
     chunk_to_buffer_float_bytes,
 };
 use rubato::Resampler;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::SystemTime;
 
+use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
 use Res;
@@ -231,7 +231,7 @@ impl CaptureDevice for PulseCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        measured_rate: Arc<AtomicUsize>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -343,8 +343,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                 Ok(()) => {
                                     now = SystemTime::now();
                                     bytes_counter += capture_bytes;
-                                    if now.duration_since(start).unwrap().as_millis() > 1000
-                                    {
+                                    if now.duration_since(start).unwrap().as_millis() as usize > capture_status.read().unwrap().update_interval {
                                         let meas_time = now.duration_since(start).unwrap().as_secs_f32();
                                         let bytes_per_sec = bytes_counter as f32 / meas_time;
                                         let measured_rate_f = bytes_per_sec / (channels * store_bytes) as f32;
@@ -352,7 +351,8 @@ impl CaptureDevice for PulseCaptureDevice {
                                             "Measured sample rate is {} Hz",
                                             measured_rate_f
                                         );
-                                        measured_rate.store(measured_rate_f as usize, Ordering::Relaxed);
+                                        let mut capt_stat = capture_status.write().unwrap();
+                                        capt_stat.measured_samplerate = measured_rate_f as usize;
                                         start = now;
                                         bytes_counter = 0;
                                     }
