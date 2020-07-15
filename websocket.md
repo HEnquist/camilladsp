@@ -13,6 +13,12 @@ The available commands are:
   * response is `OK:GETCONFIGNAME:/path/to/current.yml`
 - `getcapturerate` : get the measured sample rate of the capture device.
   * response is `OK:GETCAPTURERATE:123456`
+- `getupdateinterval` : get the update interval in ms for capture rate and signalrange.
+  * response is `OK:GETUPDATEINTERVAL:123456`
+- `setupdateinterval:<new_number>` : set the update interval in ms for capturerate and signalrange.
+  * response is `OK:SETUPDATEINTERVAL`
+- `getsignalrange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)
+  * response is `OK:GETSIGNALRANGE:1.23456`
 - `reload` : reload current config file (same as SIGHUP)
   * response is `OK:RELOAD` or `ERROR:RELOAD` 
 - `stop` : stop processing and wait for a new config to be uploaded with `setconfig`
