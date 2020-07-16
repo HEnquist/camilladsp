@@ -12,10 +12,11 @@ use rubato::Resampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::SystemTime;
 
+use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
 use Res;
@@ -385,7 +386,7 @@ impl CaptureDevice for CpalCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        measured_rate: Arc<AtomicUsize>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let host_cfg = self.host.clone();
         let devname = self.devname.clone();
@@ -568,7 +569,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             };
                             now = SystemTime::now();
                             sample_counter += capture_samples;
-                            if now.duration_since(start).unwrap().as_millis() > 1000
+                            if now.duration_since(start).unwrap().as_millis() as usize > capture_status.read().unwrap().update_interval
                             {
                                 let meas_time = now.duration_since(start).unwrap().as_secs_f32();
                                 let samples_per_sec = sample_counter as f32 / meas_time;
@@ -577,7 +578,8 @@ impl CaptureDevice for CpalCaptureDevice {
                                     "Measured sample rate is {} Hz",
                                     measured_rate_f
                                 );
-                                measured_rate.store(measured_rate_f as usize, Ordering::Relaxed);
+                                let mut capt_stat = capture_status.write().unwrap();
+                                capt_stat.measured_samplerate = measured_rate_f as usize;
                                 start = now;
                                 sample_counter = 0;
                             }
