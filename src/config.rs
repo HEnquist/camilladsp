@@ -251,13 +251,9 @@ pub enum ConvParameters {
         #[serde(default)]
         format: FileFormat,
         #[serde(default)]
-        skip_bytes: usize,
+        skip_bytes_lines: usize,
         #[serde(default)]
-        read_bytes: usize,
-        #[serde(default)]
-        skip_lines: usize,
-        #[serde(default)]
-        read_lines: usize,
+        read_bytes_lines: usize,
     },
     Values {
         values: Vec<PrcFmt>,

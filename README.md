@@ -644,7 +644,25 @@ filters:
       type: File 
       filename: path/to/filter.txt
       format: TEXT
+      skip_bytes_lines: 0 (*)
+      read_bytes_lines: 0 (*)
 ```
+The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. 
+
+Example for giving values:
+```
+filters:
+  lowpass_fir:
+    type: Conv
+    parameters:
+      type: Values
+      values: [0.0, 0.1, 0.2, 0.3]
+```
+
+The File type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
+* `skip_bytes_lines`: Number of bytes (for raw files) or lines (for text) to skip at the beginning of the file. This can be used to skip over a header. Leaving it out or setting to zero means no bytes or lines are skipped. 
+* `read_bytes_lines`: Read only up until the specified number of bytes (for raw files) or lines (for text). Leave it out to read until the end of the file.
+
 For testing purposes the entire "parameters" block can be left out (or commented out with a # at the start of each line). This then becomes a dummy filter that does not affect the signal.
 The "format" parameter can be omitted, in which case it's assumed that the format is TEXT. This format is a simple text file with one value per row:
 ```
