@@ -316,7 +316,7 @@ To capture audio from applications a virtual sound card is needed. This has been
 
 Set the virtual sound card as the default playback device in the Sound preferences, and let CamillaDSP capture from the output of this card.
 
-The device name is the same as the one shown in the "Audio MIDI Setup" that can be found under "Other" in Launchpad. The name for BlackHole is "BlackHole 16ch", and the build in audio in a MacBook Pro is called "Built-in Output".
+The device name is the same as the one shown in the "Audio MIDI Setup" that can be found under "Other" in Launchpad. The name for BlackHole is "BlackHole 16ch", and the built in audio in a MacBook Pro is called "Built-in Output".
 
 The sample format appears to always be 32-bit float (FLOAT32LE) even if the device is configured to use aother format.
 
