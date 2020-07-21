@@ -1,0 +1,151 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    container: ubuntu:19.10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Update package list
+        run: apt-get update
+
+      - name: Install utils
+        run: apt-get install curl wget -y
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Install Alsa devel
+        run: apt-get install libasound2-dev -y
+
+      - name: Install PulseAudio
+        run: apt-get install libpulse0 libpulse-dev -y
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v1-release
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp.tar.gz
+          asset_name: camilladsp-linux-amd64.tar.gz
+          tag: ${{ github.ref }}
+
+  arm:
+    name: Pi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: armv7-unknown-linux-gnueabihf
+          override: true
+
+      - name: Build image
+        run: docker build -t cross/armv7:v1 ./
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          use-cross: true
+          args: --release --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features socketserver
+        env:
+          RUSTFLAGS: "-C target-feature=+neon"
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/armv7-unknown-linux-gnueabihf/release camilladsp
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v1-release
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp.tar.gz
+          asset_name: camilladsp-linux-armv7.tar.gz
+          tag: ${{ github.ref }}
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --no-default-features --features cpal-backend --features socketserver
+
+      - name: Compress
+        run: powershell Compress-Archive target/release/camilladsp.exe camilladsp.zip
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v1-release
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp.zip
+          asset_name: camilladsp-windows-amd64.zip
+          tag: ${{ github.ref }}
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --no-default-features --features cpal-backend --features socketserver
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v1-release
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp.tar.gz
+          asset_name: camilladsp-macos-amd64.tar.gz
+          tag: ${{ github.ref }}

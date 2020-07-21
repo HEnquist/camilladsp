@@ -3,7 +3,9 @@
 
 A tool to create audio processing pipelines for applications such as active crossovers or room correction. It is written in Rust to benefit from the safety and elegant handling of threading that this language provides. 
 
-Audio data is captured from a capture device and sent to a playback device. Alsa and PulseAudio are currently supported for both capture and playback.
+Supported platforms: Linux, macOS, Windows.
+
+Audio data is captured from a capture device and sent to a playback device. Alsa, PulseAudio, Wasapi and CoreAudio are currently supported for both capture and playback.
 
 The processing pipeline consists of any number of filters and mixers. Mixers are used to route audio between channels and to change the number of channels in the stream. Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT. A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples. A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
 The full configuration is given in a yaml file.
@@ -14,10 +16,13 @@ The full configuration is given in a yaml file.
 - **[Usage example: crossover for 2-way speakers](#usage-example-crossover-for-2-way-speakers)**
 - **[Dependencies](#dependencies)**
 
+**[Installing](#installing)**
+
 **[Building](#building)**
 - **[Build with standard features](#build-with-standard-features)**
 - **[Customized build](#customized-build)**
 - **[Optimize for your system](#optimize-for-your-system)**
+- **[Building on Windows and macOS](#building-on-windows-and-macos)**
 
 **[How to run](#how-to-run)**
 - **[Command line options](#commandline-options)**
@@ -27,6 +32,8 @@ The full configuration is given in a yaml file.
 **[Capturing audio](#capturing-audio)**
 - **[Alsa](#alsa)**
 - **[PulseAudio](#pulseaudio)**
+- **[Wasapi](#wasapi)**
+- **[CoreAudio](#coreaudio)**
 
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
@@ -48,7 +55,7 @@ The full configuration is given in a yaml file.
 
 ## Background
 The purpose of CamillaDSP is to enable audio processing with combinations of FIR and IIR filters. This functionality is available in EqualizerAPO, but for Windows only. For Linux the best known FIR filter engine is probably BruteFIR, which works very well but doesn't support IIR filters. 
-The goal of CamillaDSP is to provide both FIR and IIR filtering for Linux, to be stable, fast and flexible, and be easy to use and configure.  
+The goal of CamillaDSP is to provide both FIR and IIR filtering for Linux, Windows and macOS, to be stable, fast and flexible, and be easy to use and configure.  
 
 * BruteFIR: https://www.ludd.ltu.se/~torger/brutefir.html
 * EqualizerAPO: https://sourceforge.net/projects/equalizerapo/
@@ -83,17 +90,45 @@ A crossover must filter all sound being played on the system. This is possible w
 See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
 ## Dependencies
+These are the key dependencies for CamillDSP.
 * https://crates.io/crates/rustfft - FFT used for FIR filters
 * https://crates.io/crates/rubato - Sample rate conversion
 * https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
 * https://crates.io/crates/alsa - Alsa audio backend
+* https://crates.io/crates/cpal - Wasapi and CoreAudio audio backends
 * https://crates.io/crates/serde_yaml - Config file reading
+
+
+# Installing
+
+The easiest way to install CamillaDSP is to download a pre-built binary. Binaries for each release are available for the most common systems. See the ["Releases"](https://github.com/HEnquist/camilladsp/releases) page. To see the files click "Assets".
+
+These are compressed files containing a single executable file that is ready to run. 
+
+The following configurations are provided:
+| Filename | Description | Backends |
+|----------|-------------|----------|
+| `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | Alsa, Pulseaudio |
+| `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon, intended for Raspberry Pi 2 and up but should also work on others | Alsa |
+| `camilladsp-macos-amd64.tar.gz` | macOS on 64-bit Intel CPU | CoreAudio |
+| `camilladsp-windows-amd64.zip` | Windows on 64-bit Intel or AMD CPU | Wasapi |
+
+All builds include the Websocket server.
+
+The `.tar.gz`-files can be uncompressed with the `tar` comand: 
+
+```sh 
+tar -xvf camilladsp-linux-amd64.tar.gz
+```
+
 
 # Building
 
 Use recent stable versions of rustc and cargo. The minimum rustc version is 1.40.0. 
 
-The recommended way to install rustc and cargo is by using the "rustup" tool. Get it here: https://rustup.rs/
+The recommended way to install rustc and cargo is by using the "rustup" tool. This tool works on all supported platforms (Linux, macOS and Windows). Get it here: https://rustup.rs/
+
+For Windows you also need the "Build Tools for Visual Studio". Get them from here: https://aka.ms/buildtools
 
 By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
 
@@ -101,9 +136,9 @@ By default the internal processing is done using 64-bit floats. There is a possi
 
 CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "socketserver". For usage see the section "Controlling via websocket".
 
-The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". FFTW is about a factor two faster. It's a much larger and more complicated library though, so this is only recommended if your filters take too much CPU time with RustFFT.
+The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". When the chunksize is a power of two, like 1024 or 4096, FFTW is only a few percent faster than RustFFT. The difference gets much larger if the chunksize is a "strange" number, like a large prime. FFTW is a much larger and more complicated library, so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT much slower.
 
-## Build with standard features
+## Building in Linux with standard features
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
@@ -125,11 +160,12 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 
 ## Customized build
 All the available options, or "features" are:
-- `alsa-backend`
-- `pulse-backend`
-- `socketserver`
-- `FFTW`
-- `32bit`
+- `alsa-backend`: Alsa support
+- `pulse-backend`: PulseAudio support
+- `cpal-backend`: Wasapi and CoreAudio support
+- `socketserver`: Websocket server for control
+- `FFTW`: Use FFTW instead of RustFFT
+- `32bit`: Perform all calculations with 32-bit floats (instead of 64)
 
 The first three (`alsa-backend`, `pulse-packend`, `socketserver`) are included in the default features, meaning if you don't specify anything you will get those three.
 Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
@@ -164,6 +200,22 @@ On a Raspberry Pi also state that NEON should be enabled:
 ```
 RUSTFLAGS='-C target-feature=+neon -C target-cpu=native' cargo build --release 
 ```
+
+## Building on Windows and macOS
+The Alsa and Pulse backends should not be included when building on Windows and macOS. The recommended build command is:
+```
+RUSTFLAGS='-C target-cpu=native' cargo build --release  --no-default-features --features cpal-backend --features socketserver 
+```
+On macOS both the PulseAudio and FFTW features can be used. The necessary dependencies can be installed with brew:
+```
+brew install fftw
+brew install pkg-config
+brew install pulseaudio
+```
+
+The FFTW feature can also be used on Windows. There is no need to install anything extra.
+
+
 
 
 # How to run
@@ -247,6 +299,29 @@ pacmd list-sinks
 pacmd list-sources
 ```
 
+## Wasapi
+To capture audio from applications a virtual sound card is needed. [VB-CABLE from VB-AUDIO](https://www.vb-audio.com/Cable/) works well.
+
+Set VB-CABLE as the default playback device in the control panel, and let CamillaDSP capture from the VB-CABLE output.
+
+The device name is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the inpout/output name and card name, and the format is "{input/output name} ({card name})".
+
+The sample format appears to always be 32-bit float (FLOAT32LE).
+
+The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
+
+
+## CoreAudio
+CoreAudio is supported by the cpal library and should work, but hasn't actually been tested.
+
+To capture audio from applications a virtual sound card is needed. See for example [BlackHole](https://github.com/ExistentialAudio/BlackHole).
+
+Set the virtual sound card as the default playback device in the Sound preferences, and let CamillaDSP capture from the output of this card.
+
+The device name is the same as the one shown in System Preferences / Sound.
+
+The sample format appears to always be 32-bit float (FLOAT32LE).
+
 
 # Configuration
 
@@ -315,15 +390,16 @@ devices:
 * `enable_rate_adjust` (optional, defaults to false)
 
   This enables the playback device to control the rate of the capture device, 
-  in order to avoid buffer underruns of a slowly increasing latency. This is currently only supported when using an Alsa playback device.
+  in order to avoid buffer underruns of a slowly increasing latency. This is currently supported when using an Alsa, Wasapi or CoreAudio playback device.
   Setting the rate can be done in two ways.
   * If the capture device is an Alsa Loopback device, the adjustment is done by tuning the virtual sample clock of the Loopback device. This avoids any need for resampling.
   * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` must then be one of the "Async" variants.
   
 
 * `target_level` (optional, defaults to the `chunksize` value)
+
   The value is the number of samples that should be left in the buffer of the playback device
-  when the next chunk arrives. It works by fine tuning the sample rate of the virtual Loopback device.
+  when the next chunk arrives. Only applies when `enable_rate_adjust` is set to `true`.
   It will take some experimentation to find the right number. 
   If it's too small there will be buffer underruns from time to time, 
   and making it too large might lead to a longer input-output delay than what is acceptable. 
@@ -332,7 +408,7 @@ devices:
 * `adjust_period` (optional, defaults to 10)
   
   The `adjust_period` parameter is used to set the interval between corrections, in seconds. 
-  The default is 10 seconds.
+  The default is 10 seconds. Only applies when `enable_rate_adjust` is set to `true`.
 
 * `silence_threshold` & `silence_timeout` (optional)
   The fields `silence_threshold` and `silence_timeout` are optional 
@@ -366,21 +442,32 @@ devices:
 * `capture` and `playback`
   Input and output devices are defined in the same way. 
   A device needs:
-  * `type`: Alsa, Pulse or File 
+  * `type`: Alsa, Pulse, Wasapi, CoreAudio or File 
   * `channels`: number of channels
-  * `device`: device name (for Alsa and Pulse)
+  * `device`: device name (for Alsa, Pulse, Wasapi, CoreAudio)
   * `filename` path the the file (for File)
   * `format`: sample format.
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
     * S16LE - Signed 16 bit int, stored as two bytes
-    * S24LE - Signed 24 bit int, stored as four bytes
-    * S24LE3 - Signed 24 bit int, stored as three bytes    
-    * S32LE - Signed 32 bit int, stored as four bytes
+    * S24LE - Signed 24 bit int, stored as four bytes 
+    * S24LE3 - Signed 24 bit int, stored as three bytes 
+    * S32LE - Signed 32 bit int, stored as four bytes 
     * FLOAT32LE - 32 bit float, stored as four bytes
-    * FLOAT64LE - 64 bit float, stored as eight bytes (not supported by PulseAudio)
+    * FLOAT64LE - 64 bit float, stored as eight bytes
 
-  Equivalent formats:
+  Supported formats:
+  |            | Alsa               | Pulse              | Wasapi             | CoreAudio          |
+  |------------|--------------------|--------------------|--------------------|--------------------|
+  | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+  | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                |
+  | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                |
+  | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                |
+  | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+  | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                |
+
+
+  Equivalent formats (for reference):
   | CamillaDSP | Alsa       | Pulse     |
   |------------|------------|-----------|
   | S16LE      | S16_LE     | S16LE     |
@@ -468,10 +555,6 @@ Using the "Synchronous" variant with rate adjust enabled will print warnings,
 and any rate adjust request will be ignored.
 
 See the library documentation for more details. [Rubato on docs.rs](https://docs.rs/rubato/0.1.0/rubato/)
-
-
-
-
 
 
 ## Mixers

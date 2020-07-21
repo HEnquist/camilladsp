@@ -1,6 +1,8 @@
-#[cfg(feature = "alsa-backend")]
+#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 extern crate alsa;
 extern crate clap;
+#[cfg(feature = "cpal-backend")]
+extern crate cpal;
 #[cfg(feature = "FFTW")]
 extern crate fftw;
 #[cfg(feature = "pulse-backend")]
@@ -32,7 +34,7 @@ pub type PrcFmt = f32;
 pub type PrcFmt = f64;
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
-#[cfg(feature = "alsa-backend")]
+#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 pub mod alsadevice;
 pub mod audiodevice;
 pub mod basicfilters;
@@ -40,6 +42,8 @@ pub mod biquad;
 pub mod biquadcombo;
 pub mod config;
 pub mod conversions;
+#[cfg(feature = "cpal-backend")]
+pub mod cpaldevice;
 pub mod diffeq;
 pub mod dither;
 #[cfg(not(feature = "FFTW"))]

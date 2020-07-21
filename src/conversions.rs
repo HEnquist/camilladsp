@@ -1,4 +1,6 @@
 use audiodevice::*;
+use num;
+use std::collections::VecDeque;
 use std::convert::TryInto;
 use PrcFmt;
 
@@ -216,14 +218,178 @@ pub fn buffer_to_chunk_float_bytes(
     AudioChunk::new(wfs, maxvalue, minvalue, num_valid_frames)
 }
 
+/// Convert an AudioChunk to an interleaved queue of ints.
+#[allow(dead_code)]
+pub fn chunk_to_queue_int<T: num::traits::cast::NumCast>(
+    chunk: AudioChunk,
+    queue: &mut VecDeque<T>,
+    scalefactor: PrcFmt,
+) {
+    let _num_samples = chunk.channels * chunk.frames;
+    let mut value: T;
+    let mut clipped = 0;
+    let mut peak = 0.0;
+    let maxval = if (scalefactor >= 2_147_483_648.0) && cfg!(feature = "32bit") {
+        (scalefactor - 128.0) / scalefactor
+    } else {
+        (scalefactor - 1.0) / scalefactor
+    };
+    let minval = -1.0;
+    for frame in 0..chunk.frames {
+        for chan in 0..chunk.channels {
+            let mut float_val = chunk.waveforms[chan][frame];
+            if float_val > maxval {
+                clipped += 1;
+                if float_val > peak {
+                    peak = float_val;
+                }
+                float_val = maxval;
+            } else if float_val < minval {
+                clipped += 1;
+                if -float_val > peak {
+                    peak = -float_val;
+                }
+                float_val = minval;
+            }
+            value = match num::traits::cast(float_val * scalefactor) {
+                Some(val) => val,
+                None => {
+                    debug!("bad float {}", float_val);
+                    num::traits::cast(0.0).unwrap()
+                }
+            };
+            queue.push_back(value);
+        }
+    }
+    if clipped > 0 {
+        warn!(
+            "Clipping detected, {} samples clipped, peak {}%",
+            clipped,
+            peak * 100.0
+        );
+    }
+    //buf
+}
+
+/// Convert a buffer of interleaved ints to an AudioChunk.
+#[allow(dead_code)]
+pub fn queue_to_chunk_int<T: num::traits::cast::AsPrimitive<PrcFmt>>(
+    queue: &mut VecDeque<T>,
+    num_frames: usize,
+    channels: usize,
+    scalefactor: PrcFmt,
+) -> AudioChunk {
+    let mut value: PrcFmt;
+    let mut maxvalue: PrcFmt = 0.0;
+    let mut minvalue: PrcFmt = 0.0;
+    let mut wfs = Vec::with_capacity(channels);
+    for _chan in 0..channels {
+        wfs.push(Vec::with_capacity(num_frames));
+    }
+    for _frame in 0..num_frames {
+        for wf in wfs.iter_mut().take(channels) {
+            value = queue.pop_front().unwrap().as_();
+            value /= scalefactor;
+            if value > maxvalue {
+                maxvalue = value;
+            }
+            if value < minvalue {
+                minvalue = value;
+            }
+            wf.push(value);
+        }
+    }
+    AudioChunk::new(wfs, maxvalue, minvalue, num_frames)
+}
+
+/// Convert an AudioChunk to an interleaved buffer of floats.
+#[allow(dead_code)]
+pub fn chunk_to_queue_float<T: num::traits::cast::NumCast>(
+    chunk: AudioChunk,
+    queue: &mut VecDeque<T>,
+) {
+    let _num_samples = chunk.channels * chunk.frames;
+    //let mut buf = Vec::with_capacity(num_samples);
+    let mut value: T;
+    let mut clipped = 0;
+    let mut peak = 0.0;
+    let maxval = 1.0;
+    let minval = -1.0;
+    for frame in 0..chunk.frames {
+        for chan in 0..chunk.channels {
+            let mut float_val = chunk.waveforms[chan][frame];
+            if float_val > maxval {
+                clipped += 1;
+                if float_val > peak {
+                    peak = float_val;
+                }
+                float_val = maxval;
+            } else if float_val < minval {
+                clipped += 1;
+                if -float_val > peak {
+                    peak = -float_val;
+                }
+                float_val = minval;
+            }
+            value = match num::traits::cast(float_val) {
+                Some(val) => val,
+                None => {
+                    debug!("bad float{}", float_val);
+                    num::traits::cast(0.0).unwrap()
+                }
+            };
+            queue.push_back(value);
+        }
+    }
+    if clipped > 0 {
+        warn!(
+            "Clipping detected, {} samples clipped, peak {}%",
+            clipped,
+            peak * 100.0
+        );
+    }
+    //buf
+}
+
+/// Convert a buffer of interleaved ints to an AudioChunk.
+#[allow(dead_code)]
+pub fn queue_to_chunk_float<T: num::traits::cast::AsPrimitive<PrcFmt>>(
+    queue: &mut VecDeque<T>,
+    num_frames: usize,
+    channels: usize,
+) -> AudioChunk {
+    let mut value: PrcFmt;
+    let mut maxvalue: PrcFmt = 0.0;
+    let mut minvalue: PrcFmt = 0.0;
+    let mut wfs = Vec::with_capacity(channels);
+    for _chan in 0..channels {
+        wfs.push(Vec::with_capacity(num_frames));
+    }
+    for _frame in 0..num_frames {
+        for wf in wfs.iter_mut().take(channels) {
+            value = queue.pop_front().unwrap().as_();
+            if value > maxvalue {
+                maxvalue = value;
+            }
+            if value < minvalue {
+                minvalue = value;
+            }
+            wf.push(value);
+        }
+    }
+    AudioChunk::new(wfs, maxvalue, minvalue, num_frames)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
     use audiodevice::AudioChunk;
     use conversions::{
         buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
-        chunk_to_buffer_float_bytes,
+        chunk_to_buffer_float_bytes, chunk_to_queue_float, chunk_to_queue_int,
+        queue_to_chunk_float, queue_to_chunk_int,
     };
+    use std::collections::VecDeque;
 
     #[test]
     fn to_buffer_int16() {
@@ -400,5 +566,31 @@ mod tests {
         chunk_to_buffer_float_bytes(chunk, &mut buffer, bits);
         let chunk2 = buffer_to_chunk_float_bytes(&buffer, 1, bits, buffer.len());
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
+    }
+
+    #[test]
+    fn to_from_queue_i16() {
+        let bits = 16;
+        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
+        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3);
+        let mut queue = VecDeque::<i16>::new();
+        chunk_to_queue_int(chunk, &mut queue, scalefactor);
+        assert_eq!(queue.len(), 3);
+        let chunk2 = queue_to_chunk_int(&mut queue, 3, 1, scalefactor);
+        assert_eq!(waveforms[0], chunk2.waveforms[0]);
+        assert_eq!(queue.len(), 0);
+    }
+
+    #[test]
+    fn to_from_queue_f32() {
+        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3);
+        let mut queue = VecDeque::<f32>::new();
+        chunk_to_queue_float(chunk, &mut queue);
+        assert_eq!(queue.len(), 3);
+        let chunk2 = queue_to_chunk_float(&mut queue, 3, 1);
+        assert_eq!(waveforms[0], chunk2.waveforms[0]);
+        assert_eq!(queue.len(), 0);
     }
 }

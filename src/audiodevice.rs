@@ -1,7 +1,9 @@
 // Traits for audio devices
-#[cfg(feature = "alsa-backend")]
+#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 use alsadevice;
 use config;
+#[cfg(feature = "cpal-backend")]
+use cpaldevice;
 use filedevice;
 use num::integer;
 #[cfg(feature = "pulse-backend")]
@@ -101,7 +103,7 @@ pub trait CaptureDevice {
 /// Create a playback device.
 pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     match conf.playback {
-        #[cfg(feature = "alsa-backend")]
+        #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
         config::PlaybackDevice::Alsa {
             channels,
             device,
@@ -139,6 +141,38 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             chunksize: conf.chunksize,
             channels,
             format,
+        }),
+        #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+        config::PlaybackDevice::CoreAudio {
+            channels,
+            device,
+            format,
+        } => Box::new(cpaldevice::CpalPlaybackDevice {
+            devname: device,
+            host: cpaldevice::CpalHost::CoreAudio,
+            samplerate: conf.samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            format,
+            target_level: conf.target_level,
+            adjust_period: conf.adjust_period,
+            enable_rate_adjust: conf.enable_rate_adjust,
+        }),
+        #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+        config::PlaybackDevice::Wasapi {
+            channels,
+            device,
+            format,
+        } => Box::new(cpaldevice::CpalPlaybackDevice {
+            devname: device,
+            host: cpaldevice::CpalHost::Wasapi,
+            samplerate: conf.samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            format,
+            target_level: conf.target_level,
+            adjust_period: conf.adjust_period,
+            enable_rate_adjust: conf.enable_rate_adjust,
         }),
     }
 }
@@ -299,7 +333,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         info!("Using Async resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time.");
     }
     match conf.capture {
-        #[cfg(feature = "alsa-backend")]
+        #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
         config::CaptureDevice::Alsa {
             channels,
             device,
@@ -354,6 +388,42 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_timeout: conf.silence_timeout,
             skip_bytes,
             read_bytes,
+        }),
+        #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+        config::CaptureDevice::CoreAudio {
+            channels,
+            device,
+            format,
+        } => Box::new(cpaldevice::CpalCaptureDevice {
+            devname: device,
+            host: cpaldevice::CpalHost::CoreAudio,
+            samplerate: conf.samplerate,
+            enable_resampling: conf.enable_resampling,
+            resampler_conf: conf.resampler_type,
+            capture_samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            format,
+            silence_threshold: conf.silence_threshold,
+            silence_timeout: conf.silence_timeout,
+        }),
+        #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+        config::CaptureDevice::Wasapi {
+            channels,
+            device,
+            format,
+        } => Box::new(cpaldevice::CpalCaptureDevice {
+            devname: device,
+            host: cpaldevice::CpalHost::Wasapi,
+            samplerate: conf.samplerate,
+            enable_resampling: conf.enable_resampling,
+            resampler_conf: conf.resampler_type,
+            capture_samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            format,
+            silence_threshold: conf.silence_threshold,
+            silence_timeout: conf.silence_timeout,
         }),
     }
 }

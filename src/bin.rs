@@ -1,4 +1,4 @@
-#[cfg(feature = "alsa-backend")]
+#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 extern crate alsa;
 extern crate camillalib;
 extern crate clap;
@@ -154,6 +154,7 @@ fn run(
 
     let mut pb_ready = false;
     let mut cap_ready = false;
+    #[cfg(target_os = "linux")]
     signal_hook::flag::register(signal_hook::SIGHUP, Arc::clone(&signal_reload))?;
 
     loop {
@@ -270,6 +271,9 @@ fn main() {
     }
     if cfg!(feature = "pulse-backend") {
         features.push("pulse-backend");
+    }
+    if cfg!(feature = "cpal-backend") {
+        features.push("cpal-backend");
     }
     if cfg!(feature = "socketserver") {
         features.push("socketserver");

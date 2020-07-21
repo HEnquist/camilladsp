@@ -3,8 +3,8 @@ on: [push, pull_request]
 name: CI test and lint
 
 jobs:
-  check:
-    name: Check
+  check_lint_linux:
+    name: Check test and lint Linux
     runs-on: ubuntu-latest
     container: ubuntu:19.10
     steps:
@@ -23,6 +23,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
+          components: rustfmt, clippy
 
       - name: Install Alsa devel
         run: apt-get install libasound2-dev -y
@@ -41,8 +42,27 @@ jobs:
           command: check
           args: --no-default-features
 
-  check_cross:
-    name: CheckCross
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+      - name: Run cargo clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings
+
+
+
+  check_arm:
+    name: Check and test Linux arm
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -74,17 +94,10 @@ jobs:
           args: --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features socketserver
 
 
-  test:
-    name: Test Suite
-    runs-on: ubuntu-latest
-    container: ubuntu:19.10
+  check_lint_windows:
+    name: Check and test Windows
+    runs-on: windows-latest
     steps:
-      - name: Update package list
-        run: apt-get update
-          
-      - name: Install utils
-        run: apt-get install curl wget -y
-
       - name: Checkout sources
         uses: actions/checkout@v2
 
@@ -95,28 +108,22 @@ jobs:
           toolchain: stable
           override: true
 
-      - name: Install Alsa devel
-        run: apt-get install libasound2-dev -y
-
-      - name: Install PulseAudio
-        run: apt-get install libpulse0 libpulse-dev -y
+      - name: Run cargo check
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --no-default-features --features cpal-backend
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --no-default-features --features cpal-backend
 
-  lints:
-    name: Lints
-    runs-on: ubuntu-latest
-    container: ubuntu:19.10
+  check_lint_macos:
+    name: Check and test macOS
+    runs-on: macos-latest
     steps:
-      - name: Update package list
-        run: apt-get update
-          
-      - name: Install utils
-        run: apt-get install curl wget -y
-
       - name: Checkout sources
         uses: actions/checkout@v2
 
@@ -126,22 +133,19 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-          components: rustfmt, clippy
 
-      - name: Install Alsa devel
-        run: apt-get install libasound2-dev -y
-
-      - name: Install PulseAudio
-        run: apt-get install libpulse0 libpulse-dev -y
-
-      - name: Run cargo fmt
+      - name: Run cargo check
         uses: actions-rs/cargo@v1
         with:
-          command: fmt
-          args: --all -- --check
+          command: check
+          args: --no-default-features --features cpal-backend
 
-      - name: Run cargo clippy
+      - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
-          command: clippy
-          args: -- -D warnings
+          command: test
+          args: --no-default-features --features cpal-backend
+
+
+
+
