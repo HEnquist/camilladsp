@@ -7,7 +7,7 @@ use conversions::{
 use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
-use cpal::{ChannelCount, HostId, SampleRate, StreamConfig};
+use cpal::{ChannelCount, HostId, SampleRate, StreamConfig, BufferSize};
 use rubato::Resampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -97,6 +97,7 @@ fn open_cpal_playback(
     let stream_config = StreamConfig {
         channels: channels as ChannelCount,
         sample_rate: SampleRate(samplerate as u32),
+        buffer_size: BufferSize::Default,
     };
     //let event_loop = host.event_loop();
     //let stream_id = event_loop.build_output_stream(&device, &format)?;
@@ -142,6 +143,7 @@ fn open_cpal_capture(
     let stream_config = StreamConfig {
         channels: channels as ChannelCount,
         sample_rate: SampleRate(samplerate as u32),
+        buffer_size: BufferSize::Default,
     };
     //let stream_id = event_loop.build_input_stream(&device, &format)?;
     //event_loop.play_stream(stream_id.clone())?;

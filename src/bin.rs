@@ -2,6 +2,7 @@
 extern crate alsa;
 extern crate camillalib;
 extern crate clap;
+extern crate ctrlc;
 #[cfg(feature = "FFTW")]
 extern crate fftw;
 #[cfg(feature = "pulse-backend")]
@@ -165,6 +166,11 @@ fn run(
     let mut cap_ready = false;
     #[cfg(target_os = "linux")]
     signal_hook::flag::register(signal_hook::SIGHUP, Arc::clone(&signal_reload))?;
+
+    signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&signal_reload))?;
+    //ctrlc::set_handler(move || {
+    //    std::process::exit(0);
+    //}).expect("Error setting Ctrl-C handler");
 
     loop {
         if signal_reload.load(Ordering::Relaxed) {
