@@ -250,6 +250,10 @@ pub enum ConvParameters {
         filename: String,
         #[serde(default)]
         format: FileFormat,
+        #[serde(default)]
+        skip_bytes_lines: usize,
+        #[serde(default)]
+        read_bytes_lines: usize,
     },
     Values {
         values: Vec<PrcFmt>,

@@ -69,9 +69,13 @@ impl FFTConv {
     pub fn from_config(name: String, data_length: usize, conf: config::ConvParameters) -> Self {
         let values = match conf {
             config::ConvParameters::Values { values } => values,
-            config::ConvParameters::File { filename, format } => {
-                filters::read_coeff_file(&filename, &format).unwrap()
-            }
+            config::ConvParameters::File {
+                filename,
+                format,
+                read_bytes_lines,
+                skip_bytes_lines,
+            } => filters::read_coeff_file(&filename, &format, read_bytes_lines, skip_bytes_lines)
+                .unwrap(),
         };
         FFTConv::new(name, data_length, &values)
     }
@@ -134,8 +138,14 @@ impl Filter for FFTConv {
         if let config::Filter::Conv { parameters: conf } = conf {
             let coeffs = match conf {
                 config::ConvParameters::Values { values } => values,
-                config::ConvParameters::File { filename, format } => {
-                    filters::read_coeff_file(&filename, &format).unwrap()
+                config::ConvParameters::File {
+                    filename,
+                    format,
+                    read_bytes_lines,
+                    skip_bytes_lines,
+                } => {
+                    filters::read_coeff_file(&filename, &format, read_bytes_lines, skip_bytes_lines)
+                        .unwrap()
                 }
             };
 
@@ -175,8 +185,14 @@ impl Filter for FFTConv {
 pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {
         config::ConvParameters::Values { .. } => Ok(()),
-        config::ConvParameters::File { filename, format } => {
-            let coeffs = filters::read_coeff_file(&filename, &format)?;
+        config::ConvParameters::File {
+            filename,
+            format,
+            read_bytes_lines,
+            skip_bytes_lines,
+        } => {
+            let coeffs =
+                filters::read_coeff_file(&filename, &format, *read_bytes_lines, *skip_bytes_lines)?;
             if coeffs.is_empty() {
                 return Err(Box::new(config::ConfigError::new(
                     "Conv coefficients are empty",
