@@ -7,7 +7,7 @@ use conversions::{
 use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
-use cpal::{ChannelCount, HostId, SampleRate, StreamConfig, BufferSize};
+use cpal::{BufferSize, ChannelCount, HostId, SampleRate, StreamConfig};
 use rubato::Resampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
