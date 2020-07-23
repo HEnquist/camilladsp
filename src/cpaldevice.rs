@@ -5,17 +5,18 @@ use conversions::{
     chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
 };
 use cpal;
-use cpal::traits::{DeviceTrait, EventLoopTrait, HostTrait};
-use cpal::{ChannelCount, Format, HostId, SampleRate};
-use cpal::{Device, EventLoop, Host};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::Device;
+use cpal::{BufferSize, ChannelCount, HostId, SampleRate, StreamConfig};
 use rubato::Resampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::SystemTime;
 
+use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
 use Res;
@@ -59,11 +60,11 @@ pub struct CpalCaptureDevice {
 
 fn open_cpal_playback(
     host_cfg: CpalHost,
-    devname: &String,
+    devname: &str,
     samplerate: usize,
     channels: usize,
     format: &SampleFormat,
-) -> Res<(Host, Device, EventLoop)> {
+) -> Res<(Device, StreamConfig, cpal::SampleFormat)> {
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
@@ -73,7 +74,7 @@ fn open_cpal_playback(
     let host = cpal::host_from_id(host_id)?;
     let mut devices = host.devices()?;
     let device = match devices.find(|dev| match dev.name() {
-        Ok(n) => &n == devname,
+        Ok(n) => n == devname,
         _ => false,
     }) {
         Some(dev) => dev,
@@ -84,30 +85,27 @@ fn open_cpal_playback(
             ))))
         }
     };
-    let data_type = match format {
+    let sample_format = match format {
         SampleFormat::S16LE => cpal::SampleFormat::I16,
         SampleFormat::FLOAT32LE => cpal::SampleFormat::F32,
         _ => panic!("Unsupported sample format"),
     };
-    let format = Format {
+    let stream_config = StreamConfig {
         channels: channels as ChannelCount,
         sample_rate: SampleRate(samplerate as u32),
-        data_type,
+        buffer_size: BufferSize::Default,
     };
-    let event_loop = host.event_loop();
-    let stream_id = event_loop.build_output_stream(&device, &format)?;
-    event_loop.play_stream(stream_id.clone())?;
     debug!("Opened CPAL playback device {}", devname);
-    Ok((host, device, event_loop))
+    Ok((device, stream_config, sample_format))
 }
 
 fn open_cpal_capture(
     host_cfg: CpalHost,
-    devname: &String,
+    devname: &str,
     samplerate: usize,
     channels: usize,
     format: &SampleFormat,
-) -> Res<(Host, Device, EventLoop)> {
+) -> Res<(Device, StreamConfig, cpal::SampleFormat)> {
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
@@ -117,7 +115,7 @@ fn open_cpal_capture(
     let host = cpal::host_from_id(host_id)?;
     let mut devices = host.devices()?;
     let device = match devices.find(|dev| match dev.name() {
-        Ok(n) => &n == devname,
+        Ok(n) => n == devname,
         _ => false,
     }) {
         Some(dev) => dev,
@@ -128,21 +126,18 @@ fn open_cpal_capture(
             ))))
         }
     };
-    let data_type = match format {
+    let sample_format = match format {
         SampleFormat::S16LE => cpal::SampleFormat::I16,
         SampleFormat::FLOAT32LE => cpal::SampleFormat::F32,
         _ => panic!("Unsupported sample format"),
     };
-    let format = Format {
+    let stream_config = StreamConfig {
         channels: channels as ChannelCount,
         sample_rate: SampleRate(samplerate as u32),
-        data_type,
+        buffer_size: BufferSize::Default,
     };
-    let event_loop = host.event_loop();
-    let stream_id = event_loop.build_input_stream(&device, &format)?;
-    event_loop.play_stream(stream_id.clone())?;
     debug!("Opened CPAL capture device {}", devname);
-    Ok((host, device, event_loop))
+    Ok((device, stream_config, sample_format))
 }
 
 fn write_data_to_device<T>(output: &mut [T], queue: &mut VecDeque<T>)
@@ -191,14 +186,13 @@ impl PlaybackDevice for CpalPlaybackDevice {
             .name("CpalPlayback".to_string())
             .spawn(move || {
                 match open_cpal_playback(host_cfg, &devname, samplerate, channels, &format) {
-                    Ok((_host, _device, event_loop)) => {
+                    Ok((device, stream_config, _sample_format)) => {
                         match status_channel.send(StatusMessage::PlaybackReady) {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
                         let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
-                        barrier.wait();
-                        debug!("Starting playback loop");
+
                         let (tx_dev, rx_dev) = mpsc::sync_channel(1);
                         let buffer_fill = Arc::new(AtomicUsize::new(0));
                         let buffer_fill_clone = buffer_fill.clone();
@@ -209,100 +203,83 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         let mut speed;
                         let mut diff: isize;
 
-                        match format {
+                        let stream = match format {
                             SampleFormat::S16LE => {
+                                trace!("Build i16 output stream");
                                 let mut sample_queue: VecDeque<i16> =
                                     VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
-                                std::thread::spawn(move || {
-                                    event_loop.run(move |id, result| {
-                                        let data = match result {
-                                            Ok(data) => data,
-                                            Err(err) => {
-                                                error!(
-                                                    "an error occurred on stream {:?}: {}",
-                                                    id, err
-                                                );
-                                                return;
-                                            }
-                                        };
-                                        match data {
-                                            cpal::StreamData::Output {
-                                                buffer:
-                                                    cpal::UnknownTypeOutputBuffer::I16(mut buffer),
-                                            } => {
-                                                trace!(
-                                                    "Playback device requests {} samples",
-                                                    buffer.len()
-                                                );
-                                                while sample_queue.len() < buffer.len() {
-                                                    trace!("Convert chunk to device format");
-                                                    let chunk = rx_dev.recv().unwrap();
-                                                    chunk_to_queue_int(
-                                                        chunk,
-                                                        &mut sample_queue,
-                                                        scalefactor,
-                                                    );
-                                                }
-                                                write_data_to_device(
-                                                    &mut buffer,
-                                                    &mut sample_queue,
-                                                );
-                                                buffer_fill_clone
-                                                    .store(sample_queue.len(), Ordering::Relaxed);
-                                            }
-                                            _ => (),
-                                        };
-                                    });
-                                });
+                                let stream = device.build_output_stream(
+                                    &stream_config,
+                                    move |mut buffer: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                                        trace!("Playback device requests {} samples", buffer.len());
+                                        while sample_queue.len() < buffer.len() {
+                                            trace!("Convert chunk to device format");
+                                            let chunk = rx_dev.recv().unwrap();
+                                            chunk_to_queue_int(
+                                                chunk,
+                                                &mut sample_queue,
+                                                scalefactor,
+                                            );
+                                        }
+                                        write_data_to_device(&mut buffer, &mut sample_queue);
+                                        buffer_fill_clone
+                                            .store(sample_queue.len(), Ordering::Relaxed);
+                                    },
+                                    move |err| error!("an error occurred on stream: {}", err),
+                                );
+                                //stream.play().unwrap();
+                                trace!("i16 output stream ready");
+                                stream
                             }
                             SampleFormat::FLOAT32LE => {
+                                trace!("Build f32 output stream");
                                 let mut sample_queue: VecDeque<f32> =
                                     VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
-                                std::thread::spawn(move || {
-                                    event_loop.run(move |id, result| {
-                                        let data = match result {
-                                            Ok(data) => data,
-                                            Err(err) => {
-                                                error!(
-                                                    "an error occurred on stream {:?}: {}",
-                                                    id, err
-                                                );
-                                                return;
-                                            }
-                                        };
-                                        match data {
-                                            cpal::StreamData::Output {
-                                                buffer:
-                                                    cpal::UnknownTypeOutputBuffer::F32(mut buffer),
-                                            } => {
-                                                trace!(
-                                                    "Playback device requests {} samples",
-                                                    buffer.len()
-                                                );
-                                                while sample_queue.len() < buffer.len() {
-                                                    trace!("Convert chunk to device format");
-                                                    let chunk = rx_dev.recv().unwrap();
-                                                    chunk_to_queue_float(chunk, &mut sample_queue);
-                                                }
-                                                write_data_to_device(
-                                                    &mut buffer,
-                                                    &mut sample_queue,
-                                                );
-                                                buffer_fill_clone
-                                                    .store(sample_queue.len(), Ordering::Relaxed);
-                                            }
-                                            _ => (),
-                                        };
-                                    });
-                                });
+                                let stream = device.build_output_stream(
+                                    &stream_config,
+                                    move |mut buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                                        trace!("Playback device requests {} samples", buffer.len());
+                                        while sample_queue.len() < buffer.len() {
+                                            trace!("Convert chunk to device format");
+                                            let chunk = rx_dev.recv().unwrap();
+                                            chunk_to_queue_float(chunk, &mut sample_queue);
+                                        }
+                                        write_data_to_device(&mut buffer, &mut sample_queue);
+                                        buffer_fill_clone
+                                            .store(sample_queue.len(), Ordering::Relaxed);
+                                    },
+                                    move |err| error!("an error occurred on stream: {}", err),
+                                );
+                                //stream.play().unwrap();
+                                trace!("f32 output stream ready");
+                                stream
                             }
                             _ => panic!("Unsupported sample format!"),
+                        };
+                        if let Err(err) = &stream {
+                            status_channel
+                                .send(StatusMessage::PlaybackError {
+                                    message: format!("{}", err),
+                                })
+                                .unwrap();
+                        }
+                        barrier.wait();
+                        if let Ok(strm) = &stream {
+                            match strm.play() {
+                                Ok(_) => debug!("Starting playback loop"),
+                                Err(err) => status_channel
+                                    .send(StatusMessage::PlaybackError {
+                                        message: format!("{}", err),
+                                    })
+                                    .unwrap(),
+                            }
                         }
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     now = SystemTime::now();
-                                    delay += buffer_fill.load(Ordering::Relaxed) as isize;
+                                    delay += (buffer_fill.load(Ordering::Relaxed) / channels_clone)
+                                        as isize;
                                     ndelays += 1;
                                     if adjust
                                         && (now.duration_since(start).unwrap().as_millis()
@@ -384,6 +361,7 @@ impl CaptureDevice for CpalCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let host_cfg = self.host.clone();
         let devname = self.devname.clone();
@@ -407,7 +385,7 @@ impl CaptureDevice for CpalCaptureDevice {
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
         let handle = thread::Builder::new()
-            .name("PulseCapture".to_string())
+            .name("CpalCapture".to_string())
             .spawn(move || {
                 let mut resampler = if enable_resampling {
                     debug!("Creating resampler");
@@ -422,68 +400,84 @@ impl CaptureDevice for CpalCaptureDevice {
                     None
                 };
                 match open_cpal_capture(host_cfg, &devname, capture_samplerate, channels, &format) {
-                    Ok((_host, _device, event_loop)) => {
+                    Ok((device, stream_config, _sample_format)) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
                         let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
                         let mut silent_nbr: usize = 0;
-                        barrier.wait();
-                        debug!("starting captureloop");
                         let (tx_dev_i, rx_dev_i) = mpsc::sync_channel(1);
                         let (tx_dev_f, rx_dev_f) = mpsc::sync_channel(1);
-                        match format {
+                        let stream = match format {
                             SampleFormat::S16LE => {
-                                std::thread::spawn(move || {
-                                    event_loop.run(move |id, result| {
-                                        let data = match result {
-                                            Ok(data) => data,
-                                            Err(err) => {
-                                                error!("an error occurred on stream {:?}: {}", id, err);
-                                                return;
-                                            }
-                                        };
-                                        match data {
-                                            cpal::StreamData::Input { buffer: cpal::UnknownTypeInputBuffer::I16(buffer) } => {
-                                                trace!("Capture device provides {} samples", buffer.len());
-                                                let mut buffer_copy = Vec::new();
-                                                buffer_copy.extend_from_slice(&buffer);
-                                                tx_dev_i.send(buffer_copy).unwrap();
-                                            },
-                                            _ => (),
-                                        };
-                                    });
-                                });
+                                trace!("Build i16 input stream");
+                                let stream = device.build_input_stream(
+                                    &stream_config,
+                                    move |buffer: &[i16], _: &cpal::InputCallbackInfo| {
+                                        trace!(
+                                            "Playback device requests {} samples",
+                                            buffer.len()
+                                        );
+                                        trace!("Capture device provides {} samples", buffer.len());
+                                        let mut buffer_copy = Vec::new();
+                                        buffer_copy.extend_from_slice(&buffer);
+                                        tx_dev_i.send(buffer_copy).unwrap();
+                                    },
+                                    move |err| error!("an error occurred on stream: {}", err)
+                                );
+                                //stream.play().unwrap();
+                                trace!("i16 input stream ready");
+                                stream
                             },
                             SampleFormat::FLOAT32LE => {
-                                std::thread::spawn(move || {
-                                    event_loop.run(move |id, result| {
-                                        let data = match result {
-                                            Ok(data) => data,
-                                            Err(err) => {
-                                                error!("an error occurred on stream {:?}: {}", id, err);
-                                                return;
-                                            }
-                                        };
-                                        match data {
-                                            cpal::StreamData::Input { buffer: cpal::UnknownTypeInputBuffer::F32(buffer) } => {
-                                                trace!("Capture device provides {} samples", buffer.len());
-                                                let mut buffer_copy = Vec::new();
-                                                buffer_copy.extend_from_slice(&buffer);
-                                                tx_dev_f.send(buffer_copy).unwrap();
-                                            },
-                                            _ => (),
-                                        };
-                                    });
-                                });
+                                trace!("Build f32 input stream");
+                                let stream = device.build_input_stream(
+                                    &stream_config,
+                                    move |buffer: &[f32], _: &cpal::InputCallbackInfo| {
+                                        trace!(
+                                            "Playback device requests {} samples",
+                                            buffer.len()
+                                        );
+                                        trace!("Capture device provides {} samples", buffer.len());
+                                        let mut buffer_copy = Vec::new();
+                                        buffer_copy.extend_from_slice(&buffer);
+                                        tx_dev_f.send(buffer_copy).unwrap();
+                                    },
+                                    move |err| error!("an error occurred on stream: {}", err)
+                                );
+                                //stream.play().unwrap();
+                                trace!("f32 input stream ready");
+                                stream
                             },
                             _ => panic!("Unsupported sample format!"),
+                        };
+                        if let Err(err) = &stream {
+                            status_channel
+                                .send(StatusMessage::CaptureError {
+                                    message: format!("{}", err),
+                                })
+                                .unwrap();
+                        }
+                        barrier.wait();
+                        if let Ok(strm) = &stream {
+                            match strm.play() {
+                                Ok(_) => debug!("Starting capture loop"),
+                                Err(err) => status_channel
+                                    .send(StatusMessage::CaptureError {
+                                        message: format!("{}", err),
+                                    })
+                                    .unwrap(),
+                            }
                         }
                         let chunksize_samples = channels * chunksize;
                         let mut capture_samples = chunksize_samples;
                         let mut sample_queue_i: VecDeque<i16> = VecDeque::with_capacity(2*chunksize*channels);
                         let mut sample_queue_f: VecDeque<f32> = VecDeque::with_capacity(2*chunksize*channels);
+                        let mut start = SystemTime::now();
+                        let mut now;
+                        let mut sample_counter = 0;
+                        let mut value_range = 0.0;
                         loop {
                             match command_channel.try_recv() {
                                 Ok(CommandMessage::Exit) => {
@@ -516,7 +510,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             let mut chunk = match format {
                                 SampleFormat::S16LE => {
                                     while sample_queue_i.len() < capture_samples {
-                                        trace!("Read buffer message");
+                                        trace!("Read message to fill capture buffer");
                                         match rx_dev_i.recv() {
                                             Ok(buf) => {
                                                 write_data_from_device(&buf, &mut sample_queue_i);
@@ -539,7 +533,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 },
                                 SampleFormat::FLOAT32LE => {
                                     while sample_queue_f.len() < capture_samples {
-                                        trace!("Read buffer message");
+                                        trace!("Read message to fill capture buffer");
                                         match rx_dev_f.recv() {
                                             Ok(buf) => {
                                                 write_data_from_device(&buf, &mut sample_queue_f);
@@ -561,7 +555,25 @@ impl CaptureDevice for CpalCaptureDevice {
                                 },
                                 _ => panic!("Unsupported sample format"),
                             };
-                            if (chunk.maxval - chunk.minval) > silence {
+                            now = SystemTime::now();
+                            sample_counter += capture_samples;
+                            if now.duration_since(start).unwrap().as_millis() as usize > capture_status.read().unwrap().update_interval
+                            {
+                                let meas_time = now.duration_since(start).unwrap().as_secs_f32();
+                                let samples_per_sec = sample_counter as f32 / meas_time;
+                                let measured_rate_f = samples_per_sec / channels as f32;
+                                trace!(
+                                    "Measured sample rate is {} Hz",
+                                    measured_rate_f
+                                );
+                                let mut capt_stat = capture_status.write().unwrap();
+                                capt_stat.measured_samplerate = measured_rate_f as usize;
+                                capt_stat.signal_range = value_range;
+                                start = now;
+                                sample_counter = 0;
+                            }
+                            value_range = chunk.maxval - chunk.minval;
+                            if (value_range) > silence {
                                 if silent_nbr > silent_limit {
                                     debug!("Resuming processing");
                                 }

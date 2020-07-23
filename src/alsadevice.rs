@@ -14,10 +14,11 @@ use conversions::{
 use rubato::Resampler;
 use std::ffi::CString;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
+use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
 use Res;
@@ -76,6 +77,7 @@ struct CaptureParams {
     samplerate: usize,
     capture_samplerate: usize,
     async_src: bool,
+    capture_status: Arc<RwLock<CaptureStatus>>,
 }
 
 struct PlaybackParams {
@@ -294,6 +296,10 @@ fn capture_loop_bytes(
         }
     }
     let mut capture_bytes = params.chunksize * params.channels * params.bytes_per_sample;
+    let mut start = SystemTime::now();
+    let mut now;
+    let mut bytes_counter = 0;
+    let mut value_range = 0.0;
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -323,6 +329,22 @@ fn capture_loop_bytes(
         match capture_res {
             Ok(_) => {
                 trace!("Captured {} bytes", capture_bytes);
+                now = SystemTime::now();
+                bytes_counter += capture_bytes;
+                if now.duration_since(start).unwrap().as_millis() as usize
+                    > params.capture_status.read().unwrap().update_interval
+                {
+                    let meas_time = now.duration_since(start).unwrap().as_secs_f32();
+                    let bytes_per_sec = bytes_counter as f32 / meas_time;
+                    let measured_rate_f =
+                        bytes_per_sec / (params.channels * params.bytes_per_sample) as f32;
+                    trace!("Measured sample rate is {} Hz", measured_rate_f);
+                    let mut capt_stat = params.capture_status.write().unwrap();
+                    capt_stat.measured_samplerate = measured_rate_f as usize;
+                    capt_stat.signal_range = value_range;
+                    start = now;
+                    bytes_counter = 0;
+                }
             }
             Err(msg) => {
                 channels
@@ -349,7 +371,8 @@ fn capture_loop_bytes(
                 capture_bytes,
             )
         };
-        if (chunk.maxval - chunk.minval) > params.silence {
+        value_range = chunk.maxval - chunk.minval;
+        if value_range > params.silence {
             if silent_nbr > params.silent_limit {
                 debug!("Resuming processing");
             }
@@ -498,6 +521,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -583,6 +607,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             samplerate,
                             capture_samplerate,
                             async_src,
+                            capture_status,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+
+<meta charset="UTF-8">
+
+<html>
+<title>CamillaDSP config</title>
+<style>
+    body {
+        background-color: lightgrey;
+    }
+</style>
+
+<body>
+    <style>
+        .editor {
+            border: solid 1px #ccc;
+            padding: 20px;
+            min-height: 200px;
+            white-space: pre;
+            font-family: "Lucida Console", Monaco, monospace;
+            background-color: white;
+        }
+
+        .oneline {
+            border: solid 1px #ccc;
+            padding: 10px;
+            min-height: 20px;
+            white-space: pre;
+            font-family: "Lucida Console", Monaco, monospace;
+            background-color: white;
+        }
+    </style>
+
+    <br>Configuration
+    <div class="editor" id="configeditor" contenteditable="true">
+    </div>
+    <button id="getBtn" onclick="getConfig()" disabled=True>Load from DSP</button>
+    <button id="setBtn" onclick="setConfig()" disabled=True>Save to DSP</button>
+    <button id="loadBtn" onclick="loadConfig()">Load from file</button>
+    <button id="saveBtn" onclick="saveConfig()">Save to file</button>
+
+    <br><br>
+    Configuration file
+    <div class="oneline" id="configpath" contenteditable="true">
+    </div>
+    <button id="getCfgFileBtn" onclick="getConfigPath()" disabled=True>Load from DSP</button>
+    <button id="setCfgFileBtn" onclick="setConfigPath()" disabled=True>Save to DSP</button>
+
+    <br><br>
+    Command response
+    <div class="oneline" id="response">
+    </div>
+</body>
+
+</html>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+<script>
+    'use strict';
+
+    function GetURLParameter(sParam) {
+        var sPageURL = window.location.search.substring(1);
+        var sURLVariables = sPageURL.split('&');
+        for (var i = 0; i < sURLVariables.length; i++) {
+            var sParameterName = sURLVariables[i].split('=');
+            if (sParameterName[0] == sParam) {
+                return sParameterName[1];
+            }
+        }
+    };
+
+    var port = GetURLParameter('port');
+
+    let socket = new WebSocket(`ws://localhost:${port}`);
+
+    socket.onopen = function (e) {
+        document.getElementById("getBtn").disabled = false;
+        document.getElementById("setBtn").disabled = false;
+        document.getElementById("getCfgFileBtn").disabled = false;
+        document.getElementById("setCfgFileBtn").disabled = false;
+    };
+
+    function getConfig() {
+        socket.send("getconfig");
+    }
+
+    function getConfigPath() {
+        socket.send("getconfigname");
+    }
+
+    function setConfig() {
+        var conf = document.getElementById('configeditor').innerText
+        socket.send(`setconfig:${conf}`);
+    }
+
+    function setConfigPath() {
+        var conf = document.getElementById('configpath').innerText
+        socket.send(`setconfigname:${conf}`);
+    }
+
+    function saveConfig() {
+        var conf = document.getElementById('configeditor').innerText
+        let bl = new Blob([conf], {
+            type: "text/html"
+        });
+        let a = document.createElement("a");
+        a.href = URL.createObjectURL(bl);
+        a.download = "config.yml";
+        a.hidden = true;
+        document.body.appendChild(a);
+        a.innerHTML =
+            "abcdefg";
+        a.click();
+    }
+
+    function loadConfig() {
+        input.click();
+    }
+
+
+    var input = document.createElement('input');
+    input.type = 'file';
+
+    input.onchange = e => {
+        var file = e.target.files[0];
+
+        var reader = new FileReader();
+        reader.readAsText(file, 'UTF-8');
+
+        reader.onload = readerEvent => {
+            var content = readerEvent.target.result;
+            var div = document.getElementById('configeditor');
+            div.innerText = content;
+        }
+    }
+
+    function split(string, separator, n) {
+        var split = string.split(separator);
+        if (split.length <= n)
+            return split;
+        var out = split.slice(0, n - 1);
+        out.push(split.slice(n - 1).join(separator));
+        return out;
+    }
+
+    socket.onmessage = function (event) {
+        console.log(event.data)
+        var parts = split(event.data, ":", 3);
+        var status = parts[0];
+        var cmd = parts[1];
+        var data = parts[2];
+        console.log(parts)
+        if (status == "OK") {
+            if (cmd == "GETCONFIG") {
+                var div = document.getElementById('configeditor');
+                div.innerText = data;
+            }
+            else if (cmd == "GETCONFIGNAME") {
+                var div = document.getElementById('configpath');
+                div.innerText = data;
+            }
+            else {
+                var div = document.getElementById('response');
+                div.innerText = event.data;
+            }
+        }
+        else {
+            var div = document.getElementById('response');
+            div.innerText = event.data;
+        }
+    };
+
+    socket.onclose = function (event) {
+        if (event.wasClean) {
+            alert(`[close] Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+        } else {
+            alert('[close] Connection died');
+        }
+    };
+
+    socket.onerror = function (error) {
+        alert(`[error] ${error.message}`);
+    };
+</script>

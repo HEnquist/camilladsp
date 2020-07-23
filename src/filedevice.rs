@@ -9,11 +9,13 @@ use std::fs::File;
 use std::io::ErrorKind;
 use std::io::{Read, Write};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
+use std::time::SystemTime;
 
 use rubato::Resampler;
 
+use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
 use Res;
@@ -68,6 +70,7 @@ struct CaptureParams {
     resampling_ratio: f32,
     read_bytes: usize,
     async_src: bool,
+    capture_status: Arc<RwLock<CaptureStatus>>,
 }
 
 //struct PlaybackParams {
@@ -248,6 +251,10 @@ fn capture_loop(
     let mut capture_bytes_temp;
     let mut extra_bytes_left = params.extra_bytes;
     let mut nbr_bytes_read = 0;
+    let mut start = SystemTime::now();
+    let mut now;
+    let mut bytes_counter = 0;
+    let mut value_range = 0.0;
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -320,6 +327,22 @@ fn capture_loop(
                         .unwrap();
                     break;
                 }
+                now = SystemTime::now();
+                bytes_counter += bytes;
+                if now.duration_since(start).unwrap().as_millis() as usize
+                    > params.capture_status.read().unwrap().update_interval
+                {
+                    let meas_time = now.duration_since(start).unwrap().as_secs_f32();
+                    let bytes_per_sec = bytes_counter as f32 / meas_time;
+                    let measured_rate_f =
+                        bytes_per_sec / (params.channels * params.store_bytes) as f32;
+                    trace!("Measured sample rate is {} Hz", measured_rate_f);
+                    let mut capt_stat = params.capture_status.write().unwrap();
+                    capt_stat.measured_samplerate = measured_rate_f as usize;
+                    capt_stat.signal_range = value_range;
+                    start = now;
+                    bytes_counter = 0;
+                }
             }
             Err(err) => {
                 debug!("Encountered a read error");
@@ -341,7 +364,8 @@ fn capture_loop(
             bytes_read,
             scalefactor,
         );
-        if (chunk.maxval - chunk.minval) > params.silence {
+        value_range = chunk.maxval - chunk.minval;
+        if (value_range) > params.silence {
             if silent_nbr > params.silent_limit {
                 debug!("Resuming processing");
             }
@@ -375,6 +399,7 @@ impl CaptureDevice for FileCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let filename = self.filename.clone();
         let samplerate = self.samplerate;
@@ -451,6 +476,7 @@ impl CaptureDevice for FileCaptureDevice {
                             resampling_ratio: samplerate as f32 / capture_samplerate as f32,
                             read_bytes,
                             async_src,
+                            capture_status,
                         };
                         let msg_channels = CaptureChannels {
                             audio: channel,

@@ -6,9 +6,19 @@ If additionally the "wait" flag is given, it will wait for a config to be upload
 
 The available commands are:
 - `getconfig` : read the current configuration as yaml
-  * response is the config in yaml format.
+  * response is `OK:GETCONFIG:(yamldata)` where yamldata is the config in yaml format.
+- `getconfigjson` : read the current configuration as json
+  * response is `OK:GETCONFIG:(jsondata)` where yamldata is the config in JSON format.
 - `getconfigname` : get name and path of current config file
-  * response is `OK:/path/to/current.yml`
+  * response is `OK:GETCONFIGNAME:/path/to/current.yml`
+- `getcapturerate` : get the measured sample rate of the capture device.
+  * response is `OK:GETCAPTURERATE:123456`
+- `getupdateinterval` : get the update interval in ms for capture rate and signalrange.
+  * response is `OK:GETUPDATEINTERVAL:123456`
+- `setupdateinterval:<new_number>` : set the update interval in ms for capturerate and signalrange.
+  * response is `OK:SETUPDATEINTERVAL`
+- `getsignalrange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)
+  * response is `OK:GETSIGNALRANGE:1.23456`
 - `reload` : reload current config file (same as SIGHUP)
   * response is `OK:RELOAD` or `ERROR:RELOAD` 
 - `stop` : stop processing and wait for a new config to be uploaded with `setconfig`
@@ -17,6 +27,8 @@ The available commands are:
   * response is `OK:/path/to/file.yml` or `ERROR:/path/to/file.yml`
 - `setconfig:<new config in yaml format>` : provide a new config as a yaml string. Applied directly.
   * response is `OK:SETCONFIG` or `ERROR:SETCONFIG`
+- `setconfigjson:<new config in JSON format>` : provide a new config as a JSON string. Applied directly.
+  * response is `OK:SETCONFIGJSON` or `ERROR:SETCONFIGJSON`
 
 ## Controlling from Python
 
@@ -39,7 +51,7 @@ In [3]: ws.send("getconfigname")
 Out[3]: 19
 
 In [4]: print(ws.recv())
-/path/to/someconfig.yml
+OK:GETCONFIGNAME:/path/to/someconfig.yml
 ```
 
 ### Switch to a different config file
@@ -49,7 +61,7 @@ In [5]: ws.send("setconfigname:/path/to/otherconfig.yml")
 Out[5]: 52
 
 In [6]: print(ws.recv())
-OK:/path/to/otherconfig.yml
+OK:SETCONFIGNAME:/path/to/otherconfig.yml
 
 In [7]: ws.send("reload")
 Out[7]: 12
@@ -65,7 +77,7 @@ In [9]: ws.send("getconfig")
 Out[9]: 15
 
 In [10]: print(ws.recv())
----
+OK:GETCONFIG:---
 devices:
   samplerate: 44100
   buffersize: 1024

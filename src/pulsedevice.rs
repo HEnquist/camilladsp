@@ -12,9 +12,11 @@ use conversions::{
 };
 use rubato::Resampler;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
+use std::time::SystemTime;
 
+use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
 use Res;
@@ -229,6 +231,7 @@ impl CaptureDevice for PulseCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -300,6 +303,9 @@ impl CaptureDevice for PulseCaptureDevice {
                         let mut buf = vec![0u8; buffer_bytes];
                         let chunksize_bytes = channels * chunksize * store_bytes;
                         let mut capture_bytes = chunksize_bytes;
+                        let mut start = SystemTime::now();
+                        let mut now;
+                        let mut bytes_counter = 0;
                         loop {
                             match command_channel.try_recv() {
                                 Ok(CommandMessage::Exit) => {
@@ -334,7 +340,23 @@ impl CaptureDevice for PulseCaptureDevice {
                             }
                             let read_res = pulsedevice.read(&mut buf[0..capture_bytes]);
                             match read_res {
-                                Ok(()) => {}
+                                Ok(()) => {
+                                    now = SystemTime::now();
+                                    bytes_counter += capture_bytes;
+                                    if now.duration_since(start).unwrap().as_millis() as usize > capture_status.read().unwrap().update_interval {
+                                        let meas_time = now.duration_since(start).unwrap().as_secs_f32();
+                                        let bytes_per_sec = bytes_counter as f32 / meas_time;
+                                        let measured_rate_f = bytes_per_sec / (channels * store_bytes) as f32;
+                                        trace!(
+                                            "Measured sample rate is {} Hz",
+                                            measured_rate_f
+                                        );
+                                        let mut capt_stat = capture_status.write().unwrap();
+                                        capt_stat.measured_samplerate = measured_rate_f as usize;
+                                        start = now;
+                                        bytes_counter = 0;
+                                    }
+                                }
                                 Err(msg) => {
                                     status_channel
                                         .send(StatusMessage::CaptureError {

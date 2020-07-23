@@ -1,16 +1,23 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
+use crate::CaptureStatus;
 use config;
 
 #[derive(Debug, PartialEq)]
 enum WSCommand {
     SetConfigName(String),
     SetConfig(String),
+    SetConfigJson(String),
     Reload,
     GetConfig,
+    GetConfigJson,
     GetConfigName,
+    GetSignalRange,
+    GetCaptureRate,
+    GetUpdateInterval,
+    SetUpdateInterval(usize),
     Exit,
     Stop,
     Invalid,
@@ -26,9 +33,24 @@ fn parse_command(cmd: &ws::Message) -> WSCommand {
         match cmdarg[0] {
             "reload" => WSCommand::Reload,
             "getconfig" => WSCommand::GetConfig,
+            "getconfigjson" => WSCommand::GetConfigJson,
             "getconfigname" => WSCommand::GetConfigName,
             "exit" => WSCommand::Exit,
             "stop" => WSCommand::Stop,
+            "getcapturerate" => WSCommand::GetCaptureRate,
+            "getsignalrange" => WSCommand::GetSignalRange,
+            "getupdateinterval" => WSCommand::GetUpdateInterval,
+            "setupdateinterval" => {
+                if cmdarg.len() == 2 {
+                    let nbr_conv = cmdarg[1].to_string().parse::<usize>();
+                    match nbr_conv {
+                        Ok(nbr) => WSCommand::SetUpdateInterval(nbr),
+                        Err(_) => WSCommand::Invalid,
+                    }
+                } else {
+                    WSCommand::Invalid
+                }
+            }
             "setconfigname" => {
                 if cmdarg.len() == 2 {
                     WSCommand::SetConfigName(cmdarg[1].to_string())
@@ -39,6 +61,13 @@ fn parse_command(cmd: &ws::Message) -> WSCommand {
             "setconfig" => {
                 if cmdarg.len() == 2 {
                     WSCommand::SetConfig(cmdarg[1].to_string())
+                } else {
+                    WSCommand::Invalid
+                }
+            }
+            "setconfigjson" => {
+                if cmdarg.len() == 2 {
+                    WSCommand::SetConfigJson(cmdarg[1].to_string())
                 } else {
                     WSCommand::Invalid
                 }
@@ -57,6 +86,7 @@ pub fn start_server(
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     active_config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
+    capture_status: Arc<RwLock<CaptureStatus>>,
 ) {
     debug!("Start websocket server on port {}", port);
     thread::spawn(move || {
@@ -66,6 +96,7 @@ pub fn start_server(
             let active_config_inst = active_config_shared.clone();
             let new_config_inst = new_config_shared.clone();
             let active_config_path_inst = active_config_path.clone();
+            let capture_status_inst = capture_status.clone();
             move |msg: ws::Message| {
                 let command = parse_command(&msg);
                 debug!("parsed command: {:?}", command);
@@ -74,20 +105,46 @@ pub fn start_server(
                         signal_reload_inst.store(true, Ordering::Relaxed);
                         socket.send("OK:RELOAD")
                     }
+                    WSCommand::GetCaptureRate => {
+                        let capstat = capture_status_inst.read().unwrap();
+                        socket.send(format!("OK:GETCAPTURERATE:{}", capstat.measured_samplerate))
+                    }
+                    WSCommand::GetSignalRange => {
+                        let capstat = capture_status_inst.read().unwrap();
+                        socket.send(format!("OK:GETSIGNALRANGE:{}", capstat.signal_range))
+                    }
+                    WSCommand::GetUpdateInterval => {
+                        let capstat = capture_status_inst.read().unwrap();
+                        socket.send(format!("OK:GETUPDATEINTERVAL:{}", capstat.update_interval))
+                    }
+                    WSCommand::SetUpdateInterval(nbr) => {
+                        let mut capstat = capture_status_inst.write().unwrap();
+                        capstat.update_interval = nbr;
+                        socket.send("OK:SETUPDATEINTERVAL".to_string())
+                    }
                     WSCommand::GetConfig => {
                         //let conf_yaml = serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap();
-                        socket.send(
+                        socket.send(format!(
+                            "OK:GETCONFIG:{}",
                             serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap(),
-                        )
+                        ))
                     }
-                    WSCommand::GetConfigName => socket.send(
+                    WSCommand::GetConfigJson => {
+                        //let conf_yaml = serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap();
+                        socket.send(format!(
+                            "OK:GETCONFIGJSON:{}",
+                            serde_json::to_string(&*active_config_inst.lock().unwrap()).unwrap(),
+                        ))
+                    }
+                    WSCommand::GetConfigName => socket.send(format!(
+                        "OK:GETCONFIGNAME:{}",
                         active_config_path_inst
                             .lock()
                             .unwrap()
                             .as_ref()
                             .unwrap_or(&"NONE".to_string())
                             .to_string(),
-                    ),
+                    )),
                     WSCommand::SetConfigName(path) => match config::load_validate_config(&path) {
                         Ok(_) => {
                             *active_config_path_inst.lock().unwrap() = Some(path.clone());
@@ -109,6 +166,23 @@ pub fn start_server(
                             Err(error) => {
                                 error!("Config error: {}", error);
                                 socket.send("ERROR:SETCONFIG")
+                            }
+                        }
+                    }
+                    WSCommand::SetConfigJson(config_json) => {
+                        match serde_json::from_str::<config::Configuration>(&config_json) {
+                            Ok(conf) => match config::validate_config(conf.clone()) {
+                                Ok(()) => {
+                                    //*active_config_path_inst.lock().unwrap() = String::from("none");
+                                    *new_config_inst.lock().unwrap() = Some(conf);
+                                    signal_reload_inst.store(true, Ordering::Relaxed);
+                                    socket.send("OK:SETCONFIGJSON")
+                                }
+                                _ => socket.send("ERROR:SETCONFIGJSON"),
+                            },
+                            Err(error) => {
+                                error!("Config error: {}", error);
+                                socket.send("ERROR:SETCONFIGJSON")
                             }
                         }
                     }
