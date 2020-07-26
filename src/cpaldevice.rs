@@ -568,7 +568,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 );
                                 let mut capt_stat = capture_status.write().unwrap();
                                 capt_stat.measured_samplerate = measured_rate_f as usize;
-                                capt_stat.signal_range = value_range;
+                                capt_stat.signal_range = value_range as f32;
                                 start = now;
                                 sample_counter = 0;
                             }

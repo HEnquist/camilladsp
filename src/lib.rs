@@ -82,8 +82,27 @@ pub enum ExitStatus {
 }
 
 #[derive(Clone, Debug)]
+pub enum ProcessingState {
+    Running,
+    Paused,
+    Inactive,
+}
+
+#[derive(Clone, Debug)]
 pub struct CaptureStatus {
     pub update_interval: usize,
     pub measured_samplerate: usize,
-    pub signal_range: PrcFmt,
+    pub signal_range: f32,
+    pub state: ProcessingState,
+    pub rate_adjust: f32,
+}
+
+impl ProcessingState {
+    pub fn to_string(&self) -> String {
+        match self {
+            ProcessingState::Running => String::from("RUNNING"),
+            ProcessingState::Paused => String::from("PAUSED"),
+            ProcessingState::Inactive => String::from("INACTIVE"),
+        }
+    }
 }

@@ -341,7 +341,7 @@ fn capture_loop_bytes(
                     trace!("Measured sample rate is {} Hz", measured_rate_f);
                     let mut capt_stat = params.capture_status.write().unwrap();
                     capt_stat.measured_samplerate = measured_rate_f as usize;
-                    capt_stat.signal_range = value_range;
+                    capt_stat.signal_range = value_range as f32;
                     start = now;
                     bytes_counter = 0;
                 }

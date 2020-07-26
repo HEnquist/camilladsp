@@ -49,6 +49,8 @@ use camillalib::CommandMessage;
 use camillalib::ExitStatus;
 
 use camillalib::CaptureStatus;
+use camillalib::ProcessingState;
+
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
@@ -399,6 +401,8 @@ fn main() {
         measured_samplerate: 0,
         update_interval: 1000,
         signal_range: 0.0,
+        rate_adjust: 0.0,
+        state: ProcessingState::Inactive,
     }));
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));

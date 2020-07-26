@@ -306,6 +306,7 @@ impl CaptureDevice for PulseCaptureDevice {
                         let mut start = SystemTime::now();
                         let mut now;
                         let mut bytes_counter = 0;
+                        let mut value_range = 0.0;
                         loop {
                             match command_channel.try_recv() {
                                 Ok(CommandMessage::Exit) => {
@@ -353,6 +354,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                         );
                                         let mut capt_stat = capture_status.write().unwrap();
                                         capt_stat.measured_samplerate = measured_rate_f as usize;
+                                        capt_stat.signal_range = value_range as f32;
                                         start = now;
                                         bytes_counter = 0;
                                     }
@@ -384,7 +386,8 @@ impl CaptureDevice for PulseCaptureDevice {
                                 ),
                                 _ => panic!("Unsupported sample format"),
                             };
-                            if (chunk.maxval - chunk.minval) > silence {
+                            value_range = chunk.maxval - chunk.minval;
+                            if (value_range) > silence {
                                 if silent_nbr > silent_limit {
                                     debug!("Resuming processing");
                                 }
