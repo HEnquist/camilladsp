@@ -1,7 +1,7 @@
+use clap::crate_version;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use clap::crate_version;
 
 use crate::CaptureStatus;
 use config;

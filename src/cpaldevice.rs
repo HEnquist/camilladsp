@@ -19,6 +19,7 @@ use std::time::SystemTime;
 use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
+use ProcessingState;
 use Res;
 use StatusMessage;
 
@@ -478,6 +479,8 @@ impl CaptureDevice for CpalCaptureDevice {
                         let mut now;
                         let mut sample_counter = 0;
                         let mut value_range = 0.0;
+                        let mut rate_adjust = 0.0;
+                        let mut state = ProcessingState::Running;
                         loop {
                             match command_channel.try_recv() {
                                 Ok(CommandMessage::Exit) => {
@@ -487,6 +490,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                     break;
                                 }
                                 Ok(CommandMessage::SetSpeed { speed }) => {
+                                    rate_adjust = speed;
                                     if let Some(resampl) = &mut resampler {
                                         debug!("Adjusting resampler rate to {}", speed);
                                         if async_src {
@@ -569,17 +573,21 @@ impl CaptureDevice for CpalCaptureDevice {
                                 let mut capt_stat = capture_status.write().unwrap();
                                 capt_stat.measured_samplerate = measured_rate_f as usize;
                                 capt_stat.signal_range = value_range as f32;
+                                capt_stat.rate_adjust = rate_adjust as f32;
+                                capt_stat.state = state;
                                 start = now;
                                 sample_counter = 0;
                             }
                             value_range = chunk.maxval - chunk.minval;
                             if (value_range) > silence {
                                 if silent_nbr > silent_limit {
+                                    state = ProcessingState::Running;
                                     debug!("Resuming processing");
                                 }
                                 silent_nbr = 0;
                             } else if silent_limit > 0 {
                                 if silent_nbr == silent_limit {
+                                    state = ProcessingState::Paused;
                                     debug!("Pausing processing");
                                 }
                                 silent_nbr += 1;
@@ -595,6 +603,8 @@ impl CaptureDevice for CpalCaptureDevice {
                                 channel.send(msg).unwrap();
                             }
                         }
+                        let mut capt_stat = capture_status.write().unwrap();
+                        capt_stat.state = ProcessingState::Inactive;
                     }
                     Err(err) => {
                         status_channel

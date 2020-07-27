@@ -26,6 +26,7 @@ extern crate log;
 extern crate env_logger;
 
 use std::error;
+use std::fmt;
 
 // Sample format
 #[cfg(feature = "32bit")]
@@ -76,12 +77,12 @@ pub enum CommandMessage {
     Exit,
 }
 
-pub enum ExitStatus {
+pub enum ExitState {
     Restart,
     Exit,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub enum ProcessingState {
     Running,
     Paused,
@@ -97,12 +98,13 @@ pub struct CaptureStatus {
     pub rate_adjust: f32,
 }
 
-impl ProcessingState {
-    pub fn to_string(&self) -> String {
-        match self {
-            ProcessingState::Running => String::from("RUNNING"),
-            ProcessingState::Paused => String::from("PAUSED"),
-            ProcessingState::Inactive => String::from("INACTIVE"),
-        }
+impl fmt::Display for ProcessingState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let desc = match self {
+            ProcessingState::Running => "RUNNING",
+            ProcessingState::Paused => "PAUSED",
+            ProcessingState::Inactive => "INACTIVE",
+        };
+        write!(f, "{}", desc)
     }
 }
