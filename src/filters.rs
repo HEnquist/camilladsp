@@ -44,9 +44,35 @@ pub fn read_coeff_file(
 
     match format {
         config::FileFormat::TEXT => {
-            for line in file.lines().skip(skip_bytes_lines).take(read_bytes_lines) {
-                let l = line?;
-                coefficients.push(l.trim().parse()?);
+            for (nbr, line) in file
+                .lines()
+                .skip(skip_bytes_lines)
+                .take(read_bytes_lines)
+                .enumerate()
+            {
+                match line {
+                    Err(err) => {
+                        let msg = format!(
+                            "Can't read line {} of file '{}', error: {}",
+                            nbr + 1 + skip_bytes_lines,
+                            filename,
+                            err
+                        );
+                        return Err(Box::new(config::ConfigError::new(&msg)));
+                    }
+                    Ok(l) => match l.trim().parse() {
+                        Ok(val) => coefficients.push(val),
+                        Err(err) => {
+                            let msg = format!(
+                                "Can't parse value on line {} of file '{}', error: {}",
+                                nbr + 1 + skip_bytes_lines,
+                                filename,
+                                err
+                            );
+                            return Err(Box::new(config::ConfigError::new(&msg)));
+                        }
+                    },
+                }
             }
         }
         config::FileFormat::FLOAT32LE => {

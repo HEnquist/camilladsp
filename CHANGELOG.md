@@ -2,9 +2,8 @@
 New features:
 - New commands to get more information from the websocket server.
 - Possible to skip lines or bytes in coefficient files.
+- Updated Cpal library
 Bugfixes:
-
-TODO:
 - Improved cryptic error message for errors in text coefficient files
 
 
