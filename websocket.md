@@ -5,6 +5,13 @@ If the websocket server is enabled with the `-p` option, CamillaDSP will listen 
 If additionally the "wait" flag is given, it will wait for a config to be uploaded via the websocket server before starting the processing.
 
 The available commands are:
+- `getstate` : get the current state of the processing. Possible values are: 
+  * "RUNNING": the processing is running normally.
+  * "PAUSED": processing is paused because the input signal is silent.
+  * "INACTIVE": the program is inactive and waiting for a new configuration.
+  * response is `OK:GETSTATE:RUNNING`
+- `getversion` : read the CamillaDSP version
+  * response is `OK:GETVERSION:1.2.3` 
 - `getconfig` : read the current configuration as yaml
   * response is `OK:GETCONFIG:(yamldata)` where yamldata is the config in yaml format.
 - `getconfigjson` : read the current configuration as json
@@ -19,6 +26,8 @@ The available commands are:
   * response is `OK:SETUPDATEINTERVAL`
 - `getsignalrange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)
   * response is `OK:GETSIGNALRANGE:1.23456`
+- `getrateadjust` : get the adjustment factor applied to the asynchronous resampler.
+  * response is `OK:GETRATEADJUST:1.0023`
 - `reload` : reload current config file (same as SIGHUP)
   * response is `OK:RELOAD` or `ERROR:RELOAD` 
 - `stop` : stop processing and wait for a new config to be uploaded with `setconfig`
@@ -30,7 +39,14 @@ The available commands are:
 - `setconfigjson:<new config in JSON format>` : provide a new config as a JSON string. Applied directly.
   * response is `OK:SETCONFIGJSON` or `ERROR:SETCONFIGJSON`
 
-## Controlling from Python
+## Controlling from Python using pyCamillaDSP
+
+The recommended way of controlling CamillaDSP with Python is by using the [pyCamillaDSP library](https://github.com/HEnquist/pycamilladsp).
+
+Please see the readme in that library for instructions.
+
+
+## Controlling directly using Python
 
 You need the websocket_client module installed for this to work. The package is called `python-websocket-client` on Fedora and `python3-websocket` on Debian/Ubuntu.
 
