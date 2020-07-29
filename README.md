@@ -306,19 +306,19 @@ Set VB-CABLE as the default playback device in the control panel, and let Camill
 
 The device name is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the inpout/output name and card name, and the format is "{input/output name} ({card name})".
 
-The sample format appears to always be 32-bit float (FLOAT32LE) even if the device is configured to use aother format.
+The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use aother format.
 
 The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
 
 
 ## CoreAudio
-To capture audio from applications a virtual sound card is needed. This has been verified to work with [BlackHole](https://github.com/ExistentialAudio/BlackHole).
+To capture audio from applications a virtual sound card is needed. This has been verified to work well with [Soundflower](https://github.com/mattingalls/Soundflower)
 
 Set the virtual sound card as the default playback device in the Sound preferences, and let CamillaDSP capture from the output of this card.
 
-The device name is the same as the one shown in the "Audio MIDI Setup" that can be found under "Other" in Launchpad. The name for BlackHole is "BlackHole 16ch", and the built in audio in a MacBook Pro is called "Built-in Output".
+The device name is the same as the one shown in the "Audio MIDI Setup" that can be found under "Other" in Launchpad. The name for the 2-channel interface of Soundflower is "Soundflower (2ch)", and the built in audio in a MacBook Pro is called "Built-in Output".
 
-The sample format appears to always be 32-bit float (FLOAT32LE) even if the device is configured to use aother format.
+The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
 
 
 # Configuration
