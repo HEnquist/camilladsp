@@ -19,6 +19,7 @@ use std::time::SystemTime;
 use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
+use ProcessingState;
 use Res;
 use StatusMessage;
 
@@ -306,6 +307,9 @@ impl CaptureDevice for PulseCaptureDevice {
                         let mut start = SystemTime::now();
                         let mut now;
                         let mut bytes_counter = 0;
+                        let mut value_range = 0.0;
+                        let mut rate_adjust = 0.0;
+                        let mut state = ProcessingState::Running;
                         loop {
                             match command_channel.try_recv() {
                                 Ok(CommandMessage::Exit) => {
@@ -315,6 +319,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                     break;
                                 }
                                 Ok(CommandMessage::SetSpeed { speed }) => {
+                                    rate_adjust = speed;
                                     if let Some(resampl) = &mut resampler {
                                         if async_src {
                                             if resampl.set_resample_ratio_relative(speed).is_err() {
@@ -353,6 +358,9 @@ impl CaptureDevice for PulseCaptureDevice {
                                         );
                                         let mut capt_stat = capture_status.write().unwrap();
                                         capt_stat.measured_samplerate = measured_rate_f as usize;
+                                        capt_stat.signal_range = value_range as f32;
+                                        capt_stat.rate_adjust = rate_adjust as f32;
+                                        capt_stat.state = state;
                                         start = now;
                                         bytes_counter = 0;
                                     }
@@ -384,13 +392,16 @@ impl CaptureDevice for PulseCaptureDevice {
                                 ),
                                 _ => panic!("Unsupported sample format"),
                             };
-                            if (chunk.maxval - chunk.minval) > silence {
+                            value_range = chunk.maxval - chunk.minval;
+                            if (value_range) > silence {
                                 if silent_nbr > silent_limit {
+                                    state = ProcessingState::Running;
                                     debug!("Resuming processing");
                                 }
                                 silent_nbr = 0;
                             } else if silent_limit > 0 {
                                 if silent_nbr == silent_limit {
+                                    state = ProcessingState::Paused;
                                     debug!("Pausing processing");
                                 }
                                 silent_nbr += 1;
@@ -406,6 +417,8 @@ impl CaptureDevice for PulseCaptureDevice {
                                 channel.send(msg).unwrap();
                             }
                         }
+                        let mut capt_stat = capture_status.write().unwrap();
+                        capt_stat.state = ProcessingState::Inactive;
                     }
                     Err(err) => {
                         status_channel

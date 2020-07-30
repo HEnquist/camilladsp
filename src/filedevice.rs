@@ -18,6 +18,7 @@ use rubato::Resampler;
 use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
+use ProcessingState;
 use Res;
 use StatusMessage;
 
@@ -255,6 +256,8 @@ fn capture_loop(
     let mut now;
     let mut bytes_counter = 0;
     let mut value_range = 0.0;
+    let mut rate_adjust = 0.0;
+    let mut state = ProcessingState::Running;
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -267,6 +270,7 @@ fn capture_loop(
                 break;
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
+                rate_adjust = speed;
                 if let Some(resampl) = &mut resampler {
                     if params.async_src {
                         if resampl.set_resample_ratio_relative(speed).is_err() {
@@ -339,7 +343,9 @@ fn capture_loop(
                     trace!("Measured sample rate is {} Hz", measured_rate_f);
                     let mut capt_stat = params.capture_status.write().unwrap();
                     capt_stat.measured_samplerate = measured_rate_f as usize;
-                    capt_stat.signal_range = value_range;
+                    capt_stat.signal_range = value_range as f32;
+                    capt_stat.rate_adjust = rate_adjust as f32;
+                    capt_stat.state = state;
                     start = now;
                     bytes_counter = 0;
                 }
@@ -367,11 +373,13 @@ fn capture_loop(
         value_range = chunk.maxval - chunk.minval;
         if (value_range) > params.silence {
             if silent_nbr > params.silent_limit {
+                state = ProcessingState::Running;
                 debug!("Resuming processing");
             }
             silent_nbr = 0;
         } else if params.silent_limit > 0 {
             if silent_nbr == params.silent_limit {
+                state = ProcessingState::Paused;
                 debug!("Pausing processing");
             }
             silent_nbr += 1;
@@ -389,6 +397,8 @@ fn capture_loop(
             msg_channels.audio.send(msg).unwrap();
         }
     }
+    let mut capt_stat = params.capture_status.write().unwrap();
+    capt_stat.state = ProcessingState::Inactive;
 }
 
 /// Start a capture thread providing AudioMessages via a channel

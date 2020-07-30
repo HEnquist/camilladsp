@@ -46,9 +46,10 @@ use camillalib::StatusMessage;
 
 use camillalib::CommandMessage;
 
-use camillalib::ExitStatus;
+use camillalib::ExitState;
 
 use camillalib::CaptureStatus;
+use camillalib::ProcessingState;
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
@@ -107,12 +108,12 @@ fn run(
     config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     capture_status: Arc<RwLock<CaptureStatus>>,
-) -> Res<ExitStatus> {
+) -> Res<ExitState> {
     let conf = match new_config_shared.lock().unwrap().clone() {
         Some(cfg) => cfg,
         None => {
             error!("Tried to start without config!");
-            return Ok(ExitStatus::Exit);
+            return Ok(ExitState::Exit);
         }
     };
     let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.queuelimit);
@@ -192,7 +193,7 @@ fn run(
                             trace!("Wait for cap..");
                             cap_handle.join().unwrap();
                             *new_config_shared.lock().unwrap() = Some(conf);
-                            return Ok(ExitStatus::Restart);
+                            return Ok(ExitState::Restart);
                         }
                         config::ConfigChange::None => {
                             debug!("No changes in config.");
@@ -214,7 +215,7 @@ fn run(
                 pb_handle.join().unwrap();
                 trace!("Wait for cap..");
                 cap_handle.join().unwrap();
-                return Ok(ExitStatus::Exit);
+                return Ok(ExitState::Exit);
             }
             2 => {
                 debug!("Stop requested...");
@@ -225,7 +226,7 @@ fn run(
                 trace!("Wait for cap..");
                 cap_handle.join().unwrap();
                 *new_config_shared.lock().unwrap() = None;
-                return Ok(ExitStatus::Restart);
+                return Ok(ExitState::Restart);
             }
             _ => {}
         };
@@ -247,15 +248,15 @@ fn run(
                 }
                 StatusMessage::PlaybackError { message } => {
                     error!("Playback error: {}", message);
-                    return Ok(ExitStatus::Exit);
+                    return Ok(ExitState::Exit);
                 }
                 StatusMessage::CaptureError { message } => {
                     error!("Capture error: {}", message);
-                    return Ok(ExitStatus::Exit);
+                    return Ok(ExitState::Exit);
                 }
                 StatusMessage::PlaybackDone => {
                     info!("Playback finished");
-                    return Ok(ExitStatus::Exit);
+                    return Ok(ExitState::Exit);
                 }
                 StatusMessage::CaptureDone => {
                     info!("Capture finished");
@@ -399,6 +400,8 @@ fn main() {
         measured_samplerate: 0,
         update_interval: 1000,
         signal_range: 0.0,
+        rate_adjust: 0.0,
+        state: ProcessingState::Inactive,
     }));
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));
@@ -445,13 +448,13 @@ fn main() {
                     break;
                 }
             }
-            Ok(ExitStatus::Exit) => {
+            Ok(ExitState::Exit) => {
                 debug!("Exiting");
                 if !wait {
                     break;
                 }
             }
-            Ok(ExitStatus::Restart) => {
+            Ok(ExitState::Restart) => {
                 debug!("Restarting with new config");
             }
         };

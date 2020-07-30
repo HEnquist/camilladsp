@@ -1,3 +1,4 @@
+use clap::crate_version;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -18,6 +19,9 @@ enum WSCommand {
     GetCaptureRate,
     GetUpdateInterval,
     SetUpdateInterval(usize),
+    GetVersion,
+    GetState,
+    GetRateAdjust,
     Exit,
     Stop,
     Invalid,
@@ -39,6 +43,9 @@ fn parse_command(cmd: &ws::Message) -> WSCommand {
             "stop" => WSCommand::Stop,
             "getcapturerate" => WSCommand::GetCaptureRate,
             "getsignalrange" => WSCommand::GetSignalRange,
+            "getstate" => WSCommand::GetState,
+            "getversion" => WSCommand::GetVersion,
+            "getrateadjust" => WSCommand::GetRateAdjust,
             "getupdateinterval" => WSCommand::GetUpdateInterval,
             "setupdateinterval" => {
                 if cmdarg.len() == 2 {
@@ -112,6 +119,17 @@ pub fn start_server(
                     WSCommand::GetSignalRange => {
                         let capstat = capture_status_inst.read().unwrap();
                         socket.send(format!("OK:GETSIGNALRANGE:{}", capstat.signal_range))
+                    }
+                    WSCommand::GetVersion => {
+                        socket.send(format!("OK:GETVERSION:{}", crate_version!()))
+                    }
+                    WSCommand::GetState => {
+                        let capstat = capture_status_inst.read().unwrap();
+                        socket.send(format!("OK:GETSTATE:{}", &capstat.state.to_string()))
+                    }
+                    WSCommand::GetRateAdjust => {
+                        let capstat = capture_status_inst.read().unwrap();
+                        socket.send(format!("OK:GETRATEADJUST:{}", capstat.rate_adjust))
                     }
                     WSCommand::GetUpdateInterval => {
                         let capstat = capture_status_inst.read().unwrap();
