@@ -3,8 +3,10 @@ New features:
 - New commands to get more information from the websocket server.
 - Possible to skip lines or bytes in coefficient files.
 - Updated Cpal library
+
 Bugfixes:
 - Improved cryptic error message for errors in text coefficient files
+- Fix websocket `exit` command
 
 
 ## 0.3.1
@@ -32,6 +34,7 @@ New features:
 New features:
 - Synchronous resampler that replaces the previous FastSync, BalancedSync and AccurateSync types with a single one called Synchronous. This uses FFT for a major speedup.
 - The Async resamplers have been optimized and are now around a factor 2 faster than before.
+
 Bugfixes:
 - Fixed error when setting Alsa buffer size in some cases.
 
@@ -41,6 +44,7 @@ New features:
 - Support for asynchronous resampling in all backends.
 - Added S24LE3 format (corresponds to Alsa S24_3LE)
 - File capture device can skip a number of bytes at the beginning of a file and then read a limited number of bytes
+
 Other:
 - Alsa backend rewritten to reduce code duplication
 - Improved debug output
