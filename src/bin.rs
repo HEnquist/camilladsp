@@ -431,7 +431,7 @@ fn main() {
         while new_config.lock().unwrap().is_none() {
             trace!("waiting...");
             if signal_exit.load(Ordering::Relaxed) == 1 {
-                // exit requested 
+                // exit requested
                 break;
             }
             thread::sleep(delay);
@@ -455,7 +455,7 @@ fn main() {
             Ok(ExitState::Exit) => {
                 debug!("Exiting");
                 if !wait || signal_exit.load(Ordering::Relaxed) == 1 {
-                    // wait mode not active, or exit requested 
+                    // wait mode not active, or exit requested
                     break;
                 }
             }
