@@ -166,9 +166,9 @@ pub fn start_server(
                     WSCommand::SetConfigName(path) => match config::load_validate_config(&path) {
                         Ok(_) => {
                             *active_config_path_inst.lock().unwrap() = Some(path.clone());
-                            socket.send(format!("OK:{}", path))
+                            socket.send(format!("OK:SETCONFIGNAME:{}", path))
                         }
-                        _ => socket.send(format!("ERROR:{}", path)),
+                        _ => socket.send("ERROR:SETCONFIGNAME"),
                     },
                     WSCommand::SetConfig(config_yml) => {
                         match serde_yaml::from_str::<config::Configuration>(&config_yml) {

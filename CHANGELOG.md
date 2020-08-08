@@ -7,6 +7,7 @@ New features:
 Bugfixes:
 - Improved cryptic error message for errors in text coefficient files
 - Fix websocket `exit` command
+- Correct response of `setconfigname` command
 
 
 ## 0.3.1
