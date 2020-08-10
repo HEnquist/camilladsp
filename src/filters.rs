@@ -34,7 +34,14 @@ pub fn read_coeff_file(
     skip_bytes_lines: usize,
 ) -> Res<Vec<PrcFmt>> {
     let mut coefficients = Vec::<PrcFmt>::new();
-    let f = File::open(filename)?;
+    let f = match File::open(filename) {
+        Ok(f) => f,
+        Err(_) => {
+            return Err(Box::new(config::ConfigError::new(
+                format!("Could not open cofficient file {}", filename).as_str(),
+            )));
+        }
+    };
     let mut file = BufReader::new(&f);
     let read_bytes_lines = if read_bytes_lines > 0 {
         read_bytes_lines
