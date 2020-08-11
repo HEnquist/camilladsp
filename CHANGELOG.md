@@ -3,11 +3,11 @@ New features:
 - New commands to get more information from the websocket server.
 - Possible to skip lines or bytes in coefficient files.
 - Updated Cpal library
+- Improved error messages
 
 Bugfixes:
-- Improved cryptic error message for errors in text coefficient files
 - Fix websocket `exit` command
-- Correct response of `setconfigname` command
+- Correct response of `setconfigname` websocket command
 
 
 ## 0.3.1
