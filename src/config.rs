@@ -458,25 +458,25 @@ pub struct Configuration {
 pub fn load_config(filename: &str) -> Res<Configuration> {
     let file = match File::open(filename) {
         Ok(f) => f,
-        Err(_) => {
-            return Err(Box::new(ConfigError::new("Could not open config file!")));
+        Err(err) => {
+            let msg = format!("Could not open config file '{}'. Error: {}", filename, err);
+            return Err(ConfigError::new(&msg).into());
         }
     };
     let mut buffered_reader = BufReader::new(file);
     let mut contents = String::new();
     let _number_of_bytes: usize = match buffered_reader.read_to_string(&mut contents) {
         Ok(number_of_bytes) => number_of_bytes,
-        Err(_err) => {
-            return Err(Box::new(ConfigError::new("Could not read config file!")));
+        Err(err) => {
+            let msg = format!("Could not read config file '{}'. Error: {}", filename, err);
+            return Err(ConfigError::new(&msg).into());
         }
     };
     let configuration: Configuration = match serde_yaml::from_str(&contents) {
         Ok(config) => config,
         Err(err) => {
-            return Err(Box::new(ConfigError::new(&format!(
-                "Invalid config file!\n{}",
-                err
-            ))));
+            let msg = format!("Invalid config file!\n{}", err);
+            return Err(ConfigError::new(&msg).into());
         }
     };
     Ok(configuration)
@@ -539,12 +539,14 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
     if conf.devices.target_level >= 2 * conf.devices.chunksize {
-        return Err(Box::new(ConfigError::new("target_level is too large.")));
+        let msg = format!(
+            "target_level can't be larger than {}",
+            2 * conf.devices.chunksize
+        );
+        return Err(ConfigError::new(&msg).into());
     }
     if conf.devices.adjust_period <= 0.0 {
-        return Err(Box::new(ConfigError::new(
-            "adjust_period must be positive and > 0",
-        )));
+        return Err(ConfigError::new("adjust_period must be positive and > 0").into());
     }
     let mut num_channels = match conf.devices.capture {
         #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
@@ -562,36 +564,37 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         match step {
             PipelineStep::Mixer { name } => {
                 if !conf.mixers.contains_key(&name) {
-                    return Err(Box::new(ConfigError::new(&format!(
-                        "Use of missing mixer '{}'",
-                        name
-                    ))));
+                    let msg = format!("Use of missing mixer '{}'", name);
+                    return Err(ConfigError::new(&msg).into());
                 } else {
                     let chan_in = conf.mixers.get(&name).unwrap().channels.r#in;
                     if chan_in != num_channels {
-                        return Err(Box::new(ConfigError::new(&format!(
+                        let msg = format!(
                             "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
                             name, num_channels, chan_in
-                        ))));
+                        );
+                        return Err(ConfigError::new(&msg).into());
                     }
                     num_channels = conf.mixers.get(&name).unwrap().channels.out;
                 }
             }
             PipelineStep::Filter { channel, names } => {
                 if channel > num_channels {
-                    return Err(Box::new(ConfigError::new(&format!(
-                        "Use of non existing channel {}",
-                        channel
-                    ))));
+                    let msg = format!("Use of non existing channel {}", channel);
+                    return Err(ConfigError::new(&msg).into());
                 }
                 for name in names {
                     if !conf.filters.contains_key(&name) {
-                        return Err(Box::new(ConfigError::new(&format!(
-                            "Use of missing filter '{}'",
-                            name
-                        ))));
+                        let msg = format!("Use of missing filter '{}'", name);
+                        return Err(ConfigError::new(&msg).into());
                     }
-                    filters::validate_filter(fs, &conf.filters.get(&name).unwrap())?;
+                    match filters::validate_filter(fs, &conf.filters.get(&name).unwrap()) {
+                        Ok(_) => {}
+                        Err(err) => {
+                            let msg = format!("Invalid filter '{}'. Reason: {}", name, err);
+                            return Err(ConfigError::new(&msg).into());
+                        }
+                    }
                 }
             }
         }
@@ -608,10 +611,11 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         PlaybackDevice::Wasapi { channels, .. } => channels,
     };
     if num_channels != num_channels_out {
-        return Err(Box::new(ConfigError::new(&format!(
+        let msg = format!(
             "Pipeline outputs {} channels, playback device has {}.",
             num_channels, num_channels_out
-        ))));
+        );
+        return Err(ConfigError::new(&msg).into());
     }
     Ok(())
 }

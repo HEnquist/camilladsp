@@ -95,9 +95,7 @@ fn get_new_config(
         }
     } else {
         error!("No new config supplied and no path set");
-        Err(Box::new(config::ConfigError::new(
-            "No new config supplied and no path set",
-        )))
+        Err(config::ConfigError::new("No new config supplied and no path set").into())
     }
 }
 
