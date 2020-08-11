@@ -36,9 +36,13 @@ pub fn read_coeff_file(
     let mut coefficients = Vec::<PrcFmt>::new();
     let f = match File::open(filename) {
         Ok(f) => f,
-        Err(_) => {
+        Err(err) => {
             return Err(Box::new(config::ConfigError::new(
-                format!("Could not open cofficient file {}", filename).as_str(),
+                format!(
+                    "Could not open coefficient file '{}', error: {}",
+                    filename, err
+                )
+                .as_str(),
             )));
         }
     };
