@@ -13,6 +13,8 @@ enum WSCommand {
     SetConfigJson(String),
     Reload,
     GetConfig,
+    ReadConfigFile(String),
+    ValidateConfig(String),
     GetConfigJson,
     GetConfigName,
     GetSignalRange,
@@ -37,6 +39,20 @@ fn parse_command(cmd: &ws::Message) -> WSCommand {
         match cmdarg[0] {
             "reload" => WSCommand::Reload,
             "getconfig" => WSCommand::GetConfig,
+            "validateconfig" => {
+                if cmdarg.len() == 2 {
+                    WSCommand::ValidateConfig(cmdarg[1].to_string())
+                } else {
+                    WSCommand::Invalid
+                }
+            }
+            "readconfigfile" => {
+                if cmdarg.len() == 2 {
+                    WSCommand::ReadConfigFile(cmdarg[1].to_string())
+                } else {
+                    WSCommand::Invalid
+                }
+            }
             "getconfigjson" => WSCommand::GetConfigJson,
             "getconfigname" => WSCommand::GetConfigName,
             "exit" => WSCommand::Exit,
@@ -201,6 +217,30 @@ pub fn start_server(
                             Err(error) => {
                                 error!("Config error: {}", error);
                                 socket.send("ERROR:SETCONFIGJSON")
+                            }
+                        }
+                    }
+                    WSCommand::ReadConfigFile(path) => match config::load_config(&path) {
+                        Ok(config) => socket.send(format!(
+                            "OK:READCONFIGFILE:{}",
+                            serde_yaml::to_string(&config).unwrap()
+                        )),
+                        Err(error) => socket.send(format!("ERROR:READCONFIGFILE:{}", error)),
+                    },
+                    WSCommand::ValidateConfig(config_yml) => {
+                        match serde_yaml::from_str::<config::Configuration>(&config_yml) {
+                            Ok(conf) => match config::validate_config(conf.clone()) {
+                                Ok(()) => socket.send(format!(
+                                    "OK:VALIDATECONFIG:{}",
+                                    serde_yaml::to_string(&conf).unwrap()
+                                )),
+                                Err(error) => {
+                                    socket.send(format!("ERROR:VALIDATECONFIG:{}", error))
+                                }
+                            },
+                            Err(error) => {
+                                error!("Config error: {}", error);
+                                socket.send(format!("ERROR:VALIDATECONFIG:{}", error))
                             }
                         }
                     }
