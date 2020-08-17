@@ -13,6 +13,7 @@ enum WSCommand {
     SetConfigJson(String),
     Reload,
     GetConfig,
+    ReadConfig(String),
     ReadConfigFile(String),
     ValidateConfig(String),
     GetConfigJson,
@@ -49,6 +50,13 @@ fn parse_command(cmd: &ws::Message) -> WSCommand {
             "readconfigfile" => {
                 if cmdarg.len() == 2 {
                     WSCommand::ReadConfigFile(cmdarg[1].to_string())
+                } else {
+                    WSCommand::Invalid
+                }
+            }
+            "readconfig" => {
+                if cmdarg.len() == 2 {
+                    WSCommand::ReadConfig(cmdarg[1].to_string())
                 } else {
                     WSCommand::Invalid
                 }
@@ -220,6 +228,13 @@ pub fn start_server(
                             }
                         }
                     }
+                    WSCommand::ReadConfig(config_yml) => match serde_yaml::from_str::<config::Configuration>(&config_yml) {
+                        Ok(config) => socket.send(format!(
+                            "OK:READCONFIG:{}",
+                            serde_yaml::to_string(&config).unwrap()
+                        )),
+                        Err(error) => socket.send(format!("ERROR:READCONFIG:{}", error)),
+                    },
                     WSCommand::ReadConfigFile(path) => match config::load_config(&path) {
                         Ok(config) => socket.send(format!(
                             "OK:READCONFIGFILE:{}",
