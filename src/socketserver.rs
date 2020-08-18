@@ -228,13 +228,15 @@ pub fn start_server(
                             }
                         }
                     }
-                    WSCommand::ReadConfig(config_yml) => match serde_yaml::from_str::<config::Configuration>(&config_yml) {
-                        Ok(config) => socket.send(format!(
-                            "OK:READCONFIG:{}",
-                            serde_yaml::to_string(&config).unwrap()
-                        )),
-                        Err(error) => socket.send(format!("ERROR:READCONFIG:{}", error)),
-                    },
+                    WSCommand::ReadConfig(config_yml) => {
+                        match serde_yaml::from_str::<config::Configuration>(&config_yml) {
+                            Ok(config) => socket.send(format!(
+                                "OK:READCONFIG:{}",
+                                serde_yaml::to_string(&config).unwrap()
+                            )),
+                            Err(error) => socket.send(format!("ERROR:READCONFIG:{}", error)),
+                        }
+                    }
                     WSCommand::ReadConfigFile(path) => match config::load_config(&path) {
                         Ok(config) => socket.send(format!(
                             "OK:READCONFIGFILE:{}",
