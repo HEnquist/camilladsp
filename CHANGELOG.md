@@ -2,12 +2,13 @@
 New features:
 - New commands to get more information from the websocket server.
 - Possible to skip lines or bytes in coefficient files.
-- Updated Cpal library
-- Improved error messages
+- Updated Cpal library.
+- Added capture and playback devices Stdin & Stdout.
+- Improved error messages.
 
 Bugfixes:
-- Fix websocket `exit` command
-- Correct response of `setconfigname` websocket command
+- Fix websocket `exit` command.
+- Correct response of `setconfigname` websocket command.
 
 
 ## 0.3.1
@@ -17,7 +18,7 @@ New features:
 
 ## 0.3.0
 New features:
-- Support for Windows (Wasapi) and macOS (CoreAudio) via the Cpal library
+- Support for Windows (Wasapi) and macOS (CoreAudio) via the Cpal library.
 
 
 ## 0.2.2
@@ -29,7 +30,7 @@ New features:
 
 ## 0.2.1
 New features:
-- Convolver was optimized to be up to a factor 2 faster
+- Convolver was optimized to be up to a factor 2 faster.
 
 ## 0.2.0
 New features:

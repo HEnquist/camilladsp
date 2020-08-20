@@ -10,7 +10,6 @@ devices:
     device: "MySink.monitor"
     format: S16LE
   playback:
-    type: File
+    type: Stdout
     channels: 2
-    filename: "/dev/stdout"
     format: S16LE

@@ -5,9 +5,8 @@ devices:
   silence_threshold: -60
   silence_timeout: 3.0
   capture:
-    type: File
+    type: Stdin
     channels: 2
-    filename: "/dev/stdin"
     format: S16LE
   playback:
     type: Pulse
