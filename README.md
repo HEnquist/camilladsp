@@ -438,9 +438,18 @@ devices:
 
  
 * `capture` and `playback`
+
   Input and output devices are defined in the same way. 
   A device needs:
-  * `type`: Alsa, Pulse, Wasapi, CoreAudio or File 
+  * `type`: 
+    The available types depend on which features that were included when compiling. All possible types are:
+    * `Alsa` 
+    * `Pulse`
+    * `Wasapi`
+    * `CoreAudio`
+    * `File`
+    * `Stdin` (capture only)
+    * `Stdout` (playback only)
   * `channels`: number of channels
   * `device`: device name (for Alsa, Pulse, Wasapi, CoreAudio)
   * `filename` path the the file (for File)
@@ -454,42 +463,42 @@ devices:
     * FLOAT32LE - 32 bit float, stored as four bytes
     * FLOAT64LE - 64 bit float, stored as eight bytes
 
-  Supported formats:
-  |            | Alsa               | Pulse              | Wasapi             | CoreAudio          |
-  |------------|--------------------|--------------------|--------------------|--------------------|
-  | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-  | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                |
-  | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                |
-  | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                |
-  | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-  | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                |
+    Supported formats:
+    |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | File/Stdin/Stdout  |
+    |------------|--------------------|--------------------|--------------------|--------------------|--------------------|
+    | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+    | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
+    | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
+    | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
+    | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+    | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+  
+  
+    Equivalent formats (for reference):
+    | CamillaDSP | Alsa       | Pulse     |
+    |------------|------------|-----------|
+    | S16LE      | S16_LE     | S16LE     |
+    | S24LE      | S24_LE     | S24_32LE  |
+    | S24LE3     | S24_3LE    | S24LE     |
+    | S32LE      | S32_LE     | S32LE     |
+    | FLOAT32LE  | FLOAT_LE   | FLOAT32LE |
+    | FLOAT64LE  | FLOAT64_LE | -         |
+  
+    The __File__ device type reads or writes to a file, while __Stdin__ reads from stdin and __Stdout__ writes to stdout.
+    The format is raw interleaved samples, in the selected sample format.
+    If the capture device reaches the end of a file, the program will exit once all chunks have been played. 
+    That delayed sound that would end up in a later chunk will be cut off. To avoid this, set the optional parameter `extra_samples` for the File capture device.
+    This causes the capture device to yield the given number of samples (per channel) after reaching end of file, allowing any delayed sound to be played back.
+    The __Stdin__ capture device and __Stdout__ playback device use stdin and stdout, so it's possible to easily pipe audio between applications:
+    ```
+    > camilladsp stdio_capt.yml > rawfile.dat
+    > cat rawfile.dat | camilladsp stdio_pb.yml
+    ```
+    Note: On Unix-like systems it's also possible to use the File device and set the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback. 
 
-
-  Equivalent formats (for reference):
-  | CamillaDSP | Alsa       | Pulse     |
-  |------------|------------|-----------|
-  | S16LE      | S16_LE     | S16LE     |
-  | S24LE      | S24_LE     | S24_32LE  |
-  | S24LE3     | S24_3LE    | S24LE     |
-  | S32LE      | S32_LE     | S32LE     |
-  | FLOAT32LE  | FLOAT_LE   | FLOAT32LE |
-  | FLOAT64LE  | FLOAT64_LE | -         |
-
-  The File capture device supports two additional optional parameters, for advanced handling of raw files and testing:
-  * `skip_bytes`: Number of bytes to skip at the beginning of the file. This can be used to skip over the header of some formats like .wav (which typocally has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
-  * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file.
-
-  The File device type reads or writes to a file. 
-  The format is raw interleaved samples, 2 bytes per sample for 16-bit, 
-  and 4 bytes per sample for 24 and 32 bits. 
-  If the capture device reaches the end of a file, the program will exit once all chunks have been played. 
-  That delayed sound that would end up in a later chunk will be cut off. To avoid this, set the optional parameter `extra_samples` for the File capture device.
-  This causes the capture device to yield the given number of samples (per channel) after reaching end of file, allowing any delayed sound to be played back.
-  By setting the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback, the sound will be written to or read from stdio, so one can play with pipes:
-  ```
-  > camilladsp stdio_capt.yml > rawfile.dat
-  > cat rawfile.dat | camilladsp stdio_pb.yml
-  ```
+  The __File__ and __Stdin__ capture devices support two additional optional parameters, for advanced handling of raw files and testing:
+  * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream. This can be used to skip over the header of some formats like .wav (which typically has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
+  * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file or stream.
 
 ## Resampling
 

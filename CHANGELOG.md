@@ -2,9 +2,13 @@
 New features:
 - New commands to get more information from the websocket server.
 - Possible to skip lines or bytes in coefficient files.
-- Updated Cpal library
+- Updated Cpal library.
+- Added capture and playback devices Stdin & Stdout.
+- Improved error messages.
+
 Bugfixes:
-- Improved cryptic error message for errors in text coefficient files
+- Fix websocket `exit` command.
+- Correct response of `setconfigname` websocket command.
 
 
 ## 0.3.1
@@ -14,7 +18,7 @@ New features:
 
 ## 0.3.0
 New features:
-- Support for Windows (Wasapi) and macOS (CoreAudio) via the Cpal library
+- Support for Windows (Wasapi) and macOS (CoreAudio) via the Cpal library.
 
 
 ## 0.2.2
@@ -26,12 +30,13 @@ New features:
 
 ## 0.2.1
 New features:
-- Convolver was optimized to be up to a factor 2 faster
+- Convolver was optimized to be up to a factor 2 faster.
 
 ## 0.2.0
 New features:
 - Synchronous resampler that replaces the previous FastSync, BalancedSync and AccurateSync types with a single one called Synchronous. This uses FFT for a major speedup.
 - The Async resamplers have been optimized and are now around a factor 2 faster than before.
+
 Bugfixes:
 - Fixed error when setting Alsa buffer size in some cases.
 
@@ -41,6 +46,7 @@ New features:
 - Support for asynchronous resampling in all backends.
 - Added S24LE3 format (corresponds to Alsa S24_3LE)
 - File capture device can skip a number of bytes at the beginning of a file and then read a limited number of bytes
+
 Other:
 - Alsa backend rewritten to reduce code duplication
 - Improved debug output

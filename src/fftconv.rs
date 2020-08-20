@@ -194,9 +194,7 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
             let coeffs =
                 filters::read_coeff_file(&filename, &format, *read_bytes_lines, *skip_bytes_lines)?;
             if coeffs.is_empty() {
-                return Err(Box::new(config::ConfigError::new(
-                    "Conv coefficients are empty",
-                )));
+                return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }
             Ok(())
         }

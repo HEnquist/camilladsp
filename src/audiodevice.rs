@@ -2,6 +2,7 @@
 #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 use alsadevice;
 use config;
+use config::SampleFormat;
 #[cfg(feature = "cpal-backend")]
 use cpaldevice;
 use filedevice;
@@ -27,6 +28,28 @@ pub enum AudioMessage {
     //Quit,
     Audio(AudioChunk),
     EndOfStream,
+}
+
+pub fn get_bits_per_sample(format: &SampleFormat) -> usize {
+    match format {
+        SampleFormat::S16LE => 16,
+        SampleFormat::S24LE => 24,
+        SampleFormat::S24LE3 => 24,
+        SampleFormat::S32LE => 32,
+        SampleFormat::FLOAT32LE => 32,
+        SampleFormat::FLOAT64LE => 64,
+    }
+}
+
+pub fn get_bytes_per_sample(format: &SampleFormat) -> usize {
+    match format {
+        SampleFormat::S16LE => 2,
+        SampleFormat::S24LE => 4,
+        SampleFormat::S24LE3 => 3,
+        SampleFormat::S32LE => 4,
+        SampleFormat::FLOAT32LE => 4,
+        SampleFormat::FLOAT64LE => 8,
+    }
 }
 
 /// Main container of audio data
@@ -138,7 +161,16 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             format,
             ..
         } => Box::new(filedevice::FilePlaybackDevice {
-            filename,
+            destination: filedevice::PlaybackDest::Filename(filename),
+            samplerate: conf.samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            format,
+        }),
+        config::PlaybackDevice::Stdout {
+            channels, format, ..
+        } => Box::new(filedevice::FilePlaybackDevice {
+            destination: filedevice::PlaybackDest::Stdout,
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
@@ -377,7 +409,28 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             skip_bytes,
             read_bytes,
         } => Box::new(filedevice::FileCaptureDevice {
-            filename,
+            source: filedevice::CaptureSource::Filename(filename),
+            samplerate: conf.samplerate,
+            enable_resampling: conf.enable_resampling,
+            capture_samplerate,
+            resampler_conf: conf.resampler_type,
+            chunksize: conf.chunksize,
+            channels,
+            format,
+            extra_samples,
+            silence_threshold: conf.silence_threshold,
+            silence_timeout: conf.silence_timeout,
+            skip_bytes,
+            read_bytes,
+        }),
+        config::CaptureDevice::Stdin {
+            channels,
+            format,
+            extra_samples,
+            skip_bytes,
+            read_bytes,
+        } => Box::new(filedevice::FileCaptureDevice {
+            source: filedevice::CaptureSource::Stdin,
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
             capture_samplerate,

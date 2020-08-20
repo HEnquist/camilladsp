@@ -230,7 +230,7 @@ fn playback_loop_bytes(
                     let av_delay = delay / ndelays;
                     diff = av_delay - params.target_level as isize;
                     let rel_diff = (diff as f64) / (srate as f64);
-                    speed = 1.0 + 0.5 * rel_diff / params.adjust_period as f64;
+                    speed = 1.0 - 0.5 * rel_diff / params.adjust_period as f64;
                     debug!(
                         "Current buffer level {}, set capture rate to {}%",
                         av_delay,
@@ -314,7 +314,7 @@ fn capture_loop_bytes(
             Ok(CommandMessage::SetSpeed { speed }) => {
                 rate_adjust = speed;
                 if let Some(elem) = &element {
-                    elval.set_integer(0, (100_000.0 * speed) as i32).unwrap();
+                    elval.set_integer(0, (100_000.0 / speed) as i32).unwrap();
                     elem.write(&elval).unwrap();
                 } else if let Some(resampl) = &mut resampler {
                     if params.async_src {

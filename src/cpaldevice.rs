@@ -80,10 +80,8 @@ fn open_cpal_playback(
     }) {
         Some(dev) => dev,
         None => {
-            return Err(Box::new(ConfigError::new(&format!(
-                "Could not find device: {}",
-                devname
-            ))))
+            let msg = format!("Could not find device '{}'", devname);
+            return Err(ConfigError::new(&msg).into());
         }
     };
     let sample_format = match format {
@@ -121,10 +119,8 @@ fn open_cpal_capture(
     }) {
         Some(dev) => dev,
         None => {
-            return Err(Box::new(ConfigError::new(&format!(
-                "Could not find device: {}",
-                devname
-            ))))
+            let msg = format!("Could not find device '{}'", devname);
+            return Err(ConfigError::new(&msg).into());
         }
     };
     let sample_format = match format {

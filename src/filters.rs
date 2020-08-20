@@ -34,7 +34,16 @@ pub fn read_coeff_file(
     skip_bytes_lines: usize,
 ) -> Res<Vec<PrcFmt>> {
     let mut coefficients = Vec::<PrcFmt>::new();
-    let f = File::open(filename)?;
+    let f = match File::open(filename) {
+        Ok(f) => f,
+        Err(err) => {
+            let msg = format!(
+                "Could not open coefficient file '{}'. Error: {}",
+                filename, err
+            );
+            return Err(config::ConfigError::new(&msg).into());
+        }
+    };
     let mut file = BufReader::new(&f);
     let read_bytes_lines = if read_bytes_lines > 0 {
         read_bytes_lines
@@ -53,23 +62,23 @@ pub fn read_coeff_file(
                 match line {
                     Err(err) => {
                         let msg = format!(
-                            "Can't read line {} of file '{}', error: {}",
+                            "Can't read line {} of file '{}'. Error: {}",
                             nbr + 1 + skip_bytes_lines,
                             filename,
                             err
                         );
-                        return Err(Box::new(config::ConfigError::new(&msg)));
+                        return Err(config::ConfigError::new(&msg).into());
                     }
                     Ok(l) => match l.trim().parse() {
                         Ok(val) => coefficients.push(val),
                         Err(err) => {
                             let msg = format!(
-                                "Can't parse value on line {} of file '{}', error: {}",
+                                "Can't parse value on line {} of file '{}'. Error: {}",
                                 nbr + 1 + skip_bytes_lines,
                                 filename,
                                 err
                             );
-                            return Err(Box::new(config::ConfigError::new(&msg)));
+                            return Err(config::ConfigError::new(&msg).into());
                         }
                     },
                 }
@@ -318,17 +327,13 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
         config::Filter::Biquad { parameters } => {
             let coeffs = biquad::BiquadCoefficients::from_config(fs, parameters.clone());
             if !coeffs.is_stable() {
-                return Err(Box::new(config::ConfigError::new(
-                    "Unstable filter specified",
-                )));
+                return Err(config::ConfigError::new("Unstable filter specified").into());
             }
             Ok(())
         }
         config::Filter::Delay { parameters } => {
             if parameters.delay < 0.0 {
-                return Err(Box::new(config::ConfigError::new(
-                    "Negative delay specified",
-                )));
+                return Err(config::ConfigError::new("Negative delay specified").into());
             }
             Ok(())
         }
