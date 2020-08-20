@@ -7,7 +7,7 @@ use conversions::{
 };
 use std::fs::File;
 use std::io::ErrorKind;
-use std::io::{Read, Write};
+use std::io::{Read, Write, stdin};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
@@ -30,8 +30,14 @@ pub struct FilePlaybackDevice {
     pub format: SampleFormat,
 }
 
+#[derive(Clone)]
+pub enum CaptureSource {
+    Filename(String),
+    Stdin,
+}
+
 pub struct FileCaptureDevice {
-    pub filename: String,
+    pub source: CaptureSource,
     pub chunksize: usize,
     pub samplerate: usize,
     pub enable_resampling: bool,
@@ -92,22 +98,8 @@ impl PlaybackDevice for FilePlaybackDevice {
         let filename = self.filename.clone();
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits = match self.format {
-            SampleFormat::S16LE => 16,
-            SampleFormat::S24LE => 24,
-            SampleFormat::S24LE3 => 24,
-            SampleFormat::S32LE => 32,
-            SampleFormat::FLOAT32LE => 32,
-            SampleFormat::FLOAT64LE => 64,
-        };
-        let store_bytes = match self.format {
-            SampleFormat::S16LE => 2,
-            SampleFormat::S24LE => 4,
-            SampleFormat::S24LE3 => 3,
-            SampleFormat::S32LE => 4,
-            SampleFormat::FLOAT32LE => 4,
-            SampleFormat::FLOAT64LE => 8,
-        };
+        let bits = get_bits_per_sample(&self.format);
+        let store_bytes = get_bytes_per_sample(&self.format);
         let format = self.format.clone();
         let handle = thread::Builder::new()
             .name("FilePlayback".to_string())
@@ -120,7 +112,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                             Err(_err) => {}
                         }
                         //let scalefactor = (1<<bits-1) as PrcFmt;
-                        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+                        let scalefactor = (2.0 as PrcFmt).powi(bits as i32 - 1);
                         barrier.wait();
                         //thread::sleep(delay);
                         debug!("starting playback loop");
@@ -136,11 +128,11 @@ impl PlaybackDevice for FilePlaybackDevice {
                                             chunk,
                                             &mut buffer,
                                             scalefactor,
-                                            bits,
+                                            bits as i32,
                                             store_bytes,
                                         ),
                                         SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
-                                            chunk_to_buffer_float_bytes(chunk, &mut buffer, bits)
+                                            chunk_to_buffer_float_bytes(chunk, &mut buffer, bits as i32)
                                         }
                                     };
                                     let write_res = file.write(&buffer[0..bytes]);
@@ -237,7 +229,7 @@ fn get_capture_bytes(
 }
 
 fn capture_loop(
-    mut file: File,
+    mut file: Box<dyn Read>,
     params: CaptureParams,
     msg_channels: CaptureChannels,
     mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
@@ -411,27 +403,13 @@ impl CaptureDevice for FileCaptureDevice {
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
-        let filename = self.filename.clone();
+        let source = self.source.clone();
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let capture_samplerate = self.capture_samplerate;
         let channels = self.channels;
-        let bits = match self.format {
-            SampleFormat::S16LE => 16,
-            SampleFormat::S24LE => 24,
-            SampleFormat::S24LE3 => 24,
-            SampleFormat::S32LE => 32,
-            SampleFormat::FLOAT32LE => 32,
-            SampleFormat::FLOAT64LE => 64,
-        };
-        let store_bytes = match self.format {
-            SampleFormat::S16LE => 2,
-            SampleFormat::S24LE => 4,
-            SampleFormat::S24LE3 => 3,
-            SampleFormat::S32LE => 4,
-            SampleFormat::FLOAT32LE => 4,
-            SampleFormat::FLOAT64LE => 8,
-        };
+        let bits = get_bits_per_sample(&self.format);
+        let store_bytes = get_bytes_per_sample(&self.format);
         let buffer_bytes = 2.0f32.powf(
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
                 .log2()
@@ -465,29 +443,33 @@ impl CaptureDevice for FileCaptureDevice {
                 } else {
                     None
                 };
-                match File::open(filename) {
+                let params = CaptureParams {
+                    channels,
+                    bits: bits as i32,
+                    bytes_per_sample: store_bytes,
+                    format,
+                    store_bytes,
+                    extra_bytes,
+                    buffer_bytes,
+                    silent_limit,
+                    silence,
+                    chunksize,
+                    resampling_ratio: samplerate as f32 / capture_samplerate as f32,
+                    read_bytes,
+                    async_src,
+                    capture_status,
+                };
+                let file_res: Result<Box<dyn Read>, std::io::Error> = match source {
+                    CaptureSource::Filename(filename) => File::open(filename).map(|f| Box::new(f) as Box<dyn Read>),
+                    CaptureSource::Stdin => Ok(Box::new(stdin())),
+                };
+                match file_res {
                     Ok(mut file) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
                         barrier.wait();
-                        let params = CaptureParams {
-                            channels,
-                            bits,
-                            bytes_per_sample: store_bytes,
-                            format,
-                            store_bytes,
-                            extra_bytes,
-                            buffer_bytes,
-                            silent_limit,
-                            silence,
-                            chunksize,
-                            resampling_ratio: samplerate as f32 / capture_samplerate as f32,
-                            read_bytes,
-                            async_src,
-                            capture_status,
-                        };
                         let msg_channels = CaptureChannels {
                             audio: channel,
                             status: status_channel,
@@ -537,7 +519,7 @@ fn send_silence(
     }
 }
 
-fn read_retry(file: &mut File, mut buf: &mut [u8]) -> Res<usize> {
+fn read_retry(file: &mut dyn Read, mut buf: &mut [u8]) -> Res<usize> {
     let requested = buf.len();
     while !buf.is_empty() {
         match file.read(buf) {

@@ -75,6 +75,16 @@ pub enum CaptureDevice {
         #[serde(default)]
         read_bytes: usize,
     },
+    Stdin {
+        channels: usize,
+        format: SampleFormat,
+        #[serde(default)]
+        extra_samples: usize,
+        #[serde(default)]
+        skip_bytes: usize,
+        #[serde(default)]
+        read_bytes: usize,
+    },
     #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
     CoreAudio {
         channels: usize,
@@ -554,6 +564,7 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         #[cfg(feature = "pulse-backend")]
         CaptureDevice::Pulse { channels, .. } => channels,
         CaptureDevice::File { channels, .. } => channels,
+        CaptureDevice::Stdin { channels, .. } => channels,
         #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
         CaptureDevice::CoreAudio { channels, .. } => channels,
         #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
