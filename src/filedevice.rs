@@ -7,7 +7,7 @@ use conversions::{
 };
 use std::fs::File;
 use std::io::ErrorKind;
-use std::io::{Read, Write, stdin};
+use std::io::{stdin, stdout, Read, Write};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
@@ -23,7 +23,7 @@ use Res;
 use StatusMessage;
 
 pub struct FilePlaybackDevice {
-    pub filename: String,
+    pub destination: PlaybackDest,
     pub chunksize: usize,
     pub samplerate: usize,
     pub channels: usize,
@@ -34,6 +34,12 @@ pub struct FilePlaybackDevice {
 pub enum CaptureSource {
     Filename(String),
     Stdin,
+}
+
+#[derive(Clone)]
+pub enum PlaybackDest {
+    Filename(String),
+    Stdout,
 }
 
 pub struct FileCaptureDevice {
@@ -95,7 +101,7 @@ impl PlaybackDevice for FilePlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
-        let filename = self.filename.clone();
+        let destination = self.destination.clone();
         let chunksize = self.chunksize;
         let channels = self.channels;
         let bits = get_bits_per_sample(&self.format);
@@ -105,7 +111,13 @@ impl PlaybackDevice for FilePlaybackDevice {
             .name("FilePlayback".to_string())
             .spawn(move || {
                 //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
-                match File::create(filename) {
+                let file_res: Result<Box<dyn Write>, std::io::Error> = match destination {
+                    PlaybackDest::Filename(filename) => {
+                        File::create(filename).map(|f| Box::new(f) as Box<dyn Write>)
+                    }
+                    PlaybackDest::Stdout => Ok(Box::new(stdout())),
+                };
+                match file_res {
                     Ok(mut file) => {
                         match status_channel.send(StatusMessage::PlaybackReady) {
                             Ok(()) => {}
@@ -132,7 +144,11 @@ impl PlaybackDevice for FilePlaybackDevice {
                                             store_bytes,
                                         ),
                                         SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
-                                            chunk_to_buffer_float_bytes(chunk, &mut buffer, bits as i32)
+                                            chunk_to_buffer_float_bytes(
+                                                chunk,
+                                                &mut buffer,
+                                                bits as i32,
+                                            )
                                         }
                                     };
                                     let write_res = file.write(&buffer[0..bytes]);
@@ -460,7 +476,9 @@ impl CaptureDevice for FileCaptureDevice {
                     capture_status,
                 };
                 let file_res: Result<Box<dyn Read>, std::io::Error> = match source {
-                    CaptureSource::Filename(filename) => File::open(filename).map(|f| Box::new(f) as Box<dyn Read>),
+                    CaptureSource::Filename(filename) => {
+                        File::open(filename).map(|f| Box::new(f) as Box<dyn Read>)
+                    }
                     CaptureSource::Stdin => Ok(Box::new(stdin())),
                 };
                 match file_res {

@@ -52,7 +52,6 @@ pub fn get_bytes_per_sample(format: &SampleFormat) -> usize {
     }
 }
 
-
 /// Main container of audio data
 pub struct AudioChunk {
     pub frames: usize,
@@ -162,7 +161,16 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             format,
             ..
         } => Box::new(filedevice::FilePlaybackDevice {
-            filename,
+            destination: filedevice::PlaybackDest::Filename(filename),
+            samplerate: conf.samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            format,
+        }),
+        config::PlaybackDevice::Stdout {
+            channels, format, ..
+        } => Box::new(filedevice::FilePlaybackDevice {
+            destination: filedevice::PlaybackDest::Stdout,
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,

@@ -120,6 +120,10 @@ pub enum PlaybackDevice {
         filename: String,
         format: SampleFormat,
     },
+    Stdout {
+        channels: usize,
+        format: SampleFormat,
+    },
     #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
     CoreAudio {
         channels: usize,
@@ -616,6 +620,7 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         #[cfg(feature = "pulse-backend")]
         PlaybackDevice::Pulse { channels, .. } => channels,
         PlaybackDevice::File { channels, .. } => channels,
+        PlaybackDevice::Stdout { channels, .. } => channels,
         #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
         PlaybackDevice::CoreAudio { channels, .. } => channels,
         #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
