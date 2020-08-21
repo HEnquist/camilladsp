@@ -130,7 +130,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
         }),
         config::PlaybackDevice::File {
             channels,
@@ -374,7 +374,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),

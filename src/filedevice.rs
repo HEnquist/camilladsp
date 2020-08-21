@@ -209,9 +209,13 @@ fn build_chunk(
     scalefactor: PrcFmt,
 ) -> AudioChunk {
     match sample_format.number_family() {
-        NumberFamily::Integer => {
-            buffer_to_chunk_bytes(&buf, channels, scalefactor, store_bytes_per_sample, bytes_read)
-        }
+        NumberFamily::Integer => buffer_to_chunk_bytes(
+            &buf,
+            channels,
+            scalefactor,
+            store_bytes_per_sample,
+            bytes_read,
+        ),
         NumberFamily::Float => {
             buffer_to_chunk_float_bytes(&buf, channels, bits_per_sample, bytes_read)
         }
