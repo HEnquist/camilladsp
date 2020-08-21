@@ -28,7 +28,7 @@ pub struct FilePlaybackDevice {
     pub chunksize: usize,
     pub samplerate: usize,
     pub channels: usize,
-    pub format: SampleFormat,
+    pub sample_format: SampleFormat,
 }
 
 #[derive(Clone)]
@@ -51,7 +51,7 @@ pub struct FileCaptureDevice {
     pub capture_samplerate: usize,
     pub resampler_conf: config::Resampler,
     pub channels: usize,
-    pub format: SampleFormat,
+    pub sample_format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub extra_samples: usize,
@@ -104,9 +104,9 @@ impl PlaybackDevice for FilePlaybackDevice {
         let destination = self.destination.clone();
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits_per_sample = self.format.bits_per_sample();
-        let store_bytes_per_sample = self.format.bytes_per_sample();
-        let format = self.format.clone();
+        let bits_per_sample = self.sample_format.bits_per_sample();
+        let store_bytes_per_sample = self.sample_format.bytes_per_sample();
+        let sample_format = self.sample_format.clone();
         let handle = thread::Builder::new()
             .name("FilePlayback".to_string())
             .spawn(move || {
@@ -132,7 +132,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    let bytes = match format.number_family() {
+                                    let valid_bytes = match sample_format.number_family() {
                                         NumberFamily::Integer => chunk_to_buffer_bytes(
                                             chunk,
                                             &mut buffer,
@@ -146,7 +146,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                             bits_per_sample as i32,
                                         ),
                                     };
-                                    let write_res = file.write(&buffer[0..bytes]);
+                                    let write_res = file.write(&buffer[0..valid_bytes]);
                                     match write_res {
                                         Ok(_) => {}
                                         Err(msg) => {
@@ -201,14 +201,14 @@ fn get_nbr_capture_bytes(
 
 fn build_chunk(
     buf: &[u8],
-    format: &SampleFormat,
+    sample_format: &SampleFormat,
     channels: usize,
     bits_per_sample: i32,
     bytes_per_sample: usize,
     bytes_read: usize,
     scalefactor: PrcFmt,
 ) -> AudioChunk {
-    match format.number_family() {
+    match sample_format.number_family() {
         NumberFamily::Integer => {
             buffer_to_chunk_bytes(&buf, channels, scalefactor, bytes_per_sample, bytes_read)
         }
@@ -420,8 +420,8 @@ impl CaptureDevice for FileCaptureDevice {
         let chunksize = self.chunksize;
         let capture_samplerate = self.capture_samplerate;
         let channels = self.channels;
-        let bits_per_sample = self.format.bits_per_sample();
-        let store_bytes_per_sample = self.format.bytes_per_sample();
+        let bits_per_sample = self.sample_format.bits_per_sample();
+        let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let buffer_bytes = 2.0f32.powf(
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
                 .log2()
@@ -430,7 +430,7 @@ impl CaptureDevice for FileCaptureDevice {
             * 2
             * channels
             * store_bytes_per_sample;
-        let sample_format = self.format.clone();
+        let sample_format = self.sample_format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let async_src = resampler_is_async(&resampler_conf);

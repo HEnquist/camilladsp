@@ -115,7 +115,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             target_level: conf.target_level,
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
@@ -142,7 +142,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
         }),
         config::PlaybackDevice::Stdout {
             channels, format, ..
@@ -151,7 +151,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
         }),
         #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
         config::PlaybackDevice::CoreAudio {
@@ -357,7 +357,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),
@@ -393,7 +393,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             extra_samples,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
@@ -414,7 +414,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             extra_samples,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
