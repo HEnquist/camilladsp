@@ -38,7 +38,7 @@ pub struct CpalPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub format: SampleFormat,
+    pub sample_format: SampleFormat,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -54,7 +54,7 @@ pub struct CpalCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub format: SampleFormat,
+    pub sample_format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
 }
@@ -64,7 +64,7 @@ fn open_cpal_playback(
     devname: &str,
     samplerate: usize,
     channels: usize,
-    format: &SampleFormat,
+    sample_format: &SampleFormat,
 ) -> Res<(Device, StreamConfig, cpal::SampleFormat)> {
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
@@ -84,7 +84,7 @@ fn open_cpal_playback(
             return Err(ConfigError::new(&msg).into());
         }
     };
-    let sample_format = match format {
+    let cpal_format = match sample_format {
         SampleFormat::S16LE => cpal::SampleFormat::I16,
         SampleFormat::FLOAT32LE => cpal::SampleFormat::F32,
         _ => panic!("Unsupported sample format"),
@@ -95,7 +95,7 @@ fn open_cpal_playback(
         buffer_size: BufferSize::Default,
     };
     debug!("Opened CPAL playback device {}", devname);
-    Ok((device, stream_config, sample_format))
+    Ok((device, stream_config, cpal_format))
 }
 
 fn open_cpal_capture(
@@ -103,7 +103,7 @@ fn open_cpal_capture(
     devname: &str,
     samplerate: usize,
     channels: usize,
-    format: &SampleFormat,
+    sample_format: &SampleFormat,
 ) -> Res<(Device, StreamConfig, cpal::SampleFormat)> {
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
@@ -123,7 +123,7 @@ fn open_cpal_capture(
             return Err(ConfigError::new(&msg).into());
         }
     };
-    let sample_format = match format {
+    let cpal_format = match sample_format {
         SampleFormat::S16LE => cpal::SampleFormat::I16,
         SampleFormat::FLOAT32LE => cpal::SampleFormat::F32,
         _ => panic!("Unsupported sample format"),
@@ -134,7 +134,7 @@ fn open_cpal_capture(
         buffer_size: BufferSize::Default,
     };
     debug!("Opened CPAL capture device {}", devname);
-    Ok((device, stream_config, sample_format))
+    Ok((device, stream_config, cpal_format))
 }
 
 fn write_data_to_device<T>(output: &mut [T], queue: &mut VecDeque<T>)
@@ -170,18 +170,18 @@ impl PlaybackDevice for CpalPlaybackDevice {
         let chunksize_clone = chunksize;
         let channels_clone = channels;
 
-        let bits = self.format.bits_per_sample() as i32;
-        let format = self.format.clone();
+        let bits_per_sample = self.sample_format.bits_per_sample() as i32;
+        let sample_format = self.sample_format.clone();
         let handle = thread::Builder::new()
             .name("CpalPlayback".to_string())
             .spawn(move || {
-                match open_cpal_playback(host_cfg, &devname, samplerate, channels, &format) {
+                match open_cpal_playback(host_cfg, &devname, samplerate, channels, &sample_format) {
                     Ok((device, stream_config, _sample_format)) => {
                         match status_channel.send(StatusMessage::PlaybackReady) {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
 
                         let (tx_dev, rx_dev) = mpsc::sync_channel(1);
                         let buffer_fill = Arc::new(AtomicUsize::new(0));
@@ -193,7 +193,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         let mut speed;
                         let mut diff: isize;
 
-                        let stream = match format {
+                        let stream = match sample_format {
                             SampleFormat::S16LE => {
                                 trace!("Build i16 output stream");
                                 let mut sample_queue: VecDeque<i16> =
@@ -359,8 +359,8 @@ impl CaptureDevice for CpalCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits = self.format.bits_per_sample() as i32;
-        let format = self.format.clone();
+        let bits_per_sample = self.sample_format.bits_per_sample() as i32;
+        let sample_format = self.sample_format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let async_src = resampler_is_async(&resampler_conf);
@@ -382,17 +382,17 @@ impl CaptureDevice for CpalCaptureDevice {
                 } else {
                     None
                 };
-                match open_cpal_capture(host_cfg, &devname, capture_samplerate, channels, &format) {
+                match open_cpal_capture(host_cfg, &devname, capture_samplerate, channels, &sample_format) {
                     Ok((device, stream_config, _sample_format)) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
                         let mut silent_nbr: usize = 0;
                         let (tx_dev_i, rx_dev_i) = mpsc::sync_channel(1);
                         let (tx_dev_f, rx_dev_f) = mpsc::sync_channel(1);
-                        let stream = match format {
+                        let stream = match sample_format {
                             SampleFormat::S16LE => {
                                 trace!("Build i16 input stream");
                                 let stream = device.build_input_stream(
@@ -493,7 +493,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 channels,
                             );
 
-                            let mut chunk = match format {
+                            let mut chunk = match sample_format {
                                 SampleFormat::S16LE => {
                                     while sample_queue_i.len() < capture_samples {
                                         trace!("Read message to fill capture buffer");
