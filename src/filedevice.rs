@@ -72,10 +72,9 @@ struct CaptureChannels {
 
 struct CaptureParams {
     channels: usize,
-    bits: i32,
-    bytes_per_sample: usize,
-    format: SampleFormat,
-    store_bytes: usize,
+    bits_per_sample: i32,
+    sample_format: SampleFormat,
+    store_bytes_per_sample: usize,
     extra_bytes: usize,
     buffer_bytes: usize,
     silent_limit: usize,
@@ -105,8 +104,8 @@ impl PlaybackDevice for FilePlaybackDevice {
         let destination = self.destination.clone();
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits = self.format.bits_per_sample();
-        let store_bytes = self.format.bytes_per_sample();
+        let bits_per_sample = self.format.bits_per_sample();
+        let store_bytes_per_sample = self.format.bytes_per_sample();
         let format = self.format.clone();
         let handle = thread::Builder::new()
             .name("FilePlayback".to_string())
@@ -125,11 +124,11 @@ impl PlaybackDevice for FilePlaybackDevice {
                             Err(_err) => {}
                         }
                         //let scalefactor = (1<<bits-1) as PrcFmt;
-                        let scalefactor = (2.0 as PrcFmt).powi(bits as i32 - 1);
+                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample as i32 - 1);
                         barrier.wait();
                         //thread::sleep(delay);
                         debug!("starting playback loop");
-                        let mut buffer = vec![0u8; chunksize * channels * store_bytes];
+                        let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
@@ -138,13 +137,13 @@ impl PlaybackDevice for FilePlaybackDevice {
                                             chunk,
                                             &mut buffer,
                                             scalefactor,
-                                            bits as i32,
-                                            store_bytes,
+                                            bits_per_sample as i32,
+                                            store_bytes_per_sample,
                                         ),
                                         NumberFamily::Float => chunk_to_buffer_float_bytes(
                                             chunk,
                                             &mut buffer,
-                                            bits as i32,
+                                            bits_per_sample as i32,
                                         ),
                                     };
                                     let write_res = file.write(&buffer[0..bytes]);
@@ -185,10 +184,10 @@ fn get_nbr_capture_bytes(
     resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
     capture_bytes: usize,
     channels: usize,
-    store_bytes: usize,
+    store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes;
+        let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
         trace!(
             "Resampler needs {} frames, will read {} bytes",
             resampl.nbr_frames_needed(),
@@ -204,7 +203,7 @@ fn build_chunk(
     buf: &[u8],
     format: &SampleFormat,
     channels: usize,
-    bits: i32,
+    bits_per_sample: i32,
     bytes_per_sample: usize,
     bytes_read: usize,
     scalefactor: PrcFmt,
@@ -213,7 +212,9 @@ fn build_chunk(
         NumberFamily::Integer => {
             buffer_to_chunk_bytes(&buf, channels, scalefactor, bytes_per_sample, bytes_read)
         }
-        NumberFamily::Float => buffer_to_chunk_float_bytes(&buf, channels, bits, bytes_read),
+        NumberFamily::Float => {
+            buffer_to_chunk_float_bytes(&buf, channels, bits_per_sample, bytes_read)
+        }
     }
 }
 
@@ -245,9 +246,9 @@ fn capture_loop(
     mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
 ) {
     debug!("starting captureloop");
-    let scalefactor = (2.0 as PrcFmt).powi(params.bits - 1);
+    let scalefactor = (2.0 as PrcFmt).powi(params.bits_per_sample - 1);
     let mut silent_nbr: usize = 0;
-    let chunksize_bytes = params.channels * params.chunksize * params.store_bytes;
+    let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];
     let mut bytes_read = 0;
     let mut capture_bytes = chunksize_bytes;
@@ -289,7 +290,7 @@ fn capture_loop(
             &resampler,
             capture_bytes,
             params.channels,
-            params.store_bytes,
+            params.store_bytes_per_sample,
         );
         capture_bytes_temp =
             get_capture_bytes(params.read_bytes, nbr_bytes_read, capture_bytes, &mut buf);
@@ -318,7 +319,8 @@ fn capture_loop(
                     }
                 } else if bytes == 0 && capture_bytes > 0 {
                     debug!("Reached end of file");
-                    let extra_samples = extra_bytes_left / params.store_bytes / params.channels;
+                    let extra_samples =
+                        extra_bytes_left / params.store_bytes_per_sample / params.channels;
                     send_silence(
                         extra_samples,
                         params.channels,
@@ -341,7 +343,7 @@ fn capture_loop(
                     let meas_time = now.duration_since(start).unwrap().as_secs_f32();
                     let bytes_per_sec = bytes_counter as f32 / meas_time;
                     let measured_rate_f =
-                        bytes_per_sec / (params.channels * params.store_bytes) as f32;
+                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f32;
                     trace!("Measured sample rate is {} Hz", measured_rate_f);
                     let mut capt_stat = params.capture_status.write().unwrap();
                     capt_stat.measured_samplerate = measured_rate_f as usize;
@@ -365,10 +367,10 @@ fn capture_loop(
         //let before = Instant::now();
         let mut chunk = build_chunk(
             &buf[0..capture_bytes],
-            &params.format,
+            &params.sample_format,
             params.channels,
-            params.bits,
-            params.bytes_per_sample,
+            params.bits_per_sample,
+            params.store_bytes_per_sample,
             bytes_read,
             scalefactor,
         );
@@ -418,8 +420,8 @@ impl CaptureDevice for FileCaptureDevice {
         let chunksize = self.chunksize;
         let capture_samplerate = self.capture_samplerate;
         let channels = self.channels;
-        let bits = self.format.bits_per_sample();
-        let store_bytes = self.format.bytes_per_sample();
+        let bits_per_sample = self.format.bits_per_sample();
+        let store_bytes_per_sample = self.format.bytes_per_sample();
         let buffer_bytes = 2.0f32.powf(
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
                 .log2()
@@ -427,12 +429,12 @@ impl CaptureDevice for FileCaptureDevice {
         ) as usize
             * 2
             * channels
-            * store_bytes;
+            * store_bytes_per_sample;
         let sample_format = self.format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let async_src = resampler_is_async(&resampler_conf);
-        let extra_bytes = self.extra_samples * store_bytes * channels;
+        let extra_bytes = self.extra_samples * store_bytes_per_sample * channels;
         let skip_bytes = self.skip_bytes;
         let read_bytes = self.read_bytes;
         let mut silence: PrcFmt = 10.0;
@@ -455,10 +457,9 @@ impl CaptureDevice for FileCaptureDevice {
                 };
                 let params = CaptureParams {
                     channels,
-                    bits: bits as i32,
-                    bytes_per_sample: store_bytes,
-                    format: sample_format,
-                    store_bytes,
+                    bits_per_sample: bits_per_sample as i32,
+                    sample_format,
+                    store_bytes_per_sample,
                     extra_bytes,
                     buffer_bytes,
                     silent_limit,
