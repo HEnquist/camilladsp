@@ -2,7 +2,6 @@
 #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 use alsadevice;
 use config;
-use config::SampleFormat;
 #[cfg(feature = "cpal-backend")]
 use cpaldevice;
 use filedevice;
@@ -28,28 +27,6 @@ pub enum AudioMessage {
     //Quit,
     Audio(AudioChunk),
     EndOfStream,
-}
-
-pub fn get_bits_per_sample(format: &SampleFormat) -> usize {
-    match format {
-        SampleFormat::S16LE => 16,
-        SampleFormat::S24LE => 24,
-        SampleFormat::S24LE3 => 24,
-        SampleFormat::S32LE => 32,
-        SampleFormat::FLOAT32LE => 32,
-        SampleFormat::FLOAT64LE => 64,
-    }
-}
-
-pub fn get_bytes_per_sample(format: &SampleFormat) -> usize {
-    match format {
-        SampleFormat::S16LE => 2,
-        SampleFormat::S24LE => 4,
-        SampleFormat::S24LE3 => 3,
-        SampleFormat::S32LE => 4,
-        SampleFormat::FLOAT32LE => 4,
-        SampleFormat::FLOAT64LE => 8,
-    }
 }
 
 /// Main container of audio data
@@ -138,7 +115,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             target_level: conf.target_level,
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
@@ -153,7 +130,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
         }),
         config::PlaybackDevice::File {
             channels,
@@ -165,7 +142,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
         }),
         config::PlaybackDevice::Stdout {
             channels, format, ..
@@ -174,7 +151,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
         }),
         #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
         config::PlaybackDevice::CoreAudio {
@@ -187,7 +164,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             target_level: conf.target_level,
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
@@ -203,7 +180,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             target_level: conf.target_level,
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
@@ -380,7 +357,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),
@@ -397,7 +374,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),
@@ -416,7 +393,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             extra_samples,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
@@ -437,7 +414,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             extra_samples,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
@@ -458,7 +435,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),
@@ -476,7 +453,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),

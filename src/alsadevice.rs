@@ -35,7 +35,7 @@ pub struct AlsaPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub format: SampleFormat,
+    pub sample_format: SampleFormat,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -50,7 +50,7 @@ pub struct AlsaCaptureDevice {
     pub resampler_conf: config::Resampler,
     pub chunksize: usize,
     pub channels: usize,
-    pub format: SampleFormat,
+    pub sample_format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
 }
@@ -72,8 +72,8 @@ struct CaptureParams {
     silent_limit: usize,
     silence: PrcFmt,
     chunksize: usize,
-    bits: i32,
-    bytes_per_sample: usize,
+    bits_per_sample: i32,
+    store_bytes_per_sample: usize,
     floats: bool,
     samplerate: usize,
     capture_samplerate: usize,
@@ -138,7 +138,7 @@ fn open_pcm(
     samplerate: u32,
     bufsize: MachInt,
     channels: u32,
-    format: &SampleFormat,
+    sample_format: &SampleFormat,
     capture: bool,
 ) -> Res<alsa::PCM> {
     // Open the device
@@ -153,7 +153,7 @@ fn open_pcm(
         let hwp = HwParams::any(&pcmdev)?;
         hwp.set_channels(channels)?;
         hwp.set_rate(samplerate, ValueOr::Nearest)?;
-        match format {
+        match sample_format {
             SampleFormat::S16LE => hwp.set_format(Format::s16())?,
             SampleFormat::S24LE => hwp.set_format(Format::s24())?,
             SampleFormat::S24LE3 => hwp.set_format(Format::S243LE)?,
@@ -296,7 +296,7 @@ fn capture_loop_bytes(
             warn!("Async resampler not needed since capture device supports rate adjust. Switch to Sync type to save CPU time.");
         }
     }
-    let mut capture_bytes = params.chunksize * params.channels * params.bytes_per_sample;
+    let mut capture_bytes = params.chunksize * params.channels * params.store_bytes_per_sample;
     let mut start = SystemTime::now();
     let mut now;
     let mut bytes_counter = 0;
@@ -341,7 +341,7 @@ fn capture_loop_bytes(
                     let meas_time = now.duration_since(start).unwrap().as_secs_f32();
                     let bytes_per_sec = bytes_counter as f32 / meas_time;
                     let measured_rate_f =
-                        bytes_per_sec / (params.channels * params.bytes_per_sample) as f32;
+                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f32;
                     trace!("Measured sample rate is {} Hz", measured_rate_f);
                     let mut capt_stat = params.capture_status.write().unwrap();
                     capt_stat.measured_samplerate = measured_rate_f as usize;
@@ -365,7 +365,7 @@ fn capture_loop_bytes(
             buffer_to_chunk_float_bytes(
                 &buffer[0..capture_bytes],
                 params.channels,
-                params.bits,
+                params.bits_per_sample,
                 capture_bytes,
             )
         } else {
@@ -373,7 +373,7 @@ fn capture_loop_bytes(
                 &buffer[0..capture_bytes],
                 params.channels,
                 params.scalefactor,
-                params.bytes_per_sample,
+                params.store_bytes_per_sample,
                 capture_bytes,
             )
         };
@@ -414,7 +414,7 @@ fn get_nbr_capture_bytes(
 ) -> usize {
     let capture_bytes_new = if let Some(resampl) = &resampler {
         trace!("Resamper needs {} frames", resampl.nbr_frames_needed());
-        resampl.nbr_frames_needed() * params.channels * params.bytes_per_sample
+        resampl.nbr_frames_needed() * params.channels * params.store_bytes_per_sample
     } else {
         capture_bytes
     };
@@ -444,30 +444,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits: i32 = match self.format {
-            SampleFormat::S16LE => 16,
-            SampleFormat::S24LE => 24,
-            SampleFormat::S24LE3 => 24,
-            SampleFormat::S32LE => 32,
-            SampleFormat::FLOAT32LE => 32,
-            SampleFormat::FLOAT64LE => 64,
-        };
-        let bytes_per_sample = match self.format {
-            SampleFormat::S16LE => 2,
-            SampleFormat::S24LE => 4,
-            SampleFormat::S24LE3 => 3,
-            SampleFormat::S32LE => 4,
-            SampleFormat::FLOAT32LE => 4,
-            SampleFormat::FLOAT64LE => 8,
-        };
-        let floats = match self.format {
-            SampleFormat::S16LE
-            | SampleFormat::S24LE
-            | SampleFormat::S24LE3
-            | SampleFormat::S32LE => false,
-            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => true,
-        };
-        let format = self.format.clone();
+        let bits = self.sample_format.bits_per_sample() as i32;
+        let bytes_per_sample = self.sample_format.bytes_per_sample();
+        let floats = self.sample_format.is_float();
+        let sample_format = self.sample_format.clone();
         let handle = thread::Builder::new()
             .name("AlsaPlayback".to_string())
             .spawn(move || {
@@ -477,7 +457,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     samplerate as u32,
                     chunksize as MachInt,
                     channels as u32,
-                    &format,
+                    &sample_format,
                     false,
                 ) {
                     Ok(pcmdevice) => {
@@ -544,33 +524,13 @@ impl CaptureDevice for AlsaCaptureDevice {
         ) as usize;
         println!("Buffer frames {}", buffer_frames);
         let channels = self.channels;
-        let bits: i32 = match self.format {
-            SampleFormat::S16LE => 16,
-            SampleFormat::S24LE => 24,
-            SampleFormat::S24LE3 => 24,
-            SampleFormat::S32LE => 32,
-            SampleFormat::FLOAT32LE => 32,
-            SampleFormat::FLOAT64LE => 64,
-        };
-        let bytes_per_sample = match self.format {
-            SampleFormat::S16LE => 2,
-            SampleFormat::S24LE => 4,
-            SampleFormat::S24LE3 => 3,
-            SampleFormat::S32LE => 4,
-            SampleFormat::FLOAT32LE => 4,
-            SampleFormat::FLOAT64LE => 8,
-        };
-        let floats = match self.format {
-            SampleFormat::S16LE
-            | SampleFormat::S24LE
-            | SampleFormat::S24LE3
-            | SampleFormat::S32LE => false,
-            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => true,
-        };
+        let bits_per_sample = self.sample_format.bits_per_sample() as i32;
+        let store_bytes_per_sample = self.sample_format.bytes_per_sample();
+        let floats = self.sample_format.is_float();
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
-        let format = self.format.clone();
+        let sample_format = self.sample_format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let async_src = resampler_is_async(&resampler_conf);
@@ -594,7 +554,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                     capture_samplerate as u32,
                     buffer_frames as MachInt,
                     channels as u32,
-                    &format,
+                    &sample_format,
                     true,
                 ) {
                     Ok(pcmdevice) => {
@@ -602,7 +562,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
                         barrier.wait();
                         debug!("Starting captureloop");
                         let cap_params = CaptureParams {
@@ -611,8 +571,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                             silent_limit,
                             silence,
                             chunksize,
-                            bits,
-                            bytes_per_sample,
+                            bits_per_sample,
+                            store_bytes_per_sample,
                             floats,
                             samplerate,
                             capture_samplerate,
@@ -625,7 +585,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             command: command_channel,
                         };
                         let io = pcmdevice.io();
-                        let buffer = vec![0u8; channels * buffer_frames * bytes_per_sample];
+                        let buffer = vec![0u8; channels * buffer_frames * store_bytes_per_sample];
                         capture_loop_bytes(
                             cap_channels,
                             buffer,
