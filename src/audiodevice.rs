@@ -2,7 +2,6 @@
 #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 use alsadevice;
 use config;
-use config::SampleFormat;
 #[cfg(feature = "cpal-backend")]
 use cpaldevice;
 use filedevice;
@@ -28,28 +27,6 @@ pub enum AudioMessage {
     //Quit,
     Audio(AudioChunk),
     EndOfStream,
-}
-
-pub fn get_bits_per_sample(format: &SampleFormat) -> usize {
-    match format {
-        SampleFormat::S16LE => 16,
-        SampleFormat::S24LE => 24,
-        SampleFormat::S24LE3 => 24,
-        SampleFormat::S32LE => 32,
-        SampleFormat::FLOAT32LE => 32,
-        SampleFormat::FLOAT64LE => 64,
-    }
-}
-
-pub fn get_bytes_per_sample(format: &SampleFormat) -> usize {
-    match format {
-        SampleFormat::S16LE => 2,
-        SampleFormat::S24LE => 4,
-        SampleFormat::S24LE3 => 3,
-        SampleFormat::S32LE => 4,
-        SampleFormat::FLOAT32LE => 4,
-        SampleFormat::FLOAT64LE => 8,
-    }
 }
 
 /// Main container of audio data

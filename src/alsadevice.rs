@@ -444,30 +444,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits: i32 = match self.format {
-            SampleFormat::S16LE => 16,
-            SampleFormat::S24LE => 24,
-            SampleFormat::S24LE3 => 24,
-            SampleFormat::S32LE => 32,
-            SampleFormat::FLOAT32LE => 32,
-            SampleFormat::FLOAT64LE => 64,
-        };
-        let bytes_per_sample = match self.format {
-            SampleFormat::S16LE => 2,
-            SampleFormat::S24LE => 4,
-            SampleFormat::S24LE3 => 3,
-            SampleFormat::S32LE => 4,
-            SampleFormat::FLOAT32LE => 4,
-            SampleFormat::FLOAT64LE => 8,
-        };
-        let floats = match self.format {
-            SampleFormat::S16LE
-            | SampleFormat::S24LE
-            | SampleFormat::S24LE3
-            | SampleFormat::S32LE => false,
-            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => true,
-        };
-        let format = self.format.clone();
+        let bits = self.format.bits_per_sample() as i32;
+        let bytes_per_sample = self.format.bytes_per_sample();
+        let floats = self.format.is_float();
+        let sample_format = self.format.clone();
         let handle = thread::Builder::new()
             .name("AlsaPlayback".to_string())
             .spawn(move || {
@@ -477,7 +457,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     samplerate as u32,
                     chunksize as MachInt,
                     channels as u32,
-                    &format,
+                    &sample_format,
                     false,
                 ) {
                     Ok(pcmdevice) => {
@@ -544,29 +524,9 @@ impl CaptureDevice for AlsaCaptureDevice {
         ) as usize;
         println!("Buffer frames {}", buffer_frames);
         let channels = self.channels;
-        let bits: i32 = match self.format {
-            SampleFormat::S16LE => 16,
-            SampleFormat::S24LE => 24,
-            SampleFormat::S24LE3 => 24,
-            SampleFormat::S32LE => 32,
-            SampleFormat::FLOAT32LE => 32,
-            SampleFormat::FLOAT64LE => 64,
-        };
-        let bytes_per_sample = match self.format {
-            SampleFormat::S16LE => 2,
-            SampleFormat::S24LE => 4,
-            SampleFormat::S24LE3 => 3,
-            SampleFormat::S32LE => 4,
-            SampleFormat::FLOAT32LE => 4,
-            SampleFormat::FLOAT64LE => 8,
-        };
-        let floats = match self.format {
-            SampleFormat::S16LE
-            | SampleFormat::S24LE
-            | SampleFormat::S24LE3
-            | SampleFormat::S32LE => false,
-            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => true,
-        };
+        let bits = self.format.bits_per_sample() as i32;
+        let bytes_per_sample = self.format.bytes_per_sample();
+        let floats = self.format.is_float();
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;

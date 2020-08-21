@@ -48,6 +48,53 @@ pub enum SampleFormat {
     FLOAT64LE,
 }
 
+#[derive(Clone, Debug)]
+pub enum NumberFamily {
+    Integer,
+    Float,
+}
+
+impl SampleFormat {
+    pub fn bits_per_sample(&self) -> usize {
+        match self {
+            SampleFormat::S16LE => 16,
+            SampleFormat::S24LE => 24,
+            SampleFormat::S24LE3 => 24,
+            SampleFormat::S32LE => 32,
+            SampleFormat::FLOAT32LE => 32,
+            SampleFormat::FLOAT64LE => 64,
+        }
+    }
+
+    pub fn bytes_per_sample(&self) -> usize {
+        match self {
+            SampleFormat::S16LE => 2,
+            SampleFormat::S24LE => 4,
+            SampleFormat::S24LE3 => 3,
+            SampleFormat::S32LE => 4,
+            SampleFormat::FLOAT32LE => 4,
+            SampleFormat::FLOAT64LE => 8,
+        }
+    }
+
+    pub fn number_family(&self) -> NumberFamily {
+        match self {
+            SampleFormat::S16LE
+            | SampleFormat::S24LE
+            | SampleFormat::S24LE3
+            | SampleFormat::S32LE => NumberFamily::Integer,
+            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => NumberFamily::Float,
+        }
+    }
+
+    pub fn is_float(&self) -> bool {
+        match self {
+            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]

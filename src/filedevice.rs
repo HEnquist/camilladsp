@@ -1,5 +1,6 @@
 use audiodevice::*;
 use config;
+use config::NumberFamily;
 use config::SampleFormat;
 use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
@@ -104,8 +105,8 @@ impl PlaybackDevice for FilePlaybackDevice {
         let destination = self.destination.clone();
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits = get_bits_per_sample(&self.format);
-        let store_bytes = get_bytes_per_sample(&self.format);
+        let bits = self.format.bits_per_sample();
+        let store_bytes = self.format.bytes_per_sample();
         let format = self.format.clone();
         let handle = thread::Builder::new()
             .name("FilePlayback".to_string())
@@ -132,24 +133,19 @@ impl PlaybackDevice for FilePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    let bytes = match format {
-                                        SampleFormat::S16LE
-                                        | SampleFormat::S24LE
-                                        | SampleFormat::S24LE3
-                                        | SampleFormat::S32LE => chunk_to_buffer_bytes(
+                                    let bytes = match format.number_family() {
+                                        NumberFamily::Integer => chunk_to_buffer_bytes(
                                             chunk,
                                             &mut buffer,
                                             scalefactor,
                                             bits as i32,
                                             store_bytes,
                                         ),
-                                        SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
-                                            chunk_to_buffer_float_bytes(
-                                                chunk,
-                                                &mut buffer,
-                                                bits as i32,
-                                            )
-                                        }
+                                        NumberFamily::Float => chunk_to_buffer_float_bytes(
+                                            chunk,
+                                            &mut buffer,
+                                            bits as i32,
+                                        ),
                                     };
                                     let write_res = file.write(&buffer[0..bytes]);
                                     match write_res {
@@ -213,13 +209,11 @@ fn build_chunk(
     bytes_read: usize,
     scalefactor: PrcFmt,
 ) -> AudioChunk {
-    match format {
-        SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S24LE3 | SampleFormat::S32LE => {
+    match format.number_family() {
+        NumberFamily::Integer => {
             buffer_to_chunk_bytes(&buf, channels, scalefactor, bytes_per_sample, bytes_read)
         }
-        SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => {
-            buffer_to_chunk_float_bytes(&buf, channels, bits, bytes_read)
-        }
+        NumberFamily::Float => buffer_to_chunk_float_bytes(&buf, channels, bits, bytes_read),
     }
 }
 
@@ -424,8 +418,8 @@ impl CaptureDevice for FileCaptureDevice {
         let chunksize = self.chunksize;
         let capture_samplerate = self.capture_samplerate;
         let channels = self.channels;
-        let bits = get_bits_per_sample(&self.format);
-        let store_bytes = get_bytes_per_sample(&self.format);
+        let bits = self.format.bits_per_sample();
+        let store_bytes = self.format.bytes_per_sample();
         let buffer_bytes = 2.0f32.powf(
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
                 .log2()
@@ -434,7 +428,7 @@ impl CaptureDevice for FileCaptureDevice {
             * 2
             * channels
             * store_bytes;
-        let format = self.format.clone();
+        let sample_format = self.format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let async_src = resampler_is_async(&resampler_conf);
@@ -463,7 +457,7 @@ impl CaptureDevice for FileCaptureDevice {
                     channels,
                     bits: bits as i32,
                     bytes_per_sample: store_bytes,
-                    format,
+                    format: sample_format,
                     store_bytes,
                     extra_bytes,
                     buffer_bytes,

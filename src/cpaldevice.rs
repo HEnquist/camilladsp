@@ -170,14 +170,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
         let chunksize_clone = chunksize;
         let channels_clone = channels;
 
-        let bits = match self.format {
-            SampleFormat::S16LE => 16,
-            SampleFormat::S24LE => 24,
-            SampleFormat::S24LE3 => 24,
-            SampleFormat::S32LE => 32,
-            SampleFormat::FLOAT32LE => 32,
-            SampleFormat::FLOAT64LE => 64,
-        };
+        let bits = self.format.bits_per_sample() as i32;
         let format = self.format.clone();
         let handle = thread::Builder::new()
             .name("CpalPlayback".to_string())
@@ -366,14 +359,7 @@ impl CaptureDevice for CpalCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits = match self.format {
-            SampleFormat::S16LE => 16,
-            SampleFormat::S24LE => 24,
-            SampleFormat::S24LE3 => 24,
-            SampleFormat::S32LE => 32,
-            SampleFormat::FLOAT32LE => 32,
-            SampleFormat::FLOAT64LE => 64,
-        };
+        let bits = self.format.bits_per_sample() as i32;
         let format = self.format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
