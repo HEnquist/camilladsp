@@ -204,13 +204,13 @@ fn build_chunk(
     sample_format: &SampleFormat,
     channels: usize,
     bits_per_sample: i32,
-    bytes_per_sample: usize,
+    store_bytes_per_sample: usize,
     bytes_read: usize,
     scalefactor: PrcFmt,
 ) -> AudioChunk {
     match sample_format.number_family() {
         NumberFamily::Integer => {
-            buffer_to_chunk_bytes(&buf, channels, scalefactor, bytes_per_sample, bytes_read)
+            buffer_to_chunk_bytes(&buf, channels, scalefactor, store_bytes_per_sample, bytes_read)
         }
         NumberFamily::Float => {
             buffer_to_chunk_float_bytes(&buf, channels, bits_per_sample, bytes_read)
