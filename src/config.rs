@@ -1,4 +1,5 @@
 use filters;
+use mixer;
 use serde::{Deserialize, Serialize};
 use serde_with;
 use std::collections::HashMap;
@@ -638,10 +639,17 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
                         return Err(ConfigError::new(&msg).into());
                     }
                     num_channels = conf.mixers.get(&name).unwrap().channels.out;
+                    match mixer::validate_mixer(&conf.mixers.get(&name).unwrap()) {
+                        Ok(_) => {}
+                        Err(err) => {
+                            let msg = format!("Invalid mixer '{}'. Reason: {}", name, err);
+                            return Err(ConfigError::new(&msg).into());
+                        }
+                    }
                 }
             }
             PipelineStep::Filter { channel, names } => {
-                if channel > num_channels {
+                if channel >= num_channels {
                     let msg = format!("Use of non existing channel {}", channel);
                     return Err(ConfigError::new(&msg).into());
                 }
