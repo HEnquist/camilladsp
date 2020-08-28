@@ -93,18 +93,20 @@ pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
     let chan_in = mixer_config.channels.r#in;
     let chan_out = mixer_config.channels.out;
     for mapping in mixer_config.mapping.iter() {
-        if  mapping.dest >= chan_out {
+        if mapping.dest >= chan_out {
             let msg = format!(
                 "Invalid destination channel {}, max is {}.",
-                mapping.dest, chan_out-1
+                mapping.dest,
+                chan_out - 1
             );
             return Err(config::ConfigError::new(&msg).into());
         }
         for source in mapping.sources.iter() {
-            if  source.channel >= chan_in {
+            if source.channel >= chan_in {
                 let msg = format!(
                     "Invalid source channel {}, max is {}.",
-                    source.channel, chan_in-1
+                    source.channel,
+                    chan_in - 1
                 );
                 return Err(config::ConfigError::new(&msg).into());
             }
