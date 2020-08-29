@@ -5,6 +5,7 @@ New features:
 - Updated Cpal library.
 - Added capture and playback devices Stdin & Stdout.
 - Improved error messages.
+- Improved validation of mixer config
 
 Bugfixes:
 - Fix websocket `exit` command.
