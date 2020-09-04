@@ -445,6 +445,7 @@ fn main() {
         );
         match exitstatus {
             Err(e) => {
+                *active_config.lock().unwrap() = None;
                 error!("({}) {}", e.to_string(), e);
                 if !wait {
                     break;
@@ -452,12 +453,14 @@ fn main() {
             }
             Ok(ExitState::Exit) => {
                 debug!("Exiting");
+                *active_config.lock().unwrap() = None;
                 if !wait || signal_exit.load(Ordering::Relaxed) == 1 {
                     // wait mode not active, or exit requested
                     break;
                 }
             }
             Ok(ExitState::Restart) => {
+                *active_config.lock().unwrap() = None;
                 debug!("Restarting with new config");
             }
         };

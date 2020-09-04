@@ -167,11 +167,12 @@ impl PlaybackDevice for FilePlaybackDevice {
                         }
                     }
                     Err(err) => {
-                        status_channel
-                            .send(StatusMessage::PlaybackError {
-                                message: format!("{}", err),
-                            })
-                            .unwrap();
+                        let send_result = status_channel.send(StatusMessage::PlaybackError {
+                            message: format!("{}", err),
+                        });
+                        if send_result.is_err() {
+                            error!("Playback error: {}", err);
+                        }
                     }
                 }
             })
@@ -501,11 +502,12 @@ impl CaptureDevice for FileCaptureDevice {
                         capture_loop(file, params, msg_channels, resampler);
                     }
                     Err(err) => {
-                        status_channel
-                            .send(StatusMessage::CaptureError {
-                                message: format!("{}", err),
-                            })
-                            .unwrap();
+                        let send_result = status_channel.send(StatusMessage::CaptureError {
+                            message: format!("{}", err),
+                        });
+                        if send_result.is_err() {
+                            error!("Capture error: {}", err);
+                        }
                     }
                 }
             })

@@ -302,11 +302,12 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         }
                     }
                     Err(err) => {
-                        status_channel
-                            .send(StatusMessage::PlaybackError {
-                                message: format!("{}", err),
-                            })
-                            .unwrap();
+                        let send_result = status_channel.send(StatusMessage::PlaybackError {
+                            message: format!("{}", err),
+                        });
+                        if send_result.is_err() {
+                            error!("Playback error: {}", err);
+                        }
                     }
                 }
             })
@@ -589,11 +590,13 @@ impl CaptureDevice for CpalCaptureDevice {
                         capt_stat.state = ProcessingState::Inactive;
                     }
                     Err(err) => {
-                        status_channel
+                        let send_result = status_channel
                             .send(StatusMessage::CaptureError {
                                 message: format!("{}", err),
-                            })
-                            .unwrap();
+                            });
+                        if send_result.is_err() {
+                            error!("Capture error: {}", err);
+                        }
                     }
                 }
             })
