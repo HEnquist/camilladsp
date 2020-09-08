@@ -230,7 +230,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.1.0
+CamillaDSP 0.3.2
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
@@ -247,7 +247,8 @@ FLAGS:
     -w, --wait       Wait for config from websocket
 
 OPTIONS:
-    -p, --port <port>    Port for websocket server
+    -a, --address <address>    IP address to bind websocket server to
+    -p, --port <port>          Port for websocket server
 
 ARGS:
     <configfile>    The configuration file to use
@@ -255,6 +256,8 @@ ARGS:
 If the "check" flag is given, the program will exit after checking the configuration file. Use this if you only want to verify that the configuration is ok, and not start any processing.
 
 To enable the websocket server, provide a port number with the `-p` option. Leave it out, or give 0 to disable. 
+
+By default the websocket server binds to the address 127.0.0.1 which means it's only accessible locally. If it should be also available to remote machines, give the IP address of the interface where it should be available with the `-a` option. Giving 0.0.0.0 will bind to all interfaces.
 
 If the "wait" flag, `-w` is given, CamillaDSP will start the websocket server and wait for a configuration to be uploaded. Then the config file argument must be left out.
 
@@ -266,8 +269,6 @@ The configuration can be reloaded without restarting by sending a SIGHUP to the 
 
 ## Controlling via websocket
 See the [separate readme for the websocket server](./websocket.md)
-
-If the websocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
 
 
 # Capturing audio

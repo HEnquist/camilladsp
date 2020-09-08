@@ -6,6 +6,7 @@ New features:
 - Added capture and playback devices Stdin & Stdout.
 - Improved error messages.
 - Improved validation of mixer config
+- Added option to set which IP address to bind websocket server to
 
 Bugfixes:
 - Fix websocket `exit` command.

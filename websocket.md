@@ -4,6 +4,8 @@ If the websocket server is enabled with the `-p` option, CamillaDSP will listen 
 
 If additionally the "wait" flag is given, it will wait for a config to be uploaded via the websocket server before starting the processing.
 
+By default the websocket server binds to the address 127.0.0.1, which means it's only accessible locally (on the same machine). If it should be also available to remote machines, give the IP address of the interface where it should be available with the `-a` option. Giving 0.0.0.0 will bind to all interfaces.
+
 The available commands are:
 
 ### General

@@ -41,6 +41,8 @@ use camillalib::config;
 use camillalib::processing;
 #[cfg(feature = "socketserver")]
 use camillalib::socketserver;
+#[cfg(feature = "socketserver")]
+use std::net::IpAddr;
 
 use camillalib::StatusMessage;
 
@@ -337,6 +339,20 @@ fn main() {
                 }),
         )
         .arg(
+            Arg::with_name("address")
+                .help("IP address to bind websocket server to")
+                .short("a")
+                .long("address")
+                .takes_value(true)
+                .requires("port")
+                .validator(|val: String| -> Result<(), String> {
+                    if val.parse::<IpAddr>().is_ok() {
+                        return Ok(());
+                    }
+                    Err(String::from("Must be a valid IP address"))
+                }),
+        )
+        .arg(
             Arg::with_name("wait")
                 .short("w")
                 .long("wait")
@@ -410,16 +426,20 @@ fn main() {
     #[cfg(feature = "socketserver")]
     {
         if let Some(port_str) = matches.value_of("port") {
+            let serveraddress = match matches.value_of("address") {
+                Some(addr) => addr,
+                None => "127.0.0.1",
+            };
             let serverport = port_str.parse::<usize>().unwrap();
-            socketserver::start_server(
-                serverport,
-                signal_reload.clone(),
-                signal_exit.clone(),
-                active_config.clone(),
-                active_config_path.clone(),
-                new_config.clone(),
-                capture_status.clone(),
-            );
+            let shared_data = socketserver::SharedData {
+                signal_reload: signal_reload.clone(),
+                signal_exit: signal_exit.clone(),
+                active_config: active_config.clone(),
+                active_config_path: active_config_path.clone(),
+                new_config: new_config.clone(),
+                capture_status: capture_status.clone(),
+            };
+            socketserver::start_server(serveraddress, serverport, shared_data);
         }
     }
 

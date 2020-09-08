@@ -6,6 +6,16 @@ use std::thread;
 use crate::CaptureStatus;
 use config;
 
+#[derive(Debug, Clone)]
+pub struct SharedData {
+    pub signal_reload: Arc<AtomicBool>,
+    pub signal_exit: Arc<AtomicUsize>,
+    pub active_config: Arc<Mutex<Option<config::Configuration>>>,
+    pub active_config_path: Arc<Mutex<Option<String>>>,
+    pub new_config: Arc<Mutex<Option<config::Configuration>>>,
+    pub capture_status: Arc<RwLock<CaptureStatus>>,
+}
+
 #[derive(Debug, PartialEq)]
 enum WSCommand {
     SetConfigName(String),
@@ -110,57 +120,47 @@ fn parse_command(cmd: &ws::Message) -> WSCommand {
     }
 }
 
-pub fn start_server(
-    port: usize,
-    signal_reload: Arc<AtomicBool>,
-    signal_exit: Arc<AtomicUsize>,
-    active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
-    active_config_path: Arc<Mutex<Option<String>>>,
-    new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
-    capture_status: Arc<RwLock<CaptureStatus>>,
-) {
+pub fn start_server(bind_address: &str, port: usize, shared_data: SharedData) {
+    let address = bind_address.to_owned();
     debug!("Start websocket server on port {}", port);
     thread::spawn(move || {
-        ws::listen(format!("127.0.0.1:{}", port), |socket| {
-            let signal_reload_inst = signal_reload.clone();
-            let signal_exit_inst = signal_exit.clone();
-            let active_config_inst = active_config_shared.clone();
-            let new_config_inst = new_config_shared.clone();
-            let active_config_path_inst = active_config_path.clone();
-            let capture_status_inst = capture_status.clone();
+        let ws_result = ws::listen(format!("{}:{}", address, port), |socket| {
+            let shared_data_inst = shared_data.clone();
             move |msg: ws::Message| {
                 let command = parse_command(&msg);
                 debug!("parsed command: {:?}", command);
                 match command {
                     WSCommand::Reload => {
-                        signal_reload_inst.store(true, Ordering::Relaxed);
+                        shared_data_inst
+                            .signal_reload
+                            .store(true, Ordering::Relaxed);
                         socket.send("OK:RELOAD")
                     }
                     WSCommand::GetCaptureRate => {
-                        let capstat = capture_status_inst.read().unwrap();
+                        let capstat = shared_data_inst.capture_status.read().unwrap();
                         socket.send(format!("OK:GETCAPTURERATE:{}", capstat.measured_samplerate))
                     }
                     WSCommand::GetSignalRange => {
-                        let capstat = capture_status_inst.read().unwrap();
+                        let capstat = shared_data_inst.capture_status.read().unwrap();
                         socket.send(format!("OK:GETSIGNALRANGE:{}", capstat.signal_range))
                     }
                     WSCommand::GetVersion => {
                         socket.send(format!("OK:GETVERSION:{}", crate_version!()))
                     }
                     WSCommand::GetState => {
-                        let capstat = capture_status_inst.read().unwrap();
+                        let capstat = shared_data_inst.capture_status.read().unwrap();
                         socket.send(format!("OK:GETSTATE:{}", &capstat.state.to_string()))
                     }
                     WSCommand::GetRateAdjust => {
-                        let capstat = capture_status_inst.read().unwrap();
+                        let capstat = shared_data_inst.capture_status.read().unwrap();
                         socket.send(format!("OK:GETRATEADJUST:{}", capstat.rate_adjust))
                     }
                     WSCommand::GetUpdateInterval => {
-                        let capstat = capture_status_inst.read().unwrap();
+                        let capstat = shared_data_inst.capture_status.read().unwrap();
                         socket.send(format!("OK:GETUPDATEINTERVAL:{}", capstat.update_interval))
                     }
                     WSCommand::SetUpdateInterval(nbr) => {
-                        let mut capstat = capture_status_inst.write().unwrap();
+                        let mut capstat = shared_data_inst.capture_status.write().unwrap();
                         capstat.update_interval = nbr;
                         socket.send("OK:SETUPDATEINTERVAL".to_string())
                     }
@@ -168,19 +168,22 @@ pub fn start_server(
                         //let conf_yaml = serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap();
                         socket.send(format!(
                             "OK:GETCONFIG:{}",
-                            serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap(),
+                            serde_yaml::to_string(&*shared_data_inst.active_config.lock().unwrap())
+                                .unwrap(),
                         ))
                     }
                     WSCommand::GetConfigJson => {
                         //let conf_yaml = serde_yaml::to_string(&*active_config_inst.lock().unwrap()).unwrap();
                         socket.send(format!(
                             "OK:GETCONFIGJSON:{}",
-                            serde_json::to_string(&*active_config_inst.lock().unwrap()).unwrap(),
+                            serde_json::to_string(&*shared_data_inst.active_config.lock().unwrap())
+                                .unwrap(),
                         ))
                     }
                     WSCommand::GetConfigName => socket.send(format!(
                         "OK:GETCONFIGNAME:{}",
-                        active_config_path_inst
+                        shared_data_inst
+                            .active_config_path
                             .lock()
                             .unwrap()
                             .as_ref()
@@ -189,7 +192,8 @@ pub fn start_server(
                     )),
                     WSCommand::SetConfigName(path) => match config::load_validate_config(&path) {
                         Ok(_) => {
-                            *active_config_path_inst.lock().unwrap() = Some(path.clone());
+                            *shared_data_inst.active_config_path.lock().unwrap() =
+                                Some(path.clone());
                             socket.send(format!("OK:SETCONFIGNAME:{}", path))
                         }
                         _ => socket.send("ERROR:SETCONFIGNAME"),
@@ -199,8 +203,10 @@ pub fn start_server(
                             Ok(conf) => match config::validate_config(conf.clone()) {
                                 Ok(()) => {
                                     //*active_config_path_inst.lock().unwrap() = String::from("none");
-                                    *new_config_inst.lock().unwrap() = Some(conf);
-                                    signal_reload_inst.store(true, Ordering::Relaxed);
+                                    *shared_data_inst.new_config.lock().unwrap() = Some(conf);
+                                    shared_data_inst
+                                        .signal_reload
+                                        .store(true, Ordering::Relaxed);
                                     socket.send("OK:SETCONFIG")
                                 }
                                 _ => socket.send("ERROR:SETCONFIG"),
@@ -216,8 +222,10 @@ pub fn start_server(
                             Ok(conf) => match config::validate_config(conf.clone()) {
                                 Ok(()) => {
                                     //*active_config_path_inst.lock().unwrap() = String::from("none");
-                                    *new_config_inst.lock().unwrap() = Some(conf);
-                                    signal_reload_inst.store(true, Ordering::Relaxed);
+                                    *shared_data_inst.new_config.lock().unwrap() = Some(conf);
+                                    shared_data_inst
+                                        .signal_reload
+                                        .store(true, Ordering::Relaxed);
                                     socket.send("OK:SETCONFIGJSON")
                                 }
                                 _ => socket.send("ERROR:SETCONFIGJSON"),
@@ -262,12 +270,12 @@ pub fn start_server(
                         }
                     }
                     WSCommand::Stop => {
-                        *new_config_inst.lock().unwrap() = None;
-                        signal_exit_inst.store(2, Ordering::Relaxed);
+                        *shared_data_inst.new_config.lock().unwrap() = None;
+                        shared_data_inst.signal_exit.store(2, Ordering::Relaxed);
                         socket.send("OK:STOP")
                     }
                     WSCommand::Exit => {
-                        signal_exit_inst.store(1, Ordering::Relaxed);
+                        shared_data_inst.signal_exit.store(1, Ordering::Relaxed);
                         socket.send("OK:EXIT")
                     }
                     WSCommand::Invalid => {
@@ -276,8 +284,11 @@ pub fn start_server(
                     }
                 }
             }
-        })
-        .unwrap();
+        });
+        match ws_result {
+            Ok(_) => {}
+            Err(err) => error!("Failed to start websocket server: {}", err),
+        }
     });
 }
 
