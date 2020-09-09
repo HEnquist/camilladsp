@@ -1,7 +1,5 @@
 #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 extern crate alsa;
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
-extern crate nix;
 extern crate clap;
 #[cfg(feature = "cpal-backend")]
 extern crate cpal;
@@ -11,6 +9,8 @@ extern crate fftw;
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
+#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+extern crate nix;
 extern crate num;
 extern crate rand;
 extern crate rand_distr;
