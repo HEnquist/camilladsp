@@ -409,9 +409,9 @@ fn capture_loop_bytes(
             debug!("Source inactive, pausing");
         } else if value_range > params.silence {
             if silent_nbr > params.silent_limit {
-                state = ProcessingState::Running;
                 debug!("Resuming processing");
             }
+            state = ProcessingState::Running;
             silent_nbr = 0;
         } else if params.silent_limit > 0 {
             if silent_nbr == params.silent_limit {
@@ -420,7 +420,7 @@ fn capture_loop_bytes(
             }
             silent_nbr += 1;
         }
-        if silent_nbr <= params.silent_limit {
+        if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
                 let new_waves = resampl.process(&chunk.waveforms).unwrap();
                 chunk.frames = new_waves[0].len();
