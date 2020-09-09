@@ -1,5 +1,7 @@
 #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 extern crate alsa;
+#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+extern crate nix;
 extern crate clap;
 #[cfg(feature = "cpal-backend")]
 extern crate cpal;

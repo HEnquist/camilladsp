@@ -1,4 +1,5 @@
 extern crate alsa;
+extern crate nix;
 use alsa::ctl::{ElemId, ElemIface};
 use alsa::ctl::{ElemType, ElemValue};
 use alsa::hctl::HCtl;
@@ -11,6 +12,7 @@ use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
     chunk_to_buffer_float_bytes,
 };
+use nix::errno::Errno;
 use rubato::Resampler;
 use std::ffi::CString;
 use std::sync::mpsc;
@@ -91,6 +93,11 @@ struct PlaybackParams {
     floats: bool,
 }
 
+enum CaptureResult {
+    Normal,
+    Timeout,
+}
+
 /// Play a buffer.
 fn play_buffer(buffer: &[u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u8>) -> Res<()> {
     let playback_state = pcmdevice.state();
@@ -115,7 +122,7 @@ fn play_buffer(buffer: &[u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u8>) -> 
 }
 
 /// Play a buffer.
-fn capture_buffer(buffer: &mut [u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u8>) -> Res<()> {
+fn capture_buffer(buffer: &mut [u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u8>) -> Res<CaptureResult> {
     let capture_state = pcmdevice.state();
     if capture_state == State::XRun {
         warn!("prepare capture");
@@ -124,12 +131,24 @@ fn capture_buffer(buffer: &mut [u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u
     let _frames = match io.readi(buffer) {
         Ok(frames) => frames,
         Err(err) => {
-            warn!("Retrying capture, error: {}", err);
-            pcmdevice.prepare()?;
-            io.readi(buffer)?
+            match err.nix_error() {
+                nix::Error::Sys(Errno::EIO) => {
+                    warn!("Capture timed out, error: {}", err);
+                    return Ok(CaptureResult::Timeout)
+                },
+                nix::Error::Sys(Errno::EPIPE) => {
+                    warn!("Retrying capture, error: {}", err);
+                    pcmdevice.prepare()?;
+                    io.readi(buffer)?
+                }
+                _ => { 
+                    warn!("Capture failed, error: {}", err);
+                    return Err(Box::new(err))
+                }
+            }
         }
     };
-    Ok(())
+    Ok(CaptureResult::Normal)
 }
 
 /// Open an Alsa PCM device
@@ -303,6 +322,7 @@ fn capture_loop_bytes(
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     let mut state = ProcessingState::Running;
+    let mut card_inactive = false;
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -331,7 +351,7 @@ fn capture_loop_bytes(
         capture_bytes = get_nbr_capture_bytes(capture_bytes, &resampler, &params, &mut buffer);
         let capture_res = capture_buffer(&mut buffer[0..capture_bytes], pcmdevice, &io);
         match capture_res {
-            Ok(_) => {
+            Ok(CaptureResult::Normal) => {
                 trace!("Captured {} bytes", capture_bytes);
                 now = SystemTime::now();
                 bytes_counter += capture_bytes;
@@ -350,7 +370,11 @@ fn capture_loop_bytes(
                     capt_stat.state = state;
                     start = now;
                     bytes_counter = 0;
+                    card_inactive = false;
                 }
+            }
+            Ok(CaptureResult::Timeout) => {
+                card_inactive = true;
             }
             Err(msg) => {
                 channels
@@ -378,7 +402,10 @@ fn capture_loop_bytes(
             )
         };
         value_range = chunk.maxval - chunk.minval;
-        if value_range > params.silence {
+        if card_inactive {
+            state = ProcessingState::Paused;
+            debug!("Source inactive, pausing");
+        } else if value_range > params.silence {
             if silent_nbr > params.silent_limit {
                 state = ProcessingState::Running;
                 debug!("Resuming processing");
