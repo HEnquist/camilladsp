@@ -356,6 +356,7 @@ fn capture_loop_bytes(
             Ok(CaptureResult::Normal) => {
                 trace!("Captured {} bytes", capture_bytes);
                 now = SystemTime::now();
+                card_inactive = false;
                 bytes_counter += capture_bytes;
                 if now.duration_since(start).unwrap().as_millis() as usize
                     > params.capture_status.read().unwrap().update_interval
@@ -372,7 +373,6 @@ fn capture_loop_bytes(
                     capt_stat.state = state;
                     start = now;
                     bytes_counter = 0;
-                    card_inactive = false;
                 }
             }
             Ok(CaptureResult::Timeout) => {
