@@ -5,8 +5,13 @@ authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 description = "A flexible tool for processing audio"
 
 [features]
+<<<<<<< HEAD
 default = ["alsa-backend", "pulse-backend", "websocket"]
 alsa-backend = ["alsa"]
+=======
+default = ["alsa-backend", "pulse-backend", "socketserver"]
+alsa-backend = ["alsa", "nix"]
+>>>>>>> 5fc0d55... Check if capture card is just inactive and wait
 pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
 cpal-backend = ["cpal"]
 32bit = []
@@ -25,6 +30,7 @@ path = "src/bin.rs"
 
 [target.'cfg(target_os="linux")'.dependencies]
 alsa = { version = "0.4", optional = true }
+nix = { version = "0.15", optional = true }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
