@@ -427,6 +427,7 @@ fn capture_loop_bytes(
                 chunk.valid_frames = new_waves[0].len();
                 chunk.waveforms = new_waves;
             }
+            trace!("sending chunk");
             let msg = AudioMessage::Audio(chunk);
             channels.audio.send(msg).unwrap();
         }
