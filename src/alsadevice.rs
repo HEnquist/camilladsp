@@ -377,6 +377,8 @@ fn capture_loop_bytes(
             }
             Ok(CaptureResult::Timeout) => {
                 card_inactive = true;
+                let mut capt_stat = params.capture_status.write().unwrap();
+                capt_stat.state = ProcessingState::Paused;
             }
             Err(msg) => {
                 channels
