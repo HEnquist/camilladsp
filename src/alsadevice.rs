@@ -12,11 +12,8 @@ use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
     chunk_to_buffer_float_bytes,
 };
-<<<<<<< HEAD
 use countertimer;
-=======
 use nix::errno::Errno;
->>>>>>> 5fc0d55... Check if capture card is just inactive and wait
 use rubato::Resampler;
 use std::ffi::CString;
 use std::sync::mpsc;
@@ -132,7 +129,11 @@ fn play_buffer(
 }
 
 /// Play a buffer.
-fn capture_buffer(buffer: &mut [u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u8>) -> Res<CaptureResult> {
+fn capture_buffer(
+    buffer: &mut [u8],
+    pcmdevice: &alsa::PCM,
+    io: &alsa::pcm::IO<u8>,
+) -> Res<CaptureResult> {
     let capture_state = pcmdevice.state();
     if capture_state == State::XRun {
         warn!("prepare capture");
@@ -140,23 +141,21 @@ fn capture_buffer(buffer: &mut [u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u
     }
     let _frames = match io.readi(buffer) {
         Ok(frames) => frames,
-        Err(err) => {
-            match err.nix_error() {
-                nix::Error::Sys(Errno::EIO) => {
-                    warn!("Capture timed out, error: {}", err);
-                    return Ok(CaptureResult::Timeout)
-                },
-                nix::Error::Sys(Errno::EPIPE) => {
-                    warn!("Retrying capture, error: {}", err);
-                    pcmdevice.prepare()?;
-                    io.readi(buffer)?
-                }
-                _ => { 
-                    warn!("Capture failed, error: {}", err);
-                    return Err(Box::new(err))
-                }
+        Err(err) => match err.nix_error() {
+            nix::Error::Sys(Errno::EIO) => {
+                warn!("Capture timed out, error: {}", err);
+                return Ok(CaptureResult::Timeout);
             }
-        }
+            nix::Error::Sys(Errno::EPIPE) => {
+                warn!("Retrying capture, error: {}", err);
+                pcmdevice.prepare()?;
+                io.readi(buffer)?
+            }
+            _ => {
+                warn!("Capture failed, error: {}", err);
+                return Err(Box::new(err));
+            }
+        },
     };
     Ok(CaptureResult::Normal)
 }

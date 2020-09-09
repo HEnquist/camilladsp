@@ -1,7 +1,5 @@
 #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 extern crate alsa;
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
-extern crate nix;
 extern crate clap;
 #[cfg(feature = "cpal-backend")]
 extern crate cpal;
@@ -11,11 +9,17 @@ extern crate fftw;
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
+<<<<<<< HEAD
 #[cfg(feature = "secure-websocket")]
 extern crate native_tls;
 extern crate num_complex;
 extern crate num_integer;
 extern crate num_traits;
+=======
+#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+extern crate nix;
+extern crate num;
+>>>>>>> c960793... Format
 extern crate rand;
 extern crate rand_distr;
 #[cfg(not(feature = "FFTW"))]
