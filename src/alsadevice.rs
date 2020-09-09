@@ -103,8 +103,8 @@ fn play_buffer(buffer: &[u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u8>) -> 
     }
     let _frames = match io.writei(&buffer[..]) {
         Ok(frames) => frames,
-        Err(_err) => {
-            warn!("Retrying playback");
+        Err(err) => {
+            warn!("Retrying playback, error: {}", err);
             pcmdevice.prepare()?;
             let delay = Duration::from_millis(5);
             thread::sleep(delay);
@@ -123,8 +123,8 @@ fn capture_buffer(buffer: &mut [u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u
     }
     let _frames = match io.readi(buffer) {
         Ok(frames) => frames,
-        Err(_err) => {
-            warn!("retrying capture");
+        Err(err) => {
+            warn!("Retrying capture, error: {}", err);
             pcmdevice.prepare()?;
             io.readi(buffer)?
         }
@@ -413,7 +413,7 @@ fn get_nbr_capture_bytes(
     buf: &mut Vec<u8>,
 ) -> usize {
     let capture_bytes_new = if let Some(resampl) = &resampler {
-        trace!("Resamper needs {} frames", resampl.nbr_frames_needed());
+        trace!("Resampler needs {} frames", resampl.nbr_frames_needed());
         resampl.nbr_frames_needed() * params.channels * params.store_bytes_per_sample
     } else {
         capture_bytes
