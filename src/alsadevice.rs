@@ -99,13 +99,13 @@ fn play_buffer(
     target_delay: u64,
 ) -> Res<()> {
     let playback_state = pcmdevice.state();
-    trace!("playback state {:?}", playback_state);
+    trace!("Playback state {:?}", playback_state);
     if playback_state == State::XRun {
         warn!("Prepare playback after buffer underrun");
         pcmdevice.prepare()?;
         thread::sleep(Duration::from_millis(target_delay));
     } else if playback_state == State::Prepared {
-        warn!("Starting playback from Prepared state");
+        info!("Starting playback from Prepared state");
         thread::sleep(Duration::from_millis(target_delay));
     }
     let _frames = match io.writei(&buffer[..]) {
