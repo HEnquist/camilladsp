@@ -11,6 +11,7 @@ New features:
 Bugfixes:
 - Fix websocket `exit` command.
 - Correct response of `setconfigname` websocket command.
+- Fix buffer underrun soon after starting Alsa playback.
 
 
 ## 0.3.1

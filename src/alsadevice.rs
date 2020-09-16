@@ -92,22 +92,28 @@ struct PlaybackParams {
 }
 
 /// Play a buffer.
-fn play_buffer(buffer: &[u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u8>) -> Res<()> {
+fn play_buffer(
+    buffer: &[u8],
+    pcmdevice: &alsa::PCM,
+    io: &alsa::pcm::IO<u8>,
+    target_delay: u64,
+) -> Res<()> {
     let playback_state = pcmdevice.state();
     trace!("playback state {:?}", playback_state);
     if playback_state == State::XRun {
-        warn!("Prepare playback");
+        warn!("Prepare playback after buffer underrun");
         pcmdevice.prepare()?;
-        let delay = Duration::from_millis(5);
-        thread::sleep(delay);
+        thread::sleep(Duration::from_millis(target_delay));
+    } else if playback_state == State::Prepared {
+        warn!("Starting playback from Prepared state");
+        thread::sleep(Duration::from_millis(target_delay));
     }
     let _frames = match io.writei(&buffer[..]) {
         Ok(frames) => frames,
         Err(err) => {
             warn!("Retrying playback, error: {}", err);
             pcmdevice.prepare()?;
-            let delay = Duration::from_millis(5);
-            thread::sleep(delay);
+            thread::sleep(Duration::from_millis(target_delay));
             io.writei(&buffer[..])?
         }
     };
@@ -204,6 +210,7 @@ fn playback_loop_bytes(
     let mut speed;
     let mut diff: isize;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
+    let target_delay = 1000 * (params.target_level as u64) / srate as u64;
     loop {
         match channels.audio.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
@@ -245,7 +252,7 @@ fn playback_loop_bytes(
                         .unwrap();
                 }
 
-                let playback_res = play_buffer(&buffer, pcmdevice, &io);
+                let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay);
                 match playback_res {
                     Ok(_) => {}
                     Err(msg) => {
