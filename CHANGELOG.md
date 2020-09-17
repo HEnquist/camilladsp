@@ -12,6 +12,7 @@ Bugfixes:
 - Fix websocket `exit` command.
 - Correct response of `setconfigname` websocket command.
 - Fix buffer underrun soon after starting Alsa playback.
+- Correct scaling of FIR coefficients when reloading config.
 
 
 ## 0.3.1

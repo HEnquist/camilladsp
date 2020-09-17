@@ -167,7 +167,7 @@ impl Filter for FFTConv {
 
             for (n, coeff) in coeffs.iter().enumerate() {
                 coeffs_padded[n / self.npoints][n % self.npoints] =
-                    coeff / (2.0 * self.npoints as PrcFmt);
+                    coeff / (self.npoints as PrcFmt);
             }
 
             for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
