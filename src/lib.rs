@@ -19,12 +19,13 @@ extern crate serde;
 extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "socketserver")]
-extern crate ws;
+extern crate tungstenite;
 
 #[macro_use]
 extern crate log;
 extern crate env_logger;
 
+use serde::Serialize;
 use std::error;
 use std::fmt;
 
@@ -82,7 +83,7 @@ pub enum ExitState {
     Exit,
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Serialize, PartialEq)]
 pub enum ProcessingState {
     Running,
     Paused,

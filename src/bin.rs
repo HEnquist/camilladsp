@@ -18,7 +18,7 @@ extern crate serde;
 extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "socketserver")]
-extern crate ws;
+extern crate tungstenite;
 
 #[macro_use]
 extern crate log;
