@@ -3,6 +3,7 @@ import yaml
 from websocket import create_connection
 import sys
 import os
+import json
 from analyze_wav import read_wav_header
 
 try:
@@ -47,5 +48,5 @@ modded = yaml.dump(cfg)
 
 # Send the modded config
 ws = create_connection("ws://127.0.0.1:{}".format(port))
-ws.send("setconfig:{}".format(modded))
+ws.send(json.dumps({"SetConfig": modded))
 ws.recv()
