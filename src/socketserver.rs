@@ -42,6 +42,8 @@ enum WSCommand {
     GetVersion,
     GetState,
     GetRateAdjust,
+    GetClippedSamples,
+    GetBufferLevel,
     Exit,
     Stop,
 }
@@ -116,6 +118,14 @@ enum WSReply {
     GetRateAdjust {
         result: WSResult,
         value: f32,
+    },
+    GetBufferLevel {
+        result: WSResult,
+        value: usize,
+    },
+    GetClippedSamples {
+        result: WSResult,
+        value: usize,
     },
     Exit {
         result: WSResult,
@@ -219,6 +229,20 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply 
             WSReply::GetRateAdjust {
                 result: WSResult::Ok,
                 value: capstat.rate_adjust,
+            }
+        }
+        WSCommand::GetClippedSamples => {
+            let pbstat = shared_data_inst.playback_status.read().unwrap();
+            WSReply::GetClippedSamples {
+                result: WSResult::Ok,
+                value: pbstat.clipped_samples,
+            }
+        }
+        WSCommand::GetBufferLevel => {
+            let pbstat = shared_data_inst.playback_status.read().unwrap();
+            WSReply::GetBufferLevel {
+                result: WSResult::Ok,
+                value: pbstat.buffer_level,
             }
         }
         WSCommand::GetUpdateInterval => {
