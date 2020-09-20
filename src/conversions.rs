@@ -11,7 +11,7 @@ pub fn chunk_to_buffer_bytes(
     scalefactor: PrcFmt,
     bits: i32,
     bytes_per_sample: usize,
-) -> usize {
+) -> (usize, usize) {
     let _num_samples = chunk.channels * chunk.frames;
     let mut value16;
     let mut value32;
@@ -66,7 +66,7 @@ pub fn chunk_to_buffer_bytes(
             peak * 100.0
         );
     }
-    num_valid_bytes
+    (num_valid_bytes, clipped)
 }
 
 /// Convert a buffer of interleaved u8 to an AudioChunk.
@@ -109,7 +109,7 @@ pub fn buffer_to_chunk_bytes(
 }
 
 /// Convert an AudioChunk to an interleaved buffer of floats stored as u8.
-pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: i32) -> usize {
+pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: i32) -> (usize, usize) {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
     let mut value64;
@@ -161,7 +161,7 @@ pub fn chunk_to_buffer_float_bytes(chunk: AudioChunk, buf: &mut [u8], bits: i32)
             peak * 100.0
         );
     }
-    num_valid_bytes
+    (num_valid_bytes, clipped)
 }
 
 /// Convert a buffer of interleaved u8 to an AudioChunk.
@@ -224,7 +224,7 @@ pub fn chunk_to_queue_int<T: num::traits::cast::NumCast>(
     chunk: AudioChunk,
     queue: &mut VecDeque<T>,
     scalefactor: PrcFmt,
-) {
+) -> usize {
     let _num_samples = chunk.channels * chunk.frames;
     let mut value: T;
     let mut clipped = 0;
@@ -268,7 +268,7 @@ pub fn chunk_to_queue_int<T: num::traits::cast::NumCast>(
             peak * 100.0
         );
     }
-    //buf
+    clipped
 }
 
 /// Convert a buffer of interleaved ints to an AudioChunk.
@@ -307,7 +307,7 @@ pub fn queue_to_chunk_int<T: num::traits::cast::AsPrimitive<PrcFmt>>(
 pub fn chunk_to_queue_float<T: num::traits::cast::NumCast>(
     chunk: AudioChunk,
     queue: &mut VecDeque<T>,
-) {
+) -> usize {
     let _num_samples = chunk.channels * chunk.frames;
     //let mut buf = Vec::with_capacity(num_samples);
     let mut value: T;
@@ -348,7 +348,7 @@ pub fn chunk_to_queue_float<T: num::traits::cast::NumCast>(
             peak * 100.0
         );
     }
-    //buf
+    clipped
 }
 
 /// Convert a buffer of interleaved ints to an AudioChunk.

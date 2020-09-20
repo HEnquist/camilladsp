@@ -16,7 +16,7 @@ use std::time::SystemTime;
 
 use rubato::Resampler;
 
-use crate::CaptureStatus;
+use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
 use PrcFmt;
 use ProcessingState;
@@ -100,6 +100,7 @@ impl PlaybackDevice for FilePlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let destination = self.destination.clone();
         let chunksize = self.chunksize;
@@ -132,7 +133,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    let valid_bytes = match sample_format.number_family() {
+                                    let (valid_bytes, nbr_clipped) = match sample_format.number_family() {
                                         NumberFamily::Integer => chunk_to_buffer_bytes(
                                             chunk,
                                             &mut buffer,
@@ -157,6 +158,9 @@ impl PlaybackDevice for FilePlaybackDevice {
                                                 .unwrap();
                                         }
                                     };
+                                    if nbr_clipped > 0 {
+                                        playback_status.write().unwrap().clipped_samples += nbr_clipped;
+                                    }
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();

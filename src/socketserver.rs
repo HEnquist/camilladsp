@@ -7,7 +7,7 @@ use std::thread;
 use tungstenite::server::accept;
 use tungstenite::Message;
 
-use crate::CaptureStatus;
+use crate::{CaptureStatus, PlaybackStatus};
 use config;
 use ProcessingState;
 use Res;
@@ -20,6 +20,7 @@ pub struct SharedData {
     pub active_config_path: Arc<Mutex<Option<String>>>,
     pub new_config: Arc<Mutex<Option<config::Configuration>>>,
     pub capture_status: Arc<RwLock<CaptureStatus>>,
+    pub playback_status: Arc<RwLock<PlaybackStatus>>,
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -130,7 +131,7 @@ enum WSReply {
 fn parse_command(cmd: Message) -> Res<WSCommand> {
     let command_str = cmd.into_text()?;
     let command = serde_json::from_str::<WSCommand>(&command_str)?;
-    return Ok(command);
+    Ok(command)
 }
 
 pub fn start_server(bind_address: &str, port: usize, shared_data: SharedData) {
@@ -210,7 +211,7 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply 
             let capstat = shared_data_inst.capture_status.read().unwrap();
             WSReply::GetState {
                 result: WSResult::Ok,
-                value: capstat.state.clone(),
+                value: capstat.state,
             }
         }
         WSCommand::GetRateAdjust => {
@@ -267,7 +268,6 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply 
             match serde_yaml::from_str::<config::Configuration>(&config_yml) {
                 Ok(conf) => match config::validate_config(conf.clone()) {
                     Ok(()) => {
-                        //*active_config_path_inst.lock().unwrap() = String::from("none");
                         *shared_data_inst.new_config.lock().unwrap() = Some(conf);
                         shared_data_inst
                             .signal_reload
@@ -292,7 +292,6 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply 
             match serde_json::from_str::<config::Configuration>(&config_json) {
                 Ok(conf) => match config::validate_config(conf.clone()) {
                     Ok(()) => {
-                        //*active_config_path_inst.lock().unwrap() = String::from("none");
                         *shared_data_inst.new_config.lock().unwrap() = Some(conf);
                         shared_data_inst
                             .signal_reload
@@ -317,22 +316,22 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply 
             match serde_yaml::from_str::<config::Configuration>(&config_yml) {
                 Ok(conf) => WSReply::ReadConfig {
                     result: WSResult::Ok,
-                    value: format!("{}", serde_yaml::to_string(&conf).unwrap()),
+                    value: serde_yaml::to_string(&conf).unwrap(),
                 },
                 Err(error) => WSReply::ReadConfig {
                     result: WSResult::Error,
-                    value: format!("{}", error),
+                    value: error.to_string(),
                 },
             }
         }
         WSCommand::ReadConfigFile(path) => match config::load_config(&path) {
             Ok(conf) => WSReply::ReadConfigFile {
                 result: WSResult::Ok,
-                value: format!("{}", serde_yaml::to_string(&conf).unwrap()),
+                value: serde_yaml::to_string(&conf).unwrap(),
             },
             Err(error) => WSReply::ReadConfigFile {
                 result: WSResult::Error,
-                value: format!("{}", error),
+                value: error.to_string(),
             },
         },
         WSCommand::ValidateConfig(config_yml) => {
@@ -340,18 +339,18 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply 
                 Ok(conf) => match config::validate_config(conf.clone()) {
                     Ok(()) => WSReply::ValidateConfig {
                         result: WSResult::Ok,
-                        value: format!("{}", serde_yaml::to_string(&conf).unwrap()),
+                        value: serde_yaml::to_string(&conf).unwrap(),
                     },
                     Err(error) => WSReply::ValidateConfig {
                         result: WSResult::Error,
-                        value: format!("{}", error),
+                        value: error.to_string(),
                     },
                 },
                 Err(error) => {
                     error!("Config error: {}", error);
                     WSReply::ValidateConfig {
                         result: WSResult::Error,
-                        value: format!("{}", error),
+                        value: error.to_string(),
                     }
                 }
             }

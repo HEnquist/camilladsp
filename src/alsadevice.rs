@@ -18,7 +18,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use crate::CaptureStatus;
+use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
 use PrcFmt;
 use ProcessingState;
@@ -89,6 +89,7 @@ struct PlaybackParams {
     bits: i32,
     bytes_per_sample: usize,
     floats: bool,
+    playback_status: Arc<RwLock<PlaybackStatus>>,
 }
 
 /// Play a buffer.
@@ -209,21 +210,25 @@ fn playback_loop_bytes(
     let mut ndelays = 0;
     let mut speed;
     let mut diff: isize;
+    let mut conversion_result;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
     let target_delay = 1000 * (params.target_level as u64) / srate as u64;
     loop {
         match channels.audio.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
                 if params.floats {
-                    chunk_to_buffer_float_bytes(chunk, &mut buffer, params.bits);
+                    conversion_result = chunk_to_buffer_float_bytes(chunk, &mut buffer, params.bits);
                 } else {
-                    chunk_to_buffer_bytes(
+                    conversion_result = chunk_to_buffer_bytes(
                         chunk,
                         &mut buffer,
                         params.scalefactor,
                         params.bits as i32,
                         params.bytes_per_sample,
                     );
+                }
+                if conversion_result.1 > 0 {
+                    params.playback_status.write().unwrap().clipped_samples += conversion_result.1;
                 }
                 now = SystemTime::now();
                 if let Ok(status) = pcmdevice.status() {
@@ -250,6 +255,7 @@ fn playback_loop_bytes(
                         .status
                         .send(StatusMessage::SetSpeed { speed })
                         .unwrap();
+                    params.playback_status.write().unwrap().buffer_level = av_delay as usize;
                 }
 
                 let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay);
@@ -439,6 +445,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let target_level = if self.target_level > 0 {
@@ -486,6 +493,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             bits,
                             bytes_per_sample,
                             floats,
+                            playback_status,
                         };
                         let pb_channels = PlaybackChannels {
                             audio: channel,

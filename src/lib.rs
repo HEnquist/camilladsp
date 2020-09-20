@@ -99,6 +99,12 @@ pub struct CaptureStatus {
     pub rate_adjust: f32,
 }
 
+#[derive(Clone, Debug)]
+pub struct PlaybackStatus {
+    pub clipped_samples: usize,
+    pub buffer_level: usize,
+}
+
 impl fmt::Display for ProcessingState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let desc = match self {

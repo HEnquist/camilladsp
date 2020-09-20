@@ -17,7 +17,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Instant;
 
-use crate::CaptureStatus;
+use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
 use PrcFmt;
 use Res;
@@ -87,6 +87,7 @@ pub trait PlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
