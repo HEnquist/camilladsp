@@ -398,21 +398,21 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply 
 #[cfg(test)]
 mod tests {
     use socketserver::{parse_command, WSCommand};
-    use ws::Message;
+    use tungstenite::Message;
 
     #[test]
     fn parse_commands() {
-        let cmd = Message::text("reload");
-        let res = parse_command(&cmd);
+        let cmd = Message::text("\"Reload\"");
+        let res = parse_command(cmd).unwrap();
         assert_eq!(res, WSCommand::Reload);
         let cmd = Message::text("asdfasdf");
-        let res = parse_command(&cmd);
-        assert_eq!(res, WSCommand::Invalid);
+        let res = parse_command(cmd);
+        assert!(res.is_err());
         let cmd = Message::text("");
-        let res = parse_command(&cmd);
-        assert_eq!(res, WSCommand::Invalid);
-        let cmd = Message::text("setconfigname:somefile");
-        let res = parse_command(&cmd);
+        let res = parse_command(cmd);
+        assert!(res.is_err());
+        let cmd = Message::text("{\"SetConfigName\": \"somefile\"}");
+        let res = parse_command(cmd).unwrap();
         assert_eq!(res, WSCommand::SetConfigName("somefile".to_string()));
     }
 }
