@@ -148,7 +148,9 @@ fn run(
 
     // Playback thread
     let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
-    let pb_handle = playback_dev.start(rx_pb, barrier_pb, tx_status_pb, playback_status).unwrap();
+    let pb_handle = playback_dev
+        .start(rx_pb, barrier_pb, tx_status_pb, playback_status)
+        .unwrap();
 
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
@@ -421,7 +423,7 @@ fn main() {
     }));
     let playback_status = Arc::new(RwLock::new(PlaybackStatus {
         buffer_level: 0,
-        clipped_samples: 0
+        clipped_samples: 0,
     }));
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));

@@ -133,20 +133,21 @@ impl PlaybackDevice for FilePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    let (valid_bytes, nbr_clipped) = match sample_format.number_family() {
-                                        NumberFamily::Integer => chunk_to_buffer_bytes(
-                                            chunk,
-                                            &mut buffer,
-                                            scalefactor,
-                                            bits_per_sample as i32,
-                                            store_bytes_per_sample,
-                                        ),
-                                        NumberFamily::Float => chunk_to_buffer_float_bytes(
-                                            chunk,
-                                            &mut buffer,
-                                            bits_per_sample as i32,
-                                        ),
-                                    };
+                                    let (valid_bytes, nbr_clipped) =
+                                        match sample_format.number_family() {
+                                            NumberFamily::Integer => chunk_to_buffer_bytes(
+                                                chunk,
+                                                &mut buffer,
+                                                scalefactor,
+                                                bits_per_sample as i32,
+                                                store_bytes_per_sample,
+                                            ),
+                                            NumberFamily::Float => chunk_to_buffer_float_bytes(
+                                                chunk,
+                                                &mut buffer,
+                                                bits_per_sample as i32,
+                                            ),
+                                        };
                                     let write_res = file.write(&buffer[0..valid_bytes]);
                                     match write_res {
                                         Ok(_) => {}
@@ -159,7 +160,8 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         }
                                     };
                                     if nbr_clipped > 0 {
-                                        playback_status.write().unwrap().clipped_samples += nbr_clipped;
+                                        playback_status.write().unwrap().clipped_samples +=
+                                            nbr_clipped;
                                     }
                                 }
                                 Ok(AudioMessage::EndOfStream) => {

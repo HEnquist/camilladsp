@@ -174,7 +174,8 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         }
                                     };
                                     if conversion_result.1 > 0 {
-                                        playback_status.write().unwrap().clipped_samples += conversion_result.1;
+                                        playback_status.write().unwrap().clipped_samples +=
+                                            conversion_result.1;
                                     }
                                 }
                                 Ok(AudioMessage::EndOfStream) => {

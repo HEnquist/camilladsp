@@ -217,7 +217,8 @@ fn playback_loop_bytes(
         match channels.audio.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
                 if params.floats {
-                    conversion_result = chunk_to_buffer_float_bytes(chunk, &mut buffer, params.bits);
+                    conversion_result =
+                        chunk_to_buffer_float_bytes(chunk, &mut buffer, params.bits);
                 } else {
                     conversion_result = chunk_to_buffer_bytes(
                         chunk,

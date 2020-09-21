@@ -218,7 +218,10 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         buffer_fill_clone
                                             .store(sample_queue.len(), Ordering::Relaxed);
                                         if clipped > 0 {
-                                            playback_status_clone.write().unwrap().clipped_samples += clipped;
+                                            playback_status_clone
+                                                .write()
+                                                .unwrap()
+                                                .clipped_samples += clipped;
                                         }
                                     },
                                     move |err| error!("an error occurred on stream: {}", err),
@@ -239,13 +242,17 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         while sample_queue.len() < buffer.len() {
                                             trace!("Convert chunk to device format");
                                             let chunk = rx_dev.recv().unwrap();
-                                            clipped = chunk_to_queue_float(chunk, &mut sample_queue);
+                                            clipped =
+                                                chunk_to_queue_float(chunk, &mut sample_queue);
                                         }
                                         write_data_to_device(&mut buffer, &mut sample_queue);
                                         buffer_fill_clone
                                             .store(sample_queue.len(), Ordering::Relaxed);
                                         if clipped > 0 {
-                                            playback_status_clone.write().unwrap().clipped_samples += clipped;
+                                            playback_status_clone
+                                                .write()
+                                                .unwrap()
+                                                .clipped_samples += clipped;
                                         }
                                     },
                                     move |err| error!("an error occurred on stream: {}", err),
@@ -300,7 +307,8 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         status_channel
                                             .send(StatusMessage::SetSpeed { speed })
                                             .unwrap();
-                                        playback_status.write().unwrap().buffer_level = av_delay as usize;
+                                        playback_status.write().unwrap().buffer_level =
+                                            av_delay as usize;
                                     }
                                     tx_dev.send(chunk).unwrap();
                                 }
