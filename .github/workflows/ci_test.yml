@@ -32,7 +32,7 @@ jobs:
         run: apt-get install libpulse0 libpulse-dev -y
 
       - name: Install OpenSSL
-        run: apt-get install openssl -y
+        run: apt-get install openssl libssl-dev -y
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
