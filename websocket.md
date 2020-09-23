@@ -6,66 +6,93 @@ If additionally the "wait" flag is given, it will wait for a config to be upload
 
 By default the websocket server binds to the address 127.0.0.1, which means it's only accessible locally (on the same machine). If it should be also available to remote machines, give the IP address of the interface where it should be available with the `-a` option. Giving 0.0.0.0 will bind to all interfaces.
 
-The available commands are:
+
+## Command syntax
+All commands are sent as JSON. For commands without arguments, this is just a string with the command name withing quotes:
+```
+"GetVersion"
+```
+For commands that take an argument, they are instead given as a key and a value:
+```json
+{"SetUpdateInterval": 500}
+```
+
+The return values are also JSON. The commands that don't return a value return a structure containing the command name and the result, which is either Ok or Error:
+```json
+{
+  "SetUpdateInterval: {
+    "result": "Ok"
+  }
+}
+```
+
+The commands that return a value also include a "value" field:
+```json
+{
+  "GetUpdateInterval: {
+    "result": "Ok",
+    "value": 500
+  }
+}
+```
+
+## All commands
+The available commands are listed below. All commands return the result, and for the ones that return a value are this described here.
 
 ### General
-- `getversion` : read the CamillaDSP version
-  * response is `OK:GETVERSION:1.2.3` 
-- `stop` : stop processing and wait for a new config to be uploaded with `setconfig`
-  * response is `OK:STOP` 
-- `exit` : stop processing and exit
-  * response is `OK:EXIT` 
+- `GetVersion` : read the CamillaDSP version
+  * returns the version as a string, like `1.2.3` 
+- `Stop` : stop processing and wait for a new config to be uploaded with `SetConfig`
+- `Exit` : stop processing and exit
 
 ### Websocket server settings
 
 Commands for reading and changing settings for the websocket server.
-- `getupdateinterval` : get the update interval in ms for capture rate and signalrange.
-  * response is `OK:GETUPDATEINTERVAL:123456`
-- `setupdateinterval:<new_number>` : set the update interval in ms for capturerate and signalrange.
-  * response is `OK:SETUPDATEINTERVAL`
+- `GetUpdateInterval` : get the update interval in ms for capture rate and signalrange.
+  * return the value as an integer
+- `SetUpdateInterval` : set the update interval in ms for capturerate and signalrange.
 
 ### Read processing status
 
 Commands for reading status parameters.
-- `getstate` : get the current state of the processing. Possible values are: 
+- `GetState` : get the current state of the processing as a string. Possible values are: 
   * "RUNNING": the processing is running normally.
   * "PAUSED": processing is paused because the input signal is silent.
   * "INACTIVE": the program is inactive and waiting for a new configuration.
-  * response is `OK:GETSTATE:RUNNING`
-- `getcapturerate` : get the measured sample rate of the capture device.
-  * response is `OK:GETCAPTURERATE:123456`
-- `getsignalrange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)
-  * response is `OK:GETSIGNALRANGE:1.23456`
-- `getrateadjust` : get the adjustment factor applied to the asynchronous resampler.
-  * response is `OK:GETRATEADJUST:1.0023`
+- `GetCaptureRate` : get the measured sample rate of the capture device.
+  * return the value as an integer
+- `GetSignalRange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)
+  * return the value as a float
+- `GetRateAdjust` : get the adjustment factor applied to the asynchronous resampler.
+  * return the value as a float
+- `GetBufferLevel` : get the current buffer level of the playback device when rate adjust is enabled, returns zero otherwise.
+  * return the value as an integer
+- `GetClippedSamples` : get the number of clipped samples since the config was loaded.
+  * return the value as an integer
 
 ### Config management
 
 Commands for reading and changing the active configuration
-- `getconfig` : read the current configuration as yaml
-  * response is `OK:GETCONFIG:(yamldata)` where yamldata is the config in yaml format.
-- `getconfigjson` : read the current configuration as json
-  * response is `OK:GETCONFIG:(jsondata)` where yamldata is the config in JSON format.
-- `getconfigname` : get name and path of current config file
-  * response is `OK:GETCONFIGNAME:/path/to/current.yml`
-- `setconfigname:/path/to/file.yml` : change config file name, not applied until `reload` is called
-  * response is `OK:/path/to/file.yml` or `ERROR:/path/to/file.yml`
-- `setconfig:<new config in yaml format>` : provide a new config as a yaml string. Applied directly.
-  * response is `OK:SETCONFIG` or `ERROR:SETCONFIG`
-- `setconfigjson:<new config in JSON format>` : provide a new config as a JSON string. Applied directly.
-  * response is `OK:SETCONFIGJSON` or `ERROR:SETCONFIGJSON`
-- `reload` : reload current config file (same as SIGHUP)
-  * response is `OK:RELOAD` or `ERROR:RELOAD` 
+- `GetConfig` : read the current configuration as yaml
+  * returns the config in yaml as a string
+- `GetConfigjson` : read the current configuration as json
+  * returns the config in json as a string
+- `GetConfigName` : get name and path of current config file
+  * returns the path as a string
+- `SetConfigName` : change config file name given as a string, not applied until `Reload` is called
+- `SetConfig:` : provide a new config as a yaml string. Applied directly.
+- `SetConfigJson` : provide a new config as a JSON string. Applied directly.
+- `Reload` : reload current config file (same as SIGHUP)
+
 
 ### Config reading and checking
 
 These commands are used to check the syntax and contents of configurations. They do not affect the active configuration.
-- `readconfig:<config in yaml format>` : read the provided config, check for syntax errors, and return the config with all optional fields filled with their default values.
-  * response is `OK:READCONFIG:<config in yaml format>` or `ERROR:READCONFIG:<error message>`
-- `readconfigfile:/path/to/file.yml` : read a config from a file, check for syntax errors, and return the config with all optional fields filled with their default values.
-  * response is `OK:READCONFIGFILE:<config in yaml format>` or `ERROR:READCONFIGFILE:<error message>`
-- `validateconfig:<config in yaml format>` : read the provided config, check for syntax errors and validate the contents. Returns the config with all optional fields filled with their default values.
-  * response is `OK:VALIDATECONFIG:<config in yaml format>` or `ERROR:VALIDATECONFIG:<error message>`
+- `ReadConfig` : read the provided config (as a yaml string) and check it for yaml syntax errors.
+  * If the config is ok, it returns the config with all optional fields filled with their default values. If there are problems, the status will be Error and the return value an error message.
+- `ReadConfigFile` : same as ReadConfig but reads the config from the file at the given path.
+- `ValidateConfig`: same as ReadConfig but performs more extensive checks to ensure the configuration can be applied.
+
 
 
 ## Controlling from Python using pyCamillaDSP
@@ -87,41 +114,44 @@ camilladsp -v -p1234 /path/to/someconfig.yml
 Start Ipython. Import the websocket client and make a connection:
 ```ipython
 In [1]: from websocket import create_connection
-In [2]: ws = create_connection("ws://127.0.0.1:1234")
+In [2]: import json
+In [3]: ws = create_connection("ws://127.0.0.1:1234")
 ```
 
 ### Get the name of the current config file
 ```ipython
-In [3]: ws.send("getconfigname")
-Out[3]: 19
+In [4]: ws.send(json.dumps("GetConfigName"))
+Out[4]: 19
 
-In [4]: print(ws.recv())
-OK:GETCONFIGNAME:/path/to/someconfig.yml
+In [5]: print(ws.recv())
+{"GetConfigName":{"result":"Ok","value":"/path/to/someconfig.yml"}}
 ```
 
 ### Switch to a different config file
 The new config is applied when the "reload" command is sent.
 ```ipython
-In [5]: ws.send("setconfigname:/path/to/otherconfig.yml")
-Out[5]: 52
+In [6]: ws.send(json.dumps({"SetConfigName": "/path/to/otherconfig.yml"}))
+Out[6]: 52
 
-In [6]: print(ws.recv())
-OK:SETCONFIGNAME:/path/to/otherconfig.yml
+In [7]: print(ws.recv())
+{"GetConfigName":{"result":"Ok","value":"/path/to/someconfig.yml"}}
 
-In [7]: ws.send("reload")
-Out[7]: 12
+In [8]: ws.send(json.dumps("Reload"))
+Out[8]: 12
 
-In [8]: print(ws.recv())
-OK:RELOAD
+In [9]: print(ws.recv())
+{"Reload":{"result":"Ok"}}
 ```
 
 
 ### Get the current configuration
+Use json.loads to parse the json response.
 ```
-In [9]: ws.send("getconfig")
-Out[9]: 15
+In [10]: ws.send(json.dumps("GetConfig"))
+Out[10]: 15
 
-In [10]: print(ws.recv())
+In [11]: reply = json.loads(ws.recv())
+In [12]: print(reply["GetConfig"]["value"])
 OK:GETCONFIG:---
 devices:
   samplerate: 44100
@@ -136,13 +166,41 @@ devices:
 ### Send a new config as yaml
 The new config is applied directly.
 ```ipython
-In [11]: with open('/path/to/newconfig.yml') as f:
+In [12]: with open('/path/to/newconfig.yml') as f:
     ...:     cfg=f.read()
     ...:
 
-In [12]: ws.send("setconfig:{}".format(cfg))
-Out[12]: 957
+In [13]: ws.send(json.dumps({"SetConfig": cfg))
+Out[13]: 957
 
-In [13]: print(ws.recv())
-OK:SETCONFIG
+In [14]: print(ws.recv())
+{"SetConfig":{"result":"Ok"}}
 ```
+
+## Secure websocket
+The websocket server also supports loading an identity from a .pfx file. 
+This is enabled by providing the two optional parameters "cert" and "pass", where "cert" is the path to the .pfx-file containing the identity, and "pass" is the password for the file.
+How to properly generate the identity is outside the scope of this readme, but for simple tests a self-signed certificate can be used.
+
+### Generate self-signed identity
+First geneate rsa keys: 
+```sh
+openssl req -newkey rsa:2048 -new -nodes -x509 -days 3650 -keyout key.pem -out cert.pem
+```
+
+Then use these to generate the identity:
+```sh
+openssl pkcs12 -export -out identity.pfx -inkey key.pem -in cert.pem
+```
+This will prompt for an Export password. This is the password that must then be provided to CamillaDSP.
+
+
+To connect with a Python client, do this:
+```python
+import websocket
+import ssl
+
+ws = websocket.WebSocket(sslopt={"cert_reqs": ssl.CERT_NONE})
+ws.connect("wss://localhost:1234") 
+```
+Note the "wss" instead of "ws" in the address. Since the certificate is self.signed, we need to use ssl.CERT_NONE for the connection to be accepted.

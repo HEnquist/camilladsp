@@ -1,6 +1,9 @@
 use clap::crate_version;
+use native_tls::{Identity, TlsAcceptor, TlsStream};
 use serde::{Deserialize, Serialize};
-use std::net::TcpListener;
+use std::fs::File;
+use std::io::Read;
+use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -144,42 +147,113 @@ fn parse_command(cmd: Message) -> Res<WSCommand> {
     Ok(command)
 }
 
-pub fn start_server(bind_address: &str, port: usize, shared_data: SharedData) {
+fn make_acceptor_with_cert(cert: &str, key: &str) -> Res<Arc<TlsAcceptor>> {
+    let mut file = File::open(cert)?;
+    let mut identity = vec![];
+    file.read_to_end(&mut identity)?;
+    let identity = Identity::from_pkcs12(&identity, key)?;
+    let acceptor = TlsAcceptor::new(identity)?;
+    Ok(Arc::new(acceptor))
+}
+
+fn make_acceptor(cert_file: Option<&str>, cert_key: Option<&str>) -> Option<Arc<TlsAcceptor>> {
+    if let (Some(cert), Some(key)) = (cert_file, cert_key) {
+        let acceptor = make_acceptor_with_cert(&cert, &key);
+        match acceptor {
+            Ok(acc) => {
+                debug!("Created TLS acceptor");
+                return Some(acc);
+            }
+            Err(err) => {
+                error!("Could not create TLS acceptor: {}", err);
+            }
+        }
+    }
+    debug!("Running websocket server without TLS");
+    None
+}
+
+pub fn start_server(
+    bind_address: &str,
+    port: usize,
+    shared_data: SharedData,
+    cert_file: Option<&str>,
+    cert_key: Option<&str>,
+) {
     let address = bind_address.to_owned();
     debug!("Start websocket server on port {}", port);
+    let acceptor = make_acceptor(cert_file, cert_key);
 
     thread::spawn(move || {
         let ws_result = TcpListener::bind(format!("{}:{}", address, port));
         if let Ok(server) = ws_result {
             for stream in server.incoming() {
                 let shared_data_inst = shared_data.clone();
+                let acceptor_inst = acceptor.clone();
                 thread::spawn(move || {
-                    let mut websocket = accept(stream.unwrap()).unwrap();
-                    loop {
-                        let msg_res = websocket.read_message();
-                        match msg_res {
-                            Ok(msg) => {
-                                let command = parse_command(msg);
-                                debug!("parsed command: {:?}", command);
-                                let reply = match command {
-                                    Ok(cmd) => handle_command(cmd, &shared_data_inst),
-                                    Err(err) => WSReply::Invalid {
-                                        error: format!("{}", err).to_string(),
-                                    },
-                                };
-                                let write_result = websocket.write_message(Message::text(
-                                    serde_json::to_string(&reply).unwrap(),
-                                ));
-                                if let Err(err) = write_result {
-                                    warn!("Failed to write: {}", err);
-                                    break;
+                    if let Some(acc) = acceptor_inst {
+                        //let mut websocket = accept(acc.accept(stream.unwrap()).unwrap()).unwrap();
+                        let websocket_res = accept_secure_stream(acc, stream);
+                        match websocket_res {
+                            Ok(mut websocket) => loop {
+                                let msg_res = websocket.read_message();
+                                match msg_res {
+                                    Ok(msg) => {
+                                        let command = parse_command(msg);
+                                        debug!("parsed command: {:?}", command);
+                                        let reply = match command {
+                                            Ok(cmd) => handle_command(cmd, &shared_data_inst),
+                                            Err(err) => WSReply::Invalid {
+                                                error: format!("{}", err).to_string(),
+                                            },
+                                        };
+                                        let write_result = websocket.write_message(Message::text(
+                                            serde_json::to_string(&reply).unwrap(),
+                                        ));
+                                        if let Err(err) = write_result {
+                                            warn!("Failed to write: {}", err);
+                                            break;
+                                        }
+                                    }
+                                    Err(err) => {
+                                        warn!("Lost connection: {}", err);
+                                        break;
+                                    }
                                 }
-                            }
-                            Err(err) => {
-                                warn!("Lost connection: {}", err);
-                                break;
-                            }
-                        }
+                            },
+                            Err(err) => warn!("Connection failed: {}", err),
+                        };
+                    } else {
+                        let websocket_res = accept_plain_stream(stream);
+                        match websocket_res {
+                            Ok(mut websocket) => loop {
+                                let msg_res = websocket.read_message();
+                                match msg_res {
+                                    Ok(msg) => {
+                                        let command = parse_command(msg);
+                                        debug!("parsed command: {:?}", command);
+                                        let reply = match command {
+                                            Ok(cmd) => handle_command(cmd, &shared_data_inst),
+                                            Err(err) => WSReply::Invalid {
+                                                error: format!("{}", err).to_string(),
+                                            },
+                                        };
+                                        let write_result = websocket.write_message(Message::text(
+                                            serde_json::to_string(&reply).unwrap(),
+                                        ));
+                                        if let Err(err) = write_result {
+                                            warn!("Failed to write: {}", err);
+                                            break;
+                                        }
+                                    }
+                                    Err(err) => {
+                                        warn!("Lost connection: {}", err);
+                                        break;
+                                    }
+                                }
+                            },
+                            Err(err) => warn!("Connection failed: {}", err),
+                        };
                     }
                 });
             }
@@ -187,6 +261,21 @@ pub fn start_server(bind_address: &str, port: usize, shared_data: SharedData) {
             error!("Failed to start websocket server: {}", err);
         }
     });
+}
+
+fn accept_secure_stream(
+    acceptor: Arc<TlsAcceptor>,
+    stream: Result<TcpStream, std::io::Error>,
+) -> Res<tungstenite::WebSocket<TlsStream<TcpStream>>> {
+    let ws = accept(acceptor.accept(stream?)?)?;
+    Ok(ws)
+}
+
+fn accept_plain_stream(
+    stream: Result<TcpStream, std::io::Error>,
+) -> Res<tungstenite::WebSocket<TcpStream>> {
+    let ws = accept(stream?)?;
+    Ok(ws)
 }
 
 fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply {

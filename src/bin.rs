@@ -317,7 +317,8 @@ fn main() {
             Arg::with_name("check")
                 .help("Check config file and exit")
                 .short("c")
-                .long("check"),
+                .long("check")
+                .requires("configfile"),
         )
         .arg(
             Arg::with_name("verbosity")
@@ -361,7 +362,20 @@ fn main() {
                 .short("w")
                 .long("wait")
                 .help("Wait for config from websocket")
-                .conflicts_with("configfile")
+                .requires("port"),
+        )
+        .arg(
+            Arg::with_name("cert")
+                .long("cert")
+                .takes_value(true)
+                .help("Path to .pfx/.p12 certificate file")
+                .requires("port"),
+        )
+        .arg(
+            Arg::with_name("pass")
+                .long("pass")
+                .takes_value(true)
+                .help("Password .pfx/.p12 certificate file")
                 .requires("port"),
         );
     let matches = clapapp.get_matches();
@@ -448,7 +462,15 @@ fn main() {
                 capture_status: capture_status.clone(),
                 playback_status: playback_status.clone(),
             };
-            socketserver::start_server(serveraddress, serverport, shared_data);
+            let cert_file = matches.value_of("cert");
+            let cert_pass = matches.value_of("pass");
+            socketserver::start_server(
+                serveraddress,
+                serverport,
+                shared_data,
+                cert_file,
+                cert_pass,
+            );
         }
     }
 

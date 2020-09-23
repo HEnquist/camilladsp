@@ -9,6 +9,8 @@ extern crate fftw;
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
+#[cfg(feature = "socketserver")]
+extern crate native_tls;
 extern crate num;
 extern crate rand;
 extern crate rand_distr;
