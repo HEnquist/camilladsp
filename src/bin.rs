@@ -375,7 +375,7 @@ fn main() {
             Arg::with_name("pass")
                 .long("pass")
                 .takes_value(true)
-                .help("Password .pfx/.p12 certificate file")
+                .help("Password for .pfx/.p12 certificate file")
                 .requires("port"),
         );
     let matches = clapapp.get_matches();

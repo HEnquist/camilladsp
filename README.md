@@ -248,6 +248,8 @@ FLAGS:
 
 OPTIONS:
     -a, --address <address>    IP address to bind websocket server to
+        --cert <cert>          Path to .pfx/.p12 certificate file
+        --pass <pass>          Password for .pfx/.p12 certificate file
     -p, --port <port>          Port for websocket server
 
 ARGS:
@@ -257,7 +259,7 @@ If the "check" flag is given, the program will exit after checking the configura
 
 To enable the websocket server, provide a port number with the `-p` option. Leave it out, or give 0 to disable. 
 
-By default the websocket server binds to the address 127.0.0.1 which means it's only accessible locally. If it should be also available to remote machines, give the IP address of the interface where it should be available with the `-a` option. Giving 0.0.0.0 will bind to all interfaces.
+By default the websocket server binds to the address 127.0.0.1 which means it's only accessible locally. If it should be also available to remote machines, give the IP address of the interface where it should be available with the `-a` option. Giving 0.0.0.0 will bind to all interfaces. The `--cert` and `--pass` options are used to provide an identity that is used to enable secure websocket connections. See the [websocket readme for more details.](./websocket.md)
 
 If the "wait" flag, `-w` is given, CamillaDSP will start the websocket server and wait for a configuration to be uploaded. Then the config file argument must be left out.
 
