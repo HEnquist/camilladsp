@@ -375,6 +375,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                 _ => panic!("Unsupported sample format"),
                             };
                             value_range = chunk.maxval - chunk.minval;
+                            trace!("Value range: {}", value_range);
                             if (value_range) > silence {
                                 if silent_nbr > silent_limit {
                                     state = ProcessingState::Running;

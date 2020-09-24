@@ -151,6 +151,10 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 - - Fedora: ```sudo dnf install pulseaudio-libs-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
 - - Arch:  ```sudo pacman -S libpulse```
+- Install OpenSSL dependency:
+- - Fedora: ```sudo dnf install openssl openssl-devel```
+- - Debian/Ubuntu etc: ```sudo apt-get install openssl libssl-dev```
+- - Arch:  ```sudo pacman -S openssl```
 - Clone the repository
 - Build with standard options: ```cargo build --release```
 - - see below for other options

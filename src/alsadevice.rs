@@ -392,6 +392,7 @@ fn capture_loop_bytes(
             )
         };
         value_range = chunk.maxval - chunk.minval;
+        trace!("Value range: {}", value_range);
         if value_range > params.silence {
             if silent_nbr > params.silent_limit {
                 state = ProcessingState::Running;

@@ -2,8 +2,7 @@
 New features:
 - New commands to get more playback information from the websocket server.
 - Changed all websocket commands to use Json input and output.
-planned:
-- Add support for secure websocket connections (wss)
+- Added support for secure websocket connections (wss)
 
 
 ## 0.3.2
