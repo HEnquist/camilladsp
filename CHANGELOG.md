@@ -4,6 +4,9 @@ New features:
 - Changed all websocket commands to use Json input and output.
 - Added support for secure websocket connections (wss)
 
+Bugfixes:
+- Better handling of input device errors, fixes 100% cpu usage after panic.
+
 
 ## 0.3.2
 New features:
