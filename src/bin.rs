@@ -18,7 +18,7 @@ extern crate serde;
 extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "socketserver")]
-extern crate ws;
+extern crate tungstenite;
 
 #[macro_use]
 extern crate log;
@@ -51,6 +51,7 @@ use camillalib::CommandMessage;
 use camillalib::ExitState;
 
 use camillalib::CaptureStatus;
+use camillalib::PlaybackStatus;
 use camillalib::ProcessingState;
 
 fn get_new_config(
@@ -108,6 +109,7 @@ fn run(
     config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     capture_status: Arc<RwLock<CaptureStatus>>,
+    playback_status: Arc<RwLock<PlaybackStatus>>,
 ) -> Res<ExitState> {
     let conf = match new_config_shared.lock().unwrap().clone() {
         Some(cfg) => cfg,
@@ -146,7 +148,9 @@ fn run(
 
     // Playback thread
     let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
-    let pb_handle = playback_dev.start(rx_pb, barrier_pb, tx_status_pb).unwrap();
+    let pb_handle = playback_dev
+        .start(rx_pb, barrier_pb, tx_status_pb, playback_status)
+        .unwrap();
 
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
@@ -313,7 +317,8 @@ fn main() {
             Arg::with_name("check")
                 .help("Check config file and exit")
                 .short("c")
-                .long("check"),
+                .long("check")
+                .requires("configfile"),
         )
         .arg(
             Arg::with_name("verbosity")
@@ -357,7 +362,20 @@ fn main() {
                 .short("w")
                 .long("wait")
                 .help("Wait for config from websocket")
-                .conflicts_with("configfile")
+                .requires("port"),
+        )
+        .arg(
+            Arg::with_name("cert")
+                .long("cert")
+                .takes_value(true)
+                .help("Path to .pfx/.p12 certificate file")
+                .requires("port"),
+        )
+        .arg(
+            Arg::with_name("pass")
+                .long("pass")
+                .takes_value(true)
+                .help("Password for .pfx/.p12 certificate file")
                 .requires("port"),
         );
     let matches = clapapp.get_matches();
@@ -417,6 +435,10 @@ fn main() {
         rate_adjust: 0.0,
         state: ProcessingState::Inactive,
     }));
+    let playback_status = Arc::new(RwLock::new(PlaybackStatus {
+        buffer_level: 0,
+        clipped_samples: 0,
+    }));
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
@@ -438,8 +460,17 @@ fn main() {
                 active_config_path: active_config_path.clone(),
                 new_config: new_config.clone(),
                 capture_status: capture_status.clone(),
+                playback_status: playback_status.clone(),
             };
-            socketserver::start_server(serveraddress, serverport, shared_data);
+            let cert_file = matches.value_of("cert");
+            let cert_pass = matches.value_of("pass");
+            socketserver::start_server(
+                serveraddress,
+                serverport,
+                shared_data,
+                cert_file,
+                cert_pass,
+            );
         }
     }
 
@@ -462,6 +493,7 @@ fn main() {
             active_config_path.clone(),
             new_config.clone(),
             capture_status.clone(),
+            playback_status.clone(),
         );
         match exitstatus {
             Err(e) => {

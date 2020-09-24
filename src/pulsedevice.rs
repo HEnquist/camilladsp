@@ -16,7 +16,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::SystemTime;
 
-use crate::CaptureStatus;
+use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
 use PrcFmt;
 use ProcessingState;
@@ -105,6 +105,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -131,6 +132,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         }
                         //let scalefactor = (1<<bits-1) as PrcFmt;
                         let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
+                        let mut conversion_result;
                         barrier.wait();
                         //thread::sleep(delay);
                         debug!("starting playback loop");
@@ -142,7 +144,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         SampleFormat::S16LE
                                         | SampleFormat::S24LE
                                         | SampleFormat::S32LE => {
-                                            chunk_to_buffer_bytes(
+                                            conversion_result = chunk_to_buffer_bytes(
                                                 chunk,
                                                 &mut buffer,
                                                 scalefactor,
@@ -151,7 +153,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                             );
                                         }
                                         SampleFormat::FLOAT32LE => {
-                                            chunk_to_buffer_float_bytes(
+                                            conversion_result = chunk_to_buffer_float_bytes(
                                                 chunk,
                                                 &mut buffer,
                                                 bits_per_sample,
@@ -171,12 +173,20 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                                 .unwrap();
                                         }
                                     };
+                                    if conversion_result.1 > 0 {
+                                        playback_status.write().unwrap().clipped_samples +=
+                                            conversion_result.1;
+                                    }
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
                                     break;
                                 }
-                                Err(_) => {}
+                                Err(err) => {
+                                    error!("Message channel error: {}", err);
+                                    status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                    break;
+                                }
                             }
                         }
                     }
@@ -369,6 +379,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                 _ => panic!("Unsupported sample format"),
                             };
                             value_range = chunk.maxval - chunk.minval;
+                            trace!("Value range: {}", value_range);
                             if (value_range) > silence {
                                 if silent_nbr > silent_limit {
                                     state = ProcessingState::Running;

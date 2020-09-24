@@ -16,7 +16,7 @@ use std::time::SystemTime;
 
 use rubato::Resampler;
 
-use crate::CaptureStatus;
+use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
 use PrcFmt;
 use ProcessingState;
@@ -100,6 +100,7 @@ impl PlaybackDevice for FilePlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let destination = self.destination.clone();
         let chunksize = self.chunksize;
@@ -132,20 +133,21 @@ impl PlaybackDevice for FilePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    let valid_bytes = match sample_format.number_family() {
-                                        NumberFamily::Integer => chunk_to_buffer_bytes(
-                                            chunk,
-                                            &mut buffer,
-                                            scalefactor,
-                                            bits_per_sample as i32,
-                                            store_bytes_per_sample,
-                                        ),
-                                        NumberFamily::Float => chunk_to_buffer_float_bytes(
-                                            chunk,
-                                            &mut buffer,
-                                            bits_per_sample as i32,
-                                        ),
-                                    };
+                                    let (valid_bytes, nbr_clipped) =
+                                        match sample_format.number_family() {
+                                            NumberFamily::Integer => chunk_to_buffer_bytes(
+                                                chunk,
+                                                &mut buffer,
+                                                scalefactor,
+                                                bits_per_sample as i32,
+                                                store_bytes_per_sample,
+                                            ),
+                                            NumberFamily::Float => chunk_to_buffer_float_bytes(
+                                                chunk,
+                                                &mut buffer,
+                                                bits_per_sample as i32,
+                                            ),
+                                        };
                                     let write_res = file.write(&buffer[0..valid_bytes]);
                                     match write_res {
                                         Ok(_) => {}
@@ -157,12 +159,20 @@ impl PlaybackDevice for FilePlaybackDevice {
                                                 .unwrap();
                                         }
                                     };
+                                    if nbr_clipped > 0 {
+                                        playback_status.write().unwrap().clipped_samples +=
+                                            nbr_clipped;
+                                    }
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
                                     break;
                                 }
-                                Err(_) => {}
+                                Err(err) => {
+                                    error!("Message channel error: {}", err);
+                                    status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                    break;
+                                }
                             }
                         }
                     }
@@ -380,6 +390,7 @@ fn capture_loop(
             scalefactor,
         );
         value_range = chunk.maxval - chunk.minval;
+        trace!("Value range: {}", value_range);
         if (value_range) > params.silence {
             if silent_nbr > params.silent_limit {
                 state = ProcessingState::Running;

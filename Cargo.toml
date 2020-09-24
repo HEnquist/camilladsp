@@ -1,6 +1,6 @@
 [package]
 name = "camilladsp"
-version = "0.3.2"
+version = "0.4.0"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 description = "A flexible tool for processing audio"
 
@@ -10,7 +10,7 @@ alsa-backend = ["alsa"]
 pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
 cpal-backend = ["cpal"]
 32bit = []
-socketserver = ["ws"]
+socketserver = ["tungstenite", "native-tls"]
 FFTW = ["fftw"]
 
 [lib]
@@ -39,7 +39,8 @@ rand_distr = "0.2.2"
 clap = "2.33.0"
 log = "0.4.8"
 env_logger = "0.7.1"
-ws = { version = "0.9.1", optional = true }
+tungstenite = { version = "0.11.1", optional = true }
+native-tls = { version = "0.2.4", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
 rubato = "0.4.3"

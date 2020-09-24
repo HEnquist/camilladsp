@@ -16,7 +16,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::SystemTime;
 
-use crate::CaptureStatus;
+use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
 use PrcFmt;
 use ProcessingState;
@@ -154,6 +154,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let host_cfg = self.host.clone();
@@ -172,6 +173,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
 
         let bits_per_sample = self.sample_format.bits_per_sample() as i32;
         let sample_format = self.sample_format.clone();
+        let playback_status_clone = playback_status.clone();
         let handle = thread::Builder::new()
             .name("CpalPlayback".to_string())
             .spawn(move || {
@@ -196,6 +198,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         let stream = match sample_format {
                             SampleFormat::S16LE => {
                                 trace!("Build i16 output stream");
+                                let mut clipped = 0;
                                 let mut sample_queue: VecDeque<i16> =
                                     VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
                                 let stream = device.build_output_stream(
@@ -205,7 +208,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         while sample_queue.len() < buffer.len() {
                                             trace!("Convert chunk to device format");
                                             let chunk = rx_dev.recv().unwrap();
-                                            chunk_to_queue_int(
+                                            clipped = chunk_to_queue_int(
                                                 chunk,
                                                 &mut sample_queue,
                                                 scalefactor,
@@ -214,6 +217,12 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         write_data_to_device(&mut buffer, &mut sample_queue);
                                         buffer_fill_clone
                                             .store(sample_queue.len(), Ordering::Relaxed);
+                                        if clipped > 0 {
+                                            playback_status_clone
+                                                .write()
+                                                .unwrap()
+                                                .clipped_samples += clipped;
+                                        }
                                     },
                                     move |err| error!("an error occurred on stream: {}", err),
                                 );
@@ -223,6 +232,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             }
                             SampleFormat::FLOAT32LE => {
                                 trace!("Build f32 output stream");
+                                let mut clipped = 0;
                                 let mut sample_queue: VecDeque<f32> =
                                     VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
                                 let stream = device.build_output_stream(
@@ -232,11 +242,18 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         while sample_queue.len() < buffer.len() {
                                             trace!("Convert chunk to device format");
                                             let chunk = rx_dev.recv().unwrap();
-                                            chunk_to_queue_float(chunk, &mut sample_queue);
+                                            clipped =
+                                                chunk_to_queue_float(chunk, &mut sample_queue);
                                         }
                                         write_data_to_device(&mut buffer, &mut sample_queue);
                                         buffer_fill_clone
                                             .store(sample_queue.len(), Ordering::Relaxed);
+                                        if clipped > 0 {
+                                            playback_status_clone
+                                                .write()
+                                                .unwrap()
+                                                .clipped_samples += clipped;
+                                        }
                                     },
                                     move |err| error!("an error occurred on stream: {}", err),
                                 );
@@ -290,6 +307,8 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         status_channel
                                             .send(StatusMessage::SetSpeed { speed })
                                             .unwrap();
+                                        playback_status.write().unwrap().buffer_level =
+                                            av_delay as usize;
                                     }
                                     tx_dev.send(chunk).unwrap();
                                 }
@@ -297,7 +316,11 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
                                     break;
                                 }
-                                Err(_) => {}
+                                Err(err) => {
+                                    error!("Message channel error: {}", err);
+                                    status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                    break;
+                                }
                             }
                         }
                     }
@@ -562,6 +585,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 sample_counter = 0;
                             }
                             value_range = chunk.maxval - chunk.minval;
+                            trace!("Value range: {}", value_range);
                             if (value_range) > silence {
                                 if silent_nbr > silent_limit {
                                     state = ProcessingState::Running;

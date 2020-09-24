@@ -9,6 +9,8 @@ extern crate fftw;
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
+#[cfg(feature = "socketserver")]
+extern crate native_tls;
 extern crate num;
 extern crate rand;
 extern crate rand_distr;
@@ -19,12 +21,13 @@ extern crate serde;
 extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "socketserver")]
-extern crate ws;
+extern crate tungstenite;
 
 #[macro_use]
 extern crate log;
 extern crate env_logger;
 
+use serde::Serialize;
 use std::error;
 use std::fmt;
 
@@ -82,7 +85,7 @@ pub enum ExitState {
     Exit,
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Serialize, PartialEq)]
 pub enum ProcessingState {
     Running,
     Paused,
@@ -96,6 +99,12 @@ pub struct CaptureStatus {
     pub signal_range: f32,
     pub state: ProcessingState,
     pub rate_adjust: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlaybackStatus {
+    pub clipped_samples: usize,
+    pub buffer_level: usize,
 }
 
 impl fmt::Display for ProcessingState {
