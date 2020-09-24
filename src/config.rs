@@ -1,4 +1,5 @@
 use filters;
+use mixer;
 use serde::{Deserialize, Serialize};
 use serde_with;
 use std::collections::HashMap;
@@ -48,6 +49,53 @@ pub enum SampleFormat {
     FLOAT64LE,
 }
 
+#[derive(Clone, Debug)]
+pub enum NumberFamily {
+    Integer,
+    Float,
+}
+
+impl SampleFormat {
+    pub fn bits_per_sample(&self) -> usize {
+        match self {
+            SampleFormat::S16LE => 16,
+            SampleFormat::S24LE => 24,
+            SampleFormat::S24LE3 => 24,
+            SampleFormat::S32LE => 32,
+            SampleFormat::FLOAT32LE => 32,
+            SampleFormat::FLOAT64LE => 64,
+        }
+    }
+
+    pub fn bytes_per_sample(&self) -> usize {
+        match self {
+            SampleFormat::S16LE => 2,
+            SampleFormat::S24LE => 4,
+            SampleFormat::S24LE3 => 3,
+            SampleFormat::S32LE => 4,
+            SampleFormat::FLOAT32LE => 4,
+            SampleFormat::FLOAT64LE => 8,
+        }
+    }
+
+    pub fn number_family(&self) -> NumberFamily {
+        match self {
+            SampleFormat::S16LE
+            | SampleFormat::S24LE
+            | SampleFormat::S24LE3
+            | SampleFormat::S32LE => NumberFamily::Integer,
+            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => NumberFamily::Float,
+        }
+    }
+
+    pub fn is_float(&self) -> bool {
+        match self {
+            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
@@ -67,6 +115,16 @@ pub enum CaptureDevice {
     File {
         channels: usize,
         filename: String,
+        format: SampleFormat,
+        #[serde(default)]
+        extra_samples: usize,
+        #[serde(default)]
+        skip_bytes: usize,
+        #[serde(default)]
+        read_bytes: usize,
+    },
+    Stdin {
+        channels: usize,
         format: SampleFormat,
         #[serde(default)]
         extra_samples: usize,
@@ -108,6 +166,10 @@ pub enum PlaybackDevice {
     File {
         channels: usize,
         filename: String,
+        format: SampleFormat,
+    },
+    Stdout {
+        channels: usize,
         format: SampleFormat,
     },
     #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
@@ -250,6 +312,10 @@ pub enum ConvParameters {
         filename: String,
         #[serde(default)]
         format: FileFormat,
+        #[serde(default)]
+        skip_bytes_lines: usize,
+        #[serde(default)]
+        read_bytes_lines: usize,
     },
     Values {
         values: Vec<PrcFmt>,
@@ -454,25 +520,25 @@ pub struct Configuration {
 pub fn load_config(filename: &str) -> Res<Configuration> {
     let file = match File::open(filename) {
         Ok(f) => f,
-        Err(_) => {
-            return Err(Box::new(ConfigError::new("Could not open config file!")));
+        Err(err) => {
+            let msg = format!("Could not open config file '{}'. Error: {}", filename, err);
+            return Err(ConfigError::new(&msg).into());
         }
     };
     let mut buffered_reader = BufReader::new(file);
     let mut contents = String::new();
     let _number_of_bytes: usize = match buffered_reader.read_to_string(&mut contents) {
         Ok(number_of_bytes) => number_of_bytes,
-        Err(_err) => {
-            return Err(Box::new(ConfigError::new("Could not read config file!")));
+        Err(err) => {
+            let msg = format!("Could not read config file '{}'. Error: {}", filename, err);
+            return Err(ConfigError::new(&msg).into());
         }
     };
     let configuration: Configuration = match serde_yaml::from_str(&contents) {
         Ok(config) => config,
         Err(err) => {
-            return Err(Box::new(ConfigError::new(&format!(
-                "Invalid config file!\n{}",
-                err
-            ))));
+            let msg = format!("Invalid config file!\n{}", err);
+            return Err(ConfigError::new(&msg).into());
         }
     };
     Ok(configuration)
@@ -535,12 +601,14 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: Configuration) -> Res<()> {
     if conf.devices.target_level >= 2 * conf.devices.chunksize {
-        return Err(Box::new(ConfigError::new("target_level is too large.")));
+        let msg = format!(
+            "target_level can't be larger than {}",
+            2 * conf.devices.chunksize
+        );
+        return Err(ConfigError::new(&msg).into());
     }
     if conf.devices.adjust_period <= 0.0 {
-        return Err(Box::new(ConfigError::new(
-            "adjust_period must be positive and > 0",
-        )));
+        return Err(ConfigError::new("adjust_period must be positive and > 0").into());
     }
     let mut num_channels = match conf.devices.capture {
         #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
@@ -548,6 +616,7 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         #[cfg(feature = "pulse-backend")]
         CaptureDevice::Pulse { channels, .. } => channels,
         CaptureDevice::File { channels, .. } => channels,
+        CaptureDevice::Stdin { channels, .. } => channels,
         #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
         CaptureDevice::CoreAudio { channels, .. } => channels,
         #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
@@ -558,36 +627,44 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         match step {
             PipelineStep::Mixer { name } => {
                 if !conf.mixers.contains_key(&name) {
-                    return Err(Box::new(ConfigError::new(&format!(
-                        "Use of missing mixer '{}'",
-                        name
-                    ))));
+                    let msg = format!("Use of missing mixer '{}'", name);
+                    return Err(ConfigError::new(&msg).into());
                 } else {
                     let chan_in = conf.mixers.get(&name).unwrap().channels.r#in;
                     if chan_in != num_channels {
-                        return Err(Box::new(ConfigError::new(&format!(
+                        let msg = format!(
                             "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
                             name, num_channels, chan_in
-                        ))));
+                        );
+                        return Err(ConfigError::new(&msg).into());
                     }
                     num_channels = conf.mixers.get(&name).unwrap().channels.out;
+                    match mixer::validate_mixer(&conf.mixers.get(&name).unwrap()) {
+                        Ok(_) => {}
+                        Err(err) => {
+                            let msg = format!("Invalid mixer '{}'. Reason: {}", name, err);
+                            return Err(ConfigError::new(&msg).into());
+                        }
+                    }
                 }
             }
             PipelineStep::Filter { channel, names } => {
-                if channel > num_channels {
-                    return Err(Box::new(ConfigError::new(&format!(
-                        "Use of non existing channel {}",
-                        channel
-                    ))));
+                if channel >= num_channels {
+                    let msg = format!("Use of non existing channel {}", channel);
+                    return Err(ConfigError::new(&msg).into());
                 }
                 for name in names {
                     if !conf.filters.contains_key(&name) {
-                        return Err(Box::new(ConfigError::new(&format!(
-                            "Use of missing filter '{}'",
-                            name
-                        ))));
+                        let msg = format!("Use of missing filter '{}'", name);
+                        return Err(ConfigError::new(&msg).into());
                     }
-                    filters::validate_filter(fs, &conf.filters.get(&name).unwrap())?;
+                    match filters::validate_filter(fs, &conf.filters.get(&name).unwrap()) {
+                        Ok(_) => {}
+                        Err(err) => {
+                            let msg = format!("Invalid filter '{}'. Reason: {}", name, err);
+                            return Err(ConfigError::new(&msg).into());
+                        }
+                    }
                 }
             }
         }
@@ -598,16 +675,18 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         #[cfg(feature = "pulse-backend")]
         PlaybackDevice::Pulse { channels, .. } => channels,
         PlaybackDevice::File { channels, .. } => channels,
+        PlaybackDevice::Stdout { channels, .. } => channels,
         #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
         PlaybackDevice::CoreAudio { channels, .. } => channels,
         #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
         PlaybackDevice::Wasapi { channels, .. } => channels,
     };
     if num_channels != num_channels_out {
-        return Err(Box::new(ConfigError::new(&format!(
+        let msg = format!(
             "Pipeline outputs {} channels, playback device has {}.",
             num_channels, num_channels_out
-        ))));
+        );
+        return Err(ConfigError::new(&msg).into());
     }
     Ok(())
 }

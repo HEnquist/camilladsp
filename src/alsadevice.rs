@@ -14,12 +14,14 @@ use conversions::{
 use rubato::Resampler;
 use std::ffi::CString;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
+use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
+use ProcessingState;
 use Res;
 use StatusMessage;
 
@@ -33,7 +35,7 @@ pub struct AlsaPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub format: SampleFormat,
+    pub sample_format: SampleFormat,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -48,7 +50,7 @@ pub struct AlsaCaptureDevice {
     pub resampler_conf: config::Resampler,
     pub chunksize: usize,
     pub channels: usize,
-    pub format: SampleFormat,
+    pub sample_format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
 }
@@ -70,12 +72,13 @@ struct CaptureParams {
     silent_limit: usize,
     silence: PrcFmt,
     chunksize: usize,
-    bits: i32,
-    bytes_per_sample: usize,
+    bits_per_sample: i32,
+    store_bytes_per_sample: usize,
     floats: bool,
     samplerate: usize,
     capture_samplerate: usize,
     async_src: bool,
+    capture_status: Arc<RwLock<CaptureStatus>>,
 }
 
 struct PlaybackParams {
@@ -89,22 +92,28 @@ struct PlaybackParams {
 }
 
 /// Play a buffer.
-fn play_buffer(buffer: &[u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u8>) -> Res<()> {
+fn play_buffer(
+    buffer: &[u8],
+    pcmdevice: &alsa::PCM,
+    io: &alsa::pcm::IO<u8>,
+    target_delay: u64,
+) -> Res<()> {
     let playback_state = pcmdevice.state();
-    trace!("playback state {:?}", playback_state);
+    trace!("Playback state {:?}", playback_state);
     if playback_state == State::XRun {
-        warn!("Prepare playback");
+        warn!("Prepare playback after buffer underrun");
         pcmdevice.prepare()?;
-        let delay = Duration::from_millis(5);
-        thread::sleep(delay);
+        thread::sleep(Duration::from_millis(target_delay));
+    } else if playback_state == State::Prepared {
+        info!("Starting playback from Prepared state");
+        thread::sleep(Duration::from_millis(target_delay));
     }
     let _frames = match io.writei(&buffer[..]) {
         Ok(frames) => frames,
-        Err(_err) => {
-            warn!("Retrying playback");
+        Err(err) => {
+            warn!("Retrying playback, error: {}", err);
             pcmdevice.prepare()?;
-            let delay = Duration::from_millis(5);
-            thread::sleep(delay);
+            thread::sleep(Duration::from_millis(target_delay));
             io.writei(&buffer[..])?
         }
     };
@@ -120,8 +129,8 @@ fn capture_buffer(buffer: &mut [u8], pcmdevice: &alsa::PCM, io: &alsa::pcm::IO<u
     }
     let _frames = match io.readi(buffer) {
         Ok(frames) => frames,
-        Err(_err) => {
-            warn!("retrying capture");
+        Err(err) => {
+            warn!("Retrying capture, error: {}", err);
             pcmdevice.prepare()?;
             io.readi(buffer)?
         }
@@ -135,7 +144,7 @@ fn open_pcm(
     samplerate: u32,
     bufsize: MachInt,
     channels: u32,
-    format: &SampleFormat,
+    sample_format: &SampleFormat,
     capture: bool,
 ) -> Res<alsa::PCM> {
     // Open the device
@@ -150,7 +159,7 @@ fn open_pcm(
         let hwp = HwParams::any(&pcmdev)?;
         hwp.set_channels(channels)?;
         hwp.set_rate(samplerate, ValueOr::Nearest)?;
-        match format {
+        match sample_format {
             SampleFormat::S16LE => hwp.set_format(Format::s16())?,
             SampleFormat::S24LE => hwp.set_format(Format::s24())?,
             SampleFormat::S24LE3 => hwp.set_format(Format::S243LE)?,
@@ -201,6 +210,7 @@ fn playback_loop_bytes(
     let mut speed;
     let mut diff: isize;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
+    let target_delay = 1000 * (params.target_level as u64) / srate as u64;
     loop {
         match channels.audio.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
@@ -227,7 +237,7 @@ fn playback_loop_bytes(
                     let av_delay = delay / ndelays;
                     diff = av_delay - params.target_level as isize;
                     let rel_diff = (diff as f64) / (srate as f64);
-                    speed = 1.0 + 0.5 * rel_diff / params.adjust_period as f64;
+                    speed = 1.0 - 0.5 * rel_diff / params.adjust_period as f64;
                     debug!(
                         "Current buffer level {}, set capture rate to {}%",
                         av_delay,
@@ -242,7 +252,7 @@ fn playback_loop_bytes(
                         .unwrap();
                 }
 
-                let playback_res = play_buffer(&buffer, pcmdevice, &io);
+                let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay);
                 match playback_res {
                     Ok(_) => {}
                     Err(msg) => {
@@ -293,7 +303,13 @@ fn capture_loop_bytes(
             warn!("Async resampler not needed since capture device supports rate adjust. Switch to Sync type to save CPU time.");
         }
     }
-    let mut capture_bytes = params.chunksize * params.channels * params.bytes_per_sample;
+    let mut capture_bytes = params.chunksize * params.channels * params.store_bytes_per_sample;
+    let mut start = SystemTime::now();
+    let mut now;
+    let mut bytes_counter = 0;
+    let mut value_range = 0.0;
+    let mut rate_adjust = 0.0;
+    let mut state = ProcessingState::Running;
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -303,8 +319,9 @@ fn capture_loop_bytes(
                 break;
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
+                rate_adjust = speed;
                 if let Some(elem) = &element {
-                    elval.set_integer(0, (100_000.0 * speed) as i32).unwrap();
+                    elval.set_integer(0, (100_000.0 / speed) as i32).unwrap();
                     elem.write(&elval).unwrap();
                 } else if let Some(resampl) = &mut resampler {
                     if params.async_src {
@@ -323,6 +340,24 @@ fn capture_loop_bytes(
         match capture_res {
             Ok(_) => {
                 trace!("Captured {} bytes", capture_bytes);
+                now = SystemTime::now();
+                bytes_counter += capture_bytes;
+                if now.duration_since(start).unwrap().as_millis() as usize
+                    > params.capture_status.read().unwrap().update_interval
+                {
+                    let meas_time = now.duration_since(start).unwrap().as_secs_f32();
+                    let bytes_per_sec = bytes_counter as f32 / meas_time;
+                    let measured_rate_f =
+                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f32;
+                    trace!("Measured sample rate is {} Hz", measured_rate_f);
+                    let mut capt_stat = params.capture_status.write().unwrap();
+                    capt_stat.measured_samplerate = measured_rate_f as usize;
+                    capt_stat.signal_range = value_range as f32;
+                    capt_stat.rate_adjust = rate_adjust as f32;
+                    capt_stat.state = state;
+                    start = now;
+                    bytes_counter = 0;
+                }
             }
             Err(msg) => {
                 channels
@@ -337,7 +372,7 @@ fn capture_loop_bytes(
             buffer_to_chunk_float_bytes(
                 &buffer[0..capture_bytes],
                 params.channels,
-                params.bits,
+                params.bits_per_sample,
                 capture_bytes,
             )
         } else {
@@ -345,17 +380,20 @@ fn capture_loop_bytes(
                 &buffer[0..capture_bytes],
                 params.channels,
                 params.scalefactor,
-                params.bytes_per_sample,
+                params.store_bytes_per_sample,
                 capture_bytes,
             )
         };
-        if (chunk.maxval - chunk.minval) > params.silence {
+        value_range = chunk.maxval - chunk.minval;
+        if value_range > params.silence {
             if silent_nbr > params.silent_limit {
+                state = ProcessingState::Running;
                 debug!("Resuming processing");
             }
             silent_nbr = 0;
         } else if params.silent_limit > 0 {
             if silent_nbr == params.silent_limit {
+                state = ProcessingState::Paused;
                 debug!("Pausing processing");
             }
             silent_nbr += 1;
@@ -371,6 +409,8 @@ fn capture_loop_bytes(
             channels.audio.send(msg).unwrap();
         }
     }
+    let mut capt_stat = params.capture_status.write().unwrap();
+    capt_stat.state = ProcessingState::Inactive;
 }
 
 fn get_nbr_capture_bytes(
@@ -380,8 +420,8 @@ fn get_nbr_capture_bytes(
     buf: &mut Vec<u8>,
 ) -> usize {
     let capture_bytes_new = if let Some(resampl) = &resampler {
-        trace!("Resamper needs {} frames", resampl.nbr_frames_needed());
-        resampl.nbr_frames_needed() * params.channels * params.bytes_per_sample
+        trace!("Resampler needs {} frames", resampl.nbr_frames_needed());
+        resampl.nbr_frames_needed() * params.channels * params.store_bytes_per_sample
     } else {
         capture_bytes
     };
@@ -411,30 +451,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits: i32 = match self.format {
-            SampleFormat::S16LE => 16,
-            SampleFormat::S24LE => 24,
-            SampleFormat::S24LE3 => 24,
-            SampleFormat::S32LE => 32,
-            SampleFormat::FLOAT32LE => 32,
-            SampleFormat::FLOAT64LE => 64,
-        };
-        let bytes_per_sample = match self.format {
-            SampleFormat::S16LE => 2,
-            SampleFormat::S24LE => 4,
-            SampleFormat::S24LE3 => 3,
-            SampleFormat::S32LE => 4,
-            SampleFormat::FLOAT32LE => 4,
-            SampleFormat::FLOAT64LE => 8,
-        };
-        let floats = match self.format {
-            SampleFormat::S16LE
-            | SampleFormat::S24LE
-            | SampleFormat::S24LE3
-            | SampleFormat::S32LE => false,
-            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => true,
-        };
-        let format = self.format.clone();
+        let bits = self.sample_format.bits_per_sample() as i32;
+        let bytes_per_sample = self.sample_format.bytes_per_sample();
+        let floats = self.sample_format.is_float();
+        let sample_format = self.sample_format.clone();
         let handle = thread::Builder::new()
             .name("AlsaPlayback".to_string())
             .spawn(move || {
@@ -444,7 +464,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     samplerate as u32,
                     chunksize as MachInt,
                     channels as u32,
-                    &format,
+                    &sample_format,
                     false,
                 ) {
                     Ok(pcmdevice) => {
@@ -477,11 +497,12 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         playback_loop_bytes(pb_channels, buffer, &pcmdevice, io, pb_params);
                     }
                     Err(err) => {
-                        status_channel
-                            .send(StatusMessage::PlaybackError {
-                                message: format!("{}", err),
-                            })
-                            .unwrap();
+                        let send_result = status_channel.send(StatusMessage::PlaybackError {
+                            message: format!("{}", err),
+                        });
+                        if send_result.is_err() {
+                            error!("Playback error: {}", err);
+                        }
                     }
                 }
             })
@@ -498,6 +519,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -510,33 +532,13 @@ impl CaptureDevice for AlsaCaptureDevice {
         ) as usize;
         println!("Buffer frames {}", buffer_frames);
         let channels = self.channels;
-        let bits: i32 = match self.format {
-            SampleFormat::S16LE => 16,
-            SampleFormat::S24LE => 24,
-            SampleFormat::S24LE3 => 24,
-            SampleFormat::S32LE => 32,
-            SampleFormat::FLOAT32LE => 32,
-            SampleFormat::FLOAT64LE => 64,
-        };
-        let bytes_per_sample = match self.format {
-            SampleFormat::S16LE => 2,
-            SampleFormat::S24LE => 4,
-            SampleFormat::S24LE3 => 3,
-            SampleFormat::S32LE => 4,
-            SampleFormat::FLOAT32LE => 4,
-            SampleFormat::FLOAT64LE => 8,
-        };
-        let floats = match self.format {
-            SampleFormat::S16LE
-            | SampleFormat::S24LE
-            | SampleFormat::S24LE3
-            | SampleFormat::S32LE => false,
-            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => true,
-        };
+        let bits_per_sample = self.sample_format.bits_per_sample() as i32;
+        let store_bytes_per_sample = self.sample_format.bytes_per_sample();
+        let floats = self.sample_format.is_float();
         let mut silence: PrcFmt = 10.0;
         silence = silence.powf(self.silence_threshold / 20.0);
         let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
-        let format = self.format.clone();
+        let sample_format = self.sample_format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let async_src = resampler_is_async(&resampler_conf);
@@ -560,7 +562,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                     capture_samplerate as u32,
                     buffer_frames as MachInt,
                     channels as u32,
-                    &format,
+                    &sample_format,
                     true,
                 ) {
                     Ok(pcmdevice) => {
@@ -568,7 +570,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
                         barrier.wait();
                         debug!("Starting captureloop");
                         let cap_params = CaptureParams {
@@ -577,12 +579,13 @@ impl CaptureDevice for AlsaCaptureDevice {
                             silent_limit,
                             silence,
                             chunksize,
-                            bits,
-                            bytes_per_sample,
+                            bits_per_sample,
+                            store_bytes_per_sample,
                             floats,
                             samplerate,
                             capture_samplerate,
                             async_src,
+                            capture_status,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,
@@ -590,7 +593,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             command: command_channel,
                         };
                         let io = pcmdevice.io();
-                        let buffer = vec![0u8; channels * buffer_frames * bytes_per_sample];
+                        let buffer = vec![0u8; channels * buffer_frames * store_bytes_per_sample];
                         capture_loop_bytes(
                             cap_channels,
                             buffer,
@@ -601,11 +604,12 @@ impl CaptureDevice for AlsaCaptureDevice {
                         );
                     }
                     Err(err) => {
-                        status_channel
-                            .send(StatusMessage::CaptureError {
-                                message: format!("{}", err),
-                            })
-                            .unwrap();
+                        let send_result = status_channel.send(StatusMessage::CaptureError {
+                            message: format!("{}", err),
+                        });
+                        if send_result.is_err() {
+                            error!("Capture error: {}", err);
+                        }
                     }
                 }
             })

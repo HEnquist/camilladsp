@@ -13,10 +13,11 @@ use rubato::{
     WindowFunction,
 };
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Instant;
 
+use crate::CaptureStatus;
 use CommandMessage;
 use PrcFmt;
 use Res;
@@ -97,6 +98,7 @@ pub trait CaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
@@ -113,7 +115,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             target_level: conf.target_level,
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
@@ -128,7 +130,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
         }),
         config::PlaybackDevice::File {
             channels,
@@ -136,11 +138,20 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             format,
             ..
         } => Box::new(filedevice::FilePlaybackDevice {
-            filename,
+            destination: filedevice::PlaybackDest::Filename(filename),
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
+        }),
+        config::PlaybackDevice::Stdout {
+            channels, format, ..
+        } => Box::new(filedevice::FilePlaybackDevice {
+            destination: filedevice::PlaybackDest::Stdout,
+            samplerate: conf.samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            sample_format: format,
         }),
         #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
         config::PlaybackDevice::CoreAudio {
@@ -153,7 +164,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             target_level: conf.target_level,
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
@@ -169,7 +180,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             target_level: conf.target_level,
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
@@ -346,7 +357,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),
@@ -363,7 +374,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),
@@ -375,14 +386,35 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             skip_bytes,
             read_bytes,
         } => Box::new(filedevice::FileCaptureDevice {
-            filename,
+            source: filedevice::CaptureSource::Filename(filename),
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
             capture_samplerate,
             resampler_conf: conf.resampler_type,
             chunksize: conf.chunksize,
             channels,
+            sample_format: format,
+            extra_samples,
+            silence_threshold: conf.silence_threshold,
+            silence_timeout: conf.silence_timeout,
+            skip_bytes,
+            read_bytes,
+        }),
+        config::CaptureDevice::Stdin {
+            channels,
             format,
+            extra_samples,
+            skip_bytes,
+            read_bytes,
+        } => Box::new(filedevice::FileCaptureDevice {
+            source: filedevice::CaptureSource::Stdin,
+            samplerate: conf.samplerate,
+            enable_resampling: conf.enable_resampling,
+            capture_samplerate,
+            resampler_conf: conf.resampler_type,
+            chunksize: conf.chunksize,
+            channels,
+            sample_format: format,
             extra_samples,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
@@ -403,7 +435,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),
@@ -421,7 +453,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
-            format,
+            sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),

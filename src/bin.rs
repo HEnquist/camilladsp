@@ -30,7 +30,7 @@ use log::LevelFilter;
 use std::env;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::thread;
 use std::time;
 
@@ -41,12 +41,17 @@ use camillalib::config;
 use camillalib::processing;
 #[cfg(feature = "socketserver")]
 use camillalib::socketserver;
+#[cfg(feature = "socketserver")]
+use std::net::IpAddr;
 
 use camillalib::StatusMessage;
 
 use camillalib::CommandMessage;
 
-use camillalib::ExitStatus;
+use camillalib::ExitState;
+
+use camillalib::CaptureStatus;
+use camillalib::ProcessingState;
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
@@ -92,9 +97,7 @@ fn get_new_config(
         }
     } else {
         error!("No new config supplied and no path set");
-        Err(Box::new(config::ConfigError::new(
-            "No new config supplied and no path set",
-        )))
+        Err(config::ConfigError::new("No new config supplied and no path set").into())
     }
 }
 
@@ -104,12 +107,13 @@ fn run(
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
-) -> Res<ExitStatus> {
+    capture_status: Arc<RwLock<CaptureStatus>>,
+) -> Res<ExitState> {
     let conf = match new_config_shared.lock().unwrap().clone() {
         Some(cfg) => cfg,
         None => {
             error!("Tried to start without config!");
-            return Ok(ExitStatus::Exit);
+            return Ok(ExitState::Exit);
         }
     };
     let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.queuelimit);
@@ -147,7 +151,13 @@ fn run(
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
     let cap_handle = capture_dev
-        .start(tx_cap, barrier_cap, tx_status_cap, rx_command_cap)
+        .start(
+            tx_cap,
+            barrier_cap,
+            tx_status_cap,
+            rx_command_cap,
+            capture_status,
+        )
         .unwrap();
 
     let delay = time::Duration::from_millis(100);
@@ -183,7 +193,7 @@ fn run(
                             trace!("Wait for cap..");
                             cap_handle.join().unwrap();
                             *new_config_shared.lock().unwrap() = Some(conf);
-                            return Ok(ExitStatus::Restart);
+                            return Ok(ExitState::Restart);
                         }
                         config::ConfigChange::None => {
                             debug!("No changes in config.");
@@ -205,7 +215,7 @@ fn run(
                 pb_handle.join().unwrap();
                 trace!("Wait for cap..");
                 cap_handle.join().unwrap();
-                return Ok(ExitStatus::Exit);
+                return Ok(ExitState::Exit);
             }
             2 => {
                 debug!("Stop requested...");
@@ -216,7 +226,7 @@ fn run(
                 trace!("Wait for cap..");
                 cap_handle.join().unwrap();
                 *new_config_shared.lock().unwrap() = None;
-                return Ok(ExitStatus::Restart);
+                return Ok(ExitState::Restart);
             }
             _ => {}
         };
@@ -238,15 +248,15 @@ fn run(
                 }
                 StatusMessage::PlaybackError { message } => {
                     error!("Playback error: {}", message);
-                    return Ok(ExitStatus::Exit);
+                    return Ok(ExitState::Exit);
                 }
                 StatusMessage::CaptureError { message } => {
                     error!("Capture error: {}", message);
-                    return Ok(ExitStatus::Exit);
+                    return Ok(ExitState::Exit);
                 }
                 StatusMessage::PlaybackDone => {
                     info!("Playback finished");
-                    return Ok(ExitStatus::Exit);
+                    return Ok(ExitState::Exit);
                 }
                 StatusMessage::CaptureDone => {
                     info!("Capture finished");
@@ -329,6 +339,20 @@ fn main() {
                 }),
         )
         .arg(
+            Arg::with_name("address")
+                .help("IP address to bind websocket server to")
+                .short("a")
+                .long("address")
+                .takes_value(true)
+                .requires("port")
+                .validator(|val: String| -> Result<(), String> {
+                    if val.parse::<IpAddr>().is_ok() {
+                        return Ok(());
+                    }
+                    Err(String::from("Must be a valid IP address"))
+                }),
+        )
+        .arg(
             Arg::with_name("wait")
                 .short("w")
                 .long("wait")
@@ -386,6 +410,13 @@ fn main() {
 
     let signal_reload = Arc::new(AtomicBool::new(false));
     let signal_exit = Arc::new(AtomicUsize::new(0));
+    let capture_status = Arc::new(RwLock::new(CaptureStatus {
+        measured_samplerate: 0,
+        update_interval: 1000,
+        signal_range: 0.0,
+        rate_adjust: 0.0,
+        state: ProcessingState::Inactive,
+    }));
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
@@ -395,15 +426,20 @@ fn main() {
     #[cfg(feature = "socketserver")]
     {
         if let Some(port_str) = matches.value_of("port") {
+            let serveraddress = match matches.value_of("address") {
+                Some(addr) => addr,
+                None => "127.0.0.1",
+            };
             let serverport = port_str.parse::<usize>().unwrap();
-            socketserver::start_server(
-                serverport,
-                signal_reload.clone(),
-                signal_exit.clone(),
-                active_config.clone(),
-                active_config_path.clone(),
-                new_config.clone(),
-            );
+            let shared_data = socketserver::SharedData {
+                signal_reload: signal_reload.clone(),
+                signal_exit: signal_exit.clone(),
+                active_config: active_config.clone(),
+                active_config_path: active_config_path.clone(),
+                new_config: new_config.clone(),
+                capture_status: capture_status.clone(),
+            };
+            socketserver::start_server(serveraddress, serverport, shared_data);
         }
     }
 
@@ -412,6 +448,10 @@ fn main() {
         debug!("Wait for config");
         while new_config.lock().unwrap().is_none() {
             trace!("waiting...");
+            if signal_exit.load(Ordering::Relaxed) == 1 {
+                // exit requested
+                break;
+            }
             thread::sleep(delay);
         }
         debug!("Config ready");
@@ -421,21 +461,26 @@ fn main() {
             active_config.clone(),
             active_config_path.clone(),
             new_config.clone(),
+            capture_status.clone(),
         );
         match exitstatus {
             Err(e) => {
+                *active_config.lock().unwrap() = None;
                 error!("({}) {}", e.to_string(), e);
                 if !wait {
                     break;
                 }
             }
-            Ok(ExitStatus::Exit) => {
+            Ok(ExitState::Exit) => {
                 debug!("Exiting");
-                if !wait {
+                *active_config.lock().unwrap() = None;
+                if !wait || signal_exit.load(Ordering::Relaxed) == 1 {
+                    // wait mode not active, or exit requested
                     break;
                 }
             }
-            Ok(ExitStatus::Restart) => {
+            Ok(ExitState::Restart) => {
+                *active_config.lock().unwrap() = None;
                 debug!("Restarting with new config");
             }
         };

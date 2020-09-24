@@ -230,7 +230,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.1.0
+CamillaDSP 0.3.2
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
@@ -247,7 +247,8 @@ FLAGS:
     -w, --wait       Wait for config from websocket
 
 OPTIONS:
-    -p, --port <port>    Port for websocket server
+    -a, --address <address>    IP address to bind websocket server to
+    -p, --port <port>          Port for websocket server
 
 ARGS:
     <configfile>    The configuration file to use
@@ -255,6 +256,8 @@ ARGS:
 If the "check" flag is given, the program will exit after checking the configuration file. Use this if you only want to verify that the configuration is ok, and not start any processing.
 
 To enable the websocket server, provide a port number with the `-p` option. Leave it out, or give 0 to disable. 
+
+By default the websocket server binds to the address 127.0.0.1 which means it's only accessible locally. If it should be also available to remote machines, give the IP address of the interface where it should be available with the `-a` option. Giving 0.0.0.0 will bind to all interfaces.
 
 If the "wait" flag, `-w` is given, CamillaDSP will start the websocket server and wait for a configuration to be uploaded. Then the config file argument must be left out.
 
@@ -266,8 +269,6 @@ The configuration can be reloaded without restarting by sending a SIGHUP to the 
 
 ## Controlling via websocket
 See the [separate readme for the websocket server](./websocket.md)
-
-If the websocket server is enabled with the -p option, CamillaDSP will listen to incoming websocket connections on the specified port.
 
 
 # Capturing audio
@@ -306,21 +307,19 @@ Set VB-CABLE as the default playback device in the control panel, and let Camill
 
 The device name is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the inpout/output name and card name, and the format is "{input/output name} ({card name})".
 
-The sample format appears to always be 32-bit float (FLOAT32LE).
+The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use aother format.
 
 The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
 
 
 ## CoreAudio
-CoreAudio is supported by the cpal library and should work, but hasn't actually been tested.
-
-To capture audio from applications a virtual sound card is needed. See for example [BlackHole](https://github.com/ExistentialAudio/BlackHole).
+To capture audio from applications a virtual sound card is needed. This has been verified to work well with [Soundflower](https://github.com/mattingalls/Soundflower)
 
 Set the virtual sound card as the default playback device in the Sound preferences, and let CamillaDSP capture from the output of this card.
 
-The device name is the same as the one shown in System Preferences / Sound.
+The device name is the same as the one shown in the "Audio MIDI Setup" that can be found under "Other" in Launchpad. The name for the 2-channel interface of Soundflower is "Soundflower (2ch)", and the built in audio in a MacBook Pro is called "Built-in Output".
 
-The sample format appears to always be 32-bit float (FLOAT32LE).
+The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
 
 
 # Configuration
@@ -440,9 +439,18 @@ devices:
 
  
 * `capture` and `playback`
+
   Input and output devices are defined in the same way. 
   A device needs:
-  * `type`: Alsa, Pulse, Wasapi, CoreAudio or File 
+  * `type`: 
+    The available types depend on which features that were included when compiling. All possible types are:
+    * `Alsa` 
+    * `Pulse`
+    * `Wasapi`
+    * `CoreAudio`
+    * `File`
+    * `Stdin` (capture only)
+    * `Stdout` (playback only)
   * `channels`: number of channels
   * `device`: device name (for Alsa, Pulse, Wasapi, CoreAudio)
   * `filename` path the the file (for File)
@@ -456,42 +464,42 @@ devices:
     * FLOAT32LE - 32 bit float, stored as four bytes
     * FLOAT64LE - 64 bit float, stored as eight bytes
 
-  Supported formats:
-  |            | Alsa               | Pulse              | Wasapi             | CoreAudio          |
-  |------------|--------------------|--------------------|--------------------|--------------------|
-  | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-  | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                |
-  | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                |
-  | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                |
-  | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-  | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                |
+    Supported formats:
+    |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | File/Stdin/Stdout  |
+    |------------|--------------------|--------------------|--------------------|--------------------|--------------------|
+    | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+    | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
+    | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
+    | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
+    | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+    | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+  
+  
+    Equivalent formats (for reference):
+    | CamillaDSP | Alsa       | Pulse     |
+    |------------|------------|-----------|
+    | S16LE      | S16_LE     | S16LE     |
+    | S24LE      | S24_LE     | S24_32LE  |
+    | S24LE3     | S24_3LE    | S24LE     |
+    | S32LE      | S32_LE     | S32LE     |
+    | FLOAT32LE  | FLOAT_LE   | FLOAT32LE |
+    | FLOAT64LE  | FLOAT64_LE | -         |
+  
+    The __File__ device type reads or writes to a file, while __Stdin__ reads from stdin and __Stdout__ writes to stdout.
+    The format is raw interleaved samples, in the selected sample format.
+    If the capture device reaches the end of a file, the program will exit once all chunks have been played. 
+    That delayed sound that would end up in a later chunk will be cut off. To avoid this, set the optional parameter `extra_samples` for the File capture device.
+    This causes the capture device to yield the given number of samples (per channel) after reaching end of file, allowing any delayed sound to be played back.
+    The __Stdin__ capture device and __Stdout__ playback device use stdin and stdout, so it's possible to easily pipe audio between applications:
+    ```
+    > camilladsp stdio_capt.yml > rawfile.dat
+    > cat rawfile.dat | camilladsp stdio_pb.yml
+    ```
+    Note: On Unix-like systems it's also possible to use the File device and set the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback. 
 
-
-  Equivalent formats (for reference):
-  | CamillaDSP | Alsa       | Pulse     |
-  |------------|------------|-----------|
-  | S16LE      | S16_LE     | S16LE     |
-  | S24LE      | S24_LE     | S24_32LE  |
-  | S24LE3     | S24_3LE    | S24LE     |
-  | S32LE      | S32_LE     | S32LE     |
-  | FLOAT32LE  | FLOAT_LE   | FLOAT32LE |
-  | FLOAT64LE  | FLOAT64_LE | -         |
-
-  The File capture device supports two additional optional parameters, for advanced handling of raw files and testing:
-  * `skip_bytes`: Number of bytes to skip at the beginning of the file. This can be used to skip over the header of some formats like .wav (which typocally has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
-  * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file.
-
-  The File device type reads or writes to a file. 
-  The format is raw interleaved samples, 2 bytes per sample for 16-bit, 
-  and 4 bytes per sample for 24 and 32 bits. 
-  If the capture device reaches the end of a file, the program will exit once all chunks have been played. 
-  That delayed sound that would end up in a later chunk will be cut off. To avoid this, set the optional parameter `extra_samples` for the File capture device.
-  This causes the capture device to yield the given number of samples (per channel) after reaching end of file, allowing any delayed sound to be played back.
-  By setting the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback, the sound will be written to or read from stdio, so one can play with pipes:
-  ```
-  > camilladsp stdio_capt.yml > rawfile.dat
-  > cat rawfile.dat | camilladsp stdio_pb.yml
-  ```
+  The __File__ and __Stdin__ capture devices support two additional optional parameters, for advanced handling of raw files and testing:
+  * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream. This can be used to skip over the header of some formats like .wav (which typically has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
+  * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file or stream.
 
 ## Resampling
 
@@ -644,7 +652,25 @@ filters:
       type: File 
       filename: path/to/filter.txt
       format: TEXT
+      skip_bytes_lines: 0 (*)
+      read_bytes_lines: 0 (*)
 ```
+The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. 
+
+Example for giving values:
+```
+filters:
+  lowpass_fir:
+    type: Conv
+    parameters:
+      type: Values
+      values: [0.0, 0.1, 0.2, 0.3]
+```
+
+The File type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
+* `skip_bytes_lines`: Number of bytes (for raw files) or lines (for text) to skip at the beginning of the file. This can be used to skip over a header. Leaving it out or setting to zero means no bytes or lines are skipped. 
+* `read_bytes_lines`: Read only up until the specified number of bytes (for raw files) or lines (for text). Leave it out to read until the end of the file.
+
 For testing purposes the entire "parameters" block can be left out (or commented out with a # at the start of each line). This then becomes a dummy filter that does not affect the signal.
 The "format" parameter can be omitted, in which case it's assumed that the format is TEXT. This format is a simple text file with one value per row:
 ```

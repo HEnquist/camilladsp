@@ -27,10 +27,10 @@ filters:
   peak1:
     type: Biquad
     parameters:
-      type: Highshelf
-      freq: 1000
-      slope: 15
-      gain: -6
+      type: Peaking
+      freq: 100
+      q: 2.0
+      gain: -20
 
 mixers:
   mono:
