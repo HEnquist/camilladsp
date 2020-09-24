@@ -30,7 +30,12 @@ pub fn run_processing(
                     tx_pb.send(msg).unwrap();
                     break;
                 }
-                _ => {}
+                Err(err) => {
+                    error!("Message channel error: {}", err);
+                    let msg = AudioMessage::EndOfStream;
+                    tx_pb.send(msg).unwrap();
+                    break;
+                }
             }
             if let Ok((diff, new_config)) = rx_pipeconf.try_recv() {
                 trace!("Message received on config channel");

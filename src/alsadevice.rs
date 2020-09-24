@@ -276,7 +276,11 @@ fn playback_loop_bytes(
                 channels.status.send(StatusMessage::PlaybackDone).unwrap();
                 break;
             }
-            _ => {}
+            Err(err) => {
+                error!("Message channel error: {}", err);
+                channels.status.send(StatusMessage::PlaybackDone).unwrap();
+                break;
+            }
         }
     }
 }
