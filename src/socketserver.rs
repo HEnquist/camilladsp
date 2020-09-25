@@ -63,6 +63,7 @@ enum WSCommand {
     GetBufferLevel,
     Exit,
     Stop,
+    None,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -156,9 +157,13 @@ enum WSReply {
 }
 
 fn parse_command(cmd: Message) -> Res<WSCommand> {
-    let command_str = cmd.into_text()?;
-    let command = serde_json::from_str::<WSCommand>(&command_str)?;
-    Ok(command)
+    match cmd {
+        Message::Text(command_str) => {
+            let command = serde_json::from_str::<WSCommand>(&command_str)?;
+            Ok(command)
+        }
+        _ => Ok(WSCommand::None),
+    }
 }
 
 #[cfg(feature = "secure-websocket")]
@@ -235,21 +240,30 @@ macro_rules! make_handler {
                     let msg_res = websocket.read_message();
                     match msg_res {
                         Ok(msg) => {
+                            trace!("received: {:?}", msg);
                             let command = parse_command(msg);
                             debug!("parsed command: {:?}", command);
                             let reply = match command {
                                 Ok(cmd) => handle_command(cmd, &shared_data_inst),
-                                Err(err) => WSReply::Invalid {
+                                Err(err) => Some(WSReply::Invalid {
                                     error: format!("{}", err).to_string(),
-                                },
+                                }),
                             };
-                            let write_result = websocket.write_message(Message::text(
-                                serde_json::to_string(&reply).unwrap(),
-                            ));
-                            if let Err(err) = write_result {
-                                warn!("Failed to write: {}", err);
-                                break;
+                            if let Some(rep) = reply {
+                                let write_result = websocket.write_message(Message::text(
+                                    serde_json::to_string(&rep).unwrap(),
+                                ));
+                                if let Err(err) = write_result {
+                                    warn!("Failed to write: {}", err);
+                                    break;
+                                }
+                            } else {
+                                debug!("Sending no reply");
                             }
+                        }
+                        Err(tungstenite::error::Error::ConnectionClosed) => {
+                            debug!("Connection was closed");
+                            break;
                         }
                         Err(err) => {
                             warn!("Lost connection: {}", err);
@@ -283,85 +297,85 @@ fn accept_plain_stream(
     Ok(ws)
 }
 
-fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply {
+fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<WSReply> {
     match command {
         WSCommand::Reload => {
             shared_data_inst
                 .signal_reload
                 .store(true, Ordering::Relaxed);
-            WSReply::Reload {
+            Some(WSReply::Reload {
                 result: WSResult::Ok,
-            }
+            })
         }
         WSCommand::GetCaptureRate => {
             let capstat = shared_data_inst.capture_status.read().unwrap();
-            WSReply::GetCaptureRate {
+            Some(WSReply::GetCaptureRate {
                 result: WSResult::Ok,
                 value: capstat.measured_samplerate,
-            }
+            })
         }
         WSCommand::GetSignalRange => {
             let capstat = shared_data_inst.capture_status.read().unwrap();
-            WSReply::GetSignalRange {
+            Some(WSReply::GetSignalRange {
                 result: WSResult::Ok,
                 value: capstat.signal_range,
-            }
+            })
         }
-        WSCommand::GetVersion => WSReply::GetVersion {
+        WSCommand::GetVersion => Some(WSReply::GetVersion {
             result: WSResult::Ok,
             value: crate_version!().to_string(),
-        },
+        }),
         WSCommand::GetState => {
             let capstat = shared_data_inst.capture_status.read().unwrap();
-            WSReply::GetState {
+            Some(WSReply::GetState {
                 result: WSResult::Ok,
                 value: capstat.state,
-            }
+            })
         }
         WSCommand::GetRateAdjust => {
             let capstat = shared_data_inst.capture_status.read().unwrap();
-            WSReply::GetRateAdjust {
+            Some(WSReply::GetRateAdjust {
                 result: WSResult::Ok,
                 value: capstat.rate_adjust,
-            }
+            })
         }
         WSCommand::GetClippedSamples => {
             let pbstat = shared_data_inst.playback_status.read().unwrap();
-            WSReply::GetClippedSamples {
+            Some(WSReply::GetClippedSamples {
                 result: WSResult::Ok,
                 value: pbstat.clipped_samples,
-            }
+            })
         }
         WSCommand::GetBufferLevel => {
             let pbstat = shared_data_inst.playback_status.read().unwrap();
-            WSReply::GetBufferLevel {
+            Some(WSReply::GetBufferLevel {
                 result: WSResult::Ok,
                 value: pbstat.buffer_level,
-            }
+            })
         }
         WSCommand::GetUpdateInterval => {
             let capstat = shared_data_inst.capture_status.read().unwrap();
-            WSReply::GetUpdateInterval {
+            Some(WSReply::GetUpdateInterval {
                 result: WSResult::Ok,
                 value: capstat.update_interval,
-            }
+            })
         }
         WSCommand::SetUpdateInterval(nbr) => {
             let mut capstat = shared_data_inst.capture_status.write().unwrap();
             capstat.update_interval = nbr;
-            WSReply::SetUpdateInterval {
+            Some(WSReply::SetUpdateInterval {
                 result: WSResult::Ok,
-            }
+            })
         }
-        WSCommand::GetConfig => WSReply::GetConfig {
+        WSCommand::GetConfig => Some(WSReply::GetConfig {
             result: WSResult::Ok,
             value: serde_yaml::to_string(&*shared_data_inst.active_config.lock().unwrap()).unwrap(),
-        },
-        WSCommand::GetConfigJson => WSReply::GetConfigJson {
+        }),
+        WSCommand::GetConfigJson => Some(WSReply::GetConfigJson {
             result: WSResult::Ok,
             value: serde_json::to_string(&*shared_data_inst.active_config.lock().unwrap()).unwrap(),
-        },
-        WSCommand::GetConfigName => WSReply::GetConfigName {
+        }),
+        WSCommand::GetConfigName => Some(WSReply::GetConfigName {
             result: WSResult::Ok,
             value: shared_data_inst
                 .active_config_path
@@ -370,17 +384,17 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply 
                 .as_ref()
                 .unwrap_or(&"NONE".to_string())
                 .to_string(),
-        },
+        }),
         WSCommand::SetConfigName(path) => match config::load_validate_config(&path) {
             Ok(_) => {
                 *shared_data_inst.active_config_path.lock().unwrap() = Some(path.clone());
-                WSReply::SetConfigName {
+                Some(WSReply::SetConfigName {
                     result: WSResult::Ok,
-                }
+                })
             }
-            _ => WSReply::SetConfigName {
+            _ => Some(WSReply::SetConfigName {
                 result: WSResult::Error,
-            },
+            }),
         },
         WSCommand::SetConfig(config_yml) => {
             match serde_yaml::from_str::<config::Configuration>(&config_yml) {
@@ -390,19 +404,19 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply 
                         shared_data_inst
                             .signal_reload
                             .store(true, Ordering::Relaxed);
-                        WSReply::SetConfig {
+                        Some(WSReply::SetConfig {
                             result: WSResult::Ok,
-                        }
+                        })
                     }
-                    _ => WSReply::SetConfig {
+                    _ => Some(WSReply::SetConfig {
                         result: WSResult::Error,
-                    },
+                    }),
                 },
                 Err(error) => {
                     error!("Config error: {}", error);
-                    WSReply::SetConfig {
+                    Some(WSReply::SetConfig {
                         result: WSResult::Error,
-                    }
+                    })
                 }
             }
         }
@@ -414,78 +428,79 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> WSReply 
                         shared_data_inst
                             .signal_reload
                             .store(true, Ordering::Relaxed);
-                        WSReply::SetConfigJson {
+                        Some(WSReply::SetConfigJson {
                             result: WSResult::Ok,
-                        }
+                        })
                     }
-                    _ => WSReply::SetConfigJson {
+                    _ => Some(WSReply::SetConfigJson {
                         result: WSResult::Error,
-                    },
+                    }),
                 },
                 Err(error) => {
                     error!("Config error: {}", error);
-                    WSReply::SetConfigJson {
+                    Some(WSReply::SetConfigJson {
                         result: WSResult::Error,
-                    }
+                    })
                 }
             }
         }
         WSCommand::ReadConfig(config_yml) => {
             match serde_yaml::from_str::<config::Configuration>(&config_yml) {
-                Ok(conf) => WSReply::ReadConfig {
+                Ok(conf) => Some(WSReply::ReadConfig {
                     result: WSResult::Ok,
                     value: serde_yaml::to_string(&conf).unwrap(),
-                },
-                Err(error) => WSReply::ReadConfig {
+                }),
+                Err(error) => Some(WSReply::ReadConfig {
                     result: WSResult::Error,
                     value: error.to_string(),
-                },
+                }),
             }
         }
         WSCommand::ReadConfigFile(path) => match config::load_config(&path) {
-            Ok(conf) => WSReply::ReadConfigFile {
+            Ok(conf) => Some(WSReply::ReadConfigFile {
                 result: WSResult::Ok,
                 value: serde_yaml::to_string(&conf).unwrap(),
-            },
-            Err(error) => WSReply::ReadConfigFile {
+            }),
+            Err(error) => Some(WSReply::ReadConfigFile {
                 result: WSResult::Error,
                 value: error.to_string(),
-            },
+            }),
         },
         WSCommand::ValidateConfig(config_yml) => {
             match serde_yaml::from_str::<config::Configuration>(&config_yml) {
                 Ok(conf) => match config::validate_config(conf.clone()) {
-                    Ok(()) => WSReply::ValidateConfig {
+                    Ok(()) => Some(WSReply::ValidateConfig {
                         result: WSResult::Ok,
                         value: serde_yaml::to_string(&conf).unwrap(),
-                    },
-                    Err(error) => WSReply::ValidateConfig {
+                    }),
+                    Err(error) => Some(WSReply::ValidateConfig {
                         result: WSResult::Error,
                         value: error.to_string(),
-                    },
+                    }),
                 },
                 Err(error) => {
                     error!("Config error: {}", error);
-                    WSReply::ValidateConfig {
+                    Some(WSReply::ValidateConfig {
                         result: WSResult::Error,
                         value: error.to_string(),
-                    }
+                    })
                 }
             }
         }
         WSCommand::Stop => {
             *shared_data_inst.new_config.lock().unwrap() = None;
             shared_data_inst.signal_exit.store(2, Ordering::Relaxed);
-            WSReply::Stop {
+            Some(WSReply::Stop {
                 result: WSResult::Ok,
-            }
+            })
         }
         WSCommand::Exit => {
             shared_data_inst.signal_exit.store(1, Ordering::Relaxed);
-            WSReply::Exit {
+            Some(WSReply::Exit {
                 result: WSResult::Ok,
-            }
+            })
         }
+        WSCommand::None => None,
     }
 }
 
