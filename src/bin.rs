@@ -17,7 +17,7 @@ extern crate rubato;
 extern crate serde;
 extern crate serde_with;
 extern crate signal_hook;
-#[cfg(feature = "socketserver")]
+#[cfg(feature = "websocket")]
 extern crate tungstenite;
 
 #[macro_use]
@@ -39,9 +39,9 @@ use camillalib::Res;
 use camillalib::audiodevice;
 use camillalib::config;
 use camillalib::processing;
-#[cfg(feature = "socketserver")]
+#[cfg(feature = "websocket")]
 use camillalib::socketserver;
-#[cfg(feature = "socketserver")]
+#[cfg(feature = "websocket")]
 use std::net::IpAddr;
 
 use camillalib::StatusMessage;
@@ -289,8 +289,11 @@ fn main() {
     if cfg!(feature = "cpal-backend") {
         features.push("cpal-backend");
     }
-    if cfg!(feature = "socketserver") {
-        features.push("socketserver");
+    if cfg!(feature = "websocket") {
+        features.push("websocket");
+    }
+    if cfg!(feature = "secure-websocket") {
+        features.push("secure-websocket");
     }
     if cfg!(feature = "FFTW") {
         features.push("FFTW");
@@ -326,7 +329,7 @@ fn main() {
                 .multiple(true)
                 .help("Increase message verbosity"),
         );
-    #[cfg(feature = "socketserver")]
+    #[cfg(feature = "websocket")]
     let clapapp = clapapp
         .arg(
             Arg::with_name("port")
@@ -363,7 +366,9 @@ fn main() {
                 .long("wait")
                 .help("Wait for config from websocket")
                 .requires("port"),
-        )
+        );
+    #[cfg(feature = "secure-websocket")]
+    let clapapp = clapapp
         .arg(
             Arg::with_name("cert")
                 .long("cert")
@@ -445,7 +450,7 @@ fn main() {
 
     let active_config_path = Arc::new(Mutex::new(configname));
 
-    #[cfg(feature = "socketserver")]
+    #[cfg(feature = "websocket")]
     {
         if let Some(port_str) = matches.value_of("port") {
             let serveraddress = match matches.value_of("address") {
@@ -462,15 +467,15 @@ fn main() {
                 capture_status: capture_status.clone(),
                 playback_status: playback_status.clone(),
             };
-            let cert_file = matches.value_of("cert");
-            let cert_pass = matches.value_of("pass");
-            socketserver::start_server(
-                serveraddress,
-                serverport,
-                shared_data,
-                cert_file,
-                cert_pass,
-            );
+            let server_params = socketserver::ServerParameters {
+                port: serverport,
+                address: serveraddress,
+                #[cfg(feature = "secure-websocket")]
+                cert_file: matches.value_of("cert"),
+                #[cfg(feature = "secure-websocket")]
+                cert_pass: matches.value_of("pass"),
+            };
+            socketserver::start_server(server_params, shared_data);
         }
     }
 

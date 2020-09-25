@@ -134,7 +134,7 @@ By default both the Alsa and PulseAudio backends are enabled, but they can be di
 
 By default the internal processing is done using 64-bit floats. There is a possibility to switch this to 32-bit floats. This might be useful for speeding up the processing when running on a 32-bit CPU (or a 64-bit CPU running in 32-bit mode), but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
 
-CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "socketserver". For usage see the section "Controlling via websocket".
+CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "websocket". For usage see the section "Controlling via websocket".
 
 The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". When the chunksize is a power of two, like 1024 or 4096, FFTW is only a few percent faster than RustFFT. The difference gets much larger if the chunksize is a "strange" number, like a large prime. FFTW is a much larger and more complicated library, so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT much slower.
 
@@ -167,25 +167,26 @@ All the available options, or "features" are:
 - `alsa-backend`: Alsa support
 - `pulse-backend`: PulseAudio support
 - `cpal-backend`: Wasapi and CoreAudio support
-- `socketserver`: Websocket server for control
+- `websocket`: Websocket server for control
+- `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
 - `FFTW`: Use FFTW instead of RustFFT
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64)
 
-The first three (`alsa-backend`, `pulse-packend`, `socketserver`) are included in the default features, meaning if you don't specify anything you will get those three.
+The first three (`alsa-backend`, `pulse-packend`, `websocket`) are included in the default features, meaning if you don't specify anything you will get those three.
 Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
 
-Example 1: You want `alsa-backend`, `pulse-backend`, `socketserver` and `FFTW`. The first three are included by default so you only need to add `FFTW`:
+Example 1: You want `alsa-backend`, `pulse-backend`, `websocket` and `FFTW`. The first three are included by default so you only need to add `FFTW`:
 ```
 cargo build --release --features FFTW
 (or)
 cargo install --path . --features FFTW
 ```
 
-Example 2: You want `alsa-backend`, `socketserver`, `32bit` and `FFTW`. Since you don't want `pulse-backend` you have to disable the defaults, and then add both `alsa-backend` and `socketserver`:
+Example 2: You want `alsa-backend`, `websocket`, `32bit` and `FFTW`. Since you don't want `pulse-backend` you have to disable the defaults, and then add both `alsa-backend` and `websocket`:
 ```
-cargo build --release --no-default-features --features alsa-backend --features socketserver --features FFTW --features 32bit
+cargo build --release --no-default-features --features alsa-backend --features websocket --features FFTW --features 32bit
 (or)
-cargo install --path . --no-default-features --features alsa-backend --features socketserver --features FFTW --features 32bit
+cargo install --path . --no-default-features --features alsa-backend --features websocket --features FFTW --features 32bit
 ```
 
 ## Optimize for your system
@@ -208,7 +209,7 @@ RUSTFLAGS='-C target-feature=+neon -C target-cpu=native' cargo build --release
 ## Building on Windows and macOS
 The Alsa and Pulse backends should not be included when building on Windows and macOS. The recommended build command is:
 ```
-RUSTFLAGS='-C target-cpu=native' cargo build --release  --no-default-features --features cpal-backend --features socketserver 
+RUSTFLAGS='-C target-cpu=native' cargo build --release  --no-default-features --features cpal-backend --features websocket
 ```
 On macOS both the PulseAudio and FFTW features can be used. The necessary dependencies can be installed with brew:
 ```
@@ -238,7 +239,7 @@ CamillaDSP 0.4.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
-Built with features: alsa-backend, pulse-backend, socketserver
+Built with features: alsa-backend, pulse-backend, websocket
 
 USAGE:
     camilladsp [FLAGS] [OPTIONS] <configfile>
@@ -252,8 +253,6 @@ FLAGS:
 
 OPTIONS:
     -a, --address <address>    IP address to bind websocket server to
-        --cert <cert>          Path to .pfx/.p12 certificate file
-        --pass <pass>          Password for .pfx/.p12 certificate file
     -p, --port <port>          Port for websocket server
 
 ARGS:

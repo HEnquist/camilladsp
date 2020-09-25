@@ -76,7 +76,7 @@ jobs:
         with:
           command: build
           use-cross: true
-          args: --release --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features socketserver
+          args: --release --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features websocket
         env:
           RUSTFLAGS: "-C target-feature=+neon"
 
@@ -109,7 +109,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --no-default-features --features cpal-backend --features socketserver
+          args: --release --no-default-features --features cpal-backend --features websocket
 
       - name: Compress
         run: powershell Compress-Archive target/release/camilladsp.exe camilladsp.zip
@@ -140,7 +140,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --no-default-features --features cpal-backend --features socketserver
+          args: --release --no-default-features --features cpal-backend --features websocket
 
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp

@@ -177,8 +177,8 @@ In [14]: print(ws.recv())
 {"SetConfig":{"result":"Ok"}}
 ```
 
-## Secure websocket
-The websocket server also supports loading an identity from a .pfx file. 
+## Secure websocket, wss://
+By compiling with the optional feature `secure-websocket`, the websocket server also supports loading an identity from a .pfx file. 
 This is enabled by providing the two optional parameters "cert" and "pass", where "cert" is the path to the .pfx-file containing the identity, and "pass" is the password for the file.
 How to properly generate the identity is outside the scope of this readme, but for simple tests a self-signed certificate can be used.
 

@@ -9,7 +9,7 @@ extern crate fftw;
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
-#[cfg(feature = "socketserver")]
+#[cfg(feature = "secure-websocket")]
 extern crate native_tls;
 extern crate num;
 extern crate rand;
@@ -20,7 +20,7 @@ extern crate rubato;
 extern crate serde;
 extern crate serde_with;
 extern crate signal_hook;
-#[cfg(feature = "socketserver")]
+#[cfg(feature = "websocket")]
 extern crate tungstenite;
 
 #[macro_use]
@@ -62,7 +62,7 @@ pub mod mixer;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;
-#[cfg(feature = "socketserver")]
+#[cfg(feature = "websocket")]
 pub mod socketserver;
 
 pub enum StatusMessage {

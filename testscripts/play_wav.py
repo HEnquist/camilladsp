@@ -11,7 +11,7 @@ try:
     template_file = os.path.abspath(sys.argv[2])
     wav_file = os.path.abspath(sys.argv[3])
 except:
-    print("Usage: start CamillaDSP with the socketserver enabled, and wait mode:")
+    print("Usage: start CamillaDSP with the websocket server enabled, and wait mode:")
     print("> camilladsp -p4321 -w")
     print("Then play a wav file:")
     print("> python play_wav.py 4321 path/to/some/template/config.yml path/to/file.wav")

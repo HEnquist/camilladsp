@@ -2,7 +2,9 @@
 New features:
 - New commands to get more playback information from the websocket server.
 - Changed all websocket commands to use Json input and output.
-- Added support for secure websocket connections (wss)
+- Added support for secure websocket connections (wss).
+- Rename the optional websocket to feature to `websocket`.
+- Add new optional feature `secure-websocket` for wss support.
 
 Bugfixes:
 - Better handling of input device errors, fixes 100% cpu usage after panic.
@@ -15,8 +17,8 @@ New features:
 - Updated Cpal library.
 - Added capture and playback devices Stdin & Stdout.
 - Improved error messages.
-- Improved validation of mixer config
-- Added option to set which IP address to bind websocket server to
+- Improved validation of mixer config.
+- Added option to set which IP address to bind websocket server to.
 
 Bugfixes:
 - Fix websocket `exit` command.
