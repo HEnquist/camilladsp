@@ -11,6 +11,7 @@ use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
     chunk_to_buffer_float_bytes,
 };
+use timer;
 use rubato::Resampler;
 use std::ffi::CString;
 use std::sync::mpsc;
