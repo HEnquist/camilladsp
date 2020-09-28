@@ -46,6 +46,7 @@ pub mod biquad;
 pub mod biquadcombo;
 pub mod config;
 pub mod conversions;
+pub mod countertimer;
 #[cfg(feature = "cpal-backend")]
 pub mod cpaldevice;
 pub mod diffeq;
@@ -64,7 +65,6 @@ pub mod processing;
 pub mod pulsedevice;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
-pub mod countertimer;
 
 pub enum StatusMessage {
     PlaybackReady,

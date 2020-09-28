@@ -231,10 +231,14 @@ fn playback_loop_bytes(
                 if let Ok(status) = pcmdevice.status() {
                     buffer_avg.add_value(status.get_delay() as f64)
                 }
-                if adjust && timer.larger_than_millis((1000.0 * params.adjust_period) as u64)
-                {
+                if adjust && timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
                     if let Some(av_delay) = buffer_avg.get_average() {
-                        let speed = calculate_speed(av_delay, params.target_level, params.adjust_period, srate);
+                        let speed = calculate_speed(
+                            av_delay,
+                            params.target_level,
+                            params.adjust_period,
+                            srate,
+                        );
                         timer.restart();
                         buffer_avg.restart();
                         channels
@@ -336,8 +340,9 @@ fn capture_loop_bytes(
             Ok(_) => {
                 trace!("Captured {} bytes", capture_bytes);
                 averager.add_value(capture_bytes);
-                if averager.larger_than_millis(params.capture_status.read().unwrap().update_interval as u64)
-                {
+                if averager.larger_than_millis(
+                    params.capture_status.read().unwrap().update_interval as u64,
+                ) {
                     let bytes_per_sec = averager.get_average();
                     averager.restart();
                     let measured_rate_f =

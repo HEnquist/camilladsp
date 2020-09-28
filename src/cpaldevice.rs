@@ -4,11 +4,11 @@ use config::{ConfigError, SampleFormat};
 use conversions::{
     chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
 };
+use countertimer;
 use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
 use cpal::{BufferSize, ChannelCount, HostId, SampleRate, StreamConfig};
-use countertimer;
 use rubato::Resampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -278,11 +278,20 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    buffer_avg.add_value((buffer_fill.load(Ordering::Relaxed) / channels_clone) as f64);
-                                    if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64)
+                                    buffer_avg.add_value(
+                                        (buffer_fill.load(Ordering::Relaxed) / channels_clone)
+                                            as f64,
+                                    );
+                                    if adjust
+                                        && timer.larger_than_millis((1000.0 * adjust_period) as u64)
                                     {
                                         if let Some(av_delay) = buffer_avg.get_average() {
-                                            let speed = calculate_speed(av_delay, target_level, adjust_period, samplerate as u32);
+                                            let speed = calculate_speed(
+                                                av_delay,
+                                                target_level,
+                                                adjust_period,
+                                                samplerate as u32,
+                                            );
                                             timer.restart();
                                             buffer_avg.restart();
                                             debug!(

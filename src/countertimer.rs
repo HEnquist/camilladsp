@@ -5,8 +5,6 @@ pub struct Averager {
     nbr_values: usize,
 }
 
-
-
 pub struct Stopwatch {
     start_time: Instant,
     pub value: Duration,
@@ -21,10 +19,7 @@ impl Stopwatch {
     pub fn new() -> Stopwatch {
         let start_time = Instant::now();
         let value = Duration::new(0, 0);
-        Stopwatch {
-            start_time,
-            value
-        }
+        Stopwatch { start_time, value }
     }
 
     pub fn restart(&mut self) {
@@ -58,7 +53,6 @@ impl Default for Stopwatch {
     }
 }
 
-
 impl Averager {
     pub fn new() -> Averager {
         Averager {
@@ -74,14 +68,13 @@ impl Averager {
 
     pub fn add_value(&mut self, value: f64) {
         self.sum += value;
-        self.nbr_values +=1;
+        self.nbr_values += 1;
     }
 
     pub fn get_average(&self) -> Option<f64> {
         if self.nbr_values > 0 {
             Some(self.sum / (self.nbr_values as f64))
-        }
-        else {
+        } else {
             None
         }
     }
@@ -128,7 +121,7 @@ impl Default for TimeAverage {
 
 #[cfg(test)]
 mod tests {
-    use countertimer::{Stopwatch, Averager, TimeAverage};
+    use countertimer::{Averager, Stopwatch, TimeAverage};
     use std::thread;
     use std::time::Duration;
 
@@ -182,11 +175,10 @@ mod tests {
         thread::sleep(Duration::from_millis(10));
         a.add_value(125);
         thread::sleep(Duration::from_millis(10));
-        assert!(a.get_average() > 9000.0);
-        assert!(a.get_average() < 11000.0);
+        assert!(a.get_average() > 7000.0);
+        assert!(a.get_average() < 13000.0);
         a.restart();
         thread::sleep(Duration::from_millis(10));
         assert_eq!(a.get_average(), 0.0);
     }
 }
-

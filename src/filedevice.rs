@@ -65,7 +65,6 @@ struct CaptureChannels {
     command: mpsc::Receiver<CommandMessage>,
 }
 
-
 struct CaptureParams {
     channels: usize,
     bits_per_sample: i32,
@@ -81,7 +80,6 @@ struct CaptureParams {
     async_src: bool,
     capture_status: Arc<RwLock<CaptureStatus>>,
 }
-
 
 /// Start a playback thread listening for AudioMessages via a channel.
 impl PlaybackDevice for FilePlaybackDevice {
@@ -336,8 +334,9 @@ fn capture_loop(
                     break;
                 }
                 averager.add_value(bytes);
-                if averager.larger_than_millis(params.capture_status.read().unwrap().update_interval as u64)
-                {
+                if averager.larger_than_millis(
+                    params.capture_status.read().unwrap().update_interval as u64,
+                ) {
                     let bytes_per_sec = averager.get_average();
                     averager.restart();
                     let measured_rate_f =
