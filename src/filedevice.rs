@@ -6,13 +6,13 @@ use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
     chunk_to_buffer_float_bytes,
 };
+use countertimer;
 use std::fs::File;
 use std::io::ErrorKind;
 use std::io::{stdin, stdout, Read, Write};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use std::time::SystemTime;
 
 use rubato::Resampler;
 
@@ -65,10 +65,6 @@ struct CaptureChannels {
     command: mpsc::Receiver<CommandMessage>,
 }
 
-//struct PlaybackChannels {
-//    audio: mpsc::Receiver<AudioMessage>,
-//    status: mpsc::Sender<StatusMessage>,
-//}
 
 struct CaptureParams {
     channels: usize,
@@ -86,13 +82,7 @@ struct CaptureParams {
     capture_status: Arc<RwLock<CaptureStatus>>,
 }
 
-//struct PlaybackParams {
-//    scalefactor: PrcFmt,
-//    target_level: usize,
-//    adjust_period: f32,
-//    adjust_enabled: bool,
-//}
-//
+
 /// Start a playback thread listening for AudioMessages via a channel.
 impl PlaybackDevice for FilePlaybackDevice {
     fn start(
@@ -111,7 +101,6 @@ impl PlaybackDevice for FilePlaybackDevice {
         let handle = thread::Builder::new()
             .name("FilePlayback".to_string())
             .spawn(move || {
-                //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
                 let file_res: Result<Box<dyn Write>, std::io::Error> = match destination {
                     PlaybackDest::Filename(filename) => {
                         File::create(filename).map(|f| Box::new(f) as Box<dyn Write>)
@@ -124,10 +113,8 @@ impl PlaybackDevice for FilePlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        //let scalefactor = (1<<bits-1) as PrcFmt;
                         let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample as i32 - 1);
                         barrier.wait();
-                        //thread::sleep(delay);
                         debug!("starting playback loop");
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
                         loop {
@@ -270,9 +257,7 @@ fn capture_loop(
     let mut capture_bytes_temp;
     let mut extra_bytes_left = params.extra_bytes;
     let mut nbr_bytes_read = 0;
-    let mut start = SystemTime::now();
-    let mut now;
-    let mut bytes_counter = 0;
+    let mut averager = countertimer::TimeAverage::new();
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     let mut state = ProcessingState::Running;
@@ -350,23 +335,19 @@ fn capture_loop(
                         .unwrap();
                     break;
                 }
-                now = SystemTime::now();
-                bytes_counter += bytes;
-                if now.duration_since(start).unwrap().as_millis() as usize
-                    > params.capture_status.read().unwrap().update_interval
+                averager.add_value(bytes);
+                if averager.larger_than_millis(params.capture_status.read().unwrap().update_interval as u64)
                 {
-                    let meas_time = now.duration_since(start).unwrap().as_secs_f32();
-                    let bytes_per_sec = bytes_counter as f32 / meas_time;
+                    let bytes_per_sec = averager.get_average();
+                    averager.restart();
                     let measured_rate_f =
-                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f32;
+                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
                     trace!("Measured sample rate is {} Hz", measured_rate_f);
                     let mut capt_stat = params.capture_status.write().unwrap();
                     capt_stat.measured_samplerate = measured_rate_f as usize;
                     capt_stat.signal_range = value_range as f32;
                     capt_stat.rate_adjust = rate_adjust as f32;
                     capt_stat.state = state;
-                    start = now;
-                    bytes_counter = 0;
                 }
             }
             Err(err) => {
@@ -379,7 +360,6 @@ fn capture_loop(
                     .unwrap();
             }
         };
-        //let before = Instant::now();
         let mut chunk = build_chunk(
             &buf[0..capture_bytes],
             &params.sample_format,

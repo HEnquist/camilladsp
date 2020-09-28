@@ -8,13 +8,13 @@ use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
 use cpal::{BufferSize, ChannelCount, HostId, SampleRate, StreamConfig};
+use countertimer;
 use rubato::Resampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use std::time::SystemTime;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
@@ -188,12 +188,8 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         let (tx_dev, rx_dev) = mpsc::sync_channel(1);
                         let buffer_fill = Arc::new(AtomicUsize::new(0));
                         let buffer_fill_clone = buffer_fill.clone();
-                        let mut start = SystemTime::now();
-                        let mut now;
-                        let mut delay = 0;
-                        let mut ndelays = 0;
-                        let mut speed;
-                        let mut diff: isize;
+                        let mut buffer_avg = countertimer::Averager::new();
+                        let mut timer = countertimer::Stopwatch::new();
 
                         let stream = match sample_format {
                             SampleFormat::S16LE => {
@@ -226,7 +222,6 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                     },
                                     move |err| error!("an error occurred on stream: {}", err),
                                 );
-                                //stream.play().unwrap();
                                 trace!("i16 output stream ready");
                                 stream
                             }
@@ -257,7 +252,6 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                     },
                                     move |err| error!("an error occurred on stream: {}", err),
                                 );
-                                //stream.play().unwrap();
                                 trace!("f32 output stream ready");
                                 stream
                             }
@@ -284,31 +278,24 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    now = SystemTime::now();
-                                    delay += (buffer_fill.load(Ordering::Relaxed) / channels_clone)
-                                        as isize;
-                                    ndelays += 1;
-                                    if adjust
-                                        && (now.duration_since(start).unwrap().as_millis()
-                                            > ((1000.0 * adjust_period) as u128))
+                                    buffer_avg.add_value((buffer_fill.load(Ordering::Relaxed) / channels_clone) as f64);
+                                    if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64)
                                     {
-                                        let av_delay = delay / ndelays;
-                                        diff = av_delay - target_level as isize;
-                                        let rel_diff = (diff as f64) / (samplerate as f64);
-                                        speed = 1.0 - 0.5 * rel_diff / adjust_period as f64;
-                                        debug!(
-                                            "Current buffer level {}, set capture rate to {}%",
-                                            av_delay,
-                                            100.0 * speed
-                                        );
-                                        start = now;
-                                        delay = 0;
-                                        ndelays = 0;
-                                        status_channel
-                                            .send(StatusMessage::SetSpeed { speed })
-                                            .unwrap();
-                                        playback_status.write().unwrap().buffer_level =
-                                            av_delay as usize;
+                                        if let Some(av_delay) = buffer_avg.get_average() {
+                                            let speed = calculate_speed(av_delay, target_level, adjust_period, samplerate as u32);
+                                            timer.restart();
+                                            buffer_avg.restart();
+                                            debug!(
+                                                "Current buffer level {}, set capture rate to {}%",
+                                                av_delay,
+                                                100.0 * speed
+                                            );
+                                            status_channel
+                                                .send(StatusMessage::SetSpeed { speed })
+                                                .unwrap();
+                                            playback_status.write().unwrap().buffer_level =
+                                                av_delay as usize;
+                                        }
                                     }
                                     tx_dev.send(chunk).unwrap();
                                 }
@@ -433,7 +420,6 @@ impl CaptureDevice for CpalCaptureDevice {
                                     },
                                     move |err| error!("an error occurred on stream: {}", err)
                                 );
-                                //stream.play().unwrap();
                                 trace!("i16 input stream ready");
                                 stream
                             },
@@ -453,7 +439,6 @@ impl CaptureDevice for CpalCaptureDevice {
                                     },
                                     move |err| error!("an error occurred on stream: {}", err)
                                 );
-                                //stream.play().unwrap();
                                 trace!("f32 input stream ready");
                                 stream
                             },
@@ -481,9 +466,7 @@ impl CaptureDevice for CpalCaptureDevice {
                         let mut capture_samples = chunksize_samples;
                         let mut sample_queue_i: VecDeque<i16> = VecDeque::with_capacity(2*chunksize*channels);
                         let mut sample_queue_f: VecDeque<f32> = VecDeque::with_capacity(2*chunksize*channels);
-                        let mut start = SystemTime::now();
-                        let mut now;
-                        let mut sample_counter = 0;
+                        let mut averager = countertimer::TimeAverage::new();
                         let mut value_range = 0.0;
                         let mut rate_adjust = 0.0;
                         let mut state = ProcessingState::Running;
@@ -565,13 +548,12 @@ impl CaptureDevice for CpalCaptureDevice {
                                 },
                                 _ => panic!("Unsupported sample format"),
                             };
-                            now = SystemTime::now();
-                            sample_counter += capture_samples;
-                            if now.duration_since(start).unwrap().as_millis() as usize > capture_status.read().unwrap().update_interval
+                            averager.add_value(capture_samples);
+                            if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                             {
-                                let meas_time = now.duration_since(start).unwrap().as_secs_f32();
-                                let samples_per_sec = sample_counter as f32 / meas_time;
-                                let measured_rate_f = samples_per_sec / channels as f32;
+                                let samples_per_sec = averager.get_average();
+                                averager.restart();
+                                let measured_rate_f = samples_per_sec / channels as f64;
                                 trace!(
                                     "Measured sample rate is {} Hz",
                                     measured_rate_f
@@ -581,8 +563,6 @@ impl CaptureDevice for CpalCaptureDevice {
                                 capt_stat.signal_range = value_range as f32;
                                 capt_stat.rate_adjust = rate_adjust as f32;
                                 capt_stat.state = state;
-                                start = now;
-                                sample_counter = 0;
                             }
                             value_range = chunk.maxval - chunk.minval;
                             trace!("Value range: {}", value_range);

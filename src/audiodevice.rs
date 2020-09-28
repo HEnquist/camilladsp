@@ -460,3 +460,15 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         }),
     }
 }
+
+pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, srate: u32) -> f64 {
+    let diff = avg_level as isize - target_level as isize;
+    let rel_diff = (diff as f64) / (srate as f64);
+    let speed = 1.0 - 0.5 * rel_diff / adjust_period as f64;
+    debug!(
+        "Current buffer level {}, set capture rate to {}%",
+        avg_level,
+        100.0 * speed
+    );
+    speed
+}

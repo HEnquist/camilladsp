@@ -64,7 +64,7 @@ pub mod processing;
 pub mod pulsedevice;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
-pub mod timer;
+pub mod countertimer;
 
 pub enum StatusMessage {
     PlaybackReady,

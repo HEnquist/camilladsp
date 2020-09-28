@@ -10,11 +10,11 @@ use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
     chunk_to_buffer_float_bytes,
 };
+use countertimer;
 use rubato::Resampler;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use std::time::SystemTime;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
@@ -117,7 +117,6 @@ impl PlaybackDevice for PulsePlaybackDevice {
         let handle = thread::Builder::new()
             .name("PulsePlayback".to_string())
             .spawn(move || {
-                //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
                 match open_pulse(
                     devname,
                     samplerate as u32,
@@ -130,11 +129,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        //let scalefactor = (1<<bits-1) as PrcFmt;
                         let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
                         let mut conversion_result;
                         barrier.wait();
-                        //thread::sleep(delay);
                         debug!("starting playback loop");
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
                         loop {
@@ -161,7 +158,6 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         }
                                         _ => panic!("Unsupported sample format!"),
                                     };
-                                    // let _frames = match io.writei(&buffer[..]) {
                                     let write_res = pulsedevice.write(&buffer);
                                     match write_res {
                                         Ok(_) => {}
@@ -290,9 +286,7 @@ impl CaptureDevice for PulseCaptureDevice {
                         let mut buf = vec![0u8; buffer_bytes];
                         let chunksize_bytes = channels * chunksize * store_bytes_per_sample;
                         let mut capture_bytes = chunksize_bytes;
-                        let mut start = SystemTime::now();
-                        let mut now;
-                        let mut bytes_counter = 0;
+                        let mut averager = countertimer::TimeAverage::new();
                         let mut value_range = 0.0;
                         let mut rate_adjust = 0.0;
                         let mut state = ProcessingState::Running;
@@ -332,12 +326,11 @@ impl CaptureDevice for PulseCaptureDevice {
                             let read_res = pulsedevice.read(&mut buf[0..capture_bytes]);
                             match read_res {
                                 Ok(()) => {
-                                    now = SystemTime::now();
-                                    bytes_counter += capture_bytes;
-                                    if now.duration_since(start).unwrap().as_millis() as usize > capture_status.read().unwrap().update_interval {
-                                        let meas_time = now.duration_since(start).unwrap().as_secs_f32();
-                                        let bytes_per_sec = bytes_counter as f32 / meas_time;
-                                        let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f32;
+                                    averager.add_value(capture_bytes);
+                                    if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64) {
+                                        let bytes_per_sec = averager.get_average();
+                                        averager.restart();
+                                        let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
                                         trace!(
                                             "Measured sample rate is {} Hz",
                                             measured_rate_f
@@ -347,8 +340,6 @@ impl CaptureDevice for PulseCaptureDevice {
                                         capt_stat.signal_range = value_range as f32;
                                         capt_stat.rate_adjust = rate_adjust as f32;
                                         capt_stat.state = state;
-                                        start = now;
-                                        bytes_counter = 0;
                                     }
                                 }
                                 Err(msg) => {
@@ -359,7 +350,6 @@ impl CaptureDevice for PulseCaptureDevice {
                                         .unwrap();
                                 }
                             };
-                            //let before = Instant::now();
                             let mut chunk = match sample_format {
                                 SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
                                     buffer_to_chunk_bytes(

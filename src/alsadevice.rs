@@ -11,13 +11,13 @@ use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
     chunk_to_buffer_float_bytes,
 };
-use timer;
+use countertimer;
 use rubato::Resampler;
 use std::ffi::CString;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
@@ -205,12 +205,8 @@ fn playback_loop_bytes(
     params: PlaybackParams,
 ) {
     let srate = pcmdevice.hw_params_current().unwrap().get_rate().unwrap();
-    let mut start = SystemTime::now();
-    let mut now;
-    let mut delay = 0;
-    let mut ndelays = 0;
-    let mut speed;
-    let mut diff: isize;
+    let mut timer = countertimer::Stopwatch::new();
+    let mut buffer_avg = countertimer::Averager::new();
     let mut conversion_result;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
     let target_delay = 1000 * (params.target_level as u64) / srate as u64;
@@ -232,32 +228,21 @@ fn playback_loop_bytes(
                 if conversion_result.1 > 0 {
                     params.playback_status.write().unwrap().clipped_samples += conversion_result.1;
                 }
-                now = SystemTime::now();
                 if let Ok(status) = pcmdevice.status() {
-                    delay += status.get_delay() as isize;
-                    ndelays += 1;
+                    buffer_avg.add_value(status.get_delay() as f64)
                 }
-                if adjust
-                    && (now.duration_since(start).unwrap().as_millis()
-                        > ((1000.0 * params.adjust_period) as u128))
+                if adjust && timer.larger_than_millis((1000.0 * params.adjust_period) as u64)
                 {
-                    let av_delay = delay / ndelays;
-                    diff = av_delay - params.target_level as isize;
-                    let rel_diff = (diff as f64) / (srate as f64);
-                    speed = 1.0 - 0.5 * rel_diff / params.adjust_period as f64;
-                    debug!(
-                        "Current buffer level {}, set capture rate to {}%",
-                        av_delay,
-                        100.0 * speed
-                    );
-                    start = now;
-                    delay = 0;
-                    ndelays = 0;
-                    channels
-                        .status
-                        .send(StatusMessage::SetSpeed { speed })
-                        .unwrap();
-                    params.playback_status.write().unwrap().buffer_level = av_delay as usize;
+                    if let Some(av_delay) = buffer_avg.get_average() {
+                        let speed = calculate_speed(av_delay, params.target_level, params.adjust_period, srate);
+                        timer.restart();
+                        buffer_avg.restart();
+                        channels
+                            .status
+                            .send(StatusMessage::SetSpeed { speed })
+                            .unwrap();
+                        params.playback_status.write().unwrap().buffer_level = av_delay as usize;
+                    }
                 }
 
                 let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay);
@@ -316,9 +301,7 @@ fn capture_loop_bytes(
         }
     }
     let mut capture_bytes = params.chunksize * params.channels * params.store_bytes_per_sample;
-    let mut start = SystemTime::now();
-    let mut now;
-    let mut bytes_counter = 0;
+    let mut averager = countertimer::TimeAverage::new();
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     let mut state = ProcessingState::Running;
@@ -352,23 +335,19 @@ fn capture_loop_bytes(
         match capture_res {
             Ok(_) => {
                 trace!("Captured {} bytes", capture_bytes);
-                now = SystemTime::now();
-                bytes_counter += capture_bytes;
-                if now.duration_since(start).unwrap().as_millis() as usize
-                    > params.capture_status.read().unwrap().update_interval
+                averager.add_value(capture_bytes);
+                if averager.larger_than_millis(params.capture_status.read().unwrap().update_interval as u64)
                 {
-                    let meas_time = now.duration_since(start).unwrap().as_secs_f32();
-                    let bytes_per_sec = bytes_counter as f32 / meas_time;
+                    let bytes_per_sec = averager.get_average();
+                    averager.restart();
                     let measured_rate_f =
-                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f32;
+                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
                     trace!("Measured sample rate is {} Hz", measured_rate_f);
                     let mut capt_stat = params.capture_status.write().unwrap();
                     capt_stat.measured_samplerate = measured_rate_f as usize;
                     capt_stat.signal_range = value_range as f32;
                     capt_stat.rate_adjust = rate_adjust as f32;
                     capt_stat.state = state;
-                    start = now;
-                    bytes_counter = 0;
                 }
             }
             Err(msg) => {
