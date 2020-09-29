@@ -8,6 +8,7 @@ New features:
 
 Bugfixes:
 - Better handling of input device errors, fixes 100% cpu usage after panic.
+- Use `Instant` intead of `SystemTime`to avoid issues when system closk is changed.
 
 
 ## 0.3.2
