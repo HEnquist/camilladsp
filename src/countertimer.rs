@@ -122,16 +122,20 @@ impl Default for TimeAverage {
 #[cfg(test)]
 mod tests {
     use countertimer::{Averager, Stopwatch, TimeAverage};
-    use std::thread;
-    use std::time::Duration;
+    use std::time::Instant;
+
+    fn spinsleep(time: u128) {
+        let start = Instant::now();
+        while Instant::now().duration_since(start).as_millis() <= time {}
+    }
 
     #[test]
     fn stopwatch_as_timer() {
         let mut t = Stopwatch::new();
         assert_eq!(t.larger_than_millis(8), false);
-        thread::sleep(Duration::from_millis(5));
+        spinsleep(5);
         assert_eq!(t.larger_than_millis(8), false);
-        thread::sleep(Duration::from_millis(5));
+        spinsleep(5);
         assert_eq!(t.larger_than_millis(8), true);
         t.restart();
         assert_eq!(t.larger_than_millis(8), false);
@@ -141,11 +145,11 @@ mod tests {
     fn stopwatch() {
         let mut t = Stopwatch::new();
         assert_eq!(t.get_stored_millis(), 0);
-        thread::sleep(Duration::from_millis(10));
+        spinsleep(10);
         assert_eq!(t.get_stored_millis(), 0);
         t.store_and_restart();
-        assert!(t.get_stored_millis() > 9);
-        assert!(t.get_stored_millis() < 11);
+        assert!(t.get_stored_millis() > 8);
+        assert!(t.get_stored_millis() < 12);
         t.store_and_restart();
         assert_eq!(t.get_stored_millis(), 0);
     }
@@ -165,20 +169,20 @@ mod tests {
     #[test]
     fn timeaverage() {
         let mut a = TimeAverage::new();
-        thread::sleep(Duration::from_millis(10));
+        spinsleep(10);
         assert_eq!(a.get_average(), 0.0);
         a.add_value(125);
-        thread::sleep(Duration::from_millis(10));
+        spinsleep(10);
         a.add_value(125);
-        thread::sleep(Duration::from_millis(10));
+        spinsleep(10);
         a.add_value(125);
-        thread::sleep(Duration::from_millis(10));
+        spinsleep(10);
         a.add_value(125);
-        thread::sleep(Duration::from_millis(10));
+        spinsleep(10);
         assert!(a.get_average() > 7000.0);
         assert!(a.get_average() < 13000.0);
         a.restart();
-        thread::sleep(Duration::from_millis(10));
+        spinsleep(10);
         assert_eq!(a.get_average(), 0.0);
     }
 }
