@@ -368,7 +368,6 @@ impl CaptureDevice for PulseCaptureDevice {
                                 _ => panic!("Unsupported sample format"),
                             };
                             value_range = chunk.maxval - chunk.minval;
-                            trace!("Value range: {}", value_range);
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {

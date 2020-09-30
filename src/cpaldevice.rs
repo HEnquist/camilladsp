@@ -573,7 +573,6 @@ impl CaptureDevice for CpalCaptureDevice {
                                 capt_stat.state = state;
                             }
                             value_range = chunk.maxval - chunk.minval;
-                            trace!("Value range: {}", value_range);
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
