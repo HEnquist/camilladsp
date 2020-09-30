@@ -72,8 +72,9 @@ struct CaptureParams {
     store_bytes_per_sample: usize,
     extra_bytes: usize,
     buffer_bytes: usize,
-    silent_limit: usize,
-    silence: PrcFmt,
+    capture_samplerate: usize,
+    silence_timeout: PrcFmt,
+    silence_threshold: PrcFmt,
     chunksize: usize,
     resampling_ratio: f32,
     read_bytes: usize,
@@ -247,7 +248,6 @@ fn capture_loop(
 ) {
     debug!("starting captureloop");
     let scalefactor = (2.0 as PrcFmt).powi(params.bits_per_sample - 1);
-    let mut silent_nbr: usize = 0;
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];
     let mut bytes_read = 0;
@@ -256,6 +256,12 @@ fn capture_loop(
     let mut extra_bytes_left = params.extra_bytes;
     let mut nbr_bytes_read = 0;
     let mut averager = countertimer::TimeAverage::new();
+    let mut silence_counter = countertimer::SilenceCounter::new(
+        params.silence_threshold,
+        params.silence_timeout,
+        params.capture_samplerate,
+        params.chunksize,
+    );
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     let mut state = ProcessingState::Running;
@@ -369,21 +375,8 @@ fn capture_loop(
             scalefactor,
         );
         value_range = chunk.maxval - chunk.minval;
-        trace!("Value range: {}", value_range);
-        if (value_range) > params.silence {
-            if silent_nbr > params.silent_limit {
-                state = ProcessingState::Running;
-                debug!("Resuming processing");
-            }
-            silent_nbr = 0;
-        } else if params.silent_limit > 0 {
-            if silent_nbr == params.silent_limit {
-                state = ProcessingState::Paused;
-                debug!("Pausing processing");
-            }
-            silent_nbr += 1;
-        }
-        if silent_nbr <= params.silent_limit {
+        state = silence_counter.update(value_range);
+        if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
                 let new_waves = resampl.process(&chunk.waveforms).unwrap();
                 chunk.frames = new_waves[0].len();
@@ -432,9 +425,8 @@ impl CaptureDevice for FileCaptureDevice {
         let extra_bytes = self.extra_samples * store_bytes_per_sample * channels;
         let skip_bytes = self.skip_bytes;
         let read_bytes = self.read_bytes;
-        let mut silence: PrcFmt = 10.0;
-        silence = silence.powf(self.silence_threshold / 20.0);
-        let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
+        let silence_timeout = self.silence_timeout;
+        let silence_threshold = self.silence_threshold;
         let handle = thread::Builder::new()
             .name("FileCapture".to_string())
             .spawn(move || {
@@ -457,13 +449,14 @@ impl CaptureDevice for FileCaptureDevice {
                     store_bytes_per_sample,
                     extra_bytes,
                     buffer_bytes,
-                    silent_limit,
-                    silence,
+                    silence_threshold,
+                    silence_timeout,
                     chunksize,
                     resampling_ratio: samplerate as f32 / capture_samplerate as f32,
                     read_bytes,
                     async_src,
                     capture_status,
+                    capture_samplerate,
                 };
                 let file_res: Result<Box<dyn Read>, std::io::Error> = match source {
                     CaptureSource::Filename(filename) => {

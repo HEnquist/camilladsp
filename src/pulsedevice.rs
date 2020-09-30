@@ -249,9 +249,8 @@ impl CaptureDevice for PulseCaptureDevice {
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let async_src = resampler_is_async(&resampler_conf);
-        let mut silence: PrcFmt = 10.0;
-        silence = silence.powf(self.silence_threshold / 20.0);
-        let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
+        let silence_timeout = self.silence_timeout;
+        let silence_threshold = self.silence_threshold;
         let handle = thread::Builder::new()
             .name("PulseCapture".to_string())
             .spawn(move || {
@@ -280,13 +279,13 @@ impl CaptureDevice for PulseCaptureDevice {
                             Err(_err) => {}
                         }
                         let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
-                        let mut silent_nbr: usize = 0;
                         barrier.wait();
                         debug!("starting captureloop");
                         let mut buf = vec![0u8; buffer_bytes];
                         let chunksize_bytes = channels * chunksize * store_bytes_per_sample;
                         let mut capture_bytes = chunksize_bytes;
                         let mut averager = countertimer::TimeAverage::new();
+                        let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                         let mut value_range = 0.0;
                         let mut rate_adjust = 0.0;
                         let mut state = ProcessingState::Running;
@@ -370,20 +369,8 @@ impl CaptureDevice for PulseCaptureDevice {
                             };
                             value_range = chunk.maxval - chunk.minval;
                             trace!("Value range: {}", value_range);
-                            if (value_range) > silence {
-                                if silent_nbr > silent_limit {
-                                    state = ProcessingState::Running;
-                                    debug!("Resuming processing");
-                                }
-                                silent_nbr = 0;
-                            } else if silent_limit > 0 {
-                                if silent_nbr == silent_limit {
-                                    state = ProcessingState::Paused;
-                                    debug!("Pausing processing");
-                                }
-                                silent_nbr += 1;
-                            }
-                            if silent_nbr <= silent_limit {
+                            state = silence_counter.update(value_range);
+                            if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
                                     let new_waves = resampl.process(&chunk.waveforms).unwrap();
                                     chunk.frames = new_waves[0].len();

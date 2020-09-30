@@ -1,4 +1,6 @@
 use std::time::{Duration, Instant};
+use PrcFmt;
+use ProcessingState;
 
 pub struct Averager {
     sum: f64,
@@ -13,6 +15,52 @@ pub struct Stopwatch {
 pub struct TimeAverage {
     sum: usize,
     timer: Stopwatch,
+}
+
+pub struct SilenceCounter {
+    silence_threshold: PrcFmt,
+    silence_limit_nbr: usize,
+    silent_nbr: usize,
+}
+
+impl SilenceCounter {
+    pub fn new(
+        silence_threshold_db: PrcFmt,
+        silence_timeout: PrcFmt,
+        samplerate: usize,
+        chunksize: usize,
+    ) -> SilenceCounter {
+        let silence_threshold = (10.0 as PrcFmt).powf(silence_threshold_db / 20.0);
+        let silence_limit_nbr = (silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
+        SilenceCounter {
+            silence_threshold,
+            silence_limit_nbr,
+            silent_nbr: 0,
+        }
+    }
+
+    pub fn update(&mut self, value_range: PrcFmt) -> ProcessingState {
+        trace!("Value range: {}", value_range);
+        let mut state = ProcessingState::Running;
+        if self.silence_limit_nbr > 0 {
+            if value_range > self.silence_threshold {
+                if self.silent_nbr > self.silence_limit_nbr {
+                    debug!("Resuming processing");
+                }
+                self.silent_nbr = 0;
+            } else {
+                if self.silent_nbr == self.silence_limit_nbr {
+                    debug!("Pausing processing");
+                }
+                if self.silent_nbr >= self.silence_limit_nbr {
+                    trace!("Pausing processing");
+                    state = ProcessingState::Paused;
+                }
+                self.silent_nbr += 1;
+            }
+        }
+        state
+    }
 }
 
 impl Stopwatch {
@@ -121,8 +169,9 @@ impl Default for TimeAverage {
 
 #[cfg(test)]
 mod tests {
-    use countertimer::{Averager, Stopwatch, TimeAverage};
+    use countertimer::{Averager, SilenceCounter, Stopwatch, TimeAverage};
     use std::time::Instant;
+    use ProcessingState;
 
     fn spinsleep(time: u128) {
         let start = Instant::now();
@@ -184,5 +233,29 @@ mod tests {
         a.restart();
         spinsleep(10);
         assert_eq!(a.get_average(), 0.0);
+    }
+
+    #[test]
+    fn silencecounter() {
+        let mut counter = SilenceCounter::new(-40.0, 3.0, 48000, 1024);
+        let limit_nbr = 3 * (48000 / 1024);
+        assert_eq!(counter.silence_limit_nbr, limit_nbr);
+        assert_eq!(counter.silence_threshold, 0.01);
+        for _ in 0..(2 * limit_nbr) {
+            let state = counter.update(0.1);
+            assert_eq!(state, ProcessingState::Running);
+        }
+        for _ in 0..(limit_nbr) {
+            let state = counter.update(0.001);
+            assert_eq!(state, ProcessingState::Running);
+        }
+        for _ in 0..(2 * limit_nbr) {
+            let state = counter.update(0.001);
+            assert_eq!(state, ProcessingState::Paused);
+        }
+        for _ in 0..(2 * limit_nbr) {
+            let state = counter.update(0.1);
+            assert_eq!(state, ProcessingState::Running);
+        }
     }
 }

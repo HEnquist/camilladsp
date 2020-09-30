@@ -45,7 +45,6 @@ pub struct AlsaPlaybackDevice {
 pub struct AlsaCaptureDevice {
     pub devname: String,
     pub samplerate: usize,
-    //pub resampler: Option<Box<dyn Resampler<PrcFmt>>>,
     pub enable_resampling: bool,
     pub capture_samplerate: usize,
     pub resampler_conf: config::Resampler,
@@ -70,8 +69,8 @@ struct PlaybackChannels {
 struct CaptureParams {
     channels: usize,
     scalefactor: PrcFmt,
-    silent_limit: usize,
-    silence: PrcFmt,
+    silence_timeout: PrcFmt,
+    silence_threshold: PrcFmt,
     chunksize: usize,
     bits_per_sample: i32,
     store_bytes_per_sample: usize,
@@ -283,7 +282,6 @@ fn capture_loop_bytes(
     params: CaptureParams,
     mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
 ) {
-    let mut silent_nbr: usize = 0;
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
@@ -306,9 +304,15 @@ fn capture_loop_bytes(
     }
     let mut capture_bytes = params.chunksize * params.channels * params.store_bytes_per_sample;
     let mut averager = countertimer::TimeAverage::new();
-    let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
+    let mut silence_counter = countertimer::SilenceCounter::new(
+        params.silence_threshold,
+        params.silence_timeout,
+        params.capture_samplerate,
+        params.chunksize,
+    );
     let mut state = ProcessingState::Running;
+    let mut value_range = 0.0;
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -381,21 +385,8 @@ fn capture_loop_bytes(
             )
         };
         value_range = chunk.maxval - chunk.minval;
-        trace!("Value range: {}", value_range);
-        if value_range > params.silence {
-            if silent_nbr > params.silent_limit {
-                state = ProcessingState::Running;
-                debug!("Resuming processing");
-            }
-            silent_nbr = 0;
-        } else if params.silent_limit > 0 {
-            if silent_nbr == params.silent_limit {
-                state = ProcessingState::Paused;
-                debug!("Pausing processing");
-            }
-            silent_nbr += 1;
-        }
-        if silent_nbr <= params.silent_limit {
+        state = silence_counter.update(value_range);
+        if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
                 let new_waves = resampl.process(&chunk.waveforms).unwrap();
                 chunk.frames = new_waves[0].len();
@@ -456,7 +447,6 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let handle = thread::Builder::new()
             .name("AlsaPlayback".to_string())
             .spawn(move || {
-                //let delay = time::Duration::from_millis((4*1000*chunksize/samplerate) as u64);
                 match open_pcm(
                     devname,
                     samplerate as u32,
@@ -470,11 +460,9 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        //let scalefactor = (1<<bits-1) as PrcFmt;
                         let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
 
                         barrier.wait();
-                        //thread::sleep(delay);
                         debug!("Starting playback loop");
                         let pb_params = PlaybackParams {
                             scalefactor,
@@ -534,9 +522,8 @@ impl CaptureDevice for AlsaCaptureDevice {
         let bits_per_sample = self.sample_format.bits_per_sample() as i32;
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let floats = self.sample_format.is_float();
-        let mut silence: PrcFmt = 10.0;
-        silence = silence.powf(self.silence_threshold / 20.0);
-        let silent_limit = (self.silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
+        let silence_timeout = self.silence_timeout;
+        let silence_threshold = self.silence_threshold;
         let sample_format = self.sample_format.clone();
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
@@ -575,8 +562,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                         let cap_params = CaptureParams {
                             channels,
                             scalefactor,
-                            silent_limit,
-                            silence,
+                            silence_timeout,
+                            silence_threshold,
                             chunksize,
                             bits_per_sample,
                             store_bytes_per_sample,
