@@ -42,7 +42,7 @@ The available commands are listed below. All commands return the result, and for
 ### General
 - `GetVersion` : read the CamillaDSP version
   * returns the version as a string, like `1.2.3` 
-- `Stop` : stop processing and wait for a new config to be uploaded with `SetConfig`
+- `Stop` : stop processing and wait for a new config to be uploaded either with `SetConfig` or with `SetConfigName`+`Reload`.
 - `Exit` : stop processing and exit
 
 ### Websocket server settings

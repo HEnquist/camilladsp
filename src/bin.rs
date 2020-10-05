@@ -487,6 +487,26 @@ fn main() {
             if signal_exit.load(Ordering::Relaxed) == 1 {
                 // exit requested
                 break;
+            } else if signal_reload.load(Ordering::Relaxed) {
+                debug!("Reloading configuration...");
+                signal_reload.store(false, Ordering::Relaxed);
+                let conf_loaded = get_new_config(&active_config_path, &new_config);
+                match conf_loaded {
+                    Ok(conf) => {
+                        debug!(
+                            "Loaded config file: {:?}",
+                            active_config_path.lock().unwrap()
+                        );
+                        *new_config.lock().unwrap() = Some(conf);
+                    }
+                    Err(err) => {
+                        error!(
+                            "Could not load config: {:?}, error: {}",
+                            active_config_path.lock().unwrap(),
+                            err
+                        );
+                    }
+                }
             }
             thread::sleep(delay);
         }
