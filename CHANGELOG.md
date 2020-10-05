@@ -5,6 +5,7 @@ New features:
 - Added support for secure websocket connections (wss).
 - Rename the optional websocket to feature to `websocket`.
 - Add new optional feature `secure-websocket` for wss support.
+- Added an option to generate arbitrary length filters for testing convolution cpu load.
 
 Bugfixes:
 - Better handling of input device errors, fixes 100% cpu usage after panic.

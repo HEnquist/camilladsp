@@ -68,7 +68,9 @@ impl FFTConv {
 
     pub fn from_config(name: String, data_length: usize, conf: config::ConvParameters) -> Self {
         let values = match conf {
-            config::ConvParameters::Values { values } => values,
+            config::ConvParameters::Values { values, length } => {
+                filters::pad_vector(&values, length)
+            }
             config::ConvParameters::File {
                 filename,
                 format,
@@ -137,7 +139,9 @@ impl Filter for FFTConv {
     fn update_parameters(&mut self, conf: config::Filter) {
         if let config::Filter::Conv { parameters: conf } = conf {
             let coeffs = match conf {
-                config::ConvParameters::Values { values } => values,
+                config::ConvParameters::Values { values, length } => {
+                    filters::pad_vector(&values, length)
+                }
                 config::ConvParameters::File {
                     filename,
                     format,
@@ -225,7 +229,10 @@ mod tests {
     #[test]
     fn check_result() {
         let coeffs = vec![0.5, 0.5];
-        let conf = ConvParameters::Values { values: coeffs };
+        let conf = ConvParameters::Values {
+            values: coeffs,
+            length: 0,
+        };
         let mut filter = FFTConv::from_config("test".to_string(), 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];

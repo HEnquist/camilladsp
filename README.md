@@ -670,7 +670,9 @@ filters:
     parameters:
       type: Values
       values: [0.0, 0.1, 0.2, 0.3]
+      length: 12345
 ```
+The `length` setting is optional. It is used to extend the number of coefficients past the ones given in `values`. The added coefficients are all zeroes. This is intended to provide an easy way to evaluating the CPU load for different filter lengths.
 
 The File type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
 * `skip_bytes_lines`: Number of bytes (for raw files) or lines (for text) to skip at the beginning of the file. This can be used to skip over a header. Leaving it out or setting to zero means no bytes or lines are skipped. 

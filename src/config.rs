@@ -319,6 +319,8 @@ pub enum ConvParameters {
     },
     Values {
         values: Vec<PrcFmt>,
+        #[serde(default)]
+        length: usize,
     },
 }
 
@@ -330,7 +332,10 @@ impl Default for FileFormat {
 
 impl Default for ConvParameters {
     fn default() -> Self {
-        ConvParameters::Values { values: vec![1.0] }
+        ConvParameters::Values {
+            values: vec![1.0],
+            length: 0,
+        }
     }
 }
 
