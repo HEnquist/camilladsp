@@ -164,7 +164,7 @@ fn run(
             barrier_cap,
             tx_status_cap,
             rx_command_cap,
-            capture_status.clone(),
+            capture_status,
         )
         .unwrap();
 
@@ -491,6 +491,10 @@ fn main() {
     loop {
         debug!("Wait for config");
         while new_config.lock().unwrap().is_none() {
+            if !wait {
+                debug!("Not config and not wait mode, exiting!");
+                return;
+            }
             trace!("waiting...");
             if signal_exit.load(Ordering::Relaxed) == ExitRequest::EXIT {
                 // exit requested
