@@ -53,6 +53,7 @@ use camillalib::ExitState;
 use camillalib::CaptureStatus;
 use camillalib::PlaybackStatus;
 use camillalib::ProcessingState;
+use camillalib::ExitRequest;
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
@@ -111,6 +112,8 @@ fn run(
     capture_status: Arc<RwLock<CaptureStatus>>,
     playback_status: Arc<RwLock<PlaybackStatus>>,
 ) -> Res<ExitState> {
+    capture_status.write().unwrap().state = ProcessingState::Starting;
+    let mut is_starting = true;
     let conf = match new_config_shared.lock().unwrap().clone() {
         Some(cfg) => cfg,
         None => {
@@ -142,6 +145,7 @@ fn run(
     *active_config_shared.lock().unwrap() = Some(active_config.clone());
     *new_config_shared.lock().unwrap() = None;
     signal_reload.store(false, Ordering::Relaxed);
+    signal_exit.store(ExitRequest::NONE, Ordering::Relaxed);
 
     // Processing thread
     processing::run_processing(conf_proc, barrier_proc, tx_pb, rx_cap, rx_pipeconf);
@@ -160,7 +164,7 @@ fn run(
             barrier_cap,
             tx_status_cap,
             rx_command_cap,
-            capture_status,
+            capture_status.clone(),
         )
         .unwrap();
 
@@ -210,30 +214,32 @@ fn run(
                 }
             };
         }
-        match signal_exit.load(Ordering::Relaxed) {
-            1 => {
-                debug!("Exit requested...");
-                signal_exit.store(0, Ordering::Relaxed);
-                tx_command_cap.send(CommandMessage::Exit).unwrap();
-                trace!("Wait for pb..");
-                pb_handle.join().unwrap();
-                trace!("Wait for cap..");
-                cap_handle.join().unwrap();
-                return Ok(ExitState::Exit);
-            }
-            2 => {
-                debug!("Stop requested...");
-                signal_exit.store(0, Ordering::Relaxed);
-                tx_command_cap.send(CommandMessage::Exit).unwrap();
-                trace!("Wait for pb..");
-                pb_handle.join().unwrap();
-                trace!("Wait for cap..");
-                cap_handle.join().unwrap();
-                *new_config_shared.lock().unwrap() = None;
-                return Ok(ExitState::Restart);
-            }
-            _ => {}
-        };
+        if !is_starting {
+            match signal_exit.load(Ordering::Relaxed) {
+                ExitRequest::EXIT => {
+                    debug!("Exit requested...");
+                    signal_exit.store(0, Ordering::Relaxed);
+                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    trace!("Wait for pb..");
+                    pb_handle.join().unwrap();
+                    trace!("Wait for cap..");
+                    cap_handle.join().unwrap();
+                    return Ok(ExitState::Exit);
+                }
+                ExitRequest::STOP => {
+                    debug!("Stop requested...");
+                    signal_exit.store(0, Ordering::Relaxed);
+                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    trace!("Wait for pb..");
+                    pb_handle.join().unwrap();
+                    trace!("Wait for cap..");
+                    cap_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
+                }
+                _ => {}
+            };
+        }
         match rx_status.recv_timeout(delay) {
             Ok(msg) => match msg {
                 StatusMessage::PlaybackReady => {
@@ -241,6 +247,7 @@ fn run(
                     pb_ready = true;
                     if cap_ready {
                         barrier.wait();
+                        is_starting = false;
                     }
                 }
                 StatusMessage::CaptureReady => {
@@ -248,6 +255,7 @@ fn run(
                     cap_ready = true;
                     if pb_ready {
                         barrier.wait();
+                        is_starting = false;
                     }
                 }
                 StatusMessage::PlaybackError { message } => {
@@ -484,9 +492,9 @@ fn main() {
         debug!("Wait for config");
         while new_config.lock().unwrap().is_none() {
             trace!("waiting...");
-            if signal_exit.load(Ordering::Relaxed) == 1 {
+            if signal_exit.load(Ordering::Relaxed) == ExitRequest::EXIT {
                 // exit requested
-                break;
+                return;
             } else if signal_reload.load(Ordering::Relaxed) {
                 debug!("Reloading configuration...");
                 signal_reload.store(false, Ordering::Relaxed);
@@ -531,10 +539,7 @@ fn main() {
             Ok(ExitState::Exit) => {
                 debug!("Exiting");
                 *active_config.lock().unwrap() = None;
-                if !wait || signal_exit.load(Ordering::Relaxed) == 1 {
-                    // wait mode not active, or exit requested
-                    break;
-                }
+                break;
             }
             Ok(ExitState::Restart) => {
                 *active_config.lock().unwrap() = None;

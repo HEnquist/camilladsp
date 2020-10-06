@@ -91,6 +91,15 @@ pub enum ProcessingState {
     Running,
     Paused,
     Inactive,
+    Starting,
+}
+
+pub struct ExitRequest {}
+
+impl ExitRequest {
+    pub const NONE: usize = 0;
+    pub const EXIT: usize = 1;
+    pub const STOP: usize = 2;
 }
 
 #[derive(Clone, Debug)]
@@ -114,6 +123,7 @@ impl fmt::Display for ProcessingState {
             ProcessingState::Running => "RUNNING",
             ProcessingState::Paused => "PAUSED",
             ProcessingState::Inactive => "INACTIVE",
+            ProcessingState::Starting => "STARTING",
         };
         write!(f, "{}", desc)
     }
