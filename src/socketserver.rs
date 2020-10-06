@@ -16,8 +16,8 @@ use tungstenite::WebSocket;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use config;
-use ProcessingState;
 use ExitRequest;
+use ProcessingState;
 use Res;
 
 #[derive(Debug, Clone)]
@@ -490,13 +490,17 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
         }
         WSCommand::Stop => {
             *shared_data_inst.new_config.lock().unwrap() = None;
-            shared_data_inst.signal_exit.store(ExitRequest::STOP, Ordering::Relaxed);
+            shared_data_inst
+                .signal_exit
+                .store(ExitRequest::STOP, Ordering::Relaxed);
             Some(WSReply::Stop {
                 result: WSResult::Ok,
             })
         }
         WSCommand::Exit => {
-            shared_data_inst.signal_exit.store(ExitRequest::EXIT, Ordering::Relaxed);
+            shared_data_inst
+                .signal_exit
+                .store(ExitRequest::EXIT, Ordering::Relaxed);
             Some(WSReply::Exit {
                 result: WSResult::Ok,
             })

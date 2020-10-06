@@ -51,9 +51,9 @@ use camillalib::CommandMessage;
 use camillalib::ExitState;
 
 use camillalib::CaptureStatus;
+use camillalib::ExitRequest;
 use camillalib::PlaybackStatus;
 use camillalib::ProcessingState;
-use camillalib::ExitRequest;
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
