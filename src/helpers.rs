@@ -1,4 +1,4 @@
-use num::Complex;
+use num_complex::Complex;
 use PrcFmt;
 
 // element-wise product, result = slice_a * slice_b

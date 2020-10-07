@@ -13,6 +13,7 @@ use std::io::{stdin, stdout, Read, Write};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
+use std::time::Duration;
 
 use rubato::Resampler;
 
@@ -530,7 +531,9 @@ fn read_retry(file: &mut dyn Read, mut buf: &mut [u8]) -> Res<usize> {
                 let tmp = buf;
                 buf = &mut tmp[n..];
             }
-            Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
+            Err(ref e) if e.kind() == ErrorKind::Interrupted => {
+                thread::sleep(Duration::from_millis(10))
+            }
             Err(e) => return Err(Box::new(e)),
         }
     }

@@ -1,5 +1,5 @@
 use audiodevice::*;
-use num;
+use num_traits;
 use std::collections::VecDeque;
 use std::convert::TryInto;
 use PrcFmt;
@@ -220,7 +220,7 @@ pub fn buffer_to_chunk_float_bytes(
 
 /// Convert an AudioChunk to an interleaved queue of ints.
 #[allow(dead_code)]
-pub fn chunk_to_queue_int<T: num::traits::cast::NumCast>(
+pub fn chunk_to_queue_int<T: num_traits::cast::NumCast>(
     chunk: AudioChunk,
     queue: &mut VecDeque<T>,
     scalefactor: PrcFmt,
@@ -251,11 +251,11 @@ pub fn chunk_to_queue_int<T: num::traits::cast::NumCast>(
                 }
                 float_val = minval;
             }
-            value = match num::traits::cast(float_val * scalefactor) {
+            value = match num_traits::cast(float_val * scalefactor) {
                 Some(val) => val,
                 None => {
                     debug!("bad float {}", float_val);
-                    num::traits::cast(0.0).unwrap()
+                    num_traits::cast(0.0).unwrap()
                 }
             };
             queue.push_back(value);
@@ -273,7 +273,7 @@ pub fn chunk_to_queue_int<T: num::traits::cast::NumCast>(
 
 /// Convert a buffer of interleaved ints to an AudioChunk.
 #[allow(dead_code)]
-pub fn queue_to_chunk_int<T: num::traits::cast::AsPrimitive<PrcFmt>>(
+pub fn queue_to_chunk_int<T: num_traits::cast::AsPrimitive<PrcFmt>>(
     queue: &mut VecDeque<T>,
     num_frames: usize,
     channels: usize,
@@ -304,7 +304,7 @@ pub fn queue_to_chunk_int<T: num::traits::cast::AsPrimitive<PrcFmt>>(
 
 /// Convert an AudioChunk to an interleaved buffer of floats.
 #[allow(dead_code)]
-pub fn chunk_to_queue_float<T: num::traits::cast::NumCast>(
+pub fn chunk_to_queue_float<T: num_traits::cast::NumCast>(
     chunk: AudioChunk,
     queue: &mut VecDeque<T>,
 ) -> usize {
@@ -331,11 +331,11 @@ pub fn chunk_to_queue_float<T: num::traits::cast::NumCast>(
                 }
                 float_val = minval;
             }
-            value = match num::traits::cast(float_val) {
+            value = match num_traits::cast(float_val) {
                 Some(val) => val,
                 None => {
                     debug!("bad float{}", float_val);
-                    num::traits::cast(0.0).unwrap()
+                    num_traits::cast(0.0).unwrap()
                 }
             };
             queue.push_back(value);
@@ -353,7 +353,7 @@ pub fn chunk_to_queue_float<T: num::traits::cast::NumCast>(
 
 /// Convert a buffer of interleaved ints to an AudioChunk.
 #[allow(dead_code)]
-pub fn queue_to_chunk_float<T: num::traits::cast::AsPrimitive<PrcFmt>>(
+pub fn queue_to_chunk_float<T: num_traits::cast::AsPrimitive<PrcFmt>>(
     queue: &mut VecDeque<T>,
     num_frames: usize,
     channels: usize,

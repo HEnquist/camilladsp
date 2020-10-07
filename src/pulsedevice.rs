@@ -15,6 +15,7 @@ use rubato::Resampler;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
@@ -131,7 +132,10 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         }
                         let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
                         let mut conversion_result;
+                        let chunk_duration =
+                            Duration::from_micros(((900000 * chunksize) / samplerate) as u64);
                         barrier.wait();
+                        let mut last_instant = Instant::now();
                         debug!("starting playback loop");
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
                         loop {
@@ -158,7 +162,12 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         }
                                         _ => panic!("Unsupported sample format!"),
                                     };
+                                    thread::sleep(
+                                        chunk_duration
+                                            - Instant::now().duration_since(last_instant),
+                                    );
                                     let write_res = pulsedevice.write(&buffer);
+                                    last_instant = Instant::now();
                                     match write_res {
                                         Ok(_) => {}
                                         Err(msg) => {
@@ -289,6 +298,8 @@ impl CaptureDevice for PulseCaptureDevice {
                         let mut value_range = 0.0;
                         let mut rate_adjust = 0.0;
                         let mut state = ProcessingState::Running;
+                        let chunk_duration = Duration::from_micros(((900000*chunksize)/samplerate) as u64);
+                        let mut last_instant = Instant::now();
                         loop {
                             match command_channel.try_recv() {
                                 Ok(CommandMessage::Exit) => {
@@ -322,7 +333,11 @@ impl CaptureDevice for PulseCaptureDevice {
                                 debug!("Capture buffer too small, extending");
                                 buf.append(&mut vec![0u8; capture_bytes - buf.len()]);
                             }
+                            thread::sleep(chunk_duration - Instant::now().duration_since(last_instant));
+                            let start = Instant::now();
                             let read_res = pulsedevice.read(&mut buf[0..capture_bytes]);
+                            debug!("read took {} ms", Instant::now().duration_since(start).as_millis());
+                            last_instant = Instant::now();
                             match read_res {
                                 Ok(()) => {
                                     averager.add_value(capture_bytes);

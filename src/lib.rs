@@ -11,7 +11,9 @@ extern crate libpulse_binding as pulse;
 extern crate libpulse_simple_binding as psimple;
 #[cfg(feature = "secure-websocket")]
 extern crate native_tls;
-extern crate num;
+extern crate num_complex;
+extern crate num_integer;
+extern crate num_traits;
 extern crate rand;
 extern crate rand_distr;
 #[cfg(not(feature = "FFTW"))]

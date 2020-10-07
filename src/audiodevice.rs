@@ -5,7 +5,7 @@ use config;
 #[cfg(feature = "cpal-backend")]
 use cpaldevice;
 use filedevice;
-use num::integer;
+use num_integer as integer;
 #[cfg(feature = "pulse-backend")]
 use pulsedevice;
 use rubato::{

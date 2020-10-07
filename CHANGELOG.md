@@ -11,6 +11,8 @@ New features:
 Bugfixes:
 - Better handling of input device errors, fixes 100% cpu usage after panic.
 - Use `Instant` instead of `SystemTime`to avoid issues when system clock is changed.
+- Fix 100% cpu when Stdin doesn't provide any data.
+- Reduce cpu usage when using PulseAudio.
 
 
 ## 0.3.2
