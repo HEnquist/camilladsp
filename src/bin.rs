@@ -259,15 +259,26 @@ fn run(
                 }
                 StatusMessage::PlaybackError { message } => {
                     error!("Playback error: {}", message);
-                    return Ok(ExitState::Exit);
+                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    trace!("Wait for cap to exit..");
+                    if is_starting {
+                        barrier.wait();
+                    }
+                    cap_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureError { message } => {
                     error!("Capture error: {}", message);
-                    return Ok(ExitState::Exit);
+                    if is_starting {
+                        barrier.wait();
+                    }
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
                 }
                 StatusMessage::PlaybackDone => {
                     info!("Playback finished");
-                    return Ok(ExitState::Exit);
+                    return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureDone => {
                     info!("Capture finished");

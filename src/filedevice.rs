@@ -170,6 +170,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
+                        barrier.wait();
                     }
                 }
             })
@@ -495,6 +496,7 @@ impl CaptureDevice for FileCaptureDevice {
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }
+                        barrier.wait();
                     }
                 }
             })

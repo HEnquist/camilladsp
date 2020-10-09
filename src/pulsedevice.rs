@@ -203,6 +203,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
+                        barrier.wait();
                     }
                 }
             })
@@ -406,6 +407,7 @@ impl CaptureDevice for PulseCaptureDevice {
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }
+                        barrier.wait();
                     }
                 }
             })

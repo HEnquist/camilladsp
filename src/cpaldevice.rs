@@ -327,6 +327,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
+                        barrier.wait();
                     }
                 }
             })
@@ -596,6 +597,7 @@ impl CaptureDevice for CpalCaptureDevice {
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }
+                        barrier.wait();
                     }
                 }
             })
