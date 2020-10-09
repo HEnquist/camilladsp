@@ -250,6 +250,7 @@ fn capture_loop(
     debug!("starting captureloop");
     let scalefactor = (2.0 as PrcFmt).powi(params.bits_per_sample - 1);
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
+    let bytes_per_frame = params.channels * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];
     let mut bytes_read = 0;
     let mut capture_bytes = chunksize_bytes;
@@ -388,6 +389,9 @@ fn capture_loop(
             }
             let msg = AudioMessage::Audio(chunk);
             msg_channels.audio.send(msg).unwrap();
+        }
+        else {
+            sleep_until_next(bytes_per_frame, params.capture_samplerate, capture_bytes);
         }
     }
     let mut capt_stat = params.capture_status.write().unwrap();
@@ -532,6 +536,7 @@ fn read_retry(file: &mut dyn Read, mut buf: &mut [u8]) -> Res<usize> {
                 buf = &mut tmp[n..];
             }
             Err(ref e) if e.kind() == ErrorKind::Interrupted => {
+                debug!("got Interrupted");
                 thread::sleep(Duration::from_millis(10))
             }
             Err(e) => return Err(Box::new(e)),
@@ -541,5 +546,12 @@ fn read_retry(file: &mut dyn Read, mut buf: &mut [u8]) -> Res<usize> {
         Ok(requested - buf.len())
     } else {
         Ok(requested)
+    }
+}
+
+fn sleep_until_next(bytes_per_frame: usize, samplerate: usize, nbr_bytes: usize) {
+    let io_duration = Duration::from_millis((1000 * nbr_bytes) as u64 / (bytes_per_frame*samplerate) as u64);
+    if io_duration > Duration::from_millis(2) {
+        thread::sleep(io_duration - Duration::from_millis(2));
     }
 }
