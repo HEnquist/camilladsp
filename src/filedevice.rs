@@ -389,8 +389,7 @@ fn capture_loop(
             }
             let msg = AudioMessage::Audio(chunk);
             msg_channels.audio.send(msg).unwrap();
-        }
-        else {
+        } else {
             sleep_until_next(bytes_per_frame, params.capture_samplerate, capture_bytes);
         }
     }
@@ -550,7 +549,8 @@ fn read_retry(file: &mut dyn Read, mut buf: &mut [u8]) -> Res<usize> {
 }
 
 fn sleep_until_next(bytes_per_frame: usize, samplerate: usize, nbr_bytes: usize) {
-    let io_duration = Duration::from_millis((1000 * nbr_bytes) as u64 / (bytes_per_frame*samplerate) as u64);
+    let io_duration =
+        Duration::from_millis((1000 * nbr_bytes) as u64 / (bytes_per_frame * samplerate) as u64);
     if io_duration > Duration::from_millis(2) {
         thread::sleep(io_duration - Duration::from_millis(2));
     }

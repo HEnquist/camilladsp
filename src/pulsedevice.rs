@@ -161,7 +161,12 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         }
                                         _ => panic!("Unsupported sample format!"),
                                     };
-                                    sleep_until_next(&last_instant, bytes_per_frame, samplerate, buffer.len());
+                                    sleep_until_next(
+                                        &last_instant,
+                                        bytes_per_frame,
+                                        samplerate,
+                                        buffer.len(),
+                                    );
                                     let write_res = pulsedevice.write(&buffer);
                                     last_instant = Instant::now();
                                     match write_res {
@@ -409,8 +414,14 @@ impl CaptureDevice for PulseCaptureDevice {
     }
 }
 
-fn sleep_until_next(last_instant: &Instant, bytes_per_frame: usize, samplerate: usize, nbr_bytes: usize) {
-    let io_duration = Duration::from_millis((1000 * nbr_bytes) as u64 / (bytes_per_frame*samplerate) as u64);
+fn sleep_until_next(
+    last_instant: &Instant,
+    bytes_per_frame: usize,
+    samplerate: usize,
+    nbr_bytes: usize,
+) {
+    let io_duration =
+        Duration::from_millis((1000 * nbr_bytes) as u64 / (bytes_per_frame * samplerate) as u64);
     let time_spent = Instant::now().duration_since(*last_instant);
     if (time_spent + Duration::from_millis(5)) < io_duration {
         thread::sleep(io_duration - time_spent - Duration::from_millis(5));

@@ -89,10 +89,7 @@ impl SampleFormat {
     }
 
     pub fn is_float(&self) -> bool {
-        match self {
-            SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE => true,
-            _ => false,
-        }
+        matches!(self, SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE)
     }
 }
 
