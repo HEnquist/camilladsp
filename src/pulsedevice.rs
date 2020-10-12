@@ -306,6 +306,7 @@ impl CaptureDevice for PulseCaptureDevice {
                         loop {
                             match command_channel.try_recv() {
                                 Ok(CommandMessage::Exit) => {
+                                    debug!("Exit message received, sending EndOfStream");
                                     let msg = AudioMessage::EndOfStream;
                                     channel.send(msg).unwrap();
                                     status_channel.send(StatusMessage::CaptureDone).unwrap();

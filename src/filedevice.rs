@@ -271,6 +271,7 @@ fn capture_loop(
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
+                debug!("Exit message received, sending EndOfStream");
                 let msg = AudioMessage::EndOfStream;
                 msg_channels.audio.send(msg).unwrap();
                 msg_channels
