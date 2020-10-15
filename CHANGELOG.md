@@ -2,7 +2,7 @@
 New features:
 - New commands to get more playback information from the websocket server.
 - Changed all websocket commands to use Json input and output.
-- Added support for secure websocket connections (wss).
+- Added optional support for secure websocket connections (wss).
 - Rename the optional websocket to feature to `websocket`.
 - Add new optional feature `secure-websocket` for wss support.
 - Added an option to generate arbitrary length filters for testing convolution cpu load.
