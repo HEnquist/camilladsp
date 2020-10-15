@@ -170,6 +170,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
+                        barrier.wait();
                     }
                 }
             })
@@ -270,6 +271,7 @@ fn capture_loop(
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
+                debug!("Exit message received, sending EndOfStream");
                 let msg = AudioMessage::EndOfStream;
                 msg_channels.audio.send(msg).unwrap();
                 msg_channels
@@ -495,6 +497,7 @@ impl CaptureDevice for FileCaptureDevice {
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }
+                        barrier.wait();
                     }
                 }
             })

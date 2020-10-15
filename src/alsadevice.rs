@@ -316,6 +316,7 @@ fn capture_loop_bytes(
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
+                debug!("Exit message received, sending EndOfStream");
                 let msg = AudioMessage::EndOfStream;
                 channels.audio.send(msg).unwrap();
                 channels.status.send(StatusMessage::CaptureDone).unwrap();
@@ -490,6 +491,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
+                        barrier.wait();
                     }
                 }
             })
@@ -596,6 +598,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }
+                        barrier.wait();
                     }
                 }
             })

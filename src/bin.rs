@@ -245,6 +245,7 @@ fn run(
                     debug!("Playback thread ready to start");
                     pb_ready = true;
                     if cap_ready {
+                        debug!("Both capture and playback ready, release barrier");
                         barrier.wait();
                         is_starting = false;
                     }
@@ -253,21 +254,37 @@ fn run(
                     debug!("Capture thread ready to start");
                     cap_ready = true;
                     if pb_ready {
+                        debug!("Both capture and playback ready, release barrier");
                         barrier.wait();
                         is_starting = false;
                     }
                 }
                 StatusMessage::PlaybackError { message } => {
                     error!("Playback error: {}", message);
-                    return Ok(ExitState::Exit);
+                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if is_starting {
+                        debug!("Error while starting, release barrier");
+                        barrier.wait();
+                    }
+                    debug!("Wait for capture thread to exit..");
+                    cap_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureError { message } => {
                     error!("Capture error: {}", message);
-                    return Ok(ExitState::Exit);
+                    if is_starting {
+                        debug!("Error while starting, release barrier");
+                        barrier.wait();
+                    }
+                    debug!("Wait for playback thread to exit..");
+                    pb_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
                 }
                 StatusMessage::PlaybackDone => {
                     info!("Playback finished");
-                    return Ok(ExitState::Exit);
+                    return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureDone => {
                     info!("Capture finished");
@@ -491,7 +508,7 @@ fn main() {
         debug!("Wait for config");
         while new_config.lock().unwrap().is_none() {
             if !wait {
-                debug!("Not config and not wait mode, exiting!");
+                debug!("No config and not in wait mode, exiting!");
                 return;
             }
             trace!("waiting...");
