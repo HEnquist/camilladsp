@@ -393,9 +393,12 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
                     result: WSResult::Ok,
                 })
             }
-            _ => Some(WSReply::SetConfigName {
-                result: WSResult::Error,
-            }),
+            Err(error) => {
+                error!("Error setting config name: {}", error);
+                Some(WSReply::SetConfigName {
+                    result: WSResult::Error,
+                })
+            }
         },
         WSCommand::SetConfig(config_yml) => {
             match serde_yaml::from_str::<config::Configuration>(&config_yml) {
@@ -409,9 +412,12 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
                             result: WSResult::Ok,
                         })
                     }
-                    _ => Some(WSReply::SetConfig {
-                        result: WSResult::Error,
-                    }),
+                    Err(error) => {
+                        error!("Error setting config: {}", error);
+                        Some(WSReply::SetConfig {
+                            result: WSResult::Error,
+                        })
+                    }
                 },
                 Err(error) => {
                     error!("Config error: {}", error);
@@ -433,9 +439,12 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
                             result: WSResult::Ok,
                         })
                     }
-                    _ => Some(WSReply::SetConfigJson {
-                        result: WSResult::Error,
-                    }),
+                    Err(error) => {
+                        error!("Error setting config: {}", error);
+                        Some(WSReply::SetConfigJson {
+                            result: WSResult::Error,
+                        })
+                    }
                 },
                 Err(error) => {
                     error!("Config error: {}", error);
@@ -451,10 +460,13 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
                     result: WSResult::Ok,
                     value: serde_yaml::to_string(&conf).unwrap(),
                 }),
-                Err(error) => Some(WSReply::ReadConfig {
-                    result: WSResult::Error,
-                    value: error.to_string(),
-                }),
+                Err(error) => {
+                    error!("Error reading config: {}", error);
+                    Some(WSReply::ReadConfig {
+                        result: WSResult::Error,
+                        value: error.to_string(),
+                    })
+                }
             }
         }
         WSCommand::ReadConfigFile(path) => match config::load_config(&path) {
@@ -462,10 +474,13 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
                 result: WSResult::Ok,
                 value: serde_yaml::to_string(&conf).unwrap(),
             }),
-            Err(error) => Some(WSReply::ReadConfigFile {
-                result: WSResult::Error,
-                value: error.to_string(),
-            }),
+            Err(error) => {
+                error!("Error reading config file: {}", error);
+                Some(WSReply::ReadConfigFile {
+                    result: WSResult::Error,
+                    value: error.to_string(),
+                })
+            }
         },
         WSCommand::ValidateConfig(config_yml) => {
             match serde_yaml::from_str::<config::Configuration>(&config_yml) {
@@ -474,10 +489,13 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
                         result: WSResult::Ok,
                         value: serde_yaml::to_string(&conf).unwrap(),
                     }),
-                    Err(error) => Some(WSReply::ValidateConfig {
-                        result: WSResult::Error,
-                        value: error.to_string(),
-                    }),
+                    Err(error) => {
+                        error!("Config error: {}", error);
+                        Some(WSReply::ValidateConfig {
+                            result: WSResult::Error,
+                            value: error.to_string(),
+                        })
+                    }
                 },
                 Err(error) => {
                     error!("Config error: {}", error);

@@ -15,6 +15,7 @@ The full configuration is given in a yaml file.
 - **[Background](#background)**
 - **[Usage example: crossover for 2-way speakers](#usage-example-crossover-for-2-way-speakers)**
 - **[Dependencies](#dependencies)**
+- **[Related projects](#related-projects)**
 
 **[Installing](#installing)**
 
@@ -81,7 +82,7 @@ The playback thread simply waits for audio messages to appear in the queue. Once
 The supervisor monitors all threads by listening to their status messages. The requests for capture rate adjust are passed on to the capture thread. It's also responsible for updating the configuration when requested to do so via the websocket server or a SIGHUP signal.
 
 ### Websocket server
-The websocket server lauches a separate thread to handle each connected client. All commands to change the config are send to the supoervisor thread.
+The websocket server lauches a separate thread to handle each connected client. All commands to change the config are send to the supervisor thread.
 
 
 ## Usage example: crossover for 2-way speakers
@@ -91,12 +92,30 @@ See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
 ## Dependencies
 These are the key dependencies for CamillDSP.
+* https://crates.io/crates/alsa - Alsa audio backend
+* https://crates.io/crates/clap - Command line argument parsing
+* https://crates.io/crates/cpal - Wasapi and CoreAudio audio backends
+* https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
+* https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
 * https://crates.io/crates/rustfft - FFT used for FIR filters
 * https://crates.io/crates/rubato - Sample rate conversion
-* https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
-* https://crates.io/crates/alsa - Alsa audio backend
-* https://crates.io/crates/cpal - Wasapi and CoreAudio audio backends
 * https://crates.io/crates/serde_yaml - Config file reading
+* https://crates.io/crates/tungstenite - Websocket server
+
+
+## Related projects
+These are part of the CamillaDSP family:
+* https://github.com/HEnquist/pycamilladsp - Python library for communicating with CamillaDSP over websocket
+* https://github.com/HEnquist/pycamilladsp-plot - Plotting and visualization of configurations
+* https://github.com/HEnquist/camillagui-backend - Server for a web-based gui for CamillaDSP
+* https://github.com/HEnquist/camilladsp-config - Example configurations for things like running CamillaDSP as a systemd service
+
+Other projects meant to be used with CamillaDSP:
+* https://github.com/Lykkedk/SuperPlayer_v2.0 - Automatic filter switching at sample rate change for squeezelite
+
+Projects of general nature which can be useful together with CamillaDSP:
+* https://github.com/scripple/alsa_hook_hwparams - Alsa hooks for reacting to sample rate and format changes
+* https://github.com/HEnquist/cpal-listdevices - List audio devices with names and supported formats under Windows and macOS. 
 
 
 # Installing
