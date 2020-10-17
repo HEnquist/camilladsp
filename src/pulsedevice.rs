@@ -24,6 +24,35 @@ use ProcessingState;
 use Res;
 use StatusMessage;
 
+#[derive(Debug)]
+pub struct PulseError {
+    desc: String,
+}
+
+impl std::fmt::Display for PulseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.desc)
+    }
+}
+
+impl std::error::Error for PulseError {
+    fn description(&self) -> &str {
+        &self.desc
+    }
+}
+
+impl PulseError {
+    pub fn new(pa_error: &pulse::error::PAErr) -> Self {
+        let msg = if let Some(desc) = pa_error.to_string() {
+            desc
+        } else {
+            "Unknown error".to_string()
+        };
+        let desc = format!("PulseAudio error: {}, code: {}", msg, pa_error.0);
+        PulseError { desc }
+    }
+}
+
 pub struct PulsePlaybackDevice {
     pub devname: String,
     pub samplerate: usize,
@@ -85,7 +114,7 @@ fn open_pulse(
         fragsize: bytes_per_sample as u32,
     };
 
-    let pulsedev = Simple::new(
+    let pulsedev_res = Simple::new(
         None,           // Use the default server
         "CamillaDSP",   // Our application’s name
         dir,            // We want a playback stream
@@ -94,9 +123,11 @@ fn open_pulse(
         &spec,          // Our sample format
         None,           // Use default channel map
         Some(&attr),    // Use default buffering attributes
-    )
-    .unwrap();
-    Ok(pulsedev)
+    );
+    match pulsedev_res {
+        Err(err) => Err(PulseError::new(&err).into()),
+        Ok(pulsedev) => Ok(pulsedev),
+    }
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
