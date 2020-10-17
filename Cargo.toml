@@ -5,13 +5,8 @@ authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 description = "A flexible tool for processing audio"
 
 [features]
-<<<<<<< HEAD
 default = ["alsa-backend", "pulse-backend", "websocket"]
-alsa-backend = ["alsa"]
-=======
-default = ["alsa-backend", "pulse-backend", "socketserver"]
 alsa-backend = ["alsa", "nix"]
->>>>>>> 5fc0d55... Check if capture card is just inactive and wait
 pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
 cpal-backend = ["cpal"]
 32bit = []

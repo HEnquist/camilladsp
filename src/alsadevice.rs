@@ -385,8 +385,8 @@ fn capture_loop_bytes(
             }
             Ok(CaptureResult::Timeout) => {
                 card_inactive = true;
-                let mut capt_stat = params.capture_status.write().unwrap();
-                capt_stat.state = ProcessingState::Paused;
+                params.capture_status.write().unwrap().state = ProcessingState::Paused;
+                debug!("Card inactive, pausing");
             }
             Err(msg) => {
                 channels
@@ -414,7 +414,12 @@ fn capture_loop_bytes(
             )
         };
         value_range = chunk.maxval - chunk.minval;
-        state = silence_counter.update(value_range);
+        if card_inactive {
+            state = ProcessingState::Paused;
+        }
+        else {
+            state = silence_counter.update(value_range);
+        }
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
                 let new_waves = resampl.process(&chunk.waveforms).unwrap();
