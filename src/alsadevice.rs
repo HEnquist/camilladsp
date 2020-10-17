@@ -12,7 +12,10 @@ use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
     chunk_to_buffer_float_bytes,
 };
+<<<<<<< HEAD
 use countertimer;
+=======
+>>>>>>> 6143970ee2c2b1fb66109d98fe502ca08a662e3f
 use nix::errno::Errno;
 use rubato::Resampler;
 use std::ffi::CString;
@@ -92,6 +95,11 @@ struct PlaybackParams {
     bytes_per_sample: usize,
     floats: bool,
     playback_status: Arc<RwLock<PlaybackStatus>>,
+}
+
+enum CaptureResult {
+    Normal,
+    Timeout,
 }
 
 enum CaptureResult {
@@ -333,7 +341,10 @@ fn capture_loop_bytes(
         params.chunksize,
     );
     let mut state = ProcessingState::Running;
+<<<<<<< HEAD
     let mut value_range = 0.0;
+=======
+>>>>>>> 6143970ee2c2b1fb66109d98fe502ca08a662e3f
     let mut card_inactive = false;
     loop {
         match channels.command.try_recv() {
