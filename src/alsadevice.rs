@@ -416,8 +416,7 @@ fn capture_loop_bytes(
         value_range = chunk.maxval - chunk.minval;
         if card_inactive {
             state = ProcessingState::Paused;
-        }
-        else {
+        } else {
             state = silence_counter.update(value_range);
         }
         if state == ProcessingState::Running {
