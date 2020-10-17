@@ -6,7 +6,7 @@ description = "A flexible tool for processing audio"
 
 [features]
 default = ["alsa-backend", "pulse-backend", "websocket"]
-alsa-backend = ["alsa"]
+alsa-backend = ["alsa", "nix"]
 pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
 cpal-backend = ["cpal"]
 32bit = []
@@ -25,6 +25,7 @@ path = "src/bin.rs"
 
 [target.'cfg(target_os="linux")'.dependencies]
 alsa = { version = "0.4", optional = true }
+nix = { version = "0.15", optional = true }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

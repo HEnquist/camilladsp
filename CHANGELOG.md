@@ -7,6 +7,7 @@ New features:
 - Add new optional feature `secure-websocket` for wss support.
 - Added an option to generate arbitrary length filters for testing convolution cpu load.
 - Possible to use Reload command to restart from inactive state.
+- Handle quirks of the USB audio gadget when used as Alsa capture source.
 
 Bugfixes:
 - Better handling of input device errors, fixes 100% cpu usage after panic.
