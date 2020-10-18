@@ -207,11 +207,12 @@ fn open_pcm(
             swp.set_start_threshold(act_bufsize / 2 - act_periodsize)?;
         }
         //swp.set_avail_min(periodsize)?;
-        pcmdev.sw_params(&swp)?;
         debug!(
-            "Opened audio device {:?} with parameters: {:?}, {:?}",
+            "Opening audio device \"{}\" with parameters: {:?}, {:?}",
             devname, hwp, swp
         );
+        pcmdev.sw_params(&swp)?;
+        debug!("Audio device \"{}\" successfully opened", devname);
         (hwp.get_rate()?, act_bufsize)
     };
     Ok(pcmdev)
@@ -552,7 +553,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                 .log2()
                 .ceil(),
         ) as usize;
-        println!("Buffer frames {}", buffer_frames);
+        debug!("Buffer frames {}", buffer_frames);
         let channels = self.channels;
         let bits_per_sample = self.sample_format.bits_per_sample() as i32;
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();

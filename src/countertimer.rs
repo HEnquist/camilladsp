@@ -194,11 +194,11 @@ mod tests {
     fn stopwatch() {
         let mut t = Stopwatch::new();
         assert_eq!(t.get_stored_millis(), 0);
-        spinsleep(10);
+        spinsleep(100);
         assert_eq!(t.get_stored_millis(), 0);
         t.store_and_restart();
-        assert!(t.get_stored_millis() > 8);
-        assert!(t.get_stored_millis() < 12);
+        assert!(t.get_stored_millis() > 80);
+        assert!(t.get_stored_millis() < 120);
         t.store_and_restart();
         assert_eq!(t.get_stored_millis(), 0);
     }
