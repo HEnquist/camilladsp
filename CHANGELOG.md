@@ -8,6 +8,7 @@ New features:
 - Added an option to generate arbitrary length filters for testing convolution cpu load.
 - Possible to use Reload command to restart from inactive state.
 - Handle quirks of the USB audio gadget when used as Alsa capture source.
+- Add `loglevel` option.
 
 Bugfixes:
 - Better handling of input device errors, fixes 100% cpu usage after panic.

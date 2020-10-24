@@ -271,8 +271,9 @@ FLAGS:
     -w, --wait       Wait for config from websocket
 
 OPTIONS:
-    -a, --address <address>    IP address to bind websocket server to
-    -p, --port <port>          Port for websocket server
+    -a, --address <address>      IP address to bind websocket server to
+    -l, --loglevel <loglevel>    Set log level [possible values: trace, debug, info, warn, error, off]
+    -p, --port <port>            Port for websocket server
 
 ARGS:
     <configfile>    The configuration file to use
@@ -285,7 +286,7 @@ By default the websocket server binds to the address 127.0.0.1 which means it's 
 
 If the "wait" flag, `-w` is given, CamillaDSP will start the websocket server and wait for a configuration to be uploaded. Then the config file argument must be left out.
 
-The default logging setting prints messages of levels "error", "warn" and "info". By passing the verbosity flag once, `-v` it also prints "debug". If and if's given twice, `-vv`, it also prints "trace" messages. 
+The default logging setting prints messages of levels "error", "warn" and "info". This can be changed with the `loglevel` option. Setting this to for example `warn` will print messages of level `warn` and above, but suppress the lower levels of `info`, `debug` and `trace`. Alternatively, the log level can be changed with the verbosity flag. By passing the verbosity flag once, `-v`, `debug` messages are enabled. If it's given twice, `-vv`, it also prints `trace` messages. 
 
 
 ## Reloading the configuration

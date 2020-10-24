@@ -352,6 +352,20 @@ fn main() {
                 .short("v")
                 .multiple(true)
                 .help("Increase message verbosity"),
+        )
+        .arg(
+            Arg::with_name("loglevel")
+                .short("l")
+                .long("loglevel")
+                .takes_value(true)
+                .possible_value("trace")
+                .possible_value("debug")
+                .possible_value("info")
+                .possible_value("warn")
+                .possible_value("error")
+                .possible_value("off")
+                .help("Set log level")
+                .conflicts_with("verbosity"),
         );
     #[cfg(feature = "websocket")]
     let clapapp = clapapp
@@ -409,11 +423,20 @@ fn main() {
         );
     let matches = clapapp.get_matches();
 
-    let loglevel = match matches.occurrences_of("verbosity") {
+    let mut loglevel = match matches.occurrences_of("verbosity") {
         0 => LevelFilter::Info,
         1 => LevelFilter::Debug,
         2 => LevelFilter::Trace,
         _ => LevelFilter::Trace,
+    };
+    loglevel = match matches.value_of("loglevel") {
+        Some("trace") => LevelFilter::Trace,
+        Some("debug") => LevelFilter::Debug,
+        Some("info") => LevelFilter::Info,
+        Some("warn") => LevelFilter::Warn,
+        Some("error") => LevelFilter::Error,
+        Some("off") => LevelFilter::Off,
+        _ => loglevel,
     };
 
     let mut builder = Builder::from_default_env();
