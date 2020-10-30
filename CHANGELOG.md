@@ -9,12 +9,14 @@ New features:
 - Possible to use Reload command to restart from inactive state.
 - Handle quirks of the USB audio gadget when used as Alsa capture source.
 - Add `loglevel` option.
+- Use local time instead of UTC in log messages.
 
 Bugfixes:
 - Better handling of input device errors, fixes 100% cpu usage after panic.
 - Use `Instant` instead of `SystemTime`to avoid issues when system clock is changed.
 - Fix 100% cpu when Stdin doesn't provide any data.
 - Reduce cpu usage when using PulseAudio.
+- Fix buffer size handling for alsa capture.
 
 
 ## 0.3.2
