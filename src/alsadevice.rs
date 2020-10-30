@@ -448,7 +448,7 @@ fn get_nbr_capture_bytes(
     } else {
         capture_bytes
     };
-    if capture_bytes > buf.len() {
+    if capture_bytes_new > buf.len() {
         debug!("Capture buffer too small, extending");
         buf.append(&mut vec![0u8; capture_bytes_new - buf.len()]);
     }
