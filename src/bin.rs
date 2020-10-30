@@ -1,6 +1,7 @@
 #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 extern crate alsa;
 extern crate camillalib;
+extern crate chrono;
 extern crate clap;
 #[cfg(feature = "FFTW")]
 extern crate fftw;
@@ -23,10 +24,12 @@ extern crate tungstenite;
 extern crate log;
 extern crate env_logger;
 
+use chrono::Local;
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
 use env_logger::Builder;
 use log::LevelFilter;
 use std::env;
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -441,7 +444,19 @@ fn main() {
 
     let mut builder = Builder::from_default_env();
 
-    builder.filter(None, loglevel).init();
+    builder
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "{} {} {} - {}",
+                Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                buf.default_styled_level(record.level()),
+                record.module_path().unwrap_or("camilladsp"),
+                record.args()
+            )
+        })
+        .filter(None, loglevel)
+        .init();
     // logging examples
     //trace!("trace message"); //with -vv
     //debug!("debug message"); //with -v
