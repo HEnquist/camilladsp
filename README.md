@@ -297,8 +297,8 @@ See the [separate readme for the websocket server](./websocket.md)
 
 
 # Capturing audio
+In order to insert CamillaDSP between applications and the sound card, a virtual sound card can be used. This works with Alsa, PulseAudio, CoreAudio and Wasapi. It is also possible to use pipes for apps that support outputting the audio data to stdout. 
 
-In order to insert CamillaDSP between applications and the sound card, a virtual sound card is required. This works with both Alsa and PulseAudio.
 ## Alsa
 An Alsa Loopback device can be used. This device behaves like a sound card with two devices playback and capture. The sound being send to the playback side on one device can then be captured from the capture side on the other device. To load the kernel device type:
 ```
@@ -643,7 +643,7 @@ mixers:
 
 ## Filters
 The filters section defines the filter configurations to use in the pipeline. It's enough to define each filter once even if it should be applied on several channels.
-The supported filter types are Biquad for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
+The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
 
 ### Gain
 The gain filter simply changes the amplitude of the signal. The "inverted" parameter simply inverts the signal. This parameter is optional and the default is to not invert.
@@ -717,7 +717,7 @@ The other possible formats are raw data:
 
 
 ### IIR
-IIR filters are Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filters, or you can provide the coefficients directly.
+IIR filters are implemented as Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filters, or you can provide the coefficients directly.
 Examples:
 ```
 filters:

@@ -17,6 +17,7 @@ Bugfixes:
 - Fix 100% cpu when Stdin doesn't provide any data.
 - Reduce cpu usage when using PulseAudio.
 - Fix buffer size handling for alsa capture.
+- Fix high frequency noise from synchronous resampler.
 
 
 ## 0.3.2
