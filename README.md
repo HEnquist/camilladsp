@@ -111,6 +111,7 @@ These are part of the CamillaDSP family:
 * https://github.com/HEnquist/camilladsp-config - Example configurations for things like running CamillaDSP as a systemd service
 
 Other projects meant to be used with CamillaDSP:
+* https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels
 * https://github.com/Lykkedk/SuperPlayer_v2.0 - Automatic filter switching at sample rate change for squeezelite
 
 Projects of general nature which can be useful together with CamillaDSP:
@@ -143,7 +144,7 @@ tar -xvf camilladsp-linux-amd64.tar.gz
 
 # Building
 
-Use recent stable versions of rustc and cargo. The minimum rustc version is 1.40.0. 
+Use recent stable versions of rustc and cargo. The minimum rustc version is 1.43.0. 
 
 The recommended way to install rustc and cargo is by using the "rustup" tool. This tool works on all supported platforms (Linux, macOS and Windows). Get it here: https://rustup.rs/
 
