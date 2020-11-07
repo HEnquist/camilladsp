@@ -5,6 +5,8 @@ extern crate clap;
 extern crate cpal;
 #[cfg(feature = "FFTW")]
 extern crate fftw;
+#[macro_use]
+extern crate lazy_static;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
