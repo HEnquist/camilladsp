@@ -389,22 +389,6 @@ fn main() {
                 }),
         )
         .arg(
-            Arg::with_name("capture_samplerate")
-                .help("Override capture samplerate in config")
-                .short("R")
-                .long("capture_samplerate")
-                .display_order(300)
-                .takes_value(true)
-                .validator(|v: String| -> Result<(), String> {
-                    if let Ok(rate) = v.parse::<usize>() {
-                        if rate > 0 {
-                            return Ok(());
-                        }
-                    }
-                    Err(String::from("Must be an integer > 0"))
-                }),
-        )
-        .arg(
             Arg::with_name("channels")
                 .help("Override number of channels of capture device in config")
                 .short("n")
@@ -553,9 +537,6 @@ fn main() {
     //let mut new_settings = SETTINGS.write().unwrap();
     config::OVERRIDES.write().unwrap().samplerate = matches
         .value_of("samplerate")
-        .map(|s| s.parse::<usize>().unwrap());
-    config::OVERRIDES.write().unwrap().capture_samplerate = matches
-        .value_of("capture_samplerate")
         .map(|s| s.parse::<usize>().unwrap());
     config::OVERRIDES.write().unwrap().extra_samples = matches
         .value_of("extra_samples")

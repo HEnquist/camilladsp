@@ -272,9 +272,17 @@ FLAGS:
     -w, --wait       Wait for config from websocket
 
 OPTIONS:
-    -a, --address <address>      IP address to bind websocket server to
-    -l, --loglevel <loglevel>    Set log level [possible values: trace, debug, info, warn, error, off]
-    -p, --port <port>            Port for websocket server
+    -l, --loglevel <loglevel>
+            Set log level [possible values: trace, debug, info, warn, error, off]
+
+    -a, --address <address>                          IP address to bind websocket server to
+    -p, --port <port>                                Port for websocket server
+    -n, --channels <channels>                        Override number of channels of capture device in config
+    -e, --extra_samples <extra_samples>              Override number of extra samples in config
+    -r, --samplerate <samplerate>                    Override samplerate in config
+    -f, --format <format>
+            Override sample format of capture device in config [possible values: S16LE, S24LE, S24LE3, S32LE, FLOAT32LE,
+            FLOAT64LE]
 
 ARGS:
     <configfile>    The configuration file to use
@@ -288,6 +296,8 @@ By default the websocket server binds to the address 127.0.0.1 which means it's 
 If the "wait" flag, `-w` is given, CamillaDSP will start the websocket server and wait for a configuration to be uploaded. Then the config file argument must be left out.
 
 The default logging setting prints messages of levels "error", "warn" and "info". This can be changed with the `loglevel` option. Setting this to for example `warn` will print messages of level `warn` and above, but suppress the lower levels of `info`, `debug` and `trace`. Alternatively, the log level can be changed with the verbosity flag. By passing the verbosity flag once, `-v`, `debug` messages are enabled. If it's given twice, `-vv`, it also prints `trace` messages. 
+
+There are a few options to override values in the loaded config file. Giving these options means the provided values will be used instead of the values in any loaded configuration. To change the values, CamillaDSP has to be restarted. If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` paramter. But if resampling is enabled, it will instead change the `capture_samplerate` parameter. If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled.
 
 
 ## Reloading the configuration
@@ -681,7 +691,8 @@ filters:
       skip_bytes_lines: 0 (*)
       read_bytes_lines: 0 (*)
 ```
-The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. 
+The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. If the filename includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`. 
+
 
 Example for giving values:
 ```
@@ -814,7 +825,7 @@ The available types are
 - Shibata48, for 48 kHz
 - None, just quantize without dither. Only useful with small target bit depth for demonstration.
 
-Lipshitz, Fweighted and Shibata give the least amount ofaudible noise. [See the SOX documentation for more details.](http://sox.sourceforge.net/SoX/NoiseShaping)
+Lipshitz, Fweighted and Shibata give the least amount of audible noise. [See the SOX documentation for more details.](http://sox.sourceforge.net/SoX/NoiseShaping)
 To test the different types, set the target bit depth to something very small like 5 bits and try them all.
 
 
@@ -859,6 +870,7 @@ pipeline:
       - highpass_fir
 ```
 In this config first a mixer is used to copy a stereo input to four channels. Then for each channel a filter step is added. A filter block can contain one or several filters that must be define in the "Filters" section. Here channel 0 and 1 get filtered by "lowpass_fir" and "peak1", while 2 and 3 get filtered by just "highpass_fir". 
+If the names of mixers or filters includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filter name `fir_$samplerate$` will be updated to `fir_44100`. 
 
 ## Visualizing the config
 A Python script is included to view the configuration. This plots the transfer functions of all included filters, as well as plots a flowchart of the entire processing pipeline. Run it with:

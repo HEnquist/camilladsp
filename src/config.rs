@@ -16,7 +16,6 @@ type Res<T> = Result<T, Box<dyn error::Error>>;
 
 pub struct Overrides {
     pub samplerate: Option<usize>,
-    pub capture_samplerate: Option<usize>,
     pub sample_format: Option<SampleFormat>,
     pub extra_samples: Option<usize>,
     pub channels: Option<usize>,
@@ -25,7 +24,6 @@ pub struct Overrides {
 lazy_static! {
     pub static ref OVERRIDES: RwLock<Overrides> = RwLock::new(Overrides {
         samplerate: None,
-        capture_samplerate: None,
         sample_format: None,
         extra_samples: None,
         channels: None,
@@ -644,28 +642,10 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
 
 fn apply_overrides(configuration: &mut Configuration) {
     if let Some(rate) = OVERRIDES.read().unwrap().samplerate {
-        debug!("Apply override for samplerate: {}", rate);
         let cfg_rate = configuration.devices.samplerate;
-        configuration.devices.samplerate = rate;
-        match &mut configuration.devices.capture {
-            CaptureDevice::File { extra_samples, .. } => {
-                let new_extra = *extra_samples * rate / cfg_rate;
-                debug!("Scale extra samples: {} -> {}", *extra_samples, new_extra);
-                *extra_samples = new_extra;
-            }
-            CaptureDevice::Stdin { extra_samples, .. } => {
-                let new_extra = *extra_samples * rate / cfg_rate;
-                debug!("Scale extra samples: {} -> {}", *extra_samples, new_extra);
-                *extra_samples = new_extra;
-            }
-            _ => {}
-        }
-    }
-    if let Some(rate) = OVERRIDES.read().unwrap().capture_samplerate {
-        debug!("Apply override for capture_samplerate: {}", rate);
-        let cfg_rate = configuration.devices.capture_samplerate;
-        configuration.devices.capture_samplerate = rate;
-        if cfg_rate > 0 {
+        if !configuration.devices.enable_resampling {
+            debug!("Apply override for samplerate: {}", rate);
+            configuration.devices.samplerate = rate;
             match &mut configuration.devices.capture {
                 CaptureDevice::File { extra_samples, .. } => {
                     let new_extra = *extra_samples * rate / cfg_rate;
@@ -678,6 +658,14 @@ fn apply_overrides(configuration: &mut Configuration) {
                     *extra_samples = new_extra;
                 }
                 _ => {}
+            }
+        }
+        else {
+            debug!("Apply override for capture_samplerate: {}", rate);
+            configuration.devices.capture_samplerate = rate;
+            if rate == cfg_rate && !configuration.devices.enable_rate_adjust {
+                debug!("Disabling unneccesary 1:1 resampling");
+                configuration.devices.enable_resampling = false;
             }
         }
     }
@@ -753,21 +741,17 @@ fn replace_tokens(
     string: &str,
     samplerate: usize,
     channels: usize,
-    format: SampleFormat,
 ) -> String {
     let srate = format!("{}", samplerate);
     let ch = format!("{}", channels);
-    let fmt = format!("{}", format);
     string
         .replace("$samplerate$", &srate)
         .replace("$channels$", &ch)
-        .replace("$format$", &fmt)
 }
 
 fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
     let samplerate = config.devices.samplerate;
     let num_channels = config.devices.capture.channels();
-    let sformat = config.devices.capture.sampleformat();
     let mut new_filters = config.filters.clone();
     for (_name, filter) in new_filters.iter_mut() {
         let modified_filter = match filter {
@@ -783,7 +767,6 @@ fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
                             filename,
                             samplerate,
                             num_channels,
-                            sformat.clone(),
                         ),
                         skip_bytes_lines: *skip_bytes_lines,
                         read_bytes_lines: *read_bytes_lines,
@@ -802,11 +785,11 @@ fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
         match &mut step {
             PipelineStep::Filter { names, .. } => {
                 for name in names.iter_mut() {
-                    *name = replace_tokens(name, samplerate, num_channels, sformat.clone());
+                    *name = replace_tokens(name, samplerate, num_channels,);
                 }
             }
             PipelineStep::Mixer { name } => {
-                *name = replace_tokens(name, samplerate, num_channels, sformat.clone());
+                *name = replace_tokens(name, samplerate, num_channels);
             }
         }
     }
