@@ -228,9 +228,24 @@ RUSTFLAGS='-C target-feature=+neon -C target-cpu=native' cargo build --release
 
 ## Building on Windows and macOS
 The Alsa and Pulse backends should not be included when building on Windows and macOS. The recommended build command is:
+
+macOS:
 ```
 RUSTFLAGS='-C target-cpu=native' cargo build --release  --no-default-features --features cpal-backend --features websocket
 ```
+
+Windows (cmd.exe command prompt):
+```
+set RUSTFLAGS=-C target-cpu=native 
+cargo build --release  --no-default-features --features cpal-backend --features websocket
+```
+
+Windows (PowerShell):
+```
+$env:RUSTFLAGS="-C target-cpu=native"
+cargo build --release  --no-default-features --features cpal-backend --features websocket
+```
+
 On macOS both the PulseAudio and FFTW features can be used. The necessary dependencies can be installed with brew:
 ```
 brew install fftw
