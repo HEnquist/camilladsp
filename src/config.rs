@@ -748,20 +748,13 @@ fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
     let samplerate = config.devices.samplerate;
     let num_channels = config.devices.capture.channels();
     let mut new_config = config.clone();
-    for (_name, mut filter) in new_config.filters.iter_mut() {
-        match &mut filter {
-            Filter::Conv { parameters } => {
-                match parameters {
-                    ConvParameters::File { filename, .. } => {
-                        *filename = replace_tokens(filename, samplerate, num_channels);
-                    }
-                    _ => {}
-                };
+    for (_name, filter) in new_config.filters.iter_mut() {
+        if let Filter::Conv { parameters } = filter {
+            if let ConvParameters::File { filename, .. } = parameters {
+                *filename = replace_tokens(filename, samplerate, num_channels);
             }
-            _ => {}
-        };
+        }
     }
-    //let new_pipeline = config.pipeline.clone();
     for mut step in new_config.pipeline.iter_mut() {
         match &mut step {
             PipelineStep::Filter { names, .. } => {
@@ -774,9 +767,6 @@ fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
             }
         }
     }
-
-    //let mut new_config = config.clone();
-    //new_config.filters = new_filters;
     Ok(new_config)
 }
 
