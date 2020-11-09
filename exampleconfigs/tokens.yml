@@ -40,7 +40,7 @@ filters:
     type: Conv
     parameters:
       type: File
-      filename: file_$samplerate$_$format$_$channels$.txt
+      filename: file_$samplerate$_$channels$.txt
   highpass_2k:
     type: Conv
     parameters:

@@ -659,8 +659,7 @@ fn apply_overrides(configuration: &mut Configuration) {
                 }
                 _ => {}
             }
-        }
-        else {
+        } else {
             debug!("Apply override for capture_samplerate: {}", rate);
             configuration.devices.capture_samplerate = rate;
             if rate == cfg_rate && !configuration.devices.enable_rate_adjust {
@@ -737,11 +736,7 @@ fn apply_overrides(configuration: &mut Configuration) {
     }
 }
 
-fn replace_tokens(
-    string: &str,
-    samplerate: usize,
-    channels: usize,
-) -> String {
+fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
     let srate = format!("{}", samplerate);
     let ch = format!("{}", channels);
     string
@@ -752,40 +747,26 @@ fn replace_tokens(
 fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
     let samplerate = config.devices.samplerate;
     let num_channels = config.devices.capture.channels();
-    let mut new_filters = config.filters.clone();
-    for (_name, filter) in new_filters.iter_mut() {
-        let modified_filter = match filter {
+    let mut new_config = config.clone();
+    for (_name, mut filter) in new_config.filters.iter_mut() {
+        match &mut filter {
             Filter::Conv { parameters } => {
-                let params = match parameters {
-                    ConvParameters::File {
-                        filename,
-                        skip_bytes_lines,
-                        read_bytes_lines,
-                        format,
-                    } => ConvParameters::File {
-                        filename: replace_tokens(
-                            filename,
-                            samplerate,
-                            num_channels,
-                        ),
-                        skip_bytes_lines: *skip_bytes_lines,
-                        read_bytes_lines: *read_bytes_lines,
-                        format: format.clone(),
-                    },
-                    _ => parameters.clone(),
+                match parameters {
+                    ConvParameters::File { filename, .. } => {
+                        *filename = replace_tokens(filename, samplerate, num_channels);
+                    }
+                    _ => {}
                 };
-                Filter::Conv { parameters: params }
             }
-            _ => filter.clone(),
+            _ => {}
         };
-        *filter = modified_filter;
     }
-    let new_pipeline = config.pipeline.clone();
-    for mut step in new_pipeline {
+    //let new_pipeline = config.pipeline.clone();
+    for mut step in new_config.pipeline.iter_mut() {
         match &mut step {
             PipelineStep::Filter { names, .. } => {
                 for name in names.iter_mut() {
-                    *name = replace_tokens(name, samplerate, num_channels,);
+                    *name = replace_tokens(name, samplerate, num_channels);
                 }
             }
             PipelineStep::Mixer { name } => {
@@ -794,8 +775,8 @@ fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
         }
     }
 
-    let mut new_config = config.clone();
-    new_config.filters = new_filters;
+    //let mut new_config = config.clone();
+    //new_config.filters = new_filters;
     Ok(new_config)
 }
 
