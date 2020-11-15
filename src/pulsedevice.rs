@@ -176,7 +176,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         | SampleFormat::S24LE
                                         | SampleFormat::S32LE => {
                                             conversion_result = chunk_to_buffer_bytes(
-                                                chunk,
+                                                &chunk,
                                                 &mut buffer,
                                                 scalefactor,
                                                 bits_per_sample,
@@ -185,7 +185,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         }
                                         SampleFormat::FLOAT32LE => {
                                             conversion_result = chunk_to_buffer_float_bytes(
-                                                chunk,
+                                                &chunk,
                                                 &mut buffer,
                                                 bits_per_sample,
                                             );

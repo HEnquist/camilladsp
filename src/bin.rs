@@ -580,10 +580,14 @@ fn main() {
         signal_range: 0.0,
         rate_adjust: 0.0,
         state: ProcessingState::Inactive,
+        signal_rms: Vec::new(),
+        signal_peak: Vec::new(),
     }));
     let playback_status = Arc::new(RwLock::new(PlaybackStatus {
         buffer_level: 0,
         clipped_samples: 0,
+        signal_rms: Vec::new(),
+        signal_peak: Vec::new(),
     }));
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));

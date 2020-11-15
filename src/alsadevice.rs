@@ -236,10 +236,10 @@ fn playback_loop_bytes(
             Ok(AudioMessage::Audio(chunk)) => {
                 if params.floats {
                     conversion_result =
-                        chunk_to_buffer_float_bytes(chunk, &mut buffer, params.bits);
+                        chunk_to_buffer_float_bytes(&chunk, &mut buffer, params.bits);
                 } else {
                     conversion_result = chunk_to_buffer_bytes(
-                        chunk,
+                        &chunk,
                         &mut buffer,
                         params.scalefactor,
                         params.bits as i32,
@@ -268,6 +268,10 @@ fn playback_loop_bytes(
                             .unwrap();
                         params.playback_status.write().unwrap().buffer_level = av_delay as usize;
                     }
+                    let mut pb_stat = params.playback_status.write().unwrap();
+                    let chunk_stats = chunk.get_stats();
+                    pb_stat.signal_rms = chunk_stats.rms.clone();
+                    pb_stat.signal_peak = chunk_stats.peak.clone();
                 }
 
                 let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay);
@@ -335,6 +339,10 @@ fn capture_loop_bytes(
     );
     let mut state = ProcessingState::Running;
     let mut value_range = 0.0;
+    let mut chunk_stats = ChunkStats {
+        rms: vec![0.0; params.channels],
+        peak: vec![0.0; params.channels],
+    };
     let mut card_inactive = false;
     loop {
         match channels.command.try_recv() {
@@ -383,6 +391,9 @@ fn capture_loop_bytes(
                     capt_stat.state = state;
                     card_inactive = false;
                 }
+                let mut capt_stat = params.capture_status.write().unwrap();
+                capt_stat.signal_rms = chunk_stats.rms.clone();
+                capt_stat.signal_peak = chunk_stats.peak.clone();
             }
             Ok(CaptureResult::Timeout) => {
                 card_inactive = true;
@@ -414,6 +425,7 @@ fn capture_loop_bytes(
                 capture_bytes,
             )
         };
+        chunk_stats = chunk.get_stats();
         value_range = chunk.maxval - chunk.minval;
         if card_inactive {
             state = ProcessingState::Paused;

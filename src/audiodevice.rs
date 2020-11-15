@@ -40,6 +40,12 @@ pub struct AudioChunk {
     pub waveforms: Vec<Vec<PrcFmt>>,
 }
 
+/// Container for RMS and peak values of a chunk
+pub struct ChunkStats {
+    pub rms: Vec<PrcFmt>,
+    pub peak: Vec<PrcFmt>,
+}
+
 impl AudioChunk {
     pub fn new(
         waveforms: Vec<Vec<PrcFmt>>,
@@ -77,6 +83,31 @@ impl AudioChunk {
             valid_frames,
             waveforms,
         }
+    }
+
+    pub fn get_stats(&self) -> ChunkStats {
+        let rms_peak: Vec<(PrcFmt, PrcFmt)> =
+            self.waveforms.iter().map(|wf| rms_and_peak(&wf)).collect();
+        let rms: Vec<PrcFmt> = rms_peak.iter().map(|rp| rp.0).collect();
+        let peak: Vec<PrcFmt> = rms_peak.iter().map(|rp| rp.1).collect();
+        ChunkStats { rms, peak }
+    }
+}
+
+/// Get RMS and peak value of a vector
+pub fn rms_and_peak(data: &[PrcFmt]) -> (PrcFmt, PrcFmt) {
+    if !data.is_empty() {
+        let (squaresum, peakval) = data.iter().fold((0.0, 0.0), |(sqsum, peak), value| {
+            let newpeak = if peak > value.abs() {
+                peak
+            } else {
+                value.abs()
+            };
+            (sqsum + *value * *value, newpeak)
+        });
+        ((squaresum / data.len() as PrcFmt).sqrt(), peakval)
+    } else {
+        (0.0, 0.0)
     }
 }
 
@@ -468,4 +499,30 @@ pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, 
         100.0 * speed
     );
     speed
+}
+
+#[cfg(test)]
+mod tests {
+    use audiodevice::{rms_and_peak, AudioChunk};
+
+    #[test]
+    fn vec_rms_and_peak() {
+        let data = vec![1.0, 1.0, -1.0, -1.0];
+        assert_eq!((1.0, 1.0), rms_and_peak(&data));
+        let data = vec![0.0, -4.0, 0.0, 0.0];
+        assert_eq!((2.0, 4.0), rms_and_peak(&data));
+    }
+
+    #[test]
+    fn chunk_rms_and_peak() {
+        let data1 = vec![1.0, 1.0, -1.0, -1.0];
+        let data2 = vec![0.0, -4.0, 0.0, 0.0];
+        let waveforms = vec![data1, data2];
+        let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1);
+        let stats = chunk.get_stats();
+        assert_eq!(stats.rms[0], 1.0);
+        assert_eq!(stats.rms[1], 2.0);
+        assert_eq!(stats.peak[0], 1.0);
+        assert_eq!(stats.peak[1], 4.0);
+    }
 }

@@ -123,14 +123,14 @@ impl PlaybackDevice for FilePlaybackDevice {
                                     let (valid_bytes, nbr_clipped) =
                                         match sample_format.number_family() {
                                             NumberFamily::Integer => chunk_to_buffer_bytes(
-                                                chunk,
+                                                &chunk,
                                                 &mut buffer,
                                                 scalefactor,
                                                 bits_per_sample as i32,
                                                 store_bytes_per_sample,
                                             ),
                                             NumberFamily::Float => chunk_to_buffer_float_bytes(
-                                                chunk,
+                                                &chunk,
                                                 &mut buffer,
                                                 bits_per_sample as i32,
                                             ),
