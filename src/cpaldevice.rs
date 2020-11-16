@@ -205,7 +205,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             trace!("Convert chunk to device format");
                                             let chunk = rx_dev.recv().unwrap();
                                             clipped = chunk_to_queue_int(
-                                                chunk,
+                                                &chunk,
                                                 &mut sample_queue,
                                                 scalefactor,
                                             );
@@ -238,7 +238,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             trace!("Convert chunk to device format");
                                             let chunk = rx_dev.recv().unwrap();
                                             clipped =
-                                                chunk_to_queue_float(chunk, &mut sample_queue);
+                                                chunk_to_queue_float(&chunk, &mut sample_queue);
                                         }
                                         write_data_to_device(&mut buffer, &mut sample_queue);
                                         buffer_fill_clone

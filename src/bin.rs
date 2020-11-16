@@ -47,16 +47,10 @@ use camillalib::socketserver;
 #[cfg(feature = "websocket")]
 use std::net::IpAddr;
 
-use camillalib::StatusMessage;
-
-use camillalib::CommandMessage;
-
-use camillalib::ExitState;
-
-use camillalib::CaptureStatus;
-use camillalib::ExitRequest;
-use camillalib::PlaybackStatus;
-use camillalib::ProcessingState;
+use camillalib::{
+    CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus, ProcessingState,
+    ProcessingStatus, StatusMessage, StatusStructs,
+};
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
@@ -112,10 +106,9 @@ fn run(
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
-    capture_status: Arc<RwLock<CaptureStatus>>,
-    playback_status: Arc<RwLock<PlaybackStatus>>,
+    status_structs: StatusStructs,
 ) -> Res<ExitState> {
-    capture_status.write().unwrap().state = ProcessingState::Starting;
+    status_structs.capture.write().unwrap().state = ProcessingState::Starting;
     let mut is_starting = true;
     let conf = match new_config_shared.lock().unwrap().clone() {
         Some(cfg) => cfg,
@@ -151,12 +144,19 @@ fn run(
     signal_exit.store(ExitRequest::NONE, Ordering::Relaxed);
 
     // Processing thread
-    processing::run_processing(conf_proc, barrier_proc, tx_pb, rx_cap, rx_pipeconf);
+    processing::run_processing(
+        conf_proc,
+        barrier_proc,
+        tx_pb,
+        rx_cap,
+        rx_pipeconf,
+        status_structs.processing,
+    );
 
     // Playback thread
     let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
     let pb_handle = playback_dev
-        .start(rx_pb, barrier_pb, tx_status_pb, playback_status)
+        .start(rx_pb, barrier_pb, tx_status_pb, status_structs.playback)
         .unwrap();
 
     // Capture thread
@@ -167,7 +167,7 @@ fn run(
             barrier_cap,
             tx_status_cap,
             rx_command_cap,
-            capture_status,
+            status_structs.capture,
         )
         .unwrap();
 
@@ -589,6 +589,13 @@ fn main() {
         signal_rms: Vec::new(),
         signal_peak: Vec::new(),
     }));
+    let processing_status = Arc::new(RwLock::new(ProcessingStatus { volume: 0.0 }));
+
+    let status_structs = StatusStructs {
+        capture: capture_status.clone(),
+        playback: playback_status.clone(),
+        processing: processing_status.clone(),
+    };
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
@@ -609,8 +616,9 @@ fn main() {
                 active_config: active_config.clone(),
                 active_config_path: active_config_path.clone(),
                 new_config: new_config.clone(),
-                capture_status: capture_status.clone(),
-                playback_status: playback_status.clone(),
+                capture_status,
+                playback_status,
+                processing_status,
             };
             let server_params = socketserver::ServerParameters {
                 port: serverport,
@@ -666,8 +674,7 @@ fn main() {
             active_config.clone(),
             active_config_path.clone(),
             new_config.clone(),
-            capture_status.clone(),
-            playback_status.clone(),
+            status_structs.clone(),
         );
         match exitstatus {
             Err(e) => {

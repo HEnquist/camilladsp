@@ -14,7 +14,7 @@ use tungstenite::server::accept;
 use tungstenite::Message;
 use tungstenite::WebSocket;
 
-use crate::{CaptureStatus, PlaybackStatus};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingStatus};
 use config;
 use ExitRequest;
 use ProcessingState;
@@ -29,6 +29,7 @@ pub struct SharedData {
     pub new_config: Arc<Mutex<Option<config::Configuration>>>,
     pub capture_status: Arc<RwLock<CaptureStatus>>,
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
+    pub processing_status: Arc<RwLock<ProcessingStatus>>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,9 +55,15 @@ enum WSCommand {
     GetConfigJson,
     GetConfigName,
     GetSignalRange,
+    GetCaptureSignalRms,
+    GetCaptureSignalPeak,
+    GetPlaybackSignalRms,
+    GetPlaybackSignalPeak,
     GetCaptureRate,
     GetUpdateInterval,
     SetUpdateInterval(usize),
+    GetVolume,
+    SetVolume(f32),
     GetVersion,
     GetState,
     GetRateAdjust,
@@ -115,6 +122,22 @@ enum WSReply {
         result: WSResult,
         value: f32,
     },
+    GetPlaybackSignalRms {
+        result: WSResult,
+        value: Vec<f32>,
+    },
+    GetPlaybackSignalPeak {
+        result: WSResult,
+        value: Vec<f32>,
+    },
+    GetCaptureSignalRms {
+        result: WSResult,
+        value: Vec<f32>,
+    },
+    GetCaptureSignalPeak {
+        result: WSResult,
+        value: Vec<f32>,
+    },
     GetCaptureRate {
         result: WSResult,
         value: usize,
@@ -125,6 +148,13 @@ enum WSReply {
     },
     SetUpdateInterval {
         result: WSResult,
+    },
+    SetVolume {
+        result: WSResult,
+    },
+    GetVolume {
+        result: WSResult,
+        value: f32,
     },
     GetVersion {
         result: WSResult,
@@ -322,6 +352,34 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
                 value: capstat.signal_range,
             })
         }
+        WSCommand::GetCaptureSignalRms => {
+            let capstat = shared_data_inst.capture_status.read().unwrap();
+            Some(WSReply::GetCaptureSignalRms {
+                result: WSResult::Ok,
+                value: capstat.signal_rms.clone(),
+            })
+        }
+        WSCommand::GetPlaybackSignalRms => {
+            let pbstat = shared_data_inst.playback_status.read().unwrap();
+            Some(WSReply::GetPlaybackSignalRms {
+                result: WSResult::Ok,
+                value: pbstat.signal_rms.clone(),
+            })
+        }
+        WSCommand::GetCaptureSignalPeak => {
+            let capstat = shared_data_inst.capture_status.read().unwrap();
+            Some(WSReply::GetCaptureSignalPeak {
+                result: WSResult::Ok,
+                value: capstat.signal_peak.clone(),
+            })
+        }
+        WSCommand::GetPlaybackSignalPeak => {
+            let pbstat = shared_data_inst.playback_status.read().unwrap();
+            Some(WSReply::GetPlaybackSignalPeak {
+                result: WSResult::Ok,
+                value: pbstat.signal_peak.clone(),
+            })
+        }
         WSCommand::GetVersion => Some(WSReply::GetVersion {
             result: WSResult::Ok,
             value: crate_version!().to_string(),
@@ -365,6 +423,20 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
             let mut capstat = shared_data_inst.capture_status.write().unwrap();
             capstat.update_interval = nbr;
             Some(WSReply::SetUpdateInterval {
+                result: WSResult::Ok,
+            })
+        }
+        WSCommand::GetVolume => {
+            let procstat = shared_data_inst.processing_status.read().unwrap();
+            Some(WSReply::GetVolume {
+                result: WSResult::Ok,
+                value: procstat.volume,
+            })
+        }
+        WSCommand::SetVolume(nbr) => {
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.volume = nbr;
+            Some(WSReply::SetVolume {
                 result: WSResult::Ok,
             })
         }

@@ -46,6 +46,34 @@ pub struct ChunkStats {
     pub peak: Vec<PrcFmt>,
 }
 
+impl ChunkStats {
+    pub fn rms_db(&self) -> Vec<f32> {
+        self.rms
+            .iter()
+            .map(|val| {
+                if *val == 0.0 {
+                    -1000.0
+                } else {
+                    20.0 * val.log10() as f32
+                }
+            })
+            .collect()
+    }
+
+    pub fn peak_db(&self) -> Vec<f32> {
+        self.peak
+            .iter()
+            .map(|val| {
+                if *val == 0.0 {
+                    -1000.0
+                } else {
+                    20.0 * val.log10() as f32
+                }
+            })
+            .collect()
+    }
+}
+
 impl AudioChunk {
     pub fn new(
         waveforms: Vec<Vec<PrcFmt>>,
@@ -494,7 +522,7 @@ pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, 
     let rel_diff = (diff as f64) / (srate as f64);
     let speed = 1.0 - 0.5 * rel_diff / adjust_period as f64;
     debug!(
-        "Current buffer level {}, set capture rate to {}%",
+        "Current buffer level: {}, corrected capture rate: {}%",
         avg_level,
         100.0 * speed
     );
@@ -503,7 +531,7 @@ pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, 
 
 #[cfg(test)]
 mod tests {
-    use audiodevice::{rms_and_peak, AudioChunk};
+    use audiodevice::{rms_and_peak, AudioChunk, ChunkStats};
 
     #[test]
     fn vec_rms_and_peak() {
@@ -524,5 +552,16 @@ mod tests {
         assert_eq!(stats.rms[1], 2.0);
         assert_eq!(stats.peak[0], 1.0);
         assert_eq!(stats.peak[1], 4.0);
+    }
+
+    #[test]
+    fn rms_and_peak_to_db() {
+        let stats = ChunkStats {
+            rms: vec![0.0, 0.5],
+            peak: vec![1.0],
+        };
+        assert_eq!(-1000.0, stats.rms_db()[0]);
+        assert_eq!(0.0, stats.peak_db()[0]);
+        assert!(stats.rms_db()[1] > -6.1 && stats.rms_db()[1] < -5.9);
     }
 }

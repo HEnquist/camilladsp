@@ -252,26 +252,32 @@ fn playback_loop_bytes(
                 if let Ok(status) = pcmdevice.status() {
                     buffer_avg.add_value(status.get_delay() as f64)
                 }
-                if adjust && timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
+                if timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
                     if let Some(av_delay) = buffer_avg.get_average() {
-                        let speed = calculate_speed(
-                            av_delay,
-                            params.target_level,
-                            params.adjust_period,
-                            srate,
-                        );
                         timer.restart();
                         buffer_avg.restart();
-                        channels
-                            .status
-                            .send(StatusMessage::SetSpeed { speed })
-                            .unwrap();
-                        params.playback_status.write().unwrap().buffer_level = av_delay as usize;
+                        if adjust {
+                            let speed = calculate_speed(
+                                av_delay,
+                                params.target_level,
+                                params.adjust_period,
+                                srate,
+                            );
+                            channels
+                                .status
+                                .send(StatusMessage::SetSpeed { speed })
+                                .unwrap();
+                        }
+                        let chunk_stats = chunk.get_stats();
+                        let mut pb_stat = params.playback_status.write().unwrap();
+                        pb_stat.buffer_level = av_delay as usize;
+                        pb_stat.signal_rms = chunk_stats.rms_db();
+                        pb_stat.signal_peak = chunk_stats.peak_db();
+                        debug!(
+                            "Playback buffer level: {}, Signal RMS: {:?}",
+                            av_delay, pb_stat.signal_rms
+                        );
                     }
-                    let mut pb_stat = params.playback_status.write().unwrap();
-                    let chunk_stats = chunk.get_stats();
-                    pb_stat.signal_rms = chunk_stats.rms.clone();
-                    pb_stat.signal_peak = chunk_stats.peak.clone();
                 }
 
                 let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay);
@@ -392,8 +398,8 @@ fn capture_loop_bytes(
                     card_inactive = false;
                 }
                 let mut capt_stat = params.capture_status.write().unwrap();
-                capt_stat.signal_rms = chunk_stats.rms.clone();
-                capt_stat.signal_peak = chunk_stats.peak.clone();
+                capt_stat.signal_rms = chunk_stats.rms_db();
+                capt_stat.signal_peak = chunk_stats.peak_db();
             }
             Ok(CaptureResult::Timeout) => {
                 card_inactive = true;
@@ -426,6 +432,7 @@ fn capture_loop_bytes(
             )
         };
         chunk_stats = chunk.get_stats();
+        trace!("Capture rms {:?}", chunk_stats.rms_db());
         value_range = chunk.maxval - chunk.minval;
         if card_inactive {
             state = ProcessingState::Paused;

@@ -1,8 +1,11 @@
+use std::sync::{Arc, RwLock};
+
 use crate::filters::Filter;
 use config;
 use fifoqueue::FifoQueue;
 
 use PrcFmt;
+use ProcessingStatus;
 use Res;
 
 #[derive(Clone, Debug)]
@@ -15,6 +18,127 @@ pub struct Delay {
     pub name: String,
     samplerate: usize,
     pub queue: FifoQueue<PrcFmt>,
+}
+
+pub struct Volume {
+    pub name: String,
+    ramptime_in_chunks: usize,
+    current_volume: PrcFmt,
+    target_volume: f32,
+    ramp_start: PrcFmt,
+    ramp_step: usize,
+    samplerate: usize,
+    chunksize: usize,
+    processing_status: Arc<RwLock<ProcessingStatus>>,
+}
+
+impl Volume {
+    pub fn new(
+        name: String,
+        ramp_time_ms: f32,
+        current_volume: f32,
+        chunksize: usize,
+        samplerate: usize,
+        processing_status: Arc<RwLock<ProcessingStatus>>,
+    ) -> Self {
+        let ramptime_in_chunks =
+            (ramp_time_ms / (1000.0 * chunksize as f32 / samplerate as f32)).round() as usize;
+        Volume {
+            name,
+            ramptime_in_chunks,
+            current_volume: current_volume as PrcFmt,
+            ramp_start: current_volume as PrcFmt,
+            target_volume: current_volume as f32,
+            ramp_step: 0,
+            samplerate,
+            chunksize,
+            processing_status,
+        }
+    }
+
+    pub fn from_config(
+        name: String,
+        conf: config::VolumeParameters,
+        chunksize: usize,
+        samplerate: usize,
+        processing_status: Arc<RwLock<ProcessingStatus>>,
+    ) -> Self {
+        let current_volume = processing_status.read().unwrap().volume;
+        Volume::new(
+            name,
+            conf.ramp_time,
+            current_volume,
+            chunksize,
+            samplerate,
+            processing_status,
+        )
+    }
+
+    fn make_ramp(&self) -> Vec<PrcFmt> {
+        let ramprange =
+            (self.target_volume as PrcFmt - self.ramp_start) / self.ramptime_in_chunks as PrcFmt;
+        let stepsize = ramprange / self.chunksize as PrcFmt;
+        (0..self.chunksize)
+            .map(|val| {
+                (10.0 as PrcFmt).powf(
+                    (self.ramp_start
+                        + ramprange * (self.ramp_step as PrcFmt - 1.0)
+                        + val as PrcFmt * stepsize)
+                        / 20.0,
+                )
+            })
+            .collect()
+    }
+}
+
+impl Filter for Volume {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+        let shared_vol = self.processing_status.read().unwrap().volume;
+
+        // Volume setting changed
+        if (shared_vol - self.target_volume).abs() > 0.001 {
+            self.ramp_start = self.current_volume;
+            self.target_volume = shared_vol;
+            self.ramp_step = 1;
+        }
+        // Not in a ramp
+        if self.ramp_step == 0 {
+            let mut gain: PrcFmt = 10.0;
+            gain = gain.powf(self.current_volume as PrcFmt / 20.0);
+            for item in waveform.iter_mut() {
+                *item *= gain;
+            }
+        }
+        // Ramping
+        else if self.ramp_step <= self.ramptime_in_chunks {
+            let ramp = self.make_ramp();
+            self.ramp_step += 1;
+            if self.ramp_step > self.ramptime_in_chunks {
+                // Last step of ramp
+                self.ramp_step = 0;
+            }
+            for (item, stepgain) in waveform.iter_mut().zip(ramp.iter()) {
+                *item *= *stepgain;
+            }
+            self.current_volume = *ramp.last().unwrap();
+        }
+        Ok(())
+    }
+
+    fn update_parameters(&mut self, conf: config::Filter) {
+        if let config::Filter::Volume { parameters: conf } = conf {
+            self.ramptime_in_chunks = (conf.ramp_time
+                / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
+                .round() as usize;
+        } else {
+            // This should never happen unless there is a bug somewhere else
+            panic!("Invalid config change!");
+        }
+    }
 }
 
 impl Gain {

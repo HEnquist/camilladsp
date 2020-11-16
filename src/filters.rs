@@ -14,8 +14,10 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::{BufRead, Read, Seek, SeekFrom};
+use std::sync::{Arc, RwLock};
 
 use PrcFmt;
+use ProcessingStatus;
 use Res;
 
 pub trait Filter {
@@ -197,6 +199,7 @@ impl FilterGroup {
         filter_configs: HashMap<String, config::Filter>,
         waveform_length: usize,
         sample_freq: usize,
+        processing_status: Arc<RwLock<ProcessingStatus>>,
     ) -> Self {
         debug!("Build from config");
         let mut filters = Vec::<Box<dyn Filter>>::new();
@@ -222,6 +225,15 @@ impl FilterGroup {
                     ),
                     config::Filter::Gain { parameters } => {
                         Box::new(basicfilters::Gain::from_config(name, parameters))
+                    }
+                    config::Filter::Volume { parameters } => {
+                        Box::new(basicfilters::Volume::from_config(
+                            name,
+                            parameters,
+                            waveform_length,
+                            sample_freq,
+                            processing_status.clone(),
+                        ))
                     }
                     config::Filter::Dither { parameters } => {
                         Box::new(dither::Dither::from_config(name, parameters))
@@ -269,7 +281,10 @@ pub struct Pipeline {
 
 impl Pipeline {
     /// Create a new pipeline from a configuration structure.
-    pub fn from_config(conf: config::Configuration) -> Self {
+    pub fn from_config(
+        conf: config::Configuration,
+        processing_status: Arc<RwLock<ProcessingStatus>>,
+    ) -> Self {
         debug!("Build new pipeline");
         let mut steps = Vec::<PipelineStep>::new();
         for step in conf.pipeline {
@@ -286,6 +301,7 @@ impl Pipeline {
                         conf.filters.clone(),
                         conf.devices.chunksize,
                         conf.devices.samplerate,
+                        processing_status.clone(),
                     );
                     steps.push(PipelineStep::FilterStep(fltgrp));
                 }
@@ -351,6 +367,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
         config::Filter::Gain { .. } => Ok(()),
         config::Filter::Dither { .. } => Ok(()),
         config::Filter::DiffEq { .. } => Ok(()),
+        config::Filter::Volume { .. } => Ok(()),
         config::Filter::BiquadCombo { parameters } => biquadcombo::validate_config(&parameters),
     }
 }

@@ -373,6 +373,9 @@ pub enum Filter {
     Gain {
         parameters: GainParameters,
     },
+    Volume {
+        parameters: VolumeParameters,
+    },
     Dither {
         parameters: DitherParameters,
     },
@@ -507,6 +510,12 @@ pub enum BiquadComboParameters {
     LinkwitzRileyLowpass { freq: PrcFmt, order: usize },
     ButterworthHighpass { freq: PrcFmt, order: usize },
     ButterworthLowpass { freq: PrcFmt, order: usize },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct VolumeParameters {
+    pub ramp_time: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
