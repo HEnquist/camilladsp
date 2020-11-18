@@ -101,12 +101,14 @@ impl Filter for Volume {
 
         // Volume setting changed
         if (shared_vol - self.target_volume).abs() > 0.001 {
+            debug!("starting ramp {} -> {}", self.current_volume, shared_vol);
             self.ramp_start = self.current_volume;
             self.target_volume = shared_vol;
             self.ramp_step = 1;
         }
         // Not in a ramp
         if self.ramp_step == 0 {
+            debug!("constant gain {}", self.current_volume);
             let mut gain: PrcFmt = 10.0;
             gain = gain.powf(self.current_volume as PrcFmt / 20.0);
             for item in waveform.iter_mut() {
@@ -115,6 +117,7 @@ impl Filter for Volume {
         }
         // Ramping
         else if self.ramp_step <= self.ramptime_in_chunks {
+            debug!("ramp step {}", self.ramp_step);
             let ramp = self.make_ramp();
             self.ramp_step += 1;
             if self.ramp_step > self.ramptime_in_chunks {
@@ -124,7 +127,8 @@ impl Filter for Volume {
             for (item, stepgain) in waveform.iter_mut().zip(ramp.iter()) {
                 *item *= *stepgain;
             }
-            self.current_volume = *ramp.last().unwrap();
+            self.current_volume = 20.0 * ramp.last().unwrap().log10();
+            debug!("current volume {}", self.current_volume);
         }
         Ok(())
     }
