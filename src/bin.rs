@@ -1,14 +1,15 @@
 #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 extern crate alsa;
 extern crate camillalib;
+extern crate chrono;
 extern crate clap;
 #[cfg(feature = "FFTW")]
 extern crate fftw;
+extern crate lazy_static;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
-extern crate num;
 extern crate rand;
 extern crate rand_distr;
 #[cfg(not(feature = "FFTW"))]
@@ -17,17 +18,19 @@ extern crate rubato;
 extern crate serde;
 extern crate serde_with;
 extern crate signal_hook;
-#[cfg(feature = "socketserver")]
-extern crate ws;
+#[cfg(feature = "websocket")]
+extern crate tungstenite;
 
 #[macro_use]
 extern crate log;
 extern crate env_logger;
 
+use chrono::Local;
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
 use env_logger::Builder;
 use log::LevelFilter;
 use std::env;
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -39,9 +42,9 @@ use camillalib::Res;
 use camillalib::audiodevice;
 use camillalib::config;
 use camillalib::processing;
-#[cfg(feature = "socketserver")]
+#[cfg(feature = "websocket")]
 use camillalib::socketserver;
-#[cfg(feature = "socketserver")]
+#[cfg(feature = "websocket")]
 use std::net::IpAddr;
 
 use camillalib::StatusMessage;
@@ -51,6 +54,8 @@ use camillalib::CommandMessage;
 use camillalib::ExitState;
 
 use camillalib::CaptureStatus;
+use camillalib::ExitRequest;
+use camillalib::PlaybackStatus;
 use camillalib::ProcessingState;
 
 fn get_new_config(
@@ -108,7 +113,10 @@ fn run(
     config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     capture_status: Arc<RwLock<CaptureStatus>>,
+    playback_status: Arc<RwLock<PlaybackStatus>>,
 ) -> Res<ExitState> {
+    capture_status.write().unwrap().state = ProcessingState::Starting;
+    let mut is_starting = true;
     let conf = match new_config_shared.lock().unwrap().clone() {
         Some(cfg) => cfg,
         None => {
@@ -140,13 +148,16 @@ fn run(
     *active_config_shared.lock().unwrap() = Some(active_config.clone());
     *new_config_shared.lock().unwrap() = None;
     signal_reload.store(false, Ordering::Relaxed);
+    signal_exit.store(ExitRequest::NONE, Ordering::Relaxed);
 
     // Processing thread
     processing::run_processing(conf_proc, barrier_proc, tx_pb, rx_cap, rx_pipeconf);
 
     // Playback thread
     let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
-    let pb_handle = playback_dev.start(rx_pb, barrier_pb, tx_status_pb).unwrap();
+    let pb_handle = playback_dev
+        .start(rx_pb, barrier_pb, tx_status_pb, playback_status)
+        .unwrap();
 
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
@@ -206,57 +217,78 @@ fn run(
                 }
             };
         }
-        match signal_exit.load(Ordering::Relaxed) {
-            1 => {
-                debug!("Exit requested...");
-                signal_exit.store(0, Ordering::Relaxed);
-                tx_command_cap.send(CommandMessage::Exit).unwrap();
-                trace!("Wait for pb..");
-                pb_handle.join().unwrap();
-                trace!("Wait for cap..");
-                cap_handle.join().unwrap();
-                return Ok(ExitState::Exit);
-            }
-            2 => {
-                debug!("Stop requested...");
-                signal_exit.store(0, Ordering::Relaxed);
-                tx_command_cap.send(CommandMessage::Exit).unwrap();
-                trace!("Wait for pb..");
-                pb_handle.join().unwrap();
-                trace!("Wait for cap..");
-                cap_handle.join().unwrap();
-                *new_config_shared.lock().unwrap() = None;
-                return Ok(ExitState::Restart);
-            }
-            _ => {}
-        };
+        if !is_starting {
+            match signal_exit.load(Ordering::Relaxed) {
+                ExitRequest::EXIT => {
+                    debug!("Exit requested...");
+                    signal_exit.store(0, Ordering::Relaxed);
+                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    trace!("Wait for pb..");
+                    pb_handle.join().unwrap();
+                    trace!("Wait for cap..");
+                    cap_handle.join().unwrap();
+                    return Ok(ExitState::Exit);
+                }
+                ExitRequest::STOP => {
+                    debug!("Stop requested...");
+                    signal_exit.store(0, Ordering::Relaxed);
+                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    trace!("Wait for pb..");
+                    pb_handle.join().unwrap();
+                    trace!("Wait for cap..");
+                    cap_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
+                }
+                _ => {}
+            };
+        }
         match rx_status.recv_timeout(delay) {
             Ok(msg) => match msg {
                 StatusMessage::PlaybackReady => {
                     debug!("Playback thread ready to start");
                     pb_ready = true;
                     if cap_ready {
+                        debug!("Both capture and playback ready, release barrier");
                         barrier.wait();
+                        is_starting = false;
                     }
                 }
                 StatusMessage::CaptureReady => {
                     debug!("Capture thread ready to start");
                     cap_ready = true;
                     if pb_ready {
+                        debug!("Both capture and playback ready, release barrier");
                         barrier.wait();
+                        is_starting = false;
                     }
                 }
                 StatusMessage::PlaybackError { message } => {
                     error!("Playback error: {}", message);
-                    return Ok(ExitState::Exit);
+                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if is_starting {
+                        debug!("Error while starting, release barrier");
+                        barrier.wait();
+                    }
+                    debug!("Wait for capture thread to exit..");
+                    cap_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureError { message } => {
                     error!("Capture error: {}", message);
-                    return Ok(ExitState::Exit);
+                    if is_starting {
+                        debug!("Error while starting, release barrier");
+                        barrier.wait();
+                    }
+                    debug!("Wait for playback thread to exit..");
+                    pb_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
                 }
                 StatusMessage::PlaybackDone => {
                     info!("Playback finished");
-                    return Ok(ExitState::Exit);
+                    return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureDone => {
                     info!("Capture finished");
@@ -285,8 +317,11 @@ fn main() {
     if cfg!(feature = "cpal-backend") {
         features.push("cpal-backend");
     }
-    if cfg!(feature = "socketserver") {
-        features.push("socketserver");
+    if cfg!(feature = "websocket") {
+        features.push("websocket");
+    }
+    if cfg!(feature = "secure-websocket") {
+        features.push("secure-websocket");
     }
     if cfg!(feature = "FFTW") {
         features.push("FFTW");
@@ -313,21 +348,100 @@ fn main() {
             Arg::with_name("check")
                 .help("Check config file and exit")
                 .short("c")
-                .long("check"),
+                .long("check")
+                .requires("configfile"),
         )
         .arg(
             Arg::with_name("verbosity")
                 .short("v")
                 .multiple(true)
                 .help("Increase message verbosity"),
+        )
+        .arg(
+            Arg::with_name("loglevel")
+                .short("l")
+                .long("loglevel")
+                .display_order(100)
+                .takes_value(true)
+                .possible_value("trace")
+                .possible_value("debug")
+                .possible_value("info")
+                .possible_value("warn")
+                .possible_value("error")
+                .possible_value("off")
+                .help("Set log level")
+                .conflicts_with("verbosity"),
+        )
+        .arg(
+            Arg::with_name("samplerate")
+                .help("Override samplerate in config")
+                .short("r")
+                .long("samplerate")
+                .display_order(300)
+                .takes_value(true)
+                .validator(|v: String| -> Result<(), String> {
+                    if let Ok(rate) = v.parse::<usize>() {
+                        if rate > 0 {
+                            return Ok(());
+                        }
+                    }
+                    Err(String::from("Must be an integer > 0"))
+                }),
+        )
+        .arg(
+            Arg::with_name("channels")
+                .help("Override number of channels of capture device in config")
+                .short("n")
+                .long("channels")
+                .display_order(300)
+                .takes_value(true)
+                .validator(|v: String| -> Result<(), String> {
+                    if let Ok(rate) = v.parse::<usize>() {
+                        if rate > 0 {
+                            return Ok(());
+                        }
+                    }
+                    Err(String::from("Must be an integer > 0"))
+                }),
+        )
+        .arg(
+            Arg::with_name("extra_samples")
+                .help("Override number of extra samples in config")
+                .short("e")
+                .long("extra_samples")
+                .display_order(300)
+                .takes_value(true)
+                .validator(|v: String| -> Result<(), String> {
+                    if let Ok(rate) = v.parse::<usize>() {
+                        if rate > 0 {
+                            return Ok(());
+                        }
+                    }
+                    Err(String::from("Must be an integer > 0"))
+                }),
+        )
+        .arg(
+            Arg::with_name("format")
+                .short("f")
+                .long("format")
+                .display_order(310)
+                .takes_value(true)
+                .possible_value("S16LE")
+                .possible_value("S24LE")
+                .possible_value("S24LE3")
+                .possible_value("S32LE")
+                .possible_value("FLOAT32LE")
+                .possible_value("FLOAT64LE")
+                .help("Override sample format of capture device in config"),
         );
-    #[cfg(feature = "socketserver")]
+    #[cfg(feature = "websocket")]
     let clapapp = clapapp
         .arg(
             Arg::with_name("port")
                 .help("Port for websocket server")
                 .short("p")
                 .long("port")
+                .display_order(200)
                 .takes_value(true)
                 .validator(|v: String| -> Result<(), String> {
                     if let Ok(port) = v.parse::<usize>() {
@@ -343,6 +457,7 @@ fn main() {
                 .help("IP address to bind websocket server to")
                 .short("a")
                 .long("address")
+                .display_order(200)
                 .takes_value(true)
                 .requires("port")
                 .validator(|val: String| -> Result<(), String> {
@@ -357,21 +472,57 @@ fn main() {
                 .short("w")
                 .long("wait")
                 .help("Wait for config from websocket")
-                .conflicts_with("configfile")
+                .requires("port"),
+        );
+    #[cfg(feature = "secure-websocket")]
+    let clapapp = clapapp
+        .arg(
+            Arg::with_name("cert")
+                .long("cert")
+                .takes_value(true)
+                .help("Path to .pfx/.p12 certificate file")
+                .requires("port"),
+        )
+        .arg(
+            Arg::with_name("pass")
+                .long("pass")
+                .takes_value(true)
+                .help("Password for .pfx/.p12 certificate file")
                 .requires("port"),
         );
     let matches = clapapp.get_matches();
 
-    let loglevel = match matches.occurrences_of("verbosity") {
+    let mut loglevel = match matches.occurrences_of("verbosity") {
         0 => LevelFilter::Info,
         1 => LevelFilter::Debug,
         2 => LevelFilter::Trace,
         _ => LevelFilter::Trace,
     };
+    loglevel = match matches.value_of("loglevel") {
+        Some("trace") => LevelFilter::Trace,
+        Some("debug") => LevelFilter::Debug,
+        Some("info") => LevelFilter::Info,
+        Some("warn") => LevelFilter::Warn,
+        Some("error") => LevelFilter::Error,
+        Some("off") => LevelFilter::Off,
+        _ => loglevel,
+    };
 
     let mut builder = Builder::from_default_env();
 
-    builder.filter(None, loglevel).init();
+    builder
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "{} {} {} - {}",
+                Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                buf.default_styled_level(record.level()),
+                record.module_path().unwrap_or("camilladsp"),
+                record.args()
+            )
+        })
+        .filter(None, loglevel)
+        .init();
     // logging examples
     //trace!("trace message"); //with -vv
     //debug!("debug message"); //with -v
@@ -383,6 +534,19 @@ fn main() {
         Some(path) => Some(path.to_string()),
         None => None,
     };
+    //let mut new_settings = SETTINGS.write().unwrap();
+    config::OVERRIDES.write().unwrap().samplerate = matches
+        .value_of("samplerate")
+        .map(|s| s.parse::<usize>().unwrap());
+    config::OVERRIDES.write().unwrap().extra_samples = matches
+        .value_of("extra_samples")
+        .map(|s| s.parse::<usize>().unwrap());
+    config::OVERRIDES.write().unwrap().channels = matches
+        .value_of("channels")
+        .map(|s| s.parse::<usize>().unwrap());
+    config::OVERRIDES.write().unwrap().sample_format = matches
+        .value_of("format")
+        .map(|s| config::SampleFormat::from_name(s).unwrap());
 
     debug!("Read config file {:?}", configname);
 
@@ -417,13 +581,17 @@ fn main() {
         rate_adjust: 0.0,
         state: ProcessingState::Inactive,
     }));
+    let playback_status = Arc::new(RwLock::new(PlaybackStatus {
+        buffer_level: 0,
+        clipped_samples: 0,
+    }));
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
 
     let active_config_path = Arc::new(Mutex::new(configname));
 
-    #[cfg(feature = "socketserver")]
+    #[cfg(feature = "websocket")]
     {
         if let Some(port_str) = matches.value_of("port") {
             let serveraddress = match matches.value_of("address") {
@@ -438,8 +606,17 @@ fn main() {
                 active_config_path: active_config_path.clone(),
                 new_config: new_config.clone(),
                 capture_status: capture_status.clone(),
+                playback_status: playback_status.clone(),
             };
-            socketserver::start_server(serveraddress, serverport, shared_data);
+            let server_params = socketserver::ServerParameters {
+                port: serverport,
+                address: serveraddress,
+                #[cfg(feature = "secure-websocket")]
+                cert_file: matches.value_of("cert"),
+                #[cfg(feature = "secure-websocket")]
+                cert_pass: matches.value_of("pass"),
+            };
+            socketserver::start_server(server_params, shared_data);
         }
     }
 
@@ -447,10 +624,34 @@ fn main() {
     loop {
         debug!("Wait for config");
         while new_config.lock().unwrap().is_none() {
+            if !wait {
+                debug!("No config and not in wait mode, exiting!");
+                return;
+            }
             trace!("waiting...");
-            if signal_exit.load(Ordering::Relaxed) == 1 {
+            if signal_exit.load(Ordering::Relaxed) == ExitRequest::EXIT {
                 // exit requested
-                break;
+                return;
+            } else if signal_reload.load(Ordering::Relaxed) {
+                debug!("Reloading configuration...");
+                signal_reload.store(false, Ordering::Relaxed);
+                let conf_loaded = get_new_config(&active_config_path, &new_config);
+                match conf_loaded {
+                    Ok(conf) => {
+                        debug!(
+                            "Loaded config file: {:?}",
+                            active_config_path.lock().unwrap()
+                        );
+                        *new_config.lock().unwrap() = Some(conf);
+                    }
+                    Err(err) => {
+                        error!(
+                            "Could not load config: {:?}, error: {}",
+                            active_config_path.lock().unwrap(),
+                            err
+                        );
+                    }
+                }
             }
             thread::sleep(delay);
         }
@@ -462,6 +663,7 @@ fn main() {
             active_config_path.clone(),
             new_config.clone(),
             capture_status.clone(),
+            playback_status.clone(),
         );
         match exitstatus {
             Err(e) => {
@@ -474,10 +676,7 @@ fn main() {
             Ok(ExitState::Exit) => {
                 debug!("Exiting");
                 *active_config.lock().unwrap() = None;
-                if !wait || signal_exit.load(Ordering::Relaxed) == 1 {
-                    // wait mode not active, or exit requested
-                    break;
-                }
+                break;
             }
             Ok(ExitState::Restart) => {
                 *active_config.lock().unwrap() = None;

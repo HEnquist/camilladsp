@@ -3,6 +3,7 @@ import yaml
 from websocket import create_connection
 import sys
 import os
+import json
 from analyze_wav import read_wav_header
 
 try:
@@ -10,7 +11,7 @@ try:
     template_file = os.path.abspath(sys.argv[2])
     wav_file = os.path.abspath(sys.argv[3])
 except:
-    print("Usage: start CamillaDSP with the socketserver enabled, and wait mode:")
+    print("Usage: start CamillaDSP with the websocket server enabled, and wait mode:")
     print("> camilladsp -p4321 -w")
     print("Then play a wav file:")
     print("> python play_wav.py 4321 path/to/some/template/config.yml path/to/file.wav")
@@ -47,5 +48,5 @@ modded = yaml.dump(cfg)
 
 # Send the modded config
 ws = create_connection("ws://127.0.0.1:{}".format(port))
-ws.send("setconfig:{}".format(modded))
+ws.send(json.dumps({"SetConfig": modded))
 ws.recv()

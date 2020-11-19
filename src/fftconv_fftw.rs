@@ -4,7 +4,7 @@ use fftw::array::AlignedVec;
 use fftw::plan::*;
 use fftw::types::*;
 use filters;
-use helpers::{multiply_add_elements, multiply_elements};
+//use helpers::{multiply_add_elements, multiply_elements};
 
 // Sample format
 use PrcFmt;
@@ -13,6 +13,71 @@ pub type ComplexFmt = c32;
 #[cfg(not(feature = "32bit"))]
 pub type ComplexFmt = c64;
 use Res;
+
+// -- Duplcated from helpers.rs, needed until fftw updates to num-complex 0.3
+pub fn multiply_elements(
+    result: &mut [ComplexFmt],
+    slice_a: &[ComplexFmt],
+    slice_b: &[ComplexFmt],
+) {
+    let len = result.len();
+    let mut res = &mut result[..len];
+    let mut val_a = &slice_a[..len];
+    let mut val_b = &slice_b[..len];
+
+    while res.len() >= 8 {
+        res[0] = val_a[0] * val_b[0];
+        res[1] = val_a[1] * val_b[1];
+        res[2] = val_a[2] * val_b[2];
+        res[3] = val_a[3] * val_b[3];
+        res[4] = val_a[4] * val_b[4];
+        res[5] = val_a[5] * val_b[5];
+        res[6] = val_a[6] * val_b[6];
+        res[7] = val_a[7] * val_b[7];
+        res = &mut res[8..];
+        val_a = &val_a[8..];
+        val_b = &val_b[8..];
+    }
+    for (r, val) in res
+        .iter_mut()
+        .zip(val_a.iter().zip(val_b.iter()).map(|(a, b)| *a * *b))
+    {
+        *r = val;
+    }
+}
+
+// element-wise add product, result = result + slice_a * slice_b
+pub fn multiply_add_elements(
+    result: &mut [ComplexFmt],
+    slice_a: &[ComplexFmt],
+    slice_b: &[ComplexFmt],
+) {
+    let len = result.len();
+    let mut res = &mut result[..len];
+    let mut val_a = &slice_a[..len];
+    let mut val_b = &slice_b[..len];
+
+    while res.len() >= 8 {
+        res[0] += val_a[0] * val_b[0];
+        res[1] += val_a[1] * val_b[1];
+        res[2] += val_a[2] * val_b[2];
+        res[3] += val_a[3] * val_b[3];
+        res[4] += val_a[4] * val_b[4];
+        res[5] += val_a[5] * val_b[5];
+        res[6] += val_a[6] * val_b[6];
+        res[7] += val_a[7] * val_b[7];
+        res = &mut res[8..];
+        val_a = &val_a[8..];
+        val_b = &val_b[8..];
+    }
+    for (r, val) in res
+        .iter_mut()
+        .zip(val_a.iter().zip(val_b.iter()).map(|(a, b)| *a * *b))
+    {
+        *r += val;
+    }
+}
+// -- Duplcated from helpers.rs, needed until fftw updates to num-complex 0.3
 
 pub struct FFTConv {
     name: String,
@@ -81,7 +146,9 @@ impl FFTConv {
 
     pub fn from_config(name: String, data_length: usize, conf: config::ConvParameters) -> Self {
         let values = match conf {
-            config::ConvParameters::Values { values } => values,
+            config::ConvParameters::Values { values, length } => {
+                filters::pad_vector(&values, length)
+            }
             config::ConvParameters::File {
                 filename,
                 format,
@@ -142,7 +209,9 @@ impl Filter for FFTConv {
     fn update_parameters(&mut self, conf: config::Filter) {
         if let config::Filter::Conv { parameters: conf } = conf {
             let coeffs = match conf {
-                config::ConvParameters::Values { values } => values,
+                config::ConvParameters::Values { values, length } => {
+                    filters::pad_vector(&values, length)
+                }
                 config::ConvParameters::File {
                     filename,
                     format,
@@ -230,7 +299,10 @@ mod tests {
     #[test]
     fn check_result() {
         let coeffs = vec![0.5, 0.5];
-        let conf = ConvParameters::Values { values: coeffs };
+        let conf = ConvParameters::Values {
+            values: coeffs,
+            length: 0,
+        };
         let mut filter = FFTConv::from_config("test".to_string(), 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];

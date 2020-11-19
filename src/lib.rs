@@ -5,11 +5,19 @@ extern crate clap;
 extern crate cpal;
 #[cfg(feature = "FFTW")]
 extern crate fftw;
+#[macro_use]
+extern crate lazy_static;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
-extern crate num;
+#[cfg(feature = "secure-websocket")]
+extern crate native_tls;
+#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+extern crate nix;
+extern crate num_complex;
+extern crate num_integer;
+extern crate num_traits;
 extern crate rand;
 extern crate rand_distr;
 #[cfg(not(feature = "FFTW"))]
@@ -18,13 +26,14 @@ extern crate rubato;
 extern crate serde;
 extern crate serde_with;
 extern crate signal_hook;
-#[cfg(feature = "socketserver")]
-extern crate ws;
+#[cfg(feature = "websocket")]
+extern crate tungstenite;
 
 #[macro_use]
 extern crate log;
 extern crate env_logger;
 
+use serde::Serialize;
 use std::error;
 use std::fmt;
 
@@ -43,6 +52,7 @@ pub mod biquad;
 pub mod biquadcombo;
 pub mod config;
 pub mod conversions;
+pub mod countertimer;
 #[cfg(feature = "cpal-backend")]
 pub mod cpaldevice;
 pub mod diffeq;
@@ -59,7 +69,7 @@ pub mod mixer;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;
-#[cfg(feature = "socketserver")]
+#[cfg(feature = "websocket")]
 pub mod socketserver;
 
 pub enum StatusMessage {
@@ -82,11 +92,20 @@ pub enum ExitState {
     Exit,
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Serialize, PartialEq)]
 pub enum ProcessingState {
     Running,
     Paused,
     Inactive,
+    Starting,
+}
+
+pub struct ExitRequest {}
+
+impl ExitRequest {
+    pub const NONE: usize = 0;
+    pub const EXIT: usize = 1;
+    pub const STOP: usize = 2;
 }
 
 #[derive(Clone, Debug)]
@@ -98,12 +117,19 @@ pub struct CaptureStatus {
     pub rate_adjust: f32,
 }
 
+#[derive(Clone, Debug)]
+pub struct PlaybackStatus {
+    pub clipped_samples: usize,
+    pub buffer_level: usize,
+}
+
 impl fmt::Display for ProcessingState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let desc = match self {
             ProcessingState::Running => "RUNNING",
             ProcessingState::Paused => "PAUSED",
             ProcessingState::Inactive => "INACTIVE",
+            ProcessingState::Starting => "STARTING",
         };
         write!(f, "{}", desc)
     }

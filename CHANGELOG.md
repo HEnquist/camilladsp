@@ -1,3 +1,27 @@
+## 0.4.0
+New features:
+- New commands to get more playback information from the websocket server.
+- Changed all websocket commands to use Json input and output.
+- Added optional support for secure websocket connections (wss).
+- Rename the optional websocket to feature to `websocket`.
+- Add new optional feature `secure-websocket` for wss support.
+- Added an option to generate arbitrary length filters for testing convolution cpu load.
+- Possible to use Reload command to restart from inactive state.
+- Handle quirks of the USB audio gadget when used as Alsa capture source.
+- Add `loglevel` option.
+- Use local time instead of UTC in log messages.
+- Add command line options to override some parameters.
+- Add substitution of `$samplerate$` and `$channels$` tokens in config.
+
+Bugfixes:
+- Better handling of input device errors, fixes 100% cpu usage after panic.
+- Use `Instant` instead of `SystemTime`to avoid issues when system clock is changed.
+- Fix 100% cpu when Stdin doesn't provide any data.
+- Reduce cpu usage when using PulseAudio.
+- Fix buffer size handling for alsa capture.
+- Fix high frequency noise from synchronous resampler.
+
+
 ## 0.3.2
 New features:
 - New commands to get more information from the websocket server.
@@ -5,8 +29,8 @@ New features:
 - Updated Cpal library.
 - Added capture and playback devices Stdin & Stdout.
 - Improved error messages.
-- Improved validation of mixer config
-- Added option to set which IP address to bind websocket server to
+- Improved validation of mixer config.
+- Added option to set which IP address to bind websocket server to.
 
 Bugfixes:
 - Fix websocket `exit` command.

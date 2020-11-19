@@ -1,16 +1,17 @@
 [package]
 name = "camilladsp"
-version = "0.3.2"
+version = "0.4.0"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 description = "A flexible tool for processing audio"
 
 [features]
-default = ["alsa-backend", "pulse-backend", "socketserver"]
-alsa-backend = ["alsa"]
+default = ["alsa-backend", "pulse-backend", "websocket"]
+alsa-backend = ["alsa", "nix"]
 pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
 cpal-backend = ["cpal"]
 32bit = []
-socketserver = ["ws"]
+websocket = ["tungstenite"]
+secure-websocket = ["websocket", "native-tls", "tungstenite/tls"]
 FFTW = ["fftw"]
 
 [lib]
@@ -24,25 +25,31 @@ path = "src/bin.rs"
 
 [target.'cfg(target_os="linux")'.dependencies]
 alsa = { version = "0.4", optional = true }
+nix = { version = "0.15", optional = true }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 serde_json = "1.0"
-serde_with = "1.4.0"
-realfft = "0.2.0"
+serde_with = "1.5"
+realfft = "0.3.0"
 fftw = { version = "0.6.2", optional = true }
-num = "0.2"
-signal-hook = "0.1.13"
+num-complex = "0.3"
+num-integer = "0.1.43"
+num-traits = "0.2"
+signal-hook = "0.1.16"
 rand = "0.7.3"
-rand_distr = "0.2.2"
+rand_distr = "0.3.0"
 clap = "2.33.0"
-log = "0.4.8"
+lazy_static = "1.4.0"
+log = "0.4.11"
 env_logger = "0.7.1"
-ws = { version = "0.9.1", optional = true }
+chrono = "0.4"
+tungstenite = { version = "0.11.1", optional = true, default-features = false }
+native-tls = { version = "0.2.4", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-rubato = "0.4.3"
+rubato = "0.5.1"
 cpal = { version = "0.12.1", optional = true }
 
 [dev-dependencies]

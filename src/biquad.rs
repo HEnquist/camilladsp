@@ -328,7 +328,7 @@ mod tests {
     use biquad::{Biquad, BiquadCoefficients};
     use config::BiquadParameters;
     use filters::Filter;
-    use num::complex::Complex;
+    use num_complex::Complex;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);

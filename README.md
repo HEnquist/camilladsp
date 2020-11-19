@@ -15,6 +15,7 @@ The full configuration is given in a yaml file.
 - **[Background](#background)**
 - **[Usage example: crossover for 2-way speakers](#usage-example-crossover-for-2-way-speakers)**
 - **[Dependencies](#dependencies)**
+- **[Related projects](#related-projects)**
 
 **[Installing](#installing)**
 
@@ -81,7 +82,7 @@ The playback thread simply waits for audio messages to appear in the queue. Once
 The supervisor monitors all threads by listening to their status messages. The requests for capture rate adjust are passed on to the capture thread. It's also responsible for updating the configuration when requested to do so via the websocket server or a SIGHUP signal.
 
 ### Websocket server
-The websocket server lauches a separate thread to handle each connected client. All commands to change the config are send to the supoervisor thread.
+The websocket server lauches a separate thread to handle each connected client. All commands to change the config are send to the supervisor thread.
 
 
 ## Usage example: crossover for 2-way speakers
@@ -91,12 +92,31 @@ See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
 ## Dependencies
 These are the key dependencies for CamillDSP.
+* https://crates.io/crates/alsa - Alsa audio backend
+* https://crates.io/crates/clap - Command line argument parsing
+* https://crates.io/crates/cpal - Wasapi and CoreAudio audio backends
+* https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
+* https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
 * https://crates.io/crates/rustfft - FFT used for FIR filters
 * https://crates.io/crates/rubato - Sample rate conversion
-* https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
-* https://crates.io/crates/alsa - Alsa audio backend
-* https://crates.io/crates/cpal - Wasapi and CoreAudio audio backends
 * https://crates.io/crates/serde_yaml - Config file reading
+* https://crates.io/crates/tungstenite - Websocket server
+
+
+## Related projects
+These are part of the CamillaDSP family:
+* https://github.com/HEnquist/pycamilladsp - Python library for communicating with CamillaDSP over websocket
+* https://github.com/HEnquist/pycamilladsp-plot - Plotting and visualization of configurations
+* https://github.com/HEnquist/camillagui-backend - Server for a web-based gui for CamillaDSP
+* https://github.com/HEnquist/camilladsp-config - Example configurations for things like running CamillaDSP as a systemd service
+
+Other projects meant to be used with CamillaDSP:
+* https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels
+* https://github.com/Lykkedk/SuperPlayer_v2.0 - Automatic filter switching at sample rate change for squeezelite
+
+Projects of general nature which can be useful together with CamillaDSP:
+* https://github.com/scripple/alsa_hook_hwparams - Alsa hooks for reacting to sample rate and format changes
+* https://github.com/HEnquist/cpal-listdevices - List audio devices with names and supported formats under Windows and macOS. 
 
 
 # Installing
@@ -124,7 +144,7 @@ tar -xvf camilladsp-linux-amd64.tar.gz
 
 # Building
 
-Use recent stable versions of rustc and cargo. The minimum rustc version is 1.40.0. 
+Use recent stable versions of rustc and cargo. The minimum rustc version is 1.43.0. 
 
 The recommended way to install rustc and cargo is by using the "rustup" tool. This tool works on all supported platforms (Linux, macOS and Windows). Get it here: https://rustup.rs/
 
@@ -134,7 +154,7 @@ By default both the Alsa and PulseAudio backends are enabled, but they can be di
 
 By default the internal processing is done using 64-bit floats. There is a possibility to switch this to 32-bit floats. This might be useful for speeding up the processing when running on a 32-bit CPU (or a 64-bit CPU running in 32-bit mode), but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
 
-CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "socketserver". For usage see the section "Controlling via websocket".
+CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "websocket". For usage see the section "Controlling via websocket".
 
 The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". When the chunksize is a power of two, like 1024 or 4096, FFTW is only a few percent faster than RustFFT. The difference gets much larger if the chunksize is a "strange" number, like a large prime. FFTW is a much larger and more complicated library, so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT much slower.
 
@@ -151,6 +171,10 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 - - Fedora: ```sudo dnf install pulseaudio-libs-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
 - - Arch:  ```sudo pacman -S libpulse```
+- Install OpenSSL dependency:
+- - Fedora: ```sudo dnf install openssl openssl-devel```
+- - Debian/Ubuntu etc: ```sudo apt-get install openssl libssl-dev```
+- - Arch:  ```sudo pacman -S openssl```
 - Clone the repository
 - Build with standard options: ```cargo build --release```
 - - see below for other options
@@ -163,25 +187,26 @@ All the available options, or "features" are:
 - `alsa-backend`: Alsa support
 - `pulse-backend`: PulseAudio support
 - `cpal-backend`: Wasapi and CoreAudio support
-- `socketserver`: Websocket server for control
+- `websocket`: Websocket server for control
+- `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
 - `FFTW`: Use FFTW instead of RustFFT
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64)
 
-The first three (`alsa-backend`, `pulse-packend`, `socketserver`) are included in the default features, meaning if you don't specify anything you will get those three.
+The first three (`alsa-backend`, `pulse-packend`, `websocket`) are included in the default features, meaning if you don't specify anything you will get those three.
 Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
 
-Example 1: You want `alsa-backend`, `pulse-backend`, `socketserver` and `FFTW`. The first three are included by default so you only need to add `FFTW`:
+Example 1: You want `alsa-backend`, `pulse-backend`, `websocket` and `FFTW`. The first three are included by default so you only need to add `FFTW`:
 ```
 cargo build --release --features FFTW
 (or)
 cargo install --path . --features FFTW
 ```
 
-Example 2: You want `alsa-backend`, `socketserver`, `32bit` and `FFTW`. Since you don't want `pulse-backend` you have to disable the defaults, and then add both `alsa-backend` and `socketserver`:
+Example 2: You want `alsa-backend`, `websocket`, `32bit` and `FFTW`. Since you don't want `pulse-backend` you have to disable the defaults, and then add both `alsa-backend` and `websocket`:
 ```
-cargo build --release --no-default-features --features alsa-backend --features socketserver --features FFTW --features 32bit
+cargo build --release --no-default-features --features alsa-backend --features websocket --features FFTW --features 32bit
 (or)
-cargo install --path . --no-default-features --features alsa-backend --features socketserver --features FFTW --features 32bit
+cargo install --path . --no-default-features --features alsa-backend --features websocket --features FFTW --features 32bit
 ```
 
 ## Optimize for your system
@@ -203,9 +228,24 @@ RUSTFLAGS='-C target-feature=+neon -C target-cpu=native' cargo build --release
 
 ## Building on Windows and macOS
 The Alsa and Pulse backends should not be included when building on Windows and macOS. The recommended build command is:
+
+macOS:
 ```
-RUSTFLAGS='-C target-cpu=native' cargo build --release  --no-default-features --features cpal-backend --features socketserver 
+RUSTFLAGS='-C target-cpu=native' cargo build --release  --no-default-features --features cpal-backend --features websocket
 ```
+
+Windows (cmd.exe command prompt):
+```
+set RUSTFLAGS=-C target-cpu=native 
+cargo build --release  --no-default-features --features cpal-backend --features websocket
+```
+
+Windows (PowerShell):
+```
+$env:RUSTFLAGS="-C target-cpu=native"
+cargo build --release  --no-default-features --features cpal-backend --features websocket
+```
+
 On macOS both the PulseAudio and FFTW features can be used. The necessary dependencies can be installed with brew:
 ```
 brew install fftw
@@ -230,11 +270,11 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.3.2
+CamillaDSP 0.4.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
-Built with features: alsa-backend, pulse-backend, socketserver
+Built with features: alsa-backend, pulse-backend, websocket
 
 USAGE:
     camilladsp [FLAGS] [OPTIONS] <configfile>
@@ -247,8 +287,17 @@ FLAGS:
     -w, --wait       Wait for config from websocket
 
 OPTIONS:
-    -a, --address <address>    IP address to bind websocket server to
-    -p, --port <port>          Port for websocket server
+    -l, --loglevel <loglevel>
+            Set log level [possible values: trace, debug, info, warn, error, off]
+
+    -a, --address <address>                          IP address to bind websocket server to
+    -p, --port <port>                                Port for websocket server
+    -n, --channels <channels>                        Override number of channels of capture device in config
+    -e, --extra_samples <extra_samples>              Override number of extra samples in config
+    -r, --samplerate <samplerate>                    Override samplerate in config
+    -f, --format <format>
+            Override sample format of capture device in config [possible values: S16LE, S24LE, S24LE3, S32LE, FLOAT32LE,
+            FLOAT64LE]
 
 ARGS:
     <configfile>    The configuration file to use
@@ -257,11 +306,13 @@ If the "check" flag is given, the program will exit after checking the configura
 
 To enable the websocket server, provide a port number with the `-p` option. Leave it out, or give 0 to disable. 
 
-By default the websocket server binds to the address 127.0.0.1 which means it's only accessible locally. If it should be also available to remote machines, give the IP address of the interface where it should be available with the `-a` option. Giving 0.0.0.0 will bind to all interfaces.
+By default the websocket server binds to the address 127.0.0.1 which means it's only accessible locally. If it should be also available to remote machines, give the IP address of the interface where it should be available with the `-a` option. Giving 0.0.0.0 will bind to all interfaces. The `--cert` and `--pass` options are used to provide an identity that is used to enable secure websocket connections. See the [websocket readme for more details.](./websocket.md)
 
 If the "wait" flag, `-w` is given, CamillaDSP will start the websocket server and wait for a configuration to be uploaded. Then the config file argument must be left out.
 
-The default logging setting prints messages of levels "error", "warn" and "info". By passing the verbosity flag once, `-v` it also prints "debug". If and if's given twice, `-vv`, it also prints "trace" messages. 
+The default logging setting prints messages of levels "error", "warn" and "info". This can be changed with the `loglevel` option. Setting this to for example `warn` will print messages of level `warn` and above, but suppress the lower levels of `info`, `debug` and `trace`. Alternatively, the log level can be changed with the verbosity flag. By passing the verbosity flag once, `-v`, `debug` messages are enabled. If it's given twice, `-vv`, it also prints `trace` messages. 
+
+There are a few options to override values in the loaded config file. Giving these options means the provided values will be used instead of the values in any loaded configuration. To change the values, CamillaDSP has to be restarted. If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` parameter. But if resampling is enabled, it will instead change the `capture_samplerate` parameter. If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled.
 
 
 ## Reloading the configuration
@@ -272,8 +323,8 @@ See the [separate readme for the websocket server](./websocket.md)
 
 
 # Capturing audio
+In order to insert CamillaDSP between applications and the sound card, a virtual sound card can be used. This works with Alsa, PulseAudio, CoreAudio and Wasapi. It is also possible to use pipes for apps that support outputting the audio data to stdout. 
 
-In order to insert CamillaDSP between applications and the sound card, a virtual sound card is required. This works with both Alsa and PulseAudio.
 ## Alsa
 An Alsa Loopback device can be used. This device behaves like a sound card with two devices playback and capture. The sound being send to the playback side on one device can then be captured from the capture side on the other device. To load the kernel device type:
 ```
@@ -618,7 +669,7 @@ mixers:
 
 ## Filters
 The filters section defines the filter configurations to use in the pipeline. It's enough to define each filter once even if it should be applied on several channels.
-The supported filter types are Biquad for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
+The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
 
 ### Gain
 The gain filter simply changes the amplitude of the signal. The "inverted" parameter simply inverts the signal. This parameter is optional and the default is to not invert.
@@ -655,7 +706,8 @@ filters:
       skip_bytes_lines: 0 (*)
       read_bytes_lines: 0 (*)
 ```
-The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. 
+The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. If the filename includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`. 
+
 
 Example for giving values:
 ```
@@ -665,7 +717,9 @@ filters:
     parameters:
       type: Values
       values: [0.0, 0.1, 0.2, 0.3]
+      length: 12345
 ```
+The `length` setting is optional. It is used to extend the number of coefficients past the ones given in `values`. The added coefficients are all zeroes. This is intended to provide an easy way to evaluating the CPU load for different filter lengths.
 
 The File type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
 * `skip_bytes_lines`: Number of bytes (for raw files) or lines (for text) to skip at the beginning of the file. This can be used to skip over a header. Leaving it out or setting to zero means no bytes or lines are skipped. 
@@ -690,7 +744,7 @@ The other possible formats are raw data:
 
 
 ### IIR
-IIR filters are Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filters, or you can provide the coefficients directly.
+IIR filters are implemented as Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filters, or you can provide the coefficients directly.
 Examples:
 ```
 filters:
@@ -786,7 +840,7 @@ The available types are
 - Shibata48, for 48 kHz
 - None, just quantize without dither. Only useful with small target bit depth for demonstration.
 
-Lipshitz, Fweighted and Shibata give the least amount ofaudible noise. [See the SOX documentation for more details.](http://sox.sourceforge.net/SoX/NoiseShaping)
+Lipshitz, Fweighted and Shibata give the least amount of audible noise. [See the SOX documentation for more details.](http://sox.sourceforge.net/SoX/NoiseShaping)
 To test the different types, set the target bit depth to something very small like 5 bits and try them all.
 
 
@@ -831,6 +885,7 @@ pipeline:
       - highpass_fir
 ```
 In this config first a mixer is used to copy a stereo input to four channels. Then for each channel a filter step is added. A filter block can contain one or several filters that must be define in the "Filters" section. Here channel 0 and 1 get filtered by "lowpass_fir" and "peak1", while 2 and 3 get filtered by just "highpass_fir". 
+If the names of mixers or filters includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filter name `fir_$samplerate$` will be updated to `fir_44100`. 
 
 ## Visualizing the config
 A Python script is included to view the configuration. This plots the transfer functions of all included filters, as well as plots a flowchart of the entire processing pipeline. Run it with:

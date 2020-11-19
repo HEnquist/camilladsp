@@ -5,7 +5,7 @@ use config;
 #[cfg(feature = "cpal-backend")]
 use cpaldevice;
 use filedevice;
-use num::integer;
+use num_integer as integer;
 #[cfg(feature = "pulse-backend")]
 use pulsedevice;
 use rubato::{
@@ -17,7 +17,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Instant;
 
-use crate::CaptureStatus;
+use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
 use PrcFmt;
 use Res;
@@ -87,6 +87,7 @@ pub trait PlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
@@ -189,13 +190,10 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
 }
 
 pub fn resampler_is_async(conf: &config::Resampler) -> bool {
-    match &conf {
-        config::Resampler::FastAsync
+    matches!(&conf, config::Resampler::FastAsync
         | config::Resampler::BalancedAsync
         | config::Resampler::AccurateAsync
-        | config::Resampler::FreeAsync { .. } => true,
-        _ => false,
-    }
+        | config::Resampler::FreeAsync { .. })
 }
 
 pub fn get_async_parameters(
@@ -458,4 +456,16 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_timeout: conf.silence_timeout,
         }),
     }
+}
+
+pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, srate: u32) -> f64 {
+    let diff = avg_level as isize - target_level as isize;
+    let rel_diff = (diff as f64) / (srate as f64);
+    let speed = 1.0 - 0.5 * rel_diff / adjust_period as f64;
+    debug!(
+        "Current buffer level {}, set capture rate to {}%",
+        avg_level,
+        100.0 * speed
+    );
+    speed
 }

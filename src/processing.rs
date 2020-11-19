@@ -27,10 +27,17 @@ pub fn run_processing(
                 Ok(AudioMessage::EndOfStream) => {
                     trace!("AudioMessage::EndOfStream received");
                     let msg = AudioMessage::EndOfStream;
+                    if tx_pb.send(msg).is_err() {
+                        info!("Playback thread has already stopped.");
+                    }
+                    break;
+                }
+                Err(err) => {
+                    error!("Message channel error: {}", err);
+                    let msg = AudioMessage::EndOfStream;
                     tx_pb.send(msg).unwrap();
                     break;
                 }
-                _ => {}
             }
             if let Ok((diff, new_config)) = rx_pipeconf.try_recv() {
                 trace!("Message received on config channel");
