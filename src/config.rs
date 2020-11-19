@@ -8,10 +8,27 @@ use std::fmt;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
+use std::sync::RwLock;
 
 //type SmpFmt = i16;
 use PrcFmt;
 type Res<T> = Result<T, Box<dyn error::Error>>;
+
+pub struct Overrides {
+    pub samplerate: Option<usize>,
+    pub sample_format: Option<SampleFormat>,
+    pub extra_samples: Option<usize>,
+    pub channels: Option<usize>,
+}
+
+lazy_static! {
+    pub static ref OVERRIDES: RwLock<Overrides> = RwLock::new(Overrides {
+        samplerate: None,
+        sample_format: None,
+        extra_samples: None,
+        channels: None,
+    });
+}
 
 #[derive(Debug)]
 pub struct ConfigError {
@@ -91,6 +108,32 @@ impl SampleFormat {
     pub fn is_float(&self) -> bool {
         matches!(self, SampleFormat::FLOAT32LE | SampleFormat::FLOAT64LE)
     }
+
+    pub fn from_name(label: &str) -> Option<SampleFormat> {
+        match label {
+            "FLOAT32LE" => Some(SampleFormat::FLOAT32LE),
+            "FLOAT64LE" => Some(SampleFormat::FLOAT64LE),
+            "S16LE" => Some(SampleFormat::S16LE),
+            "S24LE" => Some(SampleFormat::S24LE),
+            "S24LE3" => Some(SampleFormat::S24LE3),
+            "S32LE" => Some(SampleFormat::S32LE),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for SampleFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let formatstr = match self {
+            SampleFormat::FLOAT32LE => "FLOAT32LE",
+            SampleFormat::FLOAT64LE => "FLOAT64LE",
+            SampleFormat::S16LE => "S16LE",
+            SampleFormat::S24LE => "S24LE",
+            SampleFormat::S24LE3 => "S24LE3",
+            SampleFormat::S32LE => "S32LE",
+        };
+        write!(f, "{}", formatstr)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -144,6 +187,38 @@ pub enum CaptureDevice {
     },
 }
 
+impl CaptureDevice {
+    pub fn channels(&self) -> usize {
+        match self {
+            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            CaptureDevice::Alsa { channels, .. } => *channels,
+            #[cfg(feature = "pulse-backend")]
+            CaptureDevice::Pulse { channels, .. } => *channels,
+            CaptureDevice::File { channels, .. } => *channels,
+            CaptureDevice::Stdin { channels, .. } => *channels,
+            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            CaptureDevice::CoreAudio { channels, .. } => *channels,
+            #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+            CaptureDevice::Wasapi { channels, .. } => *channels,
+        }
+    }
+
+    pub fn sampleformat(&self) -> SampleFormat {
+        match self {
+            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            CaptureDevice::Alsa { format, .. } => format.clone(),
+            #[cfg(feature = "pulse-backend")]
+            CaptureDevice::Pulse { format, .. } => format.clone(),
+            CaptureDevice::File { format, .. } => format.clone(),
+            CaptureDevice::Stdin { format, .. } => format.clone(),
+            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            CaptureDevice::CoreAudio { format, .. } => format.clone(),
+            #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+            CaptureDevice::Wasapi { format, .. } => format.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
@@ -181,6 +256,23 @@ pub enum PlaybackDevice {
         device: String,
         format: SampleFormat,
     },
+}
+
+impl PlaybackDevice {
+    pub fn channels(&self) -> usize {
+        match self {
+            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            PlaybackDevice::Alsa { channels, .. } => *channels,
+            #[cfg(feature = "pulse-backend")]
+            PlaybackDevice::Pulse { channels, .. } => *channels,
+            PlaybackDevice::File { channels, .. } => *channels,
+            PlaybackDevice::Stdout { channels, .. } => *channels,
+            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            PlaybackDevice::CoreAudio { channels, .. } => *channels,
+            #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+            PlaybackDevice::Wasapi { channels, .. } => *channels,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -536,14 +628,146 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
             return Err(ConfigError::new(&msg).into());
         }
     };
-    let configuration: Configuration = match serde_yaml::from_str(&contents) {
+    let mut configuration: Configuration = match serde_yaml::from_str(&contents) {
         Ok(config) => config,
         Err(err) => {
             let msg = format!("Invalid config file!\n{}", err);
             return Err(ConfigError::new(&msg).into());
         }
     };
-    Ok(configuration)
+    //Ok(configuration)
+    apply_overrides(&mut configuration);
+    replace_tokens_in_config(&configuration)
+}
+
+fn apply_overrides(configuration: &mut Configuration) {
+    if let Some(rate) = OVERRIDES.read().unwrap().samplerate {
+        let cfg_rate = configuration.devices.samplerate;
+        if !configuration.devices.enable_resampling {
+            debug!("Apply override for samplerate: {}", rate);
+            configuration.devices.samplerate = rate;
+            match &mut configuration.devices.capture {
+                CaptureDevice::File { extra_samples, .. } => {
+                    let new_extra = *extra_samples * rate / cfg_rate;
+                    debug!("Scale extra samples: {} -> {}", *extra_samples, new_extra);
+                    *extra_samples = new_extra;
+                }
+                CaptureDevice::Stdin { extra_samples, .. } => {
+                    let new_extra = *extra_samples * rate / cfg_rate;
+                    debug!("Scale extra samples: {} -> {}", *extra_samples, new_extra);
+                    *extra_samples = new_extra;
+                }
+                _ => {}
+            }
+        } else {
+            debug!("Apply override for capture_samplerate: {}", rate);
+            configuration.devices.capture_samplerate = rate;
+            if rate == cfg_rate && !configuration.devices.enable_rate_adjust {
+                debug!("Disabling unneccesary 1:1 resampling");
+                configuration.devices.enable_resampling = false;
+            }
+        }
+    }
+    if let Some(extra) = OVERRIDES.read().unwrap().extra_samples {
+        debug!("Apply override for extra_samples: {}", extra);
+        match &mut configuration.devices.capture {
+            CaptureDevice::File { extra_samples, .. } => {
+                *extra_samples = extra;
+            }
+            CaptureDevice::Stdin { extra_samples, .. } => {
+                *extra_samples = extra;
+            }
+            _ => {}
+        }
+    }
+    if let Some(chans) = OVERRIDES.read().unwrap().channels {
+        debug!("Apply override for capture channels: {}", chans);
+        match &mut configuration.devices.capture {
+            CaptureDevice::File { channels, .. } => {
+                *channels = chans;
+            }
+            CaptureDevice::Stdin { channels, .. } => {
+                *channels = chans;
+            }
+            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            CaptureDevice::Alsa { channels, .. } => {
+                *channels = chans;
+            }
+            #[cfg(feature = "pulse-backend")]
+            CaptureDevice::Pulse { channels, .. } => {
+                *channels = chans;
+            }
+            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            CaptureDevice::CoreAudio { channels, .. } => {
+                *channels = chans;
+            }
+            #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+            CaptureDevice::Wasapi { channels, .. } => {
+                *channels = chans;
+            }
+        }
+    }
+    if let Some(fmt) = OVERRIDES.read().unwrap().sample_format.clone() {
+        debug!("Apply override for capture sample format: {}", fmt);
+        match &mut configuration.devices.capture {
+            CaptureDevice::File { format, .. } => {
+                *format = fmt;
+            }
+            CaptureDevice::Stdin { format, .. } => {
+                *format = fmt;
+            }
+            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            CaptureDevice::Alsa { format, .. } => {
+                *format = fmt;
+            }
+            #[cfg(feature = "pulse-backend")]
+            CaptureDevice::Pulse { format, .. } => {
+                *format = fmt;
+            }
+            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            CaptureDevice::CoreAudio { format, .. } => {
+                *format = fmt;
+            }
+            #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+            CaptureDevice::Wasapi { format, .. } => {
+                *format = fmt;
+            }
+        }
+    }
+}
+
+fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
+    let srate = format!("{}", samplerate);
+    let ch = format!("{}", channels);
+    string
+        .replace("$samplerate$", &srate)
+        .replace("$channels$", &ch)
+}
+
+fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
+    let samplerate = config.devices.samplerate;
+    let num_channels = config.devices.capture.channels();
+    let mut new_config = config.clone();
+    for (_name, filter) in new_config.filters.iter_mut() {
+        if let Filter::Conv { parameters } = filter {
+            if let ConvParameters::File { filename, .. } = parameters {
+                *filename = replace_tokens(filename, samplerate, num_channels);
+            }
+        }
+    }
+    for mut step in new_config.pipeline.iter_mut() {
+        match &mut step {
+            PipelineStep::Filter { names, .. } => {
+                for name in names.iter_mut() {
+                    *name = replace_tokens(name, samplerate, num_channels);
+                }
+            }
+            PipelineStep::Mixer { name } => {
+                *name = replace_tokens(name, samplerate, num_channels);
+            }
+        }
+    }
+    Ok(new_config)
 }
 
 #[derive(Debug)]
@@ -612,18 +836,7 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
     if conf.devices.adjust_period <= 0.0 {
         return Err(ConfigError::new("adjust_period must be positive and > 0").into());
     }
-    let mut num_channels = match conf.devices.capture {
-        #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
-        CaptureDevice::Alsa { channels, .. } => channels,
-        #[cfg(feature = "pulse-backend")]
-        CaptureDevice::Pulse { channels, .. } => channels,
-        CaptureDevice::File { channels, .. } => channels,
-        CaptureDevice::Stdin { channels, .. } => channels,
-        #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
-        CaptureDevice::CoreAudio { channels, .. } => channels,
-        #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
-        CaptureDevice::Wasapi { channels, .. } => channels,
-    };
+    let mut num_channels = conf.devices.capture.channels();
     let fs = conf.devices.samplerate;
     for step in conf.pipeline {
         match step {
@@ -671,18 +884,7 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
             }
         }
     }
-    let num_channels_out = match conf.devices.playback {
-        #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
-        PlaybackDevice::Alsa { channels, .. } => channels,
-        #[cfg(feature = "pulse-backend")]
-        PlaybackDevice::Pulse { channels, .. } => channels,
-        PlaybackDevice::File { channels, .. } => channels,
-        PlaybackDevice::Stdout { channels, .. } => channels,
-        #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
-        PlaybackDevice::CoreAudio { channels, .. } => channels,
-        #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
-        PlaybackDevice::Wasapi { channels, .. } => channels,
-    };
+    let num_channels_out = conf.devices.playback.channels();
     if num_channels != num_channels_out {
         let msg = format!(
             "Pipeline outputs {} channels, playback device has {}.",

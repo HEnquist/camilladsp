@@ -10,6 +10,8 @@ New features:
 - Handle quirks of the USB audio gadget when used as Alsa capture source.
 - Add `loglevel` option.
 - Use local time instead of UTC in log messages.
+- Add command line options to override some parameters.
+- Add substitution of `$samplerate$` and `$channels$` tokens in config.
 
 Bugfixes:
 - Better handling of input device errors, fixes 100% cpu usage after panic.

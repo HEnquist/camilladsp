@@ -5,6 +5,7 @@ extern crate chrono;
 extern crate clap;
 #[cfg(feature = "FFTW")]
 extern crate fftw;
+extern crate lazy_static;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
@@ -360,6 +361,7 @@ fn main() {
             Arg::with_name("loglevel")
                 .short("l")
                 .long("loglevel")
+                .display_order(100)
                 .takes_value(true)
                 .possible_value("trace")
                 .possible_value("debug")
@@ -369,6 +371,68 @@ fn main() {
                 .possible_value("off")
                 .help("Set log level")
                 .conflicts_with("verbosity"),
+        )
+        .arg(
+            Arg::with_name("samplerate")
+                .help("Override samplerate in config")
+                .short("r")
+                .long("samplerate")
+                .display_order(300)
+                .takes_value(true)
+                .validator(|v: String| -> Result<(), String> {
+                    if let Ok(rate) = v.parse::<usize>() {
+                        if rate > 0 {
+                            return Ok(());
+                        }
+                    }
+                    Err(String::from("Must be an integer > 0"))
+                }),
+        )
+        .arg(
+            Arg::with_name("channels")
+                .help("Override number of channels of capture device in config")
+                .short("n")
+                .long("channels")
+                .display_order(300)
+                .takes_value(true)
+                .validator(|v: String| -> Result<(), String> {
+                    if let Ok(rate) = v.parse::<usize>() {
+                        if rate > 0 {
+                            return Ok(());
+                        }
+                    }
+                    Err(String::from("Must be an integer > 0"))
+                }),
+        )
+        .arg(
+            Arg::with_name("extra_samples")
+                .help("Override number of extra samples in config")
+                .short("e")
+                .long("extra_samples")
+                .display_order(300)
+                .takes_value(true)
+                .validator(|v: String| -> Result<(), String> {
+                    if let Ok(rate) = v.parse::<usize>() {
+                        if rate > 0 {
+                            return Ok(());
+                        }
+                    }
+                    Err(String::from("Must be an integer > 0"))
+                }),
+        )
+        .arg(
+            Arg::with_name("format")
+                .short("f")
+                .long("format")
+                .display_order(310)
+                .takes_value(true)
+                .possible_value("S16LE")
+                .possible_value("S24LE")
+                .possible_value("S24LE3")
+                .possible_value("S32LE")
+                .possible_value("FLOAT32LE")
+                .possible_value("FLOAT64LE")
+                .help("Override sample format of capture device in config"),
         );
     #[cfg(feature = "websocket")]
     let clapapp = clapapp
@@ -377,6 +441,7 @@ fn main() {
                 .help("Port for websocket server")
                 .short("p")
                 .long("port")
+                .display_order(200)
                 .takes_value(true)
                 .validator(|v: String| -> Result<(), String> {
                     if let Ok(port) = v.parse::<usize>() {
@@ -392,6 +457,7 @@ fn main() {
                 .help("IP address to bind websocket server to")
                 .short("a")
                 .long("address")
+                .display_order(200)
                 .takes_value(true)
                 .requires("port")
                 .validator(|val: String| -> Result<(), String> {
@@ -468,6 +534,19 @@ fn main() {
         Some(path) => Some(path.to_string()),
         None => None,
     };
+    //let mut new_settings = SETTINGS.write().unwrap();
+    config::OVERRIDES.write().unwrap().samplerate = matches
+        .value_of("samplerate")
+        .map(|s| s.parse::<usize>().unwrap());
+    config::OVERRIDES.write().unwrap().extra_samples = matches
+        .value_of("extra_samples")
+        .map(|s| s.parse::<usize>().unwrap());
+    config::OVERRIDES.write().unwrap().channels = matches
+        .value_of("channels")
+        .map(|s| s.parse::<usize>().unwrap());
+    config::OVERRIDES.write().unwrap().sample_format = matches
+        .value_of("format")
+        .map(|s| config::SampleFormat::from_name(s).unwrap());
 
     debug!("Read config file {:?}", configname);
 
