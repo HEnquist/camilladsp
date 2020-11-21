@@ -586,6 +586,7 @@ fn main() {
     let playback_status = Arc::new(RwLock::new(PlaybackStatus {
         buffer_level: 0,
         clipped_samples: 0,
+        update_interval: 1000,
         signal_rms: Vec::new(),
         signal_peak: Vec::new(),
     }));

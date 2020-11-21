@@ -122,6 +122,7 @@ pub struct CaptureStatus {
 
 #[derive(Clone, Debug)]
 pub struct PlaybackStatus {
+    pub update_interval: usize,
     pub clipped_samples: usize,
     pub buffer_level: usize,
     pub signal_rms: Vec<f32>,
