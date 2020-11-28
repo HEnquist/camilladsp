@@ -544,7 +544,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             status: status_channel,
                         };
 
-                        let io = pcmdevice.io();
+                        let io = pcmdevice.io_bytes();
                         let buffer = vec![0u8; chunksize * channels * bytes_per_sample];
                         playback_loop_bytes(pb_channels, buffer, &pcmdevice, io, pb_params);
                     }
@@ -644,7 +644,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             status: status_channel,
                             command: command_channel,
                         };
-                        let io = pcmdevice.io();
+                        let io = pcmdevice.io_bytes();
                         let buffer = vec![0u8; channels * buffer_frames * store_bytes_per_sample];
                         capture_loop_bytes(
                             cap_channels,
