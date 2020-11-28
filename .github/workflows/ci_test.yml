@@ -80,7 +80,7 @@ jobs:
           override: true
 
       - name: Build image
-        run: docker build -t cross/armv7:v1 ./Dockerfile_armv7
+        run: docker build -t cross/armv7:v1 --file Dockerfile_armv7 ./
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
@@ -112,7 +112,7 @@ jobs:
           override: true
 
       - name: Build image
-        run: docker build -t cross/armv8:v1 ./Dockerfile_armv8
+        run: docker build -t cross/armv8:v1 --file Dockerfile_armv8 ./ 
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
