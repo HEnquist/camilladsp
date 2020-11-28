@@ -119,7 +119,7 @@ jobs:
         with:
           command: check
           use-cross: true
-          args: --target aarch64-unknown-linux-gnu--no-default-features --features alsa-backend --features websocket
+          args: --target aarch64-unknown-linux-gnu --no-default-features --features alsa-backend --features websocket
 
       - name: Run cargo test for arm
         uses: actions-rs/cargo@v1

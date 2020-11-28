@@ -420,8 +420,16 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
             })
         }
         WSCommand::SetUpdateInterval(nbr) => {
-            shared_data_inst.capture_status.write().unwrap().update_interval = nbr;
-            shared_data_inst.playback_status.write().unwrap().update_interval = nbr;
+            shared_data_inst
+                .capture_status
+                .write()
+                .unwrap()
+                .update_interval = nbr;
+            shared_data_inst
+                .playback_status
+                .write()
+                .unwrap()
+                .update_interval = nbr;
             Some(WSReply::SetUpdateInterval {
                 result: WSResult::Ok,
             })

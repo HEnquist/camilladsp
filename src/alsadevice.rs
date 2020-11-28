@@ -271,13 +271,12 @@ fn playback_loop_bytes(
                         }
                         let mut pb_stat = params.playback_status.write().unwrap();
                         pb_stat.buffer_level = av_delay as usize;
-                        debug!(
-                            "Playback buffer level: {}",
-                            av_delay
-                        );
+                        debug!("Playback buffer level: {}", av_delay);
                     }
                 }
-                if timer_siglevel.larger_than_millis(params.playback_status.read().unwrap().update_interval as u64) {
+                if timer_siglevel.larger_than_millis(
+                    params.playback_status.read().unwrap().update_interval as u64,
+                ) {
                     timer_siglevel.restart();
                     let chunk_stats = chunk.get_stats();
                     let mut pb_stat = params.playback_status.write().unwrap();
@@ -440,7 +439,11 @@ fn capture_loop_bytes(
             )
         };
         chunk_stats = chunk.get_stats();
-        trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
+        trace!(
+            "Capture rms {:?}, peak {:?}",
+            chunk_stats.rms_db(),
+            chunk_stats.peak_db()
+        );
         value_range = chunk.maxval - chunk.minval;
         if card_inactive {
             state = ProcessingState::Paused;

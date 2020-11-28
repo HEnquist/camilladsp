@@ -215,7 +215,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         playback_status.write().unwrap().clipped_samples +=
                                             conversion_result.1;
                                     }
-                                    if timer.larger_than_millis(playback_status.read().unwrap().update_interval as u64) {
+                                    if timer.larger_than_millis(
+                                        playback_status.read().unwrap().update_interval as u64,
+                                    ) {
                                         timer.restart();
                                         let chunk_stats = chunk.get_stats();
                                         let mut pb_stat = playback_status.write().unwrap();
