@@ -53,8 +53,9 @@ jobs:
           asset_name: camilladsp-linux-amd64.tar.gz
           tag: ${{ github.ref }}
 
-  arm:
-    name: Pi
+
+  arm64:
+    name: Pi64
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -65,30 +66,30 @@ jobs:
         with:
           profile: minimal
           toolchain: stable
-          target: armv7-unknown-linux-gnueabihf
+          target: aarch64-unknown-linux-gnu
           override: true
 
       - name: Build image
-        run: docker build -t cross/armv7:v1 ./
+        run: docker build -t cross/armv8:v1 ./Dockerfile_armv8
 
       - name: Build
         uses: actions-rs/cargo@v1
         with:
           command: build
           use-cross: true
-          args: --release --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features websocket
+          args: --release --target aarch64-unknown-linux-gnu --no-default-features --features alsa-backend --features websocket
         env:
           RUSTFLAGS: "-C target-feature=+neon"
 
       - name: Compress
-        run: tar -zcvf camilladsp.tar.gz -C target/armv7-unknown-linux-gnueabihf/release camilladsp
+        run: tar -zcvf camilladsp.tar.gz -C target/aarch64-unknown-linux-gnu/release camilladsp
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v1-release
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
-          asset_name: camilladsp-linux-armv7.tar.gz
+          asset_name: camilladsp-linux-armv8.tar.gz
           tag: ${{ github.ref }}
 
   windows:

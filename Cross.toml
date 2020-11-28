@@ -5,3 +5,11 @@ image = "cross/armv7:v1"
 passthrough = [
     "RUSTFLAGS",
 ]
+
+[target.aarch64-unknown-linux-gnu]
+image = "cross/armv8:v1"
+
+[target.aarch64-unknown-linux-gnu.env]
+passthrough = [
+    "RUSTFLAGS",
+]

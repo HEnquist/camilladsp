@@ -334,6 +334,7 @@ Find the name of the device:
 ```
 aplay -l
 ```
+
 Play a track on card 2, device 1, subdevice 0 (the audio can then be captured from card 2, device 0, subdevice 0):
 ```
 aplay -D hw:2,1,0 sometrack.wav
@@ -356,9 +357,9 @@ To capture audio from applications a virtual sound card is needed. [VB-CABLE fro
 
 Set VB-CABLE as the default playback device in the control panel, and let CamillaDSP capture from the VB-CABLE output.
 
-The device name is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the inpout/output name and card name, and the format is "{input/output name} ({card name})".
+The device name is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the input/output name and card name, and the format is "{input/output name} ({card name})".
 
-The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use aother format.
+The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
 
 The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
 
@@ -490,7 +491,7 @@ devices:
 
  
 * `capture` and `playback`
-
+  See first the [separate help on how to find the device names and parameters.](./devices.md)
   Input and output devices are defined in the same way. 
   A device needs:
   * `type`: 
