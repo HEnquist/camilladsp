@@ -101,10 +101,17 @@ impl Filter for Volume {
 
         // Volume setting changed
         if (shared_vol - self.target_volume).abs() > 0.001 {
-            trace!("starting ramp {} -> {}", self.current_volume, shared_vol);
-            self.ramp_start = self.current_volume;
-            self.target_volume = shared_vol;
-            self.ramp_step = 1;
+            if self.ramptime_in_chunks > 0 {
+                trace!("starting ramp {} -> {}", self.current_volume, shared_vol);
+                self.ramp_start = self.current_volume;
+                self.target_volume = shared_vol;
+                self.ramp_step = 1;
+            }
+            else {
+                self.current_volume = shared_vol as f64;
+                self.target_volume = shared_vol;
+                self.ramp_step = 0;
+            }
         }
         // Not in a ramp
         if self.ramp_step == 0 {
