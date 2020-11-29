@@ -20,7 +20,7 @@ The full configuration is given in a yaml file.
 **[Installing](#installing)**
 
 **[Building](#building)**
-- **[Build with standard features](#build-with-standard-features)**
+- **[Build with standard features](#building-in-linux-with-standard-features)**
 - **[Customized build](#customized-build)**
 - **[Optimize for your system](#optimize-for-your-system)**
 - **[Building on Windows and macOS](#building-on-windows-and-macos)**
@@ -270,7 +270,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.4.0
+CamillaDSP 0.5.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
@@ -287,17 +287,15 @@ FLAGS:
     -w, --wait       Wait for config from websocket
 
 OPTIONS:
-    -l, --loglevel <loglevel>
-            Set log level [possible values: trace, debug, info, warn, error, off]
-
-    -a, --address <address>                          IP address to bind websocket server to
-    -p, --port <port>                                Port for websocket server
-    -n, --channels <channels>                        Override number of channels of capture device in config
-    -e, --extra_samples <extra_samples>              Override number of extra samples in config
-    -r, --samplerate <samplerate>                    Override samplerate in config
-    -f, --format <format>
-            Override sample format of capture device in config [possible values: S16LE, S24LE, S24LE3, S32LE, FLOAT32LE,
-            FLOAT64LE]
+    -l, --loglevel <loglevel>              Set log level [possible values: trace, debug, info, warn, error, off]
+    -a, --address <address>                IP address to bind websocket server to
+    -g, --gain <gain>                      Set initial gain of Volume filters
+    -p, --port <port>                      Port for websocket server
+    -n, --channels <channels>              Override number of channels of capture device in config
+    -e, --extra_samples <extra_samples>    Override number of extra samples in config
+    -r, --samplerate <samplerate>          Override samplerate in config
+    -f, --format <format>                  Override sample format of capture device in config [possible values: S16LE,
+                                           S24LE, S24LE3, S32LE, FLOAT32LE, FLOAT64LE]
 
 ARGS:
     <configfile>    The configuration file to use
@@ -682,6 +680,17 @@ filters:
       gain: -6.0 
       inverted: false
 ```
+
+### Volume
+The Volume filter is intended to be used as a volume control. The inital volume can be set with the `gain` command line parameter. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). This value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
+```
+filters:
+  volumeexample:
+    type: Volume
+    parameters:
+      ramp_time: 200
+```
+
 
 ### Delay
 The delay filter provides a delay in milliseconds or samples. The "unit" can be "ms" or "samples", and if left out it defaults to "ms". The millisecond value will be rounded to the nearest number of samples.

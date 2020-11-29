@@ -373,6 +373,22 @@ fn main() {
                 .conflicts_with("verbosity"),
         )
         .arg(
+            Arg::with_name("gain")
+                .help("Set initial gain of Volume filters")
+                .short("g")
+                .long("gain")
+                .display_order(200)
+                .takes_value(true)
+                .validator(|v: String| -> Result<(), String> {
+                    if let Ok(gain) = v.parse::<f32>() {
+                        if gain >= -120.0 && gain <= 20.0 {
+                            return Ok(());
+                        }
+                    }
+                    Err(String::from("Must be a number between -120 and +20"))
+                }),
+        )
+        .arg(
             Arg::with_name("samplerate")
                 .help("Override samplerate in config")
                 .short("r")
@@ -534,6 +550,11 @@ fn main() {
         Some(path) => Some(path.to_string()),
         None => None,
     };
+
+    let initial_volume= matches
+        .value_of("gain")
+        .map(|s| s.parse::<f32>().unwrap()).unwrap_or(0.0);
+
     //let mut new_settings = SETTINGS.write().unwrap();
     config::OVERRIDES.write().unwrap().samplerate = matches
         .value_of("samplerate")
@@ -590,7 +611,7 @@ fn main() {
         signal_rms: Vec::new(),
         signal_peak: Vec::new(),
     }));
-    let processing_status = Arc::new(RwLock::new(ProcessingStatus { volume: 0.0 }));
+    let processing_status = Arc::new(RwLock::new(ProcessingStatus { volume: initial_volume }));
 
     let status_structs = StatusStructs {
         capture: capture_status.clone(),

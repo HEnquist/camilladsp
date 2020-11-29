@@ -1,3 +1,8 @@
+## 0.5.0
+New features:
+- Add RMS and Peak measurement for each channel at input and output.
+- Add a Volume filter for volume control
+
 ## 0.4.0
 New features:
 - New commands to get more playback information from the websocket server.
