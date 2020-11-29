@@ -227,7 +227,7 @@ fn playback_loop_bytes(
 ) {
     let srate = pcmdevice.hw_params_current().unwrap().get_rate().unwrap();
     let mut timer = countertimer::Stopwatch::new();
-    let mut timer_siglevel = countertimer::Stopwatch::new();
+    let mut chunk_stats;
     let mut buffer_avg = countertimer::Averager::new();
     let mut conversion_result;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
@@ -274,19 +274,14 @@ fn playback_loop_bytes(
                         debug!("Playback buffer level: {}", av_delay);
                     }
                 }
-                if timer_siglevel.larger_than_millis(
-                    params.playback_status.read().unwrap().update_interval as u64,
-                ) {
-                    timer_siglevel.restart();
-                    let chunk_stats = chunk.get_stats();
-                    let mut pb_stat = params.playback_status.write().unwrap();
-                    pb_stat.signal_rms = chunk_stats.rms_db();
-                    pb_stat.signal_peak = chunk_stats.peak_db();
-                    debug!(
-                        "Signal RMS: {:?}, peak: {:?}",
-                        pb_stat.signal_rms, pb_stat.signal_peak
-                    );
-                }
+                
+                chunk_stats = chunk.get_stats();
+                params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
+                params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                trace!(
+                    "Playback signal RMS: {:?}, peak: {:?}",
+                    chunk_stats.rms_db(), chunk_stats.peak_db()
+                );
 
                 let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay);
                 match playback_res {
@@ -353,10 +348,7 @@ fn capture_loop_bytes(
     );
     let mut state = ProcessingState::Running;
     let mut value_range = 0.0;
-    let mut chunk_stats = ChunkStats {
-        rms: vec![0.0; params.channels],
-        peak: vec![0.0; params.channels],
-    };
+    let mut chunk_stats;
     let mut card_inactive = false;
     loop {
         match channels.command.try_recv() {
@@ -405,8 +397,6 @@ fn capture_loop_bytes(
                     capt_stat.state = state;
                     card_inactive = false;
                 }
-                params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
             }
             Ok(CaptureResult::Timeout) => {
                 card_inactive = true;
@@ -439,8 +429,10 @@ fn capture_loop_bytes(
             )
         };
         chunk_stats = chunk.get_stats();
+        params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
+        params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
         trace!(
-            "Capture rms {:?}, peak {:?}",
+            "Capture signal rms {:?}, peak {:?}",
             chunk_stats.rms_db(),
             chunk_stats.peak_db()
         );

@@ -114,6 +114,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                             Err(_err) => {}
                         }
                         let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample as i32 - 1);
+                        let mut chunk_stats;
                         barrier.wait();
                         debug!("starting playback loop");
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
@@ -150,6 +151,13 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         playback_status.write().unwrap().clipped_samples +=
                                             nbr_clipped;
                                     }
+                                    chunk_stats = chunk.get_stats();
+                                    playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
+                                    playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                                    trace!(
+                                        "Playback signal RMS: {:?}, peak: {:?}",
+                                        chunk_stats.rms_db(), chunk_stats.peak_db()
+                                    );
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
@@ -265,6 +273,7 @@ fn capture_loop(
         params.capture_samplerate,
         params.chunksize,
     );
+    let mut chunk_stats;
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     let mut state = ProcessingState::Running;
@@ -379,6 +388,10 @@ fn capture_loop(
             scalefactor,
         );
         value_range = chunk.maxval - chunk.minval;
+        chunk_stats = chunk.get_stats();
+        trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
+        params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
+        params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
         state = silence_counter.update(value_range);
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
