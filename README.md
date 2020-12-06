@@ -312,6 +312,14 @@ The default logging setting prints messages of levels "error", "warn" and "info"
 
 There are a few options to override values in the loaded config file. Giving these options means the provided values will be used instead of the values in any loaded configuration. To change the values, CamillaDSP has to be restarted. If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` parameter. But if resampling is enabled, it will instead change the `capture_samplerate` parameter. If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled.
 
+## Exit codes
+These are the exit codes CamillaDSP will give:
+| Exit code | Meaning |
+| --------- | ------- |
+| 0         | Normal exit, no error |
+| 101       | Invalid config file, see the error message for details |
+| 102       | Error from DSP process, see the error message for details |
+
 
 ## Reloading the configuration
 The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficients file needs to change.
@@ -716,7 +724,11 @@ filters:
       skip_bytes_lines: 0 (*)
       read_bytes_lines: 0 (*)
 ```
-The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. If the filename includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`. 
+The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. 
+
+If a relative path is given it will first try to find the file relative to the config file path. If it's not found there, the path is assumed to be relative to the current working directory. Note that this only applies when the config is loaded from a file. When a config is supplied via the websocket server only the current working dir of the CamillaDSP process will be searched.
+
+If the filename includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`. 
 
 
 Example for giving values:

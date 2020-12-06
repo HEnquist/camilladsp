@@ -803,7 +803,7 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
 fn check_and_replace_relative_path(path_str: &mut String, config_path: &Path) {
     let path = PathBuf::from(path_str.to_owned());
     if path.is_absolute() {
-        debug!("{} is absolute, no change", path_str);
+        trace!("{} is absolute, no change", path_str);
         return;
     } else {
         debug!("{} is relative", path_str);
@@ -812,6 +812,11 @@ fn check_and_replace_relative_path(path_str: &mut String, config_path: &Path) {
         if in_config_dir.exists() {
             debug!("Using {} found relative to config file dir", path_str);
             *path_str = in_config_dir.to_string_lossy().into();
+        } else {
+            trace!(
+                "{} not found relative to config file dir, not changing path",
+                path_str
+            );
         }
         return;
     }
