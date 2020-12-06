@@ -52,6 +52,11 @@ use camillalib::{
     ProcessingStatus, StatusMessage, StatusStructs,
 };
 
+const EXIT_BAD_CONFIG: i32 = 101;       // Error in config file
+const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
+const EXIT_OK: i32 = 0;                 // All ok
+
+
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
     new_config_shared: &Arc<Mutex<Option<config::Configuration>>>,
@@ -306,7 +311,7 @@ fn run(
     }
 }
 
-fn main() {
+fn main_process() -> i32 {
     let mut features = Vec::new();
     if cfg!(feature = "alsa-backend") {
         features.push("alsa-backend");
@@ -571,6 +576,20 @@ fn main() {
 
     debug!("Read config file {:?}", configname);
 
+    if matches.is_present("check") {
+        match config::load_validate_config(&configname.unwrap().clone()) {
+            Ok(_) => {
+                println!("Config is valid");
+                return EXIT_OK;
+            }
+            Err(err) => {
+                println!("Config is not valid");
+                println!("{}", err);
+                return EXIT_BAD_CONFIG;
+            }
+        }
+    }
+
     let configuration = match &configname {
         Some(path) => match config::load_validate_config(&path.clone()) {
             Ok(conf) => {
@@ -580,16 +599,11 @@ fn main() {
             Err(err) => {
                 error!("{}", err);
                 debug!("Exiting due to config error");
-                return;
+                return EXIT_BAD_CONFIG;
             }
         },
         None => None,
     };
-
-    if matches.is_present("check") {
-        debug!("Check only, done!");
-        return;
-    }
 
     let wait = matches.is_present("wait");
 
@@ -660,12 +674,12 @@ fn main() {
         while new_config.lock().unwrap().is_none() {
             if !wait {
                 debug!("No config and not in wait mode, exiting!");
-                return;
+                return EXIT_OK;
             }
             trace!("waiting...");
             if signal_exit.load(Ordering::Relaxed) == ExitRequest::EXIT {
                 // exit requested
-                return;
+                return EXIT_OK;
             } else if signal_reload.load(Ordering::Relaxed) {
                 debug!("Reloading configuration...");
                 signal_reload.store(false, Ordering::Relaxed);
@@ -703,13 +717,13 @@ fn main() {
                 *active_config.lock().unwrap() = None;
                 error!("({}) {}", e.to_string(), e);
                 if !wait {
-                    break;
+                    return EXIT_PROCESSING_ERROR;
                 }
             }
             Ok(ExitState::Exit) => {
                 debug!("Exiting");
                 *active_config.lock().unwrap() = None;
-                break;
+                return EXIT_OK;
             }
             Ok(ExitState::Restart) => {
                 *active_config.lock().unwrap() = None;
@@ -717,4 +731,8 @@ fn main() {
             }
         };
     }
+}
+
+fn main() {
+    std::process::exit(main_process());
 }
