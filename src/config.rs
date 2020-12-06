@@ -8,6 +8,7 @@ use std::fmt;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 //type SmpFmt = i16;
@@ -646,7 +647,9 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
     };
     //Ok(configuration)
     apply_overrides(&mut configuration);
-    replace_tokens_in_config(&configuration)
+    replace_tokens_in_config(&mut configuration);
+    replace_relative_paths_in_config(&mut configuration, filename);
+    Ok(configuration)
 }
 
 fn apply_overrides(configuration: &mut Configuration) {
@@ -753,18 +756,18 @@ fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
         .replace("$channels$", &ch)
 }
 
-fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
+fn replace_tokens_in_config(config: &mut Configuration) {
     let samplerate = config.devices.samplerate;
     let num_channels = config.devices.capture.channels();
-    let mut new_config = config.clone();
-    for (_name, filter) in new_config.filters.iter_mut() {
+    //let mut new_config = config.clone();
+    for (_name, filter) in config.filters.iter_mut() {
         if let Filter::Conv { parameters } = filter {
             if let ConvParameters::File { filename, .. } = parameters {
                 *filename = replace_tokens(filename, samplerate, num_channels);
             }
         }
     }
-    for mut step in new_config.pipeline.iter_mut() {
+    for mut step in config.pipeline.iter_mut() {
         match &mut step {
             PipelineStep::Filter { names, .. } => {
                 for name in names.iter_mut() {
@@ -776,7 +779,42 @@ fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
             }
         }
     }
-    Ok(new_config)
+}
+
+// Check if coefficent files with relative paths are relative to the config file path, replace path if they are
+fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str) {
+    if let Ok(config_file) = PathBuf::from(configname.to_owned()).canonicalize() {
+        if let Some(config_dir) = config_file.parent() {
+            for (_name, filter) in config.filters.iter_mut() {
+                if let Filter::Conv { parameters } = filter {
+                    if let ConvParameters::File { filename, .. } = parameters {
+                        check_and_replace_relative_path(filename, config_dir);
+                    }
+                }
+            }
+        } else {
+            warn!("Can't find parent directory of config file");
+        }
+    } else {
+        warn!("Can't find absolute path of config file");
+    }
+}
+
+fn check_and_replace_relative_path(path_str: &mut String, config_path: &Path) {
+    let path = PathBuf::from(path_str.to_owned());
+    if path.is_absolute() {
+        debug!("{} is absolute, no change", path_str);
+        return;
+    } else {
+        debug!("{} is relative", path_str);
+        let mut in_config_dir = config_path.to_path_buf();
+        in_config_dir.push(&path_str);
+        if in_config_dir.exists() {
+            debug!("Using {} found relative to config file dir", path_str);
+            *path_str = in_config_dir.to_string_lossy().into();
+        }
+        return;
+    }
 }
 
 #[derive(Debug)]
