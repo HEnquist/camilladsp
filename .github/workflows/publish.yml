@@ -69,7 +69,7 @@ jobs:
           override: true
 
       - name: Build image
-        run: docker build -t cross/armv7:v1 ./
+        run: docker build -t cross/armv7:v1 --file Dockerfile_armv7 ./
 
       - name: Build
         uses: actions-rs/cargo@v1
@@ -89,6 +89,44 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
           asset_name: camilladsp-linux-armv7.tar.gz
+          tag: ${{ github.ref }}
+
+  arm64:
+    name: Pi64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: aarch64-unknown-linux-gnu
+          override: true
+
+      - name: Build image
+        run: docker build -t cross/armv8:v1 --file Dockerfile_armv8 ./
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          use-cross: true
+          args: --release --target aarch64-unknown-linux-gnu --no-default-features --features alsa-backend --features websocket
+        env:
+          RUSTFLAGS: "-C target-feature=+neon"
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/aarch64-unknown-linux-gnu/release camilladsp
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v1-release
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp.tar.gz
+          asset_name: camilladsp-linux-armv8.tar.gz
           tag: ${{ github.ref }}
 
   windows:

@@ -20,7 +20,7 @@ The full configuration is given in a yaml file.
 **[Installing](#installing)**
 
 **[Building](#building)**
-- **[Build with standard features](#build-with-standard-features)**
+- **[Build with standard features](#building-in-linux-with-standard-features)**
 - **[Customized build](#customized-build)**
 - **[Optimize for your system](#optimize-for-your-system)**
 - **[Building on Windows and macOS](#building-on-windows-and-macos)**
@@ -270,7 +270,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.4.0
+CamillaDSP 0.5.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
@@ -287,17 +287,15 @@ FLAGS:
     -w, --wait       Wait for config from websocket
 
 OPTIONS:
-    -l, --loglevel <loglevel>
-            Set log level [possible values: trace, debug, info, warn, error, off]
-
-    -a, --address <address>                          IP address to bind websocket server to
-    -p, --port <port>                                Port for websocket server
-    -n, --channels <channels>                        Override number of channels of capture device in config
-    -e, --extra_samples <extra_samples>              Override number of extra samples in config
-    -r, --samplerate <samplerate>                    Override samplerate in config
-    -f, --format <format>
-            Override sample format of capture device in config [possible values: S16LE, S24LE, S24LE3, S32LE, FLOAT32LE,
-            FLOAT64LE]
+    -l, --loglevel <loglevel>              Set log level [possible values: trace, debug, info, warn, error, off]
+    -a, --address <address>                IP address to bind websocket server to
+    -g, --gain <gain>                      Set initial gain of Volume filters
+    -p, --port <port>                      Port for websocket server
+    -n, --channels <channels>              Override number of channels of capture device in config
+    -e, --extra_samples <extra_samples>    Override number of extra samples in config
+    -r, --samplerate <samplerate>          Override samplerate in config
+    -f, --format <format>                  Override sample format of capture device in config [possible values: S16LE,
+                                           S24LE, S24LE3, S32LE, FLOAT32LE, FLOAT64LE]
 
 ARGS:
     <configfile>    The configuration file to use
@@ -313,6 +311,14 @@ If the "wait" flag, `-w` is given, CamillaDSP will start the websocket server an
 The default logging setting prints messages of levels "error", "warn" and "info". This can be changed with the `loglevel` option. Setting this to for example `warn` will print messages of level `warn` and above, but suppress the lower levels of `info`, `debug` and `trace`. Alternatively, the log level can be changed with the verbosity flag. By passing the verbosity flag once, `-v`, `debug` messages are enabled. If it's given twice, `-vv`, it also prints `trace` messages. 
 
 There are a few options to override values in the loaded config file. Giving these options means the provided values will be used instead of the values in any loaded configuration. To change the values, CamillaDSP has to be restarted. If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` parameter. But if resampling is enabled, it will instead change the `capture_samplerate` parameter. If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled.
+
+## Exit codes
+These are the exit codes CamillaDSP will give:
+| Exit code | Meaning |
+| --------- | ------- |
+| 0         | Normal exit, no error |
+| 101       | Invalid config file, see the error message for details |
+| 102       | Error from DSP process, see the error message for details |
 
 
 ## Reloading the configuration
@@ -334,6 +340,7 @@ Find the name of the device:
 ```
 aplay -l
 ```
+
 Play a track on card 2, device 1, subdevice 0 (the audio can then be captured from card 2, device 0, subdevice 0):
 ```
 aplay -D hw:2,1,0 sometrack.wav
@@ -356,9 +363,9 @@ To capture audio from applications a virtual sound card is needed. [VB-CABLE fro
 
 Set VB-CABLE as the default playback device in the control panel, and let CamillaDSP capture from the VB-CABLE output.
 
-The device name is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the inpout/output name and card name, and the format is "{input/output name} ({card name})".
+The device name is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the input/output name and card name, and the format is "{input/output name} ({card name})".
 
-The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use aother format.
+The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
 
 The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
 
@@ -490,7 +497,7 @@ devices:
 
  
 * `capture` and `playback`
-
+  See first the [separate help on how to find the device names and parameters.](./devices.md)
   Input and output devices are defined in the same way. 
   A device needs:
   * `type`: 
@@ -682,6 +689,17 @@ filters:
       inverted: false
 ```
 
+### Volume
+The Volume filter is intended to be used as a volume control. The inital volume can be set with the `gain` command line parameter. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). This value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
+```
+filters:
+  volumeexample:
+    type: Volume
+    parameters:
+      ramp_time: 200
+```
+
+
 ### Delay
 The delay filter provides a delay in milliseconds or samples. The "unit" can be "ms" or "samples", and if left out it defaults to "ms". The millisecond value will be rounded to the nearest number of samples.
 ```
@@ -706,7 +724,11 @@ filters:
       skip_bytes_lines: 0 (*)
       read_bytes_lines: 0 (*)
 ```
-The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. If the filename includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`. 
+The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. 
+
+If a relative path is given it will first try to find the file relative to the config file path. If it's not found there, the path is assumed to be relative to the current working directory. Note that this only applies when the config is loaded from a file. When a config is supplied via the websocket server only the current working dir of the CamillaDSP process will be searched.
+
+If the filename includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`. 
 
 
 Example for giving values:

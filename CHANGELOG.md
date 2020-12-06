@@ -1,3 +1,12 @@
+## 0.5.0
+New features:
+- Add RMS and Peak measurement for each channel at input and output.
+- Add a Volume filter for volume control.
+- Add exit codes.
+- Adapt `check` output to be more suitable for scripts.
+- Search for filter coefficient files with relative paths first in config file dir. 
+
+
 ## 0.4.0
 New features:
 - New commands to get more playback information from the websocket server.

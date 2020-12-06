@@ -47,16 +47,14 @@ use camillalib::socketserver;
 #[cfg(feature = "websocket")]
 use std::net::IpAddr;
 
-use camillalib::StatusMessage;
+use camillalib::{
+    CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus, ProcessingState,
+    ProcessingStatus, StatusMessage, StatusStructs,
+};
 
-use camillalib::CommandMessage;
-
-use camillalib::ExitState;
-
-use camillalib::CaptureStatus;
-use camillalib::ExitRequest;
-use camillalib::PlaybackStatus;
-use camillalib::ProcessingState;
+const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
+const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
+const EXIT_OK: i32 = 0; // All ok
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
@@ -112,10 +110,9 @@ fn run(
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
-    capture_status: Arc<RwLock<CaptureStatus>>,
-    playback_status: Arc<RwLock<PlaybackStatus>>,
+    status_structs: StatusStructs,
 ) -> Res<ExitState> {
-    capture_status.write().unwrap().state = ProcessingState::Starting;
+    status_structs.capture.write().unwrap().state = ProcessingState::Starting;
     let mut is_starting = true;
     let conf = match new_config_shared.lock().unwrap().clone() {
         Some(cfg) => cfg,
@@ -151,12 +148,19 @@ fn run(
     signal_exit.store(ExitRequest::NONE, Ordering::Relaxed);
 
     // Processing thread
-    processing::run_processing(conf_proc, barrier_proc, tx_pb, rx_cap, rx_pipeconf);
+    processing::run_processing(
+        conf_proc,
+        barrier_proc,
+        tx_pb,
+        rx_cap,
+        rx_pipeconf,
+        status_structs.processing,
+    );
 
     // Playback thread
     let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
     let pb_handle = playback_dev
-        .start(rx_pb, barrier_pb, tx_status_pb, playback_status)
+        .start(rx_pb, barrier_pb, tx_status_pb, status_structs.playback)
         .unwrap();
 
     // Capture thread
@@ -167,7 +171,7 @@ fn run(
             barrier_cap,
             tx_status_cap,
             rx_command_cap,
-            capture_status,
+            status_structs.capture,
         )
         .unwrap();
 
@@ -306,7 +310,7 @@ fn run(
     }
 }
 
-fn main() {
+fn main_process() -> i32 {
     let mut features = Vec::new();
     if cfg!(feature = "alsa-backend") {
         features.push("alsa-backend");
@@ -371,6 +375,22 @@ fn main() {
                 .possible_value("off")
                 .help("Set log level")
                 .conflicts_with("verbosity"),
+        )
+        .arg(
+            Arg::with_name("gain")
+                .help("Set initial gain of Volume filters")
+                .short("g")
+                .long("gain")
+                .display_order(200)
+                .takes_value(true)
+                .validator(|v: String| -> Result<(), String> {
+                    if let Ok(gain) = v.parse::<f32>() {
+                        if gain >= -120.0 && gain <= 20.0 {
+                            return Ok(());
+                        }
+                    }
+                    Err(String::from("Must be a number between -120 and +20"))
+                }),
         )
         .arg(
             Arg::with_name("samplerate")
@@ -534,6 +554,12 @@ fn main() {
         Some(path) => Some(path.to_string()),
         None => None,
     };
+
+    let initial_volume = matches
+        .value_of("gain")
+        .map(|s| s.parse::<f32>().unwrap())
+        .unwrap_or(0.0);
+
     //let mut new_settings = SETTINGS.write().unwrap();
     config::OVERRIDES.write().unwrap().samplerate = matches
         .value_of("samplerate")
@@ -550,6 +576,20 @@ fn main() {
 
     debug!("Read config file {:?}", configname);
 
+    if matches.is_present("check") {
+        match config::load_validate_config(&configname.unwrap().clone()) {
+            Ok(_) => {
+                println!("Config is valid");
+                return EXIT_OK;
+            }
+            Err(err) => {
+                println!("Config is not valid");
+                println!("{}", err);
+                return EXIT_BAD_CONFIG;
+            }
+        }
+    }
+
     let configuration = match &configname {
         Some(path) => match config::load_validate_config(&path.clone()) {
             Ok(conf) => {
@@ -559,16 +599,11 @@ fn main() {
             Err(err) => {
                 error!("{}", err);
                 debug!("Exiting due to config error");
-                return;
+                return EXIT_BAD_CONFIG;
             }
         },
         None => None,
     };
-
-    if matches.is_present("check") {
-        debug!("Check only, done!");
-        return;
-    }
 
     let wait = matches.is_present("wait");
 
@@ -580,11 +615,25 @@ fn main() {
         signal_range: 0.0,
         rate_adjust: 0.0,
         state: ProcessingState::Inactive,
+        signal_rms: Vec::new(),
+        signal_peak: Vec::new(),
     }));
     let playback_status = Arc::new(RwLock::new(PlaybackStatus {
         buffer_level: 0,
         clipped_samples: 0,
+        update_interval: 1000,
+        signal_rms: Vec::new(),
+        signal_peak: Vec::new(),
     }));
+    let processing_status = Arc::new(RwLock::new(ProcessingStatus {
+        volume: initial_volume,
+    }));
+
+    let status_structs = StatusStructs {
+        capture: capture_status.clone(),
+        playback: playback_status.clone(),
+        processing: processing_status.clone(),
+    };
     //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
@@ -605,8 +654,9 @@ fn main() {
                 active_config: active_config.clone(),
                 active_config_path: active_config_path.clone(),
                 new_config: new_config.clone(),
-                capture_status: capture_status.clone(),
-                playback_status: playback_status.clone(),
+                capture_status,
+                playback_status,
+                processing_status,
             };
             let server_params = socketserver::ServerParameters {
                 port: serverport,
@@ -626,12 +676,12 @@ fn main() {
         while new_config.lock().unwrap().is_none() {
             if !wait {
                 debug!("No config and not in wait mode, exiting!");
-                return;
+                return EXIT_OK;
             }
             trace!("waiting...");
             if signal_exit.load(Ordering::Relaxed) == ExitRequest::EXIT {
                 // exit requested
-                return;
+                return EXIT_OK;
             } else if signal_reload.load(Ordering::Relaxed) {
                 debug!("Reloading configuration...");
                 signal_reload.store(false, Ordering::Relaxed);
@@ -662,21 +712,20 @@ fn main() {
             active_config.clone(),
             active_config_path.clone(),
             new_config.clone(),
-            capture_status.clone(),
-            playback_status.clone(),
+            status_structs.clone(),
         );
         match exitstatus {
             Err(e) => {
                 *active_config.lock().unwrap() = None;
                 error!("({}) {}", e.to_string(), e);
                 if !wait {
-                    break;
+                    return EXIT_PROCESSING_ERROR;
                 }
             }
             Ok(ExitState::Exit) => {
                 debug!("Exiting");
                 *active_config.lock().unwrap() = None;
-                break;
+                return EXIT_OK;
             }
             Ok(ExitState::Restart) => {
                 *active_config.lock().unwrap() = None;
@@ -684,4 +733,8 @@ fn main() {
             }
         };
     }
+}
+
+fn main() {
+    std::process::exit(main_process());
 }

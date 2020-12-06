@@ -227,6 +227,7 @@ fn playback_loop_bytes(
 ) {
     let srate = pcmdevice.hw_params_current().unwrap().get_rate().unwrap();
     let mut timer = countertimer::Stopwatch::new();
+    let mut chunk_stats;
     let mut buffer_avg = countertimer::Averager::new();
     let mut conversion_result;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
@@ -236,10 +237,10 @@ fn playback_loop_bytes(
             Ok(AudioMessage::Audio(chunk)) => {
                 if params.floats {
                     conversion_result =
-                        chunk_to_buffer_float_bytes(chunk, &mut buffer, params.bits);
+                        chunk_to_buffer_float_bytes(&chunk, &mut buffer, params.bits);
                 } else {
                     conversion_result = chunk_to_buffer_bytes(
-                        chunk,
+                        &chunk,
                         &mut buffer,
                         params.scalefactor,
                         params.bits as i32,
@@ -252,23 +253,36 @@ fn playback_loop_bytes(
                 if let Ok(status) = pcmdevice.status() {
                     buffer_avg.add_value(status.get_delay() as f64)
                 }
-                if adjust && timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
+                if timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
                     if let Some(av_delay) = buffer_avg.get_average() {
-                        let speed = calculate_speed(
-                            av_delay,
-                            params.target_level,
-                            params.adjust_period,
-                            srate,
-                        );
                         timer.restart();
                         buffer_avg.restart();
-                        channels
-                            .status
-                            .send(StatusMessage::SetSpeed { speed })
-                            .unwrap();
-                        params.playback_status.write().unwrap().buffer_level = av_delay as usize;
+                        if adjust {
+                            let speed = calculate_speed(
+                                av_delay,
+                                params.target_level,
+                                params.adjust_period,
+                                srate,
+                            );
+                            channels
+                                .status
+                                .send(StatusMessage::SetSpeed { speed })
+                                .unwrap();
+                        }
+                        let mut pb_stat = params.playback_status.write().unwrap();
+                        pb_stat.buffer_level = av_delay as usize;
+                        debug!("Playback buffer level: {}", av_delay);
                     }
                 }
+
+                chunk_stats = chunk.get_stats();
+                params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
+                params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                trace!(
+                    "Playback signal RMS: {:?}, peak: {:?}",
+                    chunk_stats.rms_db(),
+                    chunk_stats.peak_db()
+                );
 
                 let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay);
                 match playback_res {
@@ -335,6 +349,7 @@ fn capture_loop_bytes(
     );
     let mut state = ProcessingState::Running;
     let mut value_range = 0.0;
+    let mut chunk_stats;
     let mut card_inactive = false;
     loop {
         match channels.command.try_recv() {
@@ -414,6 +429,14 @@ fn capture_loop_bytes(
                 capture_bytes,
             )
         };
+        chunk_stats = chunk.get_stats();
+        params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
+        params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+        trace!(
+            "Capture signal rms {:?}, peak {:?}",
+            chunk_stats.rms_db(),
+            chunk_stats.peak_db()
+        );
         value_range = chunk.maxval - chunk.minval;
         if card_inactive {
             state = ProcessingState::Paused;
@@ -514,7 +537,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             status: status_channel,
                         };
 
-                        let io = pcmdevice.io();
+                        let io = pcmdevice.io_bytes();
                         let buffer = vec![0u8; chunksize * channels * bytes_per_sample];
                         playback_loop_bytes(pb_channels, buffer, &pcmdevice, io, pb_params);
                     }
@@ -614,7 +637,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             status: status_channel,
                             command: command_channel,
                         };
-                        let io = pcmdevice.io();
+                        let io = pcmdevice.io_bytes();
                         let buffer = vec![0u8; channels * buffer_frames * store_bytes_per_sample];
                         capture_loop_bytes(
                             cap_channels,

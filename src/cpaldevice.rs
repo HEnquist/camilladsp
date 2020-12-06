@@ -190,6 +190,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         let buffer_fill_clone = buffer_fill.clone();
                         let mut buffer_avg = countertimer::Averager::new();
                         let mut timer = countertimer::Stopwatch::new();
+                        let mut chunk_stats;
 
                         let stream = match sample_format {
                             SampleFormat::S16LE => {
@@ -205,7 +206,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             trace!("Convert chunk to device format");
                                             let chunk = rx_dev.recv().unwrap();
                                             clipped = chunk_to_queue_int(
-                                                chunk,
+                                                &chunk,
                                                 &mut sample_queue,
                                                 scalefactor,
                                             );
@@ -238,7 +239,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             trace!("Convert chunk to device format");
                                             let chunk = rx_dev.recv().unwrap();
                                             clipped =
-                                                chunk_to_queue_float(chunk, &mut sample_queue);
+                                                chunk_to_queue_float(&chunk, &mut sample_queue);
                                         }
                                         write_data_to_device(&mut buffer, &mut sample_queue);
                                         buffer_fill_clone
@@ -306,6 +307,11 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                 av_delay as usize;
                                         }
                                     }
+                                    chunk_stats = chunk.get_stats();
+                                    playback_status.write().unwrap().signal_rms =
+                                        chunk_stats.rms_db();
+                                    playback_status.write().unwrap().signal_peak =
+                                        chunk_stats.peak_db();
                                     tx_dev.send(chunk).unwrap();
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
@@ -476,6 +482,7 @@ impl CaptureDevice for CpalCaptureDevice {
                         let mut sample_queue_f: VecDeque<f32> = VecDeque::with_capacity(2*chunksize*channels);
                         let mut averager = countertimer::TimeAverage::new();
                         let mut value_range = 0.0;
+                        let mut chunk_stats;
                         let mut rate_adjust = 0.0;
                         let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                         let mut state = ProcessingState::Running;
@@ -574,6 +581,10 @@ impl CaptureDevice for CpalCaptureDevice {
                                 capt_stat.rate_adjust = rate_adjust as f32;
                                 capt_stat.state = state;
                             }
+                            chunk_stats = chunk.get_stats();
+                            trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
+                            capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
+                            capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
