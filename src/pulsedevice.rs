@@ -216,11 +216,14 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                             conversion_result.1;
                                     }
                                     chunk_stats = chunk.get_stats();
-                                    playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                                    playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                                    playback_status.write().unwrap().signal_rms =
+                                        chunk_stats.rms_db();
+                                    playback_status.write().unwrap().signal_peak =
+                                        chunk_stats.peak_db();
                                     trace!(
                                         "Playback signal RMS: {:?}, peak: {:?}",
-                                        chunk_stats.rms_db(), chunk_stats.peak_db()
+                                        chunk_stats.rms_db(),
+                                        chunk_stats.peak_db()
                                     );
                                 }
                                 Ok(AudioMessage::EndOfStream) => {

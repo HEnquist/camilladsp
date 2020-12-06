@@ -274,13 +274,14 @@ fn playback_loop_bytes(
                         debug!("Playback buffer level: {}", av_delay);
                     }
                 }
-                
+
                 chunk_stats = chunk.get_stats();
                 params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
                 params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
                 trace!(
                     "Playback signal RMS: {:?}, peak: {:?}",
-                    chunk_stats.rms_db(), chunk_stats.peak_db()
+                    chunk_stats.rms_db(),
+                    chunk_stats.peak_db()
                 );
 
                 let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay);

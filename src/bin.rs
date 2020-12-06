@@ -52,10 +52,9 @@ use camillalib::{
     ProcessingStatus, StatusMessage, StatusStructs,
 };
 
-const EXIT_BAD_CONFIG: i32 = 101;       // Error in config file
+const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
 const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
-const EXIT_OK: i32 = 0;                 // All ok
-
+const EXIT_OK: i32 = 0; // All ok
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
@@ -556,9 +555,10 @@ fn main_process() -> i32 {
         None => None,
     };
 
-    let initial_volume= matches
+    let initial_volume = matches
         .value_of("gain")
-        .map(|s| s.parse::<f32>().unwrap()).unwrap_or(0.0);
+        .map(|s| s.parse::<f32>().unwrap())
+        .unwrap_or(0.0);
 
     //let mut new_settings = SETTINGS.write().unwrap();
     config::OVERRIDES.write().unwrap().samplerate = matches
@@ -625,7 +625,9 @@ fn main_process() -> i32 {
         signal_rms: Vec::new(),
         signal_peak: Vec::new(),
     }));
-    let processing_status = Arc::new(RwLock::new(ProcessingStatus { volume: initial_volume }));
+    let processing_status = Arc::new(RwLock::new(ProcessingStatus {
+        volume: initial_volume,
+    }));
 
     let status_structs = StatusStructs {
         capture: capture_status.clone(),

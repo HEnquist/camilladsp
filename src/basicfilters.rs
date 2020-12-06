@@ -106,8 +106,7 @@ impl Filter for Volume {
                 self.ramp_start = self.current_volume;
                 self.target_volume = shared_vol;
                 self.ramp_step = 1;
-            }
-            else {
+            } else {
                 self.current_volume = shared_vol as f64;
                 self.target_volume = shared_vol;
                 self.ramp_step = 0;

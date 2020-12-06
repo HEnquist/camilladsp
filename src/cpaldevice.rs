@@ -308,8 +308,10 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         }
                                     }
                                     chunk_stats = chunk.get_stats();
-                                    playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                                    playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                                    playback_status.write().unwrap().signal_rms =
+                                        chunk_stats.rms_db();
+                                    playback_status.write().unwrap().signal_peak =
+                                        chunk_stats.peak_db();
                                     tx_dev.send(chunk).unwrap();
                                 }
                                 Ok(AudioMessage::EndOfStream) => {

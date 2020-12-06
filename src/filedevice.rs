@@ -152,11 +152,14 @@ impl PlaybackDevice for FilePlaybackDevice {
                                             nbr_clipped;
                                     }
                                     chunk_stats = chunk.get_stats();
-                                    playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                                    playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                                    playback_status.write().unwrap().signal_rms =
+                                        chunk_stats.rms_db();
+                                    playback_status.write().unwrap().signal_peak =
+                                        chunk_stats.peak_db();
                                     trace!(
                                         "Playback signal RMS: {:?}, peak: {:?}",
-                                        chunk_stats.rms_db(), chunk_stats.peak_db()
+                                        chunk_stats.rms_db(),
+                                        chunk_stats.peak_db()
                                     );
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
@@ -389,7 +392,11 @@ fn capture_loop(
         );
         value_range = chunk.maxval - chunk.minval;
         chunk_stats = chunk.get_stats();
-        trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
+        trace!(
+            "Capture rms {:?}, peak {:?}",
+            chunk_stats.rms_db(),
+            chunk_stats.peak_db()
+        );
         params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
         params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
         state = silence_counter.update(value_range);
