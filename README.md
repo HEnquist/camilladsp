@@ -289,7 +289,7 @@ FLAGS:
 OPTIONS:
     -l, --loglevel <loglevel>              Set log level [possible values: trace, debug, info, warn, error, off]
     -a, --address <address>                IP address to bind websocket server to
-    -g, --gain <gain>                      Set initial gain of Volume filters
+    -g, --gain <gain>                      Set initial gain in dB for Volume filters
     -p, --port <port>                      Port for websocket server
     -n, --channels <channels>              Override number of channels of capture device in config
     -e, --extra_samples <extra_samples>    Override number of extra samples in config
@@ -311,6 +311,27 @@ If the "wait" flag, `-w` is given, CamillaDSP will start the websocket server an
 The default logging setting prints messages of levels "error", "warn" and "info". This can be changed with the `loglevel` option. Setting this to for example `warn` will print messages of level `warn` and above, but suppress the lower levels of `info`, `debug` and `trace`. Alternatively, the log level can be changed with the verbosity flag. By passing the verbosity flag once, `-v`, `debug` messages are enabled. If it's given twice, `-vv`, it also prints `trace` messages. 
 
 There are a few options to override values in the loaded config file. Giving these options means the provided values will be used instead of the values in any loaded configuration. To change the values, CamillaDSP has to be restarted. If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` parameter. But if resampling is enabled, it will instead change the `capture_samplerate` parameter. If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled.
+
+The `--gain` option can accept negative values, but this requires a little care since the minus sign can be misinterpreted as another option. 
+It works as long as there is no space in front of the minus sign.
+
+These work (for a gain of +/- 12.3 dB):
+```
+-g12.3
+-g 12.3
+--gain 12.3
+--gain=12.3
+
+-g-12.3
+--gain=-12.3
+```
+
+These will __NOT__ work:
+```
+-g -12.3
+--gain -12.3
+``` 
+
 
 ## Exit codes
 These are the exit codes CamillaDSP will give:
@@ -655,7 +676,7 @@ mixers:
             inverted: false
 ```
 The "channels" group define the number of input and output channels for the mixer. The mapping section then decides how to route the audio.
-This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a channel number, a gain value in dB, and if it should be inverted (true/false). A channel that has no sources will be filled with silence.
+This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value in dB, and if it should be `inverted` (true/false). A channel that has no sources will be filled with silence.
 Another example, a simple stereo to mono mixer:
 ```
 mixers:
@@ -679,7 +700,7 @@ The filters section defines the filter configurations to use in the pipeline. It
 The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
 
 ### Gain
-The gain filter simply changes the amplitude of the signal. The "inverted" parameter simply inverts the signal. This parameter is optional and the default is to not invert.
+The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in dB, and a positive value means the signal will be amplified while a negative values attenuates. 
 ```
 filters:
   gainexample:
