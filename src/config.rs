@@ -558,6 +558,8 @@ pub enum DitherParameters {
     Fweighted441 { bits: usize },
     Shibata441 { bits: usize },
     Shibata48 { bits: usize },
+    ShibataLow441 { bits: usize },
+    ShibataLow48 { bits: usize },
     Uniform { bits: usize, amplitude: PrcFmt },
     None { bits: usize },
 }
@@ -804,7 +806,6 @@ fn check_and_replace_relative_path(path_str: &mut String, config_path: &Path) {
     let path = PathBuf::from(path_str.to_owned());
     if path.is_absolute() {
         trace!("{} is absolute, no change", path_str);
-        return;
     } else {
         debug!("{} is relative", path_str);
         let mut in_config_dir = config_path.to_path_buf();
@@ -818,7 +819,6 @@ fn check_and_replace_relative_path(path_str: &mut String, config_path: &Path) {
                 path_str
             );
         }
-        return;
     }
 }
 

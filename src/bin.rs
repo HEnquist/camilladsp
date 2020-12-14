@@ -432,10 +432,8 @@ fn main_process() -> i32 {
                 .display_order(300)
                 .takes_value(true)
                 .validator(|v: String| -> Result<(), String> {
-                    if let Ok(samples) = v.parse::<usize>() {
-                        if samples >= 0 {
-                            return Ok(());
-                        }
+                    if let Ok(_samples) = v.parse::<usize>() {
+                        return Ok(());
                     }
                     Err(String::from("Must be an integer > 0"))
                 }),
@@ -577,7 +575,7 @@ fn main_process() -> i32 {
     debug!("Read config file {:?}", configname);
 
     if matches.is_present("check") {
-        match config::load_validate_config(&configname.unwrap().clone()) {
+        match config::load_validate_config(&configname.unwrap()) {
             Ok(_) => {
                 println!("Config is valid");
                 return EXIT_OK;
