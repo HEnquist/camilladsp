@@ -29,9 +29,11 @@ extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
 
+//#[macro_use]
+//extern crate log;
+//extern crate env_logger;
 #[macro_use]
-extern crate log;
-extern crate env_logger;
+extern crate slog_scope;
 
 use serde::Serialize;
 use std::error;

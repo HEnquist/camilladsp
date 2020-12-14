@@ -21,14 +21,23 @@ extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
 
+//#[macro_use]
+//extern crate log;
+//extern crate env_logger;
+
 #[macro_use]
-extern crate log;
-extern crate env_logger;
+extern crate slog;
+extern crate slog_term;
+extern crate slog_async;
+#[macro_use]
+extern crate slog_scope;
+
+use slog::Drain;
 
 use chrono::Local;
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
-use env_logger::Builder;
-use log::LevelFilter;
+//use env_logger::Builder;
+//use log::LevelFilter;
 use std::env;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -511,42 +520,41 @@ fn main_process() -> i32 {
     let matches = clapapp.get_matches();
 
     let mut loglevel = match matches.occurrences_of("verbosity") {
-        0 => LevelFilter::Info,
-        1 => LevelFilter::Debug,
-        2 => LevelFilter::Trace,
-        _ => LevelFilter::Trace,
+        0 => slog::Level::Info,
+        1 => slog::Level::Debug,
+        2 => slog::Level::Trace,
+        _ => slog::Level::Trace,
     };
     loglevel = match matches.value_of("loglevel") {
-        Some("trace") => LevelFilter::Trace,
-        Some("debug") => LevelFilter::Debug,
-        Some("info") => LevelFilter::Info,
-        Some("warn") => LevelFilter::Warn,
-        Some("error") => LevelFilter::Error,
-        Some("off") => LevelFilter::Off,
+        Some("trace") => slog::Level::Trace,
+        Some("debug") => slog::Level::Debug,
+        Some("info") => slog::Level::Info,
+        Some("warn") => slog::Level::Warning,
+        Some("error") => slog::Level::Error,
+        Some("off") => slog::Level::Critical,
         _ => loglevel,
     };
 
-    let mut builder = Builder::from_default_env();
 
-    builder
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "{} {} {} - {}",
-                Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                buf.default_styled_level(record.level()),
-                record.module_path().unwrap_or("camilladsp"),
-                record.args()
-            )
-        })
-        .filter(None, loglevel)
-        .init();
+    let decorator = slog_term::TermDecorator::new().stderr().build();
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let drain = slog::LevelFilter(drain, loglevel).fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+
+    let log = slog::Logger::root(drain, o!());
+    let log = log.new(o!("src" => {
+        slog::FnValue(
+            |rec : &slog::Record| { rec.module() }
+                )
+            }));
+    let _guard = slog_scope::set_global_logger(log);
+
     // logging examples
-    //trace!("trace message"); //with -vv
-    //debug!("debug message"); //with -v
-    //info!("info message");
-    //warn!("warn message");
-    //error!("error message");
+    trace!("trace message"); //with -vv
+    debug!("debug message"); //with -v
+    info!("info message");
+    warn!("warn message");
+    error!("error message");
 
     let configname = match matches.value_of("configfile") {
         Some(path) => Some(path.to_string()),
