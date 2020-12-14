@@ -881,10 +881,15 @@ The available types are
 - Fweighted441, for 44.1 kHz
 - Shibata441, for 44.1 kHz
 - Shibata48, for 48 kHz
+- ShibataLow441, for 44.1 kHz
+- ShibataLow48, for 48 kHz
 - None, just quantize without dither. Only useful with small target bit depth for demonstration.
 
 Lipshitz, Fweighted and Shibata give the least amount of audible noise. [See the SOX documentation for more details.](http://sox.sourceforge.net/SoX/NoiseShaping)
 To test the different types, set the target bit depth to something very small like 5 bits and try them all.
+
+For sample rates above 48 kHz there is no need for anything more advanced than the "Simple" type. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20kHz up to 48 or 96kHz where the noise can be placed without issues. The Simple type will place almost all of it there.
+
 
 
 ### Difference equation
