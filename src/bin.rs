@@ -432,8 +432,8 @@ fn main_process() -> i32 {
                 .display_order(300)
                 .takes_value(true)
                 .validator(|v: String| -> Result<(), String> {
-                    if let Ok(rate) = v.parse::<usize>() {
-                        if rate > 0 {
+                    if let Ok(samples) = v.parse::<usize>() {
+                        if samples >= 0 {
                             return Ok(());
                         }
                     }
