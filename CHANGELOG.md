@@ -5,6 +5,7 @@ New features:
 - Add exit codes.
 - Adapt `check` output to be more suitable for scripts.
 - Search for filter coefficient files with relative paths first in config file dir. 
+- Add ShibataLow dither types.
 
 
 ## 0.4.0
