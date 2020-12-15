@@ -9,7 +9,7 @@ jobs:
   linux:
     name: Linux
     runs-on: ubuntu-latest
-    container: ubuntu:19.10
+    container: ubuntu:20.04
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -31,7 +31,7 @@ jobs:
         run: apt-get install libasound2-dev -y
 
       - name: Install PulseAudio
-        run: apt-get install libpulse0 libpulse-dev -y
+        run: DEBIAN_FRONTEND="noninteractive" apt-get install libpulse0 libpulse-dev -y
 
       - name: Install OpenSSL
         run: apt-get install openssl libssl-dev -y
