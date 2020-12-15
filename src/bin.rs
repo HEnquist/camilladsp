@@ -34,12 +34,13 @@ extern crate slog_scope;
 
 use slog::Drain;
 
-use chrono::Local;
+//use chrono::Local;
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
 //use env_logger::Builder;
 //use log::LevelFilter;
 use std::env;
-use std::io::Write;
+use std::fs::OpenOptions;
+//use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -386,6 +387,14 @@ fn main_process() -> i32 {
                 .conflicts_with("verbosity"),
         )
         .arg(
+            Arg::with_name("logfile")
+                .short("o")
+                .long("logfile")
+                .display_order(100)
+                .takes_value(true)
+                .help("Write logs to file"),
+        )
+        .arg(
             Arg::with_name("gain")
                 .help("Set initial gain of Volume filters")
                 .short("g")
@@ -536,19 +545,48 @@ fn main_process() -> i32 {
     };
 
 
-    let decorator = slog_term::TermDecorator::new().stderr().build();
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
-    let drain = slog::LevelFilter(drain, loglevel).fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
+    let drain = match matches.value_of("loglevel") {
+        Some("off") => {
+            let drain = slog::Discard;
+            slog_async::Async::new(drain).build().fuse()
+        },
+        _ => {
+                
+            if let Some(logfile) = matches.value_of("logfile") {
+                let file = OpenOptions::new()
+                  .create(true)
+                  .write(true)
+                  .truncate(true)
+                  .open(logfile)
+                  .unwrap();
+                let decorator = slog_term::PlainDecorator::new(file);
+                let drain = slog_term::FullFormat::new(decorator).build().filter_level(loglevel).fuse();
+                //let drain = slog::LevelFilter(drain, loglevel).fuse();
+                slog_async::Async::new(drain).build().fuse()
+            }
+            else {
+                let decorator = slog_term::TermDecorator::new().stderr().build();
+                let drain = slog_term::FullFormat::new(decorator).build().filter_level(loglevel).fuse();
+                //let drain = slog::LevelFilter(drain, loglevel).fuse();
+                slog_async::Async::new(drain).build().fuse()
+            }
+        },
+    };
+    //let decorator = slog_term::TermDecorator::new().stderr().build();
+    //let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    //let drain = slog::LevelFilter(drain, loglevel).fuse();
+    //let drain = slog_async::Async::new(drain).build().fuse();
 
-    let log = slog::Logger::root(drain, o!());
-    let log = log.new(o!("src" => {
+    let log = slog::Logger::root(drain, o!("module" => {
         slog::FnValue(
             |rec : &slog::Record| { rec.module() }
                 )
             }));
+    //match matches.value_of("loglevel") {
+    //    Some("off") => {},
+    //    _ => {let _guard = slog_scope::set_global_logger(log);},
+    //}
     let _guard = slog_scope::set_global_logger(log);
-
     // logging examples
     trace!("trace message"); //with -vv
     debug!("debug message"); //with -v
