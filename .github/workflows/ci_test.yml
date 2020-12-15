@@ -6,7 +6,7 @@ jobs:
   check_lint_linux:
     name: Check test and lint Linux
     runs-on: ubuntu-latest
-    container: ubuntu:20.04
+    #container: ubuntu:20.04
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
