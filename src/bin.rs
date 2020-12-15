@@ -27,8 +27,8 @@ extern crate tungstenite;
 
 #[macro_use]
 extern crate slog;
-extern crate slog_term;
 extern crate slog_async;
+extern crate slog_term;
 #[macro_use]
 extern crate slog_scope;
 
@@ -544,44 +544,50 @@ fn main_process() -> i32 {
         _ => loglevel,
     };
 
-
     let drain = match matches.value_of("loglevel") {
         Some("off") => {
             let drain = slog::Discard;
             slog_async::Async::new(drain).build().fuse()
-        },
+        }
         _ => {
-                
             if let Some(logfile) = matches.value_of("logfile") {
                 let file = OpenOptions::new()
-                  .create(true)
-                  .write(true)
-                  .truncate(true)
-                  .open(logfile)
-                  .unwrap();
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(logfile)
+                    .unwrap();
                 let decorator = slog_term::PlainDecorator::new(file);
-                let drain = slog_term::FullFormat::new(decorator).build().filter_level(loglevel).fuse();
+                let drain = slog_term::FullFormat::new(decorator)
+                    .build()
+                    .filter_level(loglevel)
+                    .fuse();
                 //let drain = slog::LevelFilter(drain, loglevel).fuse();
                 slog_async::Async::new(drain).build().fuse()
-            }
-            else {
+            } else {
                 let decorator = slog_term::TermDecorator::new().stderr().build();
-                let drain = slog_term::FullFormat::new(decorator).build().filter_level(loglevel).fuse();
+                let drain = slog_term::FullFormat::new(decorator)
+                    .build()
+                    .filter_level(loglevel)
+                    .fuse();
                 //let drain = slog::LevelFilter(drain, loglevel).fuse();
                 slog_async::Async::new(drain).build().fuse()
             }
-        },
+        }
     };
     //let decorator = slog_term::TermDecorator::new().stderr().build();
     //let drain = slog_term::FullFormat::new(decorator).build().fuse();
     //let drain = slog::LevelFilter(drain, loglevel).fuse();
     //let drain = slog_async::Async::new(drain).build().fuse();
 
-    let log = slog::Logger::root(drain, o!("module" => {
+    let log = slog::Logger::root(
+        drain,
+        o!("module" => {
         slog::FnValue(
             |rec : &slog::Record| { rec.module() }
                 )
-            }));
+            }),
+    );
     //match matches.value_of("loglevel") {
     //    Some("off") => {},
     //    _ => {let _guard = slog_scope::set_global_logger(log);},
