@@ -22,15 +22,17 @@ extern crate signal_hook;
 extern crate tungstenite;
 
 #[macro_use]
-extern crate log;
-extern crate env_logger;
+extern crate slog;
+extern crate slog_async;
+extern crate slog_term;
+#[macro_use]
+extern crate slog_scope;
 
-use chrono::Local;
+use slog::Drain;
+
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
-use env_logger::Builder;
-use log::LevelFilter;
 use std::env;
-use std::io::Write;
+use std::fs::OpenOptions;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -60,14 +62,12 @@ fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
     new_config_shared: &Arc<Mutex<Option<config::Configuration>>>,
 ) -> Res<config::Configuration> {
-    //let active_conf = active_config_shared.lock().unwrap().clone();
     let new_conf = new_config_shared.lock().unwrap().clone();
     let path = config_path.lock().unwrap().clone();
 
     //new_config is not None, this is the one to use
     if let Some(conf) = new_conf {
         debug!("Reload using config from websocket");
-        //let conf = active_config_shared.lock().unwrap().clone();
         match config::validate_config(conf.clone()) {
             Ok(()) => {
                 debug!("Config valid");
@@ -377,8 +377,16 @@ fn main_process() -> i32 {
                 .conflicts_with("verbosity"),
         )
         .arg(
+            Arg::with_name("logfile")
+                .short("o")
+                .long("logfile")
+                .display_order(100)
+                .takes_value(true)
+                .help("Write logs to file"),
+        )
+        .arg(
             Arg::with_name("gain")
-                .help("Set initial gain of Volume filters")
+                .help("Set initial gain in dB for Volume filters")
                 .short("g")
                 .long("gain")
                 .display_order(200)
@@ -511,36 +519,61 @@ fn main_process() -> i32 {
     let matches = clapapp.get_matches();
 
     let mut loglevel = match matches.occurrences_of("verbosity") {
-        0 => LevelFilter::Info,
-        1 => LevelFilter::Debug,
-        2 => LevelFilter::Trace,
-        _ => LevelFilter::Trace,
+        0 => slog::Level::Info,
+        1 => slog::Level::Debug,
+        2 => slog::Level::Trace,
+        _ => slog::Level::Trace,
     };
     loglevel = match matches.value_of("loglevel") {
-        Some("trace") => LevelFilter::Trace,
-        Some("debug") => LevelFilter::Debug,
-        Some("info") => LevelFilter::Info,
-        Some("warn") => LevelFilter::Warn,
-        Some("error") => LevelFilter::Error,
-        Some("off") => LevelFilter::Off,
+        Some("trace") => slog::Level::Trace,
+        Some("debug") => slog::Level::Debug,
+        Some("info") => slog::Level::Info,
+        Some("warn") => slog::Level::Warning,
+        Some("error") => slog::Level::Error,
+        Some("off") => slog::Level::Critical,
         _ => loglevel,
     };
 
-    let mut builder = Builder::from_default_env();
+    let drain = match matches.value_of("loglevel") {
+        Some("off") => {
+            let drain = slog::Discard;
+            slog_async::Async::new(drain).build().fuse()
+        }
+        _ => {
+            if let Some(logfile) = matches.value_of("logfile") {
+                let file = OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(logfile)
+                    .unwrap();
+                let decorator = slog_term::PlainDecorator::new(file);
+                let drain = slog_term::FullFormat::new(decorator)
+                    .build()
+                    .filter_level(loglevel)
+                    .fuse();
+                slog_async::Async::new(drain).build().fuse()
+            } else {
+                let decorator = slog_term::TermDecorator::new().stderr().build();
+                let drain = slog_term::FullFormat::new(decorator)
+                    .build()
+                    .filter_level(loglevel)
+                    .fuse();
+                slog_async::Async::new(drain).build().fuse()
+            }
+        }
+    };
 
-    builder
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "{} {} {} - {}",
-                Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                buf.default_styled_level(record.level()),
-                record.module_path().unwrap_or("camilladsp"),
-                record.args()
-            )
-        })
-        .filter(None, loglevel)
-        .init();
+    let log = slog::Logger::root(
+        drain,
+        o!("module" => {
+        slog::FnValue(
+            |rec : &slog::Record| { rec.module() }
+                )
+            }),
+    );
+
+    let _guard = slog_scope::set_global_logger(log);
     // logging examples
     //trace!("trace message"); //with -vv
     //debug!("debug message"); //with -v
@@ -558,7 +591,6 @@ fn main_process() -> i32 {
         .map(|s| s.parse::<f32>().unwrap())
         .unwrap_or(0.0);
 
-    //let mut new_settings = SETTINGS.write().unwrap();
     config::OVERRIDES.write().unwrap().samplerate = matches
         .value_of("samplerate")
         .map(|s| s.parse::<usize>().unwrap());
@@ -632,7 +664,6 @@ fn main_process() -> i32 {
         playback: playback_status.clone(),
         processing: processing_status.clone(),
     };
-    //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
 

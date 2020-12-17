@@ -40,7 +40,6 @@ impl SilenceCounter {
     }
 
     pub fn update(&mut self, value_range: PrcFmt) -> ProcessingState {
-        trace!("Value range: {}", value_range);
         let mut state = ProcessingState::Running;
         if self.silence_limit_nbr > 0 {
             if value_range > self.silence_threshold {

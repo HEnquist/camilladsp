@@ -21,7 +21,7 @@ pub fn run_processing(
         loop {
             match rx_cap.recv() {
                 Ok(AudioMessage::Audio(mut chunk)) => {
-                    trace!("AudioMessage::Audio received");
+                    //trace!("AudioMessage::Audio received");
                     chunk = pipeline.process_chunk(chunk);
                     let msg = AudioMessage::Audio(chunk);
                     tx_pb.send(msg).unwrap();

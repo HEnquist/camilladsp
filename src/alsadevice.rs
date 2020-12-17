@@ -107,7 +107,7 @@ fn play_buffer(
     target_delay: u64,
 ) -> Res<()> {
     let playback_state = pcmdevice.state();
-    trace!("Playback state {:?}", playback_state);
+    //trace!("Playback state {:?}", playback_state);
     if playback_state == State::XRun {
         warn!("Prepare playback after buffer underrun");
         pcmdevice.prepare()?;
@@ -278,11 +278,6 @@ fn playback_loop_bytes(
                 chunk_stats = chunk.get_stats();
                 params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
                 params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
-                trace!(
-                    "Playback signal RMS: {:?}, peak: {:?}",
-                    chunk_stats.rms_db(),
-                    chunk_stats.peak_db()
-                );
 
                 let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay);
                 match playback_res {
@@ -381,7 +376,7 @@ fn capture_loop_bytes(
         let capture_res = capture_buffer(&mut buffer[0..capture_bytes], pcmdevice, &io);
         match capture_res {
             Ok(CaptureResult::Normal) => {
-                trace!("Captured {} bytes", capture_bytes);
+                //trace!("Captured {} bytes", capture_bytes);
                 averager.add_value(capture_bytes);
                 if averager.larger_than_millis(
                     params.capture_status.read().unwrap().update_interval as u64,
@@ -432,11 +427,6 @@ fn capture_loop_bytes(
         chunk_stats = chunk.get_stats();
         params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
         params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
-        trace!(
-            "Capture signal rms {:?}, peak {:?}",
-            chunk_stats.rms_db(),
-            chunk_stats.peak_db()
-        );
         value_range = chunk.maxval - chunk.minval;
         if card_inactive {
             state = ProcessingState::Paused;
@@ -450,7 +440,6 @@ fn capture_loop_bytes(
                 chunk.valid_frames = new_waves[0].len();
                 chunk.waveforms = new_waves;
             }
-            trace!("sending chunk");
             let msg = AudioMessage::Audio(chunk);
             channels.audio.send(msg).unwrap();
         }
@@ -466,7 +455,7 @@ fn get_nbr_capture_bytes(
     buf: &mut Vec<u8>,
 ) -> usize {
     let capture_bytes_new = if let Some(resampl) = &resampler {
-        trace!("Resampler needs {} frames", resampl.nbr_frames_needed());
+        //trace!("Resampler needs {} frames", resampl.nbr_frames_needed());
         resampl.nbr_frames_needed() * params.channels * params.store_bytes_per_sample
     } else {
         capture_bytes

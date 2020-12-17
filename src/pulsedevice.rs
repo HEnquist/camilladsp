@@ -220,11 +220,11 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         chunk_stats.rms_db();
                                     playback_status.write().unwrap().signal_peak =
                                         chunk_stats.peak_db();
-                                    trace!(
-                                        "Playback signal RMS: {:?}, peak: {:?}",
-                                        chunk_stats.rms_db(),
-                                        chunk_stats.peak_db()
-                                    );
+                                    //trace!(
+                                    //    "Playback signal RMS: {:?}, peak: {:?}",
+                                    //    chunk_stats.rms_db(),
+                                    //    chunk_stats.peak_db()
+                                    //);
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
@@ -262,11 +262,11 @@ fn get_nbr_capture_bytes(
 ) -> usize {
     if let Some(resampl) = &resampler {
         let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
-        trace!(
-            "Resampler needs {} frames, will read {} bytes",
-            resampl.nbr_frames_needed(),
-            new_capture_bytes
-        );
+        //trace!(
+        //    "Resampler needs {} frames, will read {} bytes",
+        //    resampl.nbr_frames_needed(),
+        //    new_capture_bytes
+        //);
         new_capture_bytes
     } else {
         capture_bytes
@@ -427,7 +427,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                 _ => panic!("Unsupported sample format"),
                             };
                             chunk_stats = chunk.get_stats();
-                            trace!("Capture signal rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
+                            //trace!("Capture signal rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {

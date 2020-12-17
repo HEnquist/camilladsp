@@ -134,7 +134,6 @@ impl Filter for Volume {
                 *item *= *stepgain;
             }
             self.current_volume = 20.0 * ramp.last().unwrap().log10();
-            //trace!("current volume {}", self.current_volume);
         }
         Ok(())
     }
