@@ -6,6 +6,7 @@ New features:
 - Adapt `check` output to be more suitable for scripts.
 - Search for filter coefficient files with relative paths first in config file dir. 
 - Add ShibataLow dither types.
+- Add option to write logs to file.
 
 
 ## 0.4.0
