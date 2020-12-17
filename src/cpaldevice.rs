@@ -141,7 +141,6 @@ fn write_data_to_device<T>(output: &mut [T], queue: &mut VecDeque<T>)
 where
     T: cpal::Sample,
 {
-    trace!("Write data to device");
     for sample in output.iter_mut() {
         *sample = queue.pop_front().unwrap();
     }
@@ -201,9 +200,9 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                 let stream = device.build_output_stream(
                                     &stream_config,
                                     move |mut buffer: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                                        trace!("Playback device requests {} samples", buffer.len());
+                                        //trace!("Playback device requests {} samples", buffer.len());
                                         while sample_queue.len() < buffer.len() {
-                                            trace!("Convert chunk to device format");
+                                            //trace!("Convert chunk to device format");
                                             let chunk = rx_dev.recv().unwrap();
                                             clipped = chunk_to_queue_int(
                                                 &chunk,
@@ -234,9 +233,9 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                 let stream = device.build_output_stream(
                                     &stream_config,
                                     move |mut buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                                        trace!("Playback device requests {} samples", buffer.len());
+                                        //trace!("Playback device requests {} samples", buffer.len());
                                         while sample_queue.len() < buffer.len() {
-                                            trace!("Convert chunk to device format");
+                                            //trace!("Convert chunk to device format");
                                             let chunk = rx_dev.recv().unwrap();
                                             clipped =
                                                 chunk_to_queue_float(&chunk, &mut sample_queue);
@@ -349,11 +348,11 @@ fn get_nbr_capture_samples(
 ) -> usize {
     if let Some(resampl) = &resampler {
         let new_capture_samples = resampl.nbr_frames_needed() * channels;
-        trace!(
-            "Resampler needs {} frames, will read {} samples",
-            resampl.nbr_frames_needed(),
-            new_capture_samples
-        );
+        //trace!(
+        //    "Resampler needs {} frames, will read {} samples",
+        //    resampl.nbr_frames_needed(),
+        //    new_capture_samples
+        //);
         new_capture_samples
     } else {
         capture_samples
@@ -364,7 +363,7 @@ fn write_data_from_device<T>(data: &[T], queue: &mut VecDeque<T>)
 where
     T: cpal::Sample,
 {
-    trace!("Write data to device");
+    //trace!("Write data to device");
     for sample in data.iter() {
         queue.push_back(*sample);
     }
@@ -423,11 +422,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 let stream = device.build_input_stream(
                                     &stream_config,
                                     move |buffer: &[i16], _: &cpal::InputCallbackInfo| {
-                                        trace!(
-                                            "Playback device requests {} samples",
-                                            buffer.len()
-                                        );
-                                        trace!("Capture device provides {} samples", buffer.len());
+                                        //trace!("Capture device provides {} samples", buffer.len());
                                         let mut buffer_copy = Vec::new();
                                         buffer_copy.extend_from_slice(&buffer);
                                         tx_dev_i.send(buffer_copy).unwrap();
@@ -442,11 +437,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 let stream = device.build_input_stream(
                                     &stream_config,
                                     move |buffer: &[f32], _: &cpal::InputCallbackInfo| {
-                                        trace!(
-                                            "Playback device requests {} samples",
-                                            buffer.len()
-                                        );
-                                        trace!("Capture device provides {} samples", buffer.len());
+                                        //trace!("Capture device provides {} samples", buffer.len());
                                         let mut buffer_copy = Vec::new();
                                         buffer_copy.extend_from_slice(&buffer);
                                         tx_dev_f.send(buffer_copy).unwrap();
@@ -520,7 +511,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             let mut chunk = match sample_format {
                                 SampleFormat::S16LE => {
                                     while sample_queue_i.len() < capture_samples {
-                                        trace!("Read message to fill capture buffer");
+                                        //trace!("Read message to fill capture buffer");
                                         match rx_dev_i.recv() {
                                             Ok(buf) => {
                                                 write_data_from_device(&buf, &mut sample_queue_i);
@@ -543,7 +534,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 },
                                 SampleFormat::FLOAT32LE => {
                                     while sample_queue_f.len() < capture_samples {
-                                        trace!("Read message to fill capture buffer");
+                                        //trace!("Read message to fill capture buffer");
                                         match rx_dev_f.recv() {
                                             Ok(buf) => {
                                                 write_data_from_device(&buf, &mut sample_queue_f);
@@ -582,7 +573,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 capt_stat.state = state;
                             }
                             chunk_stats = chunk.get_stats();
-                            trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
+                            //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
                             capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
                             value_range = chunk.maxval - chunk.minval;

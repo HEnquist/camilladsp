@@ -156,11 +156,11 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         chunk_stats.rms_db();
                                     playback_status.write().unwrap().signal_peak =
                                         chunk_stats.peak_db();
-                                    trace!(
-                                        "Playback signal RMS: {:?}, peak: {:?}",
-                                        chunk_stats.rms_db(),
-                                        chunk_stats.peak_db()
-                                    );
+                                    //trace!(
+                                    //    "Playback signal RMS: {:?}, peak: {:?}",
+                                    //    chunk_stats.rms_db(),
+                                    //    chunk_stats.peak_db()
+                                    //);
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
@@ -198,11 +198,11 @@ fn get_nbr_capture_bytes(
 ) -> usize {
     if let Some(resampl) = &resampler {
         let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
-        trace!(
-            "Resampler needs {} frames, will read {} bytes",
-            resampl.nbr_frames_needed(),
-            new_capture_bytes
-        );
+        //trace!(
+        //    "Resampler needs {} frames, will read {} bytes",
+        //    resampl.nbr_frames_needed(),
+        //    new_capture_bytes
+        //);
         new_capture_bytes
     } else {
         capture_bytes
@@ -317,7 +317,7 @@ fn capture_loop(
         let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         match read_res {
             Ok(bytes) => {
-                trace!("Captured {} bytes", bytes);
+                //trace!("Captured {} bytes", bytes);
                 bytes_read = bytes;
                 nbr_bytes_read += bytes;
                 if bytes > 0 && bytes < capture_bytes {
@@ -392,11 +392,11 @@ fn capture_loop(
         );
         value_range = chunk.maxval - chunk.minval;
         chunk_stats = chunk.get_stats();
-        trace!(
-            "Capture rms {:?}, peak {:?}",
-            chunk_stats.rms_db(),
-            chunk_stats.peak_db()
-        );
+        //trace!(
+        //    "Capture rms {:?}, peak {:?}",
+        //    chunk_stats.rms_db(),
+        //    chunk_stats.peak_db()
+        //);
         params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
         params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
         state = silence_counter.update(value_range);
