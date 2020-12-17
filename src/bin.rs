@@ -21,10 +21,6 @@ extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
 
-//#[macro_use]
-//extern crate log;
-//extern crate env_logger;
-
 #[macro_use]
 extern crate slog;
 extern crate slog_async;
@@ -34,13 +30,9 @@ extern crate slog_scope;
 
 use slog::Drain;
 
-//use chrono::Local;
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
-//use env_logger::Builder;
-//use log::LevelFilter;
 use std::env;
 use std::fs::OpenOptions;
-//use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -70,14 +62,12 @@ fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
     new_config_shared: &Arc<Mutex<Option<config::Configuration>>>,
 ) -> Res<config::Configuration> {
-    //let active_conf = active_config_shared.lock().unwrap().clone();
     let new_conf = new_config_shared.lock().unwrap().clone();
     let path = config_path.lock().unwrap().clone();
 
     //new_config is not None, this is the one to use
     if let Some(conf) = new_conf {
         debug!("Reload using config from websocket");
-        //let conf = active_config_shared.lock().unwrap().clone();
         match config::validate_config(conf.clone()) {
             Ok(()) => {
                 debug!("Config valid");
@@ -396,7 +386,7 @@ fn main_process() -> i32 {
         )
         .arg(
             Arg::with_name("gain")
-                .help("Set initial gain of Volume filters")
+                .help("Set initial gain in dB for Volume filters")
                 .short("g")
                 .long("gain")
                 .display_order(200)
@@ -562,7 +552,6 @@ fn main_process() -> i32 {
                     .build()
                     .filter_level(loglevel)
                     .fuse();
-                //let drain = slog::LevelFilter(drain, loglevel).fuse();
                 slog_async::Async::new(drain).build().fuse()
             } else {
                 let decorator = slog_term::TermDecorator::new().stderr().build();
@@ -570,15 +559,10 @@ fn main_process() -> i32 {
                     .build()
                     .filter_level(loglevel)
                     .fuse();
-                //let drain = slog::LevelFilter(drain, loglevel).fuse();
                 slog_async::Async::new(drain).build().fuse()
             }
         }
     };
-    //let decorator = slog_term::TermDecorator::new().stderr().build();
-    //let drain = slog_term::FullFormat::new(decorator).build().fuse();
-    //let drain = slog::LevelFilter(drain, loglevel).fuse();
-    //let drain = slog_async::Async::new(drain).build().fuse();
 
     let log = slog::Logger::root(
         drain,
@@ -588,17 +572,14 @@ fn main_process() -> i32 {
                 )
             }),
     );
-    //match matches.value_of("loglevel") {
-    //    Some("off") => {},
-    //    _ => {let _guard = slog_scope::set_global_logger(log);},
-    //}
+
     let _guard = slog_scope::set_global_logger(log);
     // logging examples
-    trace!("trace message"); //with -vv
-    debug!("debug message"); //with -v
-    info!("info message");
-    warn!("warn message");
-    error!("error message");
+    //trace!("trace message"); //with -vv
+    //debug!("debug message"); //with -v
+    //info!("info message");
+    //warn!("warn message");
+    //error!("error message");
 
     let configname = match matches.value_of("configfile") {
         Some(path) => Some(path.to_string()),
@@ -610,7 +591,6 @@ fn main_process() -> i32 {
         .map(|s| s.parse::<f32>().unwrap())
         .unwrap_or(0.0);
 
-    //let mut new_settings = SETTINGS.write().unwrap();
     config::OVERRIDES.write().unwrap().samplerate = matches
         .value_of("samplerate")
         .map(|s| s.parse::<usize>().unwrap());
@@ -684,7 +664,6 @@ fn main_process() -> i32 {
         playback: playback_status.clone(),
         processing: processing_status.clone(),
     };
-    //let active_config = Arc::new(Mutex::new(String::new()));
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
 

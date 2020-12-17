@@ -290,7 +290,7 @@ OPTIONS:
     -o, --logfile <logfile>                Write logs to file
     -l, --loglevel <loglevel>              Set log level [possible values: trace, debug, info, warn, error, off]
     -a, --address <address>                IP address to bind websocket server to
-    -g, --gain <gain>                      Set initial gain of Volume filters
+    -g, --gain <gain>                      Set initial gain in dB for Volume filters
     -p, --port <port>                      Port for websocket server
     -n, --channels <channels>              Override number of channels of capture device in config
     -e, --extra_samples <extra_samples>    Override number of extra samples in config
