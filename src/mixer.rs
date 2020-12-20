@@ -77,9 +77,11 @@ impl Mixer {
             waveforms.push(vec![0.0; input.frames]);
             for source in 0..self.mapping[out_chan].len() {
                 let source_chan = self.mapping[out_chan][source].channel;
-                let gain = self.mapping[out_chan][source].gain;
-                for n in 0..input.frames {
-                    waveforms[out_chan][n] += gain * input.waveforms[source_chan][n];
+                if !input.waveforms[source_chan].is_empty() {
+                    let gain = self.mapping[out_chan][source].gain;
+                    for n in 0..input.frames {
+                        waveforms[out_chan][n] += gain * input.waveforms[source_chan][n];
+                    }
                 }
             }
         }
@@ -113,4 +115,16 @@ pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
         }
     }
     Ok(())
+}
+
+/// Get a vector showing which input channels are used
+pub fn get_used_input_channels(mixer_config: &config::Mixer) -> Vec<bool> {
+    let chan_in = mixer_config.channels.r#in;
+    let mut used_channels = vec![false; chan_in];
+    for mapping in mixer_config.mapping.iter() {
+        for source in mapping.sources.iter() {
+            used_channels[source.channel] = true;
+        }
+    }
+    used_channels
 }

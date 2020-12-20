@@ -422,6 +422,7 @@ fn capture_loop_bytes(
                 params.scalefactor,
                 params.store_bytes_per_sample,
                 capture_bytes,
+                &params.capture_status.read().unwrap().used_channels,
             )
         };
         chunk_stats = chunk.get_stats();

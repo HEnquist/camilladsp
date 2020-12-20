@@ -416,6 +416,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                         scalefactor,
                                         store_bytes_per_sample,
                                         capture_bytes,
+                                        &capture_status.read().unwrap().used_channels,
                                     )
                                 }
                                 SampleFormat::FLOAT32LE => buffer_to_chunk_float_bytes(

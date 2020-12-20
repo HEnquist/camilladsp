@@ -217,6 +217,7 @@ fn build_chunk(
     store_bytes_per_sample: usize,
     bytes_read: usize,
     scalefactor: PrcFmt,
+    used_channels: &[bool],
 ) -> AudioChunk {
     match sample_format.number_family() {
         NumberFamily::Integer => buffer_to_chunk_bytes(
@@ -225,6 +226,7 @@ fn build_chunk(
             scalefactor,
             store_bytes_per_sample,
             bytes_read,
+            used_channels,
         ),
         NumberFamily::Float => {
             buffer_to_chunk_float_bytes(&buf, channels, bits_per_sample, bytes_read)
@@ -389,6 +391,7 @@ fn capture_loop(
             params.store_bytes_per_sample,
             bytes_read,
             scalefactor,
+            &params.capture_status.read().unwrap().used_channels,
         );
         value_range = chunk.maxval - chunk.minval;
         chunk_stats = chunk.get_stats();
@@ -540,7 +543,7 @@ fn send_silence(
             samples_left
         };
         let waveforms = vec![vec![0.0; chunksize]; channels];
-        let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunk_samples);
+        let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunksize,chunk_samples);
         let msg = AudioMessage::Audio(chunk);
         debug!("Sending extra chunk of {} frames", chunk_samples);
         audio_channel.send(msg).unwrap();

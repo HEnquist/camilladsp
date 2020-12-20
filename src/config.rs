@@ -946,3 +946,18 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
     }
     Ok(())
 }
+
+/// Get a vector telling which channels are actually used in the pipeline 
+pub fn get_used_capture_channels(conf: &Configuration) -> Vec<bool> {
+    for step in conf.pipeline.iter() {
+        match step {
+            PipelineStep::Mixer { name } => {
+                let mixerconf = conf.mixers.get(name).unwrap();
+                return mixer::get_used_input_channels(mixerconf);
+            }
+            _ => {}
+        }
+    }
+    let capture_channels = conf.devices.capture.channels();
+    vec![true; capture_channels]
+}

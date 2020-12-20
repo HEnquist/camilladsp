@@ -261,8 +261,10 @@ impl FilterGroup {
 
     /// Apply all the filters to an AudioChunk.
     fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
-        for filter in &mut self.filters {
-            filter.process_waveform(&mut input.waveforms[self.channel])?;
+        if !input.waveforms[self.channel].is_empty() {
+            for filter in &mut self.filters {
+                filter.process_waveform(&mut input.waveforms[self.channel])?;
+            }
         }
         Ok(())
     }

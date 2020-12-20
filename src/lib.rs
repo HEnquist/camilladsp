@@ -117,6 +117,7 @@ pub struct CaptureStatus {
     pub signal_peak: Vec<f32>,
     pub state: ProcessingState,
     pub rate_adjust: f32,
+    pub used_channels: Vec<bool>,
 }
 
 #[derive(Clone, Debug)]

@@ -157,11 +157,16 @@ fn run(
         status_structs.processing,
     );
 
+
     // Playback thread
     let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
     let pb_handle = playback_dev
         .start(rx_pb, barrier_pb, tx_status_pb, status_structs.playback)
         .unwrap();
+
+    let used_channels = config::get_used_capture_channels(&active_config);
+    status_structs.capture.write().unwrap().used_channels = used_channels;
+
 
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
@@ -647,6 +652,7 @@ fn main_process() -> i32 {
         state: ProcessingState::Inactive,
         signal_rms: Vec::new(),
         signal_peak: Vec::new(),
+        used_channels: Vec::new(),
     }));
     let playback_status = Arc::new(RwLock::new(PlaybackStatus {
         buffer_level: 0,
