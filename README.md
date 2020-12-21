@@ -51,6 +51,10 @@ The full configuration is given in a yaml file.
 - **[Pipeline](#pipeline)**
 - **[Visualizing the config](#visualizing-the-config)**
 
+**[Getting help](#getting-help)**
+- **[FAQ](#faq)**
+- **[Troubleshooting](#troubleshooting)**
+
 
 # Introduction
 
@@ -698,6 +702,12 @@ mixers:
             inverted: false
 ```
 
+### Skip processing of unused channels
+Some audio interfaces bundle all their inputs togehter, meaning that it might be necessary to capture a large number of channels to get access to a particular input.
+To reduce the CPU load, CamillaDSP will try to avoid processing of any channel that is captured but not used in the pipeline.
+
+Let's say we have an interface with one analog input, and one SPDIF. These are presented as a single 4-channel input where channels 0 and 1 are analog, 2 and 3 SPDIF. Then, setting the number of capture channels to 4 will enable both inputs. In this case we are only interested in the SPDIF input. This is then done by adding a mixer that reduces the number of channels to 2. In this mixer, input channels 0 and 1 are not mapped to anything. This is then detected, and no format conversion, resampling or processing will be done on these two channels.  
+
 ## Filters
 The filters section defines the filter configurations to use in the pipeline. It's enough to define each filter once even if it should be applied on several channels.
 The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
@@ -954,3 +964,12 @@ The script requires the following:
 * Numpy
 * Matplotlib
 * PyYAML
+
+## Getting help
+
+### FAQ
+See the [list of frequently asked questions.](./FAQ.md)
+
+### Troubleshooting
+See the trouble [troubleshooting guide](./troubleshooting.md) for explanations of most error messages.
+

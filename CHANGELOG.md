@@ -7,6 +7,7 @@ New features:
 - Search for filter coefficient files with relative paths first in config file dir. 
 - Add ShibataLow dither types.
 - Add option to write logs to file.
+- Skip processing of channels that are not used in the pipeline.
 
 
 ## 0.4.0
