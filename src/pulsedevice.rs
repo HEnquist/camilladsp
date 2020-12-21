@@ -261,13 +261,14 @@ fn get_nbr_capture_bytes(
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
+        //let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
         //trace!(
         //    "Resampler needs {} frames, will read {} bytes",
         //    resampl.nbr_frames_needed(),
         //    new_capture_bytes
         //);
-        new_capture_bytes
+        //new_capture_bytes
+        resampl.nbr_frames_needed() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }

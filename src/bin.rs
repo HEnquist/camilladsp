@@ -157,7 +157,6 @@ fn run(
         status_structs.processing,
     );
 
-
     // Playback thread
     let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
     let pb_handle = playback_dev
@@ -167,7 +166,6 @@ fn run(
     let used_channels = config::get_used_capture_channels(&active_config);
     status_structs.capture.write().unwrap().used_channels = used_channels;
 
-
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
     let cap_handle = capture_dev
@@ -176,7 +174,7 @@ fn run(
             barrier_cap,
             tx_status_cap,
             rx_command_cap,
-            status_structs.capture,
+            status_structs.capture.clone(),
         )
         .unwrap();
 
@@ -203,6 +201,8 @@ fn run(
                             active_config = conf;
                             *active_config_shared.lock().unwrap() = Some(active_config.clone());
                             *new_config_shared.lock().unwrap() = None;
+                            let used_channels = config::get_used_capture_channels(&active_config);
+                            status_structs.capture.write().unwrap().used_channels = used_channels;
                             debug!("Sent changes to pipeline");
                         }
                         config::ConfigChange::Devices => {
