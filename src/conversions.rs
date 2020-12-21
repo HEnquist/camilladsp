@@ -449,18 +449,22 @@ mod tests {
         let bits = 24;
         let bytes_per_sample = 3;
         let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
-        let waveforms = vec![vec![0.1], Vec::new()];
-        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 1, 1);
-        let mut buffer = vec![0u8; 6];
+        let waveforms = vec![vec![0.1, 0.1], Vec::new()];
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 2, 2);
+        let mut buffer = vec![0u8; 12];
         chunk_to_buffer_bytes(&chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
-        let expected = vec![0xCC, 0xCC, 0x0C, 0x00, 0x00, 0x00];
+        let expected = vec![
+            0xCC, 0xCC, 0x0C, 0x00, 0x00, 0x00, 0xCC, 0xCC, 0x0C, 0x00, 0x00, 0x00,
+        ];
         assert_eq!(buffer, expected);
 
-        let waveforms = vec![Vec::new(), vec![0.1]];
-        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 1, 1);
-        let mut buffer = vec![0u8; 6];
+        let waveforms = vec![Vec::new(), vec![0.1, 0.1]];
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 2, 2);
+        let mut buffer = vec![0u8; 12];
         chunk_to_buffer_bytes(&chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
-        let expected = vec![0x00, 0x00, 0x00, 0xCC, 0xCC, 0x0C];
+        let expected = vec![
+            0x00, 0x00, 0x00, 0xCC, 0xCC, 0x0C, 0x00, 0x00, 0x00, 0xCC, 0xCC, 0x0C,
+        ];
         assert_eq!(buffer, expected);
     }
 

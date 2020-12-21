@@ -166,7 +166,6 @@ fn run(
     let used_channels = config::get_used_capture_channels(&active_config);
     debug!("Using channels {:?}", used_channels);
     status_structs.capture.write().unwrap().used_channels = used_channels;
-    
 
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);

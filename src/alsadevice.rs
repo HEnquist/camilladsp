@@ -271,7 +271,10 @@ fn playback_loop_bytes(
                         }
                         let mut pb_stat = params.playback_status.write().unwrap();
                         pb_stat.buffer_level = av_delay as usize;
-                        debug!("Playback buffer level: {}", av_delay);
+                        debug!(
+                            "Playback buffer level: {}, signal rms: {:?}",
+                            av_delay, pb_stat.signal_rms
+                        );
                     }
                 }
 
@@ -437,8 +440,8 @@ fn capture_loop_bytes(
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
                 let new_waves = resampl.process(&chunk.waveforms).unwrap();
-                chunk.frames = new_waves[0].len();
-                chunk.valid_frames = new_waves[0].len();
+                chunk.frames = new_waves.iter().map(|w| w.len()).max().unwrap();
+                chunk.valid_frames = chunk.frames;
                 chunk.waveforms = new_waves;
             }
             let msg = AudioMessage::Audio(chunk);

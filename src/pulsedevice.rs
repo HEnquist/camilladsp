@@ -391,8 +391,9 @@ impl CaptureDevice for PulseCaptureDevice {
                                         averager.restart();
                                         let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
                                         trace!(
-                                            "Measured sample rate is {} Hz",
-                                            measured_rate_f
+                                            "Measured sample rate is {} Hz, signal RMS is {:?}",
+                                            measured_rate_f,
+                                            capture_status.read().unwrap().signal_rms,
                                         );
                                         let mut capt_stat = capture_status.write().unwrap();
                                         capt_stat.measured_samplerate = measured_rate_f as usize;
@@ -435,8 +436,8 @@ impl CaptureDevice for PulseCaptureDevice {
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
                                     let new_waves = resampl.process(&chunk.waveforms).unwrap();
-                                    chunk.frames = new_waves[0].len();
-                                    chunk.valid_frames = new_waves[0].len();
+                                    chunk.frames = new_waves.iter().map(|w| w.len()).max().unwrap();
+                                    chunk.valid_frames = chunk.frames;
                                     chunk.waveforms = new_waves;
                                 }
                                 let msg = AudioMessage::Audio(chunk);
