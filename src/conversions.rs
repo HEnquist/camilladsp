@@ -488,7 +488,14 @@ mod tests {
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 2];
         chunk_to_buffer_bytes(&chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bytes_per_sample, buffer.len());
+        let chunk2 = buffer_to_chunk_bytes(
+            &buffer,
+            1,
+            scalefactor,
+            bytes_per_sample,
+            buffer.len(),
+            &vec![true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -501,7 +508,14 @@ mod tests {
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
         chunk_to_buffer_bytes(&chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bytes_per_sample, buffer.len());
+        let chunk2 = buffer_to_chunk_bytes(
+            &buffer,
+            1,
+            scalefactor,
+            bytes_per_sample,
+            buffer.len(),
+            &vec![true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -514,7 +528,14 @@ mod tests {
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 3];
         chunk_to_buffer_bytes(&chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bytes_per_sample, buffer.len());
+        let chunk2 = buffer_to_chunk_bytes(
+            &buffer,
+            1,
+            scalefactor,
+            bytes_per_sample,
+            buffer.len(),
+            &vec![true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -527,7 +548,14 @@ mod tests {
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
         chunk_to_buffer_bytes(&chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bytes_per_sample, buffer.len());
+        let chunk2 = buffer_to_chunk_bytes(
+            &buffer,
+            1,
+            scalefactor,
+            bytes_per_sample,
+            buffer.len(),
+            &vec![true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -540,7 +568,14 @@ mod tests {
         let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 2];
         chunk_to_buffer_bytes(&chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bytes_per_sample, buffer.len());
+        let chunk2 = buffer_to_chunk_bytes(
+            &buffer,
+            1,
+            scalefactor,
+            bytes_per_sample,
+            buffer.len(),
+            &vec![true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -553,7 +588,14 @@ mod tests {
         let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
         chunk_to_buffer_bytes(&chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bytes_per_sample, buffer.len());
+        let chunk2 = buffer_to_chunk_bytes(
+            &buffer,
+            1,
+            scalefactor,
+            bytes_per_sample,
+            buffer.len(),
+            &vec![true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -569,7 +611,14 @@ mod tests {
         let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
         chunk_to_buffer_bytes(&chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
-        let chunk2 = buffer_to_chunk_bytes(&buffer, 1, scalefactor, bytes_per_sample, buffer.len());
+        let chunk2 = buffer_to_chunk_bytes(
+            &buffer,
+            1,
+            scalefactor,
+            bytes_per_sample,
+            buffer.len(),
+            &vec![true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 

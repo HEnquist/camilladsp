@@ -211,12 +211,12 @@ fn get_nbr_capture_bytes(
 }
 
 //&params.sample_format,
-            //params.channels,
-            //params.bits_per_sample,
-            //params.store_bytes_per_sample,
-            //bytes_read,
-            //scalefactor,
-            //&params.capture_status.read().unwrap().used_channels,
+//params.channels,
+//params.bits_per_sample,
+//params.store_bytes_per_sample,
+//bytes_read,
+//scalefactor,
+//&params.capture_status.read().unwrap().used_channels,
 
 fn build_chunk(
     buf: &[u8],
@@ -404,7 +404,7 @@ fn capture_loop(
             scalefactor,
             //&params.capture_status.read().unwrap().used_channels,
         );
-        
+
         value_range = chunk.maxval - chunk.minval;
         chunk_stats = chunk.get_stats();
         //trace!(
