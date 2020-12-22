@@ -90,11 +90,11 @@ fn open_pulse(
     };
 
     let pulse_format = match sample_format {
-        SampleFormat::S16LE => sample::SAMPLE_S16NE,
-        SampleFormat::S24LE => sample::SAMPLE_S24_32NE,
-        SampleFormat::S24LE3 => sample::SAMPLE_S24NE,
-        SampleFormat::S32LE => sample::SAMPLE_S32NE,
-        SampleFormat::FLOAT32LE => sample::SAMPLE_FLOAT32NE,
+        SampleFormat::S16LE => sample::Format::S16NE,
+        SampleFormat::S24LE => sample::Format::S24_32NE,
+        SampleFormat::S24LE3 => sample::Format::S24NE,
+        SampleFormat::S32LE => sample::Format::S32NE,
+        SampleFormat::FLOAT32LE => sample::Format::FLOAT32NE,
         _ => panic!("invalid format"),
     };
 
