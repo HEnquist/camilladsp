@@ -7,6 +7,11 @@ jobs:
     name: Check test and lint Linux
     runs-on: ubuntu-latest
     container: ubuntu:20.04
+
+    env:
+      # for apt-get: otherwise installing tzdata gets stuck asking about the time zone.
+      DEBIAN_FRONTEND: noninteractive
+
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -15,7 +20,7 @@ jobs:
         run: apt-get update
 
       - name: Install utils
-        run: apt-get install curl wget -y
+        run: apt-get install build-essential curl wget -y
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
