@@ -169,7 +169,7 @@ pub fn validate_config(conf: &config::BiquadComboParameters) -> Res<()> {
             if *freq <= 0.0 {
                 return Err(config::ConfigError::new("Frequency must be > 0").into());
             }
-            if *order % 2 > 0 {
+            if *order <= 0 {
                 return Err(
                     config::ConfigError::new("Butterworth order must be larger than zero").into(),
                 );
