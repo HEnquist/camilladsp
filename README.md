@@ -421,7 +421,7 @@ Example config (note that parameters marked (*) can be left out to use their def
 devices:
   samplerate: 96000
   chunksize: 1024
-  queuelimit: 128 (*)
+  queuelimit: 4 (*)
   silence_threshold: -60 (*)
   silence_timeout: 3.0 (*)
   target_level: 500 (*)
@@ -455,9 +455,9 @@ devices:
   Try increasing in factors of two, to 2048, 4096 etc. 
   The duration in seconds of a chunk is `chunksize/samplerate`, so a value of 1024 at 44.1kHz corresponds to 23 ms per chunk.
 
-* `queuelimit` (optional, defaults to 128)
+* `queuelimit` (optional, defaults to 4)
 
-  The field `queuelimit` should normally be left out to use the default of 128. 
+  The field `queuelimit` should normally be left out to use the default of 4. 
   It sets the limit for the length of the queues between the capture device and the processing thread, 
   and between the processing thread and the playback device. 
   The total queue size limit will be `2*chunksize*queuelimit` samples per channel. 
@@ -466,11 +466,9 @@ devices:
   is about 2MB (or 1MB if the 32bit compile option is used). 
   The queues are allocated as needed, this value only sets an upper limit. 
 
-  The value should only be changed if the capture device provides data faster 
-  than the playback device can play it. 
-  This will only be the case when piping data in via the file capture device, 
-  and will lead to very high cpu usage while the queues are being filled. 
-  If this is a problem, set `queuelimit` to a low value like 1.
+  The value should only be changed if the capture device can provide data faster 
+  than the playback device can play it, like when using the Alsa "cdsp" plugin.
+  If this case, set `queuelimit` to a low value like 1.
 
 * `enable_rate_adjust` (optional, defaults to false)
 

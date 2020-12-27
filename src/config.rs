@@ -310,7 +310,7 @@ fn default_period() -> f32 {
 }
 
 fn default_queuelimit() -> usize {
-    100
+    4
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
