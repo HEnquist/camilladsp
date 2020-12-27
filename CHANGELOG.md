@@ -1,3 +1,7 @@
+## 0.4.1
+Bugfixes:
+- Fix incorrect config checks for LinkwitzRiley and Butterworth biquads.
+
 ## 0.4.0
 New features:
 - New commands to get more playback information from the websocket server.
