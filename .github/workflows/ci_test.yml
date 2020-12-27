@@ -6,16 +6,16 @@ jobs:
   check_lint_linux:
     name: Check test and lint Linux
     runs-on: ubuntu-latest
-    container: ubuntu:19.10
+    #container: ubuntu:20.04
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
 
       - name: Update package list
-        run: apt-get update
+        run: sudo apt-get update
 
       - name: Install utils
-        run: apt-get install curl wget -y
+        run: sudo apt-get install curl wget -y
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
@@ -26,13 +26,13 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install Alsa devel
-        run: apt-get install libasound2-dev -y
+        run: sudo apt-get install libasound2-dev -y
 
       - name: Install PulseAudio
-        run: apt-get install libpulse0 libpulse-dev -y
+        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
 
       - name: Install OpenSSL
-        run: apt-get install openssl libssl-dev -y
+        run: sudo apt-get install openssl libssl-dev -y
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
@@ -80,7 +80,7 @@ jobs:
           override: true
 
       - name: Build image
-        run: docker build -t cross/armv7:v1 ./
+        run: docker build -t cross/armv7:v1 --file Dockerfile_armv7 ./
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
@@ -95,6 +95,38 @@ jobs:
           command: test
           use-cross: true
           args: --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features websocket
+
+  check_arm64:
+    name: Check and test Linux arm 64bit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: aarch64-unknown-linux-gnu
+          override: true
+
+      - name: Build image
+        run: docker build -t cross/armv8:v1 --file Dockerfile_armv8 ./ 
+
+      - name: Run cargo check
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          use-cross: true
+          args: --target aarch64-unknown-linux-gnu --no-default-features --features alsa-backend --features websocket
+
+      - name: Run cargo test for arm
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          use-cross: true
+          args: --target aarch64-unknown-linux-gnu --no-default-features --features alsa-backend --features websocket
 
 
   check_lint_windows:
