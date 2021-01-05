@@ -8,6 +8,7 @@ New features:
 - Add ShibataLow dither types.
 - Add option to write logs to file.
 - Skip processing of channels that are not used in the pipeline.
+- Update to new faster RustFFT.
 
 
 ## 0.4.0
