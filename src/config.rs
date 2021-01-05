@@ -310,7 +310,7 @@ fn default_period() -> f32 {
 }
 
 fn default_queuelimit() -> usize {
-    100
+    4
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -945,4 +945,16 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         return Err(ConfigError::new(&msg).into());
     }
     Ok(())
+}
+
+/// Get a vector telling which channels are actually used in the pipeline
+pub fn get_used_capture_channels(conf: &Configuration) -> Vec<bool> {
+    for step in conf.pipeline.iter() {
+        if let PipelineStep::Mixer { name } = step {
+            let mixerconf = conf.mixers.get(name).unwrap();
+            return mixer::get_used_input_channels(mixerconf);
+        }
+    }
+    let capture_channels = conf.devices.capture.channels();
+    vec![true; capture_channels]
 }

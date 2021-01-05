@@ -79,11 +79,12 @@ impl AudioChunk {
         waveforms: Vec<Vec<PrcFmt>>,
         maxval: PrcFmt,
         minval: PrcFmt,
+        frames: usize,
         valid_frames: usize,
     ) -> Self {
         let timestamp = Instant::now();
         let channels = waveforms.len();
-        let frames = waveforms[0].len();
+        //let frames = waveforms[0].len();
         AudioChunk {
             frames,
             channels,
@@ -546,7 +547,7 @@ mod tests {
         let data1 = vec![1.0, 1.0, -1.0, -1.0];
         let data2 = vec![0.0, -4.0, 0.0, 0.0];
         let waveforms = vec![data1, data2];
-        let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1);
+        let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let stats = chunk.get_stats();
         assert_eq!(stats.rms[0], 1.0);
         assert_eq!(stats.rms[1], 2.0);

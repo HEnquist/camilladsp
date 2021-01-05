@@ -51,6 +51,10 @@ The full configuration is given in a yaml file.
 - **[Pipeline](#pipeline)**
 - **[Visualizing the config](#visualizing-the-config)**
 
+**[Getting help](#getting-help)**
+- **[FAQ](#faq)**
+- **[Troubleshooting](#troubleshooting)**
+
 
 # Introduction
 
@@ -417,7 +421,7 @@ Example config (note that parameters marked (*) can be left out to use their def
 devices:
   samplerate: 96000
   chunksize: 1024
-  queuelimit: 128 (*)
+  queuelimit: 4 (*)
   silence_threshold: -60 (*)
   silence_timeout: 3.0 (*)
   target_level: 500 (*)
@@ -451,9 +455,9 @@ devices:
   Try increasing in factors of two, to 2048, 4096 etc. 
   The duration in seconds of a chunk is `chunksize/samplerate`, so a value of 1024 at 44.1kHz corresponds to 23 ms per chunk.
 
-* `queuelimit` (optional, defaults to 128)
+* `queuelimit` (optional, defaults to 4)
 
-  The field `queuelimit` should normally be left out to use the default of 128. 
+  The field `queuelimit` should normally be left out to use the default of 4. 
   It sets the limit for the length of the queues between the capture device and the processing thread, 
   and between the processing thread and the playback device. 
   The total queue size limit will be `2*chunksize*queuelimit` samples per channel. 
@@ -462,11 +466,9 @@ devices:
   is about 2MB (or 1MB if the 32bit compile option is used). 
   The queues are allocated as needed, this value only sets an upper limit. 
 
-  The value should only be changed if the capture device provides data faster 
-  than the playback device can play it. 
-  This will only be the case when piping data in via the file capture device, 
-  and will lead to very high cpu usage while the queues are being filled. 
-  If this is a problem, set `queuelimit` to a low value like 1.
+  The value should only be changed if the capture device can provide data faster 
+  than the playback device can play it, like when using the Alsa "cdsp" plugin.
+  If this case, set `queuelimit` to a low value like 1.
 
 * `enable_rate_adjust` (optional, defaults to false)
 
@@ -697,6 +699,12 @@ mixers:
             gain: -6
             inverted: false
 ```
+
+### Skip processing of unused channels
+Some audio interfaces bundle all their inputs togehter, meaning that it might be necessary to capture a large number of channels to get access to a particular input.
+To reduce the CPU load, CamillaDSP will try to avoid processing of any channel that is captured but not used in the pipeline.
+
+Let's say we have an interface with one analog input, and one SPDIF. These are presented as a single 4-channel input where channels 0 and 1 are analog, 2 and 3 SPDIF. Then, setting the number of capture channels to 4 will enable both inputs. In this case we are only interested in the SPDIF input. This is then done by adding a mixer that reduces the number of channels to 2. In this mixer, input channels 0 and 1 are not mapped to anything. This is then detected, and no format conversion, resampling or processing will be done on these two channels.  
 
 ## Filters
 The filters section defines the filter configurations to use in the pipeline. It's enough to define each filter once even if it should be applied on several channels.
@@ -954,3 +962,12 @@ The script requires the following:
 * Numpy
 * Matplotlib
 * PyYAML
+
+## Getting help
+
+### FAQ
+See the [list of frequently asked questions.](./FAQ.md)
+
+### Troubleshooting
+See the trouble [troubleshooting guide](./troubleshooting.md) for explanations of most error messages.
+

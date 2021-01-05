@@ -163,6 +163,10 @@ fn run(
         .start(rx_pb, barrier_pb, tx_status_pb, status_structs.playback)
         .unwrap();
 
+    let used_channels = config::get_used_capture_channels(&active_config);
+    debug!("Using channels {:?}", used_channels);
+    status_structs.capture.write().unwrap().used_channels = used_channels;
+
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
     let cap_handle = capture_dev
@@ -171,7 +175,7 @@ fn run(
             barrier_cap,
             tx_status_cap,
             rx_command_cap,
-            status_structs.capture,
+            status_structs.capture.clone(),
         )
         .unwrap();
 
@@ -198,6 +202,9 @@ fn run(
                             active_config = conf;
                             *active_config_shared.lock().unwrap() = Some(active_config.clone());
                             *new_config_shared.lock().unwrap() = None;
+                            let used_channels = config::get_used_capture_channels(&active_config);
+                            debug!("Using channels {:?}", used_channels);
+                            status_structs.capture.write().unwrap().used_channels = used_channels;
                             debug!("Sent changes to pipeline");
                         }
                         config::ConfigChange::Devices => {
@@ -647,6 +654,7 @@ fn main_process() -> i32 {
         state: ProcessingState::Inactive,
         signal_rms: Vec::new(),
         signal_peak: Vec::new(),
+        used_channels: Vec::new(),
     }));
     let playback_status = Arc::new(RwLock::new(PlaybackStatus {
         buffer_level: 0,

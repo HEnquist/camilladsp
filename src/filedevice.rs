@@ -197,37 +197,49 @@ fn get_nbr_capture_bytes(
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
+        //let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
         //trace!(
         //    "Resampler needs {} frames, will read {} bytes",
         //    resampl.nbr_frames_needed(),
         //    new_capture_bytes
         //);
-        new_capture_bytes
+        //new_capture_bytes
+        resampl.nbr_frames_needed() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }
 }
 
+//&params.sample_format,
+//params.channels,
+//params.bits_per_sample,
+//params.store_bytes_per_sample,
+//bytes_read,
+//scalefactor,
+//&params.capture_status.read().unwrap().used_channels,
+
 fn build_chunk(
     buf: &[u8],
-    sample_format: &SampleFormat,
-    channels: usize,
-    bits_per_sample: i32,
-    store_bytes_per_sample: usize,
+    params: &CaptureParams,
+    //sample_format: &SampleFormat,
+    //channels: usize,
+    //bits_per_sample: i32,
+    //store_bytes_per_sample: usize,
     bytes_read: usize,
     scalefactor: PrcFmt,
+    //used_channels: &[bool],
 ) -> AudioChunk {
-    match sample_format.number_family() {
+    match params.sample_format.number_family() {
         NumberFamily::Integer => buffer_to_chunk_bytes(
             &buf,
-            channels,
+            params.channels,
             scalefactor,
-            store_bytes_per_sample,
+            params.store_bytes_per_sample,
             bytes_read,
+            &params.capture_status.read().unwrap().used_channels,
         ),
         NumberFamily::Float => {
-            buffer_to_chunk_float_bytes(&buf, channels, bits_per_sample, bytes_read)
+            buffer_to_chunk_float_bytes(&buf, params.channels, params.bits_per_sample, bytes_read)
         }
     }
 }
@@ -383,13 +395,16 @@ fn capture_loop(
         };
         let mut chunk = build_chunk(
             &buf[0..capture_bytes],
-            &params.sample_format,
-            params.channels,
-            params.bits_per_sample,
-            params.store_bytes_per_sample,
+            &params,
+            //&params.sample_format,
+            //params.channels,
+            //params.bits_per_sample,
+            //params.store_bytes_per_sample,
             bytes_read,
             scalefactor,
+            //&params.capture_status.read().unwrap().used_channels,
         );
+
         value_range = chunk.maxval - chunk.minval;
         chunk_stats = chunk.get_stats();
         //trace!(
@@ -403,10 +418,9 @@ fn capture_loop(
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
                 let new_waves = resampl.process(&chunk.waveforms).unwrap();
-                chunk.frames = new_waves[0].len();
-                chunk.valid_frames = (new_waves[0].len() as f32
-                    * (bytes_read as f32 / capture_bytes as f32))
-                    as usize;
+                chunk.frames = new_waves.iter().map(|w| w.len()).max().unwrap();
+                chunk.valid_frames =
+                    (chunk.frames as f32 * (bytes_read as f32 / capture_bytes as f32)) as usize;
                 chunk.waveforms = new_waves;
             }
             let msg = AudioMessage::Audio(chunk);
@@ -540,7 +554,7 @@ fn send_silence(
             samples_left
         };
         let waveforms = vec![vec![0.0; chunksize]; channels];
-        let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunk_samples);
+        let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunksize, chunk_samples);
         let msg = AudioMessage::Audio(chunk);
         debug!("Sending extra chunk of {} frames", chunk_samples);
         audio_channel.send(msg).unwrap();
