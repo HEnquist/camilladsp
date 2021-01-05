@@ -43,7 +43,7 @@ impl FFTConv {
         debug!("Conv {} is using {} segments", name, nsegments);
 
         for (n, coeff) in coeffs.iter().enumerate() {
-            coeffs_padded[n / data_length][n % data_length] = coeff / (2*data_length) as PrcFmt;
+            coeffs_padded[n / data_length][n % data_length] = coeff / (2 * data_length) as PrcFmt;
         }
 
         for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
@@ -171,7 +171,7 @@ impl Filter for FFTConv {
 
             for (n, coeff) in coeffs.iter().enumerate() {
                 coeffs_padded[n / self.npoints][n % self.npoints] =
-                    coeff / (2*self.npoints) as PrcFmt;
+                    coeff / (2 * self.npoints) as PrcFmt;
             }
 
             for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {

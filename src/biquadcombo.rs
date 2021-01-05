@@ -182,8 +182,8 @@ pub fn validate_config(conf: &config::BiquadComboParameters) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use config;
     use biquadcombo;
+    use config;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);
@@ -229,7 +229,7 @@ mod tests {
         assert!(q.len() == 2);
         assert!(compare_vecs(q, expect, 0.01));
     }
-    
+
     #[test]
     fn make_lr6() {
         let q = biquadcombo::BiquadCombo::linkwitzriley_q(10);
@@ -240,21 +240,39 @@ mod tests {
 
     #[test]
     fn check_lr() {
-        let okconf = config::BiquadComboParameters::LinkwitzRileyHighpass { freq: 1000.0 , order: 6 };
+        let okconf = config::BiquadComboParameters::LinkwitzRileyHighpass {
+            freq: 1000.0,
+            order: 6,
+        };
         assert!(biquadcombo::validate_config(&okconf).is_ok());
-        let badconf1 = config::BiquadComboParameters::LinkwitzRileyHighpass { freq: 1000.0 , order: 5 };
+        let badconf1 = config::BiquadComboParameters::LinkwitzRileyHighpass {
+            freq: 1000.0,
+            order: 5,
+        };
         assert!(biquadcombo::validate_config(&badconf1).is_err());
-        let badconf2 = config::BiquadComboParameters::LinkwitzRileyHighpass { freq: 1000.0 , order: 0 };
+        let badconf2 = config::BiquadComboParameters::LinkwitzRileyHighpass {
+            freq: 1000.0,
+            order: 0,
+        };
         assert!(biquadcombo::validate_config(&badconf2).is_err());
     }
 
     #[test]
     fn check_butterworth() {
-        let okconf1 = config::BiquadComboParameters::ButterworthHighpass { freq: 1000.0 , order: 6 };
+        let okconf1 = config::BiquadComboParameters::ButterworthHighpass {
+            freq: 1000.0,
+            order: 6,
+        };
         assert!(biquadcombo::validate_config(&okconf1).is_ok());
-        let okconf2 = config::BiquadComboParameters::ButterworthHighpass { freq: 1000.0 , order: 5 };
+        let okconf2 = config::BiquadComboParameters::ButterworthHighpass {
+            freq: 1000.0,
+            order: 5,
+        };
         assert!(biquadcombo::validate_config(&okconf2).is_ok());
-        let badconf = config::BiquadComboParameters::ButterworthHighpass { freq: 1000.0 , order: 0 };
+        let badconf = config::BiquadComboParameters::ButterworthHighpass {
+            freq: 1000.0,
+            order: 0,
+        };
         assert!(biquadcombo::validate_config(&badconf).is_err());
     }
 }
