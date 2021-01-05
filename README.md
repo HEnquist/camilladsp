@@ -317,7 +317,7 @@ The default logging setting prints messages of levels "error", "warn" and "info"
 
 The log messages are normally written to the terminal via stderr, but they can instead be written to a file by giving the `logfile` option. The argument should be the path to the logfile. If this file is not writable, CamillaDSP will panic and exit. 
 
-There are a few options to override values in the loaded config file. Giving these options means the provided values will be used instead of the values in any loaded configuration. To change the values, CamillaDSP has to be restarted. If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` parameter. But if resampling is enabled, it will instead change the `capture_samplerate` parameter. If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled.
+There are a few options to override values in the loaded config file. Giving these options means the provided values will be used instead of the values in any loaded configuration. To change the values, CamillaDSP has to be restarted. If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` parameter. But if resampling is enabled, it will instead change the `capture_samplerate` parameter. If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled. When overriding the samplerate, two other parameters are scaled as well. Firstly, the `chunksize` is multiplied or divided by integer factors to try to keep the pipeline running at a constant number of chunks per second. Secondly, the value of `extra_samples` is scaled to give the extra samples the same duration at the new samplerate. But if the `extra_samples` override is used, the given value is used without scaling it. 
 
 The `--gain` option can accept negative values, but this requires a little care since the minus sign can be misinterpreted as another option. 
 It works as long as there is no space in front of the minus sign.
@@ -450,10 +450,16 @@ devices:
 
   All processing is done in chunks of data. The `chunksize` is the number of samples each chunk will have per channel. 
   It's good if the number is an "easy" number like a power of two, since this speeds up the FFT in the Convolution filter. 
-  A good value to start at is 1024. 
-  If you have long FIR filters you can make this larger to reduce CPU usage. 
-  Try increasing in factors of two, to 2048, 4096 etc. 
-  The duration in seconds of a chunk is `chunksize/samplerate`, so a value of 1024 at 44.1kHz corresponds to 23 ms per chunk.
+  Suggested starting points for different sample rates:
+  - 44.1 or 48 kHz: 1024
+  - 88.2 or 96 kHz: 2048
+  - 176.4 or 192 kHz: 4096
+
+  The duration in seconds of a chunk is `chunksize/samplerate`, so the suggested values corresponds to about 22 ms per chunk. This is a resonable value, and making it shorter can increase the cpu usage and make buffer underruns more likely.
+
+  If you have long FIR filters you can reduce CPU usage by making the chunksize larger. 
+  When increasing, try increasing in factors of two, like 1024 -> 2048 or 4096 -> 8192. 
+  
 
 * `queuelimit` (optional, defaults to 4)
 

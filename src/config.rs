@@ -657,6 +657,13 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
 fn apply_overrides(configuration: &mut Configuration) {
     if let Some(rate) = OVERRIDES.read().unwrap().samplerate {
         let cfg_rate = configuration.devices.samplerate;
+        let cfg_chunksize = configuration.devices.chunksize;
+        let scaled_chunksize = if rate > cfg_rate {
+            cfg_chunksize * (rate as f32 / cfg_rate as f32).round() as usize
+        } else {
+            cfg_chunksize / (cfg_rate as f32 / rate as f32).round() as usize
+        };
+        configuration.devices.chunksize = scaled_chunksize;
         if !configuration.devices.enable_resampling {
             debug!("Apply override for samplerate: {}", rate);
             configuration.devices.samplerate = rate;
