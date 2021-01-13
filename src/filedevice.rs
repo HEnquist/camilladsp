@@ -148,7 +148,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         }
                                     };
                                     if nbr_clipped > 0 {
-                                        playback_status.write().unwrap().clipped_samples +=
+                                        playback_status.write_all().unwrap().clipped_samples +=
                                             nbr_clipped;
                                     }
                                     chunk_stats = chunk.get_stats();
