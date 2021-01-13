@@ -1,3 +1,7 @@
+## 0.4.2
+Bugfixes:
+- Fix random garbage output when using the Stdout playback device.
+
 ## 0.4.1
 Bugfixes:
 - Fix incorrect config checks for LinkwitzRiley and Butterworth biquads.

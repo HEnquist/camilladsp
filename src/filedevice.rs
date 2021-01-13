@@ -135,7 +135,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                                 bits_per_sample as i32,
                                             ),
                                         };
-                                    let write_res = file.write(&buffer[0..valid_bytes]);
+                                    let write_res = file.write_all(&buffer[0..valid_bytes]);
                                     match write_res {
                                         Ok(_) => {}
                                         Err(msg) => {

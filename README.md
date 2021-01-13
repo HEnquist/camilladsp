@@ -270,7 +270,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.4.0
+CamillaDSP 0.4.2
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
