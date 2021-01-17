@@ -16,6 +16,7 @@ use std::io::BufReader;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
 
+use NewValue;
 use PrcFmt;
 use ProcessingStatus;
 use Res;
@@ -125,7 +126,7 @@ pub fn read_coeff_file(
             let mut buffer = [0; 2];
             file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
             let nbr_coeffs = read_bytes_lines / 2;
-            let scalefactor = (2.0 as PrcFmt).powi(15);
+            let scalefactor = PrcFmt::new(2.0).powi(15);
             while let Ok(2) = file.read(&mut buffer) {
                 let mut value = i16::from_le_bytes(buffer) as PrcFmt;
                 value /= scalefactor;
@@ -139,7 +140,7 @@ pub fn read_coeff_file(
             let mut buffer = [0; 4];
             file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
             let nbr_coeffs = read_bytes_lines / 4;
-            let scalefactor = (2.0 as PrcFmt).powi(23);
+            let scalefactor = PrcFmt::new(2.0).powi(23);
             while let Ok(4) = file.read(&mut buffer) {
                 let mut value = i32::from_le_bytes(buffer) as PrcFmt;
                 value /= scalefactor;
@@ -153,7 +154,7 @@ pub fn read_coeff_file(
             let mut buffer = [0; 4];
             file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
             let nbr_coeffs = read_bytes_lines / 3;
-            let scalefactor = (2.0 as PrcFmt).powi(23);
+            let scalefactor = PrcFmt::new(2.0).powi(23);
             while let Ok(3) = file.read(&mut buffer[0..3]) {
                 let mut value = i32::from_le_bytes(buffer) as PrcFmt;
                 value /= scalefactor;
@@ -167,7 +168,7 @@ pub fn read_coeff_file(
             let mut buffer = [0; 4];
             file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
             let nbr_coeffs = read_bytes_lines / 4;
-            let scalefactor = (2.0 as PrcFmt).powi(31);
+            let scalefactor = PrcFmt::new(2.0).powi(31);
             while let Ok(4) = file.read(&mut buffer) {
                 let mut value = i32::from_le_bytes(buffer) as PrcFmt;
                 value /= scalefactor;

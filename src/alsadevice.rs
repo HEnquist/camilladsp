@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
+use NewValue;
 use PrcFmt;
 use ProcessingState;
 use Res;
@@ -511,7 +512,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+                        let scalefactor = (PrcFmt::new(2.0)).powi(bits - 1);
 
                         barrier.wait();
                         debug!("Starting playback loop");
@@ -608,7 +609,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
+                        let scalefactor = (PrcFmt::new(2.0)).powi(bits_per_sample - 1);
                         barrier.wait();
                         debug!("Starting captureloop");
                         let cap_params = CaptureParams {

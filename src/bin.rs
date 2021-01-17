@@ -400,7 +400,7 @@ fn main_process() -> i32 {
                 .takes_value(true)
                 .validator(|v: String| -> Result<(), String> {
                     if let Ok(gain) = v.parse::<f32>() {
-                        if gain >= -120.0 && gain <= 20.0 {
+                        if (-120.0..=20.0).contains(&gain) {
                             return Ok(());
                         }
                     }
@@ -680,10 +680,7 @@ fn main_process() -> i32 {
     #[cfg(feature = "websocket")]
     {
         if let Some(port_str) = matches.value_of("port") {
-            let serveraddress = match matches.value_of("address") {
-                Some(addr) => addr,
-                None => "127.0.0.1",
-            };
+            let serveraddress = matches.value_of("address").unwrap_or("127.0.0.1");
             let serverport = port_str.parse::<usize>().unwrap();
             let shared_data = socketserver::SharedData {
                 signal_reload: signal_reload.clone(),

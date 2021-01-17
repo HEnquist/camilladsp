@@ -9,7 +9,8 @@ New features:
 - Add option to write logs to file.
 - Skip processing of channels that are not used in the pipeline.
 - Update to new faster RustFFT.
-- Overriding samplerate also scales chunksize. 
+- Overriding samplerate also scales chunksize.
+- Use updated faster resampler.
 
 
 ## 0.4.0

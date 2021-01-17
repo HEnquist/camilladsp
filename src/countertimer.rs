@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use NewValue;
 use PrcFmt;
 use ProcessingState;
 
@@ -30,7 +31,7 @@ impl SilenceCounter {
         samplerate: usize,
         chunksize: usize,
     ) -> SilenceCounter {
-        let silence_threshold = (10.0 as PrcFmt).powf(silence_threshold_db / 20.0);
+        let silence_threshold = PrcFmt::new(10.0).powf(silence_threshold_db / 20.0);
         let silence_limit_nbr = (silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
         SilenceCounter {
             silence_threshold,

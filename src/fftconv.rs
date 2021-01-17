@@ -4,7 +4,8 @@ use filters;
 use helpers::{multiply_add_elements, multiply_elements};
 use num_complex::Complex;
 use num_traits::Zero;
-use realfft::{ComplexToReal, RealToComplex};
+use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
+use std::sync::Arc;
 
 // Sample format
 use PrcFmt;
@@ -16,8 +17,10 @@ pub struct FFTConv {
     nsegments: usize,
     overlap: Vec<PrcFmt>,
     coeffs_f: Vec<Vec<Complex<PrcFmt>>>,
-    fft: RealToComplex<PrcFmt>,
-    ifft: ComplexToReal<PrcFmt>,
+    fft: Arc<dyn RealToComplex<PrcFmt>>,
+    ifft: Arc<dyn ComplexToReal<PrcFmt>>,
+    scratch_fw: Vec<Complex<PrcFmt>>,
+    scratch_inv: Vec<Complex<PrcFmt>>,
     input_buf: Vec<PrcFmt>,
     input_f: Vec<Vec<Complex<PrcFmt>>>,
     temp_buf: Vec<Complex<PrcFmt>>,
@@ -31,8 +34,11 @@ impl FFTConv {
         let input_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
         let temp_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); data_length + 1];
         let output_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
-        let mut fft = RealToComplex::<PrcFmt>::new(2 * data_length).unwrap();
-        let ifft = ComplexToReal::<PrcFmt>::new(2 * data_length).unwrap();
+        let mut planner = RealFftPlanner::<PrcFmt>::new();
+        let fft = planner.plan_fft_forward(2 * data_length);
+        let ifft = planner.plan_fft_inverse(2 * data_length);
+        let mut scratch_fw = fft.make_scratch_vec();
+        let scratch_inv = ifft.make_scratch_vec();
 
         let nsegments = ((coeffs.len() as PrcFmt) / (data_length as PrcFmt)).ceil() as usize;
 
@@ -47,7 +53,8 @@ impl FFTConv {
         }
 
         for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
-            fft.process(segment, segment_f).unwrap();
+            fft.process_with_scratch(segment, segment_f, &mut scratch_fw)
+                .unwrap();
         }
 
         FFTConv {
@@ -58,6 +65,8 @@ impl FFTConv {
             coeffs_f,
             fft,
             ifft,
+            scratch_fw,
+            scratch_inv,
             input_f,
             input_buf,
             output_buf,
@@ -104,7 +113,11 @@ impl Filter for FFTConv {
         // FFT and store result in history, update index
         self.index = (self.index + 1) % self.nsegments;
         self.fft
-            .process(&mut self.input_buf, &mut self.input_f[self.index])
+            .process_with_scratch(
+                &mut self.input_buf,
+                &mut self.input_f[self.index],
+                &mut self.scratch_fw,
+            )
             .unwrap();
 
         // Loop through history of input FTs, multiply with filter FTs, accumulate result
@@ -126,7 +139,11 @@ impl Filter for FFTConv {
 
         // IFFT result, store result and overlap
         self.ifft
-            .process(&self.temp_buf, &mut self.output_buf)
+            .process_with_scratch(
+                &mut self.temp_buf,
+                &mut self.output_buf,
+                &mut self.scratch_inv,
+            )
             .unwrap();
         for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
             *item = self.output_buf[n] + self.overlap[n];
@@ -175,7 +192,9 @@ impl Filter for FFTConv {
             }
 
             for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
-                self.fft.process(segment, segment_f).unwrap();
+                self.fft
+                    .process_with_scratch(segment, segment_f, &mut self.scratch_fw)
+                    .unwrap();
             }
             self.coeffs_f = coeffs_f;
         } else {

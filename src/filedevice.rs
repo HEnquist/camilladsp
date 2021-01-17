@@ -19,6 +19,7 @@ use rubato::Resampler;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
+use NewValue;
 use PrcFmt;
 use ProcessingState;
 use Res;
@@ -113,7 +114,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample as i32 - 1);
+                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample as i32 - 1);
                         let mut chunk_stats;
                         barrier.wait();
                         debug!("starting playback loop");
@@ -136,7 +137,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                                 bits_per_sample as i32,
                                             ),
                                         };
-                                    let write_res = file.write(&buffer[0..valid_bytes]);
+                                    let write_res = file.write_all(&buffer[0..valid_bytes]);
                                     match write_res {
                                         Ok(_) => {}
                                         Err(msg) => {
@@ -148,7 +149,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         }
                                     };
                                     if nbr_clipped > 0 {
-                                        playback_status.write_all().unwrap().clipped_samples +=
+                                        playback_status.write().unwrap().clipped_samples +=
                                             nbr_clipped;
                                     }
                                     chunk_stats = chunk.get_stats();
@@ -272,7 +273,7 @@ fn capture_loop(
     mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
 ) {
     debug!("starting captureloop");
-    let scalefactor = (2.0 as PrcFmt).powi(params.bits_per_sample - 1);
+    let scalefactor = PrcFmt::new(2.0).powi(params.bits_per_sample - 1);
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
     let bytes_per_frame = params.channels * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];

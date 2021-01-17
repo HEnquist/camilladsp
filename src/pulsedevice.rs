@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
+use NewValue;
 use PrcFmt;
 use ProcessingState;
 use Res;
@@ -161,7 +162,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
+                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
                         let mut conversion_result;
                         let mut chunk_stats;
                         let bytes_per_frame = channels * store_bytes_per_sample;
@@ -332,7 +333,7 @@ impl CaptureDevice for PulseCaptureDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
+                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
                         barrier.wait();
                         debug!("starting captureloop");
                         let mut buf = vec![0u8; buffer_bytes];

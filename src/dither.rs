@@ -3,6 +3,7 @@ use config;
 use rand::thread_rng;
 use rand_distr::{Distribution, Triangular};
 
+use NewValue;
 use PrcFmt;
 use Res;
 
@@ -19,7 +20,7 @@ pub struct Dither {
 
 impl Dither {
     pub fn new(name: String, bits: usize, filter: Vec<PrcFmt>, amplitude: PrcFmt) -> Self {
-        let scalefact = (2.0 as PrcFmt).powi((bits - 1) as i32);
+        let scalefact = PrcFmt::new(2.0).powi((bits - 1) as i32);
         let buffer = vec![0.0; filter.len()];
         let idx = 0;
         let filterlen = filter.len();

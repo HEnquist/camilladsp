@@ -8,6 +8,7 @@ use config;
 
 // Sample format
 //type SmpFmt = i16;
+use NewValue;
 use PrcFmt;
 use Res;
 
@@ -98,7 +99,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
                 let alpha = sn / (2.0 * q);
                 let b0 = 1.0 + (alpha * ampl);
                 let b1 = -2.0 * cs;
@@ -113,7 +114,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
                 let alpha =
                     sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope / 12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
@@ -128,7 +129,7 @@ impl BiquadCoefficients {
             config::BiquadParameters::HighshelfFO { freq, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let tn = (omega / 2.0).tan();
-                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
                 let b0 = ampl * tn + ampl.powi(2);
                 let b1 = ampl * tn - ampl.powi(2);
                 let b2 = 0.0;
@@ -141,7 +142,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
                 let alpha =
                     sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope / 12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
@@ -156,7 +157,7 @@ impl BiquadCoefficients {
             config::BiquadParameters::LowshelfFO { freq, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let tn = (omega / 2.0).tan();
-                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
                 let b0 = ampl.powi(2) * tn + ampl;
                 let b1 = ampl.powi(2) * tn - ampl;
                 let b2 = 0.0;

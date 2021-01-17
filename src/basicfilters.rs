@@ -4,6 +4,7 @@ use crate::filters::Filter;
 use config;
 use fifoqueue::FifoQueue;
 
+use NewValue;
 use PrcFmt;
 use ProcessingStatus;
 use Res;
@@ -80,7 +81,7 @@ impl Volume {
         let stepsize = ramprange / self.chunksize as PrcFmt;
         (0..self.chunksize)
             .map(|val| {
-                (10.0 as PrcFmt).powf(
+                (PrcFmt::new(10.0)).powf(
                     (self.ramp_start
                         + ramprange * (self.ramp_step as PrcFmt - 1.0)
                         + val as PrcFmt * stepsize)

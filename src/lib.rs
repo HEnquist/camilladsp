@@ -42,6 +42,17 @@ use std::sync::{Arc, RwLock};
 pub type PrcFmt = f32;
 #[cfg(not(feature = "32bit"))]
 pub type PrcFmt = f64;
+
+pub trait NewValue<T> {
+    fn new(val: T) -> Self;
+}
+
+impl<PrcFmt> NewValue<PrcFmt> for PrcFmt {
+    fn new(val: PrcFmt) -> PrcFmt {
+        val
+    }
+}
+
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
