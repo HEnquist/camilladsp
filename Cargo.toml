@@ -13,6 +13,7 @@ cpal-backend = ["cpal"]
 websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/tls"]
 FFTW = ["fftw"]
+neon = ["rubato/neon"]
 
 [lib]
 name = "camillalib"

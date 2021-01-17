@@ -340,6 +340,9 @@ fn main_process() -> i32 {
     if cfg!(feature = "32bit") {
         features.push("32bit");
     }
+    if cfg!(feature = "neon") {
+        features.push("neon");
+    }
     let featurelist = format!("Built with features: {}", features.join(", "));
     let longabout = format!("{}\n\n{}", crate_description!(), featurelist);
 

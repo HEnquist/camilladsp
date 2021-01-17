@@ -11,6 +11,7 @@ New features:
 - Update to new faster RustFFT.
 - Overriding samplerate also scales chunksize.
 - Use updated faster resampler.
+- Enable experimental neon support in resampler via `neon` feature.
 
 
 ## 0.4.0
