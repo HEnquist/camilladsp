@@ -197,7 +197,7 @@ All the available options, or "features" are:
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
 - `FFTW`: Use FFTW instead of RustFFT
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64)
-- `neon`: Enable the experimental Neon support for aarch64 in the resampler. Note that this only works on 64-bit arm, and requires a nightly rust compiler.
+- `neon`: Enable the experimental Neon support for aarch64 in the resampler. Note that this only works on 64-bit arm, and requires a very recent nightly rust compiler.
 
 The first three (`alsa-backend`, `pulse-packend`, `websocket`) are included in the default features, meaning if you don't specify anything you will get those three.
 Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
@@ -762,10 +762,14 @@ filters:
     type: Loudness
     parameters:
       ramp_time: 1000.0
-      reference_level: -25.0
+      reference_level: -25.0 
       high_boost: 7.0
       low_boost: 7.0
 ```
+Allowed ranges:
+- reference_level: -100 to 0
+- high_boost: 0 to 20
+- low_boost: 0 to 20
 
 ### Delay
 The delay filter provides a delay in milliseconds or samples. The "unit" can be "ms" or "samples", and if left out it defaults to "ms". The millisecond value will be rounded to the nearest number of samples.

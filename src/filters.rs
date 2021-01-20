@@ -381,7 +381,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
         config::Filter::Dither { .. } => Ok(()),
         config::Filter::DiffEq { .. } => Ok(()),
         config::Filter::Volume { .. } => Ok(()),
-        config::Filter::Loudness { .. } => Ok(()),
+        config::Filter::Loudness { parameters } => loudness::validate_config(&parameters),
         config::Filter::BiquadCombo { parameters } => biquadcombo::validate_config(&parameters),
     }
 }

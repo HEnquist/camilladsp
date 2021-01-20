@@ -203,3 +203,21 @@ impl Filter for Loudness {
         }
     }
 }
+
+/// Validate a FFT convolution config.
+pub fn validate_config(conf: &config::LoudnessParameters) -> Res<()> {
+    if conf.reference_level > 0.0 {
+        return Err(config::ConfigError::new("Reference level must be less than 0").into());
+    } else if conf.reference_level < -100.0 {
+        return Err(config::ConfigError::new("Reference level must be higher than -100").into());
+    } else if conf.high_boost < 0.0 {
+        return Err(config::ConfigError::new("High boost cannot be less than 0").into());
+    } else if conf.low_boost < 0.0 {
+        return Err(config::ConfigError::new("Low boost cannot be less than 0").into());
+    } else if conf.high_boost > 20.0 {
+        return Err(config::ConfigError::new("High boost cannot be larger than 20").into());
+    } else if conf.low_boost > 20.0 {
+        return Err(config::ConfigError::new("Low boost cannot be larger than 20").into());
+    }
+    Ok(())
+}
