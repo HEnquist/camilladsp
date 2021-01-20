@@ -9,6 +9,7 @@ use dither;
 use fftconv;
 #[cfg(feature = "FFTW")]
 use fftconv_fftw as fftconv;
+use loudness;
 use mixer;
 use std::collections::HashMap;
 use std::fs::File;
@@ -236,6 +237,15 @@ impl FilterGroup {
                             processing_status.clone(),
                         ))
                     }
+                    config::Filter::Loudness { parameters } => {
+                        Box::new(loudness::Loudness::from_config(
+                            name,
+                            parameters,
+                            waveform_length,
+                            sample_freq,
+                            processing_status.clone(),
+                        ))
+                    }
                     config::Filter::Dither { parameters } => {
                         Box::new(dither::Dither::from_config(name, parameters))
                     }
@@ -371,6 +381,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
         config::Filter::Dither { .. } => Ok(()),
         config::Filter::DiffEq { .. } => Ok(()),
         config::Filter::Volume { .. } => Ok(()),
+        config::Filter::Loudness { .. } => Ok(()),
         config::Filter::BiquadCombo { parameters } => biquadcombo::validate_config(&parameters),
     }
 }

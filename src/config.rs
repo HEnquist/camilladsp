@@ -377,6 +377,9 @@ pub enum Filter {
     Volume {
         parameters: VolumeParameters,
     },
+    Loudness {
+        parameters: LoudnessParameters,
+    },
     Dither {
         parameters: DitherParameters,
     },
@@ -516,7 +519,27 @@ pub enum BiquadComboParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VolumeParameters {
+    #[serde(default = "default_ramp_time")]
     pub ramp_time: f32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LoudnessParameters {
+    #[serde(default = "default_ramp_time")]
+    pub ramp_time: f32,
+    pub reference_level: f32,
+    #[serde(default = "default_loudness_boost")]
+    pub high_boost: f32,
+    #[serde(default = "default_loudness_boost")]
+    pub low_boost: f32,
+}
+
+fn default_loudness_boost() -> f32 {
+    10.0
+}
+
+fn default_ramp_time() -> f32 {
+    200.0
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

@@ -43,6 +43,8 @@ The full configuration is given in a yaml file.
 - **[Mixers](#mixers)**
  - **[Filters](#filters)**
    - **[Gain](#gain)**
+   - **[Volume](#volume)**
+   - **[Loudness](#loudness)**
    - **[Delay](#delay)**
    - **[FIR](#fir)**
    - **[IIR](#iir)**
@@ -719,6 +721,8 @@ The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv f
 
 ### Gain
 The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in dB, and a positive value means the signal will be amplified while a negative values attenuates. 
+
+Example Gain filter:
 ```
 filters:
   gainexample:
@@ -729,7 +733,9 @@ filters:
 ```
 
 ### Volume
-The Volume filter is intended to be used as a volume control. The inital volume can be set with the `gain` command line parameter. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). This value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
+The Volume filter is intended to be used as a volume control. The inital volume can be set with the `gain` command line parameter. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). If left out, this defaults to 200 ms. This value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
+
+Example Volume filter:
 ```
 filters:
   volumeexample:
@@ -738,9 +744,33 @@ filters:
       ramp_time: 200
 ```
 
+### Loudness
+The Loudness filter is intended to be used as a volume control, similarly to the Volume filter. See the Volume filter for a description of how it is used.
+The difference is that the Loudness filter applies loudness correction when the volume is lowered. The method is the same as the one implemented by the [RME ADI-2 DAC FS](https://www.rme-audio.de/adi-2-dac.html). The loudness correction is done as shelving filters that boost the high (above 3500 Hz) and low (below 70 Hz) frequencies. The amount of boost is adjustable with the `high_boost` and `low_boost` parameters. If left out, they default to 10 dB.
+- When the volume is above the `reference_level`, only gain is applied.
+- When the volume is below `reference_level` - 20, the full correction is applied.
+- In the range between `reference_level` and `reference_level`-20, the boost value is scaled linearly.
+
+![Loudness](loudness.png)
+
+In this figure, the `reference_level` was set to -5 dB, and `high_boost` = `low_boost` = 10 dB. At a gain of 0 and -5, the curve is flat. Below that the boost increases. At -15 dB half of the boost, and at -25 the full boost is applied. Below -25 dB, the boost value stays constant.
+
+Example Loudness filter:
+```
+filters:
+  loudnessvol:
+    type: Loudness
+    parameters:
+      ramp_time: 1000.0
+      reference_level: -25.0
+      high_boost: 7.0
+      low_boost: 7.0
+```
 
 ### Delay
 The delay filter provides a delay in milliseconds or samples. The "unit" can be "ms" or "samples", and if left out it defaults to "ms". The millisecond value will be rounded to the nearest number of samples.
+
+Example Delay filter:
 ```
 filters:
   delayexample:
@@ -752,6 +782,8 @@ filters:
 
 ### FIR
 A FIR filter is given by an impulse response provided as a list of coefficients. The coefficients are preferably given in a separate file, but can be included directly in the config file. If the number of coefficients (or taps) is larger than the chunksize setting it will use segmented convolution. The number of segments is the filter length divided by the chunksize, rounded up.
+
+Example FIR filter:
 ```
 filters:
   lowpass_fir:
@@ -806,6 +838,7 @@ The other possible formats are raw data:
 
 ### IIR
 IIR filters are implemented as Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filters, or you can provide the coefficients directly.
+
 Examples:
 ```
 filters:
@@ -926,6 +959,7 @@ This example implements a Biquad lowpass, but for a Biquad the Free Biquad type 
 ## Pipeline
 The pipeline section defines the processing steps between input and output. The input and output devices are automatically added to the start and end. 
 The pipeline is essentially a list of filters and/or mixers. There are no rules for ordering or how many are added. For each mixer and for the output device the number of channels from the previous step must match the number of input channels.
+
 Example:
 ```
 pipeline:
