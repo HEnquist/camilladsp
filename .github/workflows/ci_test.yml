@@ -181,6 +181,14 @@ jobs:
           command: test
           args: --no-default-features --features cpal-backend
 
+
+  check_lint_macos_arm:
+    name: Check and test macOS aarch64
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
       - name: Install stable toolchain for arm
         uses: actions-rs/toolchain@v1
         with:
@@ -190,7 +198,10 @@ jobs:
           target: aarch64-apple-darwin
 
       - name: Run cargo check for arm
-        run: cargo check --target aarch64-apple-darwin --no-default-features --features cpal-backend
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --target aarch64-apple-darwin --no-default-features --features cpal-backend
         env:
           SDKROOT: /Applications/Xcode_12.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.1.sdk
           MACOSX_DEPLOYMENT_TARGET: 11.1
