@@ -195,7 +195,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-          
+
       - name: Install stable toolchain for arm
         uses: actions-rs/toolchain@v1
         with:
@@ -210,8 +210,8 @@ jobs:
           command: check
           args: --target aarch64-apple-darwin --no-default-features --features cpal-backend
         env:
-          SDKROOT: /Applications/Xcode_12.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.1.sdk
-          MACOSX_DEPLOYMENT_TARGET: 11.1
+          SDKROOT: /Applications/Xcode_12.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.0.sdk
+          MACOSX_DEPLOYMENT_TARGET: 11.0
           DEVELOPER_DIR: /Applications/Xcode_12.2.app
 
 
