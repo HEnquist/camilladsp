@@ -24,18 +24,20 @@ impl Mixer {
         let ch_out = config.channels.out;
         let mut mapping = vec![Vec::<MixerSource>::new(); ch_out];
         for cfg_mapping in config.mapping {
-            let dest = cfg_mapping.dest;
-            for cfg_src in cfg_mapping.sources {
-                let mut gain: PrcFmt = 10.0;
-                gain = gain.powf(cfg_src.gain / 20.0);
-                if cfg_src.inverted {
-                    gain = -gain;
+            if !cfg_mapping.mute {
+                let dest = cfg_mapping.dest;
+                for cfg_src in cfg_mapping.sources {
+                    let mut gain: PrcFmt = 10.0;
+                    gain = gain.powf(cfg_src.gain / 20.0);
+                    if cfg_src.inverted {
+                        gain = -gain;
+                    }
+                    let src = MixerSource {
+                        channel: cfg_src.channel,
+                        gain,
+                    };
+                    mapping[dest].push(src);
                 }
-                let src = MixerSource {
-                    channel: cfg_src.channel,
-                    gain,
-                };
-                mapping[dest].push(src);
             }
         }
         Mixer {

@@ -616,6 +616,8 @@ pub struct MixerSource {
 pub struct MixerMapping {
     pub dest: usize,
     pub sources: Vec<MixerSource>,
+    #[serde(default)]
+    pub mute: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
