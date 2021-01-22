@@ -261,7 +261,7 @@ mod tests {
     fn gain_invert() {
         let mut waveform = vec![-0.5, 0.0, 0.5];
         let waveform_inv = vec![0.5, 0.0, -0.5];
-        let mut gain = Gain::new("test".to_string(), 0.0, true);
+        let mut gain = Gain::new("test".to_string(), 0.0, true, false);
         gain.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_inv);
     }
@@ -270,7 +270,7 @@ mod tests {
     fn gain_ampl() {
         let mut waveform = vec![-0.5, 0.0, 0.5];
         let waveform_ampl = vec![-5.0, 0.0, 5.0];
-        let mut gain = Gain::new("test".to_string(), 20.0, false);
+        let mut gain = Gain::new("test".to_string(), 20.0, false, false);
         gain.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_ampl);
     }
