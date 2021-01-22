@@ -27,16 +27,18 @@ impl Mixer {
             if !cfg_mapping.mute {
                 let dest = cfg_mapping.dest;
                 for cfg_src in cfg_mapping.sources {
-                    let mut gain: PrcFmt = 10.0;
-                    gain = gain.powf(cfg_src.gain / 20.0);
-                    if cfg_src.inverted {
-                        gain = -gain;
+                    if !cfg_src.mute {
+                        let mut gain: PrcFmt = 10.0;
+                        gain = gain.powf(cfg_src.gain / 20.0);
+                        if cfg_src.inverted {
+                            gain = -gain;
+                        }
+                        let src = MixerSource {
+                            channel: cfg_src.channel,
+                            gain,
+                        };
+                        mapping[dest].push(src);
                     }
-                    let src = MixerSource {
-                        channel: cfg_src.channel,
-                        gain,
-                    };
-                    mapping[dest].push(src);
                 }
             }
         }
@@ -124,8 +126,12 @@ pub fn get_used_input_channels(mixer_config: &config::Mixer) -> Vec<bool> {
     let chan_in = mixer_config.channels.r#in;
     let mut used_channels = vec![false; chan_in];
     for mapping in mixer_config.mapping.iter() {
-        for source in mapping.sources.iter() {
-            used_channels[source.channel] = true;
+        if !mapping.mute {
+            for source in mapping.sources.iter() {
+                if !source.mute {
+                    used_channels[source.channel] = true;
+                }
+            }
         }
     }
     used_channels

@@ -548,6 +548,8 @@ pub struct GainParameters {
     pub gain: PrcFmt,
     #[serde(default)]
     pub inverted: bool,
+    #[serde(default)]
+    pub mute: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -609,6 +611,8 @@ pub struct MixerSource {
     pub channel: usize,
     pub gain: PrcFmt,
     pub inverted: bool,
+    #[serde(default)]
+    pub mute: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

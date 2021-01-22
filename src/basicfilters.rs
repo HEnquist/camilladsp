@@ -153,11 +153,14 @@ impl Filter for Volume {
 
 impl Gain {
     /// A simple filter providing gain in dB, and can also invert the signal.
-    pub fn new(name: String, gain_db: PrcFmt, inverted: bool) -> Self {
+    pub fn new(name: String, gain_db: PrcFmt, inverted: bool, mute: bool) -> Self {
         let mut gain: PrcFmt = 10.0;
         gain = gain.powf(gain_db / 20.0);
         if inverted {
             gain = -gain;
+        }
+        if mute {
+            gain = 0.0;
         }
         Gain { name, gain }
     }
@@ -165,7 +168,8 @@ impl Gain {
     pub fn from_config(name: String, conf: config::GainParameters) -> Self {
         let gain = conf.gain;
         let inverted = conf.inverted;
-        Gain::new(name, gain, inverted)
+        let mute = conf.mute;
+        Gain::new(name, gain, inverted, mute)
     }
 }
 
