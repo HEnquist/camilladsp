@@ -137,129 +137,382 @@ pub fn get_used_input_channels(mixer_config: &config::Mixer) -> Vec<bool> {
     used_channels
 }
 
-
 #[cfg(test)]
 mod tests {
     use config::{Mixer, MixerChannels, MixerMapping, MixerSource};
-    use mixer::get_used_input_channels;
     use mixer;
-
+    use mixer::get_used_input_channels;
 
     #[test]
     fn check_all_used() {
-        let chans = MixerChannels{ r#in:2, out:4};
-        let src0 = MixerSource{ channel: 0, gain: -3.0, inverted: false, mute: false};
-        let src1 = MixerSource{ channel: 1, gain: -3.0, inverted: false, mute: false};
-        let src2 = MixerSource{ channel: 0, gain: -3.0, inverted: false, mute: false};
-        let src3 = MixerSource{ channel: 1, gain: -3.0, inverted: false, mute: false};
-        let map0 = MixerMapping { dest: 0, sources: vec![src0], mute: false};
-        let map1 = MixerMapping { dest: 1, sources: vec![src1], mute: false};
-        let map2 = MixerMapping { dest: 2, sources: vec![src2], mute: false};
-        let map3 = MixerMapping { dest: 3, sources: vec![src3], mute: false};
-        let conf = Mixer {channels: chans, mapping: vec![map0, map1, map2, map3]};
+        let chans = MixerChannels { r#in: 2, out: 4 };
+        let src0 = MixerSource {
+            channel: 0,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let src1 = MixerSource {
+            channel: 1,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let src2 = MixerSource {
+            channel: 0,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let src3 = MixerSource {
+            channel: 1,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let map0 = MixerMapping {
+            dest: 0,
+            sources: vec![src0],
+            mute: false,
+        };
+        let map1 = MixerMapping {
+            dest: 1,
+            sources: vec![src1],
+            mute: false,
+        };
+        let map2 = MixerMapping {
+            dest: 2,
+            sources: vec![src2],
+            mute: false,
+        };
+        let map3 = MixerMapping {
+            dest: 3,
+            sources: vec![src3],
+            mute: false,
+        };
+        let conf = Mixer {
+            channels: chans,
+            mapping: vec![map0, map1, map2, map3],
+        };
         let used = get_used_input_channels(&conf);
         assert_eq!(used, vec![true, true]);
     }
 
     #[test]
     fn check_not_mapped() {
-        let chans = MixerChannels{ r#in:2, out:4};
-        let src0 = MixerSource{ channel: 1, gain: -3.0, inverted: false, mute: false};
-        let src1 = MixerSource{ channel: 1, gain: -3.0, inverted: false, mute: false};
-        let src2 = MixerSource{ channel: 1, gain: -3.0, inverted: false, mute: false};
-        let src3 = MixerSource{ channel: 1, gain: -3.0, inverted: false, mute: false};
-        let map0 = MixerMapping { dest: 0, sources: vec![src0], mute: false};
-        let map1 = MixerMapping { dest: 1, sources: vec![src1], mute: false};
-        let map2 = MixerMapping { dest: 2, sources: vec![src2], mute: false};
-        let map3 = MixerMapping { dest: 3, sources: vec![src3], mute: false};
-        let conf = Mixer {channels: chans, mapping: vec![map0, map1, map2, map3]};
+        let chans = MixerChannels { r#in: 2, out: 4 };
+        let src0 = MixerSource {
+            channel: 1,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let src1 = MixerSource {
+            channel: 1,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let src2 = MixerSource {
+            channel: 1,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let src3 = MixerSource {
+            channel: 1,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let map0 = MixerMapping {
+            dest: 0,
+            sources: vec![src0],
+            mute: false,
+        };
+        let map1 = MixerMapping {
+            dest: 1,
+            sources: vec![src1],
+            mute: false,
+        };
+        let map2 = MixerMapping {
+            dest: 2,
+            sources: vec![src2],
+            mute: false,
+        };
+        let map3 = MixerMapping {
+            dest: 3,
+            sources: vec![src3],
+            mute: false,
+        };
+        let conf = Mixer {
+            channels: chans,
+            mapping: vec![map0, map1, map2, map3],
+        };
         let used = get_used_input_channels(&conf);
         assert_eq!(used, vec![false, true]);
     }
 
     #[test]
     fn check_mute_source() {
-        let chans = MixerChannels{ r#in:2, out:4};
-        let src0 = MixerSource{ channel: 0, gain: -3.0, inverted: false, mute: true};
-        let src1 = MixerSource{ channel: 1, gain: -3.0, inverted: false, mute: false};
-        let src2 = MixerSource{ channel: 0, gain: -3.0, inverted: false, mute: true};
-        let src3 = MixerSource{ channel: 1, gain: -3.0, inverted: false, mute: false};
-        let map0 = MixerMapping { dest: 0, sources: vec![src0], mute: false};
-        let map1 = MixerMapping { dest: 1, sources: vec![src1], mute: false};
-        let map2 = MixerMapping { dest: 2, sources: vec![src2], mute: false};
-        let map3 = MixerMapping { dest: 3, sources: vec![src3], mute: false};
-        let conf = Mixer {channels: chans, mapping: vec![map0, map1, map2, map3]};
+        let chans = MixerChannels { r#in: 2, out: 4 };
+        let src0 = MixerSource {
+            channel: 0,
+            gain: -3.0,
+            inverted: false,
+            mute: true,
+        };
+        let src1 = MixerSource {
+            channel: 1,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let src2 = MixerSource {
+            channel: 0,
+            gain: -3.0,
+            inverted: false,
+            mute: true,
+        };
+        let src3 = MixerSource {
+            channel: 1,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let map0 = MixerMapping {
+            dest: 0,
+            sources: vec![src0],
+            mute: false,
+        };
+        let map1 = MixerMapping {
+            dest: 1,
+            sources: vec![src1],
+            mute: false,
+        };
+        let map2 = MixerMapping {
+            dest: 2,
+            sources: vec![src2],
+            mute: false,
+        };
+        let map3 = MixerMapping {
+            dest: 3,
+            sources: vec![src3],
+            mute: false,
+        };
+        let conf = Mixer {
+            channels: chans,
+            mapping: vec![map0, map1, map2, map3],
+        };
         let used = get_used_input_channels(&conf);
         assert_eq!(used, vec![false, true]);
     }
 
     #[test]
     fn check_mute_mapping() {
-        let chans = MixerChannels{ r#in:2, out:4};
-        let src0 = MixerSource{ channel: 0, gain: -3.0, inverted: false, mute: false};
-        let src1 = MixerSource{ channel: 1, gain: -3.0, inverted: false, mute: false};
-        let src2 = MixerSource{ channel: 0, gain: -3.0, inverted: false, mute: false};
-        let src3 = MixerSource{ channel: 1, gain: -3.0, inverted: false, mute: false};
-        let map0 = MixerMapping { dest: 0, sources: vec![src0], mute: true};
-        let map1 = MixerMapping { dest: 1, sources: vec![src1], mute: false};
-        let map2 = MixerMapping { dest: 2, sources: vec![src2], mute: true};
-        let map3 = MixerMapping { dest: 3, sources: vec![src3], mute: false};
-        let conf = Mixer {channels: chans, mapping: vec![map0, map1, map2, map3]};
+        let chans = MixerChannels { r#in: 2, out: 4 };
+        let src0 = MixerSource {
+            channel: 0,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let src1 = MixerSource {
+            channel: 1,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let src2 = MixerSource {
+            channel: 0,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let src3 = MixerSource {
+            channel: 1,
+            gain: -3.0,
+            inverted: false,
+            mute: false,
+        };
+        let map0 = MixerMapping {
+            dest: 0,
+            sources: vec![src0],
+            mute: true,
+        };
+        let map1 = MixerMapping {
+            dest: 1,
+            sources: vec![src1],
+            mute: false,
+        };
+        let map2 = MixerMapping {
+            dest: 2,
+            sources: vec![src2],
+            mute: true,
+        };
+        let map3 = MixerMapping {
+            dest: 3,
+            sources: vec![src3],
+            mute: false,
+        };
+        let conf = Mixer {
+            channels: chans,
+            mapping: vec![map0, map1, map2, map3],
+        };
         let used = get_used_input_channels(&conf);
         assert_eq!(used, vec![false, true]);
     }
 
     #[test]
     fn check_make_mixer() {
-        let chans = MixerChannels{ r#in:2, out:4};
-        let src0 = MixerSource{ channel: 0, gain: 0.0, inverted: false, mute: false};
-        let src1 = MixerSource{ channel: 1, gain: 0.0, inverted: false, mute: false};
-        let src2 = MixerSource{ channel: 0, gain: 0.0, inverted: false, mute: false};
-        let src3 = MixerSource{ channel: 1, gain: 0.0, inverted: false, mute: false};
-        let map0 = MixerMapping { dest: 0, sources: vec![src0], mute: false};
-        let map1 = MixerMapping { dest: 1, sources: vec![src1], mute: false};
-        let map2 = MixerMapping { dest: 2, sources: vec![src2], mute: false};
-        let map3 = MixerMapping { dest: 3, sources: vec![src3], mute: false};
-        let conf = Mixer {channels: chans, mapping: vec![map0, map1, map2, map3]};
+        let chans = MixerChannels { r#in: 2, out: 4 };
+        let src0 = MixerSource {
+            channel: 0,
+            gain: 0.0,
+            inverted: false,
+            mute: false,
+        };
+        let src1 = MixerSource {
+            channel: 1,
+            gain: 0.0,
+            inverted: false,
+            mute: false,
+        };
+        let src2 = MixerSource {
+            channel: 0,
+            gain: 0.0,
+            inverted: false,
+            mute: false,
+        };
+        let src3 = MixerSource {
+            channel: 1,
+            gain: 0.0,
+            inverted: false,
+            mute: false,
+        };
+        let map0 = MixerMapping {
+            dest: 0,
+            sources: vec![src0],
+            mute: false,
+        };
+        let map1 = MixerMapping {
+            dest: 1,
+            sources: vec![src1],
+            mute: false,
+        };
+        let map2 = MixerMapping {
+            dest: 2,
+            sources: vec![src2],
+            mute: false,
+        };
+        let map3 = MixerMapping {
+            dest: 3,
+            sources: vec![src3],
+            mute: false,
+        };
+        let conf = Mixer {
+            channels: chans,
+            mapping: vec![map0, map1, map2, map3],
+        };
         let mix = mixer::Mixer::from_config("dummy".to_string(), conf);
         assert_eq!(mix.channels_in, 2);
         assert_eq!(mix.channels_out, 4);
 
-        let exp_src0 = mixer::MixerSource {channel: 0, gain: 1.0};
-        let exp_src1 = mixer::MixerSource {channel: 1, gain: 1.0};
-        let exp_src2 = mixer::MixerSource {channel: 0, gain: 1.0};
-        let exp_src3 = mixer::MixerSource {channel: 1, gain: 1.0};
+        let exp_src0 = mixer::MixerSource {
+            channel: 0,
+            gain: 1.0,
+        };
+        let exp_src1 = mixer::MixerSource {
+            channel: 1,
+            gain: 1.0,
+        };
+        let exp_src2 = mixer::MixerSource {
+            channel: 0,
+            gain: 1.0,
+        };
+        let exp_src3 = mixer::MixerSource {
+            channel: 1,
+            gain: 1.0,
+        };
 
-        let exp_map = vec![vec![exp_src0], vec![exp_src1],vec![exp_src2],vec![exp_src3]];
+        let exp_map = vec![
+            vec![exp_src0],
+            vec![exp_src1],
+            vec![exp_src2],
+            vec![exp_src3],
+        ];
 
         assert_eq!(mix.mapping, exp_map);
     }
 
     #[test]
     fn check_make_mixer_muted() {
-        let chans = MixerChannels{ r#in:2, out:4};
-        let src0 = MixerSource{ channel: 0, gain: 0.0, inverted: false, mute: false};
-        let src1 = MixerSource{ channel: 1, gain: 0.0, inverted: false, mute: false};
-        let src2 = MixerSource{ channel: 0, gain: 0.0, inverted: false, mute: false};
-        let src3 = MixerSource{ channel: 1, gain: 0.0, inverted: false, mute: false};
-        let map0 = MixerMapping { dest: 0, sources: vec![src0], mute: true};
-        let map1 = MixerMapping { dest: 1, sources: vec![src1], mute: false};
-        let map2 = MixerMapping { dest: 2, sources: vec![src2], mute: true};
-        let map3 = MixerMapping { dest: 3, sources: vec![src3], mute: false};
-        let conf = Mixer {channels: chans, mapping: vec![map0, map1, map2, map3]};
+        let chans = MixerChannels { r#in: 2, out: 4 };
+        let src0 = MixerSource {
+            channel: 0,
+            gain: 0.0,
+            inverted: false,
+            mute: false,
+        };
+        let src1 = MixerSource {
+            channel: 1,
+            gain: 0.0,
+            inverted: false,
+            mute: false,
+        };
+        let src2 = MixerSource {
+            channel: 0,
+            gain: 0.0,
+            inverted: false,
+            mute: false,
+        };
+        let src3 = MixerSource {
+            channel: 1,
+            gain: 0.0,
+            inverted: false,
+            mute: false,
+        };
+        let map0 = MixerMapping {
+            dest: 0,
+            sources: vec![src0],
+            mute: true,
+        };
+        let map1 = MixerMapping {
+            dest: 1,
+            sources: vec![src1],
+            mute: false,
+        };
+        let map2 = MixerMapping {
+            dest: 2,
+            sources: vec![src2],
+            mute: true,
+        };
+        let map3 = MixerMapping {
+            dest: 3,
+            sources: vec![src3],
+            mute: false,
+        };
+        let conf = Mixer {
+            channels: chans,
+            mapping: vec![map0, map1, map2, map3],
+        };
         let mix = mixer::Mixer::from_config("dummy".to_string(), conf);
         assert_eq!(mix.channels_in, 2);
         assert_eq!(mix.channels_out, 4);
 
         //let exp_src0 = mixer::MixerSource {channel: 0, gain: 1.0};
-        let exp_src1 = mixer::MixerSource {channel: 1, gain: 1.0};
+        let exp_src1 = mixer::MixerSource {
+            channel: 1,
+            gain: 1.0,
+        };
         //let exp_src2 = mixer::MixerSource {channel: 0, gain: 1.0};
-        let exp_src3 = mixer::MixerSource {channel: 1, gain: 1.0};
+        let exp_src3 = mixer::MixerSource {
+            channel: 1,
+            gain: 1.0,
+        };
 
-        let exp_map = vec![vec![], vec![exp_src1],vec![],vec![exp_src3]];
+        let exp_map = vec![vec![], vec![exp_src1], vec![], vec![exp_src3]];
 
         assert_eq!(mix.mapping, exp_map);
     }
-
 }
-

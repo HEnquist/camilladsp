@@ -144,6 +144,7 @@ pub struct PlaybackStatus {
 #[derive(Clone, Debug)]
 pub struct ProcessingStatus {
     pub volume: f32,
+    pub mute: bool,
 }
 
 #[derive(Clone)]

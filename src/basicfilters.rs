@@ -26,6 +26,8 @@ pub struct Volume {
     ramptime_in_chunks: usize,
     current_volume: PrcFmt,
     target_volume: f32,
+    target_linear_gain: PrcFmt,
+    mute: bool,
     ramp_start: PrcFmt,
     ramp_step: usize,
     samplerate: usize,
@@ -38,18 +40,23 @@ impl Volume {
         name: String,
         ramp_time_ms: f32,
         current_volume: f32,
+        mute: bool,
         chunksize: usize,
         samplerate: usize,
         processing_status: Arc<RwLock<ProcessingStatus>>,
     ) -> Self {
         let ramptime_in_chunks =
             (ramp_time_ms / (1000.0 * chunksize as f32 / samplerate as f32)).round() as usize;
+        let tempgain: PrcFmt = 10.0;
+        let target_linear_gain = tempgain.powf(current_volume as PrcFmt / 20.0);
         Volume {
             name,
             ramptime_in_chunks,
             current_volume: current_volume as PrcFmt,
             ramp_start: current_volume as PrcFmt,
             target_volume: current_volume as f32,
+            target_linear_gain,
+            mute,
             ramp_step: 0,
             samplerate,
             chunksize,
@@ -65,10 +72,12 @@ impl Volume {
         processing_status: Arc<RwLock<ProcessingStatus>>,
     ) -> Self {
         let current_volume = processing_status.read().unwrap().volume;
+        let mute = processing_status.read().unwrap().mute;
         Volume::new(
             name,
             conf.ramp_time,
             current_volume,
+            mute,
             chunksize,
             samplerate,
             processing_status,
@@ -76,8 +85,14 @@ impl Volume {
     }
 
     fn make_ramp(&self) -> Vec<PrcFmt> {
+        let target_volume = if self.mute {
+            -100.0
+        } else {
+            self.target_volume
+        };
+
         let ramprange =
-            (self.target_volume as PrcFmt - self.ramp_start) / self.ramptime_in_chunks as PrcFmt;
+            (target_volume as PrcFmt - self.ramp_start) / self.ramptime_in_chunks as PrcFmt;
         let stepsize = ramprange / self.chunksize as PrcFmt;
         (0..self.chunksize)
             .map(|val| {
@@ -99,27 +114,47 @@ impl Filter for Volume {
 
     fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
         let shared_vol = self.processing_status.read().unwrap().volume;
+        let shared_mute = self.processing_status.read().unwrap().mute;
 
         // Volume setting changed
-        if (shared_vol - self.target_volume).abs() > 0.001 {
+        if (shared_vol - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
             if self.ramptime_in_chunks > 0 {
-                trace!("starting ramp {} -> {}", self.current_volume, shared_vol);
+                trace!(
+                    "starting ramp: {} -> {}, mute: {}",
+                    self.current_volume,
+                    shared_vol,
+                    shared_mute
+                );
                 self.ramp_start = self.current_volume;
-                self.target_volume = shared_vol;
                 self.ramp_step = 1;
             } else {
-                self.current_volume = shared_vol as PrcFmt;
-                self.target_volume = shared_vol;
+                trace!(
+                    "switch volume without ramp: {} -> {}, mute: {}",
+                    self.current_volume,
+                    shared_vol,
+                    shared_mute
+                );
+                self.current_volume = if shared_mute {
+                    0.0
+                } else {
+                    shared_vol as PrcFmt
+                };
                 self.ramp_step = 0;
             }
+            self.target_volume = shared_vol;
+            self.target_linear_gain = if shared_mute {
+                0.0
+            } else {
+                let tempgain: PrcFmt = 10.0;
+                tempgain.powf(shared_vol as PrcFmt / 20.0)
+            };
+            self.mute = shared_mute;
         }
+
         // Not in a ramp
         if self.ramp_step == 0 {
-            //debug!("constant gain {}", self.current_volume);
-            let mut gain: PrcFmt = 10.0;
-            gain = gain.powf(self.current_volume as PrcFmt / 20.0);
             for item in waveform.iter_mut() {
-                *item *= gain;
+                *item *= self.target_linear_gain;
             }
         }
         // Ramping

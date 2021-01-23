@@ -64,6 +64,8 @@ enum WSCommand {
     SetUpdateInterval(usize),
     GetVolume,
     SetVolume(f32),
+    GetMute,
+    SetMute(bool),
     GetVersion,
     GetState,
     GetRateAdjust,
@@ -155,6 +157,13 @@ enum WSReply {
     GetVolume {
         result: WSResult,
         value: f32,
+    },
+    SetMute {
+        result: WSResult,
+    },
+    GetMute {
+        result: WSResult,
+        value: bool,
     },
     GetVersion {
         result: WSResult,
@@ -445,6 +454,20 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
             procstat.volume = nbr;
             Some(WSReply::SetVolume {
+                result: WSResult::Ok,
+            })
+        }
+        WSCommand::GetMute => {
+            let procstat = shared_data_inst.processing_status.read().unwrap();
+            Some(WSReply::GetMute {
+                result: WSResult::Ok,
+                value: procstat.mute,
+            })
+        }
+        WSCommand::SetMute(mute) => {
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.mute = mute;
+            Some(WSReply::SetMute {
                 result: WSResult::Ok,
             })
         }

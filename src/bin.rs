@@ -396,7 +396,7 @@ fn main_process() -> i32 {
         )
         .arg(
             Arg::with_name("gain")
-                .help("Set initial gain in dB for Volume filters")
+                .help("Set initial gain in dB for Volume and Loudness filters")
                 .short("g")
                 .long("gain")
                 .display_order(200)
@@ -409,6 +409,13 @@ fn main_process() -> i32 {
                     }
                     Err(String::from("Must be a number between -120 and +20"))
                 }),
+        )
+        .arg(
+            Arg::with_name("mute")
+                .help("Start with Volume and Loudness filters muted")
+                .short("m")
+                .long("mute")
+                .display_order(200),
         )
         .arg(
             Arg::with_name("samplerate")
@@ -601,6 +608,8 @@ fn main_process() -> i32 {
         .map(|s| s.parse::<f32>().unwrap())
         .unwrap_or(0.0);
 
+    let initial_mute = matches.is_present("mute");
+
     config::OVERRIDES.write().unwrap().samplerate = matches
         .value_of("samplerate")
         .map(|s| s.parse::<usize>().unwrap());
@@ -668,6 +677,7 @@ fn main_process() -> i32 {
     }));
     let processing_status = Arc::new(RwLock::new(ProcessingStatus {
         volume: initial_volume,
+        mute: initial_mute,
     }));
 
     let status_structs = StatusStructs {
