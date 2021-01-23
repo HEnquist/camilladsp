@@ -81,10 +81,13 @@ Commands for reading status parameters.
 
 ### Volume control
 
-Commands for setting and getting the volume setting. These are only relevant if the pipeline includes "Volume" filters.
+Commands for setting and getting the volume setting. These are only relevant if the pipeline includes "Volume" or "Loudness" filters.
 - `GetVolume` : get the current volume setting in dB.
   * returns the value as a float
 - `SetVolume` : set the volume control to the given value in dB.
+- `GetMute` : get the current mute setting.
+  * returns the muting status as a boolean
+- `SetMute` : set muting to the given value.
 
 ### Config management
 

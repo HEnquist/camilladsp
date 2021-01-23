@@ -723,7 +723,7 @@ The filters section defines the filter configurations to use in the pipeline. It
 The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
 
 ### Gain
-The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in dB, and a positive value means the signal will be amplified while a negative values attenuates. 
+The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in dB, and a positive value means the signal will be amplified while a negative values attenuates. The `mute` parameter determines if the the signal should be muted. This is optional and defaults to not mute.
 
 Example Gain filter:
 ```
@@ -733,10 +733,11 @@ filters:
     parameters:
       gain: -6.0 
       inverted: false
+      mute: false (*)
 ```
 
 ### Volume
-The Volume filter is intended to be used as a volume control. The inital volume can be set with the `gain` command line parameter. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). If left out, this defaults to 200 ms. This value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
+The Volume filter is intended to be used as a volume control. The inital volume and muting state can be set with the `gain` and `mute` command line parameters. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume or mute state is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). If left out, this defaults to 200 ms. This value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
 
 Example Volume filter:
 ```

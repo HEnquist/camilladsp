@@ -1,11 +1,11 @@
 ## 0.5.0
 New features:
 - Add RMS and Peak measurement for each channel at input and output.
-- Add a Volume filter for volume control.
+- Add a `Volume` filter for volume control.
 - Add exit codes.
 - Adapt `check` output to be more suitable for scripts.
 - Search for filter coefficient files with relative paths first in config file dir. 
-- Add ShibataLow dither types.
+- Add `ShibataLow` dither types.
 - Add option to write logs to file.
 - Skip processing of channels that are not used in the pipeline.
 - Update to new faster RustFFT.
@@ -13,7 +13,8 @@ New features:
 - Use updated faster resampler.
 - Enable experimental neon support in resampler via `neon` feature.
 - Add `Loudness` volume control filter.
-- Add mute option on mixer outputs.
+- Add mute options in mixer and Gain filters.
+- Add mute function to Volume and Loundness filters, with websocket commands.
 
 
 ## 0.4.0
