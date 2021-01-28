@@ -75,15 +75,25 @@ fn open_cpal_playback(
         CpalHost::Wasapi => HostId::Wasapi,
     };
     let host = cpal::host_from_id(host_id)?;
-    let mut devices = host.devices()?;
-    let device = match devices.find(|dev| match dev.name() {
-        Ok(n) => n == devname,
-        _ => false,
-    }) {
-        Some(dev) => dev,
-        None => {
-            let msg = format!("Could not find device '{}'", devname);
-            return Err(ConfigError::new(&msg).into());
+    let device = if devname == "default" {
+        match host.default_output_device() {
+            Some(dev) => dev,
+            None => {
+                let msg = "Could not get default playback device".to_string();
+                return Err(ConfigError::new(&msg).into());
+            }
+        }
+    } else {
+        let mut devices = host.devices()?;
+        match devices.find(|dev| match dev.name() {
+            Ok(n) => n == devname,
+            _ => false,
+        }) {
+            Some(dev) => dev,
+            None => {
+                let msg = format!("Could not find playback device '{}'", devname);
+                return Err(ConfigError::new(&msg).into());
+            }
         }
     };
     let cpal_format = match sample_format {
@@ -114,17 +124,28 @@ fn open_cpal_capture(
         CpalHost::Wasapi => HostId::Wasapi,
     };
     let host = cpal::host_from_id(host_id)?;
-    let mut devices = host.devices()?;
-    let device = match devices.find(|dev| match dev.name() {
-        Ok(n) => n == devname,
-        _ => false,
-    }) {
-        Some(dev) => dev,
-        None => {
-            let msg = format!("Could not find device '{}'", devname);
-            return Err(ConfigError::new(&msg).into());
+    let device = if devname == "default" {
+        match host.default_input_device() {
+            Some(dev) => dev,
+            None => {
+                let msg = "Could not get default capture device".to_string();
+                return Err(ConfigError::new(&msg).into());
+            }
+        }
+    } else {
+        let mut devices = host.devices()?;
+        match devices.find(|dev| match dev.name() {
+            Ok(n) => n == devname,
+            _ => false,
+        }) {
+            Some(dev) => dev,
+            None => {
+                let msg = format!("Could not find capture device '{}'", devname);
+                return Err(ConfigError::new(&msg).into());
+            }
         }
     };
+
     let cpal_format = match sample_format {
         SampleFormat::S16LE => cpal::SampleFormat::I16,
         SampleFormat::FLOAT32LE => cpal::SampleFormat::F32,

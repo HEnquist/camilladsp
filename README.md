@@ -545,7 +545,7 @@ devices:
     * `Stdin` (capture only)
     * `Stdout` (playback only)
   * `channels`: number of channels
-  * `device`: device name (for Alsa, Pulse, Wasapi, CoreAudio)
+  * `device`: device name (for Alsa, Pulse, Wasapi, CoreAudio). For CoreAudio and Wasapi, "default" will give the default device.
   * `filename` path the the file (for File)
   * `format`: sample format.
 

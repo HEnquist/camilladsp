@@ -41,7 +41,7 @@ Available formats:
 - S16_LE
 - S32_LE
 ```
-The interesting fields are FORMAT, RATE and CHANNELS. In this example the sample formats this device can use are S16_LE and S32_LE (corresponding to S16LE and S32LE in CamillaDSP, see the table in the main README for all formats). The sample rate can be either 44,1, or 48 kHz. And it supports only stereo playback.
+The interesting fields are FORMAT, RATE and CHANNELS. In this example the sample formats this device can use are S16_LE and S32_LE (corresponding to S16LE and S32LE in CamillaDSP, see the table in the main README for all formats). The sample rate can be either 44.1, or 48 kHz. And it supports only stereo playback.
 
 
 Capture parameters are determined in the same way with `arecord`:

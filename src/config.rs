@@ -804,10 +804,11 @@ fn replace_tokens_in_config(config: &mut Configuration) {
     let num_channels = config.devices.capture.channels();
     //let mut new_config = config.clone();
     for (_name, filter) in config.filters.iter_mut() {
-        if let Filter::Conv { parameters } = filter {
-            if let ConvParameters::File { filename, .. } = parameters {
-                *filename = replace_tokens(filename, samplerate, num_channels);
-            }
+        if let Filter::Conv {
+            parameters: ConvParameters::File { filename, .. },
+        } = filter
+        {
+            *filename = replace_tokens(filename, samplerate, num_channels);
         }
     }
     for mut step in config.pipeline.iter_mut() {
@@ -829,10 +830,11 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
     if let Ok(config_file) = PathBuf::from(configname.to_owned()).canonicalize() {
         if let Some(config_dir) = config_file.parent() {
             for (_name, filter) in config.filters.iter_mut() {
-                if let Filter::Conv { parameters } = filter {
-                    if let ConvParameters::File { filename, .. } = parameters {
-                        check_and_replace_relative_path(filename, config_dir);
-                    }
+                if let Filter::Conv {
+                    parameters: ConvParameters::File { filename, .. },
+                } = filter
+                {
+                    check_and_replace_relative_path(filename, config_dir);
                 }
             }
         } else {
