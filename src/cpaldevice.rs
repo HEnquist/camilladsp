@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
+use std::time;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
@@ -201,15 +202,30 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                 let stream = device.build_output_stream(
                                     &stream_config,
                                     move |mut buffer: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                                        //trace!("Playback device requests {} samples", buffer.len());
+                                        #[cfg(feature = "debug")]
+                                        trace!("Playback device requests {} samples", buffer.len());
                                         while sample_queue.len() < buffer.len() {
                                             //trace!("Convert chunk to device format");
-                                            let chunk = rx_dev.recv().unwrap();
-                                            clipped = chunk_to_queue_int(
-                                                &chunk,
-                                                &mut sample_queue,
-                                                scalefactor,
-                                            );
+                                            match rx_dev.recv_timeout(time::Duration::from_micros(
+                                                (1000000 * buffer.len()
+                                                    / (samplerate * channels_clone))
+                                                    as u64,
+                                            )) {
+                                                Ok(chunk) => {
+                                                    clipped = chunk_to_queue_int(
+                                                        &chunk,
+                                                        &mut sample_queue,
+                                                        scalefactor,
+                                                    )
+                                                }
+                                                Err(_) => {
+                                                    warn!("No data to play, dropping a callback");
+                                                    for sample in buffer.iter_mut() {
+                                                        *sample = 0;
+                                                    }
+                                                    return;
+                                                }
+                                            }
                                         }
                                         write_data_to_device(&mut buffer, &mut sample_queue);
                                         buffer_fill_clone
@@ -234,12 +250,29 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                 let stream = device.build_output_stream(
                                     &stream_config,
                                     move |mut buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                                        //trace!("Playback device requests {} samples", buffer.len());
+                                        #[cfg(feature = "debug")]
+                                        trace!("Playback device requests {} samples", buffer.len());
                                         while sample_queue.len() < buffer.len() {
                                             //trace!("Convert chunk to device format");
-                                            let chunk = rx_dev.recv().unwrap();
-                                            clipped =
-                                                chunk_to_queue_float(&chunk, &mut sample_queue);
+                                            match rx_dev.recv_timeout(time::Duration::from_micros(
+                                                (1000000 * buffer.len()
+                                                    / (samplerate * channels_clone))
+                                                    as u64,
+                                            )) {
+                                                Ok(chunk) => {
+                                                    clipped = chunk_to_queue_float(
+                                                        &chunk,
+                                                        &mut sample_queue,
+                                                    )
+                                                }
+                                                Err(_) => {
+                                                    warn!("No data to play, dropping a callback");
+                                                    for sample in buffer.iter_mut() {
+                                                        *sample = 0.0;
+                                                    }
+                                                    return;
+                                                }
+                                            }
                                         }
                                         write_data_to_device(&mut buffer, &mut sample_queue);
                                         buffer_fill_clone
@@ -348,13 +381,13 @@ fn get_nbr_capture_samples(
     channels: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        let new_capture_samples = resampl.nbr_frames_needed() * channels;
-        //trace!(
-        //    "Resampler needs {} frames, will read {} samples",
-        //    resampl.nbr_frames_needed(),
-        //    new_capture_samples
-        //);
-        new_capture_samples
+        #[cfg(feature = "debug")]
+        trace!(
+            "Resampler needs {} frames, will read {} samples",
+            resampl.nbr_frames_needed(),
+            resampl.nbr_frames_needed() * channels;
+        );
+        resampl.nbr_frames_needed() * channels
     } else {
         capture_samples
     }
@@ -423,7 +456,8 @@ impl CaptureDevice for CpalCaptureDevice {
                                 let stream = device.build_input_stream(
                                     &stream_config,
                                     move |buffer: &[i16], _: &cpal::InputCallbackInfo| {
-                                        //trace!("Capture device provides {} samples", buffer.len());
+                                        #[cfg(feature = "debug")]
+                                        trace!("Capture device provides {} samples", buffer.len());
                                         let mut buffer_copy = Vec::new();
                                         buffer_copy.extend_from_slice(&buffer);
                                         tx_dev_i.send(buffer_copy).unwrap();
@@ -438,7 +472,8 @@ impl CaptureDevice for CpalCaptureDevice {
                                 let stream = device.build_input_stream(
                                     &stream_config,
                                     move |buffer: &[f32], _: &cpal::InputCallbackInfo| {
-                                        //trace!("Capture device provides {} samples", buffer.len());
+                                        #[cfg(feature = "debug")]
+                                        trace!("Capture device provides {} samples", buffer.len());
                                         let mut buffer_copy = Vec::new();
                                         buffer_copy.extend_from_slice(&buffer);
                                         tx_dev_f.send(buffer_copy).unwrap();

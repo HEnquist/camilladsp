@@ -14,7 +14,11 @@ New features:
 - Enable experimental neon support in resampler via `neon` feature.
 - Add `Loudness` volume control filter.
 - Add mute options in mixer and Gain filters.
-- Add mute function to Volume and Loudness filters, with websocket commands.
+- Add mute function to Volume and Loundness filters, with websocket commands.
+- Add `debug` feature for extra logging.
+
+Bugfixes:
+- Don't block playback for CoreAudio/Wasapi if there is no data in time.
 
 
 ## 0.4.0
