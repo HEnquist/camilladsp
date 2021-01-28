@@ -250,10 +250,13 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
 }
 
 pub fn resampler_is_async(conf: &config::Resampler) -> bool {
-    matches!(&conf, config::Resampler::FastAsync
-        | config::Resampler::BalancedAsync
-        | config::Resampler::AccurateAsync
-        | config::Resampler::FreeAsync { .. })
+    matches!(
+        &conf,
+        config::Resampler::FastAsync
+            | config::Resampler::BalancedAsync
+            | config::Resampler::AccurateAsync
+            | config::Resampler::FreeAsync { .. }
+    )
 }
 
 pub fn get_async_parameters(

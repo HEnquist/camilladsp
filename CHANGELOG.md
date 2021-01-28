@@ -19,6 +19,7 @@ New features:
 
 Bugfixes:
 - Don't block playback for CoreAudio/Wasapi if there is no data in time.
+- Validate `silence_threshold` and `silence_timeout` fields.
 
 
 ## 0.4.0

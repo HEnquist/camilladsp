@@ -929,6 +929,12 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
     if conf.devices.adjust_period <= 0.0 {
         return Err(ConfigError::new("adjust_period must be positive and > 0").into());
     }
+    if conf.devices.silence_threshold > 0.0 {
+        return Err(ConfigError::new("silence_threshold must be less than or equal to 0").into());
+    }
+    if conf.devices.silence_timeout < 0.0 {
+        return Err(ConfigError::new("silence_timeout cannot be negative").into());
+    }
     let mut num_channels = conf.devices.capture.channels();
     let fs = conf.devices.samplerate;
     for step in conf.pipeline {
