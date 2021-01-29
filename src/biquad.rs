@@ -323,6 +323,14 @@ impl Filter for Biquad {
     }
 }
 
+pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters) -> Res<()> {
+    let coeffs = BiquadCoefficients::from_config(samplerate, parameters.clone());
+    if !coeffs.is_stable() {
+        return Err(config::ConfigError::new("Unstable filter specified").into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;

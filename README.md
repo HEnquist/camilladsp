@@ -723,7 +723,7 @@ The filters section defines the filter configurations to use in the pipeline. It
 The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
 
 ### Gain
-The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in dB, and a positive value means the signal will be amplified while a negative values attenuates. The `mute` parameter determines if the the signal should be muted. This is optional and defaults to not mute.
+The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in dB, and a positive value means the signal will be amplified while a negative values attenuates. The gain value must be in the range -150 to +150 dB. The `mute` parameter determines if the the signal should be muted. This is optional and defaults to not mute.
 
 Example Gain filter:
 ```
@@ -737,7 +737,7 @@ filters:
 ```
 
 ### Volume
-The Volume filter is intended to be used as a volume control. The inital volume and muting state can be set with the `gain` and `mute` command line parameters. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume or mute state is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). If left out, this defaults to 200 ms. This value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
+The Volume filter is intended to be used as a volume control. The inital volume and muting state can be set with the `gain` and `mute` command line parameters. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume or mute state is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). The value must not be negative. If left out, it defaults to 200 ms. The value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
 
 Example Volume filter:
 ```
@@ -765,7 +765,7 @@ filters:
   loudnessvol:
     type: Loudness
     parameters:
-      ramp_time: 1000.0
+      ramp_time: 200.0
       reference_level: -25.0 
       high_boost: 7.0
       low_boost: 7.0
@@ -776,7 +776,7 @@ Allowed ranges:
 - low_boost: 0 to 20
 
 ### Delay
-The delay filter provides a delay in milliseconds or samples. The "unit" can be "ms" or "samples", and if left out it defaults to "ms". The millisecond value will be rounded to the nearest number of samples.
+The delay filter provides a delay in milliseconds or samples. The "unit" can be "ms" or "samples", and if left out it defaults to "ms". The millisecond value will be rounded to the nearest number of samples. The delay value must be positive or zero. 
 
 Example Delay filter:
 ```
@@ -923,7 +923,7 @@ Other types such as Bessel filters can be built by combining several Biquads. [S
 
 
 ### Dither
-The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several types, and the parameter "bits" sets the target bit depth. For the best result this should match the bit depth of the playback device. Setting it to a higher value is not useful since then the applied dither will be rounded off. On the other hand, setting it to a much lower value, for example 5 or 6 bits, makes the noise very audible and can be useful for comparing the different types.
+The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several types, and the parameter "bits" sets the target bit depth. For the best result this should match the bit depth of the playback device. Setting it to a higher value is not useful since then the applied dither will be rounded off. On the other hand, setting it to a much lower value, for example 5 or 6 bits (minimum allowed value is 2), makes the noise very audible and can be useful for comparing the different types.
 
 Example:
 ```
@@ -935,7 +935,7 @@ Example:
 ```
 The available types are 
 - Simple, simple noise shaping with increasing noise towards higher frequencies
-- Uniform, just dither, no shaping. Requires also the parameter "amplitude" to set the dither amplitude in bits.
+- Uniform, just dither, no shaping. Requires also the parameter "amplitude" to set the dither amplitude in units of LSB (least significant bit). The allowed amplitude range is 0 to 100.
 - Lipshitz441, for 44.1 kHz
 - Fweighted441, for 44.1 kHz
 - Shibata441, for 44.1 kHz

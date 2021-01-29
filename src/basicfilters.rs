@@ -287,6 +287,32 @@ impl Filter for Delay {
     }
 }
 
+/// Validate a Loudness config.
+pub fn validate_delay_config(conf: &config::DelayParameters) -> Res<()> {
+    if conf.delay < 0.0 {
+        return Err(config::ConfigError::new("Delay cannot be negative").into());
+    }
+    Ok(())
+}
+
+/// Validate a Volume config.
+pub fn validate_volume_config(conf: &config::VolumeParameters) -> Res<()> {
+    if conf.ramp_time < 0.0 {
+        return Err(config::ConfigError::new("Ramp time cannot be negative").into());
+    }
+    Ok(())
+}
+
+/// Validate a Gain config.
+pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
+    if conf.gain < -150.0 {
+        return Err(config::ConfigError::new("Gain must be larger than -150 dB").into());
+    } else if conf.gain > 150.0 {
+        return Err(config::ConfigError::new("Gain must be less than +150 dB").into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use basicfilters::{Delay, Gain};
