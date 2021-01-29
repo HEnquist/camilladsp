@@ -364,23 +364,12 @@ impl Pipeline {
 pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
     match filter_config {
         config::Filter::Conv { parameters } => fftconv::validate_config(&parameters),
-        config::Filter::Biquad { parameters } => {
-            let coeffs = biquad::BiquadCoefficients::from_config(fs, parameters.clone());
-            if !coeffs.is_stable() {
-                return Err(config::ConfigError::new("Unstable filter specified").into());
-            }
-            Ok(())
-        }
-        config::Filter::Delay { parameters } => {
-            if parameters.delay < 0.0 {
-                return Err(config::ConfigError::new("Negative delay specified").into());
-            }
-            Ok(())
-        }
-        config::Filter::Gain { .. } => Ok(()),
-        config::Filter::Dither { .. } => Ok(()),
-        config::Filter::DiffEq { .. } => Ok(()),
-        config::Filter::Volume { .. } => Ok(()),
+        config::Filter::Biquad { parameters } => biquad::validate_config(fs, &parameters),
+        config::Filter::Delay { parameters } => basicfilters::validate_delay_config(&parameters),
+        config::Filter::Gain { parameters } => basicfilters::validate_gain_config(&parameters),
+        config::Filter::Dither { parameters } => dither::validate_config(&parameters),
+        config::Filter::DiffEq { parameters } => diffeq::validate_config(&parameters),
+        config::Filter::Volume { parameters } => basicfilters::validate_volume_config(&parameters),
         config::Filter::Loudness { parameters } => loudness::validate_config(&parameters),
         config::Filter::BiquadCombo { parameters } => biquadcombo::validate_config(&parameters),
     }

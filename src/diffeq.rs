@@ -91,6 +91,11 @@ impl Filter for DiffEq {
     }
 }
 
+pub fn validate_config(_parameters: &config::DiffEqParameters) -> Res<()> {
+    // TODO add check for stability
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;

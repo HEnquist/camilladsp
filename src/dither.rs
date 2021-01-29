@@ -219,6 +219,33 @@ impl Filter for Dither {
     }
 }
 
+/// Validate a Dither config.
+pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
+    let bits = match conf {
+        config::DitherParameters::Simple { bits } => bits,
+        config::DitherParameters::Lipshitz441 { bits } => bits,
+        config::DitherParameters::Fweighted441 { bits } => bits,
+        config::DitherParameters::Shibata441 { bits } => bits,
+        config::DitherParameters::Shibata48 { bits } => bits,
+        config::DitherParameters::ShibataLow441 { bits } => bits,
+        config::DitherParameters::ShibataLow48 { bits } => bits,
+        config::DitherParameters::Uniform { bits, .. } => bits,
+        config::DitherParameters::None { bits } => bits,
+    };
+    if *bits <= 1 {
+        return Err(config::ConfigError::new("Dither bit depth must be at least 2").into());
+    }
+    if let config::DitherParameters::Uniform { amplitude, .. } = conf {
+        if *amplitude < 0.0 {
+            return Err(config::ConfigError::new("Dither amplitude cannot be negative").into());
+        }
+        if *amplitude > 100.0 {
+            return Err(config::ConfigError::new("Dither amplitude must be less than 100").into());
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;

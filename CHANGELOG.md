@@ -16,6 +16,7 @@ New features:
 - Add mute options in mixer and Gain filters.
 - Add mute function to Volume and Loundness filters, with websocket commands.
 - Add `debug` feature for extra logging.
+- Improve validation of filters.
 
 Bugfixes:
 - Don't block playback for CoreAudio/Wasapi if there is no data in time.
