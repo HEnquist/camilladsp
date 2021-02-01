@@ -21,6 +21,7 @@ New features:
 Bugfixes:
 - Don't block playback for CoreAudio/Wasapi if there is no data in time.
 - Validate `silence_threshold` and `silence_timeout` fields.
+- Fix panic when reloading config if a new filter was defined but not added to the pipeline.
 
 
 ## 0.4.0
