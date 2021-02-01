@@ -401,7 +401,7 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use biquad::{Biquad, BiquadCoefficients};
+    use biquad::{validate_config, Biquad, BiquadCoefficients};
     use config::BiquadParameters;
     use filters::Filter;
     use num_complex::Complex;
@@ -678,5 +678,57 @@ mod tests {
         assert!(is_close(gain_87, 0.0, 0.1));
         assert!(is_close(gain_123, -2.4, 0.1));
         assert!(is_close(gain_hf, 0.0, 0.1));
+    }
+
+    #[test]
+    fn check_freq_q() {
+        let fs = 48000;
+        let okconf1 = BiquadParameters::Peaking {
+            freq: 1000.0,
+            q: 2.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &okconf1).is_ok());
+        let badconf1 = BiquadParameters::Peaking {
+            freq: 1000.0,
+            q: 0.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &badconf1).is_err());
+        let badconf2 = BiquadParameters::Peaking {
+            freq: 25000.0,
+            q: 1.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &badconf2).is_err());
+        let badconf3 = BiquadParameters::Peaking {
+            freq: 0.0,
+            q: 1.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &badconf3).is_err());
+    }
+
+    #[test]
+    fn check_slope() {
+        let fs = 48000;
+        let okconf1 = BiquadParameters::Highshelf {
+            freq: 1000.0,
+            slope: 5.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &okconf1).is_ok());
+        let badconf1 = BiquadParameters::Highshelf {
+            freq: 1000.0,
+            slope: 0.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &badconf1).is_err());
+        let badconf2 = BiquadParameters::Highshelf {
+            freq: 1000.0,
+            slope: 15.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &badconf2).is_err());
     }
 }
