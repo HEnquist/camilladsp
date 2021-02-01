@@ -149,13 +149,16 @@ impl Filter for BiquadCombo {
     }
 }
 
-/// Validate a FFT convolution config.
-pub fn validate_config(conf: &config::BiquadComboParameters) -> Res<()> {
+/// Validate a BiquadCombo convolution config.
+pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) -> Res<()> {
+    let maxfreq = samplerate as PrcFmt / 2.0;
     match conf {
         config::BiquadComboParameters::LinkwitzRileyHighpass { freq, order }
         | config::BiquadComboParameters::LinkwitzRileyLowpass { freq, order } => {
             if *freq <= 0.0 {
                 return Err(config::ConfigError::new("Frequency must be > 0").into());
+            } else if *freq >= maxfreq {
+                return Err(config::ConfigError::new("Frequency must be < samplerate/2").into());
             }
             if (*order % 2 > 0) || (*order == 0) {
                 return Err(
@@ -168,6 +171,8 @@ pub fn validate_config(conf: &config::BiquadComboParameters) -> Res<()> {
         | config::BiquadComboParameters::ButterworthLowpass { freq, order } => {
             if *freq <= 0.0 {
                 return Err(config::ConfigError::new("Frequency must be > 0").into());
+            } else if *freq >= maxfreq {
+                return Err(config::ConfigError::new("Frequency must be < samplerate/2").into());
             }
             if *order == 0 {
                 return Err(

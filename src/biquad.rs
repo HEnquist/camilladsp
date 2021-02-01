@@ -324,6 +324,73 @@ impl Filter for Biquad {
 }
 
 pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters) -> Res<()> {
+    let maxfreq = samplerate as PrcFmt / 2.0;
+    // Check frequency
+    match parameters {
+        config::BiquadParameters::Highpass { freq, .. }
+        | config::BiquadParameters::Lowpass { freq, .. }
+        | config::BiquadParameters::HighpassFO { freq, .. }
+        | config::BiquadParameters::LowpassFO { freq, .. }
+        | config::BiquadParameters::Peaking { freq, .. }
+        | config::BiquadParameters::Highshelf { freq, .. }
+        | config::BiquadParameters::Lowshelf { freq, .. }
+        | config::BiquadParameters::HighshelfFO { freq, .. }
+        | config::BiquadParameters::LowshelfFO { freq, .. }
+        | config::BiquadParameters::Notch { freq, .. }
+        | config::BiquadParameters::Bandpass { freq, .. }
+        | config::BiquadParameters::Allpass { freq, .. }
+        | config::BiquadParameters::AllpassFO { freq, .. } => {
+            if *freq <= 0.0 {
+                return Err(config::ConfigError::new("Frequency must be > 0").into());
+            } else if *freq >= maxfreq {
+                return Err(config::ConfigError::new("Frequency must be < samplerate/2").into());
+            }
+        }
+        _ => {}
+    }
+    // Check Q
+    match parameters {
+        config::BiquadParameters::Highpass { q, .. }
+        | config::BiquadParameters::Lowpass { q, .. }
+        | config::BiquadParameters::Peaking { q, .. }
+        | config::BiquadParameters::Notch { q, .. }
+        | config::BiquadParameters::Bandpass { q, .. }
+        | config::BiquadParameters::Allpass { q, .. } => {
+            if *q <= 0.0 {
+                return Err(config::ConfigError::new("Q must be > 0").into());
+            }
+        }
+        _ => {}
+    }
+    // Check slope
+    match parameters {
+        config::BiquadParameters::Highshelf { slope, .. }
+        | config::BiquadParameters::Lowshelf { slope, .. } => {
+            if *slope <= 0.0 {
+                return Err(config::ConfigError::new("Slope must be > 0").into());
+            } else if *slope > 12.0 {
+                return Err(config::ConfigError::new("Slope must be <= 12.0").into());
+            }
+        }
+        _ => {}
+    }
+    // Check LT
+    if let config::BiquadParameters::LinkwitzTransform {
+        freq_act,
+        q_act,
+        freq_target,
+        q_target,
+    } = parameters
+    {
+        if *freq_act <= 0.0 || *freq_target <= 0.0 {
+            return Err(config::ConfigError::new("Frequency must be > 0").into());
+        } else if *freq_act >= maxfreq || *freq_target >= maxfreq {
+            return Err(config::ConfigError::new("Frequency must be < samplerate/2").into());
+        }
+        if *q_act <= 0.0 || *q_target <= 0.0 {
+            return Err(config::ConfigError::new("Q must be > 0").into());
+        }
+    }
     let coeffs = BiquadCoefficients::from_config(samplerate, parameters.clone());
     if !coeffs.is_stable() {
         return Err(config::ConfigError::new("Unstable filter specified").into());
