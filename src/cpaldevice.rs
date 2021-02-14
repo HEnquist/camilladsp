@@ -218,6 +218,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             SampleFormat::S16LE => {
                                 trace!("Build i16 output stream");
                                 let mut clipped = 0;
+                                let mut running = true;
                                 let mut sample_queue: VecDeque<i16> =
                                     VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
                                 let stream = device.build_output_stream(
@@ -233,6 +234,10 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                     as u64,
                                             )) {
                                                 Ok(chunk) => {
+                                                    if !running {
+                                                        running = true;
+                                                        info!("Restarting playback after buffer underrun");
+                                                    }
                                                     clipped = chunk_to_queue_int(
                                                         &chunk,
                                                         &mut sample_queue,
@@ -240,7 +245,10 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                     )
                                                 }
                                                 Err(_) => {
-                                                    warn!("No data to play, dropping a callback");
+                                                    if running {
+                                                        running = false;
+                                                        warn!("Playback interrupted, no data available");
+                                                    }
                                                     for sample in buffer.iter_mut() {
                                                         *sample = 0;
                                                     }
