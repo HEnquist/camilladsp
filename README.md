@@ -843,7 +843,7 @@ The other possible formats are raw data:
 - S16LE: signed 16-bit little-endian integers
 - S24LE: signed 24-bit little-endian integers stored as 32 bits (with the data in the low 24)
 - S24LE3: signed 24-bit little-endian integers stored as 24 bits
-- S32LE: signed 32 bit little-endian integers
+- S32LE: signed 32-bit little-endian integers
 - FLOAT32LE: 32-bit little endian float
 - FLOAT64LE: 64-bit little endian float
 
