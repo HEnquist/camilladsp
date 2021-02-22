@@ -936,7 +936,6 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
 pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<()> {
-
     // pre-process by applying overrides and replacing tokens
     apply_overrides(conf);
     replace_tokens_in_config(conf);
