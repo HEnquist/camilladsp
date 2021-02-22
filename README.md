@@ -550,12 +550,12 @@ devices:
   * `format`: sample format.
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
-    * S16LE - Signed 16 bit int, stored as two bytes
-    * S24LE - Signed 24 bit int, stored as four bytes 
-    * S24LE3 - Signed 24 bit int, stored as three bytes 
-    * S32LE - Signed 32 bit int, stored as four bytes 
-    * FLOAT32LE - 32 bit float, stored as four bytes
-    * FLOAT64LE - 64 bit float, stored as eight bytes
+    * S16LE - Signed 16-bit int, stored as two bytes
+    * S24LE - Signed 24-bit int, stored as four bytes 
+    * S24LE3 - Signed 24-bit int, stored as three bytes 
+    * S32LE - Signed 32-bit int, stored as four bytes 
+    * FLOAT32LE - 32-bit float, stored as four bytes
+    * FLOAT64LE - 64-bit float, stored as eight bytes
 
     Supported formats:
     |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | File/Stdin/Stdout  |
@@ -803,7 +803,7 @@ filters:
       skip_bytes_lines: 0 (*)
       read_bytes_lines: 0 (*)
 ```
-The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. 
+The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. Please note that wav-files are not supported! See below for a list of allowed formats.
 
 If a relative path is given it will first try to find the file relative to the config file path. If it's not found there, the path is assumed to be relative to the current working directory. Note that this only applies when the config is loaded from a file. When a config is supplied via the websocket server only the current working dir of the CamillaDSP process will be searched.
 
@@ -827,6 +827,10 @@ The File type supports two additional optional parameters, for advanced handling
 * `read_bytes_lines`: Read only up until the specified number of bytes (for raw files) or lines (for text). Leave it out to read until the end of the file.
 
 For testing purposes the entire "parameters" block can be left out (or commented out with a # at the start of each line). This then becomes a dummy filter that does not affect the signal.
+
+#### Coefficient data formats
+
+The filter coefficients must be provided either as text, or as raw samples. Wav-files are not supported, and each file can only hold one channel.
 The "format" parameter can be omitted, in which case it's assumed that the format is TEXT. This format is a simple text file with one value per row:
 ```
 -0.000021
@@ -836,12 +840,14 @@ The "format" parameter can be omitted, in which case it's assumed that the forma
 -0.000012
 ```
 The other possible formats are raw data:
-- S16LE: signed 16 bit little-endian integers
-- S24LE: signed 24 bit little-endian integers stored as 32 bits (with the data in the low 24)
-- S24LE3: signed 24 bit little-endian integers stored as 24 bits
+- S16LE: signed 16-bit little-endian integers
+- S24LE: signed 24-bit little-endian integers stored as 32 bits (with the data in the low 24)
+- S24LE3: signed 24-bit little-endian integers stored as 24 bits
 - S32LE: signed 32 bit little-endian integers
-- FLOAT32LE: 32 bit little endian float
-- FLOAT64LE: 64 bit little endian float
+- FLOAT32LE: 32-bit little endian float
+- FLOAT64LE: 64-bit little endian float
+
+If you have a stereo wav-file, this should be converted to two separate raw files. To convert a stereo wav to signed 32-bit integers using Audacity, start by splitting the stereo track to two mono tracks. Then save each one using File / Export / Export Audio. In the lower part of the dialog, select Header: RAW (header-less), Encoding: Signed 32-bit PCM. 
 
 
 ### IIR
