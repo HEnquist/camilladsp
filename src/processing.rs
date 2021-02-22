@@ -44,7 +44,7 @@ pub fn run_processing(
             if let Ok((diff, new_config)) = rx_pipeconf.try_recv() {
                 trace!("Message received on config channel");
                 match diff {
-                    config::ConfigChange::Pipeline => {
+                    config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
                         debug!("Rebuilding pipeline.");
                         let new_pipeline =
                             filters::Pipeline::from_config(new_config, processing_status.clone());

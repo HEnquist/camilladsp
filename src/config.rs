@@ -871,6 +871,7 @@ pub enum ConfigChange {
         filters: Vec<String>,
         mixers: Vec<String>,
     },
+    MixerParameters,
     Pipeline,
     Devices,
     None,
@@ -891,6 +892,9 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     }
     if currentconf.pipeline != newconf.pipeline {
         return ConfigChange::Pipeline;
+    }
+    if currentconf.mixers != newconf.mixers {
+        return ConfigChange::MixerParameters;
     }
     let mut filters = Vec::<String>::new();
     let mut mixers = Vec::<String>::new();

@@ -197,6 +197,7 @@ fn run(
                     let comp = config::config_diff(&active_config, &conf);
                     match comp {
                         config::ConfigChange::Pipeline
+                        | config::ConfigChange::MixerParameters
                         | config::ConfigChange::FilterParameters { .. } => {
                             tx_pipeconf.send((comp, conf.clone())).unwrap();
                             active_config = conf;
