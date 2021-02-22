@@ -23,7 +23,8 @@ Bugfixes:
 - Validate `silence_threshold` and `silence_timeout` fields.
 - Fix panic when reloading config if a new filter was defined but not added to the pipeline.
 - Check for mixer parameter changes when reloading config.
- 
+- Token substutution and overrides also work via websocket.
+
 
 
 ## 0.4.0

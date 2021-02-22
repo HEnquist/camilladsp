@@ -669,7 +669,7 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
             return Err(ConfigError::new(&msg).into());
         }
     };
-    let mut configuration: Configuration = match serde_yaml::from_str(&contents) {
+    let configuration: Configuration = match serde_yaml::from_str(&contents) {
         Ok(config) => config,
         Err(err) => {
             let msg = format!("Invalid config file!\n{}", err);
@@ -677,9 +677,9 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
         }
     };
     //Ok(configuration)
-    apply_overrides(&mut configuration);
-    replace_tokens_in_config(&mut configuration);
-    replace_relative_paths_in_config(&mut configuration, filename);
+    //apply_overrides(&mut configuration);
+    //replace_tokens_in_config(&mut configuration);
+    //replace_relative_paths_in_config(&mut configuration, filename);
     Ok(configuration)
 }
 
@@ -878,8 +878,8 @@ pub enum ConfigChange {
 }
 
 pub fn load_validate_config(configname: &str) -> Res<Configuration> {
-    let configuration = load_config(configname)?;
-    validate_config(configuration.clone())?;
+    let mut configuration = load_config(configname)?;
+    validate_config(&mut configuration, Some(configname))?;
     Ok(configuration)
 }
 
@@ -935,7 +935,15 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 }
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
-pub fn validate_config(conf: Configuration) -> Res<()> {
+pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<()> {
+
+    // pre-process by applying overrides and replacing tokens
+    apply_overrides(conf);
+    replace_tokens_in_config(conf);
+    if let Some(fname) = filename {
+        replace_relative_paths_in_config(conf, fname);
+    }
+
     if conf.devices.target_level >= 2 * conf.devices.chunksize {
         let msg = format!(
             "target_level can't be larger than {}",
@@ -954,14 +962,14 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
     }
     let mut num_channels = conf.devices.capture.channels();
     let fs = conf.devices.samplerate;
-    for step in conf.pipeline {
+    for step in &conf.pipeline {
         match step {
             PipelineStep::Mixer { name } => {
-                if !conf.mixers.contains_key(&name) {
+                if !conf.mixers.contains_key(name) {
                     let msg = format!("Use of missing mixer '{}'", name);
                     return Err(ConfigError::new(&msg).into());
                 } else {
-                    let chan_in = conf.mixers.get(&name).unwrap().channels.r#in;
+                    let chan_in = conf.mixers.get(name).unwrap().channels.r#in;
                     if chan_in != num_channels {
                         let msg = format!(
                             "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
@@ -969,8 +977,8 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
                         );
                         return Err(ConfigError::new(&msg).into());
                     }
-                    num_channels = conf.mixers.get(&name).unwrap().channels.out;
-                    match mixer::validate_mixer(&conf.mixers.get(&name).unwrap()) {
+                    num_channels = conf.mixers.get(name).unwrap().channels.out;
+                    match mixer::validate_mixer(&conf.mixers.get(name).unwrap()) {
                         Ok(_) => {}
                         Err(err) => {
                             let msg = format!("Invalid mixer '{}'. Reason: {}", name, err);
@@ -980,16 +988,16 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
                 }
             }
             PipelineStep::Filter { channel, names } => {
-                if channel >= num_channels {
+                if *channel >= num_channels {
                     let msg = format!("Use of non existing channel {}", channel);
                     return Err(ConfigError::new(&msg).into());
                 }
                 for name in names {
-                    if !conf.filters.contains_key(&name) {
+                    if !conf.filters.contains_key(name) {
                         let msg = format!("Use of missing filter '{}'", name);
                         return Err(ConfigError::new(&msg).into());
                     }
-                    match filters::validate_filter(fs, &conf.filters.get(&name).unwrap()) {
+                    match filters::validate_filter(fs, &conf.filters.get(name).unwrap()) {
                         Ok(_) => {}
                         Err(err) => {
                             let msg = format!("Invalid filter '{}'. Reason: {}", name, err);

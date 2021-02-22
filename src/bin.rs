@@ -66,9 +66,9 @@ fn get_new_config(
     let path = config_path.lock().unwrap().clone();
 
     //new_config is not None, this is the one to use
-    if let Some(conf) = new_conf {
+    if let Some(mut conf) = new_conf {
         debug!("Reload using config from websocket");
-        match config::validate_config(conf.clone()) {
+        match config::validate_config(&mut conf, None) {
             Ok(()) => {
                 debug!("Config valid");
                 Ok(conf)
@@ -81,7 +81,7 @@ fn get_new_config(
         }
     } else if let Some(file) = path {
         match config::load_config(&file) {
-            Ok(conf) => match config::validate_config(conf.clone()) {
+            Ok(mut conf) => match config::validate_config(&mut conf, Some(&file)) {
                 Ok(()) => {
                     debug!("Reload using config file");
                     Ok(conf)

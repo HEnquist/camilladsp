@@ -505,7 +505,7 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
         },
         WSCommand::SetConfig(config_yml) => {
             match serde_yaml::from_str::<config::Configuration>(&config_yml) {
-                Ok(conf) => match config::validate_config(conf.clone()) {
+                Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => {
                         *shared_data_inst.new_config.lock().unwrap() = Some(conf);
                         shared_data_inst
@@ -532,7 +532,7 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
         }
         WSCommand::SetConfigJson(config_json) => {
             match serde_json::from_str::<config::Configuration>(&config_json) {
-                Ok(conf) => match config::validate_config(conf.clone()) {
+                Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => {
                         *shared_data_inst.new_config.lock().unwrap() = Some(conf);
                         shared_data_inst
@@ -587,7 +587,7 @@ fn handle_command(command: WSCommand, shared_data_inst: &SharedData) -> Option<W
         },
         WSCommand::ValidateConfig(config_yml) => {
             match serde_yaml::from_str::<config::Configuration>(&config_yml) {
-                Ok(conf) => match config::validate_config(conf.clone()) {
+                Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => Some(WSReply::ValidateConfig {
                         result: WSResult::Ok,
                         value: serde_yaml::to_string(&conf).unwrap(),
