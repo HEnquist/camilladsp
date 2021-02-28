@@ -142,17 +142,20 @@ impl fmt::Display for SampleFormat {
 #[serde(tag = "type")]
 pub enum CaptureDevice {
     #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+    #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
     #[cfg(feature = "pulse-backend")]
+    #[serde(alias = "PULSE", alias = "pulse")]
     Pulse {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
+    #[serde(alias = "FILE", alias = "file")]
     File {
         channels: usize,
         filename: String,
@@ -164,6 +167,7 @@ pub enum CaptureDevice {
         #[serde(default)]
         read_bytes: usize,
     },
+    #[serde(alias = "STDIN", alias = "stdin")]
     Stdin {
         channels: usize,
         format: SampleFormat,
@@ -175,12 +179,14 @@ pub enum CaptureDevice {
         read_bytes: usize,
     },
     #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
     #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    #[serde(alias="WASAPI", alias"wasapi")]
     Wasapi {
         channels: usize,
         device: String,
@@ -225,33 +231,39 @@ impl CaptureDevice {
 #[serde(tag = "type")]
 pub enum PlaybackDevice {
     #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+    #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
     #[cfg(feature = "pulse-backend")]
+    #[serde(alias = "PULSE", alias = "pulse")]
     Pulse {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
+    #[serde(alias = "FILE", alias = "file")]
     File {
         channels: usize,
         filename: String,
         format: SampleFormat,
     },
+    #[serde(alias = "STDOUT", alias = "stdout")]
     Stdout {
         channels: usize,
         format: SampleFormat,
     },
     #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
     #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi {
         channels: usize,
         device: String,

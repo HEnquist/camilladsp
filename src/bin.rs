@@ -184,7 +184,7 @@ fn run(
     let mut pb_ready = false;
     let mut cap_ready = false;
     #[cfg(target_os = "linux")]
-    signal_hook::flag::register(signal_hook::SIGHUP, Arc::clone(&signal_reload))?;
+    signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&signal_reload))?;
 
     loop {
         if signal_reload.load(Ordering::Relaxed) {
@@ -601,6 +601,11 @@ fn main_process() -> i32 {
     //info!("info message");
     //warn!("warn message");
     //error!("error message");
+
+    #[cfg(target_os = "linux")]
+    let _signal = unsafe {
+        signal_hook::low_level::register(signal_hook::consts::SIGHUP, || debug!("Received SIGHUP"))
+    };
 
     let configname = match matches.value_of("configfile") {
         Some(path) => Some(path.to_string()),

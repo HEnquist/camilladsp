@@ -39,7 +39,7 @@ fftw = { version = "0.6.2", optional = true }
 num-complex = "0.3"
 num-integer = "0.1.43"
 num-traits = "0.2"
-signal-hook = "0.1.16"
+signal-hook = "0.3.6"
 rand = "0.7.3"
 rand_distr = "0.3.0"
 clap = "2.33.0"
