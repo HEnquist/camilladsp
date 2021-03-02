@@ -186,7 +186,7 @@ pub enum CaptureDevice {
         format: SampleFormat,
     },
     #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
-    #[serde(alias="WASAPI", alias"wasapi")]
+    #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi {
         channels: usize,
         device: String,
