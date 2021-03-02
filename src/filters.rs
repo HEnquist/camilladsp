@@ -155,8 +155,8 @@ pub fn read_coeff_file(
             let mut buffer = [0; 4];
             file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
             let nbr_coeffs = read_bytes_lines / 3;
-            let scalefactor = PrcFmt::new(2.0).powi(23);
-            while let Ok(3) = file.read(&mut buffer[0..3]) {
+            let scalefactor = PrcFmt::new(2.0).powi(31);
+            while let Ok(3) = file.read(&mut buffer[1..4]) {
                 let mut value = i32::from_le_bytes(buffer) as PrcFmt;
                 value /= scalefactor;
                 coefficients.push(value);
@@ -382,12 +382,15 @@ mod tests {
     use filters::{pad_vector, read_coeff_file};
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
-        println!("{} - {}", left, right);
-        (left - right).abs() < maxdiff
+        println!("{} - {} = {}", left, right, left - right);
+        let res = (left - right).abs() < maxdiff;
+        println!("Ok: {}", res);
+        res
     }
 
     fn compare_waveforms(left: &[PrcFmt], right: &[PrcFmt], maxdiff: PrcFmt) -> bool {
         if left.len() != right.len() {
+            println!("wrong length");
             return false;
         }
         for (val_l, val_r) in left.iter().zip(right.iter()) {
@@ -436,6 +439,15 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(compare_waveforms(&loaded, &expected, 1e-6));
         let loaded = read_coeff_file("testdata/int24.raw", &FileFormat::S24LE, 12, 4).unwrap();
+        let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
+        assert!(compare_waveforms(&loaded, &expected, 1e-6));
+    }
+    #[test]
+    fn read_int24_3() {
+        let loaded = read_coeff_file("testdata/int243.raw", &FileFormat::S24LE3, 0, 0).unwrap();
+        let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
+        assert!(compare_waveforms(&loaded, &expected, 1e-6));
+        let loaded = read_coeff_file("testdata/int243.raw", &FileFormat::S24LE3, 9, 3).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(compare_waveforms(&loaded, &expected, 1e-6));
     }

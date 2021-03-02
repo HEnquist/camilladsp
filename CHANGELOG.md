@@ -24,7 +24,8 @@ Bugfixes:
 - Fix panic when reloading config if a new filter was defined but not added to the pipeline.
 - Check for mixer parameter changes when reloading config.
 - Token substutution and overrides also work via websocket.
-- Don't exit on SIGHUP when waiting for a config. 
+- Don't exit on SIGHUP when waiting for a config.
+- Fix handling of negative values when reading filter coeffs in S24LE3 format.
 
 
 
