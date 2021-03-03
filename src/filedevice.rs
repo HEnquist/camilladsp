@@ -419,7 +419,11 @@ fn capture_loop(
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
                 let new_waves = resampl.process(&chunk.waveforms).unwrap();
-                chunk.frames = new_waves.iter().map(|w| w.len()).max().unwrap();
+                let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
+                if chunk_frames == 0 {
+                    chunk_frames = params.chunksize;
+                }
+                chunk.frames = chunk_frames;
                 chunk.valid_frames =
                     (chunk.frames as f32 * (bytes_read as f32 / capture_bytes as f32)) as usize;
                 chunk.waveforms = new_waves;

@@ -654,7 +654,11 @@ impl CaptureDevice for CpalCaptureDevice {
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
                                     let new_waves = resampl.process(&chunk.waveforms).unwrap();
-                                    chunk.frames = new_waves.iter().map(|w| w.len()).max().unwrap();
+                                    let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
+                                    if chunk_frames == 0 {
+                                        chunk_frames = chunksize;
+                                    }
+                                    chunk.frames = chunk_frames;
                                     chunk.valid_frames = chunk.frames;
                                     chunk.waveforms = new_waves;
                                 }

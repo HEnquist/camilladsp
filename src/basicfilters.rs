@@ -229,6 +229,9 @@ impl Filter for Gain {
             if inverted {
                 gain = -gain;
             }
+            if conf.mute {
+                gain = 0.0;
+            }
             self.gain = gain;
         } else {
             // This should never happen unless there is a bug somewhere else
