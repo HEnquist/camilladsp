@@ -26,6 +26,8 @@ Bugfixes:
 - Token substutution and overrides also work via websocket.
 - Don't exit on SIGHUP when waiting for a config.
 - Fix handling of negative values when reading filter coeffs in S24LE3 format.
+- Gain filters react to mute setting on reload.
+- Fix noise in output when resampling and muting all channels in mixer.
 
 
 
