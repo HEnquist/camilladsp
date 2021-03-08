@@ -805,7 +805,7 @@ filters:
       skip_bytes_lines: 0 (*)
       read_bytes_lines: 0 (*)
 ```
-The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. Please note that wav-files are not supported! See below for a list of allowed formats.
+The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. Please note that wav-files are not supported! Please see the [separate guide for converting wav to raw files](coefficients_from_wav.md). See below for a list of allowed raw formats.
 
 If a relative path is given it will first try to find the file relative to the config file path. If it's not found there, the path is assumed to be relative to the current working directory. Note that this only applies when the config is loaded from a file. When a config is supplied via the websocket server only the current working dir of the CamillaDSP process will be searched.
 
