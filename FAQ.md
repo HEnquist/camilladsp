@@ -21,3 +21,7 @@
   Note that resampling between the fixed rates 44.1 kHz -> 48 kHz corresponds to a ratio of 160/147, and can be handled by the synchronous resampler.
   This works for any fixed resampling between the standard rates, 44.1 <-> 96 kHz, 88.2 <-> 192 kHz, 88.1 <-> 48 kHz etc.
 
+- My impulse response is a wav-file. How to I use it in CamillaDSP?
+
+  The wav-file must be converted to raw format, with one file per channel. Please see the [guide for converting](coefficients_from_wav.md).
+

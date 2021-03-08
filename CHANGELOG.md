@@ -17,6 +17,7 @@ New features:
 - Add mute function to Volume and Loundness filters, with websocket commands.
 - Add `debug` feature for extra logging.
 - Improve validation of filters.
+- Setting to enable retry on reads from Alsa capture devices.
 
 Bugfixes:
 - Don't block playback for CoreAudio/Wasapi if there is no data in time.

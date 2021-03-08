@@ -56,6 +56,7 @@ pub struct AlsaCaptureDevice {
     pub sample_format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
+    pub retry_on_error: bool,
 }
 
 struct CaptureChannels {
@@ -82,6 +83,7 @@ struct CaptureParams {
     capture_samplerate: usize,
     async_src: bool,
     capture_status: Arc<RwLock<CaptureStatus>>,
+    retry_on_error: bool,
 }
 
 struct PlaybackParams {
@@ -134,6 +136,7 @@ fn capture_buffer(
     buffer: &mut [u8],
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
+    retry: bool,
 ) -> Res<CaptureResult> {
     let capture_state = pcmdevice.state();
     if capture_state == State::XRun {
@@ -148,9 +151,14 @@ fn capture_buffer(
                 return Ok(CaptureResult::Timeout);
             }
             nix::Error::Sys(Errno::EPIPE) => {
-                warn!("Retrying capture, error: {}", err);
-                pcmdevice.prepare()?;
-                io.readi(buffer)?
+                if retry {
+                    warn!("Retrying capture, error: {}", err);
+                    pcmdevice.prepare()?;
+                    io.readi(buffer)?
+                } else {
+                    warn!("Capture failed, error: {}", err);
+                    return Err(Box::new(err));
+                }
             }
             _ => {
                 warn!("Capture failed, error: {}", err);
@@ -377,7 +385,12 @@ fn capture_loop_bytes(
             Err(_) => {}
         };
         capture_bytes = get_nbr_capture_bytes(capture_bytes, &resampler, &params, &mut buffer);
-        let capture_res = capture_buffer(&mut buffer[0..capture_bytes], pcmdevice, &io);
+        let capture_res = capture_buffer(
+            &mut buffer[0..capture_bytes],
+            pcmdevice,
+            &io,
+            params.retry_on_error,
+        );
         match capture_res {
             Ok(CaptureResult::Normal) => {
                 //trace!("Captured {} bytes", capture_bytes);
@@ -585,6 +598,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let async_src = resampler_is_async(&resampler_conf);
+        let retry_on_error = self.retry_on_error;
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
             .spawn(move || {
@@ -629,6 +643,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             capture_samplerate,
                             async_src,
                             capture_status,
+                            retry_on_error,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,

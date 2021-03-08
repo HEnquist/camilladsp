@@ -410,6 +410,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels,
             device,
             format,
+            retry_on_error,
         } => Box::new(alsadevice::AlsaCaptureDevice {
             devname: device,
             samplerate: conf.samplerate,
@@ -421,6 +422,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
+            retry_on_error,
         }),
         #[cfg(feature = "pulse-backend")]
         config::CaptureDevice::Pulse {

@@ -147,6 +147,8 @@ pub enum CaptureDevice {
         channels: usize,
         device: String,
         format: SampleFormat,
+        #[serde(default)]
+        retry_on_error: bool,
     },
     #[cfg(feature = "pulse-backend")]
     #[serde(alias = "PULSE", alias = "pulse")]
