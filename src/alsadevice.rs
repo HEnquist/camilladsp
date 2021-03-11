@@ -99,7 +99,7 @@ struct PlaybackParams {
 
 enum CaptureResult {
     Normal,
-    Timeout,
+    RecoverableError,
 }
 
 /// Play a buffer.
@@ -147,9 +147,16 @@ fn capture_buffer(
         Ok(frames) => frames,
         Err(err) => match err.nix_error() {
             nix::Error::Sys(Errno::EIO) => {
-                warn!("Capture timed out, error: {}", err);
-                return Ok(CaptureResult::Timeout);
+                if retry {
+                    warn!("Capture failed with error: {}, will try again.", err);
+                    return Ok(CaptureResult::RecoverableError);
+                } else {
+                    warn!("Capture failed, error: {}", err);
+                    return Err(Box::new(err));
+                }
             }
+            // TODO: do we need separate handling of xruns that happen in the tiny
+            // window between state() and readi()?
             nix::Error::Sys(Errno::EPIPE) => {
                 if retry {
                     warn!("Retrying capture, error: {}", err);
@@ -411,7 +418,7 @@ fn capture_loop_bytes(
                     card_inactive = false;
                 }
             }
-            Ok(CaptureResult::Timeout) => {
+            Ok(CaptureResult::RecoverableError) => {
                 card_inactive = true;
                 params.capture_status.write().unwrap().state = ProcessingState::Paused;
                 debug!("Card inactive, pausing");
