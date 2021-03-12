@@ -430,6 +430,9 @@ fn capture_loop_bytes(
                         message: format!("{}", msg),
                     })
                     .unwrap();
+                let msg = AudioMessage::EndOfStream;
+                channels.audio.send(msg).unwrap();
+                return;
             }
         };
         let mut chunk = if params.floats {
