@@ -144,21 +144,25 @@ fn capture_buffer(
     if capture_state == State::XRun {
         warn!("Prepare capture device");
         pcmdevice.prepare()?;
-        //pcmdevice.start()?;
-    }
-    else if capture_state != State::Running {
-        debug!("Starting  capture");
+    } else if capture_state != State::Running {
+        debug!("Starting capture");
         pcmdevice.start()?;
     }
     let available = pcmdevice.avail();
     match available {
         Ok(frames) => {
             if (frames as usize) < frames_to_read {
-                trace!("Not enough frames available: {}, need: {}, waiting...", frames, frames_to_read);
+                trace!(
+                    "Not enough frames available: {}, need: {}, waiting...",
+                    frames,
+                    frames_to_read
+                );
                 // Let's wait for more frames, with 20% plus 1 ms of margin
-                thread::sleep(Duration::from_millis((1 + (1200*(frames_to_read - frames as usize))/samplerate) as u64));
+                thread::sleep(Duration::from_millis(
+                    (1 + (1200 * (frames_to_read - frames as usize)) / samplerate) as u64,
+                ));
                 if (pcmdevice.avail().unwrap_or(0) as usize) < frames_to_read {
-                    // Still not enough, 
+                    // Still not enough,
                     warn!("Capture timed out, will try again");
                     return Ok(CaptureResult::RecoverableError);
                 }
@@ -167,9 +171,15 @@ fn capture_buffer(
         Err(err) => {
             if retry {
                 warn!("Capture failed while querying for available frames, error: {}, will try again.", err);
+                thread::sleep(Duration::from_millis(
+                    (1000 * frames_to_read as u64) / samplerate as u64,
+                ));
                 return Ok(CaptureResult::RecoverableError);
             } else {
-                warn!("Capture failed while querying for available frames, error: {}", err);
+                warn!(
+                    "Capture failed while querying for available frames, error: {}",
+                    err
+                );
                 return Err(Box::new(err));
             }
         }
@@ -429,7 +439,7 @@ fn capture_loop_bytes(
             &io,
             params.retry_on_error,
             params.capture_samplerate,
-            capture_bytes / (params.channels * params.store_bytes_per_sample)
+            capture_bytes / (params.channels * params.store_bytes_per_sample),
         );
         match capture_res {
             Ok(CaptureResult::Normal) => {
