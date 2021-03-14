@@ -131,17 +131,42 @@ fn play_buffer(
     Ok(())
 }
 
-/// Play a buffer.
+/// Capture a buffer.
 fn capture_buffer(
     buffer: &mut [u8],
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
     retry: bool,
+    samplerate: usize,
+    frames_to_read: usize,
 ) -> Res<CaptureResult> {
     let capture_state = pcmdevice.state();
     if capture_state == State::XRun {
         warn!("prepare capture");
         pcmdevice.prepare()?;
+    }
+    let available = pcmdevice.avail();
+    match available {
+        Ok(frames) => {
+            if (frames as usize) < frames_to_read {
+                // Let's wait for more frames, with 20% plus 1 ms of margin
+                thread::sleep(Duration::from_millis((1 + (1200*(frames_to_read - frames as usize))/samplerate) as u64));
+                if (pcmdevice.avail().unwrap_or(0) as usize) < frames_to_read {
+                    // Still not enough, 
+                    warn!("Capture timed out");
+                    return Ok(CaptureResult::RecoverableError);
+                }
+            }
+        }
+        Err(err) => {
+            if retry {
+                warn!("Capture failed while reading available frames, error: {}, will try again.", err);
+                return Ok(CaptureResult::RecoverableError);
+            } else {
+                warn!("Capture failed while reading available frames, error: {}", err);
+                return Err(Box::new(err));
+            }
+        }
     }
     let _frames = match io.readi(buffer) {
         Ok(frames) => frames,
@@ -397,6 +422,8 @@ fn capture_loop_bytes(
             pcmdevice,
             &io,
             params.retry_on_error,
+            params.capture_samplerate,
+            capture_bytes / (params.channels * params.store_bytes_per_sample)
         );
         match capture_res {
             Ok(CaptureResult::Normal) => {
