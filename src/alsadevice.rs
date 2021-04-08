@@ -157,9 +157,9 @@ fn capture_buffer(
                     frames,
                     frames_to_read
                 );
-                // Let's wait for more frames, with 20% plus 1 ms of margin
+                // Let's wait for more frames, with 10% plus 1 ms of margin
                 thread::sleep(Duration::from_millis(
-                    (1 + (1200 * (frames_to_read - frames as usize)) / samplerate) as u64,
+                    (1 + (1100 * (frames_to_read - frames as usize)) / samplerate) as u64,
                 ));
                 if (pcmdevice.avail().unwrap_or(0) as usize) < frames_to_read {
                     // Still not enough,
