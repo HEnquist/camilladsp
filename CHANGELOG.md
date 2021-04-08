@@ -18,6 +18,7 @@ New features:
 - Add `debug` feature for extra logging.
 - Improve validation of filters.
 - Setting to enable retry on reads from Alsa capture devices.
+- Avoid blocking reads on Alsa capture devices (helps avoiding driver bugs for some devices).
 
 Bugfixes:
 - Don't block playback for CoreAudio/Wasapi if there is no data in time.
