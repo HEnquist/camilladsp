@@ -633,7 +633,7 @@ There is also a "FreeAsync" mode as well where all parameters can be set freely.
 ```
 ...
   resampler_type:
-    Free:
+    FreeAsync:
       f_cutoff: 0.9
       sinc_len: 128
       window: Hann2
