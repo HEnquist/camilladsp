@@ -596,6 +596,14 @@ devices:
   * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream. This can be used to skip over the header of some formats like .wav (which typically has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
   * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file or stream.
 
+  * Example, this will skip the first 50 bytes of the file (index 0-49) and then read the following 200 bytes (index 50-249).
+    ```
+    skip_bytes: 50
+    read_bytes: 200
+    ```
+    
+
+
 ## Resampling
 
 Resampling is provided by the [Rubato library.](https://github.com/HEnquist/rubato)
