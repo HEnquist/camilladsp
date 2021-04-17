@@ -19,7 +19,7 @@ use std::ffi::CString;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
@@ -162,9 +162,16 @@ fn capture_buffer(
                         frames_to_read
                     );
                     // Let's wait for more frames, with 10% plus 1 ms of margin
-                    thread::sleep(Duration::from_millis(
-                        (1 + (1100 * (frames_to_read - frames as usize)) / samplerate) as u64,
-                    ));
+                    let millis =
+                        (1 + (1100 * (frames_to_read - frames as usize)) / samplerate) as u64;
+                    let start = Instant::now();
+                    thread::sleep(Duration::from_millis(millis));
+                    let slept_millis = start.elapsed().as_millis();
+                    trace!(
+                        "Requested sleep for {} ms, result was {} ms",
+                        millis,
+                        slept_millis
+                    );
                     let frames_after_wait = pcmdevice.avail().unwrap_or(0) as usize;
                     if frames_after_wait < frames_to_read {
                         // Still not enough,
