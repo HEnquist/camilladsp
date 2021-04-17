@@ -57,6 +57,7 @@ pub struct AlsaCaptureDevice {
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub retry_on_error: bool,
+    pub avoid_blocking_read: bool,
 }
 
 struct CaptureChannels {
@@ -84,6 +85,7 @@ struct CaptureParams {
     async_src: bool,
     capture_status: Arc<RwLock<CaptureStatus>>,
     retry_on_error: bool,
+    avoid_blocking_read: bool,
 }
 
 struct PlaybackParams {
@@ -137,6 +139,7 @@ fn capture_buffer(
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
     retry: bool,
+    avoid_blocking: bool,
     samplerate: usize,
     frames_to_read: usize,
 ) -> Res<CaptureResult> {
@@ -148,39 +151,42 @@ fn capture_buffer(
         debug!("Starting capture");
         pcmdevice.start()?;
     }
-    let available = pcmdevice.avail();
-    match available {
-        Ok(frames) => {
-            if (frames as usize) < frames_to_read {
-                trace!(
-                    "Not enough frames available: {}, need: {}, waiting...",
-                    frames,
-                    frames_to_read
-                );
-                // Let's wait for more frames, with 10% plus 1 ms of margin
-                thread::sleep(Duration::from_millis(
-                    (1 + (1100 * (frames_to_read - frames as usize)) / samplerate) as u64,
-                ));
-                if (pcmdevice.avail().unwrap_or(0) as usize) < frames_to_read {
-                    // Still not enough,
-                    warn!("Capture timed out, will try again");
-                    return Ok(CaptureResult::RecoverableError);
+    if avoid_blocking {
+        let available = pcmdevice.avail();
+        match available {
+            Ok(frames) => {
+                if (frames as usize) < frames_to_read {
+                    trace!(
+                        "Not enough frames available: {}, need: {}, waiting...",
+                        frames,
+                        frames_to_read
+                    );
+                    // Let's wait for more frames, with 10% plus 1 ms of margin
+                    thread::sleep(Duration::from_millis(
+                        (1 + (1100 * (frames_to_read - frames as usize)) / samplerate) as u64,
+                    ));
+                    let frames_after_wait = pcmdevice.avail().unwrap_or(0) as usize;
+                    if frames_after_wait < frames_to_read {
+                        // Still not enough,
+                        warn!("Still not enough frames available: {}, need: {}. Capture timed out, will try again", frames_after_wait, frames_to_read);
+                        return Ok(CaptureResult::RecoverableError);
+                    }
                 }
             }
-        }
-        Err(err) => {
-            if retry {
-                warn!("Capture failed while querying for available frames, error: {}, will try again.", err);
-                thread::sleep(Duration::from_millis(
-                    (1000 * frames_to_read as u64) / samplerate as u64,
-                ));
-                return Ok(CaptureResult::RecoverableError);
-            } else {
-                warn!(
-                    "Capture failed while querying for available frames, error: {}",
-                    err
-                );
-                return Err(Box::new(err));
+            Err(err) => {
+                if retry {
+                    warn!("Capture failed while querying for available frames, error: {}, will try again.", err);
+                    thread::sleep(Duration::from_millis(
+                        (1000 * frames_to_read as u64) / samplerate as u64,
+                    ));
+                    return Ok(CaptureResult::RecoverableError);
+                } else {
+                    warn!(
+                        "Capture failed while querying for available frames, error: {}",
+                        err
+                    );
+                    return Err(Box::new(err));
+                }
             }
         }
     }
@@ -438,6 +444,7 @@ fn capture_loop_bytes(
             pcmdevice,
             &io,
             params.retry_on_error,
+            params.avoid_blocking_read,
             params.capture_samplerate,
             capture_bytes / (params.channels * params.store_bytes_per_sample),
         );
@@ -652,6 +659,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let resampler_conf = self.resampler_conf.clone();
         let async_src = resampler_is_async(&resampler_conf);
         let retry_on_error = self.retry_on_error;
+        let avoid_blocking_read = self.avoid_blocking_read;
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
             .spawn(move || {
@@ -697,6 +705,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             async_src,
                             capture_status,
                             retry_on_error,
+                            avoid_blocking_read,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,

@@ -590,7 +590,15 @@ devices:
     ```
     Note: On Unix-like systems it's also possible to use the File device and set the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback. 
 
-  The __Alsa__ capture device has an optional extra property `retry_on_error`. This is used to work around quirks of some devices. In most cases this should be left at the default values of `false`. Set this to `true` if capturing from the USB gadget driver on for example a Raspberry Pi. This device stops providing data if playback is stopped or paused, and retrying capture after an error allows capture to continue when more data becomes available.
+  The __Alsa__ capture device has two optional extra properties that are used to work around quirks of some devices. 
+  Both should normally be left out, or set to the default value of `false`.
+  - `retry_on_error`: Set this to `true` if capturing from the USB gadget driver on for example a Raspberry Pi. 
+    This device stops providing data if playback is stopped or paused, and retrying capture after an error 
+    allows capture to continue when more data becomes available.
+  - `avoid_blocking_read`: Some devices misbehave when using the blocking IO of Alsa, 
+    typically when there is no incoming data. Examples are spdif inputs when there is no signal present, 
+    or the USB gadget driver when the source isn't sending any data. 
+    Set this to `true` if you get capture errors when stopping the signal. This then allows processing to continue once the signal returns. 
 
   The __File__ and __Stdin__ capture devices support two additional optional parameters, for advanced handling of raw files and testing:
   * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream. This can be used to skip over the header of some formats like .wav (which typically has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
