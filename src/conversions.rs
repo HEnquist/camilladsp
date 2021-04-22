@@ -432,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn to_buffer_int24() {
+    fn to_buffer_int24_3() {
         let bits = 24;
         let bytes_per_sample = 3;
         let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
@@ -442,6 +442,38 @@ mod tests {
         chunk_to_buffer_bytes(&chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
         let expected = vec![0xCC, 0xCC, 0x0C];
         assert_eq!(buffer, expected);
+    }
+
+    #[test]
+    fn to_buffer_int24_4() {
+        let bits = 24;
+        let bytes_per_sample = 4;
+        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+        let waveforms = vec![vec![0.1]; 1];
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 1, 1);
+        let mut buffer = vec![0u8; 4];
+        chunk_to_buffer_bytes(&chunk, &mut buffer, scalefactor, bits, bytes_per_sample);
+        let expected = vec![0xCC, 0xCC, 0x0C, 0x00];
+        assert_eq!(buffer, expected);
+    }
+
+    #[test]
+    fn from_buffer_int24_4() {
+        let bits = 24;
+        let bytes_per_sample = 4;
+        let scalefactor = (2.0 as PrcFmt).powi(bits - 1);
+        let waveforms = vec![vec![0.1]; 1];
+        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 1, 1);
+        let buffer = vec![0xCC, 0xCC, 0x0C, 0x00];
+        let chunk2 = buffer_to_chunk_bytes(
+            &buffer,
+            1,
+            scalefactor,
+            bytes_per_sample,
+            buffer.len(),
+            &vec![true; 1],
+        );
+        assert!((chunk.waveforms[0][0] - chunk2.waveforms[0][0]).abs() < 1.0e-6);
     }
 
     #[test]
