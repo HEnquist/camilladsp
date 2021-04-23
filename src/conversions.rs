@@ -13,7 +13,7 @@ pub fn chunk_to_buffer_bytes(
     bytes_per_sample: usize,
 ) -> (usize, usize) {
     //let _num_samples = chunk.channels * chunk.frames;
-    let data_bytes_per_sample = bits as usize/8;
+    let data_bytes_per_sample = bits as usize / 8;
     let mut idx = 0;
     let mut clipped = 0;
     let mut peak = 0.0;
@@ -54,9 +54,13 @@ pub fn chunk_to_buffer_bytes(
                 }
             } else {
                 let mut value32 = (float_val * scalefactor) as i32;
-                value32 <<= 8*(bytes_per_sample-data_bytes_per_sample);
+                value32 <<= 8 * (bytes_per_sample - data_bytes_per_sample);
                 let bytes = value32.to_le_bytes();
-                for b in bytes.iter().skip(bytes_per_sample-data_bytes_per_sample).take(data_bytes_per_sample) {
+                for b in bytes
+                    .iter()
+                    .skip(bytes_per_sample - data_bytes_per_sample)
+                    .take(data_bytes_per_sample)
+                {
                     buf[idx] = *b;
                     idx += 1;
                 }
@@ -64,7 +68,6 @@ pub fn chunk_to_buffer_bytes(
                     buf[idx] = 0;
                     idx += 1;
                 }
-
             }
         }
     }
@@ -88,7 +91,7 @@ pub fn buffer_to_chunk_bytes(
     valid_bytes: usize,
     used_channels: &[bool],
 ) -> AudioChunk {
-    let data_bytes_per_sample = bits as usize/8;
+    let data_bytes_per_sample = bits as usize / 8;
     let num_frames = buffer.len() / bytes_per_sample / channels;
     let num_valid_frames = valid_bytes / bytes_per_sample / channels;
     let mut value: PrcFmt;
@@ -481,8 +484,18 @@ mod tests {
             buffer.len(),
             &vec![true; 1],
         );
-        assert!((chunk.waveforms[0][0] - chunk2.waveforms[0][0]).abs() < 1.0e-6, "{} != {}", chunk.waveforms[0][0], chunk2.waveforms[0][0]);
-        assert!((chunk.waveforms[0][1] - chunk2.waveforms[0][1]).abs() < 1.0e-6, "{} != {}", chunk.waveforms[0][1], chunk2.waveforms[0][1]);
+        assert!(
+            (chunk.waveforms[0][0] - chunk2.waveforms[0][0]).abs() < 1.0e-6,
+            "{} != {}",
+            chunk.waveforms[0][0],
+            chunk2.waveforms[0][0]
+        );
+        assert!(
+            (chunk.waveforms[0][1] - chunk2.waveforms[0][1]).abs() < 1.0e-6,
+            "{} != {}",
+            chunk.waveforms[0][1],
+            chunk2.waveforms[0][1]
+        );
     }
 
     #[test]
@@ -502,8 +515,18 @@ mod tests {
             buffer.len(),
             &vec![true; 1],
         );
-        assert!((chunk.waveforms[0][0] - chunk2.waveforms[0][0]).abs() < 1.0e-6, "{} != {}", chunk.waveforms[0][0], chunk2.waveforms[0][0]);
-        assert!((chunk.waveforms[0][1] - chunk2.waveforms[0][1]).abs() < 1.0e-6, "{} != {}", chunk.waveforms[0][1], chunk2.waveforms[0][1]);
+        assert!(
+            (chunk.waveforms[0][0] - chunk2.waveforms[0][0]).abs() < 1.0e-6,
+            "{} != {}",
+            chunk.waveforms[0][0],
+            chunk2.waveforms[0][0]
+        );
+        assert!(
+            (chunk.waveforms[0][1] - chunk2.waveforms[0][1]).abs() < 1.0e-6,
+            "{} != {}",
+            chunk.waveforms[0][1],
+            chunk2.waveforms[0][1]
+        );
     }
 
     #[test]
