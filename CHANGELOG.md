@@ -30,6 +30,7 @@ Bugfixes:
 - Fix handling of negative values when reading filter coeffs in S24LE3 format.
 - Gain filters react to mute setting on reload.
 - Fix noise in output when resampling and muting all channels in mixer.
+- Fix handling of negative values for input and output in S24LE format.
 
 
 
