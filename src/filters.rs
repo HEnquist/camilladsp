@@ -42,6 +42,8 @@ pub fn pad_vector(values: &[PrcFmt], length: usize) -> Vec<PrcFmt> {
     new_values
 }
 
+
+
 pub fn read_coeff_file(
     filename: &str,
     format: &config::FileFormat,
@@ -380,6 +382,10 @@ mod tests {
     use crate::PrcFmt;
     use config::FileFormat;
     use filters::{pad_vector, read_coeff_file};
+    use std::fs::File;
+    use std::io::BufReader;
+    use std::io::{BufRead, Read, Seek, SeekFrom};
+    use std::convert::TryInto;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {} = {}", left, right, left - right);
@@ -478,5 +484,92 @@ mod tests {
         assert!(compare_waveforms(&values, &values_0, 1e-15));
         let values_5 = pad_vector(&values, 5);
         assert!(compare_waveforms(&values_padded, &values_5, 1e-15));
+    }
+
+
+
+
+    #[test]
+    pub fn find_data_in_wav() {
+        let f = File::open("testdata/int32.wav").unwrap();
+        let filesize = f.metadata().unwrap().len();
+        println!("size: {}", filesize); // {
+        //     Ok(f) => f,
+        //     Err(err) => {
+        //         let msg = format!(
+        //             "Could not open coefficient file '{}'. Error: {}",
+        //             filename, err
+        //         );
+        //         return Err(config::ConfigError::new(&msg).into());
+        //     }
+        // };
+        let mut file = BufReader::new(&f);
+        let mut header = [0; 12];
+        let _ = file.read(&mut header).unwrap();
+        
+        println!("{:?}", header);
+        assert_eq!(header[0..4], [0x52, 0x49, 0x46, 0x46]);
+        assert_eq!(header[8..12], [0x57, 0x41, 0x56, 0x45]);
+        let mut next_chunk_location = 12;
+        let mut found_fmt = false;
+        let mut found_data = false;
+        let mut buffer = [0; 8];
+        while (!found_fmt || !found_data) && next_chunk_location < filesize {
+            file.seek(SeekFrom::Start(next_chunk_location)).unwrap();
+            let _ = file.read(&mut buffer).unwrap();
+            let chunk_type = std::str::from_utf8(&buffer[0..4]).unwrap();
+            println!("{}",chunk_type);
+            let chunk_length = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
+            println!("length: {}", chunk_length);
+            if chunk_type == "fmt " && chunk_length == 16 {
+                found_fmt = true;
+                let mut data = [0; 16];
+                let _ = file.read(&mut data).unwrap();
+                let fmtcode = u16::from_le_bytes(data[0..2].try_into().unwrap());
+                let fmt = match fmtcode {
+                    1 => "int",
+                    3 => "float",
+                    _ => "unknown"
+                };
+                let chans = u16::from_le_bytes(data[2..4].try_into().unwrap());
+                let srate = u32::from_le_bytes(data[4..8].try_into().unwrap());
+                let bytes_per_frame = u16::from_le_bytes(data[12..14].try_into().unwrap());
+                let bits = u16::from_le_bytes(data[14..16].try_into().unwrap());
+                let bytes_per_sample = bytes_per_frame/chans;
+                let sfmt = match (fmt, bits, bytes_per_sample) {
+                    ("int", 16, 2) => "S16LE",
+                    ("int", 24, 3) => "S24LE3",
+                    ("int", 24, 4) => "S24LE",
+                    ("int", 32, 4) => "S32LE",
+                    ("float", 32, 4) => "FLOAT32LE",
+                    _ => "unknown",
+                };
+                println!("fmt: {}, chans: {}, srate: {}, bits: {}, bytes_per_sample: {}", sfmt, chans, srate, bits, bytes_per_sample);
+                // wav_info['SampleRate'] = struct.unpack('<L', data[4:8])[0]
+                // wav_info['ByteRate'] = struct.unpack('<L', data[8:12])[0]
+                // wav_info['BytesPerFrame'] = struct.unpack('<H', data[12:14])[0]
+                // wav_info['BitsPerSample'] = struct.unpack('<H', data[14:16])[0]
+            }
+            else if chunk_type == "data" {
+                found_data = true;
+                println!("data start: {}, len: {}", next_chunk_location+8, chunk_length)
+            }
+            next_chunk_location += 8 + chunk_length as u64; 
+        }
+
+        assert!(false);
+
+            // file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
+            // let nbr_coeffs = read_bytes_lines / 3;
+            // let scalefactor = PrcFmt::new(2.0).powi(31);
+            // while let Ok(3) = file.read(&mut buffer[1..4]) {
+            //     let mut value = i32::from_le_bytes(buffer) as PrcFmt;
+            //     value /= scalefactor;
+            //     coefficients.push(value);
+            //     if coefficients.len() >= nbr_coeffs {
+            //         break;
+            //     }
+            // }
+
     }
 }
