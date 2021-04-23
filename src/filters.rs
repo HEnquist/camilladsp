@@ -38,7 +38,7 @@ pub fn pad_vector(values: &[PrcFmt], length: usize) -> Vec<PrcFmt> {
         length
     };
     let mut new_values: Vec<PrcFmt> = vec![0.0; new_len];
-    new_values[0..values.len()].copy_from_slice(&values[..]);
+    new_values[0..values.len()].copy_from_slice(&values);
     new_values
 }
 
@@ -213,7 +213,7 @@ impl FilterGroup {
             let filter_cfg = filter_configs[&name].clone();
             let filter: Box<dyn Filter> =
                 match filter_cfg {
-                    config::Filter::Conv { parameters } => Box::new(fftconv::FFTConv::from_config(
+                    config::Filter::Conv { parameters } => Box::new(fftconv::FftConv::from_config(
                         name,
                         waveform_length,
                         parameters,

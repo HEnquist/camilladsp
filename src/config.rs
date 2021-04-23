@@ -56,6 +56,7 @@ impl ConfigError {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum SampleFormat {
@@ -404,6 +405,7 @@ pub enum Filter {
     },
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum FileFormat {
@@ -451,6 +453,7 @@ impl Default for ConvParameters {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]

@@ -54,7 +54,7 @@ pub fn chunk_to_buffer_bytes(
                 }
             } else {
                 let mut value32 = (float_val * scalefactor) as i32;
-                value32 = value32 << 8*(bytes_per_sample-data_bytes_per_sample);
+                value32 <<= 8*(bytes_per_sample-data_bytes_per_sample);
                 let bytes = value32.to_le_bytes();
                 for b in bytes.iter().skip(bytes_per_sample-data_bytes_per_sample).take(data_bytes_per_sample) {
                     buf[idx] = *b;

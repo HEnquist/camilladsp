@@ -11,7 +11,7 @@ use std::sync::Arc;
 use PrcFmt;
 use Res;
 
-pub struct FFTConv {
+pub struct FftConv {
     name: String,
     npoints: usize,
     nsegments: usize,
@@ -28,7 +28,7 @@ pub struct FFTConv {
     index: usize,
 }
 
-impl FFTConv {
+impl FftConv {
     /// Create a new FFT colvolution filter.
     pub fn new(name: String, data_length: usize, coeffs: &[PrcFmt]) -> Self {
         let input_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
@@ -57,7 +57,7 @@ impl FFTConv {
                 .unwrap();
         }
 
-        FFTConv {
+        FftConv {
             name,
             npoints: data_length,
             nsegments,
@@ -88,11 +88,11 @@ impl FFTConv {
             } => filters::read_coeff_file(&filename, &format, read_bytes_lines, skip_bytes_lines)
                 .unwrap(),
         };
-        FFTConv::new(name, data_length, &values)
+        FftConv::new(name, data_length, &values)
     }
 }
 
-impl Filter for FFTConv {
+impl Filter for FftConv {
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -228,7 +228,7 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
 mod tests {
     use crate::PrcFmt;
     use config::ConvParameters;
-    use fftconv::FFTConv;
+    use fftconv::FftConv;
     use filters::Filter;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
@@ -252,7 +252,7 @@ mod tests {
             values: coeffs,
             length: 0,
         };
-        let mut filter = FFTConv::from_config("test".to_string(), 8, conf);
+        let mut filter = FftConv::from_config("test".to_string(), 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
         filter.process_waveform(&mut wave1).unwrap();
@@ -265,7 +265,7 @@ mod tests {
         for m in 0..32 {
             coeffs.push(m as PrcFmt);
         }
-        let mut filter = FFTConv::new("test".to_owned(), 8, &coeffs);
+        let mut filter = FftConv::new("test".to_owned(), 8, &coeffs);
         let mut wave1 = vec![0.0 as PrcFmt; 8];
         let mut wave2 = vec![0.0 as PrcFmt; 8];
         let mut wave3 = vec![0.0 as PrcFmt; 8];
