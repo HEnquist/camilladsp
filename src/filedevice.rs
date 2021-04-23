@@ -235,6 +235,7 @@ fn build_chunk(
             &buf,
             params.channels,
             scalefactor,
+            params.bits_per_sample,
             params.store_bytes_per_sample,
             bytes_read,
             &params.capture_status.read().unwrap().used_channels,

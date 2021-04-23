@@ -141,8 +141,12 @@ pub fn read_coeff_file(
             let mut buffer = [0; 4];
             file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
             let nbr_coeffs = read_bytes_lines / 4;
-            let scalefactor = PrcFmt::new(2.0).powi(23);
+            let scalefactor = PrcFmt::new(2.0).powi(31);
             while let Ok(4) = file.read(&mut buffer) {
+                buffer[3] = buffer[2];
+                buffer[2] = buffer[1];
+                buffer[1] = buffer[0];
+                buffer[0] = 0;
                 let mut value = i32::from_le_bytes(buffer) as PrcFmt;
                 value /= scalefactor;
                 coefficients.push(value);
@@ -405,69 +409,69 @@ mod tests {
     fn read_float32() {
         let loaded = read_coeff_file("testdata/float32.raw", &FileFormat::FLOAT32LE, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
-        assert!(compare_waveforms(&loaded, &expected, 1e-15));
+        assert!(compare_waveforms(&loaded, &expected, 1e-15), "{:?} != {:?}", loaded, expected);
         let loaded =
             read_coeff_file("testdata/float32.raw", &FileFormat::FLOAT32LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
-        assert!(compare_waveforms(&loaded, &expected, 1e-15));
+        assert!(compare_waveforms(&loaded, &expected, 1e-15), "{:?} != {:?}", loaded, expected);
     }
 
     #[test]
     fn read_float64() {
         let loaded = read_coeff_file("testdata/float64.raw", &FileFormat::FLOAT64LE, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
-        assert!(compare_waveforms(&loaded, &expected, 1e-15));
+        assert!(compare_waveforms(&loaded, &expected, 1e-15), "{:?} != {:?}", loaded, expected);
         let loaded =
             read_coeff_file("testdata/float64.raw", &FileFormat::FLOAT64LE, 24, 8).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
-        assert!(compare_waveforms(&loaded, &expected, 1e-15));
+        assert!(compare_waveforms(&loaded, &expected, 1e-15), "{:?} != {:?}", loaded, expected);
     }
 
     #[test]
     fn read_int16() {
         let loaded = read_coeff_file("testdata/int16.raw", &FileFormat::S16LE, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
-        assert!(compare_waveforms(&loaded, &expected, 1e-4));
+        assert!(compare_waveforms(&loaded, &expected, 1e-4), "{:?} != {:?}", loaded, expected);
         let loaded = read_coeff_file("testdata/int16.raw", &FileFormat::S16LE, 6, 2).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
-        assert!(compare_waveforms(&loaded, &expected, 1e-4));
+        assert!(compare_waveforms(&loaded, &expected, 1e-4), "{:?} != {:?}", loaded, expected);
     }
 
     #[test]
     fn read_int24() {
         let loaded = read_coeff_file("testdata/int24.raw", &FileFormat::S24LE, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
-        assert!(compare_waveforms(&loaded, &expected, 1e-6));
+        assert!(compare_waveforms(&loaded, &expected, 1e-6), "{:?} != {:?}", loaded, expected);
         let loaded = read_coeff_file("testdata/int24.raw", &FileFormat::S24LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
-        assert!(compare_waveforms(&loaded, &expected, 1e-6));
+        assert!(compare_waveforms(&loaded, &expected, 1e-6), "{:?} != {:?}", loaded, expected);
     }
     #[test]
     fn read_int24_3() {
         let loaded = read_coeff_file("testdata/int243.raw", &FileFormat::S24LE3, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
-        assert!(compare_waveforms(&loaded, &expected, 1e-6));
+        assert!(compare_waveforms(&loaded, &expected, 1e-6), "{:?} != {:?}", loaded, expected);
         let loaded = read_coeff_file("testdata/int243.raw", &FileFormat::S24LE3, 9, 3).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
-        assert!(compare_waveforms(&loaded, &expected, 1e-6));
+        assert!(compare_waveforms(&loaded, &expected, 1e-6), "{:?} != {:?}", loaded, expected);
     }
     #[test]
     fn read_int32() {
         let loaded = read_coeff_file("testdata/int32.raw", &FileFormat::S32LE, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
-        assert!(compare_waveforms(&loaded, &expected, 1e-9));
+        assert!(compare_waveforms(&loaded, &expected, 1e-9), "{:?} != {:?}", loaded, expected);
         let loaded = read_coeff_file("testdata/int32.raw", &FileFormat::S32LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
-        assert!(compare_waveforms(&loaded, &expected, 1e-9));
+        assert!(compare_waveforms(&loaded, &expected, 1e-9), "{:?} != {:?}", loaded, expected);
     }
     #[test]
     fn read_text() {
         let loaded = read_coeff_file("testdata/text.txt", &FileFormat::TEXT, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
-        assert!(compare_waveforms(&loaded, &expected, 1e-9));
+        assert!(compare_waveforms(&loaded, &expected, 1e-9), "{:?} != {:?}", loaded, expected);
         let loaded = read_coeff_file("testdata/text_header.txt", &FileFormat::TEXT, 4, 1).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5];
-        assert!(compare_waveforms(&loaded, &expected, 1e-9));
+        assert!(compare_waveforms(&loaded, &expected, 1e-9), "{:?} != {:?}", loaded, expected);
     }
 
     #[test]

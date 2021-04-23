@@ -504,6 +504,7 @@ fn capture_loop_bytes(
                 &buffer[0..capture_bytes],
                 params.channels,
                 params.scalefactor,
+                params.bits_per_sample,
                 params.store_bytes_per_sample,
                 capture_bytes,
                 &params.capture_status.read().unwrap().used_channels,

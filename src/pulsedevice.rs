@@ -417,6 +417,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                         &buf[0..capture_bytes],
                                         channels,
                                         scalefactor,
+                                        bits_per_sample,
                                         store_bytes_per_sample,
                                         capture_bytes,
                                         &capture_status.read().unwrap().used_channels,
