@@ -612,17 +612,21 @@ mod tests {
 
     #[test]
     pub fn test_analyze_wav() {
-        let info = find_data_in_wav("testdata/int32.wav");
+        let info = find_data_in_wav("testdata/int32.wav").unwrap();
         println!("{:?}", info);
-
-        assert!(false);
+        assert_eq!(info.sample_format, FileFormat::S32LE);
+        assert_eq!(info.data_offset, 44);
+        assert_eq!(info.data_length, 20);
+        assert_eq!(info.channels, 1);
     }
 
     #[test]
     pub fn test_read_wav() {
-        let dat = read_wav("testdata/int32.wav", 1);
-        println!("{:?}", dat);
-
-        assert!(false);
+        let values = read_wav("testdata/int32.wav", 0).unwrap();
+        println!("{:?}", values);
+        let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
+        assert!(compare_waveforms(&values, &expected, 1e-9));
+        let bad = read_wav("testdata/int32.wav", 1);
+        assert!(bad.is_err());
     }
 }

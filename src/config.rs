@@ -857,6 +857,12 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
                 {
                     check_and_replace_relative_path(filename, config_dir);
                 }
+                else if let Filter::Conv {
+                    parameters: ConvParameters::Wav { filename, .. },
+                } = filter
+                {
+                    check_and_replace_relative_path(filename, config_dir);
+                }
             }
         } else {
             warn!("Can't find parent directory of config file");
