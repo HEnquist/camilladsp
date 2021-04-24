@@ -429,6 +429,11 @@ pub enum ConvParameters {
         #[serde(default)]
         read_bytes_lines: usize,
     },
+    Wav {
+        filename: String,
+        #[serde(default)]
+        channel: usize,
+    },
     Values {
         values: Vec<PrcFmt>,
         #[serde(default)]

@@ -16,11 +16,21 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
+use std::convert::TryInto;
 
 use NewValue;
 use PrcFmt;
 use ProcessingStatus;
 use Res;
+
+#[derive(Debug)]
+pub struct WavParams {
+    sample_format: config::FileFormat,
+    sample_rate: usize,
+    data_offset: usize,
+    data_length: usize,
+    channels: usize,
+}
 
 pub trait Filter {
     // Filter a Vec
@@ -189,6 +199,110 @@ pub fn read_coeff_file(
     );
     Ok(coefficients)
 }
+
+pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
+    let f = File::open(filename)?;
+    let filesize = f.metadata()?.len();
+    println!("size: {}", filesize);
+    let mut file = BufReader::new(&f);
+    let mut header = [0; 12];
+    let _ = file.read(&mut header)?;
+    
+    println!("{:?}", header);
+    let riff_b = "RIFF".as_bytes();
+    let wave_b = "WAVE".as_bytes();
+    let data_b = "data".as_bytes();
+    let fmt_b = "fmt ".as_bytes();
+    let riff_err = header.iter().take(4).zip(riff_b).any(|(a, b)| *a != *b );
+    let wave_err = header.iter().skip(8).take(4).zip(wave_b).any(|(a, b)| *a != *b );
+    if riff_err || wave_err {
+        let msg = format!("Invalid wav header in file '{}'", filename);
+        return Err(config::ConfigError::new(&msg).into());
+    }
+    let mut next_chunk_location = 12;
+    let mut found_fmt = false;
+    let mut found_data = false;
+    let mut buffer = [0; 8];
+
+    let mut sample_format = config::FileFormat::S16LE;
+    let mut sample_rate = 0;
+    let mut channels = 0;
+    let mut data_offset = 0;
+    let mut data_length = 0;
+
+    while (!found_fmt || !found_data) && next_chunk_location < filesize {
+        file.seek(SeekFrom::Start(next_chunk_location))?;
+        let _ = file.read(&mut buffer)?;
+        let chunk_length = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
+        println!("length: {}", chunk_length);
+        let is_data = buffer.iter().take(4).zip(data_b).all(|(a, b)| *a == *b );
+        let is_fmt = buffer.iter().take(4).zip(fmt_b).all(|(a, b)| *a == *b );
+        if is_fmt && chunk_length == 16 {
+            found_fmt = true;
+            let mut data = [0; 16];
+            let _ = file.read(&mut data).unwrap();
+            // 1: int, 3: float
+            let formatcode = u16::from_le_bytes(data[0..2].try_into().unwrap());
+            channels = u16::from_le_bytes(data[2..4].try_into().unwrap());
+            sample_rate = u32::from_le_bytes(data[4..8].try_into().unwrap());
+            let bytes_per_frame = u16::from_le_bytes(data[12..14].try_into().unwrap());
+            let bits = u16::from_le_bytes(data[14..16].try_into().unwrap());
+            let bytes_per_sample = bytes_per_frame/channels;
+            sample_format = match (formatcode, bits, bytes_per_sample) {
+                (1, 16, 2) => config::FileFormat::S16LE,
+                (1, 24, 3) => config::FileFormat::S24LE3,
+                (1, 24, 4) => config::FileFormat::S24LE,
+                (1, 32, 4) => config::FileFormat::S32LE,
+                (3, 32, 4) => config::FileFormat::FLOAT32LE,
+                (3, 64, 8) => config::FileFormat::FLOAT64LE,
+                _ => {  
+                    let msg = format!("Unsupported wav format of file '{}'", filename);
+                    return Err(config::ConfigError::new(&msg).into());
+                },
+            };
+            println!("fmt: {:?}, chans: {}, srate: {}, bits: {}, bytes_per_sample: {}", sample_format, channels, sample_rate, bits, bytes_per_sample);
+        }
+        else if is_data {
+            found_data = true;
+            data_offset = next_chunk_location+8;
+            data_length = chunk_length;
+            println!("data start: {}, len: {}", next_chunk_location+8, chunk_length)
+        }
+        next_chunk_location += 8 + chunk_length as u64; 
+    }
+
+    Ok(WavParams{
+        sample_format,
+        sample_rate: sample_rate as usize,
+        channels: channels as usize,
+        data_length: data_length as usize,
+        data_offset: data_offset as usize,
+    })
+}
+
+pub fn read_wav(filename: &str, channel: usize) ->  Res<Vec<PrcFmt>> {
+    let params = find_data_in_wav(filename)?;
+    if channel >= params.channels {
+        let msg = format!("Cant read channel {} of file '{}' which contains {} channels.", channel, filename, params.channels);
+        return Err(config::ConfigError::new(&msg).into());
+    }
+    
+    let data = read_coeff_file(
+        filename,
+        &params.sample_format,
+        params.data_length,
+        params.data_offset)?;
+    
+    if channel == 0 {
+        return Ok(data);
+    }
+    Ok(data.iter().skip(channel).step_by(params.channels).map(|x| *x).collect::<Vec<PrcFmt>>())
+}
+
+    
+    
+
+
 
 pub struct FilterGroup {
     channel: usize,
@@ -382,10 +496,7 @@ mod tests {
     use crate::PrcFmt;
     use config::FileFormat;
     use filters::{pad_vector, read_coeff_file};
-    use std::fs::File;
-    use std::io::BufReader;
-    use std::io::{BufRead, Read, Seek, SeekFrom};
-    use std::convert::TryInto;
+    use filters::{find_data_in_wav, read_wav};
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {} = {}", left, right, left - right);
@@ -486,90 +597,25 @@ mod tests {
         assert!(compare_waveforms(&values_padded, &values_5, 1e-15));
     }
 
-
-
-
     #[test]
-    pub fn find_data_in_wav() {
-        let f = File::open("testdata/int32.wav").unwrap();
-        let filesize = f.metadata().unwrap().len();
-        println!("size: {}", filesize); // {
-        //     Ok(f) => f,
-        //     Err(err) => {
-        //         let msg = format!(
-        //             "Could not open coefficient file '{}'. Error: {}",
-        //             filename, err
-        //         );
-        //         return Err(config::ConfigError::new(&msg).into());
-        //     }
-        // };
-        let mut file = BufReader::new(&f);
-        let mut header = [0; 12];
-        let _ = file.read(&mut header).unwrap();
-        
-        println!("{:?}", header);
-        assert_eq!(header[0..4], [0x52, 0x49, 0x46, 0x46]);
-        assert_eq!(header[8..12], [0x57, 0x41, 0x56, 0x45]);
-        let mut next_chunk_location = 12;
-        let mut found_fmt = false;
-        let mut found_data = false;
-        let mut buffer = [0; 8];
-        while (!found_fmt || !found_data) && next_chunk_location < filesize {
-            file.seek(SeekFrom::Start(next_chunk_location)).unwrap();
-            let _ = file.read(&mut buffer).unwrap();
-            let chunk_type = std::str::from_utf8(&buffer[0..4]).unwrap();
-            println!("{}",chunk_type);
-            let chunk_length = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
-            println!("length: {}", chunk_length);
-            if chunk_type == "fmt " && chunk_length == 16 {
-                found_fmt = true;
-                let mut data = [0; 16];
-                let _ = file.read(&mut data).unwrap();
-                let fmtcode = u16::from_le_bytes(data[0..2].try_into().unwrap());
-                let fmt = match fmtcode {
-                    1 => "int",
-                    3 => "float",
-                    _ => "unknown"
-                };
-                let chans = u16::from_le_bytes(data[2..4].try_into().unwrap());
-                let srate = u32::from_le_bytes(data[4..8].try_into().unwrap());
-                let bytes_per_frame = u16::from_le_bytes(data[12..14].try_into().unwrap());
-                let bits = u16::from_le_bytes(data[14..16].try_into().unwrap());
-                let bytes_per_sample = bytes_per_frame/chans;
-                let sfmt = match (fmt, bits, bytes_per_sample) {
-                    ("int", 16, 2) => "S16LE",
-                    ("int", 24, 3) => "S24LE3",
-                    ("int", 24, 4) => "S24LE",
-                    ("int", 32, 4) => "S32LE",
-                    ("float", 32, 4) => "FLOAT32LE",
-                    _ => "unknown",
-                };
-                println!("fmt: {}, chans: {}, srate: {}, bits: {}, bytes_per_sample: {}", sfmt, chans, srate, bits, bytes_per_sample);
-                // wav_info['SampleRate'] = struct.unpack('<L', data[4:8])[0]
-                // wav_info['ByteRate'] = struct.unpack('<L', data[8:12])[0]
-                // wav_info['BytesPerFrame'] = struct.unpack('<H', data[12:14])[0]
-                // wav_info['BitsPerSample'] = struct.unpack('<H', data[14:16])[0]
-            }
-            else if chunk_type == "data" {
-                found_data = true;
-                println!("data start: {}, len: {}", next_chunk_location+8, chunk_length)
-            }
-            next_chunk_location += 8 + chunk_length as u64; 
-        }
+    pub fn test_analyze_wav() {
+        let info = find_data_in_wav("testdata/int32.wav");
+        println!("{:?}", info);
+
 
         assert!(false);
 
-            // file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
-            // let nbr_coeffs = read_bytes_lines / 3;
-            // let scalefactor = PrcFmt::new(2.0).powi(31);
-            // while let Ok(3) = file.read(&mut buffer[1..4]) {
-            //     let mut value = i32::from_le_bytes(buffer) as PrcFmt;
-            //     value /= scalefactor;
-            //     coefficients.push(value);
-            //     if coefficients.len() >= nbr_coeffs {
-            //         break;
-            //     }
-            // }
+
+    }
+
+    #[test]
+    pub fn test_read_wav() {
+        let dat = read_wav("testdata/int32.wav", 1);
+        println!("{:?}", dat);
+
+
+        assert!(false);
+
 
     }
 }
