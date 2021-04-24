@@ -87,6 +87,9 @@ impl FFTConv {
                 skip_bytes_lines,
             } => filters::read_coeff_file(&filename, &format, read_bytes_lines, skip_bytes_lines)
                 .unwrap(),
+            config::ConvParameters::Wav { filename, channel } => {
+                filters::read_wav(&filename, channel).unwrap()
+            }
         };
         FFTConv::new(name, data_length, &values)
     }
@@ -168,6 +171,9 @@ impl Filter for FFTConv {
                     filters::read_coeff_file(&filename, &format, read_bytes_lines, skip_bytes_lines)
                         .unwrap()
                 }
+                config::ConvParameters::Wav { filename, channel } => {
+                    filters::read_wav(&filename, channel).unwrap()
+                }
             };
 
             let nsegments = ((coeffs.len() as PrcFmt) / (self.npoints as PrcFmt)).ceil() as usize;
@@ -216,6 +222,13 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
         } => {
             let coeffs =
                 filters::read_coeff_file(&filename, &format, *read_bytes_lines, *skip_bytes_lines)?;
+            if coeffs.is_empty() {
+                return Err(config::ConfigError::new("Conv coefficients are empty").into());
+            }
+            Ok(())
+        }
+        config::ConvParameters::Wav { filename, channel } => {
+            let coeffs = filters::read_wav(&filename, *channel)?;
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }

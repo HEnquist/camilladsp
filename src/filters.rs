@@ -12,11 +12,11 @@ use fftconv_fftw as fftconv;
 use loudness;
 use mixer;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
-use std::convert::TryInto;
 
 use NewValue;
 use PrcFmt;
@@ -51,8 +51,6 @@ pub fn pad_vector(values: &[PrcFmt], length: usize) -> Vec<PrcFmt> {
     new_values[0..values.len()].copy_from_slice(&values[..]);
     new_values
 }
-
-
 
 pub fn read_coeff_file(
     filename: &str,
@@ -207,14 +205,19 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
     let mut file = BufReader::new(&f);
     let mut header = [0; 12];
     let _ = file.read(&mut header)?;
-    
+
     println!("{:?}", header);
     let riff_b = "RIFF".as_bytes();
     let wave_b = "WAVE".as_bytes();
     let data_b = "data".as_bytes();
     let fmt_b = "fmt ".as_bytes();
-    let riff_err = header.iter().take(4).zip(riff_b).any(|(a, b)| *a != *b );
-    let wave_err = header.iter().skip(8).take(4).zip(wave_b).any(|(a, b)| *a != *b );
+    let riff_err = header.iter().take(4).zip(riff_b).any(|(a, b)| *a != *b);
+    let wave_err = header
+        .iter()
+        .skip(8)
+        .take(4)
+        .zip(wave_b)
+        .any(|(a, b)| *a != *b);
     if riff_err || wave_err {
         let msg = format!("Invalid wav header in file '{}'", filename);
         return Err(config::ConfigError::new(&msg).into());
@@ -235,8 +238,8 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
         let _ = file.read(&mut buffer)?;
         let chunk_length = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
         println!("length: {}", chunk_length);
-        let is_data = buffer.iter().take(4).zip(data_b).all(|(a, b)| *a == *b );
-        let is_fmt = buffer.iter().take(4).zip(fmt_b).all(|(a, b)| *a == *b );
+        let is_data = buffer.iter().take(4).zip(data_b).all(|(a, b)| *a == *b);
+        let is_fmt = buffer.iter().take(4).zip(fmt_b).all(|(a, b)| *a == *b);
         if is_fmt && chunk_length == 16 {
             found_fmt = true;
             let mut data = [0; 16];
@@ -247,7 +250,7 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
             sample_rate = u32::from_le_bytes(data[4..8].try_into().unwrap());
             let bytes_per_frame = u16::from_le_bytes(data[12..14].try_into().unwrap());
             let bits = u16::from_le_bytes(data[14..16].try_into().unwrap());
-            let bytes_per_sample = bytes_per_frame/channels;
+            let bytes_per_sample = bytes_per_frame / channels;
             sample_format = match (formatcode, bits, bytes_per_sample) {
                 (1, 16, 2) => config::FileFormat::S16LE,
                 (1, 24, 3) => config::FileFormat::S24LE3,
@@ -255,23 +258,29 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
                 (1, 32, 4) => config::FileFormat::S32LE,
                 (3, 32, 4) => config::FileFormat::FLOAT32LE,
                 (3, 64, 8) => config::FileFormat::FLOAT64LE,
-                _ => {  
+                _ => {
                     let msg = format!("Unsupported wav format of file '{}'", filename);
                     return Err(config::ConfigError::new(&msg).into());
-                },
+                }
             };
-            println!("fmt: {:?}, chans: {}, srate: {}, bits: {}, bytes_per_sample: {}", sample_format, channels, sample_rate, bits, bytes_per_sample);
-        }
-        else if is_data {
+            println!(
+                "fmt: {:?}, chans: {}, srate: {}, bits: {}, bytes_per_sample: {}",
+                sample_format, channels, sample_rate, bits, bytes_per_sample
+            );
+        } else if is_data {
             found_data = true;
-            data_offset = next_chunk_location+8;
+            data_offset = next_chunk_location + 8;
             data_length = chunk_length;
-            println!("data start: {}, len: {}", next_chunk_location+8, chunk_length)
+            println!(
+                "data start: {}, len: {}",
+                next_chunk_location + 8,
+                chunk_length
+            )
         }
-        next_chunk_location += 8 + chunk_length as u64; 
+        next_chunk_location += 8 + chunk_length as u64;
     }
 
-    Ok(WavParams{
+    Ok(WavParams {
         sample_format,
         sample_rate: sample_rate as usize,
         channels: channels as usize,
@@ -280,29 +289,33 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
     })
 }
 
-pub fn read_wav(filename: &str, channel: usize) ->  Res<Vec<PrcFmt>> {
+pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
     let params = find_data_in_wav(filename)?;
     if channel >= params.channels {
-        let msg = format!("Cant read channel {} of file '{}' which contains {} channels.", channel, filename, params.channels);
+        let msg = format!(
+            "Cant read channel {} of file '{}' which contains {} channels.",
+            channel, filename, params.channels
+        );
         return Err(config::ConfigError::new(&msg).into());
     }
-    
+
     let data = read_coeff_file(
         filename,
         &params.sample_format,
         params.data_length,
-        params.data_offset)?;
-    
+        params.data_offset,
+    )?;
+
     if channel == 0 {
         return Ok(data);
     }
-    Ok(data.iter().skip(channel).step_by(params.channels).map(|x| *x).collect::<Vec<PrcFmt>>())
+    Ok(data
+        .iter()
+        .skip(channel)
+        .step_by(params.channels)
+        .map(|x| *x)
+        .collect::<Vec<PrcFmt>>())
 }
-
-    
-    
-
-
 
 pub struct FilterGroup {
     channel: usize,
@@ -495,8 +508,8 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
 mod tests {
     use crate::PrcFmt;
     use config::FileFormat;
-    use filters::{pad_vector, read_coeff_file};
     use filters::{find_data_in_wav, read_wav};
+    use filters::{pad_vector, read_coeff_file};
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {} = {}", left, right, left - right);
@@ -602,10 +615,7 @@ mod tests {
         let info = find_data_in_wav("testdata/int32.wav");
         println!("{:?}", info);
 
-
         assert!(false);
-
-
     }
 
     #[test]
@@ -613,9 +623,6 @@ mod tests {
         let dat = read_wav("testdata/int32.wav", 1);
         println!("{:?}", dat);
 
-
         assert!(false);
-
-
     }
 }
