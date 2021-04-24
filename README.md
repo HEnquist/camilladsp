@@ -809,10 +809,10 @@ filters:
 ### FIR
 A FIR filter is given by an impulse response provided as a list of coefficients. The coefficients are preferably given in a separate file, but can be included directly in the config file. If the number of coefficients (or taps) is larger than the chunksize setting it will use segmented convolution. The number of segments is the filter length divided by the chunksize, rounded up.
 
-Example FIR filter:
+Example FIR filters:
 ```
 filters:
-  lowpass_fir:
+  example_fir_a:
     type: Conv
     parameters:
       type: File 
@@ -820,8 +820,14 @@ filters:
       format: TEXT
       skip_bytes_lines: 0 (*)
       read_bytes_lines: 0 (*)
+  example_fir_b:
+    type: Conv
+    parameters:
+      type: Wav 
+      filename: path/to/filter.txt
+      channel: 0 (*)
 ```
-The `type` can be "File" of "Values". Use "File" to load a file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. Please note that wav-files are not supported! Please see the [separate guide for converting wav to raw files](coefficients_from_wav.md). See below for a list of allowed raw formats.
+The `type` can be "File", "Wav" or "Values". Use "Wav" to load a standard .wav file, "File" to load a raw file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. Please note that wav-files are not supported! Please see the [separate guide for converting wav to raw files](coefficients_from_wav.md). See below for a list of allowed raw formats.
 
 If a relative path is given it will first try to find the file relative to the config file path. If it's not found there, the path is assumed to be relative to the current working directory. Note that this only applies when the config is loaded from a file. When a config is supplied via the websocket server only the current working dir of the CamillaDSP process will be searched.
 
@@ -843,6 +849,8 @@ The `length` setting is optional. It is used to extend the number of coefficient
 The File type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
 * `skip_bytes_lines`: Number of bytes (for raw files) or lines (for text) to skip at the beginning of the file. This can be used to skip over a header. Leaving it out or setting to zero means no bytes or lines are skipped. 
 * `read_bytes_lines`: Read only up until the specified number of bytes (for raw files) or lines (for text). Leave it out to read until the end of the file.
+
+The `Wav` type takes only one parameter `channel`. This is used to select which channel of a multi-channel file to load. For a standard stereo file, the left track is channel 0, and the right is channel 1. This parameter is optional and defaults to 0 if left out.
 
 For testing purposes the entire "parameters" block can be left out (or commented out with a # at the start of each line). This then becomes a dummy filter that does not affect the signal.
 

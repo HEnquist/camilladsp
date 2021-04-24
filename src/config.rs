@@ -431,6 +431,11 @@ pub enum ConvParameters {
         #[serde(default)]
         read_bytes_lines: usize,
     },
+    Wav {
+        filename: String,
+        #[serde(default)]
+        channel: usize,
+    },
     Values {
         values: Vec<PrcFmt>,
         #[serde(default)]
@@ -851,6 +856,12 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
             for (_name, filter) in config.filters.iter_mut() {
                 if let Filter::Conv {
                     parameters: ConvParameters::File { filename, .. },
+                } = filter
+                {
+                    check_and_replace_relative_path(filename, config_dir);
+                }
+                else if let Filter::Conv {
+                    parameters: ConvParameters::Wav { filename, .. },
                 } = filter
                 {
                     check_and_replace_relative_path(filename, config_dir);
