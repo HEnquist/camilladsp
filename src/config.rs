@@ -859,8 +859,7 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
                 } = filter
                 {
                     check_and_replace_relative_path(filename, config_dir);
-                }
-                else if let Filter::Conv {
+                } else if let Filter::Conv {
                     parameters: ConvParameters::Wav { filename, .. },
                 } = filter
                 {

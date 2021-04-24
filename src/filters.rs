@@ -317,7 +317,7 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
         .iter()
         .skip(channel)
         .step_by(params.channels)
-        .map(|x| *x)
+        .copied()
         .collect::<Vec<PrcFmt>>())
 }
 
