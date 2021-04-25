@@ -149,7 +149,7 @@ impl FftConv {
             config::ConvParameters::Values { values, length } => {
                 filters::pad_vector(&values, length)
             }
-            config::ConvParameters::File {
+            config::ConvParameters::Raw {
                 filename,
                 format,
                 read_bytes_lines,
@@ -215,7 +215,7 @@ impl Filter for FftConv {
                 config::ConvParameters::Values { values, length } => {
                     filters::pad_vector(&values, length)
                 }
-                config::ConvParameters::File {
+                config::ConvParameters::Raw {
                     filename,
                     format,
                     read_bytes_lines,
@@ -265,7 +265,7 @@ impl Filter for FftConv {
 pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {
         config::ConvParameters::Values { .. } => Ok(()),
-        config::ConvParameters::File {
+        config::ConvParameters::Raw {
             filename,
             format,
             read_bytes_lines,

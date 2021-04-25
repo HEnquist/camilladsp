@@ -422,7 +422,8 @@ pub enum FileFormat {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum ConvParameters {
-    File {
+    #[serde(alias = "File")]
+    Raw {
         filename: String,
         #[serde(default)]
         format: FileFormat,
@@ -829,7 +830,7 @@ fn replace_tokens_in_config(config: &mut Configuration) {
     //let mut new_config = config.clone();
     for (_name, filter) in config.filters.iter_mut() {
         if let Filter::Conv {
-            parameters: ConvParameters::File { filename, .. },
+            parameters: ConvParameters::Raw { filename, .. },
         } = filter
         {
             *filename = replace_tokens(filename, samplerate, num_channels);
@@ -855,7 +856,7 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
         if let Some(config_dir) = config_file.parent() {
             for (_name, filter) in config.filters.iter_mut() {
                 if let Filter::Conv {
-                    parameters: ConvParameters::File { filename, .. },
+                    parameters: ConvParameters::Raw { filename, .. },
                 } = filter
                 {
                     check_and_replace_relative_path(filename, config_dir);

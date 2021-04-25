@@ -590,6 +590,8 @@ devices:
     ```
     Note: On Unix-like systems it's also possible to use the File device and set the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback. 
 
+    Please note the __File__ capture device isn't able to read wav-files directly. If you want to let CamillaDSP play wav-files, please see the [separate guide for converting wav to raw files](coefficients_from_wav.md).
+
   The __Alsa__ capture device has two optional extra properties that are used to work around quirks of some devices. 
   Both should normally be left out, or set to the default value of `false`.
   - `retry_on_error`: Set this to `true` if capturing from the USB gadget driver on for example a Raspberry Pi. 
@@ -815,7 +817,7 @@ filters:
   example_fir_a:
     type: Conv
     parameters:
-      type: File 
+      type: Raw 
       filename: path/to/filter.txt
       format: TEXT
       skip_bytes_lines: 0 (*)
@@ -827,12 +829,13 @@ filters:
       filename: path/to/filter.txt
       channel: 0 (*)
 ```
-The `type` can be "File", "Wav" or "Values". Use "Wav" to load a standard .wav file, "File" to load a raw file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. Please note that wav-files are not supported! Please see the [separate guide for converting wav to raw files](coefficients_from_wav.md). See below for a list of allowed raw formats.
+The `type` can be `Raw`, `Wav` or `Values`. Use `Wav` to load a standard .wav file, `Raw` to load a raw file (see list of allowed raw formats below), and `Values` for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases.
 
 If a relative path is given it will first try to find the file relative to the config file path. If it's not found there, the path is assumed to be relative to the current working directory. Note that this only applies when the config is loaded from a file. When a config is supplied via the websocket server only the current working dir of the CamillaDSP process will be searched.
 
 If the filename includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`. 
 
+#### Values directly in config file
 
 Example for giving values:
 ```
@@ -846,17 +849,22 @@ filters:
 ```
 The `length` setting is optional. It is used to extend the number of coefficients past the ones given in `values`. The added coefficients are all zeroes. This is intended to provide an easy way to evaluating the CPU load for different filter lengths.
 
-The File type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
+For testing purposes the entire "parameters" block can be left out (or commented out with a # at the start of each line). This then becomes a dummy filter that does not affect the signal.
+
+#### Coefficients from Wav-file
+
+Supplying the coefficients as `.wav` file is the most conveient method.
+The `Wav` type takes only one parameter `channel`. This is used to select which channel of a multi-channel file to load. For a standard stereo file, the left track is channel 0, and the right is channel 1. This parameter is optional and defaults to 0 if left out.
+
+#### Coefficient Raw (headerless) data file
+
+To load coefficients from a raw file, use the `Raw` type. This is also used to load coefficients from text files.
+Raw files are often saved with a `.dbl`, `.raw`, or `.pcm` ending. The lack of a header means that the files doesn't contain any information about data format etc. CamillaDSP supports loading coefficients from such files that contain a single channel only (stereo files are not supported), in all the most common sample formats.
+The `Raw` type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
 * `skip_bytes_lines`: Number of bytes (for raw files) or lines (for text) to skip at the beginning of the file. This can be used to skip over a header. Leaving it out or setting to zero means no bytes or lines are skipped. 
 * `read_bytes_lines`: Read only up until the specified number of bytes (for raw files) or lines (for text). Leave it out to read until the end of the file.
 
-The `Wav` type takes only one parameter `channel`. This is used to select which channel of a multi-channel file to load. For a standard stereo file, the left track is channel 0, and the right is channel 1. This parameter is optional and defaults to 0 if left out.
-
-For testing purposes the entire "parameters" block can be left out (or commented out with a # at the start of each line). This then becomes a dummy filter that does not affect the signal.
-
-#### Coefficient data formats
-
-The filter coefficients must be provided either as text, or as raw samples. Wav-files are not supported, and each file can only hold one channel.
+The filter coefficients can be provided either as text, or as raw samples. Each file can only hold one channel.
 The "format" parameter can be omitted, in which case it's assumed that the format is TEXT. This format is a simple text file with one value per row:
 ```
 -0.000021
@@ -1028,6 +1036,9 @@ In this config first a mixer is used to copy a stereo input to four channels. Th
 If the names of mixers or filters includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filter name `fir_$samplerate$` will be updated to `fir_44100`. 
 
 ## Visualizing the config
+Please note that the `show_config.py` script mentioned here is deprecated, and has been replaced by the `plotcamillaconf` tool from the pycamilladsp-plot library. 
+The new tool provides the same functionality as well as many improvements. The `show_config.py` does not support any of newer config options, and the script will be removed in a future version.
+
 A Python script is included to view the configuration. This plots the transfer functions of all included filters, as well as plots a flowchart of the entire processing pipeline. Run it with:
 ```
 python show_config.py /path/to/config.yml

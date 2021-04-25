@@ -10,7 +10,7 @@ devices:
     device: "MySink.monitor"
     format: S16LE
   playback:
-    type: File
+    type: Raw
     channels: 2
     filename: "/home/henrik/test.raw"
     format: S16LE

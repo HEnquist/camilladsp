@@ -39,12 +39,12 @@ filters:
   lowpass_2k:
     type: Conv
     parameters:
-      type: File
+      type: Raw
       filename: file_$samplerate$_$channels$.txt
   highpass_2k:
     type: Conv
     parameters:
-      type: File
+      type: Raw
       filename: sometext2.txt
 
 mixers:
