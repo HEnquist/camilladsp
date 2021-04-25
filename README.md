@@ -827,7 +827,7 @@ filters:
       filename: path/to/filter.txt
       channel: 0 (*)
 ```
-The `type` can be "File", "Wav" or "Values". Use "Wav" to load a standard .wav file, "File" to load a raw file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases. Please note that wav-files are not supported! Please see the [separate guide for converting wav to raw files](coefficients_from_wav.md). See below for a list of allowed raw formats.
+The `type` can be "File", "Wav" or "Values". Use "Wav" to load a standard .wav file, "File" to load a raw file, and "Values" for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases.
 
 If a relative path is given it will first try to find the file relative to the config file path. If it's not found there, the path is assumed to be relative to the current working directory. Note that this only applies when the config is loaded from a file. When a config is supplied via the websocket server only the current working dir of the CamillaDSP process will be searched.
 
@@ -872,9 +872,6 @@ The other possible formats are raw data:
 - S32LE: signed 32-bit little-endian integers
 - FLOAT32LE: 32-bit little endian float
 - FLOAT64LE: 64-bit little endian float
-
-If you have a stereo wav-file, this should be converted to two separate raw files. To convert a stereo wav to signed 32-bit integers using Audacity, start by splitting the stereo track to two mono tracks. Then save each one using File / Export / Export Audio. In the lower part of the dialog, select Header: RAW (header-less), Encoding: Signed 32-bit PCM. 
-
 
 ### IIR
 IIR filters are implemented as Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filters, or you can provide the coefficients directly.
