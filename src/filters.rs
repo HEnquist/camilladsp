@@ -241,7 +241,7 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
         file.seek(SeekFrom::Start(next_chunk_location))?;
         let _ = file.read(&mut buffer)?;
         let chunk_length = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
-        println!("length: {}", chunk_length);
+        trace!("Analyzing wav chunk of length: {}", chunk_length);
         let is_data = buffer.iter().take(4).zip(data_b).all(|(a, b)| *a == *b);
         let is_fmt = buffer.iter().take(4).zip(fmt_b).all(|(a, b)| *a == *b);
         if is_fmt && chunk_length == 16 {
@@ -267,18 +267,18 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
                     return Err(config::ConfigError::new(&msg).into());
                 }
             };
-            println!(
-                "fmt: {:?}, chans: {}, srate: {}, bits: {}, bytes_per_sample: {}",
-                sample_format, channels, sample_rate, bits, bytes_per_sample
+            trace!(
+                "Found wav fmt chunk: formatcode: {}, channels: {}, samplerate: {}, bits: {}, bytes_per_frame: {}",
+                formatcode, channels, sample_rate, bits, bytes_per_frame
             );
         } else if is_data {
             found_data = true;
             data_offset = next_chunk_location + 8;
             data_length = chunk_length;
-            println!(
-                "data start: {}, len: {}",
-                next_chunk_location + 8,
-                chunk_length
+            trace!(
+                "Found wav data chunk, start: {}, length: {}",
+                data_offset,
+                data_length
             )
         }
         next_chunk_location += 8 + chunk_length as u64;
@@ -295,6 +295,10 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
 
 pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
     let params = find_data_in_wav(filename)?;
+    debug!(
+        "Wav data, format: {:?}, channels: {}, samplerate: {}",
+        params.sample_format, params.channels, params.sample_rate
+    );
     if channel >= params.channels {
         let msg = format!(
             "Cant read channel {} of file '{}' which contains {} channels.",

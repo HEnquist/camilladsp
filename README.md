@@ -855,6 +855,7 @@ For testing purposes the entire "parameters" block can be left out (or commented
 
 Supplying the coefficients as `.wav` file is the most conveient method.
 The `Wav` type takes only one parameter `channel`. This is used to select which channel of a multi-channel file to load. For a standard stereo file, the left track is channel 0, and the right is channel 1. This parameter is optional and defaults to 0 if left out.
+The sample rate of the file is ignored.
 
 #### Coefficient Raw (headerless) data file
 
