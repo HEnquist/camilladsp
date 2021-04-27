@@ -422,7 +422,18 @@ mod tests {
     #[test]
     fn delay_fraction() {
         let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let waveform_delayed = vec![0.0, 0.0, -0.15, -0.15500000000000003, 1.0465, -0.31395, 0.094185, -0.0282555, 0.008476649999999999, -0.0025429949999999997];
+        let waveform_delayed = vec![
+            0.0,
+            0.0,
+            -0.15,
+            -0.15500000000000003,
+            1.0465,
+            -0.31395,
+            0.094185,
+            -0.0282555,
+            0.008476649999999999,
+            -0.0025429949999999997,
+        ];
         let mut delay = Delay::new("test".to_string(), 44100, 1.7, true);
         delay.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(waveform, waveform_delayed, 1.0e-6));
