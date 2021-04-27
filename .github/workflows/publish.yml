@@ -98,11 +98,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install stable toolchain
+      - name: Install nightly toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           target: aarch64-unknown-linux-gnu
           override: true
 
@@ -114,9 +114,7 @@ jobs:
         with:
           command: build
           use-cross: true
-          args: --release --target aarch64-unknown-linux-gnu --no-default-features --features alsa-backend --features websocket
-        env:
-          RUSTFLAGS: "-C target-feature=+neon"
+          args: --release --target aarch64-unknown-linux-gnu --no-default-features --features alsa-backend --features websocket --features neon
 
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/aarch64-unknown-linux-gnu/release camilladsp
@@ -126,7 +124,7 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
-          asset_name: camilladsp-linux-armv8.tar.gz
+          asset_name: camilladsp-linux-aarch64.tar.gz
           tag: ${{ github.ref }}
 
   windows:
@@ -189,4 +187,41 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
           asset_name: camilladsp-macos-amd64.tar.gz
+          tag: ${{ github.ref }}
+
+
+  macos_arm:
+    name: macOS aarch64
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain for arm
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          target: aarch64-apple-darwin
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args:  --release --target aarch64-apple-darwin --no-default-features --features cpal-backend --features websocket
+        env:
+          SDKROOT: /Applications/Xcode_12.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.0.sdk
+          MACOSX_DEPLOYMENT_TARGET: 11.0
+          DEVELOPER_DIR: /Applications/Xcode_12.2.app
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/aarch64-apple-darwin/release camilladsp
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v1-release
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp.tar.gz
+          asset_name: camilladsp-macos-aarch64.tar.gz
           tag: ${{ github.ref }}

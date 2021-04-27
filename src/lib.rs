@@ -30,18 +30,29 @@ extern crate signal_hook;
 extern crate tungstenite;
 
 #[macro_use]
-extern crate log;
-extern crate env_logger;
+extern crate slog_scope;
 
 use serde::Serialize;
 use std::error;
 use std::fmt;
+use std::sync::{Arc, RwLock};
 
 // Sample format
 #[cfg(feature = "32bit")]
 pub type PrcFmt = f32;
 #[cfg(not(feature = "32bit"))]
 pub type PrcFmt = f64;
+
+pub trait NewValue<T> {
+    fn new(val: T) -> Self;
+}
+
+impl<PrcFmt> NewValue<PrcFmt> for PrcFmt {
+    fn new(val: PrcFmt) -> PrcFmt {
+        val
+    }
+}
+
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
@@ -65,6 +76,7 @@ pub mod fifoqueue;
 pub mod filedevice;
 pub mod filters;
 pub mod helpers;
+pub mod loudness;
 pub mod mixer;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
@@ -113,14 +125,33 @@ pub struct CaptureStatus {
     pub update_interval: usize,
     pub measured_samplerate: usize,
     pub signal_range: f32,
+    pub signal_rms: Vec<f32>,
+    pub signal_peak: Vec<f32>,
     pub state: ProcessingState,
     pub rate_adjust: f32,
+    pub used_channels: Vec<bool>,
 }
 
 #[derive(Clone, Debug)]
 pub struct PlaybackStatus {
+    pub update_interval: usize,
     pub clipped_samples: usize,
     pub buffer_level: usize,
+    pub signal_rms: Vec<f32>,
+    pub signal_peak: Vec<f32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProcessingStatus {
+    pub volume: f32,
+    pub mute: bool,
+}
+
+#[derive(Clone)]
+pub struct StatusStructs {
+    pub capture: Arc<RwLock<CaptureStatus>>,
+    pub playback: Arc<RwLock<PlaybackStatus>>,
+    pub processing: Arc<RwLock<ProcessingStatus>>,
 }
 
 impl fmt::Display for ProcessingState {

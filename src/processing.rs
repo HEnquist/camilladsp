@@ -2,8 +2,9 @@ use audiodevice::*;
 use config;
 use filters;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
+use ProcessingStatus;
 
 pub fn run_processing(
     conf_proc: config::Configuration,
@@ -11,15 +12,16 @@ pub fn run_processing(
     tx_pb: mpsc::SyncSender<AudioMessage>,
     rx_cap: mpsc::Receiver<AudioMessage>,
     rx_pipeconf: mpsc::Receiver<(config::ConfigChange, config::Configuration)>,
+    processing_status: Arc<RwLock<ProcessingStatus>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let mut pipeline = filters::Pipeline::from_config(conf_proc);
+        let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_status.clone());
         debug!("build filters, waiting to start processing loop");
         barrier_proc.wait();
         loop {
             match rx_cap.recv() {
                 Ok(AudioMessage::Audio(mut chunk)) => {
-                    trace!("AudioMessage::Audio received");
+                    //trace!("AudioMessage::Audio received");
                     chunk = pipeline.process_chunk(chunk);
                     let msg = AudioMessage::Audio(chunk);
                     tx_pb.send(msg).unwrap();
@@ -42,9 +44,10 @@ pub fn run_processing(
             if let Ok((diff, new_config)) = rx_pipeconf.try_recv() {
                 trace!("Message received on config channel");
                 match diff {
-                    config::ConfigChange::Pipeline => {
+                    config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
                         debug!("Rebuilding pipeline.");
-                        let new_pipeline = filters::Pipeline::from_config(new_config);
+                        let new_pipeline =
+                            filters::Pipeline::from_config(new_config, processing_status.clone());
                         pipeline = new_pipeline;
                     }
                     config::ConfigChange::FilterParameters { filters, mixers } => {

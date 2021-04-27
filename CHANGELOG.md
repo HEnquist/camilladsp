@@ -1,3 +1,40 @@
+## 0.5.0
+New features:
+- Add RMS and Peak measurement for each channel at input and output.
+- Add a `Volume` filter for volume control.
+- Add exit codes.
+- Adapt `check` output to be more suitable for scripts.
+- Search for filter coefficient files with relative paths first in config file dir. 
+- Add `ShibataLow` dither types.
+- Add option to write logs to file.
+- Skip processing of channels that are not used in the pipeline.
+- Update to new faster RustFFT.
+- Overriding samplerate also scales chunksize.
+- Use updated faster resampler.
+- Enable experimental neon support in resampler via `neon` feature.
+- Add `Loudness` volume control filter.
+- Add mute options in mixer and Gain filters.
+- Add mute function to Volume and Loundness filters, with websocket commands.
+- Add `debug` feature for extra logging.
+- Improve validation of filters.
+- Setting to enable retry on reads from Alsa capture devices (helps avoiding driver bugs/quirks for some devices).
+- Optionally avoid blocking reads on Alsa capture devices (helps avoiding driver bugs/quirks for some devices).
+- Read FIR coefficients from WAV.
+- Add subsample delay.
+
+Bugfixes:
+- Don't block playback for CoreAudio/Wasapi if there is no data in time.
+- Validate `silence_threshold` and `silence_timeout` fields.
+- Fix panic when reloading config if a new filter was defined but not added to the pipeline.
+- Check for mixer parameter changes when reloading config.
+- Token substutution and overrides also work via websocket.
+- Don't exit on SIGHUP when waiting for a config.
+- Fix handling of negative values when reading filter coeffs in S24LE3 format.
+- Gain filters react to mute setting on reload.
+- Fix noise in output when resampling and muting all channels in mixer.
+- Fix handling of negative values for input and output in S24LE format.
+
+
 ## 0.4.2
 Bugfixes:
 - Fix random garbage output when using the Stdout playback device.

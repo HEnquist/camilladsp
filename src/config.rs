@@ -8,6 +8,7 @@ use std::fmt;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 //type SmpFmt = i16;
@@ -55,6 +56,7 @@ impl ConfigError {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum SampleFormat {
@@ -141,17 +143,24 @@ impl fmt::Display for SampleFormat {
 #[serde(tag = "type")]
 pub enum CaptureDevice {
     #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+    #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
         channels: usize,
         device: String,
         format: SampleFormat,
+        #[serde(default)]
+        retry_on_error: bool,
+        #[serde(default)]
+        avoid_blocking_read: bool,
     },
     #[cfg(feature = "pulse-backend")]
+    #[serde(alias = "PULSE", alias = "pulse")]
     Pulse {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
+    #[serde(alias = "FILE", alias = "file")]
     File {
         channels: usize,
         filename: String,
@@ -163,6 +172,7 @@ pub enum CaptureDevice {
         #[serde(default)]
         read_bytes: usize,
     },
+    #[serde(alias = "STDIN", alias = "stdin")]
     Stdin {
         channels: usize,
         format: SampleFormat,
@@ -174,12 +184,14 @@ pub enum CaptureDevice {
         read_bytes: usize,
     },
     #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
     #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi {
         channels: usize,
         device: String,
@@ -224,33 +236,39 @@ impl CaptureDevice {
 #[serde(tag = "type")]
 pub enum PlaybackDevice {
     #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+    #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
     #[cfg(feature = "pulse-backend")]
+    #[serde(alias = "PULSE", alias = "pulse")]
     Pulse {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
+    #[serde(alias = "FILE", alias = "file")]
     File {
         channels: usize,
         filename: String,
         format: SampleFormat,
     },
+    #[serde(alias = "STDOUT", alias = "stdout")]
     Stdout {
         channels: usize,
         format: SampleFormat,
     },
     #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio {
         channels: usize,
         device: String,
         format: SampleFormat,
     },
     #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi {
         channels: usize,
         device: String,
@@ -309,7 +327,7 @@ fn default_period() -> f32 {
 }
 
 fn default_queuelimit() -> usize {
-    100
+    4
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -373,6 +391,12 @@ pub enum Filter {
     Gain {
         parameters: GainParameters,
     },
+    Volume {
+        parameters: VolumeParameters,
+    },
+    Loudness {
+        parameters: LoudnessParameters,
+    },
     Dither {
         parameters: DitherParameters,
     },
@@ -381,6 +405,7 @@ pub enum Filter {
     },
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum FileFormat {
@@ -397,7 +422,8 @@ pub enum FileFormat {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum ConvParameters {
-    File {
+    #[serde(alias = "File")]
+    Raw {
         filename: String,
         #[serde(default)]
         format: FileFormat,
@@ -405,6 +431,11 @@ pub enum ConvParameters {
         skip_bytes_lines: usize,
         #[serde(default)]
         read_bytes_lines: usize,
+    },
+    Wav {
+        filename: String,
+        #[serde(default)]
+        channel: usize,
     },
     Values {
         values: Vec<PrcFmt>,
@@ -428,6 +459,7 @@ impl Default for ConvParameters {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
@@ -511,10 +543,38 @@ pub enum BiquadComboParameters {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct VolumeParameters {
+    #[serde(default = "default_ramp_time")]
+    pub ramp_time: f32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LoudnessParameters {
+    #[serde(default = "default_ramp_time")]
+    pub ramp_time: f32,
+    pub reference_level: f32,
+    #[serde(default = "default_loudness_boost")]
+    pub high_boost: f32,
+    #[serde(default = "default_loudness_boost")]
+    pub low_boost: f32,
+}
+
+fn default_loudness_boost() -> f32 {
+    10.0
+}
+
+fn default_ramp_time() -> f32 {
+    200.0
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct GainParameters {
     pub gain: PrcFmt,
     #[serde(default)]
     pub inverted: bool,
+    #[serde(default)]
+    pub mute: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -523,6 +583,8 @@ pub struct DelayParameters {
     pub delay: PrcFmt,
     #[serde(default)]
     pub unit: TimeUnit,
+    #[serde(default)]
+    pub subsample: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -548,6 +610,8 @@ pub enum DitherParameters {
     Fweighted441 { bits: usize },
     Shibata441 { bits: usize },
     Shibata48 { bits: usize },
+    ShibataLow441 { bits: usize },
+    ShibataLow48 { bits: usize },
     Uniform { bits: usize, amplitude: PrcFmt },
     None { bits: usize },
 }
@@ -574,6 +638,8 @@ pub struct MixerSource {
     pub channel: usize,
     pub gain: PrcFmt,
     pub inverted: bool,
+    #[serde(default)]
+    pub mute: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -581,6 +647,8 @@ pub struct MixerSource {
 pub struct MixerMapping {
     pub dest: usize,
     pub sources: Vec<MixerSource>,
+    #[serde(default)]
+    pub mute: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -628,7 +696,7 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
             return Err(ConfigError::new(&msg).into());
         }
     };
-    let mut configuration: Configuration = match serde_yaml::from_str(&contents) {
+    let configuration: Configuration = match serde_yaml::from_str(&contents) {
         Ok(config) => config,
         Err(err) => {
             let msg = format!("Invalid config file!\n{}", err);
@@ -636,16 +704,30 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
         }
     };
     //Ok(configuration)
-    apply_overrides(&mut configuration);
-    replace_tokens_in_config(&configuration)
+    //apply_overrides(&mut configuration);
+    //replace_tokens_in_config(&mut configuration);
+    //replace_relative_paths_in_config(&mut configuration, filename);
+    Ok(configuration)
 }
 
 fn apply_overrides(configuration: &mut Configuration) {
     if let Some(rate) = OVERRIDES.read().unwrap().samplerate {
         let cfg_rate = configuration.devices.samplerate;
+        let cfg_chunksize = configuration.devices.chunksize;
+
         if !configuration.devices.enable_resampling {
             debug!("Apply override for samplerate: {}", rate);
             configuration.devices.samplerate = rate;
+            let scaled_chunksize = if rate > cfg_rate {
+                cfg_chunksize * (rate as f32 / cfg_rate as f32).round() as usize
+            } else {
+                cfg_chunksize / (cfg_rate as f32 / rate as f32).round() as usize
+            };
+            debug!(
+                "Samplerate changed, adjusting chunksize: {} -> {}",
+                cfg_chunksize, scaled_chunksize
+            );
+            configuration.devices.chunksize = scaled_chunksize;
             match &mut configuration.devices.capture {
                 CaptureDevice::File { extra_samples, .. } => {
                     let new_extra = *extra_samples * rate / cfg_rate;
@@ -744,18 +826,19 @@ fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
         .replace("$channels$", &ch)
 }
 
-fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
+fn replace_tokens_in_config(config: &mut Configuration) {
     let samplerate = config.devices.samplerate;
     let num_channels = config.devices.capture.channels();
-    let mut new_config = config.clone();
-    for (_name, filter) in new_config.filters.iter_mut() {
-        if let Filter::Conv { parameters } = filter {
-            if let ConvParameters::File { filename, .. } = parameters {
-                *filename = replace_tokens(filename, samplerate, num_channels);
-            }
+    //let mut new_config = config.clone();
+    for (_name, filter) in config.filters.iter_mut() {
+        if let Filter::Conv {
+            parameters: ConvParameters::Raw { filename, .. },
+        } = filter
+        {
+            *filename = replace_tokens(filename, samplerate, num_channels);
         }
     }
-    for mut step in new_config.pipeline.iter_mut() {
+    for mut step in config.pipeline.iter_mut() {
         match &mut step {
             PipelineStep::Filter { names, .. } => {
                 for name in names.iter_mut() {
@@ -767,7 +850,51 @@ fn replace_tokens_in_config(config: &Configuration) -> Res<Configuration> {
             }
         }
     }
-    Ok(new_config)
+}
+
+// Check if coefficent files with relative paths are relative to the config file path, replace path if they are
+fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str) {
+    if let Ok(config_file) = PathBuf::from(configname.to_owned()).canonicalize() {
+        if let Some(config_dir) = config_file.parent() {
+            for (_name, filter) in config.filters.iter_mut() {
+                if let Filter::Conv {
+                    parameters: ConvParameters::Raw { filename, .. },
+                } = filter
+                {
+                    check_and_replace_relative_path(filename, config_dir);
+                } else if let Filter::Conv {
+                    parameters: ConvParameters::Wav { filename, .. },
+                } = filter
+                {
+                    check_and_replace_relative_path(filename, config_dir);
+                }
+            }
+        } else {
+            warn!("Can't find parent directory of config file");
+        }
+    } else {
+        warn!("Can't find absolute path of config file");
+    }
+}
+
+fn check_and_replace_relative_path(path_str: &mut String, config_path: &Path) {
+    let path = PathBuf::from(path_str.to_owned());
+    if path.is_absolute() {
+        trace!("{} is absolute, no change", path_str);
+    } else {
+        debug!("{} is relative", path_str);
+        let mut in_config_dir = config_path.to_path_buf();
+        in_config_dir.push(&path_str);
+        if in_config_dir.exists() {
+            debug!("Using {} found relative to config file dir", path_str);
+            *path_str = in_config_dir.to_string_lossy().into();
+        } else {
+            trace!(
+                "{} not found relative to config file dir, not changing path",
+                path_str
+            );
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -776,14 +903,15 @@ pub enum ConfigChange {
         filters: Vec<String>,
         mixers: Vec<String>,
     },
+    MixerParameters,
     Pipeline,
     Devices,
     None,
 }
 
 pub fn load_validate_config(configname: &str) -> Res<Configuration> {
-    let configuration = load_config(configname)?;
-    validate_config(configuration.clone())?;
+    let mut configuration = load_config(configname)?;
+    validate_config(&mut configuration, Some(configname))?;
     Ok(configuration)
 }
 
@@ -797,35 +925,56 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     if currentconf.pipeline != newconf.pipeline {
         return ConfigChange::Pipeline;
     }
+    if currentconf.mixers != newconf.mixers {
+        return ConfigChange::MixerParameters;
+    }
     let mut filters = Vec::<String>::new();
     let mut mixers = Vec::<String>::new();
     for (filter, params) in &newconf.filters {
-        match (params, currentconf.filters.get(filter).unwrap()) {
-            (Filter::Biquad { .. }, Filter::Biquad { .. })
-            | (Filter::BiquadCombo { .. }, Filter::BiquadCombo { .. })
-            | (Filter::Conv { .. }, Filter::Conv { .. })
-            | (Filter::Delay { .. }, Filter::Delay { .. })
-            | (Filter::Gain { .. }, Filter::Gain { .. })
-            | (Filter::Dither { .. }, Filter::Dither { .. })
-            | (Filter::DiffEq { .. }, Filter::DiffEq { .. }) => {}
-            _ => {
-                return ConfigChange::Pipeline;
+        // The pipeline didn't change, any added filter isn't included and can be skipped
+        if let Some(current_filter) = currentconf.filters.get(filter) {
+            // Did the filter change type?
+            match (params, current_filter) {
+                (Filter::Biquad { .. }, Filter::Biquad { .. })
+                | (Filter::BiquadCombo { .. }, Filter::BiquadCombo { .. })
+                | (Filter::Conv { .. }, Filter::Conv { .. })
+                | (Filter::Delay { .. }, Filter::Delay { .. })
+                | (Filter::Gain { .. }, Filter::Gain { .. })
+                | (Filter::Dither { .. }, Filter::Dither { .. })
+                | (Filter::DiffEq { .. }, Filter::DiffEq { .. })
+                | (Filter::Volume { .. }, Filter::Volume { .. })
+                | (Filter::Loudness { .. }, Filter::Loudness { .. }) => {}
+                _ => {
+                    // A filter changed type, need to rebuild the pipeline
+                    return ConfigChange::Pipeline;
+                }
+            };
+            // Only parameters changed, ok to update
+            if params != current_filter {
+                filters.push(filter.to_string());
             }
-        };
-        if params != currentconf.filters.get(filter).unwrap() {
-            filters.push(filter.to_string());
         }
     }
     for (mixer, params) in &newconf.mixers {
-        if params != currentconf.mixers.get(mixer).unwrap() {
-            mixers.push(mixer.to_string());
+        // The pipeline didn't change, any added mixer isn't included and can be skipped
+        if let Some(current_mixer) = currentconf.mixers.get(mixer) {
+            if params != current_mixer {
+                mixers.push(mixer.to_string());
+            }
         }
     }
     ConfigChange::FilterParameters { filters, mixers }
 }
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
-pub fn validate_config(conf: Configuration) -> Res<()> {
+pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<()> {
+    // pre-process by applying overrides and replacing tokens
+    apply_overrides(conf);
+    replace_tokens_in_config(conf);
+    if let Some(fname) = filename {
+        replace_relative_paths_in_config(conf, fname);
+    }
+
     if conf.devices.target_level >= 2 * conf.devices.chunksize {
         let msg = format!(
             "target_level can't be larger than {}",
@@ -836,16 +985,22 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
     if conf.devices.adjust_period <= 0.0 {
         return Err(ConfigError::new("adjust_period must be positive and > 0").into());
     }
+    if conf.devices.silence_threshold > 0.0 {
+        return Err(ConfigError::new("silence_threshold must be less than or equal to 0").into());
+    }
+    if conf.devices.silence_timeout < 0.0 {
+        return Err(ConfigError::new("silence_timeout cannot be negative").into());
+    }
     let mut num_channels = conf.devices.capture.channels();
     let fs = conf.devices.samplerate;
-    for step in conf.pipeline {
+    for step in &conf.pipeline {
         match step {
             PipelineStep::Mixer { name } => {
-                if !conf.mixers.contains_key(&name) {
+                if !conf.mixers.contains_key(name) {
                     let msg = format!("Use of missing mixer '{}'", name);
                     return Err(ConfigError::new(&msg).into());
                 } else {
-                    let chan_in = conf.mixers.get(&name).unwrap().channels.r#in;
+                    let chan_in = conf.mixers.get(name).unwrap().channels.r#in;
                     if chan_in != num_channels {
                         let msg = format!(
                             "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
@@ -853,8 +1008,8 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
                         );
                         return Err(ConfigError::new(&msg).into());
                     }
-                    num_channels = conf.mixers.get(&name).unwrap().channels.out;
-                    match mixer::validate_mixer(&conf.mixers.get(&name).unwrap()) {
+                    num_channels = conf.mixers.get(name).unwrap().channels.out;
+                    match mixer::validate_mixer(&conf.mixers.get(name).unwrap()) {
                         Ok(_) => {}
                         Err(err) => {
                             let msg = format!("Invalid mixer '{}'. Reason: {}", name, err);
@@ -864,16 +1019,16 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
                 }
             }
             PipelineStep::Filter { channel, names } => {
-                if channel >= num_channels {
+                if *channel >= num_channels {
                     let msg = format!("Use of non existing channel {}", channel);
                     return Err(ConfigError::new(&msg).into());
                 }
                 for name in names {
-                    if !conf.filters.contains_key(&name) {
+                    if !conf.filters.contains_key(name) {
                         let msg = format!("Use of missing filter '{}'", name);
                         return Err(ConfigError::new(&msg).into());
                     }
-                    match filters::validate_filter(fs, &conf.filters.get(&name).unwrap()) {
+                    match filters::validate_filter(fs, &conf.filters.get(name).unwrap()) {
                         Ok(_) => {}
                         Err(err) => {
                             let msg = format!("Invalid filter '{}'. Reason: {}", name, err);
@@ -893,4 +1048,16 @@ pub fn validate_config(conf: Configuration) -> Res<()> {
         return Err(ConfigError::new(&msg).into());
     }
     Ok(())
+}
+
+/// Get a vector telling which channels are actually used in the pipeline
+pub fn get_used_capture_channels(conf: &Configuration) -> Vec<bool> {
+    for step in conf.pipeline.iter() {
+        if let PipelineStep::Mixer { name } = step {
+            let mixerconf = conf.mixers.get(name).unwrap();
+            return mixer::get_used_input_channels(mixerconf);
+        }
+    }
+    let capture_channels = conf.devices.capture.channels();
+    vec![true; capture_channels]
 }

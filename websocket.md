@@ -49,7 +49,7 @@ The available commands are listed below. All commands return the result, and for
 
 Commands for reading and changing settings for the websocket server.
 - `GetUpdateInterval` : get the update interval in ms for capture rate and signalrange.
-  * return the value as an integer
+  * returns the value as an integer
 - `SetUpdateInterval` : set the update interval in ms for capturerate and signalrange.
 
 ### Read processing status
@@ -62,13 +62,32 @@ Commands for reading status parameters.
 - `GetCaptureRate` : get the measured sample rate of the capture device.
   * return the value as an integer
 - `GetSignalRange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)
-  * return the value as a float
+  * returns the value as a float
+- `GetCaptureSignalPeak` : get the peak value in the last chunk for all channels on the capture side. The scale is in dB, and a value of 0.0 means full level.
+  * returns the value as a vector of floats
+- `GetCaptureSignalRms` : get the RMS value in the last chunk for all channels on the capture side. The scale is in dB, and a value of 0.0 means full level.
+  * returns the value as a vector of floats
+- `GetPlaybackSignalPeak` : get the peak value in the last chunk for all channels on the playback side. The scale is in dB, and a value of 0.0 means full level.
+  * returns the value as a vector of floats
+- `GetPlaybackSignalRms` : get the RMS value in the last chunk for all channels on the playback side. The scale is in dB, and a value of 0.0 means full level.
+  * returns the value as a vector of floats
 - `GetRateAdjust` : get the adjustment factor applied to the asynchronous resampler.
-  * return the value as a float
+  * returns the value as a float
 - `GetBufferLevel` : get the current buffer level of the playback device when rate adjust is enabled, returns zero otherwise.
-  * return the value as an integer
+  * returns the value as an integer
 - `GetClippedSamples` : get the number of clipped samples since the config was loaded.
-  * return the value as an integer
+  * returns the value as an integer
+
+
+### Volume control
+
+Commands for setting and getting the volume setting. These are only relevant if the pipeline includes "Volume" or "Loudness" filters.
+- `GetVolume` : get the current volume setting in dB.
+  * returns the value as a float
+- `SetVolume` : set the volume control to the given value in dB.
+- `GetMute` : get the current mute setting.
+  * returns the muting status as a boolean
+- `SetMute` : set muting to the given value.
 
 ### Config management
 

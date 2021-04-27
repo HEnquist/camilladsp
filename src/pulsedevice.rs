@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
+use NewValue;
 use PrcFmt;
 use ProcessingState;
 use Res;
@@ -90,11 +91,11 @@ fn open_pulse(
     };
 
     let pulse_format = match sample_format {
-        SampleFormat::S16LE => sample::SAMPLE_S16NE,
-        SampleFormat::S24LE => sample::SAMPLE_S24_32NE,
-        SampleFormat::S24LE3 => sample::SAMPLE_S24NE,
-        SampleFormat::S32LE => sample::SAMPLE_S32NE,
-        SampleFormat::FLOAT32LE => sample::SAMPLE_FLOAT32NE,
+        SampleFormat::S16LE => sample::Format::S16le,
+        SampleFormat::S24LE => sample::Format::S24_32le,
+        SampleFormat::S24LE3 => sample::Format::S24le,
+        SampleFormat::S32LE => sample::Format::S32le,
+        SampleFormat::FLOAT32LE => sample::Format::F32le,
         _ => panic!("invalid format"),
     };
 
@@ -161,8 +162,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
+                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
                         let mut conversion_result;
+                        let mut chunk_stats;
                         let bytes_per_frame = channels * store_bytes_per_sample;
                         barrier.wait();
                         let mut last_instant = Instant::now();
@@ -176,7 +178,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         | SampleFormat::S24LE
                                         | SampleFormat::S32LE => {
                                             conversion_result = chunk_to_buffer_bytes(
-                                                chunk,
+                                                &chunk,
                                                 &mut buffer,
                                                 scalefactor,
                                                 bits_per_sample,
@@ -185,7 +187,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         }
                                         SampleFormat::FLOAT32LE => {
                                             conversion_result = chunk_to_buffer_float_bytes(
-                                                chunk,
+                                                &chunk,
                                                 &mut buffer,
                                                 bits_per_sample,
                                             );
@@ -214,6 +216,16 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         playback_status.write().unwrap().clipped_samples +=
                                             conversion_result.1;
                                     }
+                                    chunk_stats = chunk.get_stats();
+                                    playback_status.write().unwrap().signal_rms =
+                                        chunk_stats.rms_db();
+                                    playback_status.write().unwrap().signal_peak =
+                                        chunk_stats.peak_db();
+                                    //trace!(
+                                    //    "Playback signal RMS: {:?}, peak: {:?}",
+                                    //    chunk_stats.rms_db(),
+                                    //    chunk_stats.peak_db()
+                                    //);
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
@@ -250,13 +262,14 @@ fn get_nbr_capture_bytes(
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
-        trace!(
-            "Resampler needs {} frames, will read {} bytes",
-            resampl.nbr_frames_needed(),
-            new_capture_bytes
-        );
-        new_capture_bytes
+        //let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
+        //trace!(
+        //    "Resampler needs {} frames, will read {} bytes",
+        //    resampl.nbr_frames_needed(),
+        //    new_capture_bytes
+        //);
+        //new_capture_bytes
+        resampl.nbr_frames_needed() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }
@@ -320,7 +333,7 @@ impl CaptureDevice for PulseCaptureDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample - 1);
+                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
                         barrier.wait();
                         debug!("starting captureloop");
                         let mut buf = vec![0u8; buffer_bytes];
@@ -331,7 +344,7 @@ impl CaptureDevice for PulseCaptureDevice {
                         let mut value_range = 0.0;
                         let mut rate_adjust = 0.0;
                         let mut state = ProcessingState::Running;
-                        //let chunk_duration = Duration::from_micros(((900000*chunksize)/samplerate) as u64);
+                        let mut chunk_stats;
                         let bytes_per_frame = channels * store_bytes_per_sample;
                         let mut last_instant = Instant::now();
                         loop {
@@ -379,8 +392,9 @@ impl CaptureDevice for PulseCaptureDevice {
                                         averager.restart();
                                         let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
                                         trace!(
-                                            "Measured sample rate is {} Hz",
-                                            measured_rate_f
+                                            "Measured sample rate is {} Hz, signal RMS is {:?}",
+                                            measured_rate_f,
+                                            capture_status.read().unwrap().signal_rms,
                                         );
                                         let mut capt_stat = capture_status.write().unwrap();
                                         capt_stat.measured_samplerate = measured_rate_f as usize;
@@ -403,8 +417,10 @@ impl CaptureDevice for PulseCaptureDevice {
                                         &buf[0..capture_bytes],
                                         channels,
                                         scalefactor,
+                                        bits_per_sample,
                                         store_bytes_per_sample,
                                         capture_bytes,
+                                        &capture_status.read().unwrap().used_channels,
                                     )
                                 }
                                 SampleFormat::FLOAT32LE => buffer_to_chunk_float_bytes(
@@ -415,21 +431,28 @@ impl CaptureDevice for PulseCaptureDevice {
                                 ),
                                 _ => panic!("Unsupported sample format"),
                             };
+                            chunk_stats = chunk.get_stats();
+                            //trace!("Capture signal rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
                                     let new_waves = resampl.process(&chunk.waveforms).unwrap();
-                                    chunk.frames = new_waves[0].len();
-                                    chunk.valid_frames = new_waves[0].len();
+                                    let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
+                                    if chunk_frames == 0 {
+                                        chunk_frames = chunksize;
+                                    }
+                                    chunk.frames = chunk_frames;
+                                    chunk.valid_frames = chunk.frames;
                                     chunk.waveforms = new_waves;
                                 }
                                 let msg = AudioMessage::Audio(chunk);
                                 channel.send(msg).unwrap();
                             }
+                            capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
+                            capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
                         }
-                        let mut capt_stat = capture_status.write().unwrap();
-                        capt_stat.state = ProcessingState::Inactive;
+                        capture_status.write().unwrap().state = ProcessingState::Inactive;
                     }
                     Err(err) => {
                         let send_result = status_channel

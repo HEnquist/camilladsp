@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use NewValue;
 use PrcFmt;
 use ProcessingState;
 
@@ -30,8 +31,9 @@ impl SilenceCounter {
         samplerate: usize,
         chunksize: usize,
     ) -> SilenceCounter {
-        let silence_threshold = (10.0 as PrcFmt).powf(silence_threshold_db / 20.0);
-        let silence_limit_nbr = (silence_timeout * ((samplerate / chunksize) as PrcFmt)) as usize;
+        let silence_threshold = PrcFmt::new(10.0).powf(silence_threshold_db / 20.0);
+        let silence_limit_nbr =
+            (silence_timeout * samplerate as PrcFmt / chunksize as PrcFmt).round() as usize;
         SilenceCounter {
             silence_threshold,
             silence_limit_nbr,
@@ -40,7 +42,6 @@ impl SilenceCounter {
     }
 
     pub fn update(&mut self, value_range: PrcFmt) -> ProcessingState {
-        trace!("Value range: {}", value_range);
         let mut state = ProcessingState::Running;
         if self.silence_limit_nbr > 0 {
             if value_range > self.silence_threshold {
@@ -238,7 +239,7 @@ mod tests {
     #[test]
     fn silencecounter() {
         let mut counter = SilenceCounter::new(-40.0, 3.0, 48000, 1024);
-        let limit_nbr = 3 * (48000 / 1024);
+        let limit_nbr = (3.0f64 * 48000.0 / 1024.0).round() as usize;
         assert_eq!(counter.silence_limit_nbr, limit_nbr);
         assert_eq!(counter.silence_threshold, 0.01);
         for _ in 0..(2 * limit_nbr) {
@@ -254,6 +255,30 @@ mod tests {
             assert_eq!(state, ProcessingState::Paused);
         }
         for _ in 0..(2 * limit_nbr) {
+            let state = counter.update(0.1);
+            assert_eq!(state, ProcessingState::Running);
+        }
+    }
+
+    #[test]
+    fn silencecounter_largechunksize() {
+        let mut counter = SilenceCounter::new(-40.0, 1.0, 48000, 23000);
+        let limit_nbr = 2;
+        assert_eq!(counter.silence_limit_nbr, limit_nbr);
+        assert_eq!(counter.silence_threshold, 0.01);
+        for _ in 0..5 {
+            let state = counter.update(0.1);
+            assert_eq!(state, ProcessingState::Running);
+        }
+        for _ in 0..2 {
+            let state = counter.update(0.001);
+            assert_eq!(state, ProcessingState::Running);
+        }
+        for _ in 0..5 {
+            let state = counter.update(0.001);
+            assert_eq!(state, ProcessingState::Paused);
+        }
+        for _ in 0..5 {
             let state = counter.update(0.1);
             assert_eq!(state, ProcessingState::Running);
         }

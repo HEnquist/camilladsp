@@ -22,15 +22,17 @@ extern crate signal_hook;
 extern crate tungstenite;
 
 #[macro_use]
-extern crate log;
-extern crate env_logger;
+extern crate slog;
+extern crate slog_async;
+extern crate slog_term;
+#[macro_use]
+extern crate slog_scope;
 
-use chrono::Local;
+use slog::Drain;
+
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
-use env_logger::Builder;
-use log::LevelFilter;
 use std::env;
-use std::io::Write;
+use std::fs::OpenOptions;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -47,30 +49,26 @@ use camillalib::socketserver;
 #[cfg(feature = "websocket")]
 use std::net::IpAddr;
 
-use camillalib::StatusMessage;
+use camillalib::{
+    CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus, ProcessingState,
+    ProcessingStatus, StatusMessage, StatusStructs,
+};
 
-use camillalib::CommandMessage;
-
-use camillalib::ExitState;
-
-use camillalib::CaptureStatus;
-use camillalib::ExitRequest;
-use camillalib::PlaybackStatus;
-use camillalib::ProcessingState;
+const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
+const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
+const EXIT_OK: i32 = 0; // All ok
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
     new_config_shared: &Arc<Mutex<Option<config::Configuration>>>,
 ) -> Res<config::Configuration> {
-    //let active_conf = active_config_shared.lock().unwrap().clone();
     let new_conf = new_config_shared.lock().unwrap().clone();
     let path = config_path.lock().unwrap().clone();
 
     //new_config is not None, this is the one to use
-    if let Some(conf) = new_conf {
+    if let Some(mut conf) = new_conf {
         debug!("Reload using config from websocket");
-        //let conf = active_config_shared.lock().unwrap().clone();
-        match config::validate_config(conf.clone()) {
+        match config::validate_config(&mut conf, None) {
             Ok(()) => {
                 debug!("Config valid");
                 Ok(conf)
@@ -83,7 +81,7 @@ fn get_new_config(
         }
     } else if let Some(file) = path {
         match config::load_config(&file) {
-            Ok(conf) => match config::validate_config(conf.clone()) {
+            Ok(mut conf) => match config::validate_config(&mut conf, Some(&file)) {
                 Ok(()) => {
                     debug!("Reload using config file");
                     Ok(conf)
@@ -112,10 +110,9 @@ fn run(
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
-    capture_status: Arc<RwLock<CaptureStatus>>,
-    playback_status: Arc<RwLock<PlaybackStatus>>,
+    status_structs: StatusStructs,
 ) -> Res<ExitState> {
-    capture_status.write().unwrap().state = ProcessingState::Starting;
+    status_structs.capture.write().unwrap().state = ProcessingState::Starting;
     let mut is_starting = true;
     let conf = match new_config_shared.lock().unwrap().clone() {
         Some(cfg) => cfg,
@@ -151,13 +148,24 @@ fn run(
     signal_exit.store(ExitRequest::NONE, Ordering::Relaxed);
 
     // Processing thread
-    processing::run_processing(conf_proc, barrier_proc, tx_pb, rx_cap, rx_pipeconf);
+    processing::run_processing(
+        conf_proc,
+        barrier_proc,
+        tx_pb,
+        rx_cap,
+        rx_pipeconf,
+        status_structs.processing,
+    );
 
     // Playback thread
     let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
     let pb_handle = playback_dev
-        .start(rx_pb, barrier_pb, tx_status_pb, playback_status)
+        .start(rx_pb, barrier_pb, tx_status_pb, status_structs.playback)
         .unwrap();
+
+    let used_channels = config::get_used_capture_channels(&active_config);
+    debug!("Using channels {:?}", used_channels);
+    status_structs.capture.write().unwrap().used_channels = used_channels;
 
     // Capture thread
     let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
@@ -167,7 +175,7 @@ fn run(
             barrier_cap,
             tx_status_cap,
             rx_command_cap,
-            capture_status,
+            status_structs.capture.clone(),
         )
         .unwrap();
 
@@ -176,7 +184,7 @@ fn run(
     let mut pb_ready = false;
     let mut cap_ready = false;
     #[cfg(target_os = "linux")]
-    signal_hook::flag::register(signal_hook::SIGHUP, Arc::clone(&signal_reload))?;
+    signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&signal_reload))?;
 
     loop {
         if signal_reload.load(Ordering::Relaxed) {
@@ -189,11 +197,15 @@ fn run(
                     let comp = config::config_diff(&active_config, &conf);
                     match comp {
                         config::ConfigChange::Pipeline
+                        | config::ConfigChange::MixerParameters
                         | config::ConfigChange::FilterParameters { .. } => {
                             tx_pipeconf.send((comp, conf.clone())).unwrap();
                             active_config = conf;
                             *active_config_shared.lock().unwrap() = Some(active_config.clone());
                             *new_config_shared.lock().unwrap() = None;
+                            let used_channels = config::get_used_capture_channels(&active_config);
+                            debug!("Using channels {:?}", used_channels);
+                            status_structs.capture.write().unwrap().used_channels = used_channels;
                             debug!("Sent changes to pipeline");
                         }
                         config::ConfigChange::Devices => {
@@ -306,7 +318,7 @@ fn run(
     }
 }
 
-fn main() {
+fn main_process() -> i32 {
     let mut features = Vec::new();
     if cfg!(feature = "alsa-backend") {
         features.push("alsa-backend");
@@ -328,6 +340,12 @@ fn main() {
     }
     if cfg!(feature = "32bit") {
         features.push("32bit");
+    }
+    if cfg!(feature = "neon") {
+        features.push("neon");
+    }
+    if cfg!(feature = "debug") {
+        features.push("debug");
     }
     let featurelist = format!("Built with features: {}", features.join(", "));
     let longabout = format!("{}\n\n{}", crate_description!(), featurelist);
@@ -373,6 +391,37 @@ fn main() {
                 .conflicts_with("verbosity"),
         )
         .arg(
+            Arg::with_name("logfile")
+                .short("o")
+                .long("logfile")
+                .display_order(100)
+                .takes_value(true)
+                .help("Write logs to file"),
+        )
+        .arg(
+            Arg::with_name("gain")
+                .help("Set initial gain in dB for Volume and Loudness filters")
+                .short("g")
+                .long("gain")
+                .display_order(200)
+                .takes_value(true)
+                .validator(|v: String| -> Result<(), String> {
+                    if let Ok(gain) = v.parse::<f32>() {
+                        if (-120.0..=20.0).contains(&gain) {
+                            return Ok(());
+                        }
+                    }
+                    Err(String::from("Must be a number between -120 and +20"))
+                }),
+        )
+        .arg(
+            Arg::with_name("mute")
+                .help("Start with Volume and Loudness filters muted")
+                .short("m")
+                .long("mute")
+                .display_order(200),
+        )
+        .arg(
             Arg::with_name("samplerate")
                 .help("Override samplerate in config")
                 .short("r")
@@ -412,10 +461,8 @@ fn main() {
                 .display_order(300)
                 .takes_value(true)
                 .validator(|v: String| -> Result<(), String> {
-                    if let Ok(rate) = v.parse::<usize>() {
-                        if rate > 0 {
-                            return Ok(());
-                        }
+                    if let Ok(_samples) = v.parse::<usize>() {
+                        return Ok(());
                     }
                     Err(String::from("Must be an integer > 0"))
                 }),
@@ -493,36 +540,61 @@ fn main() {
     let matches = clapapp.get_matches();
 
     let mut loglevel = match matches.occurrences_of("verbosity") {
-        0 => LevelFilter::Info,
-        1 => LevelFilter::Debug,
-        2 => LevelFilter::Trace,
-        _ => LevelFilter::Trace,
+        0 => slog::Level::Info,
+        1 => slog::Level::Debug,
+        2 => slog::Level::Trace,
+        _ => slog::Level::Trace,
     };
     loglevel = match matches.value_of("loglevel") {
-        Some("trace") => LevelFilter::Trace,
-        Some("debug") => LevelFilter::Debug,
-        Some("info") => LevelFilter::Info,
-        Some("warn") => LevelFilter::Warn,
-        Some("error") => LevelFilter::Error,
-        Some("off") => LevelFilter::Off,
+        Some("trace") => slog::Level::Trace,
+        Some("debug") => slog::Level::Debug,
+        Some("info") => slog::Level::Info,
+        Some("warn") => slog::Level::Warning,
+        Some("error") => slog::Level::Error,
+        Some("off") => slog::Level::Critical,
         _ => loglevel,
     };
 
-    let mut builder = Builder::from_default_env();
+    let drain = match matches.value_of("loglevel") {
+        Some("off") => {
+            let drain = slog::Discard;
+            slog_async::Async::new(drain).build().fuse()
+        }
+        _ => {
+            if let Some(logfile) = matches.value_of("logfile") {
+                let file = OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(logfile)
+                    .unwrap();
+                let decorator = slog_term::PlainDecorator::new(file);
+                let drain = slog_term::FullFormat::new(decorator)
+                    .build()
+                    .filter_level(loglevel)
+                    .fuse();
+                slog_async::Async::new(drain).build().fuse()
+            } else {
+                let decorator = slog_term::TermDecorator::new().stderr().build();
+                let drain = slog_term::FullFormat::new(decorator)
+                    .build()
+                    .filter_level(loglevel)
+                    .fuse();
+                slog_async::Async::new(drain).build().fuse()
+            }
+        }
+    };
 
-    builder
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "{} {} {} - {}",
-                Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                buf.default_styled_level(record.level()),
-                record.module_path().unwrap_or("camilladsp"),
-                record.args()
-            )
-        })
-        .filter(None, loglevel)
-        .init();
+    let log = slog::Logger::root(
+        drain,
+        o!("module" => {
+        slog::FnValue(
+            |rec : &slog::Record| { rec.module() }
+                )
+            }),
+    );
+
+    let _guard = slog_scope::set_global_logger(log);
     // logging examples
     //trace!("trace message"); //with -vv
     //debug!("debug message"); //with -v
@@ -530,11 +602,23 @@ fn main() {
     //warn!("warn message");
     //error!("error message");
 
+    #[cfg(target_os = "linux")]
+    let _signal = unsafe {
+        signal_hook::low_level::register(signal_hook::consts::SIGHUP, || debug!("Received SIGHUP"))
+    };
+
     let configname = match matches.value_of("configfile") {
         Some(path) => Some(path.to_string()),
         None => None,
     };
-    //let mut new_settings = SETTINGS.write().unwrap();
+
+    let initial_volume = matches
+        .value_of("gain")
+        .map(|s| s.parse::<f32>().unwrap())
+        .unwrap_or(0.0);
+
+    let initial_mute = matches.is_present("mute");
+
     config::OVERRIDES.write().unwrap().samplerate = matches
         .value_of("samplerate")
         .map(|s| s.parse::<usize>().unwrap());
@@ -550,6 +634,20 @@ fn main() {
 
     debug!("Read config file {:?}", configname);
 
+    if matches.is_present("check") {
+        match config::load_validate_config(&configname.unwrap()) {
+            Ok(_) => {
+                println!("Config is valid");
+                return EXIT_OK;
+            }
+            Err(err) => {
+                println!("Config is not valid");
+                println!("{}", err);
+                return EXIT_BAD_CONFIG;
+            }
+        }
+    }
+
     let configuration = match &configname {
         Some(path) => match config::load_validate_config(&path.clone()) {
             Ok(conf) => {
@@ -559,16 +657,11 @@ fn main() {
             Err(err) => {
                 error!("{}", err);
                 debug!("Exiting due to config error");
-                return;
+                return EXIT_BAD_CONFIG;
             }
         },
         None => None,
     };
-
-    if matches.is_present("check") {
-        debug!("Check only, done!");
-        return;
-    }
 
     let wait = matches.is_present("wait");
 
@@ -580,12 +673,27 @@ fn main() {
         signal_range: 0.0,
         rate_adjust: 0.0,
         state: ProcessingState::Inactive,
+        signal_rms: Vec::new(),
+        signal_peak: Vec::new(),
+        used_channels: Vec::new(),
     }));
     let playback_status = Arc::new(RwLock::new(PlaybackStatus {
         buffer_level: 0,
         clipped_samples: 0,
+        update_interval: 1000,
+        signal_rms: Vec::new(),
+        signal_peak: Vec::new(),
     }));
-    //let active_config = Arc::new(Mutex::new(String::new()));
+    let processing_status = Arc::new(RwLock::new(ProcessingStatus {
+        volume: initial_volume,
+        mute: initial_mute,
+    }));
+
+    let status_structs = StatusStructs {
+        capture: capture_status.clone(),
+        playback: playback_status.clone(),
+        processing: processing_status.clone(),
+    };
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
 
@@ -594,10 +702,7 @@ fn main() {
     #[cfg(feature = "websocket")]
     {
         if let Some(port_str) = matches.value_of("port") {
-            let serveraddress = match matches.value_of("address") {
-                Some(addr) => addr,
-                None => "127.0.0.1",
-            };
+            let serveraddress = matches.value_of("address").unwrap_or("127.0.0.1");
             let serverport = port_str.parse::<usize>().unwrap();
             let shared_data = socketserver::SharedData {
                 signal_reload: signal_reload.clone(),
@@ -605,8 +710,9 @@ fn main() {
                 active_config: active_config.clone(),
                 active_config_path: active_config_path.clone(),
                 new_config: new_config.clone(),
-                capture_status: capture_status.clone(),
-                playback_status: playback_status.clone(),
+                capture_status,
+                playback_status,
+                processing_status,
             };
             let server_params = socketserver::ServerParameters {
                 port: serverport,
@@ -626,12 +732,12 @@ fn main() {
         while new_config.lock().unwrap().is_none() {
             if !wait {
                 debug!("No config and not in wait mode, exiting!");
-                return;
+                return EXIT_OK;
             }
             trace!("waiting...");
             if signal_exit.load(Ordering::Relaxed) == ExitRequest::EXIT {
                 // exit requested
-                return;
+                return EXIT_OK;
             } else if signal_reload.load(Ordering::Relaxed) {
                 debug!("Reloading configuration...");
                 signal_reload.store(false, Ordering::Relaxed);
@@ -662,21 +768,20 @@ fn main() {
             active_config.clone(),
             active_config_path.clone(),
             new_config.clone(),
-            capture_status.clone(),
-            playback_status.clone(),
+            status_structs.clone(),
         );
         match exitstatus {
             Err(e) => {
                 *active_config.lock().unwrap() = None;
                 error!("({}) {}", e.to_string(), e);
                 if !wait {
-                    break;
+                    return EXIT_PROCESSING_ERROR;
                 }
             }
             Ok(ExitState::Exit) => {
                 debug!("Exiting");
                 *active_config.lock().unwrap() = None;
-                break;
+                return EXIT_OK;
             }
             Ok(ExitState::Restart) => {
                 *active_config.lock().unwrap() = None;
@@ -684,4 +789,8 @@ fn main() {
             }
         };
     }
+}
+
+fn main() {
+    std::process::exit(main_process());
 }

@@ -415,6 +415,7 @@ def draw_box(ax, level, size, label=None):
         ax.text(2*level, size/2, label, horizontalalignment='center', verticalalignment='bottom')
 
 def main():
+    print('This script is deprecated. Please use the "plotcamillaconf" tool\nfrom the pycamilladsp-plot library instead.')
     fname = sys.argv[1]
 
     conffile = open(fname)

@@ -19,7 +19,7 @@ filters:
   lowpass_fir:
     type: Conv
     parameters:
-      type: File 
+      type: Raw 
       filename: filter.txt
 
 mixers:

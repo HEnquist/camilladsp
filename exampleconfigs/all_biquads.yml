@@ -100,6 +100,16 @@ filters:
       q_act: 1.2
       freq_target: 25
       q_target: 0.7
+  free:
+    type: Biquad
+    parameters:
+      type: Free
+      a1: -1.9114181152906082
+      a2: 0.9155193893411311
+      b0: 1.0051540967655406
+      b1: -1.9114181152906082
+      b2: 0.9103652925755905
+
 
    
 

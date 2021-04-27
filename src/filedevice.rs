@@ -19,6 +19,7 @@ use rubato::Resampler;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
+use NewValue;
 use PrcFmt;
 use ProcessingState;
 use Res;
@@ -113,7 +114,8 @@ impl PlaybackDevice for FilePlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (2.0 as PrcFmt).powi(bits_per_sample as i32 - 1);
+                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample as i32 - 1);
+                        let mut chunk_stats;
                         barrier.wait();
                         debug!("starting playback loop");
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
@@ -123,14 +125,14 @@ impl PlaybackDevice for FilePlaybackDevice {
                                     let (valid_bytes, nbr_clipped) =
                                         match sample_format.number_family() {
                                             NumberFamily::Integer => chunk_to_buffer_bytes(
-                                                chunk,
+                                                &chunk,
                                                 &mut buffer,
                                                 scalefactor,
                                                 bits_per_sample as i32,
                                                 store_bytes_per_sample,
                                             ),
                                             NumberFamily::Float => chunk_to_buffer_float_bytes(
-                                                chunk,
+                                                &chunk,
                                                 &mut buffer,
                                                 bits_per_sample as i32,
                                             ),
@@ -150,6 +152,16 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         playback_status.write().unwrap().clipped_samples +=
                                             nbr_clipped;
                                     }
+                                    chunk_stats = chunk.get_stats();
+                                    playback_status.write().unwrap().signal_rms =
+                                        chunk_stats.rms_db();
+                                    playback_status.write().unwrap().signal_peak =
+                                        chunk_stats.peak_db();
+                                    //trace!(
+                                    //    "Playback signal RMS: {:?}, peak: {:?}",
+                                    //    chunk_stats.rms_db(),
+                                    //    chunk_stats.peak_db()
+                                    //);
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
@@ -186,37 +198,50 @@ fn get_nbr_capture_bytes(
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
-        trace!(
-            "Resampler needs {} frames, will read {} bytes",
-            resampl.nbr_frames_needed(),
-            new_capture_bytes
-        );
-        new_capture_bytes
+        //let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
+        //trace!(
+        //    "Resampler needs {} frames, will read {} bytes",
+        //    resampl.nbr_frames_needed(),
+        //    new_capture_bytes
+        //);
+        //new_capture_bytes
+        resampl.nbr_frames_needed() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }
 }
 
+//&params.sample_format,
+//params.channels,
+//params.bits_per_sample,
+//params.store_bytes_per_sample,
+//bytes_read,
+//scalefactor,
+//&params.capture_status.read().unwrap().used_channels,
+
 fn build_chunk(
     buf: &[u8],
-    sample_format: &SampleFormat,
-    channels: usize,
-    bits_per_sample: i32,
-    store_bytes_per_sample: usize,
+    params: &CaptureParams,
+    //sample_format: &SampleFormat,
+    //channels: usize,
+    //bits_per_sample: i32,
+    //store_bytes_per_sample: usize,
     bytes_read: usize,
     scalefactor: PrcFmt,
+    //used_channels: &[bool],
 ) -> AudioChunk {
-    match sample_format.number_family() {
+    match params.sample_format.number_family() {
         NumberFamily::Integer => buffer_to_chunk_bytes(
             &buf,
-            channels,
+            params.channels,
             scalefactor,
-            store_bytes_per_sample,
+            params.bits_per_sample,
+            params.store_bytes_per_sample,
             bytes_read,
+            &params.capture_status.read().unwrap().used_channels,
         ),
         NumberFamily::Float => {
-            buffer_to_chunk_float_bytes(&buf, channels, bits_per_sample, bytes_read)
+            buffer_to_chunk_float_bytes(&buf, params.channels, params.bits_per_sample, bytes_read)
         }
     }
 }
@@ -249,7 +274,7 @@ fn capture_loop(
     mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
 ) {
     debug!("starting captureloop");
-    let scalefactor = (2.0 as PrcFmt).powi(params.bits_per_sample - 1);
+    let scalefactor = PrcFmt::new(2.0).powi(params.bits_per_sample - 1);
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
     let bytes_per_frame = params.channels * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];
@@ -265,6 +290,7 @@ fn capture_loop(
         params.capture_samplerate,
         params.chunksize,
     );
+    let mut chunk_stats;
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     let mut state = ProcessingState::Running;
@@ -305,7 +331,7 @@ fn capture_loop(
         let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         match read_res {
             Ok(bytes) => {
-                trace!("Captured {} bytes", bytes);
+                //trace!("Captured {} bytes", bytes);
                 bytes_read = bytes;
                 nbr_bytes_read += bytes;
                 if bytes > 0 && bytes < capture_bytes {
@@ -371,22 +397,36 @@ fn capture_loop(
         };
         let mut chunk = build_chunk(
             &buf[0..capture_bytes],
-            &params.sample_format,
-            params.channels,
-            params.bits_per_sample,
-            params.store_bytes_per_sample,
+            &params,
+            //&params.sample_format,
+            //params.channels,
+            //params.bits_per_sample,
+            //params.store_bytes_per_sample,
             bytes_read,
             scalefactor,
+            //&params.capture_status.read().unwrap().used_channels,
         );
+
         value_range = chunk.maxval - chunk.minval;
+        chunk_stats = chunk.get_stats();
+        //trace!(
+        //    "Capture rms {:?}, peak {:?}",
+        //    chunk_stats.rms_db(),
+        //    chunk_stats.peak_db()
+        //);
+        params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
+        params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
         state = silence_counter.update(value_range);
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
                 let new_waves = resampl.process(&chunk.waveforms).unwrap();
-                chunk.frames = new_waves[0].len();
-                chunk.valid_frames = (new_waves[0].len() as f32
-                    * (bytes_read as f32 / capture_bytes as f32))
-                    as usize;
+                let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
+                if chunk_frames == 0 {
+                    chunk_frames = params.chunksize;
+                }
+                chunk.frames = chunk_frames;
+                chunk.valid_frames =
+                    (chunk.frames as f32 * (bytes_read as f32 / capture_bytes as f32)) as usize;
                 chunk.waveforms = new_waves;
             }
             let msg = AudioMessage::Audio(chunk);
@@ -520,7 +560,7 @@ fn send_silence(
             samples_left
         };
         let waveforms = vec![vec![0.0; chunksize]; channels];
-        let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunk_samples);
+        let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunksize, chunk_samples);
         let msg = AudioMessage::Audio(chunk);
         debug!("Sending extra chunk of {} frames", chunk_samples);
         audio_channel.send(msg).unwrap();

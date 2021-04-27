@@ -8,6 +8,7 @@ use config;
 
 // Sample format
 //type SmpFmt = i16;
+use NewValue;
 use PrcFmt;
 use Res;
 
@@ -98,7 +99,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
                 let alpha = sn / (2.0 * q);
                 let b0 = 1.0 + (alpha * ampl);
                 let b1 = -2.0 * cs;
@@ -113,7 +114,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
                 let alpha =
                     sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope / 12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
@@ -128,7 +129,7 @@ impl BiquadCoefficients {
             config::BiquadParameters::HighshelfFO { freq, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let tn = (omega / 2.0).tan();
-                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
                 let b0 = ampl * tn + ampl.powi(2);
                 let b1 = ampl * tn - ampl.powi(2);
                 let b2 = 0.0;
@@ -141,7 +142,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
                 let alpha =
                     sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope / 12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
@@ -156,7 +157,7 @@ impl BiquadCoefficients {
             config::BiquadParameters::LowshelfFO { freq, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let tn = (omega / 2.0).tan();
-                let ampl = (10.0 as PrcFmt).powf(gain / 40.0);
+                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
                 let b0 = ampl.powi(2) * tn + ampl;
                 let b1 = ampl.powi(2) * tn - ampl;
                 let b2 = 0.0;
@@ -322,10 +323,85 @@ impl Filter for Biquad {
     }
 }
 
+pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters) -> Res<()> {
+    let maxfreq = samplerate as PrcFmt / 2.0;
+    // Check frequency
+    match parameters {
+        config::BiquadParameters::Highpass { freq, .. }
+        | config::BiquadParameters::Lowpass { freq, .. }
+        | config::BiquadParameters::HighpassFO { freq, .. }
+        | config::BiquadParameters::LowpassFO { freq, .. }
+        | config::BiquadParameters::Peaking { freq, .. }
+        | config::BiquadParameters::Highshelf { freq, .. }
+        | config::BiquadParameters::Lowshelf { freq, .. }
+        | config::BiquadParameters::HighshelfFO { freq, .. }
+        | config::BiquadParameters::LowshelfFO { freq, .. }
+        | config::BiquadParameters::Notch { freq, .. }
+        | config::BiquadParameters::Bandpass { freq, .. }
+        | config::BiquadParameters::Allpass { freq, .. }
+        | config::BiquadParameters::AllpassFO { freq, .. } => {
+            if *freq <= 0.0 {
+                return Err(config::ConfigError::new("Frequency must be > 0").into());
+            } else if *freq >= maxfreq {
+                return Err(config::ConfigError::new("Frequency must be < samplerate/2").into());
+            }
+        }
+        _ => {}
+    }
+    // Check Q
+    match parameters {
+        config::BiquadParameters::Highpass { q, .. }
+        | config::BiquadParameters::Lowpass { q, .. }
+        | config::BiquadParameters::Peaking { q, .. }
+        | config::BiquadParameters::Notch { q, .. }
+        | config::BiquadParameters::Bandpass { q, .. }
+        | config::BiquadParameters::Allpass { q, .. } => {
+            if *q <= 0.0 {
+                return Err(config::ConfigError::new("Q must be > 0").into());
+            }
+        }
+        _ => {}
+    }
+    // Check slope
+    match parameters {
+        config::BiquadParameters::Highshelf { slope, .. }
+        | config::BiquadParameters::Lowshelf { slope, .. } => {
+            if *slope <= 0.0 {
+                return Err(config::ConfigError::new("Slope must be > 0").into());
+            } else if *slope > 12.0 {
+                return Err(config::ConfigError::new("Slope must be <= 12.0").into());
+            }
+        }
+        _ => {}
+    }
+    // Check LT
+    if let config::BiquadParameters::LinkwitzTransform {
+        freq_act,
+        q_act,
+        freq_target,
+        q_target,
+    } = parameters
+    {
+        if *freq_act <= 0.0 || *freq_target <= 0.0 {
+            return Err(config::ConfigError::new("Frequency must be > 0").into());
+        } else if *freq_act >= maxfreq || *freq_target >= maxfreq {
+            return Err(config::ConfigError::new("Frequency must be < samplerate/2").into());
+        }
+        if *q_act <= 0.0 || *q_target <= 0.0 {
+            return Err(config::ConfigError::new("Q must be > 0").into());
+        }
+    }
+    let coeffs = BiquadCoefficients::from_config(samplerate, parameters.clone());
+    if !coeffs.is_stable() {
+        return Err(config::ConfigError::new("Unstable filter specified").into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use biquad::{Biquad, BiquadCoefficients};
+    use biquad::{validate_config, Biquad, BiquadCoefficients};
     use config::BiquadParameters;
     use filters::Filter;
     use num_complex::Complex;
@@ -602,5 +678,57 @@ mod tests {
         assert!(is_close(gain_87, 0.0, 0.1));
         assert!(is_close(gain_123, -2.4, 0.1));
         assert!(is_close(gain_hf, 0.0, 0.1));
+    }
+
+    #[test]
+    fn check_freq_q() {
+        let fs = 48000;
+        let okconf1 = BiquadParameters::Peaking {
+            freq: 1000.0,
+            q: 2.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &okconf1).is_ok());
+        let badconf1 = BiquadParameters::Peaking {
+            freq: 1000.0,
+            q: 0.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &badconf1).is_err());
+        let badconf2 = BiquadParameters::Peaking {
+            freq: 25000.0,
+            q: 1.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &badconf2).is_err());
+        let badconf3 = BiquadParameters::Peaking {
+            freq: 0.0,
+            q: 1.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &badconf3).is_err());
+    }
+
+    #[test]
+    fn check_slope() {
+        let fs = 48000;
+        let okconf1 = BiquadParameters::Highshelf {
+            freq: 1000.0,
+            slope: 5.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &okconf1).is_ok());
+        let badconf1 = BiquadParameters::Highshelf {
+            freq: 1000.0,
+            slope: 0.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &badconf1).is_err());
+        let badconf2 = BiquadParameters::Highshelf {
+            freq: 1000.0,
+            slope: 15.0,
+            gain: 1.23,
+        };
+        assert!(validate_config(fs, &badconf2).is_err());
     }
 }

@@ -9,7 +9,7 @@ devices:
     format: S16LE
   playback:
     type: Alsa
-    channels: 2
+    channels: 4
     device: "hw:Generic_1"
     format: S32LE
 
@@ -23,7 +23,7 @@ filters:
       b0: 1.0
       b1: 1.0
       b2: 1.0
-  hp_80:
+  filter44100:
     type: Biquad
     parameters:
       type: Highpass
@@ -39,12 +39,12 @@ filters:
   lowpass_2k:
     type: Conv
     parameters:
-      type: File
+      type: Raw
       filename: file_$samplerate$_$channels$.txt
   highpass_2k:
     type: Conv
     parameters:
-      type: File
+      type: Raw
       filename: sometext2.txt
 
 mixers:
@@ -77,12 +77,12 @@ pipeline:
     channel: 0
     names:
       - lowpass_2k
-      - notch_120 
+      - peak_100 
       - filter$samplerate$
   - type: Filter
     channel: 1
     names:
       - lowpass_2k
-      - notch_120 
+      - peak_100 
    
 

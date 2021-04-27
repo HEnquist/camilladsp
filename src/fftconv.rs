@@ -4,20 +4,23 @@ use filters;
 use helpers::{multiply_add_elements, multiply_elements};
 use num_complex::Complex;
 use num_traits::Zero;
-use realfft::{ComplexToReal, RealToComplex};
+use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
+use std::sync::Arc;
 
 // Sample format
 use PrcFmt;
 use Res;
 
-pub struct FFTConv {
+pub struct FftConv {
     name: String,
     npoints: usize,
     nsegments: usize,
     overlap: Vec<PrcFmt>,
     coeffs_f: Vec<Vec<Complex<PrcFmt>>>,
-    fft: RealToComplex<PrcFmt>,
-    ifft: ComplexToReal<PrcFmt>,
+    fft: Arc<dyn RealToComplex<PrcFmt>>,
+    ifft: Arc<dyn ComplexToReal<PrcFmt>>,
+    scratch_fw: Vec<Complex<PrcFmt>>,
+    scratch_inv: Vec<Complex<PrcFmt>>,
     input_buf: Vec<PrcFmt>,
     input_f: Vec<Vec<Complex<PrcFmt>>>,
     temp_buf: Vec<Complex<PrcFmt>>,
@@ -25,14 +28,17 @@ pub struct FFTConv {
     index: usize,
 }
 
-impl FFTConv {
+impl FftConv {
     /// Create a new FFT colvolution filter.
     pub fn new(name: String, data_length: usize, coeffs: &[PrcFmt]) -> Self {
         let input_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
         let temp_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); data_length + 1];
         let output_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
-        let mut fft = RealToComplex::<PrcFmt>::new(2 * data_length).unwrap();
-        let ifft = ComplexToReal::<PrcFmt>::new(2 * data_length).unwrap();
+        let mut planner = RealFftPlanner::<PrcFmt>::new();
+        let fft = planner.plan_fft_forward(2 * data_length);
+        let ifft = planner.plan_fft_inverse(2 * data_length);
+        let mut scratch_fw = fft.make_scratch_vec();
+        let scratch_inv = ifft.make_scratch_vec();
 
         let nsegments = ((coeffs.len() as PrcFmt) / (data_length as PrcFmt)).ceil() as usize;
 
@@ -43,14 +49,15 @@ impl FFTConv {
         debug!("Conv {} is using {} segments", name, nsegments);
 
         for (n, coeff) in coeffs.iter().enumerate() {
-            coeffs_padded[n / data_length][n % data_length] = coeff / (data_length as PrcFmt);
+            coeffs_padded[n / data_length][n % data_length] = coeff / (2 * data_length) as PrcFmt;
         }
 
         for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
-            fft.process(segment, segment_f).unwrap();
+            fft.process_with_scratch(segment, segment_f, &mut scratch_fw)
+                .unwrap();
         }
 
-        FFTConv {
+        FftConv {
             name,
             npoints: data_length,
             nsegments,
@@ -58,6 +65,8 @@ impl FFTConv {
             coeffs_f,
             fft,
             ifft,
+            scratch_fw,
+            scratch_inv,
             input_f,
             input_buf,
             output_buf,
@@ -71,19 +80,22 @@ impl FFTConv {
             config::ConvParameters::Values { values, length } => {
                 filters::pad_vector(&values, length)
             }
-            config::ConvParameters::File {
+            config::ConvParameters::Raw {
                 filename,
                 format,
                 read_bytes_lines,
                 skip_bytes_lines,
             } => filters::read_coeff_file(&filename, &format, read_bytes_lines, skip_bytes_lines)
                 .unwrap(),
+            config::ConvParameters::Wav { filename, channel } => {
+                filters::read_wav(&filename, channel).unwrap()
+            }
         };
-        FFTConv::new(name, data_length, &values)
+        FftConv::new(name, data_length, &values)
     }
 }
 
-impl Filter for FFTConv {
+impl Filter for FftConv {
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -104,7 +116,11 @@ impl Filter for FFTConv {
         // FFT and store result in history, update index
         self.index = (self.index + 1) % self.nsegments;
         self.fft
-            .process(&mut self.input_buf, &mut self.input_f[self.index])
+            .process_with_scratch(
+                &mut self.input_buf,
+                &mut self.input_f[self.index],
+                &mut self.scratch_fw,
+            )
             .unwrap();
 
         // Loop through history of input FTs, multiply with filter FTs, accumulate result
@@ -126,7 +142,11 @@ impl Filter for FFTConv {
 
         // IFFT result, store result and overlap
         self.ifft
-            .process(&self.temp_buf, &mut self.output_buf)
+            .process_with_scratch(
+                &mut self.temp_buf,
+                &mut self.output_buf,
+                &mut self.scratch_inv,
+            )
             .unwrap();
         for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
             *item = self.output_buf[n] + self.overlap[n];
@@ -142,7 +162,7 @@ impl Filter for FFTConv {
                 config::ConvParameters::Values { values, length } => {
                     filters::pad_vector(&values, length)
                 }
-                config::ConvParameters::File {
+                config::ConvParameters::Raw {
                     filename,
                     format,
                     read_bytes_lines,
@@ -150,6 +170,9 @@ impl Filter for FFTConv {
                 } => {
                     filters::read_coeff_file(&filename, &format, read_bytes_lines, skip_bytes_lines)
                         .unwrap()
+                }
+                config::ConvParameters::Wav { filename, channel } => {
+                    filters::read_wav(&filename, channel).unwrap()
                 }
             };
 
@@ -171,11 +194,13 @@ impl Filter for FFTConv {
 
             for (n, coeff) in coeffs.iter().enumerate() {
                 coeffs_padded[n / self.npoints][n % self.npoints] =
-                    coeff / (self.npoints as PrcFmt);
+                    coeff / (2 * self.npoints) as PrcFmt;
             }
 
             for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
-                self.fft.process(segment, segment_f).unwrap();
+                self.fft
+                    .process_with_scratch(segment, segment_f, &mut self.scratch_fw)
+                    .unwrap();
             }
             self.coeffs_f = coeffs_f;
         } else {
@@ -189,7 +214,7 @@ impl Filter for FFTConv {
 pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {
         config::ConvParameters::Values { .. } => Ok(()),
-        config::ConvParameters::File {
+        config::ConvParameters::Raw {
             filename,
             format,
             read_bytes_lines,
@@ -202,6 +227,13 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
             }
             Ok(())
         }
+        config::ConvParameters::Wav { filename, channel } => {
+            let coeffs = filters::read_wav(&filename, *channel)?;
+            if coeffs.is_empty() {
+                return Err(config::ConfigError::new("Conv coefficients are empty").into());
+            }
+            Ok(())
+        }
     }
 }
 
@@ -209,7 +241,7 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
 mod tests {
     use crate::PrcFmt;
     use config::ConvParameters;
-    use fftconv::FFTConv;
+    use fftconv::FftConv;
     use filters::Filter;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
@@ -233,7 +265,7 @@ mod tests {
             values: coeffs,
             length: 0,
         };
-        let mut filter = FFTConv::from_config("test".to_string(), 8, conf);
+        let mut filter = FftConv::from_config("test".to_string(), 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
         filter.process_waveform(&mut wave1).unwrap();
@@ -246,7 +278,7 @@ mod tests {
         for m in 0..32 {
             coeffs.push(m as PrcFmt);
         }
-        let mut filter = FFTConv::new("test".to_owned(), 8, &coeffs);
+        let mut filter = FftConv::new("test".to_owned(), 8, &coeffs);
         let mut wave1 = vec![0.0 as PrcFmt; 8];
         let mut wave2 = vec![0.0 as PrcFmt; 8];
         let mut wave3 = vec![0.0 as PrcFmt; 8];

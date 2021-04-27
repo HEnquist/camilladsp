@@ -17,7 +17,7 @@ filters:
   lowpass_fir:
     type: Conv
     coefficients:
-      type: File 
+      type: Raw 
       values: filter.txt
 
 mixers:
