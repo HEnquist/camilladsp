@@ -195,8 +195,9 @@ pub fn read_coeff_file(
         }
     }
     debug!(
-        "Read file: {}, number of coeffs: {}",
+        "Read raw data from: '{}', format: {:?}, number of coeffs: {}",
         filename,
+        format,
         coefficients.len()
     );
     Ok(coefficients)
@@ -205,12 +206,10 @@ pub fn read_coeff_file(
 pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
     let f = File::open(filename)?;
     let filesize = f.metadata()?.len();
-    println!("size: {}", filesize);
     let mut file = BufReader::new(&f);
     let mut header = [0; 12];
     let _ = file.read(&mut header)?;
 
-    println!("{:?}", header);
     let riff_b = "RIFF".as_bytes();
     let wave_b = "WAVE".as_bytes();
     let data_b = "data".as_bytes();
@@ -295,10 +294,6 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
 
 pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
     let params = find_data_in_wav(filename)?;
-    debug!(
-        "Wav data, format: {:?}, channels: {}, samplerate: {}",
-        params.sample_format, params.channels, params.sample_rate
-    );
     if channel >= params.channels {
         let msg = format!(
             "Cant read channel {} of file '{}' which contains {} channels.",
@@ -307,22 +302,29 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
         return Err(config::ConfigError::new(&msg).into());
     }
 
-    let data = read_coeff_file(
+    let alldata = read_coeff_file(
         filename,
         &params.sample_format,
         params.data_length,
         params.data_offset,
     )?;
 
-    if channel == 0 {
-        return Ok(data);
-    }
-    Ok(data
+    let data = alldata
         .iter()
         .skip(channel)
         .step_by(params.channels)
         .copied()
-        .collect::<Vec<PrcFmt>>())
+        .collect::<Vec<PrcFmt>>();
+    debug!(
+        "Read wav file '{}', format: {:?}, channel: {} of {}, samplerate: {}, length: {}",
+        filename,
+        params.sample_format,
+        channel,
+        params.channels,
+        params.sample_rate,
+        data.len()
+    );
+    Ok(data)
 }
 
 pub struct FilterGroup {
