@@ -1,6 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use crate::filters::Filter;
+use biquad::{Biquad, BiquadCoefficients};
 use config;
 use fifoqueue::FifoQueue;
 
@@ -19,6 +20,7 @@ pub struct Delay {
     pub name: String,
     samplerate: usize,
     pub queue: FifoQueue<PrcFmt>,
+    biquad: Option<Biquad>,
 }
 
 pub struct Volume {
@@ -243,24 +245,41 @@ impl Filter for Gain {
 impl Delay {
     /// Creates a delay filter with delay in samples
     /// Will be improved as it gets slow for long delays
-    pub fn new(name: String, samplerate: usize, delay: usize) -> Self {
-        let mut queue = FifoQueue::filled_with(delay + 1, 0.0);
+    pub fn new(name: String, samplerate: usize, delay: PrcFmt, subsample: bool) -> Self {
+        let (integerdelay, biquad) = if subsample {
+            let samples = delay.floor();
+            let fraction = delay - samples;
+            let bqcoeffs = BiquadCoefficients::new(1.0 - fraction, 0.0, 1.0 - fraction, 1.0, 0.0);
+            let bq = Biquad::new("subsample".to_string(), 12345, bqcoeffs);
+            debug!(
+                "Building delay filter '{}' with delay {} + {} samples",
+                name, samples, fraction
+            );
+            (samples as usize, Some(bq))
+        } else {
+            let samples = delay.round() as usize;
+            debug!(
+                "Building delay filter '{}' with delay {} samples",
+                name, samples
+            );
+            (samples, None)
+        };
+        let mut queue = FifoQueue::filled_with(integerdelay + 1, 0.0);
         let _elem = queue.pop();
         Delay {
             name,
             samplerate,
             queue,
+            biquad,
         }
     }
 
     pub fn from_config(name: String, samplerate: usize, conf: config::DelayParameters) -> Self {
         let delay_samples = match conf.unit {
-            config::TimeUnit::Milliseconds => {
-                (conf.delay / 1000.0 * (samplerate as PrcFmt)) as usize
-            }
-            config::TimeUnit::Samples => conf.delay as usize,
+            config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (samplerate as PrcFmt),
+            config::TimeUnit::Samples => conf.delay,
         };
-        Delay::new(name, samplerate, delay_samples)
+        Delay::new(name, samplerate, delay_samples, conf.subsample)
     }
 }
 
@@ -274,15 +293,41 @@ impl Filter for Delay {
             self.queue.push(*item)?;
             *item = self.queue.pop().unwrap();
         }
+        if let Some(bq) = &mut self.biquad {
+            bq.process_waveform(waveform)?;
+        }
         Ok(())
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
         if let config::Filter::Delay { parameters: conf } = conf {
-            let delay_samples = (conf.delay / 1000.0 * (self.samplerate as PrcFmt)) as usize;
-            let mut queue = FifoQueue::filled_with(delay_samples + 1, 0.0);
+            let delay_samples = match conf.unit {
+                config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (self.samplerate as PrcFmt),
+                config::TimeUnit::Samples => conf.delay,
+            };
+            let (integerdelay, biquad) = if conf.subsample {
+                let full_samples = delay_samples.floor();
+                let fraction = delay_samples - full_samples;
+                let bqcoeffs =
+                    BiquadCoefficients::new(1.0 - fraction, 0.0, 1.0 - fraction, 1.0, 0.0);
+                let bq = Biquad::new("subsample".to_string(), 12345, bqcoeffs);
+                debug!(
+                    "Updating delay filter '{}' with delay {} + {} samples",
+                    self.name, full_samples, fraction
+                );
+                (full_samples as usize, Some(bq))
+            } else {
+                let full_samples = delay_samples.round() as usize;
+                debug!(
+                    "Updating delay filter '{}' with delay {} samples",
+                    self.name, full_samples
+                );
+                (full_samples, None)
+            };
+            let mut queue = FifoQueue::filled_with(integerdelay + 1, 0.0);
             let _elem = queue.pop();
             self.queue = queue;
+            self.biquad = biquad;
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
@@ -321,6 +366,20 @@ mod tests {
     use basicfilters::{Delay, Gain};
     use filters::Filter;
 
+    fn is_close(left: f64, right: f64, maxdiff: f64) -> bool {
+        println!("{} - {}", left, right);
+        (left - right).abs() < maxdiff
+    }
+
+    fn compare_waveforms(left: Vec<f64>, right: Vec<f64>, maxdiff: f64) -> bool {
+        for (val_l, val_r) in left.iter().zip(right.iter()) {
+            if !is_close(*val_l, *val_r, maxdiff) {
+                return false;
+            }
+        }
+        true
+    }
+
     #[test]
     fn gain_invert() {
         let mut waveform = vec![-0.5, 0.0, 0.5];
@@ -343,7 +402,7 @@ mod tests {
     fn delay_small() {
         let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let waveform_delayed = vec![0.0, 0.0, 0.0, 0.0, -0.5, 1.0, 0.0, 0.0];
-        let mut delay = Delay::new("test".to_string(), 44100, 3);
+        let mut delay = Delay::new("test".to_string(), 44100, 3.0, false);
         delay.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_delayed);
     }
@@ -353,10 +412,30 @@ mod tests {
         let mut waveform1 = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let mut waveform2 = vec![0.0; 8];
         let waveform_delayed = vec![0.0, 0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0];
-        let mut delay = Delay::new("test".to_string(), 44100, 9);
+        let mut delay = Delay::new("test".to_string(), 44100, 9.0, false);
         delay.process_waveform(&mut waveform1).unwrap();
         delay.process_waveform(&mut waveform2).unwrap();
         assert_eq!(waveform1, vec![0.0; 8]);
         assert_eq!(waveform2, waveform_delayed);
+    }
+
+    #[test]
+    fn delay_fraction() {
+        let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let waveform_delayed = vec![
+            0.0,
+            0.0,
+            -0.15,
+            -0.15500000000000003,
+            1.0465,
+            -0.31395,
+            0.094185,
+            -0.0282555,
+            0.008476649999999999,
+            -0.0025429949999999997,
+        ];
+        let mut delay = Delay::new("test".to_string(), 44100, 1.7, true);
+        delay.process_waveform(&mut waveform).unwrap();
+        assert!(compare_waveforms(waveform, waveform_delayed, 1.0e-6));
     }
 }

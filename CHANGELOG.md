@@ -20,6 +20,7 @@ New features:
 - Setting to enable retry on reads from Alsa capture devices (helps avoiding driver bugs/quirks for some devices).
 - Optionally avoid blocking reads on Alsa capture devices (helps avoiding driver bugs/quirks for some devices).
 - Read FIR coefficients from WAV.
+- Add subsample delay.
 
 Bugfixes:
 - Don't block playback for CoreAudio/Wasapi if there is no data in time.

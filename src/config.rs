@@ -583,6 +583,8 @@ pub struct DelayParameters {
     pub delay: PrcFmt,
     #[serde(default)]
     pub unit: TimeUnit,
+    #[serde(default)]
+    pub subsample: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

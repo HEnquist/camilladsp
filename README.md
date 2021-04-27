@@ -796,7 +796,9 @@ Allowed ranges:
 - low_boost: 0 to 20
 
 ### Delay
-The delay filter provides a delay in milliseconds or samples. The "unit" can be "ms" or "samples", and if left out it defaults to "ms". The millisecond value will be rounded to the nearest number of samples. The delay value must be positive or zero. 
+The delay filter provides a delay in milliseconds or samples. The `unit` can be `ms` or `samples`, and if left out it defaults to `ms`. If the `subsample` parameter is set to `true`, then it will use use an IIR filter to achieve subsample delay precision. If set to `false`, the value will instead be rounded to the nearest number of full samples. This is a little faster and should be used if subsample precision is not required. 
+
+The delay value must be positive or zero. 
 
 Example Delay filter:
 ```
@@ -806,6 +808,7 @@ filters:
     parameters:
       delay: 12.3
       unit: ms
+      subsample: false
 ```
 
 ### FIR
