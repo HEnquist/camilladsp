@@ -98,11 +98,19 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
+<<<<<<< HEAD
       - name: Install nightly toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: nightly
+=======
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+>>>>>>> master
           target: aarch64-unknown-linux-gnu
           override: true
 
@@ -114,7 +122,13 @@ jobs:
         with:
           command: build
           use-cross: true
+<<<<<<< HEAD
           args: --release --target aarch64-unknown-linux-gnu --no-default-features --features alsa-backend --features websocket --features neon
+=======
+          args: --release --target aarch64-unknown-linux-gnu --no-default-features --features alsa-backend --features websocket
+        env:
+          RUSTFLAGS: "-C target-feature=+neon"
+>>>>>>> master
 
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/aarch64-unknown-linux-gnu/release camilladsp
@@ -124,7 +138,11 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
+<<<<<<< HEAD
           asset_name: camilladsp-linux-aarch64.tar.gz
+=======
+          asset_name: camilladsp-linux-armv8.tar.gz
+>>>>>>> master
           tag: ${{ github.ref }}
 
   windows:

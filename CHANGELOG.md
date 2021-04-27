@@ -35,6 +35,13 @@ Bugfixes:
 - Fix handling of negative values for input and output in S24LE format.
 
 
+## 0.4.2
+Bugfixes:
+- Fix random garbage output when using the Stdout playback device.
+
+## 0.4.1
+Bugfixes:
+- Fix incorrect config checks for LinkwitzRiley and Butterworth biquads.
 
 ## 0.4.0
 New features:

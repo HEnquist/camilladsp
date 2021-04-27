@@ -96,7 +96,11 @@ jobs:
           use-cross: true
           args: --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features websocket
 
+<<<<<<< HEAD
   check_test_arm64:
+=======
+  check_arm64:
+>>>>>>> master
     name: Check and test Linux arm 64bit
     runs-on: ubuntu-latest
     steps:
