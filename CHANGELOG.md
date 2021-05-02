@@ -1,3 +1,10 @@
+## 0.5.1
+New features:
+- 
+
+Bugfixes:
+- Handle wav files with extended fmt chunk
+
 ## 0.5.0
 New features:
 - Add RMS and Peak measurement for each channel at input and output.

@@ -243,7 +243,7 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
         trace!("Analyzing wav chunk of length: {}", chunk_length);
         let is_data = buffer.iter().take(4).zip(data_b).all(|(a, b)| *a == *b);
         let is_fmt = buffer.iter().take(4).zip(fmt_b).all(|(a, b)| *a == *b);
-        if is_fmt && chunk_length == 16 {
+        if is_fmt && (chunk_length == 16 || chunk_length == 18 || chunk_length == 40) {
             found_fmt = true;
             let mut data = [0; 16];
             let _ = file.read(&mut data).unwrap();
@@ -282,14 +282,18 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
         }
         next_chunk_location += 8 + chunk_length as u64;
     }
-
-    Ok(WavParams {
-        sample_format,
-        sample_rate: sample_rate as usize,
-        channels: channels as usize,
-        data_length: data_length as usize,
-        data_offset: data_offset as usize,
-    })
+    if found_data && found_fmt {
+        trace!("Wav file with parameters: format: {:?},  samplerate: {}, channels: {}, data_length: {}, data_offset: {}", sample_format, sample_rate, channels, data_length, data_offset);
+        return Ok(WavParams {
+            sample_format,
+            sample_rate: sample_rate as usize,
+            channels: channels as usize,
+            data_length: data_length as usize,
+            data_offset: data_offset as usize,
+        });
+    }
+    let msg = format!("Unable to parse wav file '{}'", filename);
+    Err(config::ConfigError::new(&msg).into())
 }
 
 pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {

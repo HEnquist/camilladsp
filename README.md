@@ -90,6 +90,37 @@ The supervisor monitors all threads by listening to their status messages. The r
 ### Websocket server
 The websocket server lauches a separate thread to handle each connected client. All commands to change the config are send to the supervisor thread.
 
+## System requirements
+CamillaDSP runs on Linux, macOS and Windows. The exact system requirements are determined by the amount of processing the application requires, but even relatively weak CPUs like Intel Atom have much more processing power than most will need.
+
+In general, a 64-bit CPU and OS will perform better.
+
+A few examples, done with CamillaDSP v0.5.0:
+
+- A Raspberry Pi 4 doing FIR filtering of 8 channels, with 262k taps per channel, at 192 kHz. 
+  CPU usage about 55%.
+
+- An AMD Ryzen 7 2700u (laptop) doing FIR filtering of 96 channels, with 262k taps per channel, at 192 kHz. 
+  CPU usage just under 100%.
+
+### Linux
+Both 64 and 32 bit architechtures are supported. All platforms supported by the Rustc compiler should work. 
+
+Pre-built binaries are provided for:
+- x86_64 (almost all PCs)
+- armv7 (32-bit arm, for example a Raspeberry Pi 2,3,4 with a 32-bit OS)
+- aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS) 
+
+### Windows
+An x86_64 CPU and the 64-bit version of Windows is recommended. Any x86_64 CPU will likely be sufficient.
+
+Pre-built binaries are provided for 64-bit systems.
+
+### MacOS
+CamillaDSP can run on both Intel and Apple Silicon macs. Any reasonably recent version of MacOS should work.
+
+Pre-built binaries are provided for both Intel and Apple Silicon
+
 
 ## Usage example: crossover for 2-way speakers
 A crossover must filter all sound being played on the system. This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device. CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
