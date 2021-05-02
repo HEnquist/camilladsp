@@ -1,9 +1,9 @@
 ## 0.5.1
 New features:
-- 
+- Add JACK support.
 
 Bugfixes:
-- Handle wav files with extended fmt chunk
+- Handle wav files with extended fmt chunk.
 
 ## 0.5.0
 New features:
