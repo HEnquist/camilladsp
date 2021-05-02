@@ -329,6 +329,9 @@ fn main_process() -> i32 {
     if cfg!(feature = "cpal-backend") {
         features.push("cpal-backend");
     }
+    if cfg!(feature = "jack-backend") {
+        features.push("jack-backend");
+    }
     if cfg!(feature = "websocket") {
         features.push("websocket");
     }

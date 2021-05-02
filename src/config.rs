@@ -197,6 +197,13 @@ pub enum CaptureDevice {
         device: String,
         format: SampleFormat,
     },
+    #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+    #[serde(alias = "JACK", alias = "jack")]
+    Jack {
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
 }
 
 impl CaptureDevice {
@@ -212,6 +219,8 @@ impl CaptureDevice {
             CaptureDevice::CoreAudio { channels, .. } => *channels,
             #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
             CaptureDevice::Wasapi { channels, .. } => *channels,
+            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            CaptureDevice::Jack { channels, .. } => *channels,
         }
     }
 
@@ -227,6 +236,8 @@ impl CaptureDevice {
             CaptureDevice::CoreAudio { format, .. } => format.clone(),
             #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
             CaptureDevice::Wasapi { format, .. } => format.clone(),
+            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            CaptureDevice::Jack { format, .. } => format.clone(),
         }
     }
 }
@@ -274,6 +285,13 @@ pub enum PlaybackDevice {
         device: String,
         format: SampleFormat,
     },
+    #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+    #[serde(alias = "JACK", alias = "jack")]
+    Jack {
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
 }
 
 impl PlaybackDevice {
@@ -289,6 +307,8 @@ impl PlaybackDevice {
             PlaybackDevice::CoreAudio { channels, .. } => *channels,
             #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
             PlaybackDevice::Wasapi { channels, .. } => *channels,
+            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            PlaybackDevice::Jack { channels, .. } => *channels,
         }
     }
 }
@@ -787,6 +807,10 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Wasapi { channels, .. } => {
                 *channels = chans;
             }
+            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            CaptureDevice::Jack { channels, .. } => {
+                *channels = chans;
+            }
         }
     }
     if let Some(fmt) = OVERRIDES.read().unwrap().sample_format.clone() {
@@ -812,6 +836,10 @@ fn apply_overrides(configuration: &mut Configuration) {
             }
             #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
             CaptureDevice::Wasapi { format, .. } => {
+                *format = fmt;
+            }
+            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            CaptureDevice::Jack { format, .. } => {
                 *format = fmt;
             }
         }
@@ -990,6 +1018,78 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     if conf.devices.silence_timeout < 0.0 {
         return Err(ConfigError::new("silence_timeout cannot be negative").into());
+    }
+    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    if let CaptureDevice::CoreAudio { format, .. } = &conf.devices.capture {
+        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
+            return Err(ConfigError::new(
+                "The CoreAudio capture backend only supports FLOAT32LE and S16LE sample formats",
+            )
+            .into());
+        }
+    }
+    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    if let PlaybackDevice::CoreAudio { format, .. } = &conf.devices.playback {
+        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
+            return Err(ConfigError::new(
+                "The CoreAudio playback backend only supports FLOAT32LE and S16LE sample formats",
+            )
+            .into());
+        }
+    }
+    #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    if let CaptureDevice::Wasapi { format, .. } = &conf.devices.capture {
+        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
+            return Err(ConfigError::new(
+                "The Wasapi capture backend only supports FLOAT32LE and S16LE sample formats",
+            )
+            .into());
+        }
+    }
+    #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    if let PlaybackDevice::Wasapi { format, .. } = &conf.devices.playback {
+        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
+            return Err(ConfigError::new(
+                "The Wasapi playback backend only supports FLOAT32LE and S16LE sample formats",
+            )
+            .into());
+        }
+    }
+    #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+    if let CaptureDevice::Jack { format, .. } = &conf.devices.capture {
+        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
+            return Err(ConfigError::new(
+                "The Jack capture backend only supports FLOAT32LE and S16LE sample formats",
+            )
+            .into());
+        }
+    }
+    #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+    if let PlaybackDevice::Jack { format, .. } = &conf.devices.playback {
+        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
+            return Err(ConfigError::new(
+                "The Jack playback backend only supports FLOAT32LE and S16LE sample formats",
+            )
+            .into());
+        }
+    }
+    #[cfg(feature = "pulse-backend")]
+    if let CaptureDevice::Pulse { format, .. } = &conf.devices.capture {
+        if *format == SampleFormat::FLOAT64LE {
+            return Err(ConfigError::new(
+                "The PulseAudio playback backend does not support FLOAT64LE sample format",
+            )
+            .into());
+        }
+    }
+    #[cfg(feature = "pulse-backend")]
+    if let PlaybackDevice::Pulse { format, .. } = &conf.devices.playback {
+        if *format == SampleFormat::FLOAT64LE {
+            return Err(ConfigError::new(
+                "The PulseAudio playback backend does not support FLOAT64LE sample format",
+            )
+            .into());
+        }
     }
     let mut num_channels = conf.devices.capture.channels();
     let fs = conf.devices.samplerate;
