@@ -610,10 +610,7 @@ fn main_process() -> i32 {
         signal_hook::low_level::register(signal_hook::consts::SIGHUP, || debug!("Received SIGHUP"))
     };
 
-    let configname = match matches.value_of("configfile") {
-        Some(path) => Some(path.to_string()),
-        None => None,
-    };
+    let configname = matches.value_of("configfile").map(|path| path.to_string());
 
     let initial_volume = matches
         .value_of("gain")

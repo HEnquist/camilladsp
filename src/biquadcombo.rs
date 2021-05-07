@@ -90,36 +90,36 @@ impl BiquadCombo {
                 let qvalues = BiquadCombo::linkwitzriley_q(order);
                 let filters = BiquadCombo::make_highpass(samplerate, freq, qvalues);
                 BiquadCombo {
+                    samplerate,
                     name,
                     filters,
-                    samplerate,
                 }
             }
             config::BiquadComboParameters::LinkwitzRileyLowpass { order, freq } => {
                 let qvalues = BiquadCombo::linkwitzriley_q(order);
                 let filters = BiquadCombo::make_lowpass(samplerate, freq, qvalues);
                 BiquadCombo {
+                    samplerate,
                     name,
                     filters,
-                    samplerate,
                 }
             }
             config::BiquadComboParameters::ButterworthHighpass { order, freq } => {
                 let qvalues = BiquadCombo::butterworth_q(order);
                 let filters = BiquadCombo::make_highpass(samplerate, freq, qvalues);
                 BiquadCombo {
+                    samplerate,
                     name,
                     filters,
-                    samplerate,
                 }
             }
             config::BiquadComboParameters::ButterworthLowpass { order, freq } => {
                 let qvalues = BiquadCombo::butterworth_q(order);
                 let filters = BiquadCombo::make_lowpass(samplerate, freq, qvalues);
                 BiquadCombo {
+                    samplerate,
                     name,
                     filters,
-                    samplerate,
                 }
             }
         }
