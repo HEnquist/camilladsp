@@ -748,6 +748,7 @@ fn apply_overrides(configuration: &mut Configuration) {
                 cfg_chunksize, scaled_chunksize
             );
             configuration.devices.chunksize = scaled_chunksize;
+            #[allow(unreachable_patterns)]
             match &mut configuration.devices.capture {
                 CaptureDevice::File { extra_samples, .. } => {
                     let new_extra = *extra_samples * rate / cfg_rate;
@@ -772,6 +773,7 @@ fn apply_overrides(configuration: &mut Configuration) {
     }
     if let Some(extra) = OVERRIDES.read().unwrap().extra_samples {
         debug!("Apply override for extra_samples: {}", extra);
+        #[allow(unreachable_patterns)]
         match &mut configuration.devices.capture {
             CaptureDevice::File { extra_samples, .. } => {
                 *extra_samples = extra;
