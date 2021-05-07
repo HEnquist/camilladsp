@@ -31,6 +31,8 @@ pub enum CpalHost {
     CoreAudio,
     #[cfg(target_os = "windows")]
     Wasapi,
+    #[cfg(feature = "jack-backend")]
+    Jack,
 }
 
 #[derive(Clone, Debug)]
@@ -73,6 +75,8 @@ fn open_cpal_playback(
         CpalHost::CoreAudio => HostId::CoreAudio,
         #[cfg(target_os = "windows")]
         CpalHost::Wasapi => HostId::Wasapi,
+        #[cfg(feature = "jack-backend")]
+        CpalHost::Jack => HostId::Jack,
     };
     let host = cpal::host_from_id(host_id)?;
     let device = if devname == "default" {
@@ -122,6 +126,8 @@ fn open_cpal_capture(
         CpalHost::CoreAudio => HostId::CoreAudio,
         #[cfg(target_os = "windows")]
         CpalHost::Wasapi => HostId::Wasapi,
+        #[cfg(feature = "jack-backend")]
+        CpalHost::Jack => HostId::Jack,
     };
     let host = cpal::host_from_id(host_id)?;
     let device = if devname == "default" {

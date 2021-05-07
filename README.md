@@ -13,6 +13,8 @@ The full configuration is given in a yaml file.
 ### Table of Contents
 **[Introduction](#introduction)**
 - **[Background](#background)**
+- **[How it works](#how-it-works)**
+- **[System requirements](#system-requirements)**
 - **[Usage example: crossover for 2-way speakers](#usage-example-crossover-for-2-way-speakers)**
 - **[Dependencies](#dependencies)**
 - **[Related projects](#related-projects)**
@@ -35,6 +37,7 @@ The full configuration is given in a yaml file.
 - **[PulseAudio](#pulseaudio)**
 - **[Wasapi](#wasapi)**
 - **[CoreAudio](#coreaudio)**
+- **[Jack](#jack)**
 
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
@@ -224,6 +227,7 @@ All the available options, or "features" are:
 - `alsa-backend`: Alsa support
 - `pulse-backend`: PulseAudio support
 - `cpal-backend`: Wasapi and CoreAudio support
+- `jack-backend`: Jack support. This also enables the cpal-backend feature if building on Windows or macOS.
 - `websocket`: Websocket server for control
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
 - `FFTW`: Use FFTW instead of RustFFT
@@ -232,6 +236,11 @@ All the available options, or "features" are:
 
 The first three (`alsa-backend`, `pulse-packend`, `websocket`) are included in the default features, meaning if you don't specify anything you will get those three.
 Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
+
+The `jack-backend` feature requires jack and its development files to be installed. To install:
+- Fedora: ```sudo dnf install jack-audio-connection-kit jack-audio-connection-kit-devel```
+- Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
+- Arch:  ```sudo pacman -S jack```
 
 Example 1: You want `alsa-backend`, `pulse-backend`, `websocket` and `FFTW`. The first three are included by default so you only need to add `FFTW`:
 ```
@@ -441,6 +450,14 @@ The device name is the same as the one shown in the "Audio MIDI Setup" that can 
 
 The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
 
+## Jack
+The jack server must be running. 
+
+TODO: add information on device name. Setting `device` to "default" uses the default port.
+
+Jack support is provided by the CPAL library.
+
+The sample format is always 32-bit float (FLOAT32LE).
 
 # Configuration
 
@@ -572,6 +589,7 @@ devices:
     * `Pulse`
     * `Wasapi`
     * `CoreAudio`
+    * `Jack`
     * `File`
     * `Stdin` (capture only)
     * `Stdout` (playback only)
@@ -589,14 +607,14 @@ devices:
     * FLOAT64LE - 64-bit float, stored as eight bytes
 
     Supported formats:
-    |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | File/Stdin/Stdout  |
-    |------------|--------------------|--------------------|--------------------|--------------------|--------------------|
-    | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-    | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
-    | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
-    | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
-    | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-    | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+    |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | Jack               | File/Stdin/Stdout  |
+    |------------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|
+    | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+    | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+    | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+    | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+    | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+    | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                | :x:                | :heavy_check_mark: |
   
   
     Equivalent formats (for reference):
