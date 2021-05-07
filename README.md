@@ -227,7 +227,7 @@ All the available options, or "features" are:
 - `alsa-backend`: Alsa support
 - `pulse-backend`: PulseAudio support
 - `cpal-backend`: Wasapi and CoreAudio support
-- `jack-backend`: Jack support. This also enables the cpal-backend if building on Windows or macOS.
+- `jack-backend`: Jack support. This also enables the cpal-backend feature if building on Windows or macOS.
 - `websocket`: Websocket server for control
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
 - `FFTW`: Use FFTW instead of RustFFT
@@ -451,12 +451,13 @@ The device name is the same as the one shown in the "Audio MIDI Setup" that can 
 The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
 
 ## Jack
-TODO
-The jack server must be running.
+The jack server must be running. 
+
+TODO: add information on device name. Setting `device` to "default" uses the default port.
 
 Jack support is provided by the CPAL library.
 
-The sample format is always? 32-bit float (FLOAT32LE).
+The sample format is always 32-bit float (FLOAT32LE).
 
 # Configuration
 

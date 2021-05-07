@@ -40,10 +40,12 @@ The commands that return a value also include a "value" field:
 The available commands are listed below. All commands return the result, and for the ones that return a value are this described here.
 
 ### General
-- `GetVersion` : read the CamillaDSP version
-  * returns the version as a string, like `1.2.3` 
+- `GetVersion` : read the CamillaDSP version.
+  * returns the version as a string, like `1.2.3`.
+- `GetSupportedDeviceTypes` : read which playback and capture device types are supported. 
+  * return a list containing two lists of strings (for playback and capture), like `[['File', 'Stdout', 'Alsa'], ['File', 'Stdin', 'Alsa']]`.
 - `Stop` : stop processing and wait for a new config to be uploaded either with `SetConfig` or with `SetConfigName`+`Reload`.
-- `Exit` : stop processing and exit
+- `Exit` : stop processing and exit.
 
 ### Websocket server settings
 
