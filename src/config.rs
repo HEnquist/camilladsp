@@ -1,6 +1,6 @@
 use filters;
 use mixer;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 use serde_with;
 use std::collections::HashMap;
 use std::error;
@@ -145,6 +145,7 @@ pub enum CaptureDevice {
     #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
     #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
@@ -156,12 +157,14 @@ pub enum CaptureDevice {
     #[cfg(feature = "pulse-backend")]
     #[serde(alias = "PULSE", alias = "pulse")]
     Pulse {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
     },
     #[serde(alias = "FILE", alias = "file")]
     File {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         filename: String,
         format: SampleFormat,
@@ -174,6 +177,7 @@ pub enum CaptureDevice {
     },
     #[serde(alias = "STDIN", alias = "stdin")]
     Stdin {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         format: SampleFormat,
         #[serde(default)]
@@ -186,6 +190,7 @@ pub enum CaptureDevice {
     #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
     #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
@@ -193,6 +198,7 @@ pub enum CaptureDevice {
     #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
     #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
@@ -200,6 +206,7 @@ pub enum CaptureDevice {
     #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
     #[serde(alias = "JACK", alias = "jack")]
     Jack {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
@@ -249,6 +256,7 @@ pub enum PlaybackDevice {
     #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
     #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
@@ -256,24 +264,28 @@ pub enum PlaybackDevice {
     #[cfg(feature = "pulse-backend")]
     #[serde(alias = "PULSE", alias = "pulse")]
     Pulse {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
     },
     #[serde(alias = "FILE", alias = "file")]
     File {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         filename: String,
         format: SampleFormat,
     },
     #[serde(alias = "STDOUT", alias = "stdout")]
     Stdout {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         format: SampleFormat,
     },
     #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
     #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
@@ -281,6 +293,7 @@ pub enum PlaybackDevice {
     #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
     #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
@@ -288,6 +301,7 @@ pub enum PlaybackDevice {
     #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
     #[serde(alias = "JACK", alias = "jack")]
     Jack {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
@@ -648,7 +662,9 @@ pub struct DiffEqParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct MixerChannels {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
     pub r#in: usize,
+    #[serde(deserialize_with = "validate_nonzero_usize")]
     pub out: usize,
 }
 
@@ -697,6 +713,20 @@ pub struct Configuration {
     pub filters: HashMap<String, Filter>,
     #[serde(default)]
     pub pipeline: Vec<PipelineStep>,
+}
+
+fn validate_nonzero_usize<'de, D>(d: D) -> Result<usize, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let value = usize::deserialize(d)?;
+    if value < 1 {
+        return Err(de::Error::invalid_value(
+            de::Unexpected::Unsigned(value as u64),
+            &"a value > 0",
+        ));
+    }
+    Ok(value)
 }
 
 pub fn load_config(filename: &str) -> Res<Configuration> {

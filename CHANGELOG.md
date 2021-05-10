@@ -5,6 +5,7 @@ New features:
 
 Bugfixes:
 - Handle wav files with extended fmt chunk.
+- Don't allow starting with zero channels.
 
 ## 0.5.0
 New features:
