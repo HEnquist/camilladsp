@@ -209,7 +209,6 @@ pub enum CaptureDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
-        format: SampleFormat,
     },
 }
 
@@ -244,7 +243,7 @@ impl CaptureDevice {
             #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
             CaptureDevice::Wasapi { format, .. } => format.clone(),
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
-            CaptureDevice::Jack { format, .. } => format.clone(),
+            CaptureDevice::Jack { .. } => SampleFormat::FLOAT32LE,
         }
     }
 }
@@ -304,7 +303,6 @@ pub enum PlaybackDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
-        format: SampleFormat,
     },
 }
 
@@ -871,8 +869,8 @@ fn apply_overrides(configuration: &mut Configuration) {
                 *format = fmt;
             }
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
-            CaptureDevice::Jack { format, .. } => {
-                *format = fmt;
+            CaptureDevice::Jack { .. } => {
+                error!("Not possible to override capture format for Jack, ignoring");
             }
         }
     }
@@ -1083,24 +1081,6 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
             return Err(ConfigError::new(
                 "The Wasapi playback backend only supports FLOAT32LE and S16LE sample formats",
-            )
-            .into());
-        }
-    }
-    #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
-    if let CaptureDevice::Jack { format, .. } = &conf.devices.capture {
-        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
-            return Err(ConfigError::new(
-                "The Jack capture backend only supports FLOAT32LE and S16LE sample formats",
-            )
-            .into());
-        }
-    }
-    #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
-    if let PlaybackDevice::Jack { format, .. } = &conf.devices.playback {
-        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
-            return Err(ConfigError::new(
-                "The Jack playback backend only supports FLOAT32LE and S16LE sample formats",
             )
             .into());
         }

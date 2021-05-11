@@ -453,7 +453,7 @@ The sample format is always 32-bit float (FLOAT32LE) even if the device is confi
 ## Jack
 The jack server must be running. 
 
-Set `device` to "default" for both capture and playback. The sample format is always 32-bit float (FLOAT32LE).
+Set `device` to "default" for both capture and playback. The sample format is fixed at 32-bit float (FLOAT32LE).
 
 The samplerate must match the samplerate configured for the Jack server. 
 
@@ -596,7 +596,7 @@ devices:
   * `channels`: number of channels
   * `device`: device name (for Alsa, Pulse, Wasapi, CoreAudio). For CoreAudio and Wasapi, "default" will give the default device.
   * `filename` path the the file (for File)
-  * `format`: sample format.
+  * `format`: sample format (for all except Jack).
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
     * S16LE - Signed 16-bit int, stored as two bytes
@@ -661,6 +661,7 @@ devices:
     read_bytes: 200
     ```
     
+  The __Jack__ capture and playback devices do not have a `format` parameter, since they always uses the FLOAT32LE format. It seems that the `device` property should always be set to "default". This parameter may be removed in a future version.
 
 
 ## Resampling
