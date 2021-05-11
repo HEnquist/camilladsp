@@ -246,6 +246,20 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
         }),
+        #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+        config::PlaybackDevice::Jack { channels, device } => {
+            Box::new(cpaldevice::CpalPlaybackDevice {
+                devname: device,
+                host: cpaldevice::CpalHost::Jack,
+                samplerate: conf.samplerate,
+                chunksize: conf.chunksize,
+                channels,
+                sample_format: config::SampleFormat::FLOAT32LE,
+                target_level: conf.target_level,
+                adjust_period: conf.adjust_period,
+                enable_rate_adjust: conf.enable_rate_adjust,
+            })
+        }
     }
 }
 
@@ -522,6 +536,22 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),
+        #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+        config::CaptureDevice::Jack { channels, device } => {
+            Box::new(cpaldevice::CpalCaptureDevice {
+                devname: device,
+                host: cpaldevice::CpalHost::Jack,
+                samplerate: conf.samplerate,
+                enable_resampling: conf.enable_resampling,
+                resampler_conf: conf.resampler_type,
+                capture_samplerate,
+                chunksize: conf.chunksize,
+                channels,
+                sample_format: config::SampleFormat::FLOAT32LE,
+                silence_threshold: conf.silence_threshold,
+                silence_timeout: conf.silence_timeout,
+            })
+        }
     }
 }
 

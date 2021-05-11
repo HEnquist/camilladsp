@@ -42,6 +42,33 @@ pub struct ServerParameters<'a> {
     pub cert_pass: Option<&'a str>,
 }
 
+fn list_supported_devices() -> (Vec<String>, Vec<String>) {
+    let mut playbacktypes = vec!["File".to_owned(), "Stdout".to_owned()];
+    let mut capturetypes = vec!["File".to_owned(), "Stdin".to_owned()];
+
+    if cfg!(feature = "alsa-backend") {
+        playbacktypes.push("Alsa".to_owned());
+        capturetypes.push("Alsa".to_owned());
+    }
+    if cfg!(feature = "pulse-backend") {
+        playbacktypes.push("Pulse".to_owned());
+        capturetypes.push("Pulse".to_owned());
+    }
+    if cfg!(feature = "jack-backend") {
+        playbacktypes.push("Jack".to_owned());
+        capturetypes.push("Jack".to_owned());
+    }
+    if cfg!(all(feature = "cpal-backend", target_os = "macos")) {
+        playbacktypes.push("CoreAudio".to_owned());
+        capturetypes.push("CoreAudio".to_owned());
+    }
+    if cfg!(all(feature = "cpal-backend", target_os = "windows")) {
+        playbacktypes.push("Wasapi".to_owned());
+        capturetypes.push("Wasapi".to_owned());
+    }
+    (playbacktypes, capturetypes)
+}
+
 #[derive(Debug, PartialEq, Deserialize)]
 enum WsCommand {
     SetConfigName(String),
@@ -71,6 +98,7 @@ enum WsCommand {
     GetRateAdjust,
     GetClippedSamples,
     GetBufferLevel,
+    GetSupportedDeviceTypes,
     Exit,
     Stop,
     None,
@@ -184,6 +212,10 @@ enum WsReply {
     GetClippedSamples {
         result: WsResult,
         value: usize,
+    },
+    GetSupportedDeviceTypes {
+        result: WsResult,
+        value: (Vec<String>, Vec<String>),
     },
     Exit {
         result: WsResult,
@@ -624,6 +656,13 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
                 .store(ExitRequest::EXIT, Ordering::Relaxed);
             Some(WsReply::Exit {
                 result: WsResult::Ok,
+            })
+        }
+        WsCommand::GetSupportedDeviceTypes => {
+            let devs = list_supported_devices();
+            Some(WsReply::GetSupportedDeviceTypes {
+                result: WsResult::Ok,
+                value: devs,
             })
         }
         WsCommand::None => None,

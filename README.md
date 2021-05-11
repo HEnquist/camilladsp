@@ -13,6 +13,8 @@ The full configuration is given in a yaml file.
 ### Table of Contents
 **[Introduction](#introduction)**
 - **[Background](#background)**
+- **[How it works](#how-it-works)**
+- **[System requirements](#system-requirements)**
 - **[Usage example: crossover for 2-way speakers](#usage-example-crossover-for-2-way-speakers)**
 - **[Dependencies](#dependencies)**
 - **[Related projects](#related-projects)**
@@ -35,6 +37,7 @@ The full configuration is given in a yaml file.
 - **[PulseAudio](#pulseaudio)**
 - **[Wasapi](#wasapi)**
 - **[CoreAudio](#coreaudio)**
+- **[Jack](#jack)**
 
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
@@ -89,6 +92,37 @@ The supervisor monitors all threads by listening to their status messages. The r
 
 ### Websocket server
 The websocket server lauches a separate thread to handle each connected client. All commands to change the config are send to the supervisor thread.
+
+## System requirements
+CamillaDSP runs on Linux, macOS and Windows. The exact system requirements are determined by the amount of processing the application requires, but even relatively weak CPUs like Intel Atom have much more processing power than most will need.
+
+In general, a 64-bit CPU and OS will perform better.
+
+A few examples, done with CamillaDSP v0.5.0:
+
+- A Raspberry Pi 4 doing FIR filtering of 8 channels, with 262k taps per channel, at 192 kHz. 
+  CPU usage about 55%.
+
+- An AMD Ryzen 7 2700u (laptop) doing FIR filtering of 96 channels, with 262k taps per channel, at 192 kHz. 
+  CPU usage just under 100%.
+
+### Linux
+Both 64 and 32 bit architechtures are supported. All platforms supported by the Rustc compiler should work. 
+
+Pre-built binaries are provided for:
+- x86_64 (almost all PCs)
+- armv7 (32-bit arm, for example a Raspeberry Pi 2,3,4 with a 32-bit OS)
+- aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS) 
+
+### Windows
+An x86_64 CPU and the 64-bit version of Windows is recommended. Any x86_64 CPU will likely be sufficient.
+
+Pre-built binaries are provided for 64-bit systems.
+
+### MacOS
+CamillaDSP can run on both Intel and Apple Silicon macs. Any reasonably recent version of MacOS should work.
+
+Pre-built binaries are provided for both Intel and Apple Silicon
 
 
 ## Usage example: crossover for 2-way speakers
@@ -193,6 +227,7 @@ All the available options, or "features" are:
 - `alsa-backend`: Alsa support
 - `pulse-backend`: PulseAudio support
 - `cpal-backend`: Wasapi and CoreAudio support
+- `jack-backend`: Jack support. This also enables the cpal-backend feature if building on Windows or macOS.
 - `websocket`: Websocket server for control
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
 - `FFTW`: Use FFTW instead of RustFFT
@@ -201,6 +236,11 @@ All the available options, or "features" are:
 
 The first three (`alsa-backend`, `pulse-packend`, `websocket`) are included in the default features, meaning if you don't specify anything you will get those three.
 Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
+
+The `jack-backend` feature requires jack and its development files to be installed. To install:
+- Fedora: ```sudo dnf install jack-audio-connection-kit jack-audio-connection-kit-devel```
+- Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
+- Arch:  ```sudo pacman -S jack```
 
 Example 1: You want `alsa-backend`, `pulse-backend`, `websocket` and `FFTW`. The first three are included by default so you only need to add `FFTW`:
 ```
@@ -410,6 +450,14 @@ The device name is the same as the one shown in the "Audio MIDI Setup" that can 
 
 The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
 
+## Jack
+The jack server must be running. 
+
+Set `device` to "default" for both capture and playback. The sample format is fixed at 32-bit float (FLOAT32LE).
+
+The samplerate must match the samplerate configured for the Jack server. 
+
+CamillaDSP will show up in Jack as "cpal_client_in" and "cpal_client_out".
 
 # Configuration
 
@@ -541,13 +589,14 @@ devices:
     * `Pulse`
     * `Wasapi`
     * `CoreAudio`
+    * `Jack`
     * `File`
     * `Stdin` (capture only)
     * `Stdout` (playback only)
   * `channels`: number of channels
   * `device`: device name (for Alsa, Pulse, Wasapi, CoreAudio). For CoreAudio and Wasapi, "default" will give the default device.
   * `filename` path the the file (for File)
-  * `format`: sample format.
+  * `format`: sample format (for all except Jack).
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
     * S16LE - Signed 16-bit int, stored as two bytes
@@ -558,14 +607,14 @@ devices:
     * FLOAT64LE - 64-bit float, stored as eight bytes
 
     Supported formats:
-    |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | File/Stdin/Stdout  |
-    |------------|--------------------|--------------------|--------------------|--------------------|--------------------|
-    | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-    | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
-    | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
-    | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
-    | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-    | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+    |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | Jack               | File/Stdin/Stdout  |
+    |------------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|
+    | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark: |
+    | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+    | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+    | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+    | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+    | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                | :x:                | :heavy_check_mark: |
   
   
     Equivalent formats (for reference):
@@ -612,6 +661,7 @@ devices:
     read_bytes: 200
     ```
     
+  The __Jack__ capture and playback devices do not have a `format` parameter, since they always uses the FLOAT32LE format. It seems that the `device` property should always be set to "default". This parameter may be removed in a future version.
 
 
 ## Resampling

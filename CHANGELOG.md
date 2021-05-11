@@ -1,3 +1,12 @@
+## 0.5.1
+New features:
+- Add JACK support.
+- Add `GetSupportedDeviceTypes` websocket command.
+
+Bugfixes:
+- Handle wav files with extended fmt chunk.
+- Don't allow starting with zero channels.
+
 ## 0.5.0
 New features:
 - Add RMS and Peak measurement for each channel at input and output.
