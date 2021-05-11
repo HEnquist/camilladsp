@@ -609,7 +609,7 @@ devices:
     Supported formats:
     |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | Jack               | File/Stdin/Stdout  |
     |------------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|
-    | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+    | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark: |
     | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
     | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
     | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
