@@ -453,11 +453,11 @@ The sample format is always 32-bit float (FLOAT32LE) even if the device is confi
 ## Jack
 The jack server must be running. 
 
-TODO: add information on device name. Setting `device` to "default" uses the default port.
+Set `device` to "default" for both capture and playback. The sample format is always 32-bit float (FLOAT32LE).
 
-Jack support is provided by the CPAL library.
+The samplerate must match the samplerate configured for the Jack server. 
 
-The sample format is always 32-bit float (FLOAT32LE).
+CamillaDSP will show up in Jack as "cpal_client_in" and "cpal_client_out".
 
 # Configuration
 
