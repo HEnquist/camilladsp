@@ -52,20 +52,16 @@ impl Loudness {
         let tempgain: PrcFmt = 10.0;
         let target_linear_gain = tempgain.powf(current_volume as PrcFmt / 20.0);
         let relboost = get_rel_boost(current_volume, conf.reference_level);
-        let highshelf_conf = config::BiquadParameters::Highshelf(
-            config::ShelfSteepness::Slope {
-                freq: 3500.0,
-                slope: 12.0,
-                gain: (relboost * conf.high_boost) as PrcFmt,
-            }
-        );
-        let lowshelf_conf = config::BiquadParameters::Lowshelf(
-            config::ShelfSteepness::Slope {
-                freq: 70.0,
-                slope: 12.0,
-                gain: (relboost * conf.low_boost) as PrcFmt,
-            }
-        );
+        let highshelf_conf = config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
+            freq: 3500.0,
+            slope: 12.0,
+            gain: (relboost * conf.high_boost) as PrcFmt,
+        });
+        let lowshelf_conf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Slope {
+            freq: 70.0,
+            slope: 12.0,
+            gain: (relboost * conf.low_boost) as PrcFmt,
+        });
         let high_biquad_coeffs =
             biquad::BiquadCoefficients::from_config(samplerate, highshelf_conf);
         let low_biquad_coeffs = biquad::BiquadCoefficients::from_config(samplerate, lowshelf_conf);
@@ -183,20 +179,17 @@ impl Filter for Loudness {
                 "Updating loudness biquads, relative boost {}%",
                 100.0 * relboost
             );
-            let highshelf_conf = config::BiquadParameters::Highshelf(
-                config::ShelfSteepness::Slope {
+            let highshelf_conf =
+                config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
                     freq: 3500.0,
                     slope: 12.0,
                     gain: (relboost * self.high_boost) as PrcFmt,
-                }
-            );
-            let lowshelf_conf = config::BiquadParameters::Lowshelf(
-                config::ShelfSteepness::Slope {
-                    freq: 70.0,
-                    slope: 12.0,
-                    gain: (relboost * self.low_boost) as PrcFmt,
-                }
-            );
+                });
+            let lowshelf_conf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Slope {
+                freq: 70.0,
+                slope: 12.0,
+                gain: (relboost * self.low_boost) as PrcFmt,
+            });
             self.high_biquad.update_parameters(config::Filter::Biquad {
                 parameters: highshelf_conf,
             });
@@ -219,20 +212,17 @@ impl Filter for Loudness {
                 .round() as usize;
             let current_volume = self.processing_status.read().unwrap().volume;
             let relboost = get_rel_boost(current_volume, conf.reference_level);
-            let highshelf_conf = config::BiquadParameters::Highshelf(
-                config::ShelfSteepness::Slope {
+            let highshelf_conf =
+                config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
                     freq: 3500.0,
                     slope: 12.0,
                     gain: (relboost * conf.high_boost) as PrcFmt,
-                }
-            );
-            let lowshelf_conf = config::BiquadParameters::Lowshelf(
-                config::ShelfSteepness::Slope {
-                    freq: 70.0,
-                    slope: 12.0,
-                    gain: (relboost * conf.low_boost) as PrcFmt,
-                }
-            );
+                });
+            let lowshelf_conf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Slope {
+                freq: 70.0,
+                slope: 12.0,
+                gain: (relboost * conf.low_boost) as PrcFmt,
+            });
             self.high_biquad.update_parameters(config::Filter::Biquad {
                 parameters: highshelf_conf,
             });

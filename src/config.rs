@@ -494,22 +494,38 @@ impl Default for ConvParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum ShelfSteepness {
-    Q { freq: PrcFmt, q: PrcFmt, gain: PrcFmt},
-    Slope { freq: PrcFmt, slope: PrcFmt, gain: PrcFmt },
+    Q {
+        freq: PrcFmt,
+        q: PrcFmt,
+        gain: PrcFmt,
+    },
+    Slope {
+        freq: PrcFmt,
+        slope: PrcFmt,
+        gain: PrcFmt,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum PeakingWidth {
-    Q { freq: PrcFmt, q: PrcFmt, gain: PrcFmt},
-    Bandwidth { freq: PrcFmt, bandwidth: PrcFmt, gain: PrcFmt },
+    Q {
+        freq: PrcFmt,
+        q: PrcFmt,
+        gain: PrcFmt,
+    },
+    Bandwidth {
+        freq: PrcFmt,
+        bandwidth: PrcFmt,
+        gain: PrcFmt,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum NotchWidth {
-    Q { freq: PrcFmt, q: PrcFmt},
-    Bandwidth { freq: PrcFmt, bandwidth: PrcFmt},
+    Q { freq: PrcFmt, q: PrcFmt },
+    Bandwidth { freq: PrcFmt, bandwidth: PrcFmt },
 }
 
 #[allow(clippy::upper_case_acronyms)]
