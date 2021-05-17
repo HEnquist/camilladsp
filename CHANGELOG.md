@@ -1,3 +1,8 @@
+## 0.5.2
+New features:
+- Peaking, Notch, Bandpass and Allpass filters can be defined with bandwidth.
+- Highshelf and Lowshelf can be defined with Q-value.
+
 ## 0.5.1
 New features:
 - Add JACK support.

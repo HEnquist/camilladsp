@@ -966,12 +966,26 @@ filters:
       freq: 100
       q: 0.5
       gain: -7.3
+  peak_100_bw:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 100
+      bandwidth: 0.7
+      gain: -7.3
   exampleshelf:
     type: Biquad
     parameters:
       type: Highshelf
       freq: 1000
       slope: 6
+      gain: -12
+  exampleshelf_q:
+    type: Biquad
+    parameters:
+      type: Highshelf
+      freq: 1000
+      q: 1.5
       gain: -12
   LR_highpass:
     type: BiquadCombo
@@ -983,26 +997,27 @@ filters:
 
 Single Biquads are defined using the type "Biquad". The available filter types are:
 * Free
-  * given by normalized coefficients a1, a2, b0, b1, b2.
+  * given by normalized coefficients `a1`, `a2`, `b0`, `b1`, `b2`.
 * Highpass & Lowpass
   * Second order high/lowpass filters (12dB/oct)
-  * Defined by cutoff frequency and Q-value
+  * Defined by cutoff frequency `freq` and either Q-value `q` or bandwidth in octaves `bandwidth`.
 * HighpassFO & LowpassFO
   * First order high/lowpass filters (6dB/oct)
-  * Defined by cutoff frequency.
+  * Defined by cutoff frequency `freq`.
 * Highshelf & Lowshelf
   * High / Low uniformly affects the high / low frequencies respectively while leaving the low / high part unaffected. In between there is a slope of variable steepness.
-  * "gain" gives the gain of the filter
-  * "slope" is the steepness in dB/octave. Values up to around +-12 are usable.
-  * "freq" is the center frequency of the sloping section.
+  * `gain` gives the gain of the filter
+  * `slope` is the steepness in dB/octave. Values up to around +-12 are usable.
+  * `q` is the Q-value and can be used instead of `slope` to define the steepness of the filter. Only one of `q` and `slope` can be given. 
+  * `freq` is the center frequency of the sloping section.
 * Peaking
-  * A parametric peaking filter with selectable gain af a given frequency with a bandwidth given by the Q-value.
+  * A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
 * Notch
-  * A notch filter to attenuate a given frequency with a bandwidth given by the Q-value.
+  * A notch filter to attenuate a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
 * Bandpass
-  * A second order bandpass filter for a given frequency with a bandwidth given by the Q-value. 
+  * A second order bandpass filter for a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
 * Allpass
-  * A second order allpass filter for a given frequency with a steepness given by the Q-value. 
+  * A second order allpass filter for a given frequency `freq` with a steepness given either by the Q-value `q` or bandwidth in octaves `bandwidth`
 * LinkwitzTransform
   * A Linkwitz transform to change a speaker with resonance frequency ```freq_act``` and Q-value ```q_act```, to a new resonance frequency ```freq_target``` and Q-value ```q_target```.
 
