@@ -532,6 +532,11 @@ mod tests {
         (left - right).abs() < maxdiff
     }
 
+    fn is_close_relative(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
+        println!("{} - {}", left, right);
+        (left / right - 1.0).abs() < maxdiff
+    }
+
     fn compare_waveforms(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
         for (val_l, val_r) in left.iter().zip(right.iter()) {
             if !is_close(*val_l, *val_r, maxdiff) {
@@ -748,6 +753,106 @@ mod tests {
         assert!(is_close(gain_f0l, -18.0, 1.0));
         assert!(is_close(gain_lf, -24.0, 0.1));
         assert!(is_close(gain_hf, -0.0, 0.1));
+    }
+
+    #[test]
+    fn lowshelf_slope_vs_q() {
+        let conf_slope = BiquadParameters::Lowshelf(ShelfSteepness::Slope {
+            freq: 100.0,
+            slope: 12.0,
+            gain: -24.0,
+        });
+        let conf_q = BiquadParameters::Lowshelf(ShelfSteepness::Q {
+            freq: 100.0,
+            q: 0.707,
+            gain: -24.0,
+        });
+        let coeffs_slope = BiquadCoefficients::from_config(44100, conf_slope);
+        let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
+        assert!(is_close_relative(coeffs_slope.a1, coeffs_q.a1, 0.001));
+        assert!(is_close_relative(coeffs_slope.a2, coeffs_q.a2, 0.001));
+        assert!(is_close_relative(coeffs_slope.b0, coeffs_q.b0, 0.001));
+        assert!(is_close_relative(coeffs_slope.b1, coeffs_q.b1, 0.001));
+        assert!(is_close_relative(coeffs_slope.b2, coeffs_q.b2, 0.001));
+    }
+
+    #[test]
+    fn highshelf_slope_vs_q() {
+        let conf_slope = BiquadParameters::Highshelf(ShelfSteepness::Slope {
+            freq: 100.0,
+            slope: 12.0,
+            gain: -24.0,
+        });
+        let conf_q = BiquadParameters::Highshelf(ShelfSteepness::Q {
+            freq: 100.0,
+            q: 0.707,
+            gain: -24.0,
+        });
+        let coeffs_slope = BiquadCoefficients::from_config(44100, conf_slope);
+        let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
+        assert!(is_close_relative(coeffs_slope.a1, coeffs_q.a1, 0.001));
+        assert!(is_close_relative(coeffs_slope.a2, coeffs_q.a2, 0.001));
+        assert!(is_close_relative(coeffs_slope.b0, coeffs_q.b0, 0.001));
+        assert!(is_close_relative(coeffs_slope.b1, coeffs_q.b1, 0.001));
+        assert!(is_close_relative(coeffs_slope.b2, coeffs_q.b2, 0.001));
+    }
+
+    #[test]
+    fn bandpass_bw_vs_q() {
+        let conf_bw = BiquadParameters::Bandpass(NotchWidth::Bandwidth {
+            freq: 100.0,
+            bandwidth: 1.0,
+        });
+        let conf_q = BiquadParameters::Bandpass(NotchWidth::Q {
+            freq: 100.0,
+            q: 1.4142,
+        });
+        let coeffs_bw = BiquadCoefficients::from_config(44100, conf_bw);
+        let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
+        assert!(is_close_relative(coeffs_bw.a1, coeffs_q.a1, 0.001));
+        assert!(is_close_relative(coeffs_bw.a2, coeffs_q.a2, 0.001));
+        assert!(is_close_relative(coeffs_bw.b0, coeffs_q.b0, 0.001));
+        assert_eq!(coeffs_bw.b1, 0.0);
+        assert_eq!(coeffs_q.b1, 0.0);
+        assert!(is_close_relative(coeffs_bw.b2, coeffs_q.b2, 0.001));
+    }
+
+    #[test]
+    fn notch_bw_vs_q() {
+        let conf_bw = BiquadParameters::Notch(NotchWidth::Bandwidth {
+            freq: 100.0,
+            bandwidth: 1.0,
+        });
+        let conf_q = BiquadParameters::Notch(NotchWidth::Q {
+            freq: 100.0,
+            q: 1.4142,
+        });
+        let coeffs_bw = BiquadCoefficients::from_config(44100, conf_bw);
+        let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
+        assert!(is_close_relative(coeffs_bw.a1, coeffs_q.a1, 0.001));
+        assert!(is_close_relative(coeffs_bw.a2, coeffs_q.a2, 0.001));
+        assert!(is_close_relative(coeffs_bw.b0, coeffs_q.b0, 0.001));
+        assert!(is_close_relative(coeffs_bw.b1, coeffs_q.b1, 0.001));
+        assert!(is_close_relative(coeffs_bw.b2, coeffs_q.b2, 0.001));
+    }
+
+    #[test]
+    fn allpass_bw_vs_q() {
+        let conf_bw = BiquadParameters::Allpass(NotchWidth::Bandwidth {
+            freq: 100.0,
+            bandwidth: 1.0,
+        });
+        let conf_q = BiquadParameters::Allpass(NotchWidth::Q {
+            freq: 100.0,
+            q: 1.4142,
+        });
+        let coeffs_bw = BiquadCoefficients::from_config(44100, conf_bw);
+        let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
+        assert!(is_close_relative(coeffs_bw.a1, coeffs_q.a1, 0.001));
+        assert!(is_close_relative(coeffs_bw.a2, coeffs_q.a2, 0.001));
+        assert!(is_close_relative(coeffs_bw.b0, coeffs_q.b0, 0.001));
+        assert!(is_close_relative(coeffs_bw.b1, coeffs_q.b1, 0.001));
+        assert!(is_close_relative(coeffs_bw.b2, coeffs_q.b2, 0.001));
     }
 
     #[test]
