@@ -130,9 +130,10 @@ impl BiquadCoefficients {
 
             config::BiquadParameters::Highshelf(config::ShelfSteepness::Q { freq, q, gain }) => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
+                let sn = omega.sin();
                 let cs = omega.cos();
                 let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
-                let beta = ampl.sqrt() / q;
+                let beta = sn * ampl.sqrt() / q;
                 let b0 = ampl * ((ampl + 1.0) + (ampl - 1.0) * cs + beta);
                 let b1 = -2.0 * ampl * ((ampl - 1.0) + (ampl + 1.0) * cs);
                 let b2 = ampl * ((ampl + 1.0) + (ampl - 1.0) * cs - beta);
@@ -175,9 +176,10 @@ impl BiquadCoefficients {
             }
             config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { freq, q, gain }) => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
+                let sn = omega.sin();
                 let cs = omega.cos();
                 let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
-                let beta = ampl.sqrt() / q;
+                let beta = sn * ampl.sqrt() / q;
                 let b0 = ampl * ((ampl + 1.0) - (ampl - 1.0) * cs + beta);
                 let b1 = 2.0 * ampl * ((ampl - 1.0) - (ampl + 1.0) * cs);
                 let b2 = ampl * ((ampl + 1.0) - (ampl - 1.0) * cs - beta);
