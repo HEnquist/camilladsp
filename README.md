@@ -600,11 +600,13 @@ devices:
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
     * S16LE - Signed 16-bit int, stored as two bytes
-    * S24LE - Signed 24-bit int, stored as four bytes 
-    * S24LE3 - Signed 24-bit int, stored as three bytes 
+    * S24LE - Signed 24-bit int, stored as four bytes (three bytes of data, one padding byte)
+    * S24LE3 - Signed 24-bit int, stored as three bytes (with no padding)
     * S32LE - Signed 32-bit int, stored as four bytes 
     * FLOAT32LE - 32-bit float, stored as four bytes
     * FLOAT64LE - 64-bit float, stored as eight bytes
+
+    __Note that there are two 24-bit formats! Make sure to select the correct one.__
 
     Supported formats:
     |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | Jack               | File/Stdin/Stdout  |
@@ -934,8 +936,6 @@ The other possible formats are raw data:
 - S32LE: signed 32-bit little-endian integers
 - FLOAT32LE: 32-bit little endian float
 - FLOAT64LE: 64-bit little endian float
-
-If you have a stereo wav-file, this should be converted to two separate raw files. To convert a stereo wav to signed 32-bit integers using Audacity, start by splitting the stereo track to two mono tracks. Then save each one using File / Export / Export Audio. In the lower part of the dialog, select Header: RAW (header-less), Encoding: Signed 32-bit PCM. 
 
 
 ### IIR
