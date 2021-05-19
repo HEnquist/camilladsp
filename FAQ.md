@@ -1,5 +1,40 @@
 # Frequently asked questions
 
+## Config files
+
+- Why do I get a cryptic error message when my config file looks ok?
+  
+  In YAML it is very important that the indentation is correct, otherwise the parser is not able to deduce which properties belong to what level in the tree.
+  This can result in an error message like this:
+  ```
+  ERRO Invalid config file!
+  mapping values are not allowed in this context at line 12 column 13, module: camilladsp 
+  ```
+  Check the file carefully, to make sure everything is properly indented. Use only spaces, never tabs.
+
+## Capture and playback
+
+- Why do I get only distorted noise when using 24-bit samples?
+
+  There are two 24-bit formats, and it's very important to pick the right one. Both use three bytes to store each sample, but they are packed in different ways.
+  - S24LE: This format stores each 24-bit sample using 32 bits (4 bytes). The 24-bit data is stored in the lower three bytes, and the highest byte is padding.
+    
+  - S24LE3: Here only the three data bytes are stored, without any padding.
+
+  Let's make up three samples and write them as bytes in hex. We use little-endian byte order, hence the first byte is the least significant. 
+  
+  Sample 1: `0xA1, 0xA2, 0xA3`, 
+  
+  Sample 2: `0xB1, 0xB2, 0xB3`, 
+  
+  Sample 3: `0xC1, 0xC2, 0xC3`  
+
+  Stored as S24LE: `0xA1, 0xA2, 0xA3, 0x00, 0xB1, 0xB2, 0xB3, 0x00, 0xC1, 0xC2, 0xC3, 0x00` 
+
+  Stored as S24LE3: `0xA1, 0xA2, 0xA3, 0xB1, 0xB2, 0xB3, 0xC1, 0xC2, 0xC3` 
+
+  Note the extra padding bytes (`0x00`) in S24LE. This scheme means that the samples get an "easier" alignment in memory, while wasting some space. In practice, this format isn't used much.
+
 ## Filtering
 
 - I only have filters with negative gain, why do I get clipping anyway?
