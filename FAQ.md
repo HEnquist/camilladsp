@@ -1,5 +1,11 @@
 # Frequently asked questions
 
+## General
+
+- Who is Camilla?
+
+  Camilla my daughters middle name.
+
 ## Config files
 
 - Why do I get a cryptic error message when my config file looks ok?
