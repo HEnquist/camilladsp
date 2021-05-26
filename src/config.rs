@@ -491,6 +491,43 @@ impl Default for ConvParameters {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum ShelfSteepness {
+    Q {
+        freq: PrcFmt,
+        q: PrcFmt,
+        gain: PrcFmt,
+    },
+    Slope {
+        freq: PrcFmt,
+        slope: PrcFmt,
+        gain: PrcFmt,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum PeakingWidth {
+    Q {
+        freq: PrcFmt,
+        q: PrcFmt,
+        gain: PrcFmt,
+    },
+    Bandwidth {
+        freq: PrcFmt,
+        bandwidth: PrcFmt,
+        gain: PrcFmt,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum NotchWidth {
+    Q { freq: PrcFmt, q: PrcFmt },
+    Bandwidth { freq: PrcFmt, bandwidth: PrcFmt },
+}
+
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
@@ -511,25 +548,13 @@ pub enum BiquadParameters {
         freq: PrcFmt,
         q: PrcFmt,
     },
-    Peaking {
-        freq: PrcFmt,
-        gain: PrcFmt,
-        q: PrcFmt,
-    },
-    Highshelf {
-        freq: PrcFmt,
-        slope: PrcFmt,
-        gain: PrcFmt,
-    },
+    Peaking(PeakingWidth),
+    Highshelf(ShelfSteepness),
     HighshelfFO {
         freq: PrcFmt,
         gain: PrcFmt,
     },
-    Lowshelf {
-        freq: PrcFmt,
-        slope: PrcFmt,
-        gain: PrcFmt,
-    },
+    Lowshelf(ShelfSteepness),
     LowshelfFO {
         freq: PrcFmt,
         gain: PrcFmt,
@@ -540,21 +565,12 @@ pub enum BiquadParameters {
     LowpassFO {
         freq: PrcFmt,
     },
-    Allpass {
-        freq: PrcFmt,
-        q: PrcFmt,
-    },
+    Allpass(NotchWidth),
     AllpassFO {
         freq: PrcFmt,
     },
-    Bandpass {
-        freq: PrcFmt,
-        q: PrcFmt,
-    },
-    Notch {
-        freq: PrcFmt,
-        q: PrcFmt,
-    },
+    Bandpass(NotchWidth),
+    Notch(NotchWidth),
     LinkwitzTransform {
         freq_act: PrcFmt,
         q_act: PrcFmt,

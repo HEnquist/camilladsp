@@ -85,7 +85,7 @@ The capture thread reads a chunk samples from the audio device in the selected f
 The processing thread waits for audio chunk messages to arrive in the input queue. Once a message arrives, it's passed through all the defined filters and mixers of the pipeline. Once all processing is done, the audio data is posted to the input queue of the playback device.
 
 ### Playback
-The playback thread simply waits for audio messages to appear in the queue. Once a message arrives, the audio data is converted to the right sample format for the device, and written to the playback device. The Alsa playback device supports monitoring the buffer level of the playback device. This is used to send requests for adjusting the capture speed to the supoervisor thread, on a separate message channel.
+The playback thread simply waits for audio messages to appear in the queue. Once a message arrives, the audio data is converted to the right sample format for the device, and written to the playback device. The Alsa playback device supports monitoring the buffer level of the playback device. This is used to send requests for adjusting the capture speed to the supervisor thread, on a separate message channel.
 
 ### Supervisor
 The supervisor monitors all threads by listening to their status messages. The requests for capture rate adjust are passed on to the capture thread. It's also responsible for updating the configuration when requested to do so via the websocket server or a SIGHUP signal.
@@ -600,11 +600,13 @@ devices:
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
     * S16LE - Signed 16-bit int, stored as two bytes
-    * S24LE - Signed 24-bit int, stored as four bytes 
-    * S24LE3 - Signed 24-bit int, stored as three bytes 
+    * S24LE - Signed 24-bit int, stored as four bytes (three bytes of data, one padding byte)
+    * S24LE3 - Signed 24-bit int, stored as three bytes (with no padding)
     * S32LE - Signed 32-bit int, stored as four bytes 
     * FLOAT32LE - 32-bit float, stored as four bytes
     * FLOAT64LE - 64-bit float, stored as eight bytes
+
+    __Note that there are two 24-bit formats! Make sure to select the correct one.__
 
     Supported formats:
     |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | Jack               | File/Stdin/Stdout  |
@@ -935,8 +937,6 @@ The other possible formats are raw data:
 - FLOAT32LE: 32-bit little endian float
 - FLOAT64LE: 64-bit little endian float
 
-If you have a stereo wav-file, this should be converted to two separate raw files. To convert a stereo wav to signed 32-bit integers using Audacity, start by splitting the stereo track to two mono tracks. Then save each one using File / Export / Export Audio. In the lower part of the dialog, select Header: RAW (header-less), Encoding: Signed 32-bit PCM. 
-
 
 ### IIR
 IIR filters are implemented as Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filters, or you can provide the coefficients directly.
@@ -966,12 +966,26 @@ filters:
       freq: 100
       q: 0.5
       gain: -7.3
+  peak_100_bw:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 100
+      bandwidth: 0.7
+      gain: -7.3
   exampleshelf:
     type: Biquad
     parameters:
       type: Highshelf
       freq: 1000
       slope: 6
+      gain: -12
+  exampleshelf_q:
+    type: Biquad
+    parameters:
+      type: Highshelf
+      freq: 1000
+      q: 1.5
       gain: -12
   LR_highpass:
     type: BiquadCombo
@@ -983,26 +997,27 @@ filters:
 
 Single Biquads are defined using the type "Biquad". The available filter types are:
 * Free
-  * given by normalized coefficients a1, a2, b0, b1, b2.
+  * given by normalized coefficients `a1`, `a2`, `b0`, `b1`, `b2`.
 * Highpass & Lowpass
   * Second order high/lowpass filters (12dB/oct)
-  * Defined by cutoff frequency and Q-value
+  * Defined by cutoff frequency `freq` and either Q-value `q` or bandwidth in octaves `bandwidth`.
 * HighpassFO & LowpassFO
   * First order high/lowpass filters (6dB/oct)
-  * Defined by cutoff frequency.
+  * Defined by cutoff frequency `freq`.
 * Highshelf & Lowshelf
   * High / Low uniformly affects the high / low frequencies respectively while leaving the low / high part unaffected. In between there is a slope of variable steepness.
-  * "gain" gives the gain of the filter
-  * "slope" is the steepness in dB/octave. Values up to around +-12 are usable.
-  * "freq" is the center frequency of the sloping section.
+  * `gain` gives the gain of the filter
+  * `slope` is the steepness in dB/octave. Values up to around +-12 are usable.
+  * `q` is the Q-value and can be used instead of `slope` to define the steepness of the filter. Only one of `q` and `slope` can be given. 
+  * `freq` is the center frequency of the sloping section.
 * Peaking
-  * A parametric peaking filter with selectable gain af a given frequency with a bandwidth given by the Q-value.
+  * A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
 * Notch
-  * A notch filter to attenuate a given frequency with a bandwidth given by the Q-value.
+  * A notch filter to attenuate a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
 * Bandpass
-  * A second order bandpass filter for a given frequency with a bandwidth given by the Q-value. 
+  * A second order bandpass filter for a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
 * Allpass
-  * A second order allpass filter for a given frequency with a steepness given by the Q-value. 
+  * A second order allpass filter for a given frequency `freq` with a steepness given either by the Q-value `q` or bandwidth in octaves `bandwidth`
 * LinkwitzTransform
   * A Linkwitz transform to change a speaker with resonance frequency ```freq_act``` and Q-value ```q_act```, to a new resonance frequency ```freq_target``` and Q-value ```q_target```.
 
