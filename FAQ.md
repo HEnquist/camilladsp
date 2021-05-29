@@ -4,7 +4,7 @@
 
 - Who is Camilla?
 
-  Camilla my daughters middle name.
+  Camilla is my daughters middle name.
 
 ## Config files
 
