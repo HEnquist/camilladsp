@@ -4,8 +4,6 @@ use alsadevice;
 use config;
 #[cfg(feature = "cpal-backend")]
 use cpaldevice;
-#[cfg(target_os = "windows")]
-use wasapidevice;
 use filedevice;
 use num_integer as integer;
 #[cfg(feature = "pulse-backend")]
@@ -18,6 +16,8 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Instant;
+#[cfg(target_os = "windows")]
+use wasapidevice;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
