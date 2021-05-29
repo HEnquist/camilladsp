@@ -28,6 +28,8 @@ extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
+#[cfg(target_os = "windows")]
+extern crate wasapi;
 
 #[macro_use]
 extern crate slog_scope;
@@ -83,6 +85,8 @@ pub mod processing;
 pub mod pulsedevice;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
+#[cfg(target_os = "windows")]
+pub mod wasapidevice;
 
 pub enum StatusMessage {
     PlaybackReady,

@@ -4,6 +4,8 @@ use alsadevice;
 use config;
 #[cfg(feature = "cpal-backend")]
 use cpaldevice;
+#[cfg(target_os = "windows")]
+use wasapidevice;
 use filedevice;
 use num_integer as integer;
 #[cfg(feature = "pulse-backend")]
@@ -230,16 +232,17 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
         }),
-        #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+        #[cfg(target_os = "windows")]
         config::PlaybackDevice::Wasapi {
             channels,
             device,
             format,
-        } => Box::new(cpaldevice::CpalPlaybackDevice {
+            exclusive,
+        } => Box::new(wasapidevice::WasapiPlaybackDevice {
             devname: device,
-            host: cpaldevice::CpalHost::Wasapi,
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
+            exclusive,
             channels,
             sample_format: format,
             target_level: conf.target_level,
@@ -518,15 +521,18 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),
-        #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+        #[cfg(target_os = "windows")]
         config::CaptureDevice::Wasapi {
             channels,
             device,
             format,
-        } => Box::new(cpaldevice::CpalCaptureDevice {
+            exclusive,
+            loopback,
+        } => Box::new(wasapidevice::WasapiCaptureDevice {
             devname: device,
-            host: cpaldevice::CpalHost::Wasapi,
             samplerate: conf.samplerate,
+            exclusive,
+            loopback,
             enable_resampling: conf.enable_resampling,
             resampler_conf: conf.resampler_type,
             capture_samplerate,

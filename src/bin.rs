@@ -20,6 +20,10 @@ extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
+#[cfg(target_os = "windows")]
+extern crate windows;
+#[cfg(target_os = "windows")]
+use windows::initialize_mta;
 
 #[macro_use]
 extern crate slog;
@@ -609,6 +613,9 @@ fn main_process() -> i32 {
     let _signal = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGHUP, || debug!("Received SIGHUP"))
     };
+
+    #[cfg(target_os = "windows")]
+    initialize_mta().unwrap();
 
     let configname = matches.value_of("configfile").map(|path| path.to_string());
 

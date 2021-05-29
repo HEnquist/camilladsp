@@ -134,7 +134,7 @@ See the [tutorial for a step-by-step guide.](./stepbystep.md)
 These are the key dependencies for CamillDSP.
 * https://crates.io/crates/alsa - Alsa audio backend
 * https://crates.io/crates/clap - Command line argument parsing
-* https://crates.io/crates/cpal - Wasapi and CoreAudio audio backends
+* https://crates.io/crates/cpal - Jack and CoreAudio audio backends
 * https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
 * https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
 * https://crates.io/crates/rustfft - FFT used for FIR filters
@@ -226,8 +226,8 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 All the available options, or "features" are:
 - `alsa-backend`: Alsa support
 - `pulse-backend`: PulseAudio support
-- `cpal-backend`: Wasapi and CoreAudio support
-- `jack-backend`: Jack support. This also enables the cpal-backend feature if building on Windows or macOS.
+- `cpal-backend`: CoreAudio support
+- `jack-backend`: Jack support. This also enables the cpal-backend feature if building on macOS.
 - `websocket`: Websocket server for control
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
 - `FFTW`: Use FFTW instead of RustFFT
@@ -284,13 +284,13 @@ RUSTFLAGS='-C target-cpu=native' cargo build --release  --no-default-features --
 Windows (cmd.exe command prompt):
 ```
 set RUSTFLAGS=-C target-cpu=native 
-cargo build --release  --no-default-features --features cpal-backend --features websocket
+cargo build --release  --no-default-features --features websocket
 ```
 
 Windows (PowerShell):
 ```
 $env:RUSTFLAGS="-C target-cpu=native"
-cargo build --release  --no-default-features --features cpal-backend --features websocket
+cargo build --release  --no-default-features --features websocket
 ```
 
 On macOS both the PulseAudio and FFTW features can be used. The necessary dependencies can be installed with brew:
@@ -430,15 +430,30 @@ pacmd list-sources
 ```
 
 ## Wasapi
-To capture audio from applications a virtual sound card is needed. [VB-CABLE from VB-AUDIO](https://www.vb-audio.com/Cable/) works well.
 
-Set VB-CABLE as the default playback device in the control panel, and let CamillaDSP capture from the VB-CABLE output.
+The device name for Wasapi is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the input/output name and card name, and the format is "{input/output name} ({card name})".
 
-The device name is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the input/output name and card name, and the format is "{input/output name} ({card name})".
+Audio can be captured in two ways.
+- Virtual sound card 
+  
+  To capture audio from applications a virtual sound card is used. [VB-CABLE from VB-AUDIO](https://www.vb-audio.com/Cable/) works well.
 
-The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
+  Set VB-CABLE as the default playback device in the control panel, and let CamillaDSP capture from the VB-CABLE output.
 
-The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
+- Loopback
+
+  In loopback mode the audio is captured from a Playback device. This requires using shared mode, see more below.
+
+
+CamillaDSP supports both shared and exclusive modes. 
+
+In most cases exclusive mode is preferred since it gives a direct connection with the audio hardware. 
+
+### Exclusive mode
+In exclusice mode the sample rate of the device will be set, and the settings for "Default format" in the control panel will be overrriden.
+
+### Shared mode
+In shared mode the sample format is always 32-bit float (FLOAT32LE). The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
 
 
 ## CoreAudio
@@ -612,9 +627,9 @@ devices:
     |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | Jack               | File/Stdin/Stdout  |
     |------------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|
     | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark: |
-    | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
-    | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
-    | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+    | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
+    | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
+    | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
     | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
     | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                | :x:                | :heavy_check_mark: |
   
@@ -662,6 +677,8 @@ devices:
     skip_bytes: 50
     read_bytes: 200
     ```
+
+  The __Wasapi__ capture and playback devices have an `exclusive` parameter for setting if Exclusive mode should be used. The capture device also has a `loopback` parameter for enabling loopback capture mode.
     
   The __Jack__ capture and playback devices do not have a `format` parameter, since they always uses the FLOAT32LE format. It seems that the `device` property should always be set to "default". This parameter may be removed in a future version.
 
