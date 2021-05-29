@@ -56,6 +56,28 @@ pub struct WasapiCaptureDevice {
     pub silence_timeout: PrcFmt,
 }
 
+fn get_wave_format(sample_format: &SampleFormat, samplerate: usize, channels: usize) -> wasapi::WaveFormat {
+    match sample_format {
+        SampleFormat::S16LE => {
+            wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels)
+        }
+        SampleFormat::S24LE => {
+            wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels)
+        }
+        SampleFormat::S24LE3 => {
+            wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels)
+        }
+        SampleFormat::S32LE => {
+            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels)
+        }
+        SampleFormat::FLOAT32LE => {
+            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Float, samplerate, channels)
+        }
+        _ => panic!("Unsupported sample format"),
+    }
+}
+
+
 fn open_playback(
     devname: &str,
     samplerate: usize,
@@ -73,7 +95,6 @@ fn open_playback(
         true => wasapi::ShareMode::Exclusive,
         false => wasapi::ShareMode::Shared,
     };
-
     let device = if devname == "default" {
         wasapi::get_default_device(&wasapi::Direction::Render)?
     } else {
@@ -81,24 +102,7 @@ fn open_playback(
         collection.get_device_with_name(devname)?
     };
     let mut audio_client = device.get_iaudioclient()?;
-    let wave_format = match sample_format {
-        SampleFormat::S16LE => {
-            wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels)
-        }
-        SampleFormat::S24LE => {
-            wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels)
-        }
-        SampleFormat::S24LE3 => {
-            wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels)
-        }
-        SampleFormat::S32LE => {
-            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels)
-        }
-        SampleFormat::FLOAT32LE => {
-            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Float, samplerate, channels)
-        }
-        _ => panic!("Unsupported sample format"),
-    };
+    let wave_format = get_wave_format(&sample_format, samplerate, channels);
     match audio_client.is_supported(&wave_format, &sharemode) {
         Ok(None) => {
             debug!("Playback device supports format {:?}", wave_format)
@@ -131,9 +135,7 @@ fn open_playback(
         false,
     )?;
     debug!("initialized capture");
-
     let handle = audio_client.set_get_eventhandle()?;
-
     let render_client = audio_client.get_audiorenderclient()?;
     debug!("Opened Wasapi playback device {}", devname);
     Ok((device, audio_client, render_client, handle, wave_format))
@@ -157,7 +159,6 @@ fn open_capture(
         true => wasapi::ShareMode::Exclusive,
         false => wasapi::ShareMode::Shared,
     };
-
     let device = if devname == "default" && !loopback {
         wasapi::get_default_device(&wasapi::Direction::Capture)?
     } else if devname == "default" && loopback {
@@ -170,24 +171,7 @@ fn open_capture(
         collection.get_device_with_name(devname)?
     };
     let mut audio_client = device.get_iaudioclient()?;
-    let wave_format = match sample_format {
-        SampleFormat::S16LE => {
-            wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels)
-        }
-        SampleFormat::S24LE => {
-            wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels)
-        }
-        SampleFormat::S24LE3 => {
-            wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels)
-        }
-        SampleFormat::S32LE => {
-            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels)
-        }
-        SampleFormat::FLOAT32LE => {
-            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Float, samplerate, channels)
-        }
-        _ => panic!("Unsupported sample format"),
-    };
+    let wave_format = get_wave_format(&sample_format, samplerate, channels);
     match audio_client.is_supported(&wave_format, &sharemode) {
         Ok(None) => {
             debug!("Capture device supports format {:?}", wave_format)
@@ -220,9 +204,7 @@ fn open_capture(
         loopback,
     )?;
     debug!("initialized capture");
-
     let handle = audio_client.set_get_eventhandle()?;
-
     let capture_client = audio_client.get_audiocaptureclient()?;
     debug!("Opened Wasapi capture device {}", devname);
     Ok((device, audio_client, capture_client, handle, wave_format))
@@ -238,15 +220,15 @@ fn playback_loop(
     chunksize: usize,
     bufferfill: Arc<AtomicUsize>,
 ) -> Res<()> {
-    let mut buffer_frame_count = audio_client.get_bufferframecount()?;
+    let mut buffer_free_frame_count = audio_client.get_bufferframecount()?;
     let mut sample_queue: VecDeque<u8> =
-        VecDeque::with_capacity(4 * blockalign * (chunksize + 2 * buffer_frame_count as usize));
+        VecDeque::with_capacity(4 * blockalign * (chunksize + 2 * buffer_free_frame_count as usize));
     audio_client.start_stream()?;
     loop {
-        buffer_frame_count = audio_client.get_available_frames()?;
-        trace!("New buffer frame count {}", buffer_frame_count);
-        while sample_queue.len() < (blockalign as usize * buffer_frame_count as usize) {
-            debug!("need more samples");
+        buffer_free_frame_count = audio_client.get_available_space_in_frames()?;
+        trace!("New buffer frame count {}", buffer_free_frame_count);
+        while sample_queue.len() < (blockalign as usize * buffer_free_frame_count as usize) {
+            trace!("playback loop needs more samples, reading from channel");
             match rx_play.try_recv() {
                 Ok(chunk) => {
                     trace!("got chunk");
@@ -256,7 +238,7 @@ fn playback_loop(
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     warn!("no data, filling with zeros");
-                    for _ in 0..((blockalign as usize * buffer_frame_count as usize)
+                    for _ in 0..((blockalign as usize * buffer_free_frame_count as usize)
                         - sample_queue.len())
                     {
                         sample_queue.push_back(0);
@@ -269,13 +251,13 @@ fn playback_loop(
             }
         }
         render_client.write_to_device_from_deque(
-            buffer_frame_count as usize,
+            buffer_free_frame_count as usize,
             blockalign as usize,
             &mut sample_queue,
         )?;
         bufferfill.store(sample_queue.len() / blockalign, Ordering::Relaxed);
         trace!("write ok");
-        if handle.wait_for_event(100000).is_err() {
+        if handle.wait_for_event(1000).is_err() {
             error!("error, stopping playback");
             audio_client.stop_stream()?;
             break;
@@ -299,7 +281,7 @@ fn capture_loop(
         let mut data = vec![0u8; available_frames as usize * blockalign as usize];
         capture_client.read_from_device(blockalign as usize, &mut data)?;
         tx_capt.send(data)?;
-        if handle.wait_for_event(1000000).is_err() {
+        if handle.wait_for_event(1000).is_err() {
             error!("error, stopping capture");
             audio_client.stop_stream()?;
             break;
@@ -329,8 +311,6 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
-        let channels_clone = channels;
-
         let bits_per_sample = self.sample_format.bits_per_sample() as i32;
         let sample_format = self.sample_format.clone();
         let sample_format_dev = self.sample_format.clone();
@@ -433,7 +413,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
                             buffer_avg.add_value(
-                                (buffer_fill.load(Ordering::Relaxed) / channels_clone) as f64,
+                                buffer_fill.load(Ordering::Relaxed) as f64,
                             );
                             if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
                                 if let Some(av_delay) = buffer_avg.get_average() {
@@ -676,7 +656,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                     );
                     let capture_bytes = blockalign * capture_samples;
                     while data_queue.len() < (blockalign * capture_samples) {
-                        debug!("need more samples");
+                        trace!("capture device needs more samples to make chunk, readning from channel");
                         match rx_dev.recv() {
                             Ok(data) => {
                                 trace!("got chunk, length {} bytes", data.len());
@@ -716,8 +696,8 @@ impl CaptureDevice for WasapiCaptureDevice {
                     {
                         let samples_per_sec = averager.get_average();
                         averager.restart();
-                        let measured_rate_f = samples_per_sec / channels as f64;
-                        trace!(
+                        let measured_rate_f = samples_per_sec;
+                        debug!(
                             "Measured sample rate is {} Hz",
                             measured_rate_f
                         );
