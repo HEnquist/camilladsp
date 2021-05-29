@@ -8,7 +8,7 @@ By default the websocket server binds to the address 127.0.0.1, which means it's
 
 
 ## Command syntax
-All commands are sent as JSON. For commands without arguments, this is just a string with the command name withing quotes:
+All commands are sent as JSON. For commands without arguments, this is just a string with the command name within quotes:
 ```
 "GetVersion"
 ```
