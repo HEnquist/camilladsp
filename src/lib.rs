@@ -30,6 +30,8 @@ extern crate signal_hook;
 extern crate tungstenite;
 #[cfg(target_os = "windows")]
 extern crate wasapi;
+#[cfg(target_os = "windows")]
+extern crate crossbeam_channel;
 
 #[macro_use]
 extern crate slog_scope;

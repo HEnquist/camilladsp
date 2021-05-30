@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
+use crossbeam_channel::bounded;
 use wasapi;
 
 use crate::{CaptureStatus, PlaybackStatus};
@@ -490,21 +491,19 @@ impl PlaybackDevice for WasapiPlaybackDevice {
     }
 }
 
-fn get_nbr_capture_samples(
+fn get_nbr_capture_frames(
     resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
-    capture_samples: usize,
-    channels: usize,
+    capture_frames: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
         #[cfg(feature = "debug")]
         trace!(
-            "Resampler needs {} frames, will read {} samples",
-            resampl.nbr_frames_needed(),
-            resampl.nbr_frames_needed() * channels;
+            "Resampler needs {} frames",
+            resampl.nbr_frames_needed()
         );
-        resampl.nbr_frames_needed() * channels
+        resampl.nbr_frames_needed()
     } else {
-        capture_samples
+        capture_frames
     }
 }
 
@@ -594,7 +593,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                     Err(_err) => {}
                 }
                 let chunksize_samples = channels * chunksize;
-                let mut capture_samples = chunksize_samples;
+                let mut capture_frames = chunksize;
                 let mut averager = countertimer::TimeAverage::new();
                 let mut value_range = 0.0;
                 let mut chunk_stats;
@@ -604,7 +603,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let blockalign = bytes_per_sample*channels;
                 let mut data_queue: VecDeque<u8> = VecDeque::with_capacity(4 * blockalign * chunksize_samples );
                 // TIDI resize if needed
-                let mut data_buffer = vec![0u8; 4 * blockalign * capture_samples];
+                let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                 debug!("Capture device ready and waiting");
                 match status_channel.send(StatusMessage::CaptureReady) {
                     Ok(()) => {}
@@ -649,13 +648,12 @@ impl CaptureDevice for WasapiCaptureDevice {
                             return;
                         }
                     }
-                    capture_samples = get_nbr_capture_samples(
+                    capture_frames = get_nbr_capture_frames(
                         &resampler,
-                        capture_samples,
-                        channels,
+                        capture_frames,
                     );
-                    let capture_bytes = blockalign * capture_samples;
-                    while data_queue.len() < (blockalign * capture_samples) {
+                    let capture_bytes = blockalign * capture_frames;
+                    while data_queue.len() < (blockalign * capture_frames) {
                         trace!("capture device needs more samples to make chunk, readning from channel");
                         match rx_dev.recv() {
                             Ok(data) => {
@@ -691,7 +689,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             &capture_status.read().unwrap().used_channels,
                         )
                     };
-                    averager.add_value(capture_samples);
+                    averager.add_value(capture_frames);
                     if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                     {
                         let samples_per_sec = averager.get_average();
