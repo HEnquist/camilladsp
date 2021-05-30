@@ -1096,6 +1096,19 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "windows")]
+    if let CaptureDevice::Wasapi {
+        loopback,
+        exclusive,
+        ..
+    } = &conf.devices.capture
+    {
+        if *loopback && *exclusive {
+            return Err(
+                ConfigError::new("Wasapi loopback is only supported in shared mode").into(),
+            );
+        }
+    }
+    #[cfg(target_os = "windows")]
     if let PlaybackDevice::Wasapi { format, .. } = &conf.devices.playback {
         if *format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(

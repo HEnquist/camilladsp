@@ -18,13 +18,17 @@ pub fn run_processing(
         let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_status.clone());
         debug!("build filters, waiting to start processing loop");
         barrier_proc.wait();
+        debug!("Processing loop starts now!");
         loop {
             match rx_cap.recv() {
                 Ok(AudioMessage::Audio(mut chunk)) => {
                     //trace!("AudioMessage::Audio received");
                     chunk = pipeline.process_chunk(chunk);
                     let msg = AudioMessage::Audio(chunk);
-                    tx_pb.send(msg).unwrap();
+                    if tx_pb.send(msg).is_err() {
+                        info!("Playback thread has already stopped.");
+                        break;
+                    }
                 }
                 Ok(AudioMessage::EndOfStream) => {
                     trace!("AudioMessage::EndOfStream received");

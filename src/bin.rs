@@ -191,6 +191,7 @@ fn run(
     signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&signal_reload))?;
 
     loop {
+        #[cfg(not(target_os = "linux"))]
         if signal_reload.load(Ordering::Relaxed) {
             debug!("Reloading configuration...");
             signal_reload.store(false, Ordering::Relaxed);
@@ -267,6 +268,7 @@ fn run(
                     if cap_ready {
                         debug!("Both capture and playback ready, release barrier");
                         barrier.wait();
+                        debug!("Supervisor loop starts now!");
                         is_starting = false;
                     }
                 }
@@ -276,6 +278,7 @@ fn run(
                     if pb_ready {
                         debug!("Both capture and playback ready, release barrier");
                         barrier.wait();
+                        debug!("Supervisor loop starts now!");
                         is_starting = false;
                     }
                 }

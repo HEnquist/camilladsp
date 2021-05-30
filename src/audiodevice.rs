@@ -12,6 +12,8 @@ use rubato::{
     FftFixedOut, InterpolationParameters, InterpolationType, Resampler, SincFixedOut,
     WindowFunction,
 };
+use std::error;
+use std::fmt;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
@@ -24,6 +26,31 @@ use CommandMessage;
 use PrcFmt;
 use Res;
 use StatusMessage;
+
+#[derive(Debug)]
+pub struct DeviceError {
+    desc: String,
+}
+
+impl fmt::Display for DeviceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.desc)
+    }
+}
+
+impl error::Error for DeviceError {
+    fn description(&self) -> &str {
+        &self.desc
+    }
+}
+
+impl DeviceError {
+    pub fn new(desc: &str) -> Self {
+        DeviceError {
+            desc: desc.to_owned(),
+        }
+    }
+}
 
 pub enum AudioMessage {
     //Quit,

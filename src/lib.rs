@@ -7,6 +7,8 @@ extern crate cpal;
 extern crate fftw;
 #[macro_use]
 extern crate lazy_static;
+#[cfg(target_os = "windows")]
+extern crate crossbeam_channel;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
@@ -30,8 +32,6 @@ extern crate signal_hook;
 extern crate tungstenite;
 #[cfg(target_os = "windows")]
 extern crate wasapi;
-#[cfg(target_os = "windows")]
-extern crate crossbeam_channel;
 
 #[macro_use]
 extern crate slog_scope;
