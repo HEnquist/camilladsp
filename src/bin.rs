@@ -191,7 +191,6 @@ fn run(
     signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&signal_reload))?;
 
     loop {
-        #[cfg(not(target_os = "windows"))]
         if signal_reload.load(Ordering::Relaxed) {
             debug!("Reloading configuration...");
             signal_reload.store(false, Ordering::Relaxed);
