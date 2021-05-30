@@ -1,3 +1,7 @@
+## 0.6.0
+New features:
+- New Wasapi backend with support for exclusive mode and loopback
+
 ## 0.5.2
 New features:
 - Peaking, Notch, Bandpass and Allpass filters can be defined with bandwidth.

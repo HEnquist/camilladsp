@@ -202,7 +202,9 @@ pub enum CaptureDevice {
         channels: usize,
         device: String,
         format: SampleFormat,
+        #[serde(default)]
         exclusive: bool,
+        #[serde(default)]
         loopback: bool,
     },
     #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
@@ -298,6 +300,7 @@ pub enum PlaybackDevice {
         channels: usize,
         device: String,
         format: SampleFormat,
+        #[serde(default)]
         exclusive: bool,
     },
     #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]

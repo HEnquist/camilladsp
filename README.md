@@ -450,10 +450,12 @@ CamillaDSP supports both shared and exclusive modes.
 In most cases exclusive mode is preferred since it gives a direct connection with the audio hardware. 
 
 ### Exclusive mode
-In exclusice mode the sample rate of the device will be set, and the settings for "Default format" in the control panel will be overrriden.
+
+In exclusice mode CamillaDSP is able to control the sample rate of the devices. The settings for "Default format" in the Windows control panel isn't used. The sample format must be one that the device driver can accept. This usually matches the hardware capabilities of the device. For example a 24-bit USB device is likely to accept `S16LE` and `S24LE3`. Other formats may be supported depending on driver support.
 
 ### Shared mode
-In shared mode the sample format is always 32-bit float (FLOAT32LE). The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
+
+In shared mode the sample format is always 32-bit float (`FLOAT32LE`). The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
 
 
 ## CoreAudio
@@ -678,7 +680,7 @@ devices:
     read_bytes: 200
     ```
 
-  The __Wasapi__ capture and playback devices have an `exclusive` parameter for setting if Exclusive mode should be used. The capture device also has a `loopback` parameter for enabling loopback capture mode.
+  The __Wasapi__ capture and playback devices have an `exclusive` parameter for setting if Exclusive mode should be used. The capture device also has a `loopback` parameter for enabling loopback capture mode. Both these parameters are optional, and default to `false` if left out.
     
   The __Jack__ capture and playback devices do not have a `format` parameter, since they always uses the FLOAT32LE format. It seems that the `device` property should always be set to "default". This parameter may be removed in a future version.
 
