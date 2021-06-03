@@ -6,7 +6,7 @@ use conversions::{
     chunk_to_buffer_float_bytes,
 };
 use countertimer;
-use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError};
+use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError, TrySendError};
 use rubato::Resampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -288,21 +288,30 @@ fn capture_loop(
     audio_client: wasapi::AudioClient,
     capture_client: wasapi::AudioCaptureClient,
     handle: wasapi::Handle,
-    tx_capt: Sender<Vec<u8>>,
+    tx_capt: Sender<(u64, Vec<u8>)>,
     blockalign: usize,
 ) -> Res<()> {
+    let mut chunk_nbr: u64 = 0;
     audio_client.start_stream()?;
     loop {
         trace!("capturing");
         let available_frames = capture_client.get_next_nbr_frames()?;
         let mut data = vec![0u8; available_frames as usize * blockalign as usize];
         capture_client.read_from_device(blockalign as usize, &mut data)?;
-        tx_capt.send(data)?;
+        match tx_capt.try_send((chunk_nbr, data)) {
+            Ok(()) | Err(TrySendError::Full(_)) => {}
+            Err(TrySendError::Disconnected(_)) => {
+                error!("Error sending, channel disconnected");
+                audio_client.stop_stream()?;
+                return Err(DeviceError::new("Channel disconnected").into());
+            }
+        }
         if handle.wait_for_event(1000).is_err() {
             error!("Capture error, stopping stream");
             audio_client.stop_stream()?;
             return Err(DeviceError::new("Error capturing data").into());
         }
+        chunk_nbr += 1;
     }
 }
 
@@ -615,6 +624,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let mut data_queue: VecDeque<u8> = VecDeque::with_capacity(4 * blockalign * chunksize_samples );
                 // TIDI resize if needed
                 let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
+                let mut expected_chunk_nbr = 0;
                 debug!("Capture device ready and waiting");
                 match status_channel.send(StatusMessage::CaptureReady) {
                     Ok(()) => {}
@@ -668,8 +678,13 @@ impl CaptureDevice for WasapiCaptureDevice {
                     while data_queue.len() < (blockalign * capture_frames) {
                         trace!("capture device needs more samples to make chunk, reading from channel");
                         match rx_dev.recv() {
-                            Ok(data) => {
+                            Ok((chunk_nbr, data)) => {
                                 trace!("got chunk, length {} bytes", data.len());
+                                expected_chunk_nbr += 1;
+                                if chunk_nbr > expected_chunk_nbr {
+                                    warn!("Samples were dropped, missing {} buffers", chunk_nbr-expected_chunk_nbr);
+                                    expected_chunk_nbr = chunk_nbr;
+                                }
                                 for element in data.iter() {
                                     data_queue.push_back(*element);
                                 }
@@ -736,7 +751,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         }
                         let msg = AudioMessage::Audio(chunk);
                         if channel.send(msg).is_err() {
-                            //info!("Processing thread has already stopped.");
+                            info!("Processing thread has already stopped.");
                             break;
                         }
                     }
