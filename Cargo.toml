@@ -51,10 +51,8 @@ rand = "0.8.3"
 rand_distr = "0.4.0"
 clap = "2.33.0"
 lazy_static = "1.4.0"
-slog = { version = "2.7.0", features = ["release_max_level_trace", "max_level_trace"] }
-slog-term = "2.8.0"
-slog-async = "2.6.0"
-slog-scope = "4.4.0"
+log = "0.4.14"
+simplelog = "0.10.0"
 chrono = "0.4"
 tungstenite = { version = "0.13.0", optional = true, default-features = false }
 native-tls = { version = "0.2.7", optional = true }
