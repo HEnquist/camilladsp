@@ -5,7 +5,7 @@ authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 description = "A flexible tool for processing audio"
 
 [features]
-default = ["alsa-backend", "pulse-backend", "websocket"]
+default = ["alsa-backend", "websocket"]
 alsa-backend = ["alsa", "nix"]
 pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
 cpal-backend = ["cpal"]
