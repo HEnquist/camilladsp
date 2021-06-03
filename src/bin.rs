@@ -544,9 +544,6 @@ fn main_process() -> i32 {
         );
     let matches = clapapp.get_matches();
 
-    
-
-
     let mut loglevel = match matches.occurrences_of("verbosity") {
         0 => LevelFilter::Info,
         1 => LevelFilter::Debug,
@@ -573,13 +570,12 @@ fn main_process() -> i32 {
         if let Err(err) = WriteLogger::init(loglevel, logconf, file) {
             println!("Failed to create logger, {}", err);
         }
-    } 
-    else {
-        if let Err(err) = TermLogger::init(loglevel, logconf, TerminalMode::Stderr, ColorChoice::Auto) {
-            println!("Failed to create logger, {}", err);
-        }
+    } else if let Err(err) =
+        TermLogger::init(loglevel, logconf, TerminalMode::Stderr, ColorChoice::Auto)
+    {
+        println!("Failed to create logger, {}", err);
     }
-    
+
     // logging examples
     //trace!("trace message"); //with -vv
     //debug!("debug message"); //with -v

@@ -299,12 +299,12 @@ fn capture_loop(
         let mut data = vec![0u8; available_frames as usize * blockalign as usize];
         capture_client.read_from_device(blockalign as usize, &mut data)?;
         match tx_capt.try_send((chunk_nbr, data)) {
-            Ok(()) | Err(TrySendError::Full(_)) => {},
+            Ok(()) | Err(TrySendError::Full(_)) => {}
             Err(TrySendError::Disconnected(_)) => {
                 error!("Error sending, channel disconnected");
                 audio_client.stop_stream()?;
                 return Err(DeviceError::new("Channel disconnected").into());
-            },
+            }
         }
         if handle.wait_for_event(1000).is_err() {
             error!("Capture error, stopping stream");
