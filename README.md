@@ -234,7 +234,7 @@ All the available options, or "features" are:
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64)
 - `neon`: Enable the experimental Neon support for aarch64 in the resampler. Note that this only works on 64-bit arm, and requires a very recent nightly rust compiler.
 
-The first three (`alsa-backend`, `pulse-packend`, `websocket`) are included in the default features, meaning if you don't specify anything you will get those three.
+The first two (`alsa-backend`, `websocket`) are included in the default features, meaning if you don't specify anything you will get those two.
 Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
 
 The `jack-backend` feature requires jack and its development files to be installed. To install:
@@ -242,18 +242,18 @@ The `jack-backend` feature requires jack and its development files to be install
 - Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
 - Arch:  ```sudo pacman -S jack```
 
-Example 1: You want `alsa-backend`, `pulse-backend`, `websocket` and `FFTW`. The first three are included by default so you only need to add `FFTW`:
+Example 1: You want `alsa-backend`, `websocket`, `pulse-backend` and `FFTW`. The first two are included by default so you only need to add `FFTW` and `pulse-backend`:
 ```
-cargo build --release --features FFTW
+cargo build --release --features FFTW --features pulse-backend
 (or)
-cargo install --path . --features FFTW
+cargo install --path . --features FFTW --features pulse-backend
 ```
 
-Example 2: You want `alsa-backend`, `websocket`, `32bit` and `FFTW`. Since you don't want `pulse-backend` you have to disable the defaults, and then add both `alsa-backend` and `websocket`:
+Example 2: You want `alsa-backend`, `32bit` and `FFTW`. Since you don't want `websocket` you have to disable the defaults, and then add back `alsa-backend`:
 ```
-cargo build --release --no-default-features --features alsa-backend --features websocket --features FFTW --features 32bit
+cargo build --release --no-default-features --features alsa-backend --features FFTW --features 32bit
 (or)
-cargo install --path . --no-default-features --features alsa-backend --features websocket --features FFTW --features 32bit
+cargo install --path . --no-default-features --features alsa-backend --features FFTW --features 32bit
 ```
 
 ## Optimize for your system
@@ -278,19 +278,19 @@ The Alsa and Pulse backends should not be included when building on Windows and 
 
 macOS:
 ```
-RUSTFLAGS='-C target-cpu=native' cargo build --release  --no-default-features --features cpal-backend --features websocket
+RUSTFLAGS='-C target-cpu=native' cargo build --release --features cpal-backend
 ```
 
 Windows (cmd.exe command prompt):
 ```
 set RUSTFLAGS=-C target-cpu=native 
-cargo build --release  --no-default-features --features websocket
+cargo build --release
 ```
 
 Windows (PowerShell):
 ```
 $env:RUSTFLAGS="-C target-cpu=native"
-cargo build --release  --no-default-features --features websocket
+cargo build --release
 ```
 
 On macOS both the PulseAudio and FFTW features can be used. The necessary dependencies can be installed with brew:
