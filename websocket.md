@@ -204,7 +204,7 @@ This is enabled by providing the two optional parameters "cert" and "pass", wher
 How to properly generate the identity is outside the scope of this readme, but for simple tests a self-signed certificate can be used.
 
 ### Generate self-signed identity
-First geneate rsa keys: 
+First generate rsa keys: 
 ```sh
 openssl req -newkey rsa:2048 -new -nodes -x509 -days 3650 -keyout key.pem -out cert.pem
 ```

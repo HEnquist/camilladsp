@@ -80,9 +80,12 @@ Just download the binary and run it in a terminal. It will list all devices with
 ## WASAPI (Windows)
 The device name is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the input/output name and card name, and the format is "{input/output name} ({card name})".
 
-The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
-
-The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
+Wasapi offers both shared and exclusive mode. 
+- In shared mode, the sample format is always 32-bit float (FLOAT32LE).
+  The sample rate must match the default format of the device. 
+  To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". 
+  Then open the "Advanced" tab and select the desired format under "Default Format".
+- In exclusive mode, the sample format and sample rate can be any combination supported natively by the device. 
 
 To help with finding the name of playback and capture devices, use the Windows version of "cpal-listdevices" program from here: https://github.com/HEnquist/cpal-listdevices/releases
 
