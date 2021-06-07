@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use NewValue;
 use PrcFmt;
-use ProcessingStatus;
+use ProcessingParameters;
 use Res;
 
 pub struct Loudness {
@@ -19,7 +19,7 @@ pub struct Loudness {
     ramp_step: usize,
     samplerate: usize,
     chunksize: usize,
-    processing_status: Arc<RwLock<ProcessingStatus>>,
+    processing_status: Arc<RwLock<ProcessingParameters>>,
     reference_level: f32,
     high_boost: f32,
     low_boost: f32,
@@ -43,7 +43,7 @@ impl Loudness {
         conf: config::LoudnessParameters,
         chunksize: usize,
         samplerate: usize,
-        processing_status: Arc<RwLock<ProcessingStatus>>,
+        processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
         let current_volume = processing_status.read().unwrap().volume;
         let mute = processing_status.read().unwrap().mute;

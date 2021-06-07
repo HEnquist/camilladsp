@@ -51,7 +51,7 @@ use std::net::IpAddr;
 
 use camillalib::{
     CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus, ProcessingState,
-    ProcessingStatus, StatusMessage, StatusStructs,
+    ProcessingParameters, StatusMessage, StatusStructs, StopReason, ProcessingStatus,
 };
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
@@ -275,6 +275,7 @@ fn run(
                         barrier.wait();
                         debug!("Supervisor loop starts now!");
                         is_starting = false;
+                        status_structs.status.write().unwrap().stop_reason = StopReason::None;
                     }
                 }
                 StatusMessage::PlaybackError { message } => {
@@ -285,6 +286,7 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for capture thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason = StopReason::PlaybackError;
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     return Ok(ExitState::Restart);
@@ -296,12 +298,42 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for playback thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason = StopReason::CaptureError;
+                    pb_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
+                }
+                StatusMessage::PlaybackFormatChange => {
+                    error!("Playback stopped due to external format change");
+                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if is_starting {
+                        debug!("Error while starting, release barrier");
+                        barrier.wait();
+                    }
+                    debug!("Wait for capture thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason = StopReason::PlaybackFormatChange;
+                    cap_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
+                }
+                StatusMessage::CaptureFormatChange => {
+                    error!("Capture stopped due to external format change");
+                    if is_starting {
+                        debug!("Error while starting, release barrier");
+                        barrier.wait();
+                    }
+                    debug!("Wait for playback thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason = StopReason::CaptureFormatChange;
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::PlaybackDone => {
                     info!("Playback finished");
+                    let mut stat = status_structs.status.write().unwrap();
+                    if stat.stop_reason == StopReason::None {
+                        stat.stop_reason = StopReason::Done;
+                    }
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureDone => {
@@ -665,15 +697,19 @@ fn main_process() -> i32 {
         signal_rms: Vec::new(),
         signal_peak: Vec::new(),
     }));
-    let processing_status = Arc::new(RwLock::new(ProcessingStatus {
+    let processing_status = Arc::new(RwLock::new(ProcessingParameters {
         volume: initial_volume,
         mute: initial_mute,
+    }));
+    let status = Arc::new(RwLock::new(ProcessingStatus {
+        stop_reason: StopReason::None,
     }));
 
     let status_structs = StatusStructs {
         capture: capture_status.clone(),
         playback: playback_status.clone(),
         processing: processing_status.clone(),
+        status: status.clone(),
     };
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
@@ -694,6 +730,7 @@ fn main_process() -> i32 {
                 capture_status,
                 playback_status,
                 processing_status,
+                status,
             };
             let server_params = socketserver::ServerParameters {
                 port: serverport,

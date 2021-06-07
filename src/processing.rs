@@ -4,7 +4,7 @@ use filters;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use ProcessingStatus;
+use ProcessingParameters;
 
 pub fn run_processing(
     conf_proc: config::Configuration,
@@ -12,7 +12,7 @@ pub fn run_processing(
     tx_pb: mpsc::SyncSender<AudioMessage>,
     rx_cap: mpsc::Receiver<AudioMessage>,
     rx_pipeconf: mpsc::Receiver<(config::ConfigChange, config::Configuration)>,
-    processing_status: Arc<RwLock<ProcessingStatus>>,
+    processing_status: Arc<RwLock<ProcessingParameters>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_status.clone());

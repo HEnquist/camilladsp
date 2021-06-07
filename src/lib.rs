@@ -95,6 +95,8 @@ pub enum StatusMessage {
     CaptureReady,
     PlaybackError { message: String },
     CaptureError { message: String },
+    PlaybackFormatChange,
+    CaptureFormatChange,
     PlaybackDone,
     CaptureDone,
     SetSpeed { speed: f64 },
@@ -148,16 +150,32 @@ pub struct PlaybackStatus {
 }
 
 #[derive(Clone, Debug)]
-pub struct ProcessingStatus {
+pub struct ProcessingParameters {
     pub volume: f32,
     pub mute: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProcessingStatus {
+    pub stop_reason: StopReason,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub enum StopReason {
+    None,
+    Done,
+    CaptureError,
+    PlaybackError,
+    CaptureFormatChange,
+    PlaybackFormatChange,
 }
 
 #[derive(Clone)]
 pub struct StatusStructs {
     pub capture: Arc<RwLock<CaptureStatus>>,
     pub playback: Arc<RwLock<PlaybackStatus>>,
-    pub processing: Arc<RwLock<ProcessingStatus>>,
+    pub processing: Arc<RwLock<ProcessingParameters>>,
+    pub status: Arc<RwLock<ProcessingStatus>>,
 }
 
 impl fmt::Display for ProcessingState {
