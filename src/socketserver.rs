@@ -14,7 +14,7 @@ use tungstenite::server::accept;
 use tungstenite::Message;
 use tungstenite::WebSocket;
 
-use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, StopReason, ProcessingStatus};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus, StopReason};
 use config;
 use ExitRequest;
 use ProcessingState;
@@ -31,7 +31,6 @@ pub struct SharedData {
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
     pub processing_status: Arc<RwLock<ProcessingParameters>>,
     pub status: Arc<RwLock<ProcessingStatus>>,
-
 }
 
 #[derive(Debug, Clone)]

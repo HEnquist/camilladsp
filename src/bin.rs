@@ -50,8 +50,8 @@ use camillalib::socketserver;
 use std::net::IpAddr;
 
 use camillalib::{
-    CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus, ProcessingState,
-    ProcessingParameters, StatusMessage, StatusStructs, StopReason, ProcessingStatus,
+    CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus, ProcessingParameters,
+    ProcessingState, ProcessingStatus, StatusMessage, StatusStructs, StopReason,
 };
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
@@ -311,7 +311,8 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for capture thread to exit..");
-                    status_structs.status.write().unwrap().stop_reason = StopReason::PlaybackFormatChange;
+                    status_structs.status.write().unwrap().stop_reason =
+                        StopReason::PlaybackFormatChange;
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     return Ok(ExitState::Restart);
@@ -323,7 +324,8 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for playback thread to exit..");
-                    status_structs.status.write().unwrap().stop_reason = StopReason::CaptureFormatChange;
+                    status_structs.status.write().unwrap().stop_reason =
+                        StopReason::CaptureFormatChange;
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     return Ok(ExitState::Restart);
