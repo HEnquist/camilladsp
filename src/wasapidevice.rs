@@ -6,7 +6,7 @@ use conversions::{
     chunk_to_buffer_float_bytes,
 };
 use countertimer;
-use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError, TrySendError};
+use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
 use rubato::Resampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -56,6 +56,12 @@ pub struct WasapiCaptureDevice {
     pub sample_format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
+}
+
+#[derive(Clone, Debug)]
+enum DisconnectReason {
+    FormatChange,
+    Error,
 }
 
 fn get_wave_format(
@@ -215,21 +221,40 @@ fn open_capture(
     Ok((device, audio_client, capture_client, handle, wave_format))
 }
 
+struct PlaybackSync {
+    rx_play: Receiver<Vec<u8>>,
+    tx_cb: Sender<DisconnectReason>,
+    bufferfill: Arc<AtomicUsize>,
+}
+
 // Playback loop, play samples received from channel
 fn playback_loop(
     audio_client: wasapi::AudioClient,
     render_client: wasapi::AudioRenderClient,
     handle: wasapi::Handle,
-    rx_play: Receiver<Vec<u8>>,
     blockalign: usize,
     chunksize: usize,
-    bufferfill: Arc<AtomicUsize>,
+    sync: PlaybackSync,
 ) -> Res<()> {
     let mut buffer_free_frame_count = audio_client.get_bufferframecount()?;
     let mut sample_queue: VecDeque<u8> = VecDeque::with_capacity(
         4 * blockalign * (chunksize + 2 * buffer_free_frame_count as usize),
     );
-    while rx_play.len() < 2 {
+
+    let tx_cb = sync.tx_cb;
+    let mut callbacks = wasapi::EventCallbacks::new();
+    callbacks.set_disconnected_callback(move |reason| {
+        debug!("Disconnected, reason: {:?}", reason);
+        let simplereason = match reason {
+            wasapi::DisconnectReason::FormatChanged => DisconnectReason::FormatChange,
+            _ => DisconnectReason::Error,
+        };
+        tx_cb.send(simplereason).unwrap_or(());
+    });
+    let sessioncontrol = audio_client.get_audiosessioncontrol()?;
+    sessioncontrol.register_session_notification(&mut callbacks)?;
+
+    while sync.rx_play.len() < 2 {
         thread::sleep(Duration::from_millis(10));
     }
     audio_client.start_stream()?;
@@ -239,7 +264,7 @@ fn playback_loop(
         trace!("New buffer frame count {}", buffer_free_frame_count);
         while sample_queue.len() < (blockalign as usize * buffer_free_frame_count as usize) {
             trace!("playback loop needs more samples, reading from channel");
-            match rx_play.try_recv() {
+            match sync.rx_play.try_recv() {
                 Ok(chunk) => {
                     trace!("got chunk");
                     for element in chunk.iter() {
@@ -272,8 +297,8 @@ fn playback_loop(
             blockalign as usize,
             &mut sample_queue,
         )?;
-        let curr_buffer_fill = sample_queue.len() / blockalign + rx_play.len() * chunksize;
-        bufferfill.store(curr_buffer_fill, Ordering::Relaxed);
+        let curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
+        sync.bufferfill.store(curr_buffer_fill, Ordering::Relaxed);
         trace!("write ok");
         if handle.wait_for_event(1000).is_err() {
             error!("Error on playback, stopping stream");
@@ -346,6 +371,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 //let (tx_dev, rx_dev) = mpsc::sync_channel(4);
                 let (tx_dev, rx_dev) = bounded(16);
                 let (tx_state_dev, rx_state_dev) = bounded(0);
+                let (tx_cb_dev, rx_cb_dev) = unbounded();
                 let buffer_fill = Arc::new(AtomicUsize::new(0));
                 let buffer_fill_clone = buffer_fill.clone();
                 let mut buffer_avg = countertimer::Averager::new();
@@ -378,14 +404,18 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                 }
                             };
                         let blockalign = wave_format.get_blockalign();
+                        let sync = PlaybackSync {
+                            rx_play: rx_dev,
+                            tx_cb: tx_cb_dev,
+                            bufferfill: buffer_fill_clone,
+                        };
                         let result = playback_loop(
                             audio_client,
                             render_client,
                             handle,
-                            rx_dev,
                             blockalign as usize,
                             chunksize,
-                            buffer_fill_clone,
+                            sync,
                         );
                         if let Err(err) = result {
                             let msg = format!("Playback failed with error {}", err);
@@ -420,21 +450,27 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 barrier.wait();
                 debug!("Playback device starts now!");
                 loop {
+                    /*
+                    match rx_cb_dev.try_recv() {
+                        Ok(DisconnectReason::Error) => {},
+                        Ok(DisconnectReason::FormatChange) => {},
+                        Err(TryRecvError::Empty) => {},
+                        Err(err) => {},
+                    }
+                    */
                     match rx_state_dev.try_recv() {
                         Ok(DeviceState::Ok) => {}
                         Ok(DeviceState::Error(err)) => {
-                            status_channel
-                                .send(StatusMessage::PlaybackError { message: err })
-                                .unwrap();
+                            send_error_or_playbackformatchange(&status_channel, &rx_cb_dev, err);
                             return;
                         }
                         Err(TryRecvError::Empty) => {}
                         Err(err) => {
-                            status_channel
-                                .send(StatusMessage::PlaybackError {
-                                    message: format!("{}", err),
-                                })
-                                .unwrap();
+                            send_error_or_playbackformatchange(
+                                &status_channel,
+                                &rx_cb_dev,
+                                err.to_string(),
+                            );
                             return;
                         }
                     }
@@ -466,7 +502,6 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             chunk_stats = chunk.get_stats();
                             playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
                             playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
-                            // TODO convert to bytes before sending to device
                             let mut buf =
                                 vec![
                                     0u8;
@@ -491,7 +526,11 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                 Ok(_) => {}
                                 Err(err) => {
                                     error!("Playback device channel error: {}", err);
-                                    status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                    send_error_or_playbackformatchange(
+                                        &status_channel,
+                                        &rx_cb_dev,
+                                        err.to_string(),
+                                    );
                                     break;
                                 }
                             }
@@ -506,13 +545,49 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                         }
                         Err(err) => {
                             error!("Message channel error: {}", err);
-                            status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                            send_error_or_playbackformatchange(
+                                &status_channel,
+                                &rx_cb_dev,
+                                err.to_string(),
+                            );
                             break;
                         }
                     }
                 }
             })?;
         Ok(Box::new(handle))
+    }
+}
+
+fn check_for_format_change(rx: &Receiver<DisconnectReason>) -> bool {
+    loop {
+        match rx.try_recv() {
+            Ok(DisconnectReason::Error) => {}
+            Ok(DisconnectReason::FormatChange) => {
+                return true;
+            }
+            Err(TryRecvError::Empty) => {
+                return false;
+            }
+            Err(_) => {
+                return false;
+            }
+        }
+    }
+}
+
+fn send_error_or_playbackformatchange(
+    tx: &mpsc::Sender<StatusMessage>,
+    rx: &Receiver<DisconnectReason>,
+    err: String,
+) {
+    if check_for_format_change(&rx) {
+        debug!("Send PlaybackFormatChange");
+        tx.send(StatusMessage::PlaybackFormatChange).unwrap();
+    } else {
+        debug!("Send PlaybackError");
+        tx.send(StatusMessage::PlaybackError { message: err })
+            .unwrap();
     }
 }
 
