@@ -1,6 +1,7 @@
 ## 0.6.0
 New features:
-- New Wasapi backend with support for exclusive mode and loopback
+- New Wasapi backend with support for exclusive mode and loopback.
+- Do proper shutdown on SIGINT (ctrl-c).
 
 ## 0.5.2
 New features:

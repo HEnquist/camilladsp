@@ -120,14 +120,14 @@ fn open_playback(
         }
         Ok(Some(modified)) => {
             let msg = format!(
-                "Playback device doesn't support format {:?}, closest match is {:?}",
+                "Playback device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
                 wave_format, modified
             );
             return Err(ConfigError::new(&msg).into());
         }
         Err(err) => {
             let msg = format!(
-                "Playback device doesn't support format {:?}, error {}",
+                "Playback device doesn't support format:\n{:#?}\nError: {}",
                 wave_format, err
             );
             return Err(ConfigError::new(&msg).into());
@@ -189,14 +189,14 @@ fn open_capture(
         }
         Ok(Some(modified)) => {
             let msg = format!(
-                "Capture device doesn't support format {:?}, closest match is {:?}",
+                "Capture device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
                 wave_format, modified
             );
             return Err(ConfigError::new(&msg).into());
         }
         Err(err) => {
             let msg = format!(
-                "Capture device doesn't support format {:?}, error {}",
+                "Capture device doesn't support format:\n{:#?}\nError: {}",
                 wave_format, err
             );
             return Err(ConfigError::new(&msg).into());
@@ -314,15 +314,40 @@ fn capture_loop(
     capture_client: wasapi::AudioCaptureClient,
     handle: wasapi::Handle,
     tx_capt: Sender<(u64, Vec<u8>)>,
+    tx_cb: Sender<DisconnectReason>,
     blockalign: usize,
 ) -> Res<()> {
     let mut chunk_nbr: u64 = 0;
+
+    let mut callbacks = wasapi::EventCallbacks::new();
+    callbacks.set_disconnected_callback(move |reason| {
+        debug!("Capture disconnected, reason: {:?}", reason);
+        let simplereason = match reason {
+            wasapi::DisconnectReason::FormatChanged => DisconnectReason::FormatChange,
+            _ => DisconnectReason::Error,
+        };
+        tx_cb.send(simplereason).unwrap_or(());
+    });
+    let sessioncontrol = audio_client.get_audiosessioncontrol()?;
+    sessioncontrol.register_session_notification(&mut callbacks)?;
+
     audio_client.start_stream()?;
     loop {
         trace!("capturing");
-        let available_frames = capture_client.get_next_nbr_frames()?;
+        if handle.wait_for_event(1000).is_err() {
+            error!("Capture error, stopping stream");
+            audio_client.stop_stream()?;
+            return Err(DeviceError::new("Error capturing data").into());
+        }
+        let available_frames = match capture_client.get_next_nbr_frames()? {
+            Some(frames) => frames,
+            None => audio_client.get_bufferframecount()?,
+        };
         let mut data = vec![0u8; available_frames as usize * blockalign as usize];
-        capture_client.read_from_device(blockalign as usize, &mut data)?;
+        let nbr_frames_read = capture_client.read_from_device(blockalign as usize, &mut data)?;
+        if nbr_frames_read != available_frames {
+            warn!("Expected {} frames, got {}", available_frames, nbr_frames_read);
+        }
         match tx_capt.try_send((chunk_nbr, data)) {
             Ok(()) | Err(TrySendError::Full(_)) => {}
             Err(TrySendError::Disconnected(_)) => {
@@ -330,11 +355,6 @@ fn capture_loop(
                 audio_client.stop_stream()?;
                 return Err(DeviceError::new("Channel disconnected").into());
             }
-        }
-        if handle.wait_for_event(1000).is_err() {
-            error!("Capture error, stopping stream");
-            audio_client.stop_stream()?;
-            return Err(DeviceError::new("Error capturing data").into());
         }
         chunk_nbr += 1;
     }
@@ -418,7 +438,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             sync,
                         );
                         if let Err(err) = result {
-                            let msg = format!("Playback failed with error {}", err);
+                            let msg = format!("Playback failed with error: {}", err);
                             //error!("{}", msg);
                             tx_state_dev.send(DeviceState::Error(msg)).unwrap_or(());
                         }
@@ -450,14 +470,6 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 barrier.wait();
                 debug!("Playback device starts now!");
                 loop {
-                    /*
-                    match rx_cb_dev.try_recv() {
-                        Ok(DisconnectReason::Error) => {},
-                        Ok(DisconnectReason::FormatChange) => {},
-                        Err(TryRecvError::Empty) => {},
-                        Err(err) => {},
-                    }
-                    */
                     match rx_state_dev.try_recv() {
                         Ok(DeviceState::Ok) => {}
                         Ok(DeviceState::Error(err)) => {
@@ -494,7 +506,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                     );
                                     status_channel
                                         .send(StatusMessage::SetSpeed { speed })
-                                        .unwrap();
+                                        .unwrap_or(());
                                     playback_status.write().unwrap().buffer_level =
                                         av_delay as usize;
                                 }
@@ -540,7 +552,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             }
                         }
                         Ok(AudioMessage::EndOfStream) => {
-                            status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                            status_channel.send(StatusMessage::PlaybackDone).unwrap_or(());
                             break;
                         }
                         Err(err) => {
@@ -583,11 +595,26 @@ fn send_error_or_playbackformatchange(
 ) {
     if check_for_format_change(&rx) {
         debug!("Send PlaybackFormatChange");
-        tx.send(StatusMessage::PlaybackFormatChange).unwrap();
+        tx.send(StatusMessage::PlaybackFormatChange).unwrap_or(());
     } else {
         debug!("Send PlaybackError");
         tx.send(StatusMessage::PlaybackError { message: err })
-            .unwrap();
+            .unwrap_or(());
+    }
+}
+
+fn send_error_or_captureformatchange(
+    tx: &mpsc::Sender<StatusMessage>,
+    rx: &Receiver<DisconnectReason>,
+    err: String,
+) {
+    if check_for_format_change(&rx) {
+        debug!("Send CaptureFormatChange");
+        tx.send(StatusMessage::CaptureFormatChange).unwrap_or(());
+    } else {
+        debug!("Send CaptureError");
+        tx.send(StatusMessage::CaptureError { message: err })
+            .unwrap_or(());
     }
 }
 
@@ -648,6 +675,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
                 let (tx_dev, rx_dev) = bounded(16);
                 let (tx_state_dev, rx_state_dev) = bounded(0);
+                let (tx_cb_dev, rx_cb_dev) = unbounded();
 
                 trace!("Build input stream");
                 // wasapi device loop
@@ -667,9 +695,9 @@ impl CaptureDevice for WasapiCaptureDevice {
                             }
                         };
                         let blockalign = wave_format.get_blockalign();
-                        let result = capture_loop(audio_client, capture_client, handle, tx_dev, blockalign as usize);
+                        let result = capture_loop(audio_client, capture_client, handle, tx_dev, tx_cb_dev, blockalign as usize);
                         if let Err(err) = result {
-                            let msg = format!("Capture failed with error {}", err);
+                            let msg = format!("Capture failed with error: {}", err);
                             //error!("{}", msg);
                             tx_state_dev.send(DeviceState::Error(msg)).unwrap_or(());
                         }
@@ -677,11 +705,13 @@ impl CaptureDevice for WasapiCaptureDevice {
                 match rx_state_dev.recv() {
                     Ok(DeviceState::Ok) => {},
                     Ok(DeviceState::Error(err)) => {
+                        channel.send(AudioMessage::EndOfStream).unwrap_or(());
                         status_channel.send(StatusMessage::CaptureError{ message: err }).unwrap_or(());
                         barrier.wait();
                         return;
                      },
                     Err(err) => {
+                        channel.send(AudioMessage::EndOfStream).unwrap_or(());
                         status_channel.send(StatusMessage::CaptureError{ message: format!("{}", err) }).unwrap_or(());
                         barrier.wait();
                         return;
@@ -712,8 +742,8 @@ impl CaptureDevice for WasapiCaptureDevice {
                         Ok(CommandMessage::Exit) => {
                             debug!("Exit message received, sending EndOfStream");
                             let msg = AudioMessage::EndOfStream;
-                            channel.send(msg).unwrap();
-                            status_channel.send(StatusMessage::CaptureDone).unwrap();
+                            channel.send(msg).unwrap_or(());
+                            status_channel.send(StatusMessage::CaptureDone).unwrap_or(());
                             break;
                         }
                         Ok(CommandMessage::SetSpeed { speed }) => {
@@ -736,12 +766,14 @@ impl CaptureDevice for WasapiCaptureDevice {
                     match rx_state_dev.try_recv() {
                         Ok(DeviceState::Ok) => {},
                         Ok(DeviceState::Error(err)) => {
-                            status_channel.send(StatusMessage::CaptureError{ message: err }).unwrap();
+                            channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                            send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err);
                             return;
                         },
                         Err(TryRecvError::Empty) => {}
                         Err(err) => {
-                            status_channel.send(StatusMessage::CaptureError{ message: format!("{}", err) }).unwrap(); 
+                            channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                            send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err.to_string());
                             return;
                         }
                     }
@@ -764,8 +796,10 @@ impl CaptureDevice for WasapiCaptureDevice {
                                     data_queue.push_back(*element);
                                 }
                             }
-                            Err(_) => {
+                            Err(err) => {
                                 error!("Channel is closed");
+                                channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                                send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err.to_string());
                                 return;
                             }
                         }
