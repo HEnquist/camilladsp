@@ -145,7 +145,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                                 .send(StatusMessage::PlaybackError {
                                                     message: format!("{}", msg),
                                                 })
-                                                .unwrap();
+                                                .unwrap_or(());
                                         }
                                     };
                                     if nbr_clipped > 0 {
@@ -164,12 +164,12 @@ impl PlaybackDevice for FilePlaybackDevice {
                                     //);
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
-                                    status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                    status_channel.send(StatusMessage::PlaybackDone).unwrap_or(());
                                     break;
                                 }
                                 Err(err) => {
                                     error!("Message channel error: {}", err);
-                                    status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                    status_channel.send(StatusMessage::PlaybackError{ message: err.to_string()}).unwrap_or(());
                                     break;
                                 }
                             }
@@ -299,11 +299,11 @@ fn capture_loop(
             Ok(CommandMessage::Exit) => {
                 debug!("Exit message received, sending EndOfStream");
                 let msg = AudioMessage::EndOfStream;
-                msg_channels.audio.send(msg).unwrap();
+                msg_channels.audio.send(msg).unwrap_or(());
                 msg_channels
                     .status
                     .send(StatusMessage::CaptureDone)
-                    .unwrap();
+                    .unwrap_or(());
                 break;
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
@@ -362,11 +362,11 @@ fn capture_loop(
                         &msg_channels.audio,
                     );
                     let msg = AudioMessage::EndOfStream;
-                    msg_channels.audio.send(msg).unwrap();
+                    msg_channels.audio.send(msg).unwrap_or(());
                     msg_channels
                         .status
                         .send(StatusMessage::CaptureDone)
-                        .unwrap();
+                        .unwrap_or(());
                     break;
                 }
                 averager.add_value(bytes);
@@ -392,7 +392,7 @@ fn capture_loop(
                     .send(StatusMessage::CaptureError {
                         message: format!("{}", err),
                     })
-                    .unwrap();
+                    .unwrap_or(());
             }
         };
         let mut chunk = build_chunk(
@@ -430,7 +430,7 @@ fn capture_loop(
                 chunk.waveforms = new_waves;
             }
             let msg = AudioMessage::Audio(chunk);
-            msg_channels.audio.send(msg).unwrap();
+            msg_channels.audio.send(msg).unwrap_or(());
         } else {
             sleep_until_next(bytes_per_frame, params.capture_samplerate, capture_bytes);
         }
@@ -563,7 +563,7 @@ fn send_silence(
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunksize, chunk_samples);
         let msg = AudioMessage::Audio(chunk);
         debug!("Sending extra chunk of {} frames", chunk_samples);
-        audio_channel.send(msg).unwrap();
+        audio_channel.send(msg).unwrap_or(());
         samples_left -= chunk_samples;
     }
 }
