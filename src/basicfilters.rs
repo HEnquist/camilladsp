@@ -7,7 +7,7 @@ use fifoqueue::FifoQueue;
 
 use NewValue;
 use PrcFmt;
-use ProcessingStatus;
+use ProcessingParameters;
 use Res;
 
 #[derive(Clone, Debug)]
@@ -34,7 +34,7 @@ pub struct Volume {
     ramp_step: usize,
     samplerate: usize,
     chunksize: usize,
-    processing_status: Arc<RwLock<ProcessingStatus>>,
+    processing_status: Arc<RwLock<ProcessingParameters>>,
 }
 
 impl Volume {
@@ -45,7 +45,7 @@ impl Volume {
         mute: bool,
         chunksize: usize,
         samplerate: usize,
-        processing_status: Arc<RwLock<ProcessingStatus>>,
+        processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
         let ramptime_in_chunks =
             (ramp_time_ms / (1000.0 * chunksize as f32 / samplerate as f32)).round() as usize;
@@ -71,7 +71,7 @@ impl Volume {
         conf: config::VolumeParameters,
         chunksize: usize,
         samplerate: usize,
-        processing_status: Arc<RwLock<ProcessingStatus>>,
+        processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
         let current_volume = processing_status.read().unwrap().volume;
         let mute = processing_status.read().unwrap().mute;

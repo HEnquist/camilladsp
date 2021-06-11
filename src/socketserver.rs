@@ -14,7 +14,7 @@ use tungstenite::server::accept;
 use tungstenite::Message;
 use tungstenite::WebSocket;
 
-use crate::{CaptureStatus, PlaybackStatus, ProcessingStatus};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus, StopReason};
 use config;
 use ExitRequest;
 use ProcessingState;
@@ -29,7 +29,8 @@ pub struct SharedData {
     pub new_config: Arc<Mutex<Option<config::Configuration>>>,
     pub capture_status: Arc<RwLock<CaptureStatus>>,
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
-    pub processing_status: Arc<RwLock<ProcessingStatus>>,
+    pub processing_status: Arc<RwLock<ProcessingParameters>>,
+    pub status: Arc<RwLock<ProcessingStatus>>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +96,7 @@ enum WsCommand {
     SetMute(bool),
     GetVersion,
     GetState,
+    GetStopReason,
     GetRateAdjust,
     GetClippedSamples,
     GetBufferLevel,
@@ -200,6 +202,10 @@ enum WsReply {
     GetState {
         result: WsResult,
         value: ProcessingState,
+    },
+    GetStopReason {
+        result: WsResult,
+        value: StopReason,
     },
     GetRateAdjust {
         result: WsResult,
@@ -430,6 +436,13 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
             Some(WsReply::GetState {
                 result: WsResult::Ok,
                 value: capstat.state,
+            })
+        }
+        WsCommand::GetStopReason => {
+            let stat = shared_data_inst.status.read().unwrap();
+            Some(WsReply::GetStopReason {
+                result: WsResult::Ok,
+                value: stat.stop_reason,
             })
         }
         WsCommand::GetRateAdjust => {

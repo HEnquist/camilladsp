@@ -12,16 +12,45 @@ use rubato::{
     FftFixedOut, InterpolationParameters, InterpolationType, Resampler, SincFixedOut,
     WindowFunction,
 };
+use std::error;
+use std::fmt;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Instant;
+#[cfg(target_os = "windows")]
+use wasapidevice;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
 use PrcFmt;
 use Res;
 use StatusMessage;
+
+#[derive(Debug)]
+pub struct DeviceError {
+    desc: String,
+}
+
+impl fmt::Display for DeviceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.desc)
+    }
+}
+
+impl error::Error for DeviceError {
+    fn description(&self) -> &str {
+        &self.desc
+    }
+}
+
+impl DeviceError {
+    pub fn new(desc: &str) -> Self {
+        DeviceError {
+            desc: desc.to_owned(),
+        }
+    }
+}
 
 pub enum AudioMessage {
     //Quit,
@@ -230,16 +259,17 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
         }),
-        #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+        #[cfg(target_os = "windows")]
         config::PlaybackDevice::Wasapi {
             channels,
             device,
             format,
-        } => Box::new(cpaldevice::CpalPlaybackDevice {
+            exclusive,
+        } => Box::new(wasapidevice::WasapiPlaybackDevice {
             devname: device,
-            host: cpaldevice::CpalHost::Wasapi,
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
+            exclusive,
             channels,
             sample_format: format,
             target_level: conf.target_level,
@@ -518,15 +548,18 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
         }),
-        #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+        #[cfg(target_os = "windows")]
         config::CaptureDevice::Wasapi {
             channels,
             device,
             format,
-        } => Box::new(cpaldevice::CpalCaptureDevice {
+            exclusive,
+            loopback,
+        } => Box::new(wasapidevice::WasapiCaptureDevice {
             devname: device,
-            host: cpaldevice::CpalHost::Wasapi,
             samplerate: conf.samplerate,
+            exclusive,
+            loopback,
             enable_resampling: conf.enable_resampling,
             resampler_conf: conf.resampler_type,
             capture_samplerate,

@@ -101,7 +101,7 @@ Put everything together, and run it. It should work and give unfiltered output o
 
 
 ## Filters
-The poor tweeters don't like the full range signel so we need lowpass filters for them. Left and right should be filtered with the same settings, so a single definition is enough.
+The poor tweeters don't like the full range signal so we need lowpass filters for them. Left and right should be filtered with the same settings, so a single definition is enough.
 Let's use a simple 2nd order Butterworth at 2 kHz and name it "highpass2k". Create a "filters" section like this:
 ```yaml
 filters:

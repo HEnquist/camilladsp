@@ -58,7 +58,7 @@
 - When do I need to use an asynchronous resampler?
 
   The asynchronous resampler must be used when the ratio between the input and output sample rates cannot be expressed as a fixed ratio.
-  This is only the case when resampling to adaptively match the rate of two devices with independant clocks, where the ratio drifts a little all the time.
+  This is only the case when resampling to adaptively match the rate of two devices with independent clocks, where the ratio drifts a little all the time.
   Note that resampling between the fixed rates 44.1 kHz -> 48 kHz corresponds to a ratio of 160/147, and can be handled by the synchronous resampler.
   This works for any fixed resampling between the standard rates, 44.1 <-> 96 kHz, 88.2 <-> 192 kHz, 88.1 <-> 48 kHz etc.
 

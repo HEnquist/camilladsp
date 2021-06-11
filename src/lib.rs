@@ -7,6 +7,8 @@ extern crate cpal;
 extern crate fftw;
 #[macro_use]
 extern crate lazy_static;
+#[cfg(target_os = "windows")]
+extern crate crossbeam_channel;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
@@ -28,9 +30,11 @@ extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
+#[cfg(target_os = "windows")]
+extern crate wasapi;
 
 #[macro_use]
-extern crate slog_scope;
+extern crate log;
 
 use serde::Serialize;
 use std::error;
@@ -83,12 +87,16 @@ pub mod processing;
 pub mod pulsedevice;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
+#[cfg(target_os = "windows")]
+pub mod wasapidevice;
 
 pub enum StatusMessage {
     PlaybackReady,
     CaptureReady,
     PlaybackError { message: String },
     CaptureError { message: String },
+    PlaybackFormatChange,
+    CaptureFormatChange,
     PlaybackDone,
     CaptureDone,
     SetSpeed { speed: f64 },
@@ -142,16 +150,32 @@ pub struct PlaybackStatus {
 }
 
 #[derive(Clone, Debug)]
-pub struct ProcessingStatus {
+pub struct ProcessingParameters {
     pub volume: f32,
     pub mute: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProcessingStatus {
+    pub stop_reason: StopReason,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub enum StopReason {
+    None,
+    Done,
+    CaptureError,
+    PlaybackError,
+    CaptureFormatChange,
+    PlaybackFormatChange,
 }
 
 #[derive(Clone)]
 pub struct StatusStructs {
     pub capture: Arc<RwLock<CaptureStatus>>,
     pub playback: Arc<RwLock<PlaybackStatus>>,
-    pub processing: Arc<RwLock<ProcessingStatus>>,
+    pub processing: Arc<RwLock<ProcessingParameters>>,
+    pub status: Arc<RwLock<ProcessingStatus>>,
 }
 
 impl fmt::Display for ProcessingState {

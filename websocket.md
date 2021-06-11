@@ -58,9 +58,17 @@ Commands for reading and changing settings for the websocket server.
 
 Commands for reading status parameters.
 - `GetState` : get the current state of the processing as a string. Possible values are: 
-  * "RUNNING": the processing is running normally.
-  * "PAUSED": processing is paused because the input signal is silent.
-  * "INACTIVE": the program is inactive and waiting for a new configuration.
+  * "Running": the processing is running normally.
+  * "Paused": processing is paused because the input signal is silent.
+  * "Inactive": the program is inactive and waiting for a new configuration.
+  * "Starting": the program is starting up processing with a new configuration.
+- `StopReason` : get the last reason why CamillaDSP stopped the processing. Possible values are:
+  * "None": processing hasn't stopped.
+  * "Done": processing stopped when the capture device reached the end of the stream.
+  * "CaptureError": the capture device encountered an error.
+  * "PlaybackError": the playback device encountered an error.
+  * "CaptureFormatChange": the sample rate or format of the capture device changed.
+  * "PlaybackFormatChange": the sample rate or format of the playback device changed.
 - `GetCaptureRate` : get the measured sample rate of the capture device.
   * return the value as an integer
 - `GetSignalRange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)
@@ -204,7 +212,7 @@ This is enabled by providing the two optional parameters "cert" and "pass", wher
 How to properly generate the identity is outside the scope of this readme, but for simple tests a self-signed certificate can be used.
 
 ### Generate self-signed identity
-First geneate rsa keys: 
+First generate rsa keys: 
 ```sh
 openssl req -newkey rsa:2048 -new -nodes -x509 -days 3650 -keyout key.pem -out cert.pem
 ```

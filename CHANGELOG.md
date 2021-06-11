@@ -1,3 +1,9 @@
+## 0.6.0
+New features:
+- New Wasapi backend with support for exclusive mode and loopback.
+- Do proper shutdown on SIGINT (ctrl-c).
+- Add StopReason websocket command.
+
 ## 0.5.2
 New features:
 - Peaking, Notch, Bandpass and Allpass filters can be defined with bandwidth.

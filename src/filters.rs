@@ -20,7 +20,7 @@ use std::sync::{Arc, RwLock};
 
 use NewValue;
 use PrcFmt;
-use ProcessingStatus;
+use ProcessingParameters;
 use Res;
 
 #[derive(Debug)]
@@ -344,7 +344,7 @@ impl FilterGroup {
         filter_configs: HashMap<String, config::Filter>,
         waveform_length: usize,
         sample_freq: usize,
-        processing_status: Arc<RwLock<ProcessingStatus>>,
+        processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
         debug!("Build from config");
         let mut filters = Vec::<Box<dyn Filter>>::new();
@@ -439,7 +439,7 @@ impl Pipeline {
     /// Create a new pipeline from a configuration structure.
     pub fn from_config(
         conf: config::Configuration,
-        processing_status: Arc<RwLock<ProcessingStatus>>,
+        processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
         debug!("Build new pipeline");
         let mut steps = Vec::<PipelineStep>::new();

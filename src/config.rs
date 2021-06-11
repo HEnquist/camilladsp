@@ -195,13 +195,17 @@ pub enum CaptureDevice {
         device: String,
         format: SampleFormat,
     },
-    #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
+        #[serde(default)]
+        exclusive: bool,
+        #[serde(default)]
+        loopback: bool,
     },
     #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
     #[serde(alias = "JACK", alias = "jack")]
@@ -223,7 +227,7 @@ impl CaptureDevice {
             CaptureDevice::Stdin { channels, .. } => *channels,
             #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
             CaptureDevice::CoreAudio { channels, .. } => *channels,
-            #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+            #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { channels, .. } => *channels,
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
             CaptureDevice::Jack { channels, .. } => *channels,
@@ -240,7 +244,7 @@ impl CaptureDevice {
             CaptureDevice::Stdin { format, .. } => format.clone(),
             #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
             CaptureDevice::CoreAudio { format, .. } => format.clone(),
-            #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+            #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { format, .. } => format.clone(),
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
             CaptureDevice::Jack { .. } => SampleFormat::FLOAT32LE,
@@ -289,13 +293,15 @@ pub enum PlaybackDevice {
         device: String,
         format: SampleFormat,
     },
-    #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
+        #[serde(default)]
+        exclusive: bool,
     },
     #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
     #[serde(alias = "JACK", alias = "jack")]
@@ -317,7 +323,7 @@ impl PlaybackDevice {
             PlaybackDevice::Stdout { channels, .. } => *channels,
             #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
             PlaybackDevice::CoreAudio { channels, .. } => *channels,
-            #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+            #[cfg(target_os = "windows")]
             PlaybackDevice::Wasapi { channels, .. } => *channels,
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
             PlaybackDevice::Jack { channels, .. } => *channels,
@@ -849,7 +855,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::CoreAudio { channels, .. } => {
                 *channels = chans;
             }
-            #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+            #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { channels, .. } => {
                 *channels = chans;
             }
@@ -880,7 +886,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::CoreAudio { format, .. } => {
                 *format = fmt;
             }
-            #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+            #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { format, .. } => {
                 *format = fmt;
             }
@@ -1083,20 +1089,33 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             .into());
         }
     }
-    #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi { format, .. } = &conf.devices.capture {
-        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
+        if *format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
-                "The Wasapi capture backend only supports FLOAT32LE and S16LE sample formats",
+                "The Wasapi capture backend does not support FLOAT64LE sample format",
             )
             .into());
         }
     }
-    #[cfg(all(feature = "cpal-backend", target_os = "windows"))]
+    #[cfg(target_os = "windows")]
+    if let CaptureDevice::Wasapi {
+        loopback,
+        exclusive,
+        ..
+    } = &conf.devices.capture
+    {
+        if *loopback && *exclusive {
+            return Err(
+                ConfigError::new("Wasapi loopback is only supported in shared mode").into(),
+            );
+        }
+    }
+    #[cfg(target_os = "windows")]
     if let PlaybackDevice::Wasapi { format, .. } = &conf.devices.playback {
-        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
+        if *format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
-                "The Wasapi playback backend only supports FLOAT32LE and S16LE sample formats",
+                "The Wasapi playback backend does not support FLOAT64LE sample format",
             )
             .into());
         }

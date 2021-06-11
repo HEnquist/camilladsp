@@ -20,19 +20,19 @@ extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
+#[cfg(target_os = "windows")]
+extern crate windows;
+#[cfg(target_os = "windows")]
+use windows::initialize_mta;
 
+extern crate simplelog;
 #[macro_use]
-extern crate slog;
-extern crate slog_async;
-extern crate slog_term;
-#[macro_use]
-extern crate slog_scope;
-
-use slog::Drain;
+extern crate log;
+use simplelog::*;
 
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
 use std::env;
-use std::fs::OpenOptions;
+use std::fs::File;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -50,8 +50,8 @@ use camillalib::socketserver;
 use std::net::IpAddr;
 
 use camillalib::{
-    CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus, ProcessingState,
-    ProcessingStatus, StatusMessage, StatusStructs,
+    CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus, ProcessingParameters,
+    ProcessingState, ProcessingStatus, StatusMessage, StatusStructs, StopReason,
 };
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
@@ -185,6 +185,11 @@ fn run(
     let mut cap_ready = false;
     #[cfg(target_os = "linux")]
     signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&signal_reload))?;
+    signal_hook::flag::register_usize(
+        signal_hook::consts::SIGINT,
+        Arc::clone(&signal_exit),
+        ExitRequest::EXIT,
+    )?;
 
     loop {
         if signal_reload.load(Ordering::Relaxed) {
@@ -263,6 +268,7 @@ fn run(
                     if cap_ready {
                         debug!("Both capture and playback ready, release barrier");
                         barrier.wait();
+                        debug!("Supervisor loop starts now!");
                         is_starting = false;
                     }
                 }
@@ -272,7 +278,9 @@ fn run(
                     if pb_ready {
                         debug!("Both capture and playback ready, release barrier");
                         barrier.wait();
+                        debug!("Supervisor loop starts now!");
                         is_starting = false;
+                        status_structs.status.write().unwrap().stop_reason = StopReason::None;
                     }
                 }
                 StatusMessage::PlaybackError { message } => {
@@ -283,6 +291,7 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for capture thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason = StopReason::PlaybackError;
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     return Ok(ExitState::Restart);
@@ -294,12 +303,44 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for playback thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason = StopReason::CaptureError;
+                    pb_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
+                }
+                StatusMessage::PlaybackFormatChange => {
+                    error!("Playback stopped due to external format change");
+                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if is_starting {
+                        debug!("Error while starting, release barrier");
+                        barrier.wait();
+                    }
+                    debug!("Wait for capture thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason =
+                        StopReason::PlaybackFormatChange;
+                    cap_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    return Ok(ExitState::Restart);
+                }
+                StatusMessage::CaptureFormatChange => {
+                    error!("Capture stopped due to external format change");
+                    if is_starting {
+                        debug!("Error while starting, release barrier");
+                        barrier.wait();
+                    }
+                    debug!("Wait for playback thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason =
+                        StopReason::CaptureFormatChange;
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::PlaybackDone => {
                     info!("Playback finished");
+                    let mut stat = status_structs.status.write().unwrap();
+                    if stat.stop_reason == StopReason::None {
+                        stat.stop_reason = StopReason::Done;
+                    }
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureDone => {
@@ -543,61 +584,37 @@ fn main_process() -> i32 {
     let matches = clapapp.get_matches();
 
     let mut loglevel = match matches.occurrences_of("verbosity") {
-        0 => slog::Level::Info,
-        1 => slog::Level::Debug,
-        2 => slog::Level::Trace,
-        _ => slog::Level::Trace,
+        0 => LevelFilter::Info,
+        1 => LevelFilter::Debug,
+        2 => LevelFilter::Trace,
+        _ => LevelFilter::Trace,
     };
+
     loglevel = match matches.value_of("loglevel") {
-        Some("trace") => slog::Level::Trace,
-        Some("debug") => slog::Level::Debug,
-        Some("info") => slog::Level::Info,
-        Some("warn") => slog::Level::Warning,
-        Some("error") => slog::Level::Error,
-        Some("off") => slog::Level::Critical,
+        Some("trace") => LevelFilter::Trace,
+        Some("debug") => LevelFilter::Debug,
+        Some("info") => LevelFilter::Info,
+        Some("warn") => LevelFilter::Warn,
+        Some("error") => LevelFilter::Error,
+        Some("off") => LevelFilter::Off,
         _ => loglevel,
     };
 
-    let drain = match matches.value_of("loglevel") {
-        Some("off") => {
-            let drain = slog::Discard;
-            slog_async::Async::new(drain).build().fuse()
+    let logconf = ConfigBuilder::new()
+        .set_time_format_str("%H:%M:%S%.3f")
+        .set_time_to_local(true)
+        .build();
+    if let Some(logfile) = matches.value_of("logfile") {
+        let file = File::create(logfile).unwrap();
+        if let Err(err) = WriteLogger::init(loglevel, logconf, file) {
+            println!("Failed to create logger, {}", err);
         }
-        _ => {
-            if let Some(logfile) = matches.value_of("logfile") {
-                let file = OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .truncate(true)
-                    .open(logfile)
-                    .unwrap();
-                let decorator = slog_term::PlainDecorator::new(file);
-                let drain = slog_term::FullFormat::new(decorator)
-                    .build()
-                    .filter_level(loglevel)
-                    .fuse();
-                slog_async::Async::new(drain).build().fuse()
-            } else {
-                let decorator = slog_term::TermDecorator::new().stderr().build();
-                let drain = slog_term::FullFormat::new(decorator)
-                    .build()
-                    .filter_level(loglevel)
-                    .fuse();
-                slog_async::Async::new(drain).build().fuse()
-            }
-        }
-    };
+    } else if let Err(err) =
+        TermLogger::init(loglevel, logconf, TerminalMode::Stderr, ColorChoice::Auto)
+    {
+        println!("Failed to create logger, {}", err);
+    }
 
-    let log = slog::Logger::root(
-        drain,
-        o!("module" => {
-        slog::FnValue(
-            |rec : &slog::Record| { rec.module() }
-                )
-            }),
-    );
-
-    let _guard = slog_scope::set_global_logger(log);
     // logging examples
     //trace!("trace message"); //with -vv
     //debug!("debug message"); //with -v
@@ -609,6 +626,9 @@ fn main_process() -> i32 {
     let _signal = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGHUP, || debug!("Received SIGHUP"))
     };
+
+    #[cfg(target_os = "windows")]
+    initialize_mta().unwrap();
 
     let configname = matches.value_of("configfile").map(|path| path.to_string());
 
@@ -684,15 +704,19 @@ fn main_process() -> i32 {
         signal_rms: Vec::new(),
         signal_peak: Vec::new(),
     }));
-    let processing_status = Arc::new(RwLock::new(ProcessingStatus {
+    let processing_status = Arc::new(RwLock::new(ProcessingParameters {
         volume: initial_volume,
         mute: initial_mute,
+    }));
+    let status = Arc::new(RwLock::new(ProcessingStatus {
+        stop_reason: StopReason::None,
     }));
 
     let status_structs = StatusStructs {
         capture: capture_status.clone(),
         playback: playback_status.clone(),
         processing: processing_status.clone(),
+        status: status.clone(),
     };
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
@@ -713,6 +737,7 @@ fn main_process() -> i32 {
                 capture_status,
                 playback_status,
                 processing_status,
+                status,
             };
             let server_params = socketserver::ServerParameters {
                 port: serverport,

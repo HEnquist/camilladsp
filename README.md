@@ -79,7 +79,7 @@ This chart shows the most important parts:
 ![Overview](overview.png)
 
 ### Capture
-The capture thread reads a chunk samples from the audio device in the selected format. It then converts the samples to 64-bit floats (or optionally 32-bit). If resampling is enabled, the audio data is sent to the resampler. At the end, the chunk of samples is packed as a message that is then posted to the input queue of the processing thread. After this the capture thread returns to reading he next shunk of samples from the device.
+The capture thread reads a chunk samples from the audio device in the selected format. It then converts the samples to 64-bit floats (or optionally 32-bit). If resampling is enabled, the audio data is sent to the resampler. At the end, the chunk of samples is packed as a message that is then posted to the input queue of the processing thread. After this the capture thread returns to reading the next chunk of samples from the device.
 
 ### Processing
 The processing thread waits for audio chunk messages to arrive in the input queue. Once a message arrives, it's passed through all the defined filters and mixers of the pipeline. Once all processing is done, the audio data is posted to the input queue of the playback device.
@@ -91,7 +91,7 @@ The playback thread simply waits for audio messages to appear in the queue. Once
 The supervisor monitors all threads by listening to their status messages. The requests for capture rate adjust are passed on to the capture thread. It's also responsible for updating the configuration when requested to do so via the websocket server or a SIGHUP signal.
 
 ### Websocket server
-The websocket server lauches a separate thread to handle each connected client. All commands to change the config are send to the supervisor thread.
+The websocket server launches a separate thread to handle each connected client. All commands to change the config are sent to the supervisor thread.
 
 ## System requirements
 CamillaDSP runs on Linux, macOS and Windows. The exact system requirements are determined by the amount of processing the application requires, but even relatively weak CPUs like Intel Atom have much more processing power than most will need.
@@ -107,11 +107,11 @@ A few examples, done with CamillaDSP v0.5.0:
   CPU usage just under 100%.
 
 ### Linux
-Both 64 and 32 bit architechtures are supported. All platforms supported by the Rustc compiler should work. 
+Both 64 and 32 bit architectures are supported. All platforms supported by the Rustc compiler should work. 
 
 Pre-built binaries are provided for:
 - x86_64 (almost all PCs)
-- armv7 (32-bit arm, for example a Raspeberry Pi 2,3,4 with a 32-bit OS)
+- armv7 (32-bit arm, for example a Raspberry Pi 2,3,4 with a 32-bit OS)
 - aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS) 
 
 ### Windows
@@ -131,10 +131,10 @@ A crossover must filter all sound being played on the system. This is possible w
 See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
 ## Dependencies
-These are the key dependencies for CamillDSP.
+These are the key dependencies for CamillaDSP.
 * https://crates.io/crates/alsa - Alsa audio backend
 * https://crates.io/crates/clap - Command line argument parsing
-* https://crates.io/crates/cpal - Wasapi and CoreAudio audio backends
+* https://crates.io/crates/cpal - Jack and CoreAudio audio backends
 * https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
 * https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
 * https://crates.io/crates/rustfft - FFT used for FIR filters
@@ -175,7 +175,7 @@ The following configurations are provided:
 
 All builds include the Websocket server.
 
-The `.tar.gz`-files can be uncompressed with the `tar` comand: 
+The `.tar.gz`-files can be uncompressed with the `tar` command: 
 
 ```sh 
 tar -xvf camilladsp-linux-amd64.tar.gz
@@ -226,15 +226,15 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 All the available options, or "features" are:
 - `alsa-backend`: Alsa support
 - `pulse-backend`: PulseAudio support
-- `cpal-backend`: Wasapi and CoreAudio support
-- `jack-backend`: Jack support. This also enables the cpal-backend feature if building on Windows or macOS.
+- `cpal-backend`: CoreAudio support
+- `jack-backend`: Jack support. This also enables the cpal-backend feature if building on macOS.
 - `websocket`: Websocket server for control
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
 - `FFTW`: Use FFTW instead of RustFFT
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64)
 - `neon`: Enable the experimental Neon support for aarch64 in the resampler. Note that this only works on 64-bit arm, and requires a very recent nightly rust compiler.
 
-The first three (`alsa-backend`, `pulse-packend`, `websocket`) are included in the default features, meaning if you don't specify anything you will get those three.
+The first two (`alsa-backend`, `websocket`) are included in the default features, meaning if you don't specify anything you will get those two.
 Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
 
 The `jack-backend` feature requires jack and its development files to be installed. To install:
@@ -242,18 +242,18 @@ The `jack-backend` feature requires jack and its development files to be install
 - Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
 - Arch:  ```sudo pacman -S jack```
 
-Example 1: You want `alsa-backend`, `pulse-backend`, `websocket` and `FFTW`. The first three are included by default so you only need to add `FFTW`:
+Example 1: You want `alsa-backend`, `websocket`, `pulse-backend` and `FFTW`. The first two are included by default so you only need to add `FFTW` and `pulse-backend`:
 ```
-cargo build --release --features FFTW
+cargo build --release --features FFTW --features pulse-backend
 (or)
-cargo install --path . --features FFTW
+cargo install --path . --features FFTW --features pulse-backend
 ```
 
-Example 2: You want `alsa-backend`, `websocket`, `32bit` and `FFTW`. Since you don't want `pulse-backend` you have to disable the defaults, and then add both `alsa-backend` and `websocket`:
+Example 2: You want `alsa-backend`, `32bit` and `FFTW`. Since you don't want `websocket` you have to disable the defaults, and then add back `alsa-backend`:
 ```
-cargo build --release --no-default-features --features alsa-backend --features websocket --features FFTW --features 32bit
+cargo build --release --no-default-features --features alsa-backend --features FFTW --features 32bit
 (or)
-cargo install --path . --no-default-features --features alsa-backend --features websocket --features FFTW --features 32bit
+cargo install --path . --no-default-features --features alsa-backend --features FFTW --features 32bit
 ```
 
 ## Optimize for your system
@@ -278,19 +278,19 @@ The Alsa and Pulse backends should not be included when building on Windows and 
 
 macOS:
 ```
-RUSTFLAGS='-C target-cpu=native' cargo build --release  --no-default-features --features cpal-backend --features websocket
+RUSTFLAGS='-C target-cpu=native' cargo build --release --features cpal-backend
 ```
 
 Windows (cmd.exe command prompt):
 ```
 set RUSTFLAGS=-C target-cpu=native 
-cargo build --release  --no-default-features --features cpal-backend --features websocket
+cargo build --release
 ```
 
 Windows (PowerShell):
 ```
 $env:RUSTFLAGS="-C target-cpu=native"
-cargo build --release  --no-default-features --features cpal-backend --features websocket
+cargo build --release
 ```
 
 On macOS both the PulseAudio and FFTW features can be used. The necessary dependencies can be installed with brew:
@@ -430,15 +430,32 @@ pacmd list-sources
 ```
 
 ## Wasapi
-To capture audio from applications a virtual sound card is needed. [VB-CABLE from VB-AUDIO](https://www.vb-audio.com/Cable/) works well.
 
-Set VB-CABLE as the default playback device in the control panel, and let CamillaDSP capture from the VB-CABLE output.
+The device name for Wasapi is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the input/output name and card name, and the format is "{input/output name} ({card name})".
 
-The device name is the same as seen in the Windows volume control. For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)". The device name is built from the input/output name and card name, and the format is "{input/output name} ({card name})".
+Audio can be captured in two ways.
+- Virtual sound card 
+  
+  To capture audio from applications a virtual sound card is used. [VB-CABLE from VB-AUDIO](https://www.vb-audio.com/Cable/) works well.
 
-The sample format is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
+  Set VB-CABLE as the default playback device in the control panel, and let CamillaDSP capture from the VB-CABLE output.
 
-The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
+- Loopback
+
+  In loopback mode the audio is captured from a Playback device. This requires using shared mode, see more below.
+
+
+CamillaDSP supports both shared and exclusive modes. 
+
+In most cases exclusive mode is preferred since it gives a direct connection with the audio hardware. 
+
+### Exclusive mode
+
+In exclusive mode CamillaDSP is able to control the sample rate of the devices. The settings for "Default format" in the Windows control panel isn't used. The sample format must be one that the device driver can accept. This usually matches the hardware capabilities of the device. For example a 24-bit USB device is likely to accept `S16LE` and `S24LE3`. Other formats may be supported depending on driver support.
+
+### Shared mode
+
+In shared mode the sample format is always 32-bit float (`FLOAT32LE`). The sample rate must match the default format of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format".
 
 
 ## CoreAudio
@@ -506,7 +523,7 @@ devices:
   - 88.2 or 96 kHz: 2048
   - 176.4 or 192 kHz: 4096
 
-  The duration in seconds of a chunk is `chunksize/samplerate`, so the suggested values corresponds to about 22 ms per chunk. This is a resonable value, and making it shorter can increase the cpu usage and make buffer underruns more likely.
+  The duration in seconds of a chunk is `chunksize/samplerate`, so the suggested values corresponds to about 22 ms per chunk. This is a reasonable value, and making it shorter can increase the cpu usage and make buffer underruns more likely.
 
   If you have long FIR filters you can reduce CPU usage by making the chunksize larger. 
   When increasing, try increasing in factors of two, like 1024 -> 2048 or 4096 -> 8192. 
@@ -564,7 +581,7 @@ devices:
 
   Set this to `true` to enable resampling of the input signal. 
   In addition to resampling the input to a different sample rate, 
-  this can be useful for rate-matching capture and playback devices with independant clocks.
+  this can be useful for rate-matching capture and playback devices with independent clocks.
 
 * `resampler_type` (optional, defaults to "BalancedAsync")
 
@@ -612,9 +629,9 @@ devices:
     |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | Jack               | File/Stdin/Stdout  |
     |------------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|
     | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark: |
-    | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
-    | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
-    | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :x:                | :heavy_check_mark: |
+    | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
+    | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
+    | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
     | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
     | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                | :x:                | :heavy_check_mark: |
   
@@ -662,6 +679,8 @@ devices:
     skip_bytes: 50
     read_bytes: 200
     ```
+
+  The __Wasapi__ capture and playback devices have an `exclusive` parameter for setting if Exclusive mode should be used. The capture device also has a `loopback` parameter for enabling loopback capture mode. Both these parameters are optional, and default to `false` if left out.
     
   The __Jack__ capture and playback devices do not have a `format` parameter, since they always uses the FLOAT32LE format. It seems that the `device` property should always be set to "default". This parameter may be removed in a future version.
 
@@ -785,7 +804,7 @@ mixers:
 ```
 
 ### Skip processing of unused channels
-Some audio interfaces bundle all their inputs togehter, meaning that it might be necessary to capture a large number of channels to get access to a particular input.
+Some audio interfaces bundle all their inputs together, meaning that it might be necessary to capture a large number of channels to get access to a particular input.
 To reduce the CPU load, CamillaDSP will try to avoid processing of any channel that is captured but not used in the pipeline.
 
 Let's say we have an interface with one analog input, and one SPDIF. These are presented as a single 4-channel input where channels 0 and 1 are analog, 2 and 3 SPDIF. Then, setting the number of capture channels to 4 will enable both inputs. In this case we are only interested in the SPDIF input. This is then done by adding a mixer that reduces the number of channels to 2. In this mixer, input channels 0 and 1 are not mapped to anything. This is then detected, and no format conversion, resampling or processing will be done on these two channels.  
@@ -809,7 +828,7 @@ filters:
 ```
 
 ### Volume
-The Volume filter is intended to be used as a volume control. The inital volume and muting state can be set with the `gain` and `mute` command line parameters. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume or mute state is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). The value must not be negative. If left out, it defaults to 200 ms. The value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
+The Volume filter is intended to be used as a volume control. The initial volume and muting state can be set with the `gain` and `mute` command line parameters. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume or mute state is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). The value must not be negative. If left out, it defaults to 200 ms. The value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
 
 Example Volume filter:
 ```
@@ -908,7 +927,7 @@ For testing purposes the entire "parameters" block can be left out (or commented
 
 #### Coefficients from Wav-file
 
-Supplying the coefficients as `.wav` file is the most conveient method.
+Supplying the coefficients as `.wav` file is the most convenient method.
 The `Wav` type takes only one parameter `channel`. This is used to select which channel of a multi-channel file to load. For a standard stereo file, the left track is channel 0, and the right is channel 1. This parameter is optional and defaults to 0 if left out.
 The sample rate of the file is ignored.
 
