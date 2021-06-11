@@ -110,6 +110,7 @@ fn run(
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
+    prev_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     status_structs: StatusStructs,
 ) -> Res<ExitState> {
     status_structs.capture.write().unwrap().state = ProcessingState::Starting;
@@ -244,6 +245,7 @@ fn run(
                     pb_handle.join().unwrap();
                     trace!("Wait for cap..");
                     cap_handle.join().unwrap();
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
                     return Ok(ExitState::Exit);
                 }
                 ExitRequest::STOP => {
@@ -255,6 +257,7 @@ fn run(
                     trace!("Wait for cap..");
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
                     return Ok(ExitState::Restart);
                 }
                 _ => {}
@@ -294,6 +297,7 @@ fn run(
                     status_structs.status.write().unwrap().stop_reason = StopReason::PlaybackError;
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureError { message } => {
@@ -306,6 +310,7 @@ fn run(
                     status_structs.status.write().unwrap().stop_reason = StopReason::CaptureError;
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::PlaybackFormatChange => {
@@ -320,6 +325,7 @@ fn run(
                         StopReason::PlaybackFormatChange;
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureFormatChange => {
@@ -333,6 +339,7 @@ fn run(
                         StopReason::CaptureFormatChange;
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::PlaybackDone => {
@@ -341,6 +348,7 @@ fn run(
                     if stat.stop_reason == StopReason::None {
                         stat.stop_reason = StopReason::Done;
                     }
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureDone => {
@@ -720,6 +728,7 @@ fn main_process() -> i32 {
     };
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
+    let previous_config = Arc::new(Mutex::new(None));
 
     let active_config_path = Arc::new(Mutex::new(configname));
 
@@ -734,6 +743,7 @@ fn main_process() -> i32 {
                 active_config: active_config.clone(),
                 active_config_path: active_config_path.clone(),
                 new_config: new_config.clone(),
+                previous_config: previous_config.clone(),
                 capture_status,
                 playback_status,
                 processing_status,
@@ -793,6 +803,7 @@ fn main_process() -> i32 {
             active_config.clone(),
             active_config_path.clone(),
             new_config.clone(),
+            previous_config.clone(),
             status_structs.clone(),
         );
         match exitstatus {

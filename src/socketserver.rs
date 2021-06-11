@@ -27,6 +27,7 @@ pub struct SharedData {
     pub active_config: Arc<Mutex<Option<config::Configuration>>>,
     pub active_config_path: Arc<Mutex<Option<String>>>,
     pub new_config: Arc<Mutex<Option<config::Configuration>>>,
+    pub previous_config: Arc<Mutex<Option<config::Configuration>>>,
     pub capture_status: Arc<RwLock<CaptureStatus>>,
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
     pub processing_status: Arc<RwLock<ProcessingParameters>>,
@@ -77,6 +78,7 @@ enum WsCommand {
     SetConfigJson(String),
     Reload,
     GetConfig,
+    GetPreviousConfig,
     ReadConfig(String),
     ReadConfigFile(String),
     ValidateConfig(String),
@@ -127,6 +129,10 @@ enum WsReply {
         result: WsResult,
     },
     GetConfig {
+        result: WsResult,
+        value: String,
+    },
+    GetPreviousConfig {
         result: WsResult,
         value: String,
     },
@@ -519,6 +525,10 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
         WsCommand::GetConfig => Some(WsReply::GetConfig {
             result: WsResult::Ok,
             value: serde_yaml::to_string(&*shared_data_inst.active_config.lock().unwrap()).unwrap(),
+        }),
+        WsCommand::GetPreviousConfig => Some(WsReply::GetPreviousConfig {
+            result: WsResult::Ok,
+            value: serde_yaml::to_string(&*shared_data_inst.previous_config.lock().unwrap()).unwrap(),
         }),
         WsCommand::GetConfigJson => Some(WsReply::GetConfigJson {
             result: WsResult::Ok,
