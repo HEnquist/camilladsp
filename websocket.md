@@ -108,6 +108,8 @@ Commands for reading and changing the active configuration
   * returns the config in json as a string
 - `GetConfigName` : get name and path of current config file
   * returns the path as a string
+- `GetPreviousConfig` : read the previous configuration as yaml
+  * returns the previously active config in yaml as a string
 - `SetConfigName` : change config file name given as a string, not applied until `Reload` is called
 - `SetConfig:` : provide a new config as a yaml string. Applied directly.
 - `SetConfigJson` : provide a new config as a JSON string. Applied directly.

@@ -528,7 +528,8 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
         }),
         WsCommand::GetPreviousConfig => Some(WsReply::GetPreviousConfig {
             result: WsResult::Ok,
-            value: serde_yaml::to_string(&*shared_data_inst.previous_config.lock().unwrap()).unwrap(),
+            value: serde_yaml::to_string(&*shared_data_inst.previous_config.lock().unwrap())
+                .unwrap(),
         }),
         WsCommand::GetConfigJson => Some(WsReply::GetConfigJson {
             result: WsResult::Ok,

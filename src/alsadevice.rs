@@ -366,12 +366,20 @@ fn playback_loop_bytes(
                 };
             }
             Ok(AudioMessage::EndOfStream) => {
-                channels.status.send(StatusMessage::PlaybackDone).unwrap_or(());
+                channels
+                    .status
+                    .send(StatusMessage::PlaybackDone)
+                    .unwrap_or(());
                 break;
             }
             Err(err) => {
                 error!("Message channel error: {}", err);
-                channels.status.send(StatusMessage::PlaybackError {message: err.to_string()}).unwrap_or(());
+                channels
+                    .status
+                    .send(StatusMessage::PlaybackError {
+                        message: err.to_string(),
+                    })
+                    .unwrap_or(());
                 break;
             }
         }
@@ -425,7 +433,10 @@ fn capture_loop_bytes(
                 debug!("Exit message received, sending EndOfStream");
                 let msg = AudioMessage::EndOfStream;
                 channels.audio.send(msg).unwrap_or(());
-                channels.status.send(StatusMessage::CaptureDone).unwrap_or(());
+                channels
+                    .status
+                    .send(StatusMessage::CaptureDone)
+                    .unwrap_or(());
                 break;
             }
             Ok(CommandMessage::SetSpeed { speed }) => {

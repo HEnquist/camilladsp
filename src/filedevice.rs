@@ -164,12 +164,18 @@ impl PlaybackDevice for FilePlaybackDevice {
                                     //);
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
-                                    status_channel.send(StatusMessage::PlaybackDone).unwrap_or(());
+                                    status_channel
+                                        .send(StatusMessage::PlaybackDone)
+                                        .unwrap_or(());
                                     break;
                                 }
                                 Err(err) => {
                                     error!("Message channel error: {}", err);
-                                    status_channel.send(StatusMessage::PlaybackError{ message: err.to_string()}).unwrap_or(());
+                                    status_channel
+                                        .send(StatusMessage::PlaybackError {
+                                            message: err.to_string(),
+                                        })
+                                        .unwrap_or(());
                                     break;
                                 }
                             }
