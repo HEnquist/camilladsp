@@ -346,7 +346,10 @@ fn capture_loop(
         let mut data = vec![0u8; available_frames as usize * blockalign as usize];
         let nbr_frames_read = capture_client.read_from_device(blockalign as usize, &mut data)?;
         if nbr_frames_read != available_frames {
-            warn!("Expected {} frames, got {}", available_frames, nbr_frames_read);
+            warn!(
+                "Expected {} frames, got {}",
+                available_frames, nbr_frames_read
+            );
         }
         match tx_capt.try_send((chunk_nbr, data)) {
             Ok(()) | Err(TrySendError::Full(_)) => {}
@@ -552,7 +555,9 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             }
                         }
                         Ok(AudioMessage::EndOfStream) => {
-                            status_channel.send(StatusMessage::PlaybackDone).unwrap_or(());
+                            status_channel
+                                .send(StatusMessage::PlaybackDone)
+                                .unwrap_or(());
                             break;
                         }
                         Err(err) => {

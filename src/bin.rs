@@ -185,7 +185,11 @@ fn run(
     let mut cap_ready = false;
     #[cfg(target_os = "linux")]
     signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&signal_reload))?;
-    signal_hook::flag::register_usize(signal_hook::consts::SIGINT, Arc::clone(&signal_exit), ExitRequest::EXIT)?;
+    signal_hook::flag::register_usize(
+        signal_hook::consts::SIGINT,
+        Arc::clone(&signal_exit),
+        ExitRequest::EXIT,
+    )?;
 
     loop {
         if signal_reload.load(Ordering::Relaxed) {
