@@ -6,9 +6,7 @@ use pulse::stream::Direction;
 use audiodevice::*;
 use config;
 use config::SampleFormat;
-use conversions::{
-    chunk_to_buffer_rawbytes, buffer_to_chunk_rawbytes,
-};
+use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use countertimer;
 use rubato::Resampler;
 use std::sync::mpsc;
@@ -169,8 +167,11 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    conversion_result = chunk_to_buffer_rawbytes(&chunk,
-                                        &mut buffer, &sample_format);
+                                    conversion_result = chunk_to_buffer_rawbytes(
+                                        &chunk,
+                                        &mut buffer,
+                                        &sample_format,
+                                    );
                                     sleep_until_next(
                                         &last_instant,
                                         bytes_per_frame,

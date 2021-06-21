@@ -3,6 +3,7 @@ use basicfilters;
 use biquad;
 use biquadcombo;
 use config;
+use conversions;
 use diffeq;
 use dither;
 #[cfg(not(feature = "FFTW"))]
@@ -11,6 +12,7 @@ use fftconv;
 use fftconv_fftw as fftconv;
 use loudness;
 use mixer;
+use rawsample::SampleReader;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::File;
@@ -18,7 +20,6 @@ use std::io::BufReader;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
 
-use NewValue;
 use PrcFmt;
 use ProcessingParameters;
 use Res;
@@ -77,6 +78,7 @@ pub fn read_coeff_file(
     };
 
     match format {
+        // Handle TEXT separately
         config::FileFormat::TEXT => {
             for (nbr, line) in file
                 .lines()
@@ -109,85 +111,14 @@ pub fn read_coeff_file(
                 }
             }
         }
-        config::FileFormat::FLOAT32LE => {
-            let mut buffer = [0; 4];
+        // All other formats
+        _ => {
             file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
-            let nbr_coeffs = read_bytes_lines / 4;
-            while let Ok(4) = file.read(&mut buffer) {
-                let value = f32::from_le_bytes(buffer) as PrcFmt;
-                coefficients.push(value);
-                if coefficients.len() >= nbr_coeffs {
-                    break;
-                }
-            }
-        }
-        config::FileFormat::FLOAT64LE => {
-            let mut buffer = [0; 8];
-            file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
-            let nbr_coeffs = read_bytes_lines / 8;
-            while let Ok(8) = file.read(&mut buffer) {
-                let value = f64::from_le_bytes(buffer) as PrcFmt;
-                coefficients.push(value);
-                if coefficients.len() >= nbr_coeffs {
-                    break;
-                }
-            }
-        }
-        config::FileFormat::S16LE => {
-            let mut buffer = [0; 2];
-            file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
-            let nbr_coeffs = read_bytes_lines / 2;
-            let scalefactor = PrcFmt::new(2.0).powi(15);
-            while let Ok(2) = file.read(&mut buffer) {
-                let mut value = i16::from_le_bytes(buffer) as PrcFmt;
-                value /= scalefactor;
-                coefficients.push(value);
-                if coefficients.len() >= nbr_coeffs {
-                    break;
-                }
-            }
-        }
-        config::FileFormat::S24LE => {
-            let mut buffer = [0; 4];
-            file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
-            let nbr_coeffs = read_bytes_lines / 4;
-            let scalefactor = PrcFmt::new(2.0).powi(31);
-            while let Ok(4) = file.read(&mut buffer) {
-                buffer[3] = buffer[2];
-                buffer[2] = buffer[1];
-                buffer[1] = buffer[0];
-                buffer[0] = 0;
-                let mut value = i32::from_le_bytes(buffer) as PrcFmt;
-                value /= scalefactor;
-                coefficients.push(value);
-                if coefficients.len() >= nbr_coeffs {
-                    break;
-                }
-            }
-        }
-        config::FileFormat::S24LE3 => {
-            let mut buffer = [0; 4];
-            file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
-            let nbr_coeffs = read_bytes_lines / 3;
-            let scalefactor = PrcFmt::new(2.0).powi(31);
-            while let Ok(3) = file.read(&mut buffer[1..4]) {
-                let mut value = i32::from_le_bytes(buffer) as PrcFmt;
-                value /= scalefactor;
-                coefficients.push(value);
-                if coefficients.len() >= nbr_coeffs {
-                    break;
-                }
-            }
-        }
-        config::FileFormat::S32LE => {
-            let mut buffer = [0; 4];
-            file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
-            let nbr_coeffs = read_bytes_lines / 4;
-            let scalefactor = PrcFmt::new(2.0).powi(31);
-            while let Ok(4) = file.read(&mut buffer) {
-                let mut value = i32::from_le_bytes(buffer) as PrcFmt;
-                value /= scalefactor;
-                coefficients.push(value);
+            let rawformat = conversions::map_file_formats(&format);
+            let mut nextvalue = vec![0.0; 1];
+            let nbr_coeffs = read_bytes_lines / format.bytes_per_sample();
+            while let Ok(1) = PrcFmt::read_samples(&mut file, &mut nextvalue, &rawformat) {
+                coefficients.push(nextvalue[0]);
                 if coefficients.len() >= nbr_coeffs {
                     break;
                 }

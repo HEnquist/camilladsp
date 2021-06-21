@@ -1,9 +1,7 @@
 use audiodevice::*;
 use config;
 use config::SampleFormat;
-use conversions::{
-    buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes,
-};
+use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use countertimer;
 use std::fs::File;
 use std::io::ErrorKind;
@@ -201,19 +199,14 @@ fn get_nbr_capture_bytes(
     }
 }
 
-
-fn build_chunk(
-    buf: &[u8],
-    params: &CaptureParams,
-    bytes_read: usize,
-) -> AudioChunk {
+fn build_chunk(buf: &[u8], params: &CaptureParams, bytes_read: usize) -> AudioChunk {
     buffer_to_chunk_rawbytes(
-            &buf,
-            params.channels,
-            &params.sample_format,
-            bytes_read,
-            &params.capture_status.read().unwrap().used_channels,
-        )
+        &buf,
+        params.channels,
+        &params.sample_format,
+        bytes_read,
+        &params.capture_status.read().unwrap().used_channels,
+    )
 }
 
 fn get_capture_bytes(
@@ -364,11 +357,7 @@ fn capture_loop(
                     .unwrap_or(());
             }
         };
-        let mut chunk = build_chunk(
-            &buf[0..capture_bytes],
-            &params,
-            bytes_read,
-        );
+        let mut chunk = build_chunk(&buf[0..capture_bytes], &params, bytes_read);
 
         value_range = chunk.maxval - chunk.minval;
         chunk_stats = chunk.get_stats();

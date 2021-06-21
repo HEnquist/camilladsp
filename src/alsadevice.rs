@@ -8,9 +8,7 @@ use alsa::{Direction, ValueOr};
 use audiodevice::*;
 use config;
 use config::SampleFormat;
-use conversions::{
-    chunk_to_buffer_rawbytes, buffer_to_chunk_rawbytes,
-};
+use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use countertimer;
 use nix::errno::Errno;
 use rubato::Resampler;
@@ -298,11 +296,8 @@ fn playback_loop_bytes(
     loop {
         match channels.audio.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
-                conversion_result = chunk_to_buffer_rawbytes(
-                    &chunk,
-                    &mut buffer,
-                    &params.sample_format
-                );
+                conversion_result =
+                    chunk_to_buffer_rawbytes(&chunk, &mut buffer, &params.sample_format);
                 if conversion_result.1 > 0 {
                     params.playback_status.write().unwrap().clipped_samples += conversion_result.1;
                 }
@@ -489,8 +484,13 @@ fn capture_loop_bytes(
                 return;
             }
         };
-        let mut chunk  = buffer_to_chunk_rawbytes(&buffer[0..capture_bytes], 
-            params.channels, &params.sample_format, capture_bytes, &params.capture_status.read().unwrap().used_channels);
+        let mut chunk = buffer_to_chunk_rawbytes(
+            &buffer[0..capture_bytes],
+            params.channels,
+            &params.sample_format,
+            capture_bytes,
+            &params.capture_status.read().unwrap().used_channels,
+        );
         chunk_stats = chunk.get_stats();
         params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
         params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
