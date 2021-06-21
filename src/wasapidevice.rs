@@ -4,6 +4,7 @@ use config::{ConfigError, SampleFormat};
 use conversions::{
     buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
     chunk_to_buffer_float_bytes,
+    buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes,
 };
 use countertimer;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};

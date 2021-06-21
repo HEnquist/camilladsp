@@ -9,8 +9,7 @@ use audiodevice::*;
 use config;
 use config::SampleFormat;
 use conversions::{
-    buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
-    chunk_to_buffer_float_bytes,
+    chunk_to_buffer_rawbytes, buffer_to_chunk_rawbytes,
 };
 use countertimer;
 use nix::errno::Errno;
@@ -23,7 +22,6 @@ use std::time::{Duration, Instant};
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
-use NewValue;
 use PrcFmt;
 use ProcessingState;
 use Res;
@@ -73,13 +71,11 @@ struct PlaybackChannels {
 
 struct CaptureParams {
     channels: usize,
-    scalefactor: PrcFmt,
+    sample_format: SampleFormat,
     silence_timeout: PrcFmt,
     silence_threshold: PrcFmt,
     chunksize: usize,
-    bits_per_sample: i32,
     store_bytes_per_sample: usize,
-    floats: bool,
     samplerate: usize,
     capture_samplerate: usize,
     async_src: bool,
@@ -89,13 +85,10 @@ struct CaptureParams {
 }
 
 struct PlaybackParams {
-    scalefactor: PrcFmt,
     target_level: usize,
     adjust_period: f32,
     adjust_enabled: bool,
-    bits: i32,
-    bytes_per_sample: usize,
-    floats: bool,
+    sample_format: SampleFormat,
     playback_status: Arc<RwLock<PlaybackStatus>>,
 }
 
@@ -305,18 +298,11 @@ fn playback_loop_bytes(
     loop {
         match channels.audio.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
-                if params.floats {
-                    conversion_result =
-                        chunk_to_buffer_float_bytes(&chunk, &mut buffer, params.bits);
-                } else {
-                    conversion_result = chunk_to_buffer_bytes(
-                        &chunk,
-                        &mut buffer,
-                        params.scalefactor,
-                        params.bits as i32,
-                        params.bytes_per_sample,
-                    );
-                }
+                conversion_result = chunk_to_buffer_rawbytes(
+                    &chunk,
+                    &mut buffer,
+                    &params.sample_format
+                );
                 if conversion_result.1 > 0 {
                     params.playback_status.write().unwrap().clipped_samples += conversion_result.1;
                 }
@@ -503,24 +489,8 @@ fn capture_loop_bytes(
                 return;
             }
         };
-        let mut chunk = if params.floats {
-            buffer_to_chunk_float_bytes(
-                &buffer[0..capture_bytes],
-                params.channels,
-                params.bits_per_sample,
-                capture_bytes,
-            )
-        } else {
-            buffer_to_chunk_bytes(
-                &buffer[0..capture_bytes],
-                params.channels,
-                params.scalefactor,
-                params.bits_per_sample,
-                params.store_bytes_per_sample,
-                capture_bytes,
-                &params.capture_status.read().unwrap().used_channels,
-            )
-        };
+        let mut chunk  = buffer_to_chunk_rawbytes(&buffer[0..capture_bytes], 
+            params.channels, &params.sample_format, capture_bytes, &params.capture_status.read().unwrap().used_channels);
         chunk_stats = chunk.get_stats();
         params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
         params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
@@ -588,9 +558,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits = self.sample_format.bits_per_sample() as i32;
         let bytes_per_sample = self.sample_format.bytes_per_sample();
-        let floats = self.sample_format.is_float();
         let sample_format = self.sample_format.clone();
         let handle = thread::Builder::new()
             .name("AlsaPlayback".to_string())
@@ -608,18 +576,14 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (PrcFmt::new(2.0)).powi(bits - 1);
 
                         barrier.wait();
                         debug!("Starting playback loop");
                         let pb_params = PlaybackParams {
-                            scalefactor,
                             target_level,
                             adjust_period,
                             adjust_enabled,
-                            bits,
-                            bytes_per_sample,
-                            floats,
+                            sample_format,
                             playback_status,
                         };
                         let pb_channels = PlaybackChannels {
@@ -668,9 +632,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         ) as usize;
         debug!("Buffer frames {}", buffer_frames);
         let channels = self.channels;
-        let bits_per_sample = self.sample_format.bits_per_sample() as i32;
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
-        let floats = self.sample_format.is_float();
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let sample_format = self.sample_format.clone();
@@ -707,18 +669,15 @@ impl CaptureDevice for AlsaCaptureDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = (PrcFmt::new(2.0)).powi(bits_per_sample - 1);
                         barrier.wait();
                         debug!("Starting captureloop");
                         let cap_params = CaptureParams {
                             channels,
-                            scalefactor,
+                            sample_format,
                             silence_timeout,
                             silence_threshold,
                             chunksize,
-                            bits_per_sample,
                             store_bytes_per_sample,
-                            floats,
                             samplerate,
                             capture_samplerate,
                             async_src,

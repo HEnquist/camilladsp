@@ -7,8 +7,7 @@ use audiodevice::*;
 use config;
 use config::SampleFormat;
 use conversions::{
-    buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
-    chunk_to_buffer_float_bytes,
+    chunk_to_buffer_rawbytes, buffer_to_chunk_rawbytes,
 };
 use countertimer;
 use rubato::Resampler;
@@ -19,7 +18,6 @@ use std::time::{Duration, Instant};
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
-use NewValue;
 use PrcFmt;
 use ProcessingState;
 use Res;
@@ -144,7 +142,6 @@ impl PlaybackDevice for PulsePlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits_per_sample = self.sample_format.bits_per_sample() as i32;
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let sample_format = self.sample_format.clone();
         let handle = thread::Builder::new()
@@ -162,7 +159,6 @@ impl PlaybackDevice for PulsePlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
                         let mut conversion_result;
                         let mut chunk_stats;
                         let bytes_per_frame = channels * store_bytes_per_sample;
@@ -173,27 +169,8 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    match sample_format {
-                                        SampleFormat::S16LE
-                                        | SampleFormat::S24LE
-                                        | SampleFormat::S32LE => {
-                                            conversion_result = chunk_to_buffer_bytes(
-                                                &chunk,
-                                                &mut buffer,
-                                                scalefactor,
-                                                bits_per_sample,
-                                                store_bytes_per_sample,
-                                            );
-                                        }
-                                        SampleFormat::FLOAT32LE => {
-                                            conversion_result = chunk_to_buffer_float_bytes(
-                                                &chunk,
-                                                &mut buffer,
-                                                bits_per_sample,
-                                            );
-                                        }
-                                        _ => panic!("Unsupported sample format!"),
-                                    };
+                                    conversion_result = chunk_to_buffer_rawbytes(&chunk,
+                                        &mut buffer, &sample_format);
                                     sleep_until_next(
                                         &last_instant,
                                         bytes_per_frame,
@@ -290,7 +267,6 @@ impl CaptureDevice for PulseCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits_per_sample = self.sample_format.bits_per_sample() as i32;
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let buffer_bytes = 2.0f32.powf(
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
@@ -333,7 +309,6 @@ impl CaptureDevice for PulseCaptureDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
                         barrier.wait();
                         debug!("starting captureloop");
                         let mut buf = vec![0u8; buffer_bytes];
@@ -411,26 +386,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                         .unwrap();
                                 }
                             };
-                            let mut chunk = match sample_format {
-                                SampleFormat::S16LE | SampleFormat::S24LE | SampleFormat::S32LE => {
-                                    buffer_to_chunk_bytes(
-                                        &buf[0..capture_bytes],
-                                        channels,
-                                        scalefactor,
-                                        bits_per_sample,
-                                        store_bytes_per_sample,
-                                        capture_bytes,
-                                        &capture_status.read().unwrap().used_channels,
-                                    )
-                                }
-                                SampleFormat::FLOAT32LE => buffer_to_chunk_float_bytes(
-                                    &buf[0..capture_bytes],
-                                    channels,
-                                    bits_per_sample,
-                                    capture_bytes,
-                                ),
-                                _ => panic!("Unsupported sample format"),
-                            };
+                            let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &sample_format, capture_bytes, &capture_status.read().unwrap().used_channels);
                             chunk_stats = chunk.get_stats();
                             //trace!("Capture signal rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             value_range = chunk.maxval - chunk.minval;

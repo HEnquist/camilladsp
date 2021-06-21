@@ -32,6 +32,7 @@ extern crate signal_hook;
 extern crate tungstenite;
 #[cfg(target_os = "windows")]
 extern crate wasapi;
+extern crate rawsample;
 
 #[macro_use]
 extern crate log;

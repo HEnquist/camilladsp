@@ -1,10 +1,8 @@
 use audiodevice::*;
 use config;
-use config::NumberFamily;
 use config::SampleFormat;
 use conversions::{
-    buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
-    chunk_to_buffer_float_bytes,
+    buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes,
 };
 use countertimer;
 use std::fs::File;
@@ -19,7 +17,6 @@ use rubato::Resampler;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
-use NewValue;
 use PrcFmt;
 use ProcessingState;
 use Res;
@@ -69,7 +66,6 @@ struct CaptureChannels {
 
 struct CaptureParams {
     channels: usize,
-    bits_per_sample: i32,
     sample_format: SampleFormat,
     store_bytes_per_sample: usize,
     extra_bytes: usize,
@@ -96,7 +92,6 @@ impl PlaybackDevice for FilePlaybackDevice {
         let destination = self.destination.clone();
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits_per_sample = self.sample_format.bits_per_sample();
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let sample_format = self.sample_format.clone();
         let handle = thread::Builder::new()
@@ -114,7 +109,6 @@ impl PlaybackDevice for FilePlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample as i32 - 1);
                         let mut chunk_stats;
                         barrier.wait();
                         debug!("starting playback loop");
@@ -122,21 +116,11 @@ impl PlaybackDevice for FilePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    let (valid_bytes, nbr_clipped) =
-                                        match sample_format.number_family() {
-                                            NumberFamily::Integer => chunk_to_buffer_bytes(
-                                                &chunk,
-                                                &mut buffer,
-                                                scalefactor,
-                                                bits_per_sample as i32,
-                                                store_bytes_per_sample,
-                                            ),
-                                            NumberFamily::Float => chunk_to_buffer_float_bytes(
-                                                &chunk,
-                                                &mut buffer,
-                                                bits_per_sample as i32,
-                                            ),
-                                        };
+                                    let (valid_bytes, nbr_clipped) = chunk_to_buffer_rawbytes(
+                                        &chunk,
+                                        &mut buffer,
+                                        &sample_format,
+                                    );
                                     let write_res = file.write_all(&buffer[0..valid_bytes]);
                                     match write_res {
                                         Ok(_) => {}
@@ -157,11 +141,11 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         chunk_stats.rms_db();
                                     playback_status.write().unwrap().signal_peak =
                                         chunk_stats.peak_db();
-                                    //trace!(
-                                    //    "Playback signal RMS: {:?}, peak: {:?}",
-                                    //    chunk_stats.rms_db(),
-                                    //    chunk_stats.peak_db()
-                                    //);
+                                    trace!(
+                                        "Playback signal RMS: {:?}, peak: {:?}",
+                                        chunk_stats.rms_db(),
+                                        chunk_stats.peak_db()
+                                    );
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel
@@ -217,39 +201,19 @@ fn get_nbr_capture_bytes(
     }
 }
 
-//&params.sample_format,
-//params.channels,
-//params.bits_per_sample,
-//params.store_bytes_per_sample,
-//bytes_read,
-//scalefactor,
-//&params.capture_status.read().unwrap().used_channels,
 
 fn build_chunk(
     buf: &[u8],
     params: &CaptureParams,
-    //sample_format: &SampleFormat,
-    //channels: usize,
-    //bits_per_sample: i32,
-    //store_bytes_per_sample: usize,
     bytes_read: usize,
-    scalefactor: PrcFmt,
-    //used_channels: &[bool],
 ) -> AudioChunk {
-    match params.sample_format.number_family() {
-        NumberFamily::Integer => buffer_to_chunk_bytes(
+    buffer_to_chunk_rawbytes(
             &buf,
             params.channels,
-            scalefactor,
-            params.bits_per_sample,
-            params.store_bytes_per_sample,
+            &params.sample_format,
             bytes_read,
             &params.capture_status.read().unwrap().used_channels,
-        ),
-        NumberFamily::Float => {
-            buffer_to_chunk_float_bytes(&buf, params.channels, params.bits_per_sample, bytes_read)
-        }
-    }
+        )
 }
 
 fn get_capture_bytes(
@@ -280,7 +244,6 @@ fn capture_loop(
     mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
 ) {
     debug!("starting captureloop");
-    let scalefactor = PrcFmt::new(2.0).powi(params.bits_per_sample - 1);
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
     let bytes_per_frame = params.channels * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];
@@ -404,13 +367,7 @@ fn capture_loop(
         let mut chunk = build_chunk(
             &buf[0..capture_bytes],
             &params,
-            //&params.sample_format,
-            //params.channels,
-            //params.bits_per_sample,
-            //params.store_bytes_per_sample,
             bytes_read,
-            scalefactor,
-            //&params.capture_status.read().unwrap().used_channels,
         );
 
         value_range = chunk.maxval - chunk.minval;
@@ -460,7 +417,6 @@ impl CaptureDevice for FileCaptureDevice {
         let chunksize = self.chunksize;
         let capture_samplerate = self.capture_samplerate;
         let channels = self.channels;
-        let bits_per_sample = self.sample_format.bits_per_sample();
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let buffer_bytes = 2.0f32.powf(
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
@@ -496,7 +452,6 @@ impl CaptureDevice for FileCaptureDevice {
                 };
                 let params = CaptureParams {
                     channels,
-                    bits_per_sample: bits_per_sample as i32,
                     sample_format,
                     store_bytes_per_sample,
                     extra_bytes,
