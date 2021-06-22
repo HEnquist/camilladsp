@@ -35,6 +35,7 @@ The full configuration is given in a yaml file.
 **[Capturing audio](#capturing-audio)**
 - **[Alsa](#alsa)**
 - **[PulseAudio](#pulseaudio)**
+- **[Pipewire](#pipewire)**
 - **[Wasapi](#wasapi)**
 - **[CoreAudio](#coreaudio)**
 - **[Jack](#jack)**
@@ -422,12 +423,39 @@ PulseAudio provides a null-sink that can be used to capture audio from applicati
 ```
 pacmd load-module module-null-sink sink_name=MySink
 ```
-This device can be set as the default output, meaning any application using PulseAudio will use it. The audio sent to this device can then be captured from the monitor output named MySink.monitor.
+This device can be set as the default output, meaning any application using PulseAudio will use it. The audio sent to this device can then be captured from the monitor output named "MySink.monitor".
 All available sinks and sources can be listed with the commands:
 ```
 pacmd list-sinks
 pacmd list-sources
 ```
+
+## Pipewire
+Pipewire implements both the PulseAudio and Jack APIs, and is therefore supported both via the Pulse and the Jack backends.
+
+It supports a null-sink like PulseAudio. Create it with:
+```
+pactl load-module module-null-sink sink_name=MySink object.linger=1 media.class=Audio/Sink
+```
+
+List sources and sinks with:
+```
+pw-cli ls Node
+```
+
+This will list all devices, and the null-sink should be included like this:
+```
+	id 75, type PipeWire:Interface:Node/3
+ 		factory.id = "18"
+ 		node.description = "MySink Audio/Sink sink"
+ 		node.name = "MySink"
+ 		media.class = "Audio/Sink"
+```
+This device can be set as the default output in the Gnome settings, meaning all desktop audio will use it. The audio sent to this device can then be captured from the monitor output named "MySink.monitor" using the PulseAudio backend.
+
+Pipewire can also be configured to output to an Alsa Loopback. TODO add example config for this in camilladsp-config.
+
+TODO test with Jack.
 
 ## Wasapi
 
