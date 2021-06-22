@@ -1,10 +1,7 @@
 use audiodevice::*;
 use config;
 use config::{ConfigError, SampleFormat};
-use conversions::{
-    buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
-    chunk_to_buffer_float_bytes,
-};
+use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use countertimer;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
 use rubato::Resampler;
@@ -18,7 +15,6 @@ use wasapi;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
-use NewValue;
 use PrcFmt;
 use ProcessingState;
 use Res;
@@ -384,13 +380,11 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
-        let bits_per_sample = self.sample_format.bits_per_sample() as i32;
         let sample_format = self.sample_format.clone();
         let sample_format_dev = self.sample_format.clone();
         let handle = thread::Builder::new()
             .name("WasapiPlayback".to_string())
             .spawn(move || {
-                let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
                 //let (tx_dev, rx_dev) = mpsc::sync_channel(4);
                 let (tx_dev, rx_dev) = bounded(16);
                 let (tx_state_dev, rx_state_dev) = bounded(0);
@@ -522,21 +516,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                     0u8;
                                     channels * chunk.frames * sample_format.bytes_per_sample()
                                 ];
-                            if sample_format.is_float() {
-                                conversion_result = chunk_to_buffer_float_bytes(
-                                    &chunk,
-                                    &mut buf,
-                                    sample_format.bits_per_sample() as i32,
-                                );
-                            } else {
-                                conversion_result = chunk_to_buffer_bytes(
-                                    &chunk,
-                                    &mut buf,
-                                    scalefactor,
-                                    sample_format.bits_per_sample() as i32,
-                                    sample_format.bytes_per_sample(),
-                                );
-                            }
+                            conversion_result =
+                                chunk_to_buffer_rawbytes(&chunk, &mut buf, &sample_format);
                             match tx_dev.send(buf) {
                                 Ok(_) => {}
                                 Err(err) => {
@@ -653,7 +634,6 @@ impl CaptureDevice for WasapiCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits_per_sample = self.sample_format.bits_per_sample() as i32;
         let bytes_per_sample = self.sample_format.bytes_per_sample();
         let sample_format = self.sample_format.clone();
         let sample_format_dev = self.sample_format.clone();
@@ -677,7 +657,6 @@ impl CaptureDevice for WasapiCaptureDevice {
                 } else {
                     None
                 };
-                let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
                 let (tx_dev, rx_dev) = bounded(16);
                 let (tx_state_dev, rx_state_dev) = bounded(0);
                 let (tx_cb_dev, rx_cb_dev) = unbounded();
@@ -812,24 +791,13 @@ impl CaptureDevice for WasapiCaptureDevice {
                     for element in data_buffer.iter_mut().take(capture_bytes) {
                         *element = data_queue.pop_front().unwrap();
                     }
-                    let mut chunk = if sample_format.is_float() {
-                        buffer_to_chunk_float_bytes(
-                            &data_buffer[0..capture_bytes],
-                            channels,
-                            bits_per_sample,
-                            capture_bytes,
-                        )
-                    } else {
-                        buffer_to_chunk_bytes(
-                            &data_buffer[0..capture_bytes],
-                            channels,
-                            scalefactor,
-                            bits_per_sample,
-                            bytes_per_sample,
-                            capture_bytes,
-                            &capture_status.read().unwrap().used_channels,
-                        )
-                    };
+                    let mut chunk = buffer_to_chunk_rawbytes(
+                        &data_buffer[0..capture_bytes],
+                        channels,
+                        &sample_format,
+                        capture_bytes,
+                        &capture_status.read().unwrap().used_channels,
+                    );
                     averager.add_value(capture_frames);
                     if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                     {

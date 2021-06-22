@@ -29,8 +29,6 @@ use StatusMessage;
 pub enum CpalHost {
     #[cfg(target_os = "macos")]
     CoreAudio,
-    #[cfg(target_os = "windows")]
-    Wasapi,
     #[cfg(feature = "jack-backend")]
     Jack,
 }
@@ -73,8 +71,6 @@ fn open_cpal_playback(
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
-        #[cfg(target_os = "windows")]
-        CpalHost::Wasapi => HostId::Wasapi,
         #[cfg(feature = "jack-backend")]
         CpalHost::Jack => HostId::Jack,
     };
@@ -124,8 +120,6 @@ fn open_cpal_capture(
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
-        #[cfg(target_os = "windows")]
-        CpalHost::Wasapi => HostId::Wasapi,
         #[cfg(feature = "jack-backend")]
         CpalHost::Jack => HostId::Jack,
     };
