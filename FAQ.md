@@ -45,8 +45,7 @@
 
 - I only have filters with negative gain, why do I get clipping anyway?
   
-  If all filters have negative gain, then the 
-  It's not very intuitive, but the peak amplitude can actually increase when you apply filters that only attenuate. 
+  It's not very intuitive, but the peak amplitude can actually increase even though you apply filters that only attenuate. 
   
   The signal is a sum of a large number of frequency components, and in each particular sample some components 
   will add to increase the amplitude while other decrease it. 
@@ -62,7 +61,4 @@
   Note that resampling between the fixed rates 44.1 kHz -> 48 kHz corresponds to a ratio of 160/147, and can be handled by the synchronous resampler.
   This works for any fixed resampling between the standard rates, 44.1 <-> 96 kHz, 88.2 <-> 192 kHz, 88.1 <-> 48 kHz etc.
 
-- My impulse response is a wav-file. How to I use it in CamillaDSP?
-
-  The wav-file must be converted to raw format, with one file per channel. Please see the [guide for converting](coefficients_from_wav.md).
 

@@ -89,5 +89,5 @@ Wasapi offers both shared and exclusive mode.
 
 To help with finding the name of playback and capture devices, use the Windows version of "cpal-listdevices" program from here: https://github.com/HEnquist/cpal-listdevices/releases
 
-Just download the binary and run it in a terminal. It will list all devices with the names and parameters to enter in the configuration.
+Just download the binary and run it in a terminal. It will list all devices with the names. The parameters shown are for shared mode, more sample rates and sample formats will likely be available in exclusive mode.
 

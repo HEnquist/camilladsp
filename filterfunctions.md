@@ -6,6 +6,7 @@ The standard filters in CamillaDSP are not of a specific type, like Butterworth.
 Making a Bessel filter with a set of Biquads requires creating several Biquads, each with a unique Q and cut-off frequency.
 
 ## Multiplication factor for frequency:
+
 | Order | Biquad 1   | Biquad 2  | Biquad 3  | Biquad 4 |
 |-----------|-----|----|----|----|
 | 1| 1.0*           |                |                |                |
@@ -21,6 +22,7 @@ The asterisk (*) indicates that this is a 1st order filter.
 
 
 ## Q values:
+
 | Order | Biquad 1   | Biquad 2  | Biquad 3  | Biquad 4 |
 |-----------|-----|----|----|----|
 | 1 | (1st order)   |                |               |              |
@@ -57,6 +59,7 @@ where `0 <= n < (N-1)/2`
 
 ## Table for q-values
 Butterworth and Linkwitz-Riley filtes can easily be built with Biquads. The following table lists the most common ones. High- and lowpass use the same parameters.
+
 | Type| Order   | Biquad 1   | Biquad 2  | Biquad 3  | Biquad 4 |
 |-----------|-----|----|----|----|----
 | Butterworth | 2   | 0.71 | 
