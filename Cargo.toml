@@ -63,7 +63,8 @@ rubato = "0.8.0"
 #rubato = { git = "https://github.com/HEnquist/rubato", branch = "simd" }
 cpal = { version = "0.13.3", optional = true }
 #rawsample = { path = "../../rust/rawsample" }
-rawsample = { git = "https://github.com/HEnquist/rawsample", branch = "main" }
+#rawsample = { git = "https://github.com/HEnquist/rawsample", branch = "main" }
+rawsample = "0.1.1"
 
 [build-dependencies]
 version_check = "0.9"
