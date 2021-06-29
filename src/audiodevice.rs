@@ -509,7 +509,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             skip_bytes,
             read_bytes,
             stop_on_rate_change: conf.stop_on_rate_change,
-            rate_measure_interval: conf.rate_measure_interval
+            rate_measure_interval: conf.rate_measure_interval,
         }),
         config::CaptureDevice::Stdin {
             channels,
@@ -532,7 +532,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             skip_bytes,
             read_bytes,
             stop_on_rate_change: conf.stop_on_rate_change,
-            rate_measure_interval: conf.rate_measure_interval
+            rate_measure_interval: conf.rate_measure_interval,
         }),
         #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
         config::CaptureDevice::CoreAudio {
@@ -573,7 +573,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
             stop_on_rate_change: conf.stop_on_rate_change,
-            rate_measure_interval: conf.rate_measure_interval
+            rate_measure_interval: conf.rate_measure_interval,
         }),
         #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
         config::CaptureDevice::Jack { channels, device } => {

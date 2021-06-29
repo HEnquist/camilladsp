@@ -168,7 +168,6 @@ impl Default for TimeAverage {
     }
 }
 
-
 pub struct ValueWatcher {
     min_value: f32,
     max_value: f32,
@@ -178,13 +177,13 @@ pub struct ValueWatcher {
 
 impl ValueWatcher {
     pub fn new(target_value: f32, max_rel_diff: f32, count_limit: usize) -> ValueWatcher {
-        let min_value = target_value/(1.0 + max_rel_diff);
-        let max_value = target_value*(1.0 + max_rel_diff);
+        let min_value = target_value / (1.0 + max_rel_diff);
+        let max_value = target_value * (1.0 + max_rel_diff);
         ValueWatcher {
             min_value,
             max_value,
             count_limit,
-            count: 0
+            count: 0,
         }
     }
 
@@ -195,8 +194,7 @@ impl ValueWatcher {
     pub fn check_value(&mut self, value: f32) -> bool {
         if value < self.min_value || value > self.max_value {
             self.count += 1;
-        }
-        else {
+        } else {
             self.count = 0;
         }
         self.count > self.count_limit
@@ -324,9 +322,9 @@ mod tests {
         let limit_nbr = 3;
         let mut watcher = ValueWatcher::new(48000.0, 0.05, limit_nbr);
         for n in 0..10 {
-            let val = 48000.0*(1.0 + 0.004 * n as f32);
+            let val = 48000.0 * (1.0 + 0.004 * n as f32);
             assert_eq!(watcher.check_value(val), false);
-            let val = 48000.0*(1.0 - 0.004 * n as f32);
+            let val = 48000.0 * (1.0 - 0.004 * n as f32);
             assert_eq!(watcher.check_value(val), false);
         }
         for _ in 0..limit_nbr {

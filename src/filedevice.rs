@@ -252,7 +252,8 @@ fn capture_loop(
     let rate_measure_interval_ms = (1000.0 * params.rate_measure_interval) as u64;
     let mut averager = countertimer::TimeAverage::new();
     let mut watcher_averager = countertimer::TimeAverage::new();
-    let mut valuewatcher = countertimer::ValueWatcher::new(params.capture_samplerate as f32, 0.04, 3);
+    let mut valuewatcher =
+        countertimer::ValueWatcher::new(params.capture_samplerate as f32, 0.04, 3);
     let mut silence_counter = countertimer::SilenceCounter::new(
         params.silence_threshold,
         params.silence_timeout,
@@ -354,20 +355,24 @@ fn capture_loop(
                     capt_stat.state = state;
                 }
                 watcher_averager.add_value(bytes);
-                if watcher_averager.larger_than_millis(
-                    rate_measure_interval_ms
-                ) {
+                if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
                     let bytes_per_sec = watcher_averager.get_average();
                     watcher_averager.restart();
                     let measured_rate_f =
                         bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
                     let changed = valuewatcher.check_value(measured_rate_f as f32);
                     if changed {
-                        warn!("sample rate change detected, last rate was {} Hz", measured_rate_f);
+                        warn!(
+                            "sample rate change detected, last rate was {} Hz",
+                            measured_rate_f
+                        );
                         if params.stop_on_rate_change {
                             let msg = AudioMessage::EndOfStream;
                             msg_channels.audio.send(msg).unwrap_or(());
-                            msg_channels.status.send(StatusMessage::CaptureFormatChange).unwrap_or(());
+                            msg_channels
+                                .status
+                                .send(StatusMessage::CaptureFormatChange)
+                                .unwrap_or(());
                             break;
                         }
                     }
@@ -483,8 +488,7 @@ impl CaptureDevice for FileCaptureDevice {
                     capture_status,
                     capture_samplerate,
                     stop_on_rate_change,
-                    rate_measure_interval
-
+                    rate_measure_interval,
                 };
                 let file_res: Result<Box<dyn Read>, std::io::Error> = match source {
                     CaptureSource::Filename(filename) => {

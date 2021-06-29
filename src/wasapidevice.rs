@@ -53,7 +53,7 @@ pub struct WasapiCaptureDevice {
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
-    pub rate_measure_interval: f32
+    pub rate_measure_interval: f32,
 }
 
 #[derive(Clone, Debug)]
