@@ -54,6 +54,8 @@ pub struct FileCaptureDevice {
     pub extra_samples: usize,
     pub skip_bytes: usize,
     pub read_bytes: usize,
+    pub stop_on_rate_change: bool,
+    pub rate_measure_interval: f32,
 }
 
 struct CaptureChannels {
@@ -76,6 +78,8 @@ struct CaptureParams {
     read_bytes: usize,
     async_src: bool,
     capture_status: Arc<RwLock<CaptureStatus>>,
+    stop_on_rate_change: bool,
+    rate_measure_interval: f32,
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
@@ -245,7 +249,10 @@ fn capture_loop(
     let mut capture_bytes_temp;
     let mut extra_bytes_left = params.extra_bytes;
     let mut nbr_bytes_read = 0;
+    let rate_measure_interval_ms = (1000.0 * params.rate_measure_interval) as u64;
     let mut averager = countertimer::TimeAverage::new();
+    let mut watcher_averager = countertimer::TimeAverage::new();
+    let mut valuewatcher = countertimer::ValueWatcher::new(params.capture_samplerate as f32, 0.04, 3);
     let mut silence_counter = countertimer::SilenceCounter::new(
         params.silence_threshold,
         params.silence_timeout,
@@ -346,6 +353,26 @@ fn capture_loop(
                     capt_stat.rate_adjust = rate_adjust as f32;
                     capt_stat.state = state;
                 }
+                watcher_averager.add_value(bytes);
+                if watcher_averager.larger_than_millis(
+                    rate_measure_interval_ms
+                ) {
+                    let bytes_per_sec = watcher_averager.get_average();
+                    watcher_averager.restart();
+                    let measured_rate_f =
+                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
+                    let changed = valuewatcher.check_value(measured_rate_f as f32);
+                    if changed {
+                        warn!("sample rate change detected, last rate was {} Hz", measured_rate_f);
+                        if params.stop_on_rate_change {
+                            let msg = AudioMessage::EndOfStream;
+                            msg_channels.audio.send(msg).unwrap_or(());
+                            msg_channels.status.send(StatusMessage::CaptureFormatChange).unwrap_or(());
+                            break;
+                        }
+                    }
+                    trace!("Measured sample rate is {} Hz", measured_rate_f);
+                }
             }
             Err(err) => {
                 debug!("Encountered a read error");
@@ -424,6 +451,8 @@ impl CaptureDevice for FileCaptureDevice {
         let read_bytes = self.read_bytes;
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
+        let stop_on_rate_change = self.stop_on_rate_change;
+        let rate_measure_interval = self.rate_measure_interval;
         let handle = thread::Builder::new()
             .name("FileCapture".to_string())
             .spawn(move || {
@@ -453,6 +482,9 @@ impl CaptureDevice for FileCaptureDevice {
                     async_src,
                     capture_status,
                     capture_samplerate,
+                    stop_on_rate_change,
+                    rate_measure_interval
+
                 };
                 let file_res: Result<Box<dyn Read>, std::io::Error> = match source {
                     CaptureSource::Filename(filename) => {

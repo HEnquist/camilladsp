@@ -4,6 +4,7 @@ New features:
 - Do proper shutdown on SIGINT (ctrl-c).
 - Add StopReason websocket command.
 - Add GetPreviousConfig websocket command to get the previously active config.
+- Add option to stop on detected sample rate change (WIP, implemented for wasapi and file).
 
 ## 0.5.2
 New features:

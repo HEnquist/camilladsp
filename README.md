@@ -540,6 +540,8 @@ devices:
   enable_resampling: true (*)
   resampler_type: BalancedAsync (*)
   capture_samplerate: 44100 (*)
+  stop_on_rate_change: false (*)
+  rate_measure_interval: 1.0 (*)
   capture:
     type: Pulse
     channels: 2
@@ -637,6 +639,11 @@ devices:
   The capture samplerate. If the resampler is only used for rate-matching then the capture samplerate 
   is the same as the overall samplerate, and this setting can be left out.
 
+* `stop_on_rate_change` and `rate_measure_interval` (both optional)
+
+  Setting `stop_on_rate_change` to `true` makes CamillaDSP stop the processing if the measured capture sample rate changes. Default is `false`.
+  The `rate_measure_interval` setting is used for adjusting the measurement period. A longer period gives a more accurate measurement of the rate, at the cost of slower response when the rate changes.
+  The default is 1.0 seconds. Processing will stop after 3 measurements in a row are more than 4% off from the configured rate. The value of 4% is chosen to allow some variation, while still catching changes between for example 44.1 to 48 kHz.
  
 * `capture` and `playback`
   See first the [separate help on how to find the device names and parameters.](./devices.md)

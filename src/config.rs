@@ -338,6 +338,10 @@ pub struct Devices {
     pub resampler_type: Resampler,
     #[serde(default)]
     pub capture_samplerate: usize,
+    #[serde(default)]
+    pub stop_on_rate_change: bool,
+    #[serde(default = "default_measure_interval")]
+    pub rate_measure_interval: f32,
 }
 
 fn default_period() -> f32 {
@@ -346,6 +350,10 @@ fn default_period() -> f32 {
 
 fn default_queuelimit() -> usize {
     4
+}
+
+fn default_measure_interval() -> f32 {
+    1.0
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

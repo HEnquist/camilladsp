@@ -52,6 +52,8 @@ pub struct WasapiCaptureDevice {
     pub sample_format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
+    pub stop_on_rate_change: bool,
+    pub rate_measure_interval: f32
 }
 
 #[derive(Clone, Debug)]
@@ -642,6 +644,8 @@ impl CaptureDevice for WasapiCaptureDevice {
         let async_src = resampler_is_async(&resampler_conf);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
+        let stop_on_rate_change = self.stop_on_rate_change;
+        let rate_measure_interval = (1000.0 * self.rate_measure_interval) as u64;
         let handle = thread::Builder::new()
             .name("WasapiCapture".to_string())
             .spawn(move || {
@@ -704,6 +708,8 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let chunksize_samples = channels * chunksize;
                 let mut capture_frames = chunksize;
                 let mut averager = countertimer::TimeAverage::new();
+                let mut watcher_averager = countertimer::TimeAverage::new();
+                let mut valuewatcher = countertimer::ValueWatcher::new(capture_samplerate as f32, 0.04, 3);
                 let mut value_range = 0.0;
                 let mut chunk_stats;
                 let mut rate_adjust = 0.0;
@@ -813,6 +819,27 @@ impl CaptureDevice for WasapiCaptureDevice {
                         capture_status.signal_range = value_range as f32;
                         capture_status.rate_adjust = rate_adjust as f32;
                         capture_status.state = state;
+                    }
+                    watcher_averager.add_value(capture_frames);
+                    if watcher_averager.larger_than_millis(rate_measure_interval)
+                    {
+                        let samples_per_sec = watcher_averager.get_average();
+                        watcher_averager.restart();
+                        let measured_rate_f = samples_per_sec;
+                        debug!(
+                            "Measured sample rate is {} Hz",
+                            measured_rate_f
+                        );
+                        let changed = valuewatcher.check_value(measured_rate_f as f32);
+                        if changed {
+                            warn!("sample rate change detected, last rate was {} Hz", measured_rate_f);
+                            if stop_on_rate_change {
+                                let msg = AudioMessage::EndOfStream;
+                                channel.send(msg).unwrap_or(());
+                                status_channel.send(StatusMessage::CaptureFormatChange).unwrap_or(());
+                                break;
+                            }
+                        }
                     }
                     chunk_stats = chunk.get_stats();
                     //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());

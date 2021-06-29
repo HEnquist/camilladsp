@@ -168,9 +168,44 @@ impl Default for TimeAverage {
     }
 }
 
+
+pub struct ValueWatcher {
+    min_value: f32,
+    max_value: f32,
+    count_limit: usize,
+    count: usize,
+}
+
+impl ValueWatcher {
+    pub fn new(target_value: f32, max_rel_diff: f32, count_limit: usize) -> ValueWatcher {
+        let min_value = target_value/(1.0 + max_rel_diff);
+        let max_value = target_value*(1.0 + max_rel_diff);
+        ValueWatcher {
+            min_value,
+            max_value,
+            count_limit,
+            count: 0
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.count = 0;
+    }
+
+    pub fn check_value(&mut self, value: f32) -> bool {
+        if value < self.min_value || value > self.max_value {
+            self.count += 1;
+        }
+        else {
+            self.count = 0;
+        }
+        self.count > self.count_limit
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use countertimer::{Averager, SilenceCounter, Stopwatch, TimeAverage};
+    use countertimer::{Averager, SilenceCounter, Stopwatch, TimeAverage, ValueWatcher};
     use std::time::Instant;
     use ProcessingState;
 
@@ -281,6 +316,31 @@ mod tests {
         for _ in 0..5 {
             let state = counter.update(0.1);
             assert_eq!(state, ProcessingState::Running);
+        }
+    }
+
+    #[test]
+    fn test_valuewatcher() {
+        let limit_nbr = 3;
+        let mut watcher = ValueWatcher::new(48000.0, 0.05, limit_nbr);
+        for n in 0..10 {
+            let val = 48000.0*(1.0 + 0.004 * n as f32);
+            assert_eq!(watcher.check_value(val), false);
+            let val = 48000.0*(1.0 - 0.004 * n as f32);
+            assert_eq!(watcher.check_value(val), false);
+        }
+        for _ in 0..limit_nbr {
+            assert_eq!(watcher.check_value(44100.0), false);
+        }
+        for _ in 0..5 {
+            assert_eq!(watcher.check_value(44100.0), true);
+        }
+        assert_eq!(watcher.check_value(48000.0), false);
+        for _ in 0..limit_nbr {
+            assert_eq!(watcher.check_value(88200.0), false);
+        }
+        for _ in 0..5 {
+            assert_eq!(watcher.check_value(88200.0), true);
         }
     }
 }
