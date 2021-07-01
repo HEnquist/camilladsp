@@ -3,7 +3,7 @@ extern crate nix;
 use alsa::ctl::{ElemId, ElemIface};
 use alsa::ctl::{ElemType, ElemValue};
 use alsa::hctl::HCtl;
-use alsa::pcm::{Access, Format, HwParams, State};
+use alsa::pcm::{Access, Format, HwParams, State, Frames};
 use alsa::{Direction, ValueOr};
 use audiodevice::*;
 use config;
@@ -24,11 +24,6 @@ use PrcFmt;
 use ProcessingState;
 use Res;
 use StatusMessage;
-
-#[cfg(target_pointer_width = "64")]
-pub type MachInt = i64;
-#[cfg(not(target_pointer_width = "64"))]
-pub type MachInt = i32;
 
 pub struct AlsaPlaybackDevice {
     pub devname: String,
@@ -54,6 +49,8 @@ pub struct AlsaCaptureDevice {
     pub silence_timeout: PrcFmt,
     pub retry_on_error: bool,
     pub avoid_blocking_read: bool,
+    pub stop_on_rate_change: bool,
+    pub rate_measure_interval: f32,
 }
 
 struct CaptureChannels {
@@ -80,6 +77,8 @@ struct CaptureParams {
     capture_status: Arc<RwLock<CaptureStatus>>,
     retry_on_error: bool,
     avoid_blocking_read: bool,
+    stop_on_rate_change: bool,
+    rate_measure_interval: f32,
 }
 
 struct PlaybackParams {
@@ -225,7 +224,7 @@ fn capture_buffer(
 fn open_pcm(
     devname: String,
     samplerate: u32,
-    bufsize: MachInt,
+    bufsize: Frames,
     channels: u32,
     sample_format: &SampleFormat,
     capture: bool,
@@ -397,6 +396,10 @@ fn capture_loop_bytes(
     }
     let mut capture_bytes = params.chunksize * params.channels * params.store_bytes_per_sample;
     let mut averager = countertimer::TimeAverage::new();
+    let mut watcher_averager = countertimer::TimeAverage::new();
+    let mut valuewatcher =
+        countertimer::ValueWatcher::new(params.capture_samplerate as f32, 0.04, 3);
+    let rate_measure_interval_ms = (1000.0 * params.rate_measure_interval) as u64;
     let mut rate_adjust = 0.0;
     let mut silence_counter = countertimer::SilenceCounter::new(
         params.silence_threshold,
@@ -465,6 +468,30 @@ fn capture_loop_bytes(
                     capt_stat.rate_adjust = rate_adjust as f32;
                     capt_stat.state = state;
                     card_inactive = false;
+                }
+                watcher_averager.add_value(capture_bytes);
+                if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
+                    let bytes_per_sec = watcher_averager.get_average();
+                    watcher_averager.restart();
+                    let measured_rate_f =
+                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
+                    let changed = valuewatcher.check_value(measured_rate_f as f32);
+                    if changed {
+                        warn!(
+                            "sample rate change detected, last rate was {} Hz",
+                            measured_rate_f
+                        );
+                        if params.stop_on_rate_change {
+                            let msg = AudioMessage::EndOfStream;
+                            channels.audio.send(msg).unwrap_or(());
+                            channels
+                                .status
+                                .send(StatusMessage::CaptureFormatChange)
+                                .unwrap_or(());
+                            break;
+                        }
+                    }
+                    trace!("Measured sample rate is {} Hz", measured_rate_f);
                 }
             }
             Ok(CaptureResult::RecoverableError) => {
@@ -566,7 +593,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                 match open_pcm(
                     devname,
                     samplerate as u32,
-                    chunksize as MachInt,
+                    chunksize as Frames,
                     channels as u32,
                     &sample_format,
                     false,
@@ -641,6 +668,8 @@ impl CaptureDevice for AlsaCaptureDevice {
         let async_src = resampler_is_async(&resampler_conf);
         let retry_on_error = self.retry_on_error;
         let avoid_blocking_read = self.avoid_blocking_read;
+        let stop_on_rate_change = self.stop_on_rate_change;
+        let rate_measure_interval = self.rate_measure_interval;
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
             .spawn(move || {
@@ -659,7 +688,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                 match open_pcm(
                     devname,
                     capture_samplerate as u32,
-                    buffer_frames as MachInt,
+                    buffer_frames as Frames,
                     channels as u32,
                     &sample_format,
                     true,
@@ -684,6 +713,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                             capture_status,
                             retry_on_error,
                             avoid_blocking_read,
+                            stop_on_rate_change,
+                            rate_measure_interval,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,

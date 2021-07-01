@@ -20,6 +20,12 @@
 
 ## Capture and playback
 
+- Why do I get buffer underruns sometimes even if everything looks correct?
+
+  If the playback sound card and the capture sound card have independent sample clocks, then they will never be perfectly synchronized. One of them will always run slightly faster than the other. If the playback device is the faster one, then it will sometimes run out of data to play. This will lead to almost periodic dropouts. If instead the capture device is the faster one, then there will instead be a slowly increasing delay between input and output.
+
+  Use the `enable_rate_adjust` option (with the asynchronous resampler if needed) to match the rates of the capture and playback devices. 
+
 - Why do I get only distorted noise when using 24-bit samples?
 
   There are two 24-bit formats, and it's very important to pick the right one. Both use three bytes to store each sample, but they are packed in different ways.

@@ -469,6 +469,8 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_timeout: conf.silence_timeout,
             retry_on_error,
             avoid_blocking_read,
+            stop_on_rate_change: conf.stop_on_rate_change,
+            rate_measure_interval: conf.rate_measure_interval,
         }),
         #[cfg(feature = "pulse-backend")]
         config::CaptureDevice::Pulse {
@@ -551,6 +553,8 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
+            stop_on_rate_change: conf.stop_on_rate_change,
+            rate_measure_interval: conf.rate_measure_interval,
         }),
         #[cfg(target_os = "windows")]
         config::CaptureDevice::Wasapi {
@@ -589,6 +593,8 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
                 sample_format: config::SampleFormat::FLOAT32LE,
                 silence_threshold: conf.silence_threshold,
                 silence_timeout: conf.silence_timeout,
+                stop_on_rate_change: conf.stop_on_rate_change,
+                rate_measure_interval: conf.rate_measure_interval,
             })
         }
     }
