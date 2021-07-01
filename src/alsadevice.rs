@@ -3,7 +3,7 @@ extern crate nix;
 use alsa::ctl::{ElemId, ElemIface};
 use alsa::ctl::{ElemType, ElemValue};
 use alsa::hctl::HCtl;
-use alsa::pcm::{Access, Format, HwParams, State, Frames};
+use alsa::pcm::{Access, Format, Frames, HwParams, State};
 use alsa::{Direction, ValueOr};
 use audiodevice::*;
 use config;
