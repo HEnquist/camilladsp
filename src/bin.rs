@@ -25,14 +25,19 @@ extern crate windows;
 #[cfg(target_os = "windows")]
 use windows::initialize_mta;
 
-extern crate simplelog;
 #[macro_use]
-extern crate log;
-use simplelog::*;
+extern crate slog;
+extern crate slog_async;
+extern crate slog_term;
+#[macro_use]
+extern crate slog_scope;
+
+use slog::Drain;
 
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
 use std::env;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -222,6 +227,7 @@ fn run(
                             trace!("Wait for cap..");
                             cap_handle.join().unwrap();
                             *new_config_shared.lock().unwrap() = Some(conf);
+                            trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
                         config::ConfigChange::None => {
@@ -246,6 +252,7 @@ fn run(
                     trace!("Wait for cap..");
                     cap_handle.join().unwrap();
                     *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, exiting");
                     return Ok(ExitState::Exit);
                 }
                 ExitRequest::STOP => {
@@ -258,6 +265,7 @@ fn run(
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, stopping");
                     return Ok(ExitState::Restart);
                 }
                 _ => {}
@@ -298,6 +306,7 @@ fn run(
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureError { message } => {
@@ -311,6 +320,7 @@ fn run(
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::PlaybackFormatChange => {
@@ -326,6 +336,7 @@ fn run(
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureFormatChange => {
@@ -340,6 +351,7 @@ fn run(
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::PlaybackDone => {
@@ -349,6 +361,7 @@ fn run(
                         stat.stop_reason = StopReason::Done;
                     }
                     *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureDone => {
@@ -592,36 +605,62 @@ fn main_process() -> i32 {
     let matches = clapapp.get_matches();
 
     let mut loglevel = match matches.occurrences_of("verbosity") {
-        0 => LevelFilter::Info,
-        1 => LevelFilter::Debug,
-        2 => LevelFilter::Trace,
-        _ => LevelFilter::Trace,
+        0 => slog::Level::Info,
+        1 => slog::Level::Debug,
+        2 => slog::Level::Trace,
+        _ => slog::Level::Trace,
     };
-
     loglevel = match matches.value_of("loglevel") {
-        Some("trace") => LevelFilter::Trace,
-        Some("debug") => LevelFilter::Debug,
-        Some("info") => LevelFilter::Info,
-        Some("warn") => LevelFilter::Warn,
-        Some("error") => LevelFilter::Error,
-        Some("off") => LevelFilter::Off,
+        Some("trace") => slog::Level::Trace,
+        Some("debug") => slog::Level::Debug,
+        Some("info") => slog::Level::Info,
+        Some("warn") => slog::Level::Warning,
+        Some("error") => slog::Level::Error,
+        Some("off") => slog::Level::Critical,
         _ => loglevel,
     };
 
-    let logconf = ConfigBuilder::new()
-        .set_time_format_str("%H:%M:%S%.3f")
-        .set_time_to_local(true)
-        .build();
-    if let Some(logfile) = matches.value_of("logfile") {
-        let file = File::create(logfile).unwrap();
-        if let Err(err) = WriteLogger::init(loglevel, logconf, file) {
-            println!("Failed to create logger, {}", err);
+    let drain = match matches.value_of("loglevel") {
+        Some("off") => {
+            let drain = slog::Discard;
+            slog_async::Async::new(drain).build().fuse()
         }
-    } else if let Err(err) =
-        TermLogger::init(loglevel, logconf, TerminalMode::Stderr, ColorChoice::Auto)
-    {
-        println!("Failed to create logger, {}", err);
-    }
+        _ => {
+            if let Some(logfile) = matches.value_of("logfile") {
+                let file = OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(logfile)
+                    .unwrap();
+                let decorator = slog_term::PlainDecorator::new(file);
+                let drain = slog_term::FullFormat::new(decorator)
+                    .build()
+                    .filter_level(loglevel)
+                    .fuse();
+                slog_async::Async::new(drain).build().fuse()
+            } else {
+                let decorator = slog_term::TermDecorator::new().stderr().build();
+                let drain = slog_term::FullFormat::new(decorator)
+                    .build()
+                    .filter_level(loglevel)
+                    .fuse();
+                slog_async::Async::new(drain).build().fuse()
+            }
+        }
+    };
+
+    let log = slog::Logger::root(
+        drain,
+        o!("module" => {
+        slog::FnValue(
+            |rec : &slog::Record| { rec.module() }
+                )
+            }),
+    );
+
+
+    let _guard = slog_scope::set_global_logger(log);
 
     // logging examples
     //trace!("trace message"); //with -vv
