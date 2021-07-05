@@ -35,7 +35,7 @@ extern crate tungstenite;
 extern crate wasapi;
 
 #[macro_use]
-extern crate log;
+extern crate slog_scope;
 
 use serde::Serialize;
 use std::error;
