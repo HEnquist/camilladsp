@@ -36,7 +36,6 @@ use slog::Drain;
 
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
 use std::env;
-use std::fs::File;
 use std::fs::OpenOptions;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -867,5 +866,8 @@ fn main_process() -> i32 {
 }
 
 fn main() {
+    let drain = slog_async::Async::new(slog::Discard).build().fuse();
+    let log = slog::Logger::root(drain, o!());
+    let _guard = slog_scope::set_global_logger(log);
     std::process::exit(main_process());
 }
