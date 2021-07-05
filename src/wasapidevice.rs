@@ -457,8 +457,6 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             //error!("{}", msg);
                             tx_state_dev.send(DeviceState::Error(msg)).unwrap_or(());
                         }
-                        // Short delay to let logging finish
-                        //std::thread::sleep(std::time::Duration::from_millis(50));
                     })
                     .unwrap();
                 match rx_state_dev.recv() {
@@ -492,8 +490,6 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                         Ok(DeviceState::Ok) => {}
                         Ok(DeviceState::Error(err)) => {
                             send_error_or_playbackformatchange(&status_channel, &rx_cb_dev, err);
-                            // Short delay to let logging finish
-                            // std::thread::sleep(std::time::Duration::from_millis(50));
                             break;
                         }
                         Err(TryRecvError::Empty) => {}
@@ -503,8 +499,6 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                 &rx_cb_dev,
                                 err.to_string(),
                             );
-                            // Short delay to let logging finish
-                            //std::thread::sleep(std::time::Duration::from_millis(50));
                             break;
                         }
                     }
@@ -586,8 +580,6 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                         warn!("Inner playback thread already stopped")
                     }
                 }
-                // Short delay to let logging finish
-                //std::thread::sleep(std::time::Duration::from_millis(50));
             })?;
         Ok(Box::new(handle))
     }
@@ -725,8 +717,6 @@ impl CaptureDevice for WasapiCaptureDevice {
                             //error!("{}", msg);
                             tx_state_dev.send(DeviceState::Error(msg)).unwrap_or(());
                         }
-                        // Short delay to let logging finish
-                        //std::thread::sleep(std::time::Duration::from_millis(50));
                     }).unwrap();
                 match rx_state_dev.recv() {
                     Ok(DeviceState::Ok) => {},
@@ -755,7 +745,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let mut state = ProcessingState::Running;
                 let blockalign = bytes_per_sample*channels;
                 let mut data_queue: VecDeque<u8> = VecDeque::with_capacity(4 * blockalign * chunksize_samples );
-                // TIDI resize if needed
+                // TODO check if this ever needs to be resized
                 let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                 let mut expected_chunk_nbr = 0;
                 debug!("Capture device ready and waiting");
@@ -796,16 +786,12 @@ impl CaptureDevice for WasapiCaptureDevice {
                         Ok(DeviceState::Error(err)) => {
                             channel.send(AudioMessage::EndOfStream).unwrap_or(());
                             send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err);
-                            // Short delay to let logging finish
-                            //std::thread::sleep(std::time::Duration::from_millis(50));
                             break;
                         },
                         Err(TryRecvError::Empty) => {}
                         Err(err) => {
                             channel.send(AudioMessage::EndOfStream).unwrap_or(());
                             send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err.to_string());
-                            // Short delay to let logging finish
-                            //std::thread::sleep(std::time::Duration::from_millis(50));
                             break;
                         }
                     }
@@ -832,8 +818,6 @@ impl CaptureDevice for WasapiCaptureDevice {
                                 error!("Channel is closed");
                                 channel.send(AudioMessage::EndOfStream).unwrap_or(());
                                 send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err.to_string());
-                                // Short delay to let logging finish
-                                //std::thread::sleep(std::time::Duration::from_millis(50));
                                 return;
                             }
                         }
