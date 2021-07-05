@@ -6,7 +6,7 @@ use countertimer;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
 use rubato::Resampler;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicUsize, Ordering, AtomicBool};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
@@ -459,7 +459,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                         }
                         // Short delay to let logging finish
                         //std::thread::sleep(std::time::Duration::from_millis(50));
-                    }).unwrap();
+                    })
+                    .unwrap();
                 match rx_state_dev.recv() {
                     Ok(DeviceState::Ok) => {}
                     Ok(DeviceState::Error(err)) => {

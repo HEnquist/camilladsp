@@ -658,7 +658,6 @@ fn main_process() -> i32 {
             }),
     );
 
-
     let _guard = slog_scope::set_global_logger(log);
 
     // logging examples
