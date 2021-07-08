@@ -32,8 +32,8 @@ nix = { version = "0.20", optional = true }
 
 [target.'cfg(target_os="windows")'.dependencies]
 #wasapi = { path = "../../rust/wasapi" }
-wasapi = { git = "https://github.com/HEnquist/wasapi-rs" }
-#wasapi = "0.2.0"
+#wasapi = { git = "https://github.com/HEnquist/wasapi-rs" }
+wasapi = "0.3.0"
 windows = "0.14.0"
 crossbeam-channel = "0.5"
 
