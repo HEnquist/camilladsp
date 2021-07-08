@@ -216,9 +216,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         }
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::PlaybackError {
-                            message: err.to_string(),
-                        });
+                        let send_result = status_channel.send(StatusMessage::PlaybackError(
+                            err.to_string().unwrap_or("Unknown playback error"),
+                        ));
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
@@ -379,7 +379,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                 }
                                 Err(err) => {
                                     status_channel
-                                        .send(StatusMessage::CaptureError(err.to_string()))
+                                        .send(StatusMessage::CaptureError(err.to_string().unwrap_or("Unknown capture error")))
                                         .unwrap();
                                 }
                             };
