@@ -145,7 +145,7 @@ impl AudioChunk {
 
     pub fn get_stats(&self) -> ChunkStats {
         let rms_peak: Vec<(PrcFmt, PrcFmt)> =
-            self.waveforms.iter().map(|wf| rms_and_peak(&wf)).collect();
+            self.waveforms.iter().map(|wf| rms_and_peak(wf)).collect();
         let rms: Vec<PrcFmt> = rms_peak.iter().map(|rp| rp.0).collect();
         let peak: Vec<PrcFmt> = rms_peak.iter().map(|rp| rp.1).collect();
         ChunkStats { rms, peak }
@@ -404,8 +404,8 @@ pub fn get_resampler(
     capture_samplerate: usize,
     chunksize: usize,
 ) -> Option<Box<dyn Resampler<PrcFmt>>> {
-    if resampler_is_async(&conf) {
-        let parameters = get_async_parameters(&conf, samplerate, capture_samplerate);
+    if resampler_is_async(conf) {
+        let parameters = get_async_parameters(conf, samplerate, capture_samplerate);
         debug!(
             "Creating asynchronous resampler with parameters: {:?}",
             parameters

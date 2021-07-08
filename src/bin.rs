@@ -293,7 +293,7 @@ fn run(
                         status_structs.status.write().unwrap().stop_reason = StopReason::None;
                     }
                 }
-                StatusMessage::PlaybackError { message } => {
+                StatusMessage::PlaybackError(message) => {
                     error!("Playback error: {}", message);
                     tx_command_cap.send(CommandMessage::Exit).unwrap();
                     if is_starting {
@@ -301,28 +301,30 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for capture thread to exit..");
-                    status_structs.status.write().unwrap().stop_reason = StopReason::PlaybackError;
+                    status_structs.status.write().unwrap().stop_reason =
+                        StopReason::PlaybackError(message);
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     *prev_config_shared.lock().unwrap() = Some(active_config);
                     trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
-                StatusMessage::CaptureError { message } => {
+                StatusMessage::CaptureError(message) => {
                     error!("Capture error: {}", message);
                     if is_starting {
                         debug!("Error while starting, release barrier");
                         barrier.wait();
                     }
                     debug!("Wait for playback thread to exit..");
-                    status_structs.status.write().unwrap().stop_reason = StopReason::CaptureError;
+                    status_structs.status.write().unwrap().stop_reason =
+                        StopReason::CaptureError(message);
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     *prev_config_shared.lock().unwrap() = Some(active_config);
                     trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
-                StatusMessage::PlaybackFormatChange => {
+                StatusMessage::PlaybackFormatChange(rate) => {
                     error!("Playback stopped due to external format change");
                     tx_command_cap.send(CommandMessage::Exit).unwrap();
                     if is_starting {
@@ -331,14 +333,14 @@ fn run(
                     }
                     debug!("Wait for capture thread to exit..");
                     status_structs.status.write().unwrap().stop_reason =
-                        StopReason::PlaybackFormatChange;
+                        StopReason::PlaybackFormatChange(rate);
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     *prev_config_shared.lock().unwrap() = Some(active_config);
                     trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
-                StatusMessage::CaptureFormatChange => {
+                StatusMessage::CaptureFormatChange(rate) => {
                     error!("Capture stopped due to external format change");
                     if is_starting {
                         debug!("Error while starting, release barrier");
@@ -346,7 +348,7 @@ fn run(
                     }
                     debug!("Wait for playback thread to exit..");
                     status_structs.status.write().unwrap().stop_reason =
-                        StopReason::CaptureFormatChange;
+                        StopReason::CaptureFormatChange(rate);
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
                     *prev_config_shared.lock().unwrap() = Some(active_config);
@@ -366,7 +368,7 @@ fn run(
                 StatusMessage::CaptureDone => {
                     info!("Capture finished");
                 }
-                StatusMessage::SetSpeed { speed } => {
+                StatusMessage::SetSpeed(speed) => {
                     debug!("SetSpeed message received");
                     tx_command_cap
                         .send(CommandMessage::SetSpeed { speed })

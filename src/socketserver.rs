@@ -330,7 +330,7 @@ macro_rules! make_handler {
                             let reply = match command {
                                 Ok(cmd) => handle_command(cmd, &shared_data_inst),
                                 Err(err) => Some(WsReply::Invalid {
-                                    error: format!("{}", err).to_string(),
+                                    error: err.to_string(),
                                 }),
                             };
                             if let Some(rep) = reply {
@@ -446,9 +446,10 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
         }
         WsCommand::GetStopReason => {
             let stat = shared_data_inst.status.read().unwrap();
+            let value = stat.stop_reason.clone();
             Some(WsReply::GetStopReason {
                 result: WsResult::Ok,
-                value: stat.stop_reason,
+                value,
             })
         }
         WsCommand::GetRateAdjust => {

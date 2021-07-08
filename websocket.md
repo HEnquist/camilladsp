@@ -67,8 +67,8 @@ Commands for reading status parameters.
   * "Done": processing stopped when the capture device reached the end of the stream.
   * "CaptureError": the capture device encountered an error.
   * "PlaybackError": the playback device encountered an error.
-  * "CaptureFormatChange": the sample rate or format of the capture device changed (currently only implemented for Wasapi).
-  * "PlaybackFormatChange": the sample rate or format of the playback device changed (currently only implemented for Wasapi).
+  * "CaptureFormatChange": the sample rate or format of the capture device changed.
+  * "PlaybackFormatChange": the sample rate or format of the playback device changed.
 - `GetCaptureRate` : get the measured sample rate of the capture device.
   * return the value as an integer
 - `GetSignalRange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)

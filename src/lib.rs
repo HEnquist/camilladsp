@@ -94,13 +94,13 @@ pub mod wasapidevice;
 pub enum StatusMessage {
     PlaybackReady,
     CaptureReady,
-    PlaybackError { message: String },
-    CaptureError { message: String },
-    PlaybackFormatChange,
-    CaptureFormatChange,
+    PlaybackError(String),
+    CaptureError(String),
+    PlaybackFormatChange(usize),
+    CaptureFormatChange(usize),
     PlaybackDone,
     CaptureDone,
-    SetSpeed { speed: f64 },
+    SetSpeed(f64),
 }
 
 pub enum CommandMessage {
@@ -161,14 +161,14 @@ pub struct ProcessingStatus {
     pub stop_reason: StopReason,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum StopReason {
     None,
     Done,
-    CaptureError,
-    PlaybackError,
-    CaptureFormatChange,
-    PlaybackFormatChange,
+    CaptureError(String),
+    PlaybackError(String),
+    CaptureFormatChange(usize),
+    PlaybackFormatChange(usize),
 }
 
 #[derive(Clone)]

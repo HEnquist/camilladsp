@@ -126,11 +126,9 @@ impl PlaybackDevice for FilePlaybackDevice {
                                     let write_res = file.write_all(&buffer[0..valid_bytes]);
                                     match write_res {
                                         Ok(_) => {}
-                                        Err(msg) => {
+                                        Err(err) => {
                                             status_channel
-                                                .send(StatusMessage::PlaybackError {
-                                                    message: format!("{}", msg),
-                                                })
+                                                .send(StatusMessage::PlaybackError(err.to_string()))
                                                 .unwrap_or(());
                                         }
                                     };
@@ -158,9 +156,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                 Err(err) => {
                                     error!("Message channel error: {}", err);
                                     status_channel
-                                        .send(StatusMessage::PlaybackError {
-                                            message: err.to_string(),
-                                        })
+                                        .send(StatusMessage::PlaybackError(err.to_string()))
                                         .unwrap_or(());
                                     break;
                                 }
@@ -168,9 +164,8 @@ impl PlaybackDevice for FilePlaybackDevice {
                         }
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::PlaybackError {
-                            message: format!("{}", err),
-                        });
+                        let send_result =
+                            status_channel.send(StatusMessage::PlaybackError(err.to_string()));
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
@@ -205,7 +200,7 @@ fn get_nbr_capture_bytes(
 
 fn build_chunk(buf: &[u8], params: &CaptureParams, bytes_read: usize) -> AudioChunk {
     buffer_to_chunk_rawbytes(
-        &buf,
+        buf,
         params.channels,
         &params.sample_format,
         bytes_read,
@@ -371,7 +366,7 @@ fn capture_loop(
                             msg_channels.audio.send(msg).unwrap_or(());
                             msg_channels
                                 .status
-                                .send(StatusMessage::CaptureFormatChange)
+                                .send(StatusMessage::CaptureFormatChange(measured_rate_f as usize))
                                 .unwrap_or(());
                             break;
                         }
@@ -383,9 +378,7 @@ fn capture_loop(
                 debug!("Encountered a read error");
                 msg_channels
                     .status
-                    .send(StatusMessage::CaptureError {
-                        message: format!("{}", err),
-                    })
+                    .send(StatusMessage::CaptureError(err.to_string()))
                     .unwrap_or(());
             }
         };
@@ -517,9 +510,8 @@ impl CaptureDevice for FileCaptureDevice {
                         capture_loop(file, params, msg_channels, resampler);
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::CaptureError {
-                            message: format!("{}", err),
-                        });
+                        let send_result =
+                            status_channel.send(StatusMessage::CaptureError(err.to_string()));
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }

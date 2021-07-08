@@ -332,9 +332,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         };
                         if let Err(err) = &stream {
                             status_channel
-                                .send(StatusMessage::PlaybackError {
-                                    message: format!("{}", err),
-                                })
+                                .send(StatusMessage::PlaybackError(err.to_string()))
                                 .unwrap();
                         }
                         barrier.wait();
@@ -342,9 +340,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             match strm.play() {
                                 Ok(_) => debug!("Starting playback loop"),
                                 Err(err) => status_channel
-                                    .send(StatusMessage::PlaybackError {
-                                        message: format!("{}", err),
-                                    })
+                                    .send(StatusMessage::PlaybackError(err.to_string()))
                                     .unwrap(),
                             }
                         }
@@ -373,7 +369,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                 100.0 * speed
                                             );
                                             status_channel
-                                                .send(StatusMessage::SetSpeed { speed })
+                                                .send(StatusMessage::SetSpeed(speed))
                                                 .unwrap();
                                             playback_status.write().unwrap().buffer_level =
                                                 av_delay as usize;
@@ -400,7 +396,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                     }
                     Err(err) => {
                         let send_result = status_channel.send(StatusMessage::PlaybackError {
-                            message: format!("{}", err),
+                            message: err.to_string(),
                         });
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
@@ -528,9 +524,7 @@ impl CaptureDevice for CpalCaptureDevice {
                         };
                         if let Err(err) = &stream {
                             status_channel
-                                .send(StatusMessage::CaptureError {
-                                    message: format!("{}", err),
-                                })
+                                .send(StatusMessage::CaptureError(err.to_string()))
                                 .unwrap();
                         }
                         barrier.wait();
@@ -538,9 +532,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             match strm.play() {
                                 Ok(_) => debug!("Starting capture loop"),
                                 Err(err) => status_channel
-                                    .send(StatusMessage::CaptureError {
-                                        message: format!("{}", err),
-                                    })
+                                    .send(StatusMessage::CaptureError(err.to_string()))
                                     .unwrap(),
                             }
                         }
@@ -597,11 +589,9 @@ impl CaptureDevice for CpalCaptureDevice {
                                             Ok(buf) => {
                                                 write_data_from_device(&buf, &mut sample_queue_i);
                                             }
-                                            Err(msg) => {
+                                            Err(err) => {
                                                 status_channel
-                                                    .send(StatusMessage::CaptureError {
-                                                        message: format!("{}", msg),
-                                                    })
+                                                    .send(StatusMessage::CaptureError(err.to_string()))
                                                     .unwrap();
                                             }
                                         }
@@ -620,11 +610,9 @@ impl CaptureDevice for CpalCaptureDevice {
                                             Ok(buf) => {
                                                 write_data_from_device(&buf, &mut sample_queue_f);
                                             }
-                                            Err(msg) => {
+                                            Err(err) => {
                                                 status_channel
-                                                    .send(StatusMessage::CaptureError {
-                                                        message: format!("{}", msg),
-                                                    })
+                                                    .send(StatusMessage::CaptureError(err.to_string()))
                                                     .unwrap();
                                             }
                                         }
@@ -668,7 +656,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                         let msg = AudioMessage::EndOfStream;
                                         channel.send(msg).unwrap_or(());
                                         status_channel
-                                            .send(StatusMessage::CaptureFormatChange)
+                                            .send(StatusMessage::CaptureFormatChange(measured_rate_f as usize))
                                             .unwrap_or(());
                                         break;
                                     }
@@ -701,9 +689,7 @@ impl CaptureDevice for CpalCaptureDevice {
                     }
                     Err(err) => {
                         let send_result = status_channel
-                            .send(StatusMessage::CaptureError {
-                                message: format!("{}", err),
-                            });
+                            .send(StatusMessage::CaptureError(err.to_string()));
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }
