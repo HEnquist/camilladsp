@@ -184,7 +184,11 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         Ok(_) => {}
                                         Err(err) => {
                                             status_channel
-                                                .send(StatusMessage::PlaybackError(err.to_string()))
+                                                .send(StatusMessage::PlaybackError(
+                                                    err.to_string().unwrap_or(
+                                                        "Unknown playback error".to_string(),
+                                                    ),
+                                                ))
                                                 .unwrap();
                                         }
                                     };
@@ -216,9 +220,8 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         }
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::PlaybackError(
-                            err.to_string().unwrap_or("Unknown playback error"),
-                        ));
+                        let send_result =
+                            status_channel.send(StatusMessage::PlaybackError(err.to_string()));
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
@@ -379,7 +382,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                 }
                                 Err(err) => {
                                     status_channel
-                                        .send(StatusMessage::CaptureError(err.to_string().unwrap_or("Unknown capture error")))
+                                        .send(StatusMessage::CaptureError(err.to_string().unwrap_or("Unknown capture error".to_string())))
                                         .unwrap();
                                 }
                             };
