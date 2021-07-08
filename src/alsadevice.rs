@@ -617,7 +617,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         playback_loop_bytes(pb_channels, buffer, &pcmdevice, io, pb_params);
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::PlaybackError(err.to_string()));
+                        let send_result =
+                            status_channel.send(StatusMessage::PlaybackError(err.to_string()));
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
@@ -725,7 +726,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                         );
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::CaptureError(err.to_string()));
+                        let send_result =
+                            status_channel.send(StatusMessage::CaptureError(err.to_string()));
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }
