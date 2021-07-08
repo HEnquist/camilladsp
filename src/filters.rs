@@ -49,7 +49,7 @@ pub fn pad_vector(values: &[PrcFmt], length: usize) -> Vec<PrcFmt> {
         length
     };
     let mut new_values: Vec<PrcFmt> = vec![0.0; new_len];
-    new_values[0..values.len()].copy_from_slice(&values);
+    new_values[0..values.len()].copy_from_slice(values);
     new_values
 }
 
@@ -114,7 +114,7 @@ pub fn read_coeff_file(
         // All other formats
         _ => {
             file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
-            let rawformat = conversions::map_file_formats(&format);
+            let rawformat = conversions::map_file_formats(format);
             let mut nextvalue = vec![0.0; 1];
             let nbr_coeffs = read_bytes_lines / format.bytes_per_sample();
             while let Ok(1) = PrcFmt::read_samples(&mut file, &mut nextvalue, &rawformat) {
@@ -437,15 +437,15 @@ impl Pipeline {
 /// Validate the filter config, to give a helpful message intead of a panic.
 pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
     match filter_config {
-        config::Filter::Conv { parameters } => fftconv::validate_config(&parameters),
-        config::Filter::Biquad { parameters } => biquad::validate_config(fs, &parameters),
-        config::Filter::Delay { parameters } => basicfilters::validate_delay_config(&parameters),
-        config::Filter::Gain { parameters } => basicfilters::validate_gain_config(&parameters),
-        config::Filter::Dither { parameters } => dither::validate_config(&parameters),
-        config::Filter::DiffEq { parameters } => diffeq::validate_config(&parameters),
-        config::Filter::Volume { parameters } => basicfilters::validate_volume_config(&parameters),
-        config::Filter::Loudness { parameters } => loudness::validate_config(&parameters),
-        config::Filter::BiquadCombo { parameters } => biquadcombo::validate_config(fs, &parameters),
+        config::Filter::Conv { parameters } => fftconv::validate_config(parameters),
+        config::Filter::Biquad { parameters } => biquad::validate_config(fs, parameters),
+        config::Filter::Delay { parameters } => basicfilters::validate_delay_config(parameters),
+        config::Filter::Gain { parameters } => basicfilters::validate_gain_config(parameters),
+        config::Filter::Dither { parameters } => dither::validate_config(parameters),
+        config::Filter::DiffEq { parameters } => diffeq::validate_config(parameters),
+        config::Filter::Volume { parameters } => basicfilters::validate_volume_config(parameters),
+        config::Filter::Loudness { parameters } => loudness::validate_config(parameters),
+        config::Filter::BiquadCombo { parameters } => biquadcombo::validate_config(fs, parameters),
     }
 }
 

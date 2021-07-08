@@ -182,11 +182,13 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                     last_instant = Instant::now();
                                     match write_res {
                                         Ok(_) => {}
-                                        Err(msg) => {
+                                        Err(err) => {
                                             status_channel
-                                                .send(StatusMessage::PlaybackError {
-                                                    message: format!("{}", msg),
-                                                })
+                                                .send(StatusMessage::PlaybackError(
+                                                    err.to_string().unwrap_or(
+                                                        "Unknown playback error".to_string(),
+                                                    ),
+                                                ))
                                                 .unwrap();
                                         }
                                     };
@@ -218,9 +220,8 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         }
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::PlaybackError {
-                            message: format!("{}", err),
-                        });
+                        let send_result =
+                            status_channel.send(StatusMessage::PlaybackError(err.to_string()));
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
@@ -379,11 +380,9 @@ impl CaptureDevice for PulseCaptureDevice {
                                         capt_stat.state = state;
                                     }
                                 }
-                                Err(msg) => {
+                                Err(err) => {
                                     status_channel
-                                        .send(StatusMessage::CaptureError {
-                                            message: format!("{}", msg),
-                                        })
+                                        .send(StatusMessage::CaptureError(err.to_string().unwrap_or("Unknown capture error".to_string())))
                                         .unwrap();
                                 }
                             };
@@ -413,9 +412,7 @@ impl CaptureDevice for PulseCaptureDevice {
                     }
                     Err(err) => {
                         let send_result = status_channel
-                            .send(StatusMessage::CaptureError {
-                                message: format!("{}", err),
-                            });
+                            .send(StatusMessage::CaptureError(err.to_string()));
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }

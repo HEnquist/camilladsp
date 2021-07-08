@@ -111,7 +111,7 @@ fn open_playback(
         collection.get_device_with_name(devname)?
     };
     let mut audio_client = device.get_iaudioclient()?;
-    let wave_format = get_wave_format(&sample_format, samplerate, channels);
+    let wave_format = get_wave_format(sample_format, samplerate, channels);
     match audio_client.is_supported(&wave_format, &sharemode) {
         Ok(None) => {
             debug!("Playback device supports format {:?}", wave_format)
@@ -180,7 +180,7 @@ fn open_capture(
         collection.get_device_with_name(devname)?
     };
     let mut audio_client = device.get_iaudioclient()?;
-    let wave_format = get_wave_format(&sample_format, samplerate, channels);
+    let wave_format = get_wave_format(sample_format, samplerate, channels);
     match audio_client.is_supported(&wave_format, &sharemode) {
         Ok(None) => {
             debug!("Capture device supports format {:?}", wave_format)
@@ -463,16 +463,14 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     Ok(DeviceState::Ok) => {}
                     Ok(DeviceState::Error(err)) => {
                         status_channel
-                            .send(StatusMessage::PlaybackError { message: err })
+                            .send(StatusMessage::PlaybackError(err))
                             .unwrap_or(());
                         barrier.wait();
                         return;
                     }
                     Err(err) => {
                         status_channel
-                            .send(StatusMessage::PlaybackError {
-                                message: format!("{}", err),
-                            })
+                            .send(StatusMessage::PlaybackError(err.to_string()))
                             .unwrap_or(());
                         barrier.wait();
                         return;
@@ -521,7 +519,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                         100.0 * speed
                                     );
                                     status_channel
-                                        .send(StatusMessage::SetSpeed { speed })
+                                        .send(StatusMessage::SetSpeed(speed))
                                         .unwrap_or(());
                                     playback_status.write().unwrap().buffer_level =
                                         av_delay as usize;
@@ -607,13 +605,13 @@ fn send_error_or_playbackformatchange(
     rx: &Receiver<DisconnectReason>,
     err: String,
 ) {
-    if check_for_format_change(&rx) {
+    if check_for_format_change(rx) {
         debug!("Send PlaybackFormatChange");
-        tx.send(StatusMessage::PlaybackFormatChange).unwrap_or(());
+        tx.send(StatusMessage::PlaybackFormatChange(0))
+            .unwrap_or(());
     } else {
         debug!("Send PlaybackError");
-        tx.send(StatusMessage::PlaybackError { message: err })
-            .unwrap_or(());
+        tx.send(StatusMessage::PlaybackError(err)).unwrap_or(());
     }
 }
 
@@ -622,13 +620,12 @@ fn send_error_or_captureformatchange(
     rx: &Receiver<DisconnectReason>,
     err: String,
 ) {
-    if check_for_format_change(&rx) {
+    if check_for_format_change(rx) {
         debug!("Send CaptureFormatChange");
-        tx.send(StatusMessage::CaptureFormatChange).unwrap_or(());
+        tx.send(StatusMessage::CaptureFormatChange(0)).unwrap_or(());
     } else {
         debug!("Send CaptureError");
-        tx.send(StatusMessage::CaptureError { message: err })
-            .unwrap_or(());
+        tx.send(StatusMessage::CaptureError(err)).unwrap_or(());
     }
 }
 
@@ -722,13 +719,13 @@ impl CaptureDevice for WasapiCaptureDevice {
                     Ok(DeviceState::Ok) => {},
                     Ok(DeviceState::Error(err)) => {
                         channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                        status_channel.send(StatusMessage::CaptureError{ message: err }).unwrap_or(());
+                        status_channel.send(StatusMessage::CaptureError(err)).unwrap_or(());
                         barrier.wait();
                         return;
                      },
                     Err(err) => {
                         channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                        status_channel.send(StatusMessage::CaptureError{ message: format!("{}", err) }).unwrap_or(());
+                        status_channel.send(StatusMessage::CaptureError(err.to_string() )).unwrap_or(());
                         barrier.wait();
                         return;
                     },
@@ -864,7 +861,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             if stop_on_rate_change {
                                 let msg = AudioMessage::EndOfStream;
                                 channel.send(msg).unwrap_or(());
-                                status_channel.send(StatusMessage::CaptureFormatChange).unwrap_or(());
+                                status_channel.send(StatusMessage::CaptureFormatChange(measured_rate_f as usize)).unwrap_or(());
                                 break;
                             }
                         }

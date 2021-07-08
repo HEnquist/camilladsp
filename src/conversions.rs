@@ -6,8 +6,6 @@ use rawsample;
 use rawsample::{SampleReader, SampleWriter};
 #[cfg(feature = "cpal-backend")]
 use std::collections::VecDeque;
-#[cfg(feature = "cpal-backend")]
-use std::convert::TryInto;
 use std::io::Cursor;
 use PrcFmt;
 
@@ -86,7 +84,7 @@ pub fn buffer_to_chunk_rawbytes(
     let rawformat = map_formats(sampleformat);
     let mut maxvalue: PrcFmt = 0.0;
     let mut minvalue: PrcFmt = 0.0;
-    let mut slice: &[u8] = &buffer;
+    let mut slice: &[u8] = buffer;
     let mut wfs = Vec::with_capacity(channels);
     for used in used_channels.iter() {
         if *used {

@@ -1170,7 +1170,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                         return Err(ConfigError::new(&msg).into());
                     }
                     num_channels = conf.mixers.get(name).unwrap().channels.out;
-                    match mixer::validate_mixer(&conf.mixers.get(name).unwrap()) {
+                    match mixer::validate_mixer(conf.mixers.get(name).unwrap()) {
                         Ok(_) => {}
                         Err(err) => {
                             let msg = format!("Invalid mixer '{}'. Reason: {}", name, err);
@@ -1189,7 +1189,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                         let msg = format!("Use of missing filter '{}'", name);
                         return Err(ConfigError::new(&msg).into());
                     }
-                    match filters::validate_filter(fs, &conf.filters.get(name).unwrap()) {
+                    match filters::validate_filter(fs, conf.filters.get(name).unwrap()) {
                         Ok(_) => {}
                         Err(err) => {
                             let msg = format!("Invalid filter '{}'. Reason: {}", name, err);

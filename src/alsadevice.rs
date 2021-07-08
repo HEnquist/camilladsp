@@ -316,7 +316,7 @@ fn playback_loop_bytes(
                             );
                             channels
                                 .status
-                                .send(StatusMessage::SetSpeed { speed })
+                                .send(StatusMessage::SetSpeed(speed))
                                 .unwrap_or(());
                         }
                         let mut pb_stat = params.playback_status.write().unwrap();
@@ -338,9 +338,7 @@ fn playback_loop_bytes(
                     Err(msg) => {
                         channels
                             .status
-                            .send(StatusMessage::PlaybackError {
-                                message: msg.to_string(),
-                            })
+                            .send(StatusMessage::PlaybackError(msg.to_string()))
                             .unwrap_or(());
                     }
                 };
@@ -356,9 +354,7 @@ fn playback_loop_bytes(
                 error!("Message channel error: {}", err);
                 channels
                     .status
-                    .send(StatusMessage::PlaybackError {
-                        message: err.to_string(),
-                    })
+                    .send(StatusMessage::PlaybackError(err.to_string()))
                     .unwrap_or(());
                 break;
             }
@@ -486,7 +482,7 @@ fn capture_loop_bytes(
                             channels.audio.send(msg).unwrap_or(());
                             channels
                                 .status
-                                .send(StatusMessage::CaptureFormatChange)
+                                .send(StatusMessage::CaptureFormatChange(measured_rate_f as usize))
                                 .unwrap_or(());
                             break;
                         }
@@ -502,9 +498,7 @@ fn capture_loop_bytes(
             Err(msg) => {
                 channels
                     .status
-                    .send(StatusMessage::CaptureError {
-                        message: msg.to_string(),
-                    })
+                    .send(StatusMessage::CaptureError(msg.to_string()))
                     .unwrap_or(());
                 let msg = AudioMessage::EndOfStream;
                 channels.audio.send(msg).unwrap_or(());
@@ -623,9 +617,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         playback_loop_bytes(pb_channels, buffer, &pcmdevice, io, pb_params);
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::PlaybackError {
-                            message: format!("{}", err),
-                        });
+                        let send_result =
+                            status_channel.send(StatusMessage::PlaybackError(err.to_string()));
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
@@ -733,9 +726,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                         );
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::CaptureError {
-                            message: err.to_string(),
-                        });
+                        let send_result =
+                            status_channel.send(StatusMessage::CaptureError(err.to_string()));
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }
