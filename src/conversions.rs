@@ -7,7 +7,6 @@ use rawsample::{SampleReader, SampleWriter};
 #[cfg(feature = "cpal-backend")]
 use std::collections::VecDeque;
 #[cfg(feature = "cpal-backend")]
-use std::convert::TryInto;
 use std::io::Cursor;
 use PrcFmt;
 
