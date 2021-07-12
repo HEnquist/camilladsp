@@ -27,6 +27,9 @@ use PrcFmt;
 use Res;
 use StatusMessage;
 
+pub const RATE_CHANGE_THRESHOLD_COUNT: usize = 3;
+pub const RATE_CHANGE_THRESHOLD_VALUE: f32 = 0.04;
+
 #[derive(Debug)]
 pub struct DeviceError {
     desc: String,

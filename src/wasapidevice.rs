@@ -734,7 +734,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let mut capture_frames = chunksize;
                 let mut averager = countertimer::TimeAverage::new();
                 let mut watcher_averager = countertimer::TimeAverage::new();
-                let mut valuewatcher = countertimer::ValueWatcher::new(capture_samplerate as f32, 0.04, 3);
+                let mut valuewatcher = countertimer::ValueWatcher::new(capture_samplerate as f32, RATE_CHANGE_THRESHOLD_VALUE, RATE_CHANGE_THRESHOLD_COUNT);
                 let mut value_range = 0.0;
                 let mut chunk_stats;
                 let mut rate_adjust = 0.0;

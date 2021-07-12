@@ -541,7 +541,7 @@ impl CaptureDevice for CpalCaptureDevice {
                         let mut averager = countertimer::TimeAverage::new();
                         let mut watcher_averager = countertimer::TimeAverage::new();
                         let mut valuewatcher =
-                            countertimer::ValueWatcher::new(capture_samplerate as f32, 0.04, 3);
+                            countertimer::ValueWatcher::new(capture_samplerate as f32, RATE_CHANGE_THRESHOLD_VALUE, RATE_CHANGE_THRESHOLD_COUNT);
                         let rate_measure_interval_ms = (1000.0 * rate_measure_interval) as u64;
                         let mut value_range = 0.0;
                         let mut chunk_stats;

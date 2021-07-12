@@ -247,8 +247,11 @@ fn capture_loop(
     let rate_measure_interval_ms = (1000.0 * params.rate_measure_interval) as u64;
     let mut averager = countertimer::TimeAverage::new();
     let mut watcher_averager = countertimer::TimeAverage::new();
-    let mut valuewatcher =
-        countertimer::ValueWatcher::new(params.capture_samplerate as f32, 0.04, 3);
+    let mut valuewatcher = countertimer::ValueWatcher::new(
+        params.capture_samplerate as f32,
+        RATE_CHANGE_THRESHOLD_VALUE,
+        RATE_CHANGE_THRESHOLD_COUNT,
+    );
     let mut silence_counter = countertimer::SilenceCounter::new(
         params.silence_threshold,
         params.silence_timeout,

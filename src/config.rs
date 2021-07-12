@@ -1114,15 +1114,28 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi {
+        format, exclusive, ..
+    } = &conf.devices.capture
+    {
+        if *format != SampleFormat::FLOAT32LE && !*exclusive {
+            return Err(ConfigError::new(
+                "Wasapi shared mode capture must use FLOAT32LE sample format",
+            )
+            .into());
+        }
+    }
+    #[cfg(target_os = "windows")]
+    if let CaptureDevice::Wasapi {
         loopback,
         exclusive,
         ..
     } = &conf.devices.capture
     {
         if *loopback && *exclusive {
-            return Err(
-                ConfigError::new("Wasapi loopback is only supported in shared mode").into(),
-            );
+            return Err(ConfigError::new(
+                "Wasapi loopback capture is only supported in shared mode",
+            )
+            .into());
         }
     }
     #[cfg(target_os = "windows")]
@@ -1130,6 +1143,18 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         if *format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The Wasapi playback backend does not support FLOAT64LE sample format",
+            )
+            .into());
+        }
+    }
+    #[cfg(target_os = "windows")]
+    if let PlaybackDevice::Wasapi {
+        format, exclusive, ..
+    } = &conf.devices.playback
+    {
+        if *format != SampleFormat::FLOAT32LE && !*exclusive {
+            return Err(ConfigError::new(
+                "Wasapi shared mode playback must use FLOAT32LE sample format",
             )
             .into());
         }
