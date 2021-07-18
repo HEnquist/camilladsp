@@ -56,11 +56,6 @@ since the audio data will not be routed through it. This requires using [Shared 
 
 Open the Sound Control Panel app, and locate the unused card in the "Playback" tab. Set it as default device. See [Device names](#device-names) for how to write the device name to enter in the CamillaDSP configuration. 
 
-
-### junk
-Also on the "Playback" tab, locate the device you want to use for playback of the processed audio, and write down the device name.
-Stay on the "Playback" tab and locate the device you want to use for playback of the processed audio. Note the two lines with the name and description of the device.
-
 ## Configuration of devices
 
 This example configuration will be used to explain the various options specific to WASAPI:
