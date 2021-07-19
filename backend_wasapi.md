@@ -12,16 +12,18 @@ In shared mode the audio device then operates at a fixed sample rate and sample 
 The audio passes through the Windows mixer and volume control.
 
 In shared mode, these points apply for the CamillaDSP configuration:
-- The sample format is always 32-bit float (`FLOAT32LE`). 
-- The sample rate must match the "Default format" setting of the device. 
+- The `samplerate` parameter must match the "Default format" setting of the device. 
   To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". 
   Then open the "Advanced" tab and select the desired format under "Default Format". 
   Pick the desired sample rate, and the largest number of bits available.
 - [Loopback](#loopback-capture) capture mode is available.
+- The sample format is always 32-bit float (`FLOAT32LE`). 
 
 
 ### Exclusive mode
-In this mode one application takes full control over an audio device. Only one application at a time can use the device. The sample rate and sample format can be changed, and the audio does not pass through the Windows mixer and volume control. This allows bit-perfect playback at any sample rate and sample format the hardware supports. While an application holds the device in exclusive mode, other apps will not be able to play for example notification sounds. This mode is often used for high quality music playback.
+This mode is often used for high quality music playback.
+
+In this mode one application takes full control over an audio device. Only one application at a time can use the device. The sample rate and sample format can be changed, and the audio does not pass through the Windows mixer and volume control. This allows bit-perfect playback at any sample rate and sample format the hardware supports. While an application holds the device in exclusive mode, other apps will not be able to play for example notification sounds. 
 
 In exclusive mode, these points apply for the CamillaDSP configuration:
 - CamillaDSP is able to control the sample rate of the devices. 
@@ -86,4 +88,4 @@ Just download the binary and run it in a terminal. It will list all devices with
 Set `exclusive` to `true` to enable exclusive mode. Setting it to `false` or leaving it out means that shared mode will be used. Playback and capture are independent, they do not need to use the same mode.
 
 ### Loopback capture
-Setting `loopback` to `true` enables loopback capture. This requires using shared mode for the capture device. See [Loopback](#loopback) for more details.
+Setting `loopback` to `true` enables loopback capture. This requires using shared mode for the capture device. See [Loopback capture](#loopback-capture) for more details.
