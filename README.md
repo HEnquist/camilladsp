@@ -696,7 +696,7 @@ Any parameter marked (*) in all examples in this section are optional. If they a
 
     __Note that there are two 24-bit formats! Make sure to select the correct one.__
 
-    Supported formats:
+    ### Supported formats
 
     |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | Jack               | File/Stdin/Stdout  |
     |------------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|
@@ -707,8 +707,10 @@ Any parameter marked (*) in all examples in this section are optional. If they a
     | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
     | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                | :x:                | :heavy_check_mark: |
   
-  
-    Equivalent formats (for reference):
+    
+    ### Equivalent formats
+
+    This table shows which formats in the different APIs are equivalent.
 
     | CamillaDSP | Alsa       | Pulse     |
     |------------|------------|-----------|
