@@ -374,15 +374,22 @@ fn capture_loop_bytes(
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
     let subdevice = pcminfo.get_subdevice();
-    let mut elid = ElemId::new(ElemIface::PCM);
-    elid.set_device(device);
-    elid.set_subdevice(subdevice);
-    elid.set_name(&CString::new("PCM Rate Shift 100000").unwrap());
     let h = HCtl::new(&format!("hw:{}", card), false).unwrap();
     h.load().unwrap();
-    let element = h.find_elem(&elid);
-    let mut elval = ElemValue::new(ElemType::Integer).unwrap();
-    if element.is_some() {
+
+    let mut elid_loopback = ElemId::new(ElemIface::PCM);
+    elid_loopback.set_device(device);
+    elid_loopback.set_subdevice(subdevice);
+    elid_loopback.set_name(&CString::new("PCM Rate Shift 100000").unwrap());
+    let element_loopback = h.find_elem(&elid_loopback);
+    
+    let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
+    elid_uac2_gadget.set_device(device);
+    elid_uac2_gadget.set_subdevice(subdevice);
+    elid_uac2_gadget.set_name(&CString::new("Capture Pitch 1000000").unwrap());
+    let element_uac2_gadget = h.find_elem(&elid_uac2_gadget);
+    
+    if element_loopback.is_some() || element_uac2_gadget.is_some() {
         info!("Capture device supports rate adjust");
         if params.samplerate == params.capture_samplerate && resampler.is_some() {
             warn!("Needless 1:1 sample rate conversion active. Not needed since capture device supports rate adjust");
@@ -390,6 +397,7 @@ fn capture_loop_bytes(
             warn!("Async resampler not needed since capture device supports rate adjust. Switch to Sync type to save CPU time.");
         }
     }
+    
     let mut capture_bytes = params.chunksize * params.channels * params.store_bytes_per_sample;
     let mut averager = countertimer::TimeAverage::new();
     let mut watcher_averager = countertimer::TimeAverage::new();
@@ -423,10 +431,14 @@ fn capture_loop_bytes(
                 break;
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
+                let mut elval = ElemValue::new(ElemType::Integer).unwrap();
                 rate_adjust = speed;
-                if let Some(elem) = &element {
+                if let Some(elem_loopback) = &element_loopback {
                     elval.set_integer(0, (100_000.0 / speed) as i32).unwrap();
-                    elem.write(&elval).unwrap();
+                    elem_loopback.write(&elval).unwrap();
+                } else if let Some(elem_uac2_gadget) = &element_uac2_gadget {
+                    elval.set_integer(0, (speed * 1_000_000.0) as i32).unwrap();
+                    elem_uac2_gadget.write(&elval).unwrap();
                 } else if let Some(resampl) = &mut resampler {
                     if params.async_src {
                         if resampl.set_resample_ratio_relative(speed).is_err() {
