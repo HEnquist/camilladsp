@@ -382,13 +382,13 @@ fn capture_loop_bytes(
     elid_loopback.set_subdevice(subdevice);
     elid_loopback.set_name(&CString::new("PCM Rate Shift 100000").unwrap());
     let element_loopback = h.find_elem(&elid_loopback);
-    
+
     let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
     elid_uac2_gadget.set_device(device);
     elid_uac2_gadget.set_subdevice(subdevice);
     elid_uac2_gadget.set_name(&CString::new("Capture Pitch 1000000").unwrap());
     let element_uac2_gadget = h.find_elem(&elid_uac2_gadget);
-    
+
     if element_loopback.is_some() || element_uac2_gadget.is_some() {
         info!("Capture device supports rate adjust");
         if params.samplerate == params.capture_samplerate && resampler.is_some() {
@@ -397,7 +397,7 @@ fn capture_loop_bytes(
             warn!("Async resampler not needed since capture device supports rate adjust. Switch to Sync type to save CPU time.");
         }
     }
-    
+
     let mut capture_bytes = params.chunksize * params.channels * params.store_bytes_per_sample;
     let mut averager = countertimer::TimeAverage::new();
     let mut watcher_averager = countertimer::TimeAverage::new();
