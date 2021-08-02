@@ -111,13 +111,13 @@ fn play_buffer(
         info!("Starting playback from Prepared state");
         thread::sleep(Duration::from_millis(target_delay));
     }
-    let _frames = match io.writei(&buffer) {
+    let _frames = match io.writei(buffer) {
         Ok(frames) => frames,
         Err(err) => {
             warn!("Retrying playback, error: {}", err);
             pcmdevice.prepare()?;
             thread::sleep(Duration::from_millis(target_delay));
-            io.writei(&buffer)?
+            io.writei(buffer)?
         }
     };
     Ok(())
