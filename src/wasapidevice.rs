@@ -403,8 +403,13 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         let handle = thread::Builder::new()
             .name("WasapiPlayback".to_string())
             .spawn(move || {
-                //let (tx_dev, rx_dev) = mpsc::sync_channel(4);
-                let (tx_dev, rx_dev) = bounded(16);
+                // Devices typically request around 1000 frames per buffer, set a reasonable capacity for the channel
+                let channel_capacity = 8 * 1024 / chunksize + 1;
+                debug!(
+                    "Using a playback channel capacity of {} chunks.",
+                    channel_capacity
+                );
+                let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let (tx_state_dev, rx_state_dev) = bounded(0);
                 let (tx_cb_dev, rx_cb_dev) = unbounded();
                 let buffer_fill = Arc::new(AtomicUsize::new(0));
@@ -684,7 +689,10 @@ impl CaptureDevice for WasapiCaptureDevice {
                 } else {
                     None
                 };
-                let (tx_dev, rx_dev) = bounded(16);
+                // Devices typically give around 1000 frames per buffer, set a reasonable capacity for the channel
+                let channel_capacity = 8*chunksize/1024 + 1;
+                debug!("Using a capture channel capacity of {} buffers.", channel_capacity);
+                let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let (tx_state_dev, rx_state_dev) = bounded(0);
                 let (tx_cb_dev, rx_cb_dev) = unbounded();
 
