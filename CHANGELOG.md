@@ -5,6 +5,7 @@ New features:
 - Add StopReason websocket command.
 - Add GetPreviousConfig websocket command to get the previously active config.
 - Add option to stop on detected sample rate change.
+- Add support for rate adjust on the ALSA USB gadget capture device (introduced in kernel 5.14).
 
 ## 0.5.2
 New features:
