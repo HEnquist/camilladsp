@@ -32,14 +32,16 @@ The full configuration is given in a yaml file.
 - **[Reloading the configuration](#reloading-the-configuration)**
 - **[Controlling via websocket](#controlling-via-websocket)**
 
-**[Capturing audio](#capturing-audio)**
-- **[Alsa](#alsa)**
-- **[PulseAudio](#pulseaudio)**
-- **[Pipewire](#pipewire)**
-- **[Wasapi](#wasapi)**
-- **[CoreAudio](#coreaudio)**
-- **[Jack](#jack)**
-- **[File or pipe](#file-or-pipe)**
+**[Processing audio](#processing-audio)**
+- **[Cross-platform](#cross-platform)**
+  - **[Jack](#jack)**
+  - **[File or pipe](#file-or-pipe)**
+- **[Windows](#windows)**
+- **[Linux](#linux)**
+  - **[Alsa](#alsa)**
+  - **[PulseAudio](#pulseaudio)**
+  - **[Pipewire](#pipewire)**
+- **[MacOS (CoreAudio)](#macos-coreaudio)**
 
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
@@ -108,7 +110,7 @@ A few examples, done with CamillaDSP v0.5.0:
 - An AMD Ryzen 7 2700u (laptop) doing FIR filtering of 96 channels, with 262k taps per channel, at 192 kHz. 
   CPU usage just under 100%.
 
-### Linux
+### Linux requirements
 Both 64 and 32 bit architectures are supported. All platforms supported by the Rustc compiler should work. 
 
 Pre-built binaries are provided for:
@@ -116,12 +118,12 @@ Pre-built binaries are provided for:
 - armv7 (32-bit arm, for example a Raspberry Pi 2,3,4 with a 32-bit OS)
 - aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS) 
 
-### Windows
+### Windows requirements
 An x86_64 CPU and the 64-bit version of Windows is recommended. Any x86_64 CPU will likely be sufficient.
 
 Pre-built binaries are provided for 64-bit systems.
 
-### MacOS
+### MacOS requirements
 CamillaDSP can run on both Intel and Apple Silicon macs. Any reasonably recent version of MacOS should work.
 
 Pre-built binaries are provided for both Intel and Apple Silicon
@@ -415,25 +417,38 @@ The configuration can be reloaded without restarting by sending a SIGHUP to the 
 See the [separate readme for the websocket server](./websocket.md)
 
 
-# Capturing audio
-In order to insert CamillaDSP between applications and the sound card, a virtual sound card can be used. This works with Alsa, PulseAudio, CoreAudio and Wasapi. It is also possible to use pipes for apps that support outputting the audio data to stdout. 
+# Processing audio
+The goal is to insert CamillaDSP between applications and the sound card. The details of how this is achieved depends on which operating system and which audio API is being used. It is also possible to use pipes for apps that support reading or writing audio data from/to stdout. 
 
-## Alsa
-An Alsa Loopback device can be used. This device behaves like a sound card with two devices playback and capture. The sound being send to the playback side on one device can then be captured from the capture side on the other device. To load the kernel device type:
-```
-sudo modprobe snd-aloop
-```
-Find the name of the device:
-```
-aplay -l
-```
+## Cross-platform
+These backends are supported on all platforms.
 
-Play a track on card 2, device 1, subdevice 0 (the audio can then be captured from card 2, device 0, subdevice 0):
-```
-aplay -D hw:2,1,0 sometrack.wav
-```
+### File or pipe
+Audio can be read from a file or a pipe using the `File` device type. This can read raw interleaved samples in most common formats.
 
-## PulseAudio
+To instead read from stdin, use the `Stdin` type. This makes it possible to pipe raw samples from some applications directly to CamillaDSP, without going via a virtual soundcard.
+
+### Jack
+Jack is most commonly used with Linux, but can also be used with both Windows and MacOS.
+
+The jack server must be running. 
+
+Set `device` to "default" for both capture and playback. The sample format is fixed at 32-bit float (FLOAT32LE).
+
+The samplerate must match the samplerate configured for the Jack server. 
+
+CamillaDSP will show up in Jack as "cpal_client_in" and "cpal_client_out".
+
+
+## Windows
+See the [separate readme for Wasapi](./backend_wasapi.md).
+
+## Linux
+Linux offers several audio APIs that CamillaDSP can use.
+### Alsa 
+See the [separate readme for ALSA](./backend_alsa.md).
+
+### PulseAudio
 PulseAudio provides a null-sink that can be used to capture audio from applications. To create a null sink type:
 ```
 pacmd load-module module-null-sink sink_name=MySink
@@ -445,8 +460,8 @@ pacmd list-sinks
 pacmd list-sources
 ```
 
-## Pipewire
-Pipewire implements both the PulseAudio and Jack APIs, and is therefore supported both via the Pulse and the Jack backends.
+### Pipewire
+There is no specific backend for Pipewire. It implements both the PulseAudio and Jack APIs, and is therefore supported both via the Pulse and the Jack backends.
 
 It supports a null-sink like PulseAudio. Create it with:
 ```
@@ -472,47 +487,8 @@ Pipewire can also be configured to output to an Alsa Loopback. TODO add example 
 
 TODO test with Jack.
 
-## Wasapi
-
-Audio can be captured in two ways.
-- Virtual sound card 
-  
-  To capture audio from applications a virtual sound card is used. [VB-CABLE from VB-AUDIO](https://www.vb-audio.com/Cable/) works well.
-
-  Set VB-CABLE as the default playback device in the Windows sound control panel. Open "Sound" in the Control Panel, then in the "Playback" tab select "CABLE Input" and click the "Set Default" button. 
-  The next step is to figure out the device names to enter in the CamillaDSP configuration.
-  Stay on the "Playback" tab and locate the device you want to use for playback of the processed audio. Note the two lines with the name and description of the device.
-  Then switch to the Recording tab. There should be a device listed as "CABLE Output". 
-  See "Device names" below for how to convert this information into the the devicename to enter in the CamillaDSP configuration.
-
-- Loopback
-
-  In loopback mode the audio is captured from a Playback device. In this mode, a spare unused sound card can be used instead of a virtual sound card. The built in audio of the computer should work. The quality of the card doesn't matter, since the audio data will not be routed through it. This requires using shared mode, see more below.
-
-  Open the Sound Control Panel app, and locate the unused card in the "Playback" tab. Set it as default device. See "Device names" below on how to write the device name to enter in the CamillaDSP configuration. 
-  Also on the "Playback" tab, locate the device you want to use for playback of the processed audio, and write down the device name.
-
-
-CamillaDSP supports both shared and exclusive modes. 
-
-In most cases exclusive mode is preferred since it gives a direct connection with the audio hardware. 
-
-### Exclusive mode
-
-In exclusive mode CamillaDSP is able to control the sample rate of the devices. The Windows audio mixer and volume control are both bypassed. The settings for "Default format" in the Windows Sound Control Panel app isn't used. The sample format must be one that the device driver can accept. This usually matches the hardware capabilities of the device. For example a 24-bit USB dac is likely to accept `S16LE` and `S24LE3`. Other formats may be supported depending on driver support.
-
-### Shared mode
-
-In shared mode the sample format in the CamillaDSP configuration is always 32-bit float (`FLOAT32LE`). The sample rate in CamillaDSP must match the "Default format" setting of the device. To change this, open "Sound" in the Control panel, select the sound card, and click "Properties". Then open the "Advanced" tab and select the desired format under "Default Format". Pick the sample rate you want, and the largest number of bits available.
-
-### Device names
-
-The device name to use in the CamillaDSP configuration is the same as seen in the Windows volume control. The full device name is built from the input/output name and card name. In the list of devices in the Sound Control Panel app, the first line for each device is the input/output name, and the second is the card name. The format to use in the CamillaDSP config is "{input/output name} ({card name})". For example, the Virtual Cable capture device name becomes "CABLE Output (VB-Audio Virtual Cable)".
-
-An alternative is to use the (cpal-listdevices)[https://github.com/HEnquist/cpal-listdevices/releases/latest] command line tool to list all device names. 
-
-## CoreAudio
-To capture audio from applications a virtual sound card is needed. This has been verified to work well with [Soundflower](https://github.com/mattingalls/Soundflower)
+## MacOS (CoreAudio)
+To capture audio from applications a virtual sound card is needed. This has been verified to work well with [Soundflower](https://github.com/mattingalls/Soundflower) and [BlackHole](https://github.com/ExistentialAudio/BlackHole). SoundFlower only supports Intel macs, while BlackHole supports both Intel and Apple Silicon. BlackHole has a 2-channel and a 16-channel version. There is currently a bug in the 2-channel version that in some cases can lead to choppy sound. If this happens, try the 16-channel version instead. 
 
 Set the virtual sound card as the default playback device in the Sound preferences, and let CamillaDSP capture from the output of this card.
 
@@ -521,21 +497,6 @@ The device name is the same as the one shown in the "Audio MIDI Setup" that can 
 An alternative is to use the (cpal-listdevices)[https://github.com/HEnquist/cpal-listdevices/releases/latest] command line tool to list all device names. 
 
 The sample format to enter in the CamillaDSP configuration is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
-
-## Jack
-The jack server must be running. 
-
-Set `device` to "default" for both capture and playback. The sample format is fixed at 32-bit float (FLOAT32LE).
-
-The samplerate must match the samplerate configured for the Jack server. 
-
-CamillaDSP will show up in Jack as "cpal_client_in" and "cpal_client_out".
-
-
-## File or pipe
-Audio can be read from a file or a pipe using the `File` device type. This can read raw interleaved samples in most common formats.
-
-To instead read from stdin, use the `Stdin` type. This makes it possible to pipe raw samples from some applications directly to CamillaDSP, without going via a virtual soundcard.
 
 
 # Configuration
@@ -698,14 +659,14 @@ Any parameter marked (*) in all examples in this section are optional. If they a
 
     ### Supported formats
 
-    |            | Alsa               | Pulse              | Wasapi             | CoreAudio          | Jack               | File/Stdin/Stdout  |
-    |------------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|
-    | S16LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark: |
-    | S24LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
-    | S24LE3     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
-    | S32LE      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark: |
-    | FLOAT32LE  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-    | FLOAT64LE  | :heavy_check_mark: | :x:                | :x:                | :x:                | :x:                | :heavy_check_mark: |
+    |            | Alsa | Pulse | Wasapi | CoreAudio | Jack | File/Stdin/Stdout |
+    |------------|------|-------|--------|-----------|------|-------------------|
+    | S16LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
+    | S24LE      | Yes  | Yes   | Yes    | No        | No   | Yes               |
+    | S24LE3     | Yes  | Yes   | Yes    | No        | No   | Yes               |
+    | S32LE      | Yes  | Yes   | Yes    | No        | No   | Yes               |
+    | FLOAT32LE  | Yes  | Yes   | Yes    | Yes       | Yes  | Yes               |
+    | FLOAT64LE  | Yes  | No    | No     | No        | No   | Yes               |
   
     
     ### Equivalent formats
@@ -722,20 +683,20 @@ Any parameter marked (*) in all examples in this section are optional. If they a
     | FLOAT64LE  | FLOAT64_LE | -         |
   
   ### File, Stdin, Stdout
-  The __File__ device type reads or writes to a file, while __Stdin__ reads from stdin and __Stdout__writes to stdout.
+  The `File` device type reads or writes to a file, while `Stdin` reads from stdin and `Stdout` writes to stdout.
   The format is raw interleaved samples, in the selected sample format.
   If the capture device reaches the end of a file, the program will exit once all chunks have been played. 
   That delayed sound that would end up in a later chunk will be cut off. To avoid this, set the optional parameter `extra_samples` for the File capture device.
   This causes the capture device to yield the given number of samples (per channel) after reaching end of file, allowing any delayed sound to be played back.
-  The __Stdin__ capture device and __Stdout__ playback device use stdin and stdout, so it's possible
+  The `Stdin` capture device and `Stdout` playback device use stdin and stdout, so it's possible
   to easily pipe audio between applications:
   ```
   > camilladsp stdio_capt.yml > rawfile.dat
   > cat rawfile.dat | camilladsp stdio_pb.yml
   ```
-  Note: On Unix-like systems it's also possible to use the File device and set the filename to `/devstdin` for capture, or `/dev/stdout` for playback. 
+  Note: On Unix-like systems it's also possible to use the File device and set the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback. 
 
-  Please note the __File__ capture device isn't able to read wav-files directly. If you want to letCamillaDSP play wav-files, please see the [separate guide for converting wav to raw files(coefficients_from_wav.md).
+  Please note the `File` capture device isn't able to read wav-files directly. If you want to let CamillaDSP play wav-files, please see the [separate guide for converting wav to raw files](coefficients_from_wav.md).
 
   Example config for File:
   ```
@@ -769,7 +730,7 @@ Any parameter marked (*) in all examples in this section are optional. If they a
       format: S32LE
   ```
 
-  The __File__ and __Stdin__ capture devices support two additional optional parameters, for advanced handling of raw files and testing:
+  The `File` and `Stdin` capture devices support two additional optional parameters, for advanced handling of raw files and testing:
   * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream. This can be used to skip over the header of some formats like .wav (which typically has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
   * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file or stream.
 
@@ -779,35 +740,14 @@ Any parameter marked (*) in all examples in this section are optional. If they a
     read_bytes: 200
     ```
 
-  ### Alsa
-  The __Alsa__ capture device has two optional extra properties that are used to work around quirks of some devices. 
-  Both should normally be left out, or set to the default value of `false`.
-  - `retry_on_error`: Set this to `true` if capturing from the USB gadget driver on for example a Raspberry Pi. 
-    This device stops providing data if playback is stopped or paused, and retrying capture after an error 
-    allows capture to continue when more data becomes available.
-  - `avoid_blocking_read`: Some devices misbehave when using the blocking IO of Alsa, 
-    typically when there is no incoming data. Examples are spdif inputs when there is no signal present, 
-    or the USB gadget driver when the source isn't sending any data. 
-    Set this to `true` if you get capture errors when stopping the signal. This then allows processing to continue once the signal returns. 
+  ### Wasapi
+  See the [separate readme for Wasapi](./backend_wasapi.md#configuration-of-devices).
 
-  Example config for Alsa:
-  ```
-    capture:
-      type: Alsa
-      channels: 2
-      device: "hw:0,1"
-      format: S16LE
-      retry_on_error: false (*)
-      avoid_blocking_read: false (*)
-    playback:
-      type: Alsa
-      channels: 2
-      device: "hw:Generic_1"
-      format: S32LE
-  ```
+  ### Alsa
+  See the [separate readme for ALSA](./backend_alsa.md#configuration-of-devices).
 
   ### Pulse
-  The __Pulse__ capture and playback devices have no advanced options.
+  The `Pulse` capture and playback devices have no advanced options.
 
   Example config for Pulse:
   ```
@@ -823,28 +763,8 @@ Any parameter marked (*) in all examples in this section are optional. If they a
       format: S32LE
   ```
 
-  ### Wasapi
-  On Windows, the Wasapi api is used. The __Wasapi__ capture and playback devices have an `exclusive` parameter for setting if Exclusive mode should be used. The capture device also has a `loopback` parameter for enabling loopback capture mode. Both these parameters are optional, and default to `false` if left out.
-
-  Example config for Wasapi:
-  ```
-    capture:
-      type: Wasapi
-      channels: 2
-      device: "CABLE Output (VB-Audio Virtual Cable)"
-      format: FLOAT32LE
-      exclusive: false (*)
-      loopback: false (*)
-    playback:
-      type: Wasapi
-      channels: 2
-      device: "SPDIF Interface (FX-AUDIO-DAC-X6)"
-      format: S24LE3
-      exclusive: true (*)
-  ```
-
   ### Jack
-  The __Jack__ capture and playback devices do not have a `format` parameter, since they always uses the FLOAT32LE format. It seems that the `device` property should always be set to "default". This parameter may be removed in a future version.
+  The `Jack` capture and playback devices do not have a `format` parameter, since they always uses the FLOAT32LE format. It seems that the `device` property should always be set to "default". This parameter may be removed in a future version.
 
   Example config for Jack:
   ```

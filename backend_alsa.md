@@ -4,7 +4,7 @@
 
 ALSA is the low level audio API that is used in the Linux kernel. The ALSA project also maintains various user-space tools and utilities that are installed by default in most Linux distributions.
 
-This readme only covers some basics of ALSA. For more details, see for example [the ALSA Documentation](#alsa-documentation) and [A close look at ALSA](#a-close-look-at-alsa)
+This readme only covers some basics of ALSA. For more details, see for example the [ALSA Documentation](#alsa-documentation) and [A close look at ALSA](#a-close-look-at-alsa)
 
 ### Hardware devices
 
@@ -75,9 +75,9 @@ Capture parameters are determined in the same way with `arecord`:
 ```
 This outputs the same table as for the aplay example above, but for a capture device. 
 
+## Routing all audio through CamillaDSP
 
-## Capturing audio from other applications
-
+To route all audio through CamillaDSP using ALSA, the audio output from any application must be redirected. This can be acheived either by using an [ALSA Loopback device](#alsa-loopback), or the [ALSA CamillaDSP "I/O" plugin](#alsa-camilladsp-"io"-plugin).
 
 ### ALSA Loopback
 An ALSA Loopback card can be used. This behaves like a sound card that presents two devices. The sound being send to the playback side on one device can then be captured from the capture side on the other device. 
@@ -101,19 +101,14 @@ arecord -D hw:Loopback,0,0 sometrack_copy.wav
 The first application that opens either side of a Loopback decides the sample rate and format. If `aplay` is started first in this example, this means that `arecord` must use the same sample rate and format. 
 To change format or rate, both sides of the loopback must first be closed.
 
+When using the ALSA Loopback approach, see the separate repository [camilladsp-config](#camilladsp-config). 
+This contains example configuration files for setting up the entire system, and to have it start automatically after boot.
+
 ### ALSA CamillaDSP "I/O" plugin
 
 ALSA can be extended by plugins in user-space. One such plugin that is intended specifically for CamillaDSP is the [ALSA CamillaDSP "I/O" plugin](#alsa-camilladsp-plugin) by scripple.
 
 The plugin starts CamillaDSP whenever an application opens the CamillaDSP plugin PCM device. This makes it possible to support automatic switching of the sample rate. See the plugin readme for how to install and configure it.
-
-
-## Routing all audio through CamillaDSP
-When using the ALSA Loopback approach, see the separate repository [camilladsp-config](#camilladsp-config).
-
-This contains example configuration files for setting up the entire system, and to have it start automatically after boot.
-
-For the ALSA CamillaDSP plugin, all details are in the [plugin readme](#alsa-camilladsp-plugin-readme)
 
 ## Configuration of devices
 
@@ -153,13 +148,11 @@ Both should normally be left out, or set to the default value of `false`.
 ## Links
 ### ALSA Documentation
 https://www.alsa-project.org/wiki/Documentation
-### ALSA Plugin Documentation
-https://www.alsa-project.org/alsa-doc/alsa-lib/pcm_plugins.html
 ### A close look at ALSA
 https://www.volkerschatz.com/noise/alsa.html
-### ALSA CamillaDSP plugin
-https://github.com/scripple/alsa_cdsp/
-### ALSA CamillaDSP plugin readme
-https://github.com/scripple/alsa_cdsp/blob/master/README.md
+### ALSA Plugin Documentation
+https://www.alsa-project.org/alsa-doc/alsa-lib/pcm_plugins.html
 ### camilladsp-config
 https://github.com/HEnquist/camilladsp-config
+### ALSA CamillaDSP plugin
+https://github.com/scripple/alsa_cdsp/
