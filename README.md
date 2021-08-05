@@ -37,11 +37,11 @@ The full configuration is given in a yaml file.
   - **[Jack](#jack)**
   - **[File or pipe](#file-or-pipe)**
 - **[Windows](#windows)**
+- **[MacOS (CoreAudio)](#macos-coreaudio)**
 - **[Linux](#linux)**
   - **[Alsa](#alsa)**
   - **[PulseAudio](#pulseaudio)**
   - **[Pipewire](#pipewire)**
-- **[MacOS (CoreAudio)](#macos-coreaudio)**
 
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
@@ -443,6 +443,9 @@ CamillaDSP will show up in Jack as "cpal_client_in" and "cpal_client_out".
 ## Windows
 See the [separate readme for Wasapi](./backend_wasapi.md).
 
+## MacOS (CoreAudio)
+See the [separate readme for CoreAudio](./backend_coreaudio.md).
+
 ## Linux
 Linux offers several audio APIs that CamillaDSP can use.
 ### Alsa 
@@ -486,17 +489,6 @@ This device can be set as the default output in the Gnome settings, meaning all 
 Pipewire can also be configured to output to an Alsa Loopback. TODO add example config for this in camilladsp-config.
 
 TODO test with Jack.
-
-## MacOS (CoreAudio)
-To capture audio from applications a virtual sound card is needed. This has been verified to work well with [Soundflower](https://github.com/mattingalls/Soundflower) and [BlackHole](https://github.com/ExistentialAudio/BlackHole). SoundFlower only supports Intel macs, while BlackHole supports both Intel and Apple Silicon. BlackHole has a 2-channel and a 16-channel version. There is currently a bug in the 2-channel version that in some cases can lead to choppy sound. If this happens, try the 16-channel version instead. 
-
-Set the virtual sound card as the default playback device in the Sound preferences, and let CamillaDSP capture from the output of this card.
-
-The device name is the same as the one shown in the "Audio MIDI Setup" that can be found under "Other" in Launchpad. The name for the 2-channel interface of Soundflower is "Soundflower (2ch)", and the built in audio in a MacBook Pro is called "Built-in Output".
-
-An alternative is to use the (cpal-listdevices)[https://github.com/HEnquist/cpal-listdevices/releases/latest] command line tool to list all device names. 
-
-The sample format to enter in the CamillaDSP configuration is always 32-bit float (FLOAT32LE) even if the device is configured to use another format.
 
 
 # Configuration
@@ -745,6 +737,9 @@ Any parameter marked (*) in all examples in this section are optional. If they a
 
   ### Alsa
   See the [separate readme for ALSA](./backend_alsa.md#configuration-of-devices).
+
+  ### CoreAudio
+  See the [separate readme for CoreAudio](./backend_coreaudio.md#configuration-of-devices).
 
   ### Pulse
   The `Pulse` capture and playback devices have no advanced options.

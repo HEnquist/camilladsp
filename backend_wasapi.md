@@ -44,7 +44,7 @@ CamillaDSP must capture audio from a capture device. This can either be a virtua
 When using a virtual sound card (sometimes called loopback device), all applications output their audio to the playback side of this virtual sound card. Then this audio signal can be captured from the capture side of the virtual card. [VB-CABLE from VB-AUDIO](https://www.vb-audio.com/Cable/) works well.
 
 #### Sending all audio to the virtual card
-Set VB-CABLE as the default playback device in the Windows sound control panel. Open "Sound" in the Control Panel, then in the "Playback" tab select "CABLE Input" and click the "Set Default" button. This will work for all applications that respect this setting, which in practive is nearly all. The exceptions are the ones that provide their own way of selecting playback device.
+Set VB-CABLE as the default playback device in the Windows sound control panel. Open "Sound" in the Control Panel, then in the "Playback" tab select "CABLE Input" and click the "Set Default" button. This will work for all applications that respect this setting, which in practice is nearly all. The exceptions are the ones that provide their own way of selecting playback device.
 
 #### Capturing the audio
 The next step is to figure out the device name to enter in the CamillaDSP configuration.
@@ -78,7 +78,9 @@ This example configuration will be used to explain the various options specific 
 ```
 
 ### Device names
-The device names that are used for `device:` for both playback and capture are entered as shown in the Windows volume control. Click the speaker icon in the notification area, and then click the small up-arrow in the upper right corner of the volume control pop-up. This displays a list of all playback devices, with their names in the right format. The names can also be seen in the "Sound" control panel app. Look at either the "Playback" or "Recording" tab. The device name is built from the input/output name and card name, and the format is "{input/output name} ({card name})". For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)", and the built in audio of a desktop computer can be "Speakers (Realtek(R) Audio)"
+The device names that are used for `device:` for both playback and capture are entered as shown in the Windows volume control. Click the speaker icon in the notification area, and then click the small up-arrow in the upper right corner of the volume control pop-up. This displays a list of all playback devices, with their names in the right format. The names can also be seen in the "Sound" control panel app. Look at either the "Playback" or "Recording" tab. The device name is built from the input/output name and card name, and the format is "{input/output name} ({card name})". For example, the VB-CABLE device name is "CABLE Output (VB-Audio Virtual Cable)", and the built in audio of a desktop computer can be "Speakers (Realtek(R) Audio)".
+
+Specifying "default" will give the default capture or playback device.
 
 To help with finding the name of playback and capture devices, use the Windows version of "cpal-listdevices" program from here: https://github.com/HEnquist/cpal-listdevices/releases
 
