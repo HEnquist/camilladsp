@@ -2,7 +2,7 @@
 
 ## Introduction
 CoreAudio is the standard audio API of macOS. 
-In the current version of CamillaDSP, CoreAudio is supported via the [CPAL cross-platform sound library](https://github.com/RustAudio/cpal).
+In the current version of CamillaDSP (v0.6.0 at the time of writing), CoreAudio is supported via the [CPAL cross-platform sound library](https://github.com/RustAudio/cpal).
 
 ## Capturing audio from other applications
 

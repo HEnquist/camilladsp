@@ -431,7 +431,7 @@ To instead read from stdin, use the `Stdin` type. This makes it possible to pipe
 ### Jack
 Jack is most commonly used with Linux, but can also be used with both Windows and MacOS.
 
-The Jack support of CamillaDSP should be considered experimental for the time being.
+The Jack support of the current CamillaDSP version (v0.6.0 at the time of writing) should be considered experimental.
 
 The jack server must be running. 
 
