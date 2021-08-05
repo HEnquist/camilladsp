@@ -431,6 +431,8 @@ To instead read from stdin, use the `Stdin` type. This makes it possible to pipe
 ### Jack
 Jack is most commonly used with Linux, but can also be used with both Windows and MacOS.
 
+The Jack support of CamillaDSP should be considered experimental for the time being.
+
 The jack server must be running. 
 
 Set `device` to "default" for both capture and playback. The sample format is fixed at 32-bit float (FLOAT32LE).
@@ -484,9 +486,13 @@ This will list all devices, and the null-sink should be included like this:
  		node.name = "MySink"
  		media.class = "Audio/Sink"
 ```
-This device can be set as the default output in the Gnome settings, meaning all desktop audio will use it. The audio sent to this device can then be captured from the monitor output named "MySink.monitor" using the PulseAudio backend.
+This device can be set as the default output in the Gnome sound settings, meaning all desktop audio will use it.
+ The audio sent to this device can then be captured from the monitor output named "MySink.monitor" using the PulseAudio backend.
 
-Pipewire can also be configured to output to an Alsa Loopback. TODO add example config for this in camilladsp-config.
+Pipewire can also be configured to output to an Alsa Loopback.
+This is done by adding an ALSA sink in the Pipewire configuration. 
+This sink then becomes available as an output device in the Gnome sound settings. 
+TODO add example config for this in camilladsp-config.
 
 TODO test with Jack.
 
