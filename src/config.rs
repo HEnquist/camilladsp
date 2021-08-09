@@ -923,13 +923,17 @@ fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
 fn replace_tokens_in_config(config: &mut Configuration) {
     let samplerate = config.devices.samplerate;
     let num_channels = config.devices.capture.channels();
-    //let mut new_config = config.clone();
     for (_name, filter) in config.filters.iter_mut() {
-        if let Filter::Conv {
-            parameters: ConvParameters::Raw { filename, .. },
-        } = filter
-        {
-            *filename = replace_tokens(filename, samplerate, num_channels);
+        match filter {
+            Filter::Conv {
+                parameters: ConvParameters::Raw { filename, .. },
+            }
+            | Filter::Conv {
+                parameters: ConvParameters::Wav { filename, .. },
+            } => {
+                *filename = replace_tokens(filename, samplerate, num_channels);
+            }
+            _ => {}
         }
     }
     for mut step in config.pipeline.iter_mut() {
