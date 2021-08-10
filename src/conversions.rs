@@ -59,7 +59,7 @@ pub fn chunk_to_buffer_rawbytes(
             }
             *value = float_val;
         }
-        clipped += f64::write_samples(&nextframe, &mut cursor, &rawformat).unwrap();
+        clipped += PrcFmt::write_samples(&nextframe, &mut cursor, &rawformat).unwrap();
     }
     if clipped > 0 {
         warn!(
