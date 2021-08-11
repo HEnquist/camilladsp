@@ -628,7 +628,6 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   The default is 1.0 seconds. Processing will stop after 3 measurements in a row are more than 4% off from the configured rate. The value of 4% is chosen to allow some variation, while still catching changes between for example 44.1 to 48 kHz.
  
 * `capture` and `playback`
-  See first the [separate help on how to find the device names and parameters.](./devices.md)
   Input and output devices are defined in the same way. 
   A device needs:
   * `type`: 
