@@ -29,8 +29,6 @@ use StatusMessage;
 pub enum CpalHost {
     #[cfg(target_os = "macos")]
     CoreAudio,
-    #[cfg(target_os = "windows")]
-    Wasapi,
     #[cfg(feature = "jack-backend")]
     Jack,
 }
@@ -61,6 +59,8 @@ pub struct CpalCaptureDevice {
     pub sample_format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
+    pub stop_on_rate_change: bool,
+    pub rate_measure_interval: f32,
 }
 
 fn open_cpal_playback(
@@ -73,8 +73,6 @@ fn open_cpal_playback(
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
-        #[cfg(target_os = "windows")]
-        CpalHost::Wasapi => HostId::Wasapi,
         #[cfg(feature = "jack-backend")]
         CpalHost::Jack => HostId::Jack,
     };
@@ -124,8 +122,6 @@ fn open_cpal_capture(
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
-        #[cfg(target_os = "windows")]
-        CpalHost::Wasapi => HostId::Wasapi,
         #[cfg(feature = "jack-backend")]
         CpalHost::Jack => HostId::Jack,
     };
@@ -336,9 +332,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         };
                         if let Err(err) = &stream {
                             status_channel
-                                .send(StatusMessage::PlaybackError {
-                                    message: format!("{}", err),
-                                })
+                                .send(StatusMessage::PlaybackError(err.to_string()))
                                 .unwrap();
                         }
                         barrier.wait();
@@ -346,9 +340,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             match strm.play() {
                                 Ok(_) => debug!("Starting playback loop"),
                                 Err(err) => status_channel
-                                    .send(StatusMessage::PlaybackError {
-                                        message: format!("{}", err),
-                                    })
+                                    .send(StatusMessage::PlaybackError(err.to_string()))
                                     .unwrap(),
                             }
                         }
@@ -377,7 +369,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                 100.0 * speed
                                             );
                                             status_channel
-                                                .send(StatusMessage::SetSpeed { speed })
+                                                .send(StatusMessage::SetSpeed(speed))
                                                 .unwrap();
                                             playback_status.write().unwrap().buffer_level =
                                                 av_delay as usize;
@@ -403,9 +395,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         }
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::PlaybackError {
-                            message: format!("{}", err),
-                        });
+                        let send_result = status_channel.send(StatusMessage::PlaybackError(err.to_string()));
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
@@ -469,6 +459,8 @@ impl CaptureDevice for CpalCaptureDevice {
         let async_src = resampler_is_async(&resampler_conf);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
+        let stop_on_rate_change = self.stop_on_rate_change;
+        let rate_measure_interval = self.rate_measure_interval;
         let handle = thread::Builder::new()
             .name("CpalCapture".to_string())
             .spawn(move || {
@@ -530,9 +522,7 @@ impl CaptureDevice for CpalCaptureDevice {
                         };
                         if let Err(err) = &stream {
                             status_channel
-                                .send(StatusMessage::CaptureError {
-                                    message: format!("{}", err),
-                                })
+                                .send(StatusMessage::CaptureError(err.to_string()))
                                 .unwrap();
                         }
                         barrier.wait();
@@ -540,9 +530,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             match strm.play() {
                                 Ok(_) => debug!("Starting capture loop"),
                                 Err(err) => status_channel
-                                    .send(StatusMessage::CaptureError {
-                                        message: format!("{}", err),
-                                    })
+                                    .send(StatusMessage::CaptureError(err.to_string()))
                                     .unwrap(),
                             }
                         }
@@ -551,6 +539,10 @@ impl CaptureDevice for CpalCaptureDevice {
                         let mut sample_queue_i: VecDeque<i16> = VecDeque::with_capacity(2*chunksize*channels);
                         let mut sample_queue_f: VecDeque<f32> = VecDeque::with_capacity(2*chunksize*channels);
                         let mut averager = countertimer::TimeAverage::new();
+                        let mut watcher_averager = countertimer::TimeAverage::new();
+                        let mut valuewatcher =
+                            countertimer::ValueWatcher::new(capture_samplerate as f32, RATE_CHANGE_THRESHOLD_VALUE, RATE_CHANGE_THRESHOLD_COUNT);
+                        let rate_measure_interval_ms = (1000.0 * rate_measure_interval) as u64;
                         let mut value_range = 0.0;
                         let mut chunk_stats;
                         let mut rate_adjust = 0.0;
@@ -595,11 +587,9 @@ impl CaptureDevice for CpalCaptureDevice {
                                             Ok(buf) => {
                                                 write_data_from_device(&buf, &mut sample_queue_i);
                                             }
-                                            Err(msg) => {
+                                            Err(err) => {
                                                 status_channel
-                                                    .send(StatusMessage::CaptureError {
-                                                        message: format!("{}", msg),
-                                                    })
+                                                    .send(StatusMessage::CaptureError(err.to_string()))
                                                     .unwrap();
                                             }
                                         }
@@ -618,11 +608,9 @@ impl CaptureDevice for CpalCaptureDevice {
                                             Ok(buf) => {
                                                 write_data_from_device(&buf, &mut sample_queue_f);
                                             }
-                                            Err(msg) => {
+                                            Err(err) => {
                                                 status_channel
-                                                    .send(StatusMessage::CaptureError {
-                                                        message: format!("{}", msg),
-                                                    })
+                                                    .send(StatusMessage::CaptureError(err.to_string()))
                                                     .unwrap();
                                             }
                                         }
@@ -651,6 +639,28 @@ impl CaptureDevice for CpalCaptureDevice {
                                 capt_stat.rate_adjust = rate_adjust as f32;
                                 capt_stat.state = state;
                             }
+                            watcher_averager.add_value(capture_samples);
+                            if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
+                                let samples_per_sec = watcher_averager.get_average();
+                                watcher_averager.restart();
+                                let measured_rate_f = samples_per_sec / channels as f64;
+                                let changed = valuewatcher.check_value(measured_rate_f as f32);
+                                if changed {
+                                    warn!(
+                                        "sample rate change detected, last rate was {} Hz",
+                                        measured_rate_f
+                                    );
+                                    if stop_on_rate_change {
+                                        let msg = AudioMessage::EndOfStream;
+                                        channel.send(msg).unwrap_or(());
+                                        status_channel
+                                            .send(StatusMessage::CaptureFormatChange(measured_rate_f as usize))
+                                            .unwrap_or(());
+                                        break;
+                                    }
+                                }
+                                trace!("Measured sample rate is {} Hz", measured_rate_f);
+                            }
                             chunk_stats = chunk.get_stats();
                             //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
@@ -677,9 +687,7 @@ impl CaptureDevice for CpalCaptureDevice {
                     }
                     Err(err) => {
                         let send_result = status_channel
-                            .send(StatusMessage::CaptureError {
-                                message: format!("{}", err),
-                            });
+                            .send(StatusMessage::CaptureError(err.to_string()));
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }

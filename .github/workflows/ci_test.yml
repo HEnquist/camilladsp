@@ -45,10 +45,11 @@ jobs:
           command: check
           args: --no-default-features
 
-      - name: Run cargo test
+      - name: Run cargo test with pulse-backend
         uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --features pulse-backend
 
       - name: Run cargo fmt
         uses: actions-rs/cargo@v1
@@ -87,14 +88,14 @@ jobs:
         with:
           command: check
           use-cross: true
-          args: --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features websocket
+          args: --target armv7-unknown-linux-gnueabihf
 
       - name: Run cargo test for arm
         uses: actions-rs/cargo@v1
         with:
           command: test
           use-cross: true
-          args: --target armv7-unknown-linux-gnueabihf --no-default-features --features alsa-backend --features websocket
+          args: --target armv7-unknown-linux-gnueabihf
 
   check_test_arm64:
     name: Check and test Linux arm 64bit
@@ -119,14 +120,14 @@ jobs:
         with:
           command: check
           use-cross: true
-          args: --target aarch64-unknown-linux-gnu --no-default-features --features alsa-backend --features websocket
+          args: --target aarch64-unknown-linux-gnu
 
       - name: Run cargo test for arm
         uses: actions-rs/cargo@v1
         with:
           command: test
           use-cross: true
-          args: --target aarch64-unknown-linux-gnu --no-default-features --features alsa-backend --features websocket
+          args: --target aarch64-unknown-linux-gnu
 
 
   check_test_windows:
@@ -147,13 +148,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --no-default-features --features cpal-backend
+          args: --no-default-features
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --no-default-features --features cpal-backend
+          args: --no-default-features
 
   check_test_macos:
     name: Check and test macOS

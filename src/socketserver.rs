@@ -14,7 +14,7 @@ use tungstenite::server::accept;
 use tungstenite::Message;
 use tungstenite::WebSocket;
 
-use crate::{CaptureStatus, PlaybackStatus, ProcessingStatus};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus, StopReason};
 use config;
 use ExitRequest;
 use ProcessingState;
@@ -27,9 +27,11 @@ pub struct SharedData {
     pub active_config: Arc<Mutex<Option<config::Configuration>>>,
     pub active_config_path: Arc<Mutex<Option<String>>>,
     pub new_config: Arc<Mutex<Option<config::Configuration>>>,
+    pub previous_config: Arc<Mutex<Option<config::Configuration>>>,
     pub capture_status: Arc<RwLock<CaptureStatus>>,
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
-    pub processing_status: Arc<RwLock<ProcessingStatus>>,
+    pub processing_status: Arc<RwLock<ProcessingParameters>>,
+    pub status: Arc<RwLock<ProcessingStatus>>,
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +78,7 @@ enum WsCommand {
     SetConfigJson(String),
     Reload,
     GetConfig,
+    GetPreviousConfig,
     ReadConfig(String),
     ReadConfigFile(String),
     ValidateConfig(String),
@@ -95,6 +98,7 @@ enum WsCommand {
     SetMute(bool),
     GetVersion,
     GetState,
+    GetStopReason,
     GetRateAdjust,
     GetClippedSamples,
     GetBufferLevel,
@@ -125,6 +129,10 @@ enum WsReply {
         result: WsResult,
     },
     GetConfig {
+        result: WsResult,
+        value: String,
+    },
+    GetPreviousConfig {
         result: WsResult,
         value: String,
     },
@@ -200,6 +208,10 @@ enum WsReply {
     GetState {
         result: WsResult,
         value: ProcessingState,
+    },
+    GetStopReason {
+        result: WsResult,
+        value: StopReason,
     },
     GetRateAdjust {
         result: WsResult,
@@ -318,7 +330,7 @@ macro_rules! make_handler {
                             let reply = match command {
                                 Ok(cmd) => handle_command(cmd, &shared_data_inst),
                                 Err(err) => Some(WsReply::Invalid {
-                                    error: format!("{}", err).to_string(),
+                                    error: err.to_string(),
                                 }),
                             };
                             if let Some(rep) = reply {
@@ -432,6 +444,14 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
                 value: capstat.state,
             })
         }
+        WsCommand::GetStopReason => {
+            let stat = shared_data_inst.status.read().unwrap();
+            let value = stat.stop_reason.clone();
+            Some(WsReply::GetStopReason {
+                result: WsResult::Ok,
+                value,
+            })
+        }
         WsCommand::GetRateAdjust => {
             let capstat = shared_data_inst.capture_status.read().unwrap();
             Some(WsReply::GetRateAdjust {
@@ -506,6 +526,11 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
         WsCommand::GetConfig => Some(WsReply::GetConfig {
             result: WsResult::Ok,
             value: serde_yaml::to_string(&*shared_data_inst.active_config.lock().unwrap()).unwrap(),
+        }),
+        WsCommand::GetPreviousConfig => Some(WsReply::GetPreviousConfig {
+            result: WsResult::Ok,
+            value: serde_yaml::to_string(&*shared_data_inst.previous_config.lock().unwrap())
+                .unwrap(),
         }),
         WsCommand::GetConfigJson => Some(WsReply::GetConfigJson {
             result: WsResult::Ok,

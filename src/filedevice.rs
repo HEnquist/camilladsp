@@ -1,11 +1,7 @@
 use audiodevice::*;
 use config;
-use config::NumberFamily;
 use config::SampleFormat;
-use conversions::{
-    buffer_to_chunk_bytes, buffer_to_chunk_float_bytes, chunk_to_buffer_bytes,
-    chunk_to_buffer_float_bytes,
-};
+use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use countertimer;
 use std::fs::File;
 use std::io::ErrorKind;
@@ -19,7 +15,6 @@ use rubato::Resampler;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
-use NewValue;
 use PrcFmt;
 use ProcessingState;
 use Res;
@@ -59,6 +54,8 @@ pub struct FileCaptureDevice {
     pub extra_samples: usize,
     pub skip_bytes: usize,
     pub read_bytes: usize,
+    pub stop_on_rate_change: bool,
+    pub rate_measure_interval: f32,
 }
 
 struct CaptureChannels {
@@ -69,7 +66,6 @@ struct CaptureChannels {
 
 struct CaptureParams {
     channels: usize,
-    bits_per_sample: i32,
     sample_format: SampleFormat,
     store_bytes_per_sample: usize,
     extra_bytes: usize,
@@ -82,6 +78,8 @@ struct CaptureParams {
     read_bytes: usize,
     async_src: bool,
     capture_status: Arc<RwLock<CaptureStatus>>,
+    stop_on_rate_change: bool,
+    rate_measure_interval: f32,
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
@@ -96,7 +94,6 @@ impl PlaybackDevice for FilePlaybackDevice {
         let destination = self.destination.clone();
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bits_per_sample = self.sample_format.bits_per_sample();
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let sample_format = self.sample_format.clone();
         let handle = thread::Builder::new()
@@ -114,7 +111,6 @@ impl PlaybackDevice for FilePlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample as i32 - 1);
                         let mut chunk_stats;
                         barrier.wait();
                         debug!("starting playback loop");
@@ -122,30 +118,18 @@ impl PlaybackDevice for FilePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    let (valid_bytes, nbr_clipped) =
-                                        match sample_format.number_family() {
-                                            NumberFamily::Integer => chunk_to_buffer_bytes(
-                                                &chunk,
-                                                &mut buffer,
-                                                scalefactor,
-                                                bits_per_sample as i32,
-                                                store_bytes_per_sample,
-                                            ),
-                                            NumberFamily::Float => chunk_to_buffer_float_bytes(
-                                                &chunk,
-                                                &mut buffer,
-                                                bits_per_sample as i32,
-                                            ),
-                                        };
+                                    let (valid_bytes, nbr_clipped) = chunk_to_buffer_rawbytes(
+                                        &chunk,
+                                        &mut buffer,
+                                        &sample_format,
+                                    );
                                     let write_res = file.write_all(&buffer[0..valid_bytes]);
                                     match write_res {
                                         Ok(_) => {}
-                                        Err(msg) => {
+                                        Err(err) => {
                                             status_channel
-                                                .send(StatusMessage::PlaybackError {
-                                                    message: format!("{}", msg),
-                                                })
-                                                .unwrap();
+                                                .send(StatusMessage::PlaybackError(err.to_string()))
+                                                .unwrap_or(());
                                         }
                                     };
                                     if nbr_clipped > 0 {
@@ -157,28 +141,31 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         chunk_stats.rms_db();
                                     playback_status.write().unwrap().signal_peak =
                                         chunk_stats.peak_db();
-                                    //trace!(
-                                    //    "Playback signal RMS: {:?}, peak: {:?}",
-                                    //    chunk_stats.rms_db(),
-                                    //    chunk_stats.peak_db()
-                                    //);
+                                    trace!(
+                                        "Playback signal RMS: {:?}, peak: {:?}",
+                                        chunk_stats.rms_db(),
+                                        chunk_stats.peak_db()
+                                    );
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
-                                    status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                    status_channel
+                                        .send(StatusMessage::PlaybackDone)
+                                        .unwrap_or(());
                                     break;
                                 }
                                 Err(err) => {
                                     error!("Message channel error: {}", err);
-                                    status_channel.send(StatusMessage::PlaybackDone).unwrap();
+                                    status_channel
+                                        .send(StatusMessage::PlaybackError(err.to_string()))
+                                        .unwrap_or(());
                                     break;
                                 }
                             }
                         }
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::PlaybackError {
-                            message: format!("{}", err),
-                        });
+                        let send_result =
+                            status_channel.send(StatusMessage::PlaybackError(err.to_string()));
                         if send_result.is_err() {
                             error!("Playback error: {}", err);
                         }
@@ -211,39 +198,14 @@ fn get_nbr_capture_bytes(
     }
 }
 
-//&params.sample_format,
-//params.channels,
-//params.bits_per_sample,
-//params.store_bytes_per_sample,
-//bytes_read,
-//scalefactor,
-//&params.capture_status.read().unwrap().used_channels,
-
-fn build_chunk(
-    buf: &[u8],
-    params: &CaptureParams,
-    //sample_format: &SampleFormat,
-    //channels: usize,
-    //bits_per_sample: i32,
-    //store_bytes_per_sample: usize,
-    bytes_read: usize,
-    scalefactor: PrcFmt,
-    //used_channels: &[bool],
-) -> AudioChunk {
-    match params.sample_format.number_family() {
-        NumberFamily::Integer => buffer_to_chunk_bytes(
-            &buf,
-            params.channels,
-            scalefactor,
-            params.bits_per_sample,
-            params.store_bytes_per_sample,
-            bytes_read,
-            &params.capture_status.read().unwrap().used_channels,
-        ),
-        NumberFamily::Float => {
-            buffer_to_chunk_float_bytes(&buf, params.channels, params.bits_per_sample, bytes_read)
-        }
-    }
+fn build_chunk(buf: &[u8], params: &CaptureParams, bytes_read: usize) -> AudioChunk {
+    buffer_to_chunk_rawbytes(
+        buf,
+        params.channels,
+        &params.sample_format,
+        bytes_read,
+        &params.capture_status.read().unwrap().used_channels,
+    )
 }
 
 fn get_capture_bytes(
@@ -274,7 +236,6 @@ fn capture_loop(
     mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
 ) {
     debug!("starting captureloop");
-    let scalefactor = PrcFmt::new(2.0).powi(params.bits_per_sample - 1);
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
     let bytes_per_frame = params.channels * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];
@@ -283,7 +244,14 @@ fn capture_loop(
     let mut capture_bytes_temp;
     let mut extra_bytes_left = params.extra_bytes;
     let mut nbr_bytes_read = 0;
+    let rate_measure_interval_ms = (1000.0 * params.rate_measure_interval) as u64;
     let mut averager = countertimer::TimeAverage::new();
+    let mut watcher_averager = countertimer::TimeAverage::new();
+    let mut valuewatcher = countertimer::ValueWatcher::new(
+        params.capture_samplerate as f32,
+        RATE_CHANGE_THRESHOLD_VALUE,
+        RATE_CHANGE_THRESHOLD_COUNT,
+    );
     let mut silence_counter = countertimer::SilenceCounter::new(
         params.silence_threshold,
         params.silence_timeout,
@@ -299,11 +267,11 @@ fn capture_loop(
             Ok(CommandMessage::Exit) => {
                 debug!("Exit message received, sending EndOfStream");
                 let msg = AudioMessage::EndOfStream;
-                msg_channels.audio.send(msg).unwrap();
+                msg_channels.audio.send(msg).unwrap_or(());
                 msg_channels
                     .status
                     .send(StatusMessage::CaptureDone)
-                    .unwrap();
+                    .unwrap_or(());
                 break;
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
@@ -362,11 +330,11 @@ fn capture_loop(
                         &msg_channels.audio,
                     );
                     let msg = AudioMessage::EndOfStream;
-                    msg_channels.audio.send(msg).unwrap();
+                    msg_channels.audio.send(msg).unwrap_or(());
                     msg_channels
                         .status
                         .send(StatusMessage::CaptureDone)
-                        .unwrap();
+                        .unwrap_or(());
                     break;
                 }
                 averager.add_value(bytes);
@@ -384,28 +352,40 @@ fn capture_loop(
                     capt_stat.rate_adjust = rate_adjust as f32;
                     capt_stat.state = state;
                 }
+                watcher_averager.add_value(bytes);
+                if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
+                    let bytes_per_sec = watcher_averager.get_average();
+                    watcher_averager.restart();
+                    let measured_rate_f =
+                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
+                    let changed = valuewatcher.check_value(measured_rate_f as f32);
+                    if changed {
+                        warn!(
+                            "sample rate change detected, last rate was {} Hz",
+                            measured_rate_f
+                        );
+                        if params.stop_on_rate_change {
+                            let msg = AudioMessage::EndOfStream;
+                            msg_channels.audio.send(msg).unwrap_or(());
+                            msg_channels
+                                .status
+                                .send(StatusMessage::CaptureFormatChange(measured_rate_f as usize))
+                                .unwrap_or(());
+                            break;
+                        }
+                    }
+                    trace!("Measured sample rate is {} Hz", measured_rate_f);
+                }
             }
             Err(err) => {
                 debug!("Encountered a read error");
                 msg_channels
                     .status
-                    .send(StatusMessage::CaptureError {
-                        message: format!("{}", err),
-                    })
-                    .unwrap();
+                    .send(StatusMessage::CaptureError(err.to_string()))
+                    .unwrap_or(());
             }
         };
-        let mut chunk = build_chunk(
-            &buf[0..capture_bytes],
-            &params,
-            //&params.sample_format,
-            //params.channels,
-            //params.bits_per_sample,
-            //params.store_bytes_per_sample,
-            bytes_read,
-            scalefactor,
-            //&params.capture_status.read().unwrap().used_channels,
-        );
+        let mut chunk = build_chunk(&buf[0..capture_bytes], &params, bytes_read);
 
         value_range = chunk.maxval - chunk.minval;
         chunk_stats = chunk.get_stats();
@@ -430,7 +410,7 @@ fn capture_loop(
                 chunk.waveforms = new_waves;
             }
             let msg = AudioMessage::Audio(chunk);
-            msg_channels.audio.send(msg).unwrap();
+            msg_channels.audio.send(msg).unwrap_or(());
         } else {
             sleep_until_next(bytes_per_frame, params.capture_samplerate, capture_bytes);
         }
@@ -454,7 +434,6 @@ impl CaptureDevice for FileCaptureDevice {
         let chunksize = self.chunksize;
         let capture_samplerate = self.capture_samplerate;
         let channels = self.channels;
-        let bits_per_sample = self.sample_format.bits_per_sample();
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let buffer_bytes = 2.0f32.powf(
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
@@ -473,6 +452,8 @@ impl CaptureDevice for FileCaptureDevice {
         let read_bytes = self.read_bytes;
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
+        let stop_on_rate_change = self.stop_on_rate_change;
+        let rate_measure_interval = self.rate_measure_interval;
         let handle = thread::Builder::new()
             .name("FileCapture".to_string())
             .spawn(move || {
@@ -490,7 +471,6 @@ impl CaptureDevice for FileCaptureDevice {
                 };
                 let params = CaptureParams {
                     channels,
-                    bits_per_sample: bits_per_sample as i32,
                     sample_format,
                     store_bytes_per_sample,
                     extra_bytes,
@@ -503,6 +483,8 @@ impl CaptureDevice for FileCaptureDevice {
                     async_src,
                     capture_status,
                     capture_samplerate,
+                    stop_on_rate_change,
+                    rate_measure_interval,
                 };
                 let file_res: Result<Box<dyn Read>, std::io::Error> = match source {
                     CaptureSource::Filename(filename) => {
@@ -531,9 +513,8 @@ impl CaptureDevice for FileCaptureDevice {
                         capture_loop(file, params, msg_channels, resampler);
                     }
                     Err(err) => {
-                        let send_result = status_channel.send(StatusMessage::CaptureError {
-                            message: format!("{}", err),
-                        });
+                        let send_result =
+                            status_channel.send(StatusMessage::CaptureError(err.to_string()));
                         if send_result.is_err() {
                             error!("Capture error: {}", err);
                         }
@@ -563,7 +544,7 @@ fn send_silence(
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunksize, chunk_samples);
         let msg = AudioMessage::Audio(chunk);
         debug!("Sending extra chunk of {} frames", chunk_samples);
-        audio_channel.send(msg).unwrap();
+        audio_channel.send(msg).unwrap_or(());
         samples_left -= chunk_samples;
     }
 }

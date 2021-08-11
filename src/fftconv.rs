@@ -221,14 +221,14 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
             skip_bytes_lines,
         } => {
             let coeffs =
-                filters::read_coeff_file(&filename, &format, *read_bytes_lines, *skip_bytes_lines)?;
+                filters::read_coeff_file(filename, format, *read_bytes_lines, *skip_bytes_lines)?;
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }
             Ok(())
         }
         config::ConvParameters::Wav { filename, channel } => {
-            let coeffs = filters::read_wav(&filename, *channel)?;
+            let coeffs = filters::read_wav(filename, *channel)?;
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }

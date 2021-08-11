@@ -4,7 +4,7 @@ use filters;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use ProcessingStatus;
+use ProcessingParameters;
 
 pub fn run_processing(
     conf_proc: config::Configuration,
@@ -12,19 +12,23 @@ pub fn run_processing(
     tx_pb: mpsc::SyncSender<AudioMessage>,
     rx_cap: mpsc::Receiver<AudioMessage>,
     rx_pipeconf: mpsc::Receiver<(config::ConfigChange, config::Configuration)>,
-    processing_status: Arc<RwLock<ProcessingStatus>>,
+    processing_status: Arc<RwLock<ProcessingParameters>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_status.clone());
         debug!("build filters, waiting to start processing loop");
         barrier_proc.wait();
+        debug!("Processing loop starts now!");
         loop {
             match rx_cap.recv() {
                 Ok(AudioMessage::Audio(mut chunk)) => {
                     //trace!("AudioMessage::Audio received");
                     chunk = pipeline.process_chunk(chunk);
                     let msg = AudioMessage::Audio(chunk);
-                    tx_pb.send(msg).unwrap();
+                    if tx_pb.send(msg).is_err() {
+                        info!("Playback thread has already stopped.");
+                        break;
+                    }
                 }
                 Ok(AudioMessage::EndOfStream) => {
                     trace!("AudioMessage::EndOfStream received");

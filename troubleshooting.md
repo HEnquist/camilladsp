@@ -69,7 +69,7 @@
 - Unstable filter specified
 
   This means that a Biquad filter definition was found to give an unstable filter, 
-  meaning that the output signal can grow uncontrolled. Check that the coeffients were entered correctly.
+  meaning that the output signal can grow uncontrolled. Check that the coefficients were entered correctly.
 
 - Negative delay specified
 

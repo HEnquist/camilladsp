@@ -50,8 +50,8 @@ use camillalib::socketserver;
 use std::net::IpAddr;
 
 use camillalib::{
-    CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus, ProcessingState,
-    ProcessingStatus, StatusMessage, StatusStructs,
+    CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus, ProcessingParameters,
+    ProcessingState, ProcessingStatus, StatusMessage, StatusStructs, StopReason,
 };
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
@@ -110,6 +110,7 @@ fn run(
     active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     config_path: Arc<Mutex<Option<String>>>,
     new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
+    prev_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     status_structs: StatusStructs,
 ) -> Res<ExitState> {
     status_structs.capture.write().unwrap().state = ProcessingState::Starting;
@@ -185,6 +186,11 @@ fn run(
     let mut cap_ready = false;
     #[cfg(target_os = "linux")]
     signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&signal_reload))?;
+    signal_hook::flag::register_usize(
+        signal_hook::consts::SIGINT,
+        Arc::clone(&signal_exit),
+        ExitRequest::EXIT,
+    )?;
 
     loop {
         if signal_reload.load(Ordering::Relaxed) {
@@ -216,6 +222,7 @@ fn run(
                             trace!("Wait for cap..");
                             cap_handle.join().unwrap();
                             *new_config_shared.lock().unwrap() = Some(conf);
+                            trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
                         config::ConfigChange::None => {
@@ -239,6 +246,8 @@ fn run(
                     pb_handle.join().unwrap();
                     trace!("Wait for cap..");
                     cap_handle.join().unwrap();
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, exiting");
                     return Ok(ExitState::Exit);
                 }
                 ExitRequest::STOP => {
@@ -250,6 +259,8 @@ fn run(
                     trace!("Wait for cap..");
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, stopping");
                     return Ok(ExitState::Restart);
                 }
                 _ => {}
@@ -263,6 +274,7 @@ fn run(
                     if cap_ready {
                         debug!("Both capture and playback ready, release barrier");
                         barrier.wait();
+                        debug!("Supervisor loop starts now!");
                         is_starting = false;
                     }
                 }
@@ -272,10 +284,12 @@ fn run(
                     if pb_ready {
                         debug!("Both capture and playback ready, release barrier");
                         barrier.wait();
+                        debug!("Supervisor loop starts now!");
                         is_starting = false;
+                        status_structs.status.write().unwrap().stop_reason = StopReason::None;
                     }
                 }
-                StatusMessage::PlaybackError { message } => {
+                StatusMessage::PlaybackError(message) => {
                     error!("Playback error: {}", message);
                     tx_command_cap.send(CommandMessage::Exit).unwrap();
                     if is_starting {
@@ -283,29 +297,74 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for capture thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason =
+                        StopReason::PlaybackError(message);
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
-                StatusMessage::CaptureError { message } => {
+                StatusMessage::CaptureError(message) => {
                     error!("Capture error: {}", message);
                     if is_starting {
                         debug!("Error while starting, release barrier");
                         barrier.wait();
                     }
                     debug!("Wait for playback thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason =
+                        StopReason::CaptureError(message);
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, returning");
+                    return Ok(ExitState::Restart);
+                }
+                StatusMessage::PlaybackFormatChange(rate) => {
+                    error!("Playback stopped due to external format change");
+                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if is_starting {
+                        debug!("Error while starting, release barrier");
+                        barrier.wait();
+                    }
+                    debug!("Wait for capture thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason =
+                        StopReason::PlaybackFormatChange(rate);
+                    cap_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, returning");
+                    return Ok(ExitState::Restart);
+                }
+                StatusMessage::CaptureFormatChange(rate) => {
+                    error!("Capture stopped due to external format change");
+                    if is_starting {
+                        debug!("Error while starting, release barrier");
+                        barrier.wait();
+                    }
+                    debug!("Wait for playback thread to exit..");
+                    status_structs.status.write().unwrap().stop_reason =
+                        StopReason::CaptureFormatChange(rate);
+                    pb_handle.join().unwrap();
+                    *new_config_shared.lock().unwrap() = None;
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::PlaybackDone => {
                     info!("Playback finished");
+                    let mut stat = status_structs.status.write().unwrap();
+                    if stat.stop_reason == StopReason::None {
+                        stat.stop_reason = StopReason::Done;
+                    }
+                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::CaptureDone => {
                     info!("Capture finished");
                 }
-                StatusMessage::SetSpeed { speed } => {
+                StatusMessage::SetSpeed(speed) => {
                     debug!("SetSpeed message received");
                     tx_command_cap
                         .send(CommandMessage::SetSpeed { speed })
@@ -598,6 +657,7 @@ fn main_process() -> i32 {
     );
 
     let _guard = slog_scope::set_global_logger(log);
+
     // logging examples
     //trace!("trace message"); //with -vv
     //debug!("debug message"); //with -v
@@ -609,6 +669,9 @@ fn main_process() -> i32 {
     let _signal = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGHUP, || debug!("Received SIGHUP"))
     };
+
+    #[cfg(target_os = "windows")]
+    wasapi::initialize_mta().unwrap();
 
     let configname = matches.value_of("configfile").map(|path| path.to_string());
 
@@ -684,18 +747,23 @@ fn main_process() -> i32 {
         signal_rms: Vec::new(),
         signal_peak: Vec::new(),
     }));
-    let processing_status = Arc::new(RwLock::new(ProcessingStatus {
+    let processing_status = Arc::new(RwLock::new(ProcessingParameters {
         volume: initial_volume,
         mute: initial_mute,
+    }));
+    let status = Arc::new(RwLock::new(ProcessingStatus {
+        stop_reason: StopReason::None,
     }));
 
     let status_structs = StatusStructs {
         capture: capture_status.clone(),
         playback: playback_status.clone(),
         processing: processing_status.clone(),
+        status: status.clone(),
     };
     let active_config = Arc::new(Mutex::new(None));
     let new_config = Arc::new(Mutex::new(configuration));
+    let previous_config = Arc::new(Mutex::new(None));
 
     let active_config_path = Arc::new(Mutex::new(configname));
 
@@ -710,9 +778,11 @@ fn main_process() -> i32 {
                 active_config: active_config.clone(),
                 active_config_path: active_config_path.clone(),
                 new_config: new_config.clone(),
+                previous_config: previous_config.clone(),
                 capture_status,
                 playback_status,
                 processing_status,
+                status,
             };
             let server_params = socketserver::ServerParameters {
                 port: serverport,
@@ -768,6 +838,7 @@ fn main_process() -> i32 {
             active_config.clone(),
             active_config_path.clone(),
             new_config.clone(),
+            previous_config.clone(),
             status_structs.clone(),
         );
         match exitstatus {
@@ -792,5 +863,8 @@ fn main_process() -> i32 {
 }
 
 fn main() {
+    let drain = slog_async::Async::new(slog::Discard).build().fuse();
+    let log = slog::Logger::root(drain, o!());
+    let _guard = slog_scope::set_global_logger(log);
     std::process::exit(main_process());
 }

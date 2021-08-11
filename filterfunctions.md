@@ -6,6 +6,7 @@ The standard filters in CamillaDSP are not of a specific type, like Butterworth.
 Making a Bessel filter with a set of Biquads requires creating several Biquads, each with a unique Q and cut-off frequency.
 
 ## Multiplication factor for frequency:
+
 | Order | Biquad 1   | Biquad 2  | Biquad 3  | Biquad 4 |
 |-----------|-----|----|----|----|
 | 1| 1.0*           |                |                |                |
@@ -21,16 +22,17 @@ The asterisk (*) indicates that this is a 1st order filter.
 
 
 ## Q values:
-| Order | Biquad 1   | Biquad 2  | Biquad 3  | Biquad 4 |
-|-----------|-----|----|----|----|
-| 1 | (1st order)   |                |               |              |
-| 2 | 0.57735026919 |                |               |              |
-| 3 | (1st order)   | 0.691046625825 |               |              |
-| 4 | 0.805538281842| 0.521934581669 |               |              |
-| 5 | (1st order)   | 0.916477373948 |0.563535620851 |              |
-| 6 | 1.02331395383 | 0.611194546878 |0.510317824749 |              |
-| 7 | (1st order)   | 1.12625754198  |0.660821389297 |0.5323556979  |
-| 8 | 1.22566942541 | 0.710852074442 |0.559609164796 |0.505991069397|
+
+| Order | Biquad 1      | Biquad 2       | Biquad 3      | Biquad 4     |
+|-------|---------------|----------------|---------------|--------------|
+| 1     | (1st order)   |                |               |              |
+| 2     | 0.57735026919 |                |               |              |
+| 3     | (1st order)   | 0.691046625825 |               |              |
+| 4     | 0.805538281842| 0.521934581669 |               |              |
+| 5     | (1st order)   | 0.916477373948 |0.563535620851 |              |
+| 6     | 1.02331395383 | 0.611194546878 |0.510317824749 |              |
+| 7     | (1st order)   | 1.12625754198  |0.660821389297 |0.5323556979  |
+| 8     | 1.22566942541 | 0.710852074442 |0.559609164796 |0.505991069397|
 
 ## Example Bessel filter
 Let's make a 5th order Lowpass at 1 kHz. Loking at the tables we see that we need three filters. The first should be a 1st order while the second and third are 2nd order.
@@ -57,13 +59,14 @@ where `0 <= n < (N-1)/2`
 
 ## Table for q-values
 Butterworth and Linkwitz-Riley filtes can easily be built with Biquads. The following table lists the most common ones. High- and lowpass use the same parameters.
-| Type| Order   | Biquad 1   | Biquad 2  | Biquad 3  | Biquad 4 |
-|-----------|-----|----|----|----|----
-| Butterworth | 2   | 0.71 | 
-|        | 4   | 0.54| 1.31 |
-|        | 8   | 0.51| 0.6| 0.9 | 2.56 | 
-| Linkwitz-Riley | 2   | 0.5 | 
-|        | 4   | 0.71| 0.71 |
-|        | 8   | 0.54| 1.31 | 0.54| 1.31 |
+
+| Type           | Order | Biquad 1 | Biquad 2 | Biquad 3 | Biquad 4 |
+|----------------|-------|----------|----------|----------|----------|
+| Butterworth    | 2     | 0.71     |          |          |          |
+|                | 4     | 0.54     | 1.31     |          |          |
+|                | 8     | 0.51     | 0.6      | 0.9      | 2.56     | 
+| Linkwitz-Riley | 2     | 0.5      |          |          |          |
+|                | 4     | 0.71     | 0.71     |          |          |
+|                | 8     | 0.54     | 1.31     | 0.54     | 1.31     |
 
 Note that a 4th order LR iconsists of two 2nd order Butterworth filters, and that an 8th order LR consists of two 4:th order Butterworth filters.

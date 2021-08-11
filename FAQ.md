@@ -20,6 +20,12 @@
 
 ## Capture and playback
 
+- Why do I get buffer underruns sometimes even if everything looks correct?
+
+  If the playback sound card and the capture sound card have independent sample clocks, then they will never be perfectly synchronized. One of them will always run slightly faster than the other. If the playback device is the faster one, then it will sometimes run out of data to play. This will lead to almost periodic dropouts. If instead the capture device is the faster one, then there will instead be a slowly increasing delay between input and output.
+
+  Use the `enable_rate_adjust` option (with the asynchronous resampler if needed) to match the rates of the capture and playback devices. 
+
 - Why do I get only distorted noise when using 24-bit samples?
 
   There are two 24-bit formats, and it's very important to pick the right one. Both use three bytes to store each sample, but they are packed in different ways.
@@ -45,8 +51,7 @@
 
 - I only have filters with negative gain, why do I get clipping anyway?
   
-  If all filters have negative gain, then the 
-  It's not very intuitive, but the peak amplitude can actually increase when you apply filters that only attenuate. 
+  It's not very intuitive, but the peak amplitude can actually increase even though you apply filters that only attenuate. 
   
   The signal is a sum of a large number of frequency components, and in each particular sample some components 
   will add to increase the amplitude while other decrease it. 
@@ -58,11 +63,8 @@
 - When do I need to use an asynchronous resampler?
 
   The asynchronous resampler must be used when the ratio between the input and output sample rates cannot be expressed as a fixed ratio.
-  This is only the case when resampling to adaptively match the rate of two devices with independant clocks, where the ratio drifts a little all the time.
+  This is only the case when resampling to adaptively match the rate of two devices with independent clocks, where the ratio drifts a little all the time.
   Note that resampling between the fixed rates 44.1 kHz -> 48 kHz corresponds to a ratio of 160/147, and can be handled by the synchronous resampler.
   This works for any fixed resampling between the standard rates, 44.1 <-> 96 kHz, 88.2 <-> 192 kHz, 88.1 <-> 48 kHz etc.
 
-- My impulse response is a wav-file. How to I use it in CamillaDSP?
-
-  The wav-file must be converted to raw format, with one file per channel. Please see the [guide for converting](coefficients_from_wav.md).
 
