@@ -1,11 +1,11 @@
-# CamillaDSP
+# CamillaDSP v0.6.0
 ![CI test and lint](https://github.com/HEnquist/camilladsp/workflows/CI%20test%20and%20lint/badge.svg)
 
 A tool to create audio processing pipelines for applications such as active crossovers or room correction. It is written in Rust to benefit from the safety and elegant handling of threading that this language provides. 
 
 Supported platforms: Linux, macOS, Windows.
 
-Audio data is captured from a capture device and sent to a playback device. Alsa, PulseAudio, Wasapi and CoreAudio are currently supported for both capture and playback.
+Audio data is captured from a capture device and sent to a playback device. Alsa, PulseAudio, Jack, Wasapi and CoreAudio are currently supported for both capture and playback.
 
 The processing pipeline consists of any number of filters and mixers. Mixers are used to route audio between channels and to change the number of channels in the stream. Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT. A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples. A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
 The full configuration is given in a yaml file.
@@ -322,7 +322,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp --help
-CamillaDSP 0.5.0
+CamillaDSP 0.6.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
