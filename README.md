@@ -459,6 +459,7 @@ PulseAudio provides a null-sink that can be used to capture audio from applicati
 pacmd load-module module-null-sink sink_name=MySink
 ```
 This device can be set as the default output, meaning any application using PulseAudio will use it. The audio sent to this device can then be captured from the monitor output named "MySink.monitor".
+
 All available sinks and sources can be listed with the commands:
 ```
 pacmd list-sinks
@@ -466,9 +467,9 @@ pacmd list-sources
 ```
 
 ### Pipewire
-There is no specific backend for Pipewire. It implements both the PulseAudio and Jack APIs, and is therefore supported both via the Pulse and the Jack backends.
+Pipewire implements both the PulseAudio and Jack APIs. It is therefore supported both via the Pulse and the Jack backends, and there is no need for a specific Pipewire backend.
 
-It supports a null-sink like PulseAudio. Create it with:
+Pipewire supports creating null-sink like PulseAudio. Create it with:
 ```
 pactl load-module module-null-sink sink_name=MySink object.linger=1 media.class=Audio/Sink
 ```
@@ -487,12 +488,12 @@ This will list all devices, and the null-sink should be included like this:
  		media.class = "Audio/Sink"
 ```
 This device can be set as the default output in the Gnome sound settings, meaning all desktop audio will use it.
- The audio sent to this device can then be captured from the monitor output named "MySink.monitor" using the PulseAudio backend.
+The audio sent to this device can then be captured from the monitor output named "MySink.monitor" using the PulseAudio backend.
 
-Pipewire can also be configured to output to an Alsa Loopback.
+Pipewire can also be configured to output to an ALSA Loopback.
 This is done by adding an ALSA sink in the Pipewire configuration. 
 This sink then becomes available as an output device in the Gnome sound settings. 
-TODO add example config for this in camilladsp-config.
+See the "camilladsp-config" repository under [Related projects](#related-projects) for an example Pipewire configuration.
 
 TODO test with Jack.
 
