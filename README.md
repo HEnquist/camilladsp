@@ -321,17 +321,22 @@ This starts the processing defined in the specified config file. The config is f
 ## Command line options
 Starting with the --help flag prints a short help message:
 ```
-> camilladsp --help
-CamillaDSP 0.6.0
+> camilladsp.exe --help
+CamillaDSP 0.6.1
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
-Built with features: alsa-backend, pulse-backend, websocket
+Built with features: websocket
+
+Supported device types:
+Capture: File, Stdin, Wasapi
+Playback: File, Stdout, Wasapi
 
 USAGE:
-    camilladsp [FLAGS] [OPTIONS] <configfile>
+    camilladsp.exe [FLAGS] [OPTIONS] <configfile>
 
 FLAGS:
+    -m, --mute       Start with Volume and Loudness filters muted
     -c, --check      Check config file and exit
     -h, --help       Prints help information
     -V, --version    Prints version information
@@ -342,7 +347,7 @@ OPTIONS:
     -o, --logfile <logfile>                Write logs to file
     -l, --loglevel <loglevel>              Set log level [possible values: trace, debug, info, warn, error, off]
     -a, --address <address>                IP address to bind websocket server to
-    -g, --gain <gain>                      Set initial gain in dB for Volume filters
+    -g, --gain <gain>                      Set initial gain in dB for Volume and Loudness filters
     -p, --port <port>                      Port for websocket server
     -n, --channels <channels>              Override number of channels of capture device in config
     -e, --extra_samples <extra_samples>    Override number of extra samples in config
@@ -352,6 +357,7 @@ OPTIONS:
 
 ARGS:
     <configfile>    The configuration file to use
+
 ```
 
 Most flags have a long and a short form. For example `--port 1234` and `-p1234` are equivalent.

@@ -1,3 +1,12 @@
+## 0.6.1
+New features:
+- Add lists of supported device types in help message
+
+Bugfixes:
+- Fix broken Wasapi shared mode
+- Correct "built with features" list in help.
+- Correct list of supported device types.
+
 ## 0.6.0
 New features:
 - New Wasapi backend with support for exclusive mode and loopback.
