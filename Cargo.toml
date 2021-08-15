@@ -1,6 +1,6 @@
 [package]
 name = "camilladsp"
-version = "0.6.0"
+version = "0.6.1"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 description = "A flexible tool for processing audio"
 
@@ -33,7 +33,7 @@ nix = { version = "0.20", optional = true }
 [target.'cfg(target_os="windows")'.dependencies]
 #wasapi = { path = "../../rust/wasapi" }
 #wasapi = { git = "https://github.com/HEnquist/wasapi-rs" }
-wasapi = "0.4.0"
+wasapi = "0.4.1"
 crossbeam-channel = "0.5"
 
 [dependencies]

@@ -110,7 +110,9 @@ fn open_playback(
         let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
         collection.get_device_with_name(devname)?
     };
+    trace!("Found playback device {}", devname);
     let mut audio_client = device.get_iaudioclient()?;
+    trace!("Got playback iaudioclient");
     let wave_format = get_wave_format(sample_format, samplerate, channels);
     match audio_client.is_supported(&wave_format, &sharemode) {
         Ok(None) => {
@@ -179,7 +181,9 @@ fn open_capture(
         let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
         collection.get_device_with_name(devname)?
     };
+    trace!("Found capture device {}", devname);
     let mut audio_client = device.get_iaudioclient()?;
+    trace!("Got capture iaudioclient");
     let wave_format = get_wave_format(sample_format, samplerate, channels);
     match audio_client.is_supported(&wave_format, &sharemode) {
         Ok(None) => {

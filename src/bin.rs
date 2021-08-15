@@ -50,8 +50,9 @@ use camillalib::socketserver;
 use std::net::IpAddr;
 
 use camillalib::{
-    CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus, ProcessingParameters,
-    ProcessingState, ProcessingStatus, StatusMessage, StatusStructs, StopReason,
+    list_supported_devices, CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus,
+    ProcessingParameters, ProcessingState, ProcessingStatus, StatusMessage, StatusStructs,
+    StopReason,
 };
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
@@ -379,7 +380,7 @@ fn run(
 
 fn main_process() -> i32 {
     let mut features = Vec::new();
-    if cfg!(feature = "alsa-backend") {
+    if cfg!(all(feature = "alsa-backend", target_os = "linux")) {
         features.push("alsa-backend");
     }
     if cfg!(feature = "pulse-backend") {
@@ -410,7 +411,18 @@ fn main_process() -> i32 {
         features.push("debug");
     }
     let featurelist = format!("Built with features: {}", features.join(", "));
-    let longabout = format!("{}\n\n{}", crate_description!(), featurelist);
+
+    let (pb_types, cap_types) = list_supported_devices();
+    let playback_types = format!("Playback: {}", pb_types.join(", "));
+    let capture_types = format!("Capture: {}", cap_types.join(", "));
+
+    let longabout = format!(
+        "{}\n\n{}\n\nSupported device types:\n{}\n{}",
+        crate_description!(),
+        featurelist,
+        capture_types,
+        playback_types
+    );
 
     let clapapp = App::new("CamillaDSP")
         .version(crate_version!())
