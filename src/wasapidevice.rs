@@ -261,9 +261,14 @@ fn playback_loop(
     let sessioncontrol = audio_client.get_audiosessioncontrol()?;
     sessioncontrol.register_session_notification(&mut callbacks)?;
 
-    while sync.rx_play.len() < 2 {
+    let mut waited_millis = 0;
+    trace!("Waiting for data to start playback, will time out efter 3s");
+    while sync.rx_play.len() < 2 && waited_millis < 3000 {
         thread::sleep(Duration::from_millis(10));
+        waited_millis += 10;
     }
+    debug!("Waited for data for {} ms", waited_millis);
+
     audio_client.start_stream()?;
     let mut running = true;
     loop {
