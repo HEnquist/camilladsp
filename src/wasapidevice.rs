@@ -262,8 +262,8 @@ fn playback_loop(
     sessioncontrol.register_session_notification(&mut callbacks)?;
 
     let mut waited_millis = 0;
-    trace!("Waiting for data to start playback, will time out efter 3s");
-    while sync.rx_play.len() < 2 && waited_millis < 3000 {
+    trace!("Waiting for data to start playback, will time out after one second");
+    while sync.rx_play.len() < 2 && waited_millis < 1000 {
         thread::sleep(Duration::from_millis(10));
         waited_millis += 10;
     }
