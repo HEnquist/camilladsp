@@ -6,6 +6,7 @@ use countertimer;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
 use rubato::Resampler;
 use std::collections::VecDeque;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
@@ -258,8 +259,10 @@ fn playback_loop(
         };
         tx_cb.send(simplereason).unwrap_or(());
     });
+    let callbacks_rc = Rc::new(callbacks);
+    let callbacks_weak = Rc::downgrade(&callbacks_rc);
     let sessioncontrol = audio_client.get_audiosessioncontrol()?;
-    sessioncontrol.register_session_notification(&mut callbacks)?;
+    sessioncontrol.register_session_notification(callbacks_weak)?;
 
     let mut waited_millis = 0;
     trace!("Waiting for data to start playback, will time out after one second");
@@ -346,8 +349,12 @@ fn capture_loop(
         };
         tx_cb.send(simplereason).unwrap_or(());
     });
+
+    let callbacks_rc = Rc::new(callbacks);
+    let callbacks_weak = Rc::downgrade(&callbacks_rc);
+
     let sessioncontrol = audio_client.get_audiosessioncontrol()?;
-    sessioncontrol.register_session_notification(&mut callbacks)?;
+    sessioncontrol.register_session_notification(callbacks_weak)?;
 
     audio_client.start_stream()?;
     loop {
@@ -366,23 +373,27 @@ fn capture_loop(
             Some(frames) => frames,
             None => audio_client.get_bufferframecount()?,
         };
-        let mut data = vec![0u8; available_frames as usize * blockalign as usize];
-        let nbr_frames_read = capture_client.read_from_device(blockalign as usize, &mut data)?;
-        if nbr_frames_read != available_frames {
-            warn!(
-                "Expected {} frames, got {}",
-                available_frames, nbr_frames_read
-            );
-        }
-        match tx_capt.try_send((chunk_nbr, data)) {
-            Ok(()) | Err(TrySendError::Full(_)) => {}
-            Err(TrySendError::Disconnected(_)) => {
-                error!("Error sending, channel disconnected");
-                audio_client.stop_stream()?;
-                return Err(DeviceError::new("Channel disconnected").into());
+        trace!("Available frames from capture dev: {}", available_frames);
+        if available_frames > 0 {
+            let mut data = vec![0u8; available_frames as usize * blockalign as usize];
+            let nbr_frames_read =
+                capture_client.read_from_device(blockalign as usize, &mut data)?;
+            if nbr_frames_read != available_frames {
+                warn!(
+                    "Expected {} frames, got {}",
+                    available_frames, nbr_frames_read
+                );
             }
+            match tx_capt.try_send((chunk_nbr, data)) {
+                Ok(()) | Err(TrySendError::Full(_)) => {}
+                Err(TrySendError::Disconnected(_)) => {
+                    error!("Error sending, channel disconnected");
+                    audio_client.stop_stream()?;
+                    return Err(DeviceError::new("Channel disconnected").into());
+                }
+            }
+            chunk_nbr += 1;
         }
-        chunk_nbr += 1;
     }
 }
 
