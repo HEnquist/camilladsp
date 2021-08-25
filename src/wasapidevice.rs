@@ -374,6 +374,7 @@ fn capture_loop(
             None => audio_client.get_bufferframecount()?,
         };
         trace!("Available frames from capture dev: {}", available_frames);
+        // If no available frames, just skip the rest of this loop iteration
         if available_frames > 0 {
             let mut data = vec![0u8; available_frames as usize * blockalign as usize];
             let nbr_frames_read =
