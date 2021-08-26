@@ -8,7 +8,7 @@ use config;
 use config::SampleFormat;
 use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use countertimer;
-use rubato::Resampler;
+use rubato::VecResampler;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
@@ -235,7 +235,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
 }
 
 fn get_nbr_capture_bytes(
-    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
+    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_bytes: usize,
     channels: usize,
     store_bytes_per_sample: usize,

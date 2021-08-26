@@ -4,7 +4,7 @@ use config::{ConfigError, SampleFormat};
 use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use countertimer;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
-use rubato::Resampler;
+use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -656,7 +656,7 @@ fn send_error_or_captureformatchange(
 }
 
 fn get_nbr_capture_frames(
-    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
+    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_frames: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {

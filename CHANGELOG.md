@@ -1,3 +1,10 @@
+## 0.6.2
+New features:
+- Updated wasapi library
+
+Bugfixes:
+- Stop properly after failing to start with bad wasapi config
+
 ## 0.6.1
 New features:
 - Add lists of supported device types in help message

@@ -9,7 +9,7 @@ use num_integer as integer;
 #[cfg(feature = "pulse-backend")]
 use pulsedevice;
 use rubato::{
-    FftFixedOut, InterpolationParameters, InterpolationType, Resampler, SincFixedOut,
+    FftFixedOut, InterpolationParameters, InterpolationType, SincFixedOut, VecResampler,
     WindowFunction,
 };
 use std::error;
@@ -406,7 +406,7 @@ pub fn get_resampler(
     samplerate: usize,
     capture_samplerate: usize,
     chunksize: usize,
-) -> Option<Box<dyn Resampler<PrcFmt>>> {
+) -> Option<Box<dyn VecResampler<PrcFmt>>> {
     if resampler_is_async(conf) {
         let parameters = get_async_parameters(conf, samplerate, capture_samplerate);
         debug!(

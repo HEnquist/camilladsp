@@ -603,10 +603,39 @@ pub enum BiquadParameters {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum BiquadComboParameters {
-    LinkwitzRileyHighpass { freq: PrcFmt, order: usize },
-    LinkwitzRileyLowpass { freq: PrcFmt, order: usize },
-    ButterworthHighpass { freq: PrcFmt, order: usize },
-    ButterworthLowpass { freq: PrcFmt, order: usize },
+    LinkwitzRileyHighpass {
+        freq: PrcFmt,
+        order: usize,
+    },
+    LinkwitzRileyLowpass {
+        freq: PrcFmt,
+        order: usize,
+    },
+    ButterworthHighpass {
+        freq: PrcFmt,
+        order: usize,
+    },
+    ButterworthLowpass {
+        freq: PrcFmt,
+        order: usize,
+    },
+    FivePointPeq {
+        fls: PrcFmt,
+        qls: PrcFmt,
+        gls: PrcFmt,
+        fp1: PrcFmt,
+        qp1: PrcFmt,
+        gp1: PrcFmt,
+        fp2: PrcFmt,
+        qp2: PrcFmt,
+        gp2: PrcFmt,
+        fp3: PrcFmt,
+        qp3: PrcFmt,
+        gp3: PrcFmt,
+        fhs: PrcFmt,
+        qhs: PrcFmt,
+        ghs: PrcFmt,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

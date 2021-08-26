@@ -9,7 +9,7 @@ use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
 use cpal::{BufferSize, ChannelCount, HostId, SampleRate, StreamConfig};
-use rubato::Resampler;
+use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -409,7 +409,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
 }
 
 fn get_nbr_capture_samples(
-    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
+    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_samples: usize,
     channels: usize,
 ) -> usize {

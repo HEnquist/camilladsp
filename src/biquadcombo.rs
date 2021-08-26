@@ -80,6 +80,40 @@ impl BiquadCombo {
         qvalues
     }
 
+    fn make_peq5(
+        samplerate: usize,
+        f_all: [PrcFmt; 5],
+        q_all: [PrcFmt; 5],
+        g_all: [PrcFmt; 5],
+    ) -> Vec<biquad::Biquad> {
+        let mut filters = Vec::new();
+        for (n, ((f, q), g)) in f_all.iter().zip(q_all).zip(g_all).enumerate() {
+            if q.abs() > 0.001 {
+                let filtconf = match n {
+                    0 => config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q {
+                        freq: *f,
+                        q,
+                        gain: g,
+                    }),
+                    4 => config::BiquadParameters::Highshelf(config::ShelfSteepness::Q {
+                        freq: *f,
+                        q,
+                        gain: g,
+                    }),
+                    _ => config::BiquadParameters::Peaking(config::PeakingWidth::Q {
+                        freq: *f,
+                        q,
+                        gain: g,
+                    }),
+                };
+                let coeffs = biquad::BiquadCoefficients::from_config(samplerate, filtconf);
+                let filt = biquad::Biquad::new("".to_string(), samplerate, coeffs);
+                filters.push(filt);
+            }
+        }
+        filters
+    }
+
     pub fn from_config(
         name: String,
         samplerate: usize,
@@ -116,6 +150,35 @@ impl BiquadCombo {
             config::BiquadComboParameters::ButterworthLowpass { order, freq } => {
                 let qvalues = BiquadCombo::butterworth_q(order);
                 let filters = BiquadCombo::make_lowpass(samplerate, freq, qvalues);
+                BiquadCombo {
+                    samplerate,
+                    name,
+                    filters,
+                }
+            }
+            config::BiquadComboParameters::FivePointPeq {
+                fls,
+                qls,
+                gls,
+                fp1,
+                qp1,
+                gp1,
+                fp2,
+                qp2,
+                gp2,
+                fp3,
+                qp3,
+                gp3,
+                fhs,
+                qhs,
+                ghs,
+            } => {
+                let filters = BiquadCombo::make_peq5(
+                    samplerate,
+                    [fls, fp1, fp2, fp3, fhs],
+                    [qls, qp1, qp2, qp3, qhs],
+                    [gls, gp1, gp2, gp3, ghs],
+                );
                 BiquadCombo {
                     samplerate,
                     name,
@@ -178,6 +241,31 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
                 return Err(
                     config::ConfigError::new("Butterworth order must be larger than zero").into(),
                 );
+            }
+            Ok(())
+        }
+        config::BiquadComboParameters::FivePointPeq {
+            fls,
+            qls,
+            fp1,
+            qp1,
+            fp2,
+            qp2,
+            fp3,
+            qp3,
+            fhs,
+            qhs,
+            ..
+        } => {
+            if *qls <= 0.0 || *qhs <= 0.0 || *qp1 <= 0.0 || *qp2 <= 0.0 || *qp3 <= 0.0 {
+                return Err(config::ConfigError::new("All Q-values must be > 0").into());
+            } else if *fls >= maxfreq
+                || *fhs >= maxfreq
+                || *fp1 >= maxfreq
+                || *fp2 >= maxfreq
+                || *fp3 >= maxfreq
+            {
+                return Err(config::ConfigError::new("All frequencies must be > 0").into());
             }
             Ok(())
         }

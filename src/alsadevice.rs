@@ -11,7 +11,7 @@ use config::SampleFormat;
 use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use countertimer;
 use nix::errno::Errno;
-use rubato::Resampler;
+use rubato::VecResampler;
 use std::ffi::CString;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
@@ -368,7 +368,7 @@ fn capture_loop_bytes(
     pcmdevice: &alsa::PCM,
     io: alsa::pcm::IO<u8>,
     params: CaptureParams,
-    mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
+    mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
 ) {
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
@@ -557,7 +557,7 @@ fn capture_loop_bytes(
 
 fn get_nbr_capture_bytes(
     capture_bytes: usize,
-    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
+    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     params: &CaptureParams,
     buf: &mut Vec<u8>,
 ) -> usize {
