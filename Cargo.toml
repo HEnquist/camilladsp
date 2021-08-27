@@ -31,9 +31,9 @@ alsa = { version = "0.5.0", optional = true }
 nix = { version = "0.20", optional = true }
 
 [target.'cfg(target_os="windows")'.dependencies]
-wasapi = { path = "../../rust/wasapi" }
+#wasapi = { path = "../../rust/wasapi" }
 #wasapi = { git = "https://github.com/HEnquist/wasapi-rs" }
-#wasapi = "0.4.1"
+wasapi = "0.5.0"
 crossbeam-channel = "0.5"
 
 [dependencies]
@@ -61,8 +61,8 @@ tungstenite = { version = "0.13.0", optional = true, default-features = false }
 native-tls = { version = "0.2.7", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-#rubato = "0.8.0"
-rubato = { git = "https://github.com/HEnquist/rubato", branch = "objectsafe" }
+rubato = "0.10.0"
+#rubato = { git = "https://github.com/HEnquist/rubato", branch = "objectsafe" }
 cpal = { version = "0.13.3", optional = true }
 #rawsample = { path = "../../rust/rawsample" }
 #rawsample = { git = "https://github.com/HEnquist/rawsample", branch = "main" }
