@@ -68,7 +68,10 @@ Available formats:
 ```
 Ignore the error message at the end. The interesting fields are FORMAT, RATE and CHANNELS. In this example the sample formats this device can use are S16_LE and S32_LE (corresponding to S16LE and S32LE in CamillaDSP, see the [table of equivalent formats in the main README](./README.md#equivalent-formats) for the complete list). The sample rate can be either 44.1 or 48 kHz. And it supports only stereo playback (2 channels).
 
-Note that all possible combinations of the shown parameters may not be supported by the device. For example many USB DACS only support 24-bit samples up to 96 kHz, so that only 16-bit samples are supported at 192 kHz. For other devices (for example MOTU UltraLite-mk5), the number of channels depends on the sample rate. CamillaDSP sets first the number of channels. Then it sets sample rate, and finally sample format. Setting a value for a parameter may restrict the allowed values for the ones that have not yet been set. For the USB DAC just mentioned, setting the sample rate to 192 kHz means that only the S16LE sample format is allowed. If the CamillaDSP configuration is set to 192 kHz and S24LE3, then there will be an error when setting the format.
+### Combinations of parameter values
+Note that all possible combinations of the shown parameters may not be supported by the device. For example many USB DACS only support 24-bit samples up to 96 kHz, so that only 16-bit samples are supported at 192 kHz. For other devices, the number of channels depends on the sample rate. This is common on studio interfaces that support [ADAT](#adat).
+
+CamillaDSP sets first the number of channels. Then it sets sample rate, and finally sample format. Setting a value for a parameter may restrict the allowed values for the ones that have not yet been set. For the USB DAC just mentioned, setting the sample rate to 192 kHz means that only the S16LE sample format is allowed. If the CamillaDSP configuration is set to 192 kHz and S24LE3, then there will be an error when setting the format.
 
 
 Capture parameters are determined in the same way with `arecord`:
@@ -158,3 +161,7 @@ https://www.alsa-project.org/alsa-doc/alsa-lib/pcm_plugins.html
 https://github.com/HEnquist/camilladsp-config
 ### ALSA CamillaDSP plugin
 https://github.com/scripple/alsa_cdsp/
+
+## Notes
+### ADAT
+ADAT achieves higher sampling rates by multiplexing two or four 44.1/48kHz audio streams into a single one. A device implementing 8 channels over ADAT at 48kHz will therefore provide 4 channels over ADAT at 96kHz and 2 channels over ADAT at 192kHz.
