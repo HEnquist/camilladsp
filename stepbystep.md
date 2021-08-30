@@ -167,7 +167,9 @@ pipeline:
       - lowpass2k
 ```
 
-We try this and it works, but the sound isn't very nice. First off, the tweeters have higher sensitivity than the woofers, so they need to be attenuated. This can be done in the mixer, or via a separate "Gain" filter. Let's do it in the mixer, and attenuate by 5 dB. Just modify the "gain" parameters in the mixer config:
+We try this and it works, but the sound isn't very nice. First off, the tweeters have higher sensitivity than the woofers, so they need to be attenuated. This can be done in the mixer, or via a separate "Gain" filter. Let's do it in the mixer, and attenuate by 5 dB. 
+
+Just modify the "gain" parameters in the mixer config:
 ```yaml
 mixers:
   to4chan:
@@ -197,6 +199,7 @@ mixers:
             inverted: false
 ```
 This is far better but we need baffle step compensation as well. We can do this with a "Highshelf" filter. The measurements say we need to attenuate by 4 dB from 500 Hz and up.
+
 Add this filter definition:
 ```yaml
   bafflestep:
@@ -207,9 +210,17 @@ Add this filter definition:
       slope: 6.0
       gain: -4.0
 ```
-And then we plug it into the pipeline for the woofers:
+The baffle step correction should be applied to both woofers and tweeters, so let's add this in two new Filter steps (one per channel) before the Mixer:
 ```yaml
 pipeline:
+  - type: Filter      \ 
+    channel: 0        |
+    names:            |
+      - bafflestep    |  <---- new
+  - type: Filter      |
+    channel: 1        |
+    names:            |
+      - bafflestep    / 
   - type: Mixer
     name: to4chan
   - type: Filter
@@ -224,12 +235,53 @@ pipeline:
     channel: 0
     names:
       - lowpass2k
-      - bafflestep      <---- here
   - type: Filter
     channel: 1
     names:
       - lowpass2k
-      - bafflestep      <---- here
+```
+The last thing we need to do is to adjust the delay between tweeter and woofer. Measurements tell us we need to delay the tweeter by 0.5 ms. 
+
+Add this filter definition:
+```yaml
+  tweeterdelay:
+    type: Delay
+    parameters:
+      delay: 0.5
+      unit: ms
+```
+
+Now we add this to the tweeter channels:
+```yaml
+pipeline:
+  - type: Filter
+    channel: 0
+    names:
+      - bafflestep
+  - type: Filter
+    channel: 1
+    names:
+      - bafflestep
+  - type: Mixer
+    name: to4chan
+  - type: Filter
+    channel: 2
+    names:
+      - highpass2k
+      - tweeterdelay      <---- here!
+  - type: Filter
+    channel: 3
+    names:
+      - highpass2k
+      - tweeterdelay      <---- here!
+  - type: Filter
+    channel: 0
+    names:
+      - lowpass2k
+  - type: Filter
+    channel: 1
+    names:
+      - lowpass2k
 ```
 And we are done!
 
@@ -298,26 +350,39 @@ filters:
       freq: 500
       slope: 6.0
       gain: -4.0
+  tweeterdelay:
+    type: Delay
+    parameters:
+      delay: 0.5
+      unit: ms
 
 pipeline:
+  - type: Filter
+    channel: 0
+    names:
+      - bafflestep
+  - type: Filter
+    channel: 1
+    names:
+      - bafflestep
   - type: Mixer
     name: to4chan
   - type: Filter
     channel: 2
     names:
       - highpass2k
+      - tweeterdelay
   - type: Filter
     channel: 3
     names:
       - highpass2k
+      - tweeterdelay
   - type: Filter
     channel: 0
     names:
       - lowpass2k
-      - bafflestep
   - type: Filter
     channel: 1
     names:
       - lowpass2k
-      - bafflestep
 ```
