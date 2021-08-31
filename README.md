@@ -1160,13 +1160,13 @@ Single Biquads are defined using the type "Biquad". The available filter types a
 
 * LinkwitzTransform
   
-  A Linkwitz transform to "change" the resonance frequency and Q-value of a speaker.
+  A normal sealed-box speaker has a second order high-pass frequency response given by a resonance frequency and a Q-value. A [Linkwitz transform](https://linkwitzlab.com/filters.htm#9) can be used to apply a tailored filter that modifies the actual frequency response to a new target response. The target is also a second order high-pass function, given by the target resonance frequency and Q-value.
 
   Parameters:
   * `freq_act`: actual resonance frequency of the speaker.
   * `q_act`: actual Q-value of the speaker.
   * `freq_target`: target resonance frequency. 
-  * `q_target`: target Q-value
+  * `q_target`: target Q-value.
 
 To build more complex filters, use the type "BiquadCombo". This automatically adds several Biquads to build other filter types. The available types are:
 * ButterworthHighpass & ButterworthLowpass
