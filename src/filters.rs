@@ -24,6 +24,43 @@ use PrcFmt;
 use ProcessingParameters;
 use Res;
 
+#[derive(Debug, PartialEq, Eq)]
+struct Guid {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [u8; 8],
+}
+
+impl Guid {
+    fn from_slice(data: &[u8; 16]) -> Guid {
+        let data1 = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        let data2 = u16::from_le_bytes(data[4..6].try_into().unwrap());
+        let data3 = u16::from_le_bytes(data[6..8].try_into().unwrap());
+        let data4 = data[8..16].try_into().unwrap();
+        Guid {
+            data1,
+            data2,
+            data3,
+            data4,
+        }
+    }
+}
+
+const SUBTYPE_FLOAT: Guid = Guid {
+    data1: 3,
+    data2: 0,
+    data3: 16,
+    data4: [128, 0, 0, 170, 0, 56, 155, 113],
+};
+
+const SUBTYPE_PCM: Guid = Guid {
+    data1: 1,
+    data2: 0,
+    data3: 16,
+    data4: [128, 0, 0, 170, 0, 56, 155, 113],
+};
+
 #[derive(Debug)]
 pub struct WavParams {
     sample_format: config::FileFormat,
@@ -176,9 +213,8 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
         let is_fmt = buffer.iter().take(4).zip(fmt_b).all(|(a, b)| *a == *b);
         if is_fmt && (chunk_length == 16 || chunk_length == 18 || chunk_length == 40) {
             found_fmt = true;
-            let mut data = [0; 16];
+            let mut data = vec![0; chunk_length as usize];
             let _ = file.read(&mut data).unwrap();
-            // 1: int, 3: float
             let formatcode = u16::from_le_bytes(data[0..2].try_into().unwrap());
             channels = u16::from_le_bytes(data[2..4].try_into().unwrap());
             sample_rate = u32::from_le_bytes(data[4..8].try_into().unwrap());
@@ -192,7 +228,42 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
                 (1, 32, 4) => config::FileFormat::S32LE,
                 (3, 32, 4) => config::FileFormat::FLOAT32LE,
                 (3, 64, 8) => config::FileFormat::FLOAT64LE,
-                _ => {
+                (0xFFFE, _, _) => {
+                    // waveformatex
+                    if chunk_length != 40 {
+                        let msg = format!("Invalid extended header of wav file '{}'", filename);
+                        return Err(config::ConfigError::new(&msg).into());
+                    }
+                    let cb_size = u16::from_le_bytes(data[16..18].try_into().unwrap());
+                    let valid_bits_per_sample =
+                        u16::from_le_bytes(data[18..20].try_into().unwrap());
+                    let channel_mask = u32::from_le_bytes(data[20..24].try_into().unwrap());
+                    let subformat = &data[24..40];
+                    let subformat_guid = Guid::from_slice(subformat.try_into().unwrap());
+                    trace!(
+                        "Found extended wav fmt chunk: subformatcode: {:?}, cb_size: {}, channel_mask: {}, valid bits per sample: {}",
+                        subformat_guid, cb_size, channel_mask, valid_bits_per_sample
+                    );
+                    match (
+                        subformat_guid,
+                        bits,
+                        bytes_per_sample,
+                        valid_bits_per_sample,
+                    ) {
+                        (SUBTYPE_PCM, 16, 2, 16) => config::FileFormat::S16LE,
+                        (SUBTYPE_PCM, 24, 3, 24) => config::FileFormat::S24LE3,
+                        (SUBTYPE_PCM, 24, 4, 24) => config::FileFormat::S24LE,
+                        (SUBTYPE_PCM, 32, 4, 32) => config::FileFormat::S32LE,
+                        (SUBTYPE_FLOAT, 32, 4, 32) => config::FileFormat::FLOAT32LE,
+                        (SUBTYPE_FLOAT, 64, 8, 64) => config::FileFormat::FLOAT64LE,
+                        (_, _, _, _) => {
+                            let msg =
+                                format!("Unsupported extended wav format of file '{}'", filename);
+                            return Err(config::ConfigError::new(&msg).into());
+                        }
+                    }
+                }
+                (_, _, _) => {
                     let msg = format!("Unsupported wav format of file '{}'", filename);
                     return Err(config::ConfigError::new(&msg).into());
                 }

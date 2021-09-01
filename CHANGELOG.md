@@ -2,6 +2,7 @@
 New features:
 - Updated wasapi library
 - Add FivePointPeq biquad combo
+- Support wav with extended header
 
 Bugfixes:
 - Stop properly after failing to start with bad wasapi config
