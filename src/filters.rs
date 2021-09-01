@@ -24,6 +24,8 @@ use PrcFmt;
 use ProcessingParameters;
 use Res;
 
+/// Windows Guid
+/// Used to give sample format in the extended WAVEFORMATEXTENSIBLE wav header
 #[derive(Debug, PartialEq, Eq)]
 struct Guid {
     data1: u32,
@@ -47,6 +49,7 @@ impl Guid {
     }
 }
 
+/// KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
 const SUBTYPE_FLOAT: Guid = Guid {
     data1: 3,
     data2: 0,
@@ -54,6 +57,7 @@ const SUBTYPE_FLOAT: Guid = Guid {
     data4: [128, 0, 0, 170, 0, 56, 155, 113],
 };
 
+/// KSDATAFORMAT_SUBTYPE_PCM
 const SUBTYPE_PCM: Guid = Guid {
     data1: 1,
     data2: 0,
