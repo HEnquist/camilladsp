@@ -1,6 +1,7 @@
 ## 0.6.2
 New features:
 - Updated wasapi library
+- Add FivePointPeq biquad combo
 
 Bugfixes:
 - Stop properly after failing to start with bad wasapi config
