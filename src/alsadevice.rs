@@ -11,8 +11,9 @@ use config::SampleFormat;
 use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use countertimer;
 use nix::errno::Errno;
-use rubato::Resampler;
+use rubato::VecResampler;
 use std::ffi::CString;
+use std::fmt::Debug;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
@@ -24,6 +25,17 @@ use PrcFmt;
 use ProcessingState;
 use Res;
 use StatusMessage;
+
+const STANDARD_RATES: [u32; 17] = [
+    5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
+    352800, 384000, 705600, 768000,
+];
+
+#[derive(Debug)]
+enum SupportedValues {
+    Range(u32, u32),
+    Discrete(Vec<u32>),
+}
 
 pub struct AlsaPlaybackDevice {
     pub devname: String,
@@ -220,6 +232,65 @@ fn capture_buffer(
     Ok(CaptureResult::Normal)
 }
 
+fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {
+    let min_rate = hwp.get_rate_min()?;
+    let max_rate = hwp.get_rate_max()?;
+    if min_rate == max_rate {
+        // Only one rate is supported.
+        return Ok(SupportedValues::Discrete(vec![min_rate]));
+    } else if hwp.test_rate(min_rate + 1).is_ok() {
+        // If min_rate + 1 is sipported, then this must be a range.
+        return Ok(SupportedValues::Range(min_rate, max_rate));
+    }
+    let mut rates = Vec::new();
+    // Loop through and test all the standard rates.
+    for rate in STANDARD_RATES.iter() {
+        if hwp.test_rate(*rate).is_ok() {
+            rates.push(*rate);
+        }
+    }
+    Ok(SupportedValues::Discrete(rates))
+}
+
+fn list_nbr_channels(hwp: &HwParams) -> Res<Vec<u32>> {
+    let min_channels = hwp.get_channels_min()?;
+    let max_channels = hwp.get_channels_max()?;
+    if min_channels == max_channels {
+        return Ok(vec![min_channels]);
+    }
+    let mut channels = Vec::new();
+    for chan in min_channels..max_channels {
+        if hwp.test_channels(chan).is_ok() {
+            channels.push(chan);
+        }
+    }
+    Ok(channels)
+}
+
+fn list_formats(hwp: &HwParams) -> Res<Vec<SampleFormat>> {
+    let mut formats = Vec::new();
+    // Let's just check the formats supported by CamillaDSP
+    if hwp.test_format(Format::s16()).is_ok() {
+        formats.push(SampleFormat::S16LE);
+    }
+    if hwp.test_format(Format::s24()).is_ok() {
+        formats.push(SampleFormat::S24LE);
+    }
+    if hwp.test_format(Format::S243LE).is_ok() {
+        formats.push(SampleFormat::S24LE3);
+    }
+    if hwp.test_format(Format::s32()).is_ok() {
+        formats.push(SampleFormat::S32LE);
+    }
+    if hwp.test_format(Format::float()).is_ok() {
+        formats.push(SampleFormat::FLOAT32LE);
+    }
+    if hwp.test_format(Format::float64()).is_ok() {
+        formats.push(SampleFormat::FLOAT64LE);
+    }
+    Ok(formats)
+}
+
 /// Open an Alsa PCM device
 fn open_pcm(
     devname: String,
@@ -238,9 +309,28 @@ fn open_pcm(
     }
     // Set hardware parameters
     {
+        let direction = if capture { "Capture" } else { "Playback" };
         let hwp = HwParams::any(&pcmdev)?;
+        let supported_channels = list_nbr_channels(&hwp)?;
+        debug!(
+            "{}: supported channels: {:?}",
+            direction, supported_channels
+        );
+        debug!("{}: setting channels to {}", direction, channels);
         hwp.set_channels(channels)?;
+        let supported_rates = list_samplerates(&hwp)?;
+        debug!(
+            "{}: supported sample rates: {:?}",
+            direction, supported_rates
+        );
+        debug!("{}: setting rate to {}", direction, samplerate);
         hwp.set_rate(samplerate, ValueOr::Nearest)?;
+        let supported_formats = list_formats(&hwp)?;
+        debug!(
+            "{}: supported capture formats: {:?}",
+            direction, supported_formats
+        );
+        debug!("{}: setting format to {}", direction, sample_format);
         match sample_format {
             SampleFormat::S16LE => hwp.set_format(Format::s16())?,
             SampleFormat::S24LE => hwp.set_format(Format::s24())?,
@@ -249,7 +339,6 @@ fn open_pcm(
             SampleFormat::FLOAT32LE => hwp.set_format(Format::float())?,
             SampleFormat::FLOAT64LE => hwp.set_format(Format::float64())?,
         }
-
         hwp.set_access(Access::RWInterleaved)?;
         let _bufsize = hwp.set_buffer_size_near(2 * bufsize)?;
         let _period = hwp.set_period_size_near(bufsize / 4, alsa::ValueOr::Nearest)?;
@@ -368,7 +457,7 @@ fn capture_loop_bytes(
     pcmdevice: &alsa::PCM,
     io: alsa::pcm::IO<u8>,
     params: CaptureParams,
-    mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
+    mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
 ) {
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
@@ -557,7 +646,7 @@ fn capture_loop_bytes(
 
 fn get_nbr_capture_bytes(
     capture_bytes: usize,
-    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
+    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     params: &CaptureParams,
     buf: &mut Vec<u8>,
 ) -> usize {

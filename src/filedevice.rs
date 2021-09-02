@@ -11,7 +11,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Duration;
 
-use rubato::Resampler;
+use rubato::VecResampler;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
@@ -179,7 +179,7 @@ impl PlaybackDevice for FilePlaybackDevice {
 }
 
 fn get_nbr_capture_bytes(
-    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
+    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_bytes: usize,
     channels: usize,
     store_bytes_per_sample: usize,
@@ -233,7 +233,7 @@ fn capture_loop(
     mut file: Box<dyn Read>,
     params: CaptureParams,
     msg_channels: CaptureChannels,
-    mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
+    mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
 ) {
     debug!("starting captureloop");
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;

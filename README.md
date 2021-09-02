@@ -1117,36 +1117,81 @@ filters:
 
 Single Biquads are defined using the type "Biquad". The available filter types are:
 * Free
-  * given by normalized coefficients `a1`, `a2`, `b0`, `b1`, `b2`.
+
+  Given by normalized coefficients `a1`, `a2`, `b0`, `b1`, `b2`.
+
 * Highpass & Lowpass
-  * Second order high/lowpass filters (12dB/oct)
-  * Defined by cutoff frequency `freq` and either Q-value `q` or bandwidth in octaves `bandwidth`.
+
+  Second order high/lowpass filters (12dB/oct)
+  
+  Defined by cutoff frequency `freq` and either Q-value `q` or bandwidth in octaves `bandwidth`.
+
 * HighpassFO & LowpassFO
-  * First order high/lowpass filters (6dB/oct)
-  * Defined by cutoff frequency `freq`.
+
+  First order high/lowpass filters (6dB/oct)
+  
+  Defined by cutoff frequency `freq`.
+
 * Highshelf & Lowshelf
-  * High / Low uniformly affects the high / low frequencies respectively while leaving the low / high part unaffected. In between there is a slope of variable steepness.
+  
+  High / Low uniformly affects the high / low frequencies respectively while leaving the low / high part unaffected. In between there is a slope of variable steepness.
+
+  Parameters:
   * `gain` gives the gain of the filter
   * `slope` is the steepness in dB/octave. Values up to around +-12 are usable.
   * `q` is the Q-value and can be used instead of `slope` to define the steepness of the filter. Only one of `q` and `slope` can be given. 
   * `freq` is the center frequency of the sloping section.
+
 * Peaking
-  * A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
+  
+  A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
+
 * Notch
-  * A notch filter to attenuate a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
+  
+  A notch filter to attenuate a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
+
 * Bandpass
-  * A second order bandpass filter for a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
+  
+  A second order bandpass filter for a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
+
 * Allpass
-  * A second order allpass filter for a given frequency `freq` with a steepness given either by the Q-value `q` or bandwidth in octaves `bandwidth`
+
+  A second order allpass filter for a given frequency `freq` with a steepness given either by the Q-value `q` or bandwidth in octaves `bandwidth`
+
 * LinkwitzTransform
-  * A Linkwitz transform to change a speaker with resonance frequency ```freq_act``` and Q-value ```q_act```, to a new resonance frequency ```freq_target``` and Q-value ```q_target```.
+  
+  A normal sealed-box speaker has a second order high-pass frequency response given by a resonance frequency and a Q-value. A [Linkwitz transform](https://linkwitzlab.com/filters.htm#9) can be used to apply a tailored filter that modifies the actual frequency response to a new target response. The target is also a second order high-pass function, given by the target resonance frequency and Q-value.
+
+  Parameters:
+  * `freq_act`: actual resonance frequency of the speaker.
+  * `q_act`: actual Q-value of the speaker.
+  * `freq_target`: target resonance frequency. 
+  * `q_target`: target Q-value.
 
 To build more complex filters, use the type "BiquadCombo". This automatically adds several Biquads to build other filter types. The available types are:
 * ButterworthHighpass & ButterworthLowpass
-  * defined by frequency, `freq` and filter `order`.
+
+  Defined by frequency, `freq` and filter `order`.
+
 * LinkwitzRileyHighpass & LinkwitzRileyLowpass
-  * defined by frequency, `freq` and filter `order`.
-  * Note, the order must be even
+
+  Defined by frequency, `freq` and filter `order`.
+
+  Note, the order must be even
+
+* FivePointPeq
+  
+  This filter combo is mainly meant to be created by guis. Is defines a 5-point (or band) parametric equalizer by combining a Lowshelf, a Highshelf and three Peaking filters.
+
+  Each individual filter is defined by frequency, gain and q. The parameter names are:
+  * Lowshelf: `gls`, `fls`, `qls` 
+  * Peaking 1: `gp1`, `fp1`, `qp1`
+  * Peaking 2: `gp2`, `fp2`, `qp2`
+  * Peaking 3: `gp3`, `fp3`, `qp3`
+  * Highshelf: `ghs`, `fhs`, `qhs`
+
+  All 15 parameters must be included in the config.
+
 
 Other types such as Bessel filters can be built by combining several Biquads. [See the separate readme for more filter functions.](./filterfunctions.md)
 
@@ -1223,6 +1268,10 @@ pipeline:
 ```
 In this config first a mixer is used to copy a stereo input to four channels. Then for each channel a filter step is added. A filter block can contain one or several filters that must be define in the "Filters" section. Here channel 0 and 1 get filtered by "lowpass_fir" and "peak1", while 2 and 3 get filtered by just "highpass_fir". 
 If the names of mixers or filters includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filter name `fir_$samplerate$` will be updated to `fir_44100`. 
+
+## Translating filters exported by REW
+REW can automatically generate a set of filters for correcting the response. These can then be exported as an `.xml`-file. This file can then be translated to CamillaDSP filters using the `translate_rew_xml.py` Python script. This will generate filters and pipeline steps that can be pasted into a CamillaDSP config file. This script currently supports only `Peaking` filters.
+
 
 ## Visualizing the config
 Please note that the `show_config.py` script mentioned here is deprecated, and has been replaced by the `plotcamillaconf` tool from the pycamilladsp-plot library. 
