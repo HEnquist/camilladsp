@@ -255,9 +255,8 @@ fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {
 fn list_samplerates_as_text(hwp: &HwParams) -> String {
     let supported_rates_res = list_samplerates(hwp);
     if let Ok(rates) = supported_rates_res {
-        format!("supported samplerates: {:?}", rates).to_string()
-    }
-    else {
+        format!("supported samplerates: {:?}", rates)
+    } else {
         "failed checking supported samplerates".to_string()
     }
 }
@@ -269,12 +268,12 @@ fn list_nbr_channels(hwp: &HwParams) -> Res<(u32, u32, Vec<u32>)> {
         return Ok((min_channels, max_channels, vec![min_channels]));
     }
     let mut channels = Vec::new();
-    
-    let mut check_max =  max_channels;
+
+    let mut check_max = max_channels;
     if check_max > 32 {
         check_max = 32;
     }
-    for chan in min_channels..(check_max+1) {
+    for chan in min_channels..(check_max + 1) {
         if hwp.test_channels(chan).is_ok() {
             channels.push(chan);
         }
@@ -285,9 +284,11 @@ fn list_nbr_channels(hwp: &HwParams) -> Res<(u32, u32, Vec<u32>)> {
 fn list_channels_as_text(hwp: &HwParams) -> String {
     let supported_channels_res = list_nbr_channels(hwp);
     if let Ok((min_ch, max_ch, ch_list)) = supported_channels_res {
-        format!("supported channels, min: {}, max: {}, list: {:?}", min_ch, max_ch, ch_list).to_string()
-    }
-    else {
+        format!(
+            "supported channels, min: {}, max: {}, list: {:?}",
+            min_ch, max_ch, ch_list
+        )
+    } else {
         "failed checking supported channels".to_string()
     }
 }
@@ -319,9 +320,8 @@ fn list_formats(hwp: &HwParams) -> Res<Vec<SampleFormat>> {
 fn list_formats_as_text(hwp: &HwParams) -> String {
     let supported_formats_res = list_formats(hwp);
     if let Ok(formats) = supported_formats_res {
-        format!("supported sample formats: {:?}", formats).to_string()
-    }
-    else {
+        format!("supported sample formats: {:?}", formats)
+    } else {
         "failed checking supported sample formats".to_string()
     }
 }
@@ -346,7 +346,7 @@ fn open_pcm(
     {
         let direction = if capture { "Capture" } else { "Playback" };
         let hwp = HwParams::any(&pcmdev)?;
-        
+
         // Set number of channels
         debug!("{}: {}", direction, list_channels_as_text(&hwp));
         debug!("{}: setting channels to {}", direction, channels);
