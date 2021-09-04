@@ -1,6 +1,6 @@
 [package]
 name = "camilladsp"
-version = "0.6.2"
+version = "0.6.3"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 description = "A flexible tool for processing audio"
 

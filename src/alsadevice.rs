@@ -252,19 +252,44 @@ fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {
     Ok(SupportedValues::Discrete(rates))
 }
 
-fn list_nbr_channels(hwp: &HwParams) -> Res<Vec<u32>> {
+fn list_samplerates_as_text(hwp: &HwParams) -> String {
+    let supported_rates_res = list_samplerates(hwp);
+    if let Ok(rates) = supported_rates_res {
+        format!("supported samplerates: {:?}", rates).to_string()
+    }
+    else {
+        "failed checking supported samplerates".to_string()
+    }
+}
+
+fn list_nbr_channels(hwp: &HwParams) -> Res<(u32, u32, Vec<u32>)> {
     let min_channels = hwp.get_channels_min()?;
     let max_channels = hwp.get_channels_max()?;
     if min_channels == max_channels {
-        return Ok(vec![min_channels]);
+        return Ok((min_channels, max_channels, vec![min_channels]));
     }
     let mut channels = Vec::new();
-    for chan in min_channels..max_channels {
+    
+    let mut check_max =  max_channels;
+    if check_max > 32 {
+        check_max = 32;
+    }
+    for chan in min_channels..(check_max+1) {
         if hwp.test_channels(chan).is_ok() {
             channels.push(chan);
         }
     }
-    Ok(channels)
+    Ok((min_channels, max_channels, channels))
+}
+
+fn list_channels_as_text(hwp: &HwParams) -> String {
+    let supported_channels_res = list_nbr_channels(hwp);
+    if let Ok((min_ch, max_ch, ch_list)) = supported_channels_res {
+        format!("supported channels, min: {}, max: {}, list: {:?}", min_ch, max_ch, ch_list).to_string()
+    }
+    else {
+        "failed checking supported channels".to_string()
+    }
 }
 
 fn list_formats(hwp: &HwParams) -> Res<Vec<SampleFormat>> {
@@ -291,6 +316,16 @@ fn list_formats(hwp: &HwParams) -> Res<Vec<SampleFormat>> {
     Ok(formats)
 }
 
+fn list_formats_as_text(hwp: &HwParams) -> String {
+    let supported_formats_res = list_formats(hwp);
+    if let Ok(formats) = supported_formats_res {
+        format!("supported sample formats: {:?}", formats).to_string()
+    }
+    else {
+        "failed checking supported sample formats".to_string()
+    }
+}
+
 /// Open an Alsa PCM device
 fn open_pcm(
     devname: String,
@@ -311,25 +346,19 @@ fn open_pcm(
     {
         let direction = if capture { "Capture" } else { "Playback" };
         let hwp = HwParams::any(&pcmdev)?;
-        let supported_channels = list_nbr_channels(&hwp)?;
-        debug!(
-            "{}: supported channels: {:?}",
-            direction, supported_channels
-        );
+        
+        // Set number of channels
+        debug!("{}: {}", direction, list_channels_as_text(&hwp));
         debug!("{}: setting channels to {}", direction, channels);
         hwp.set_channels(channels)?;
-        let supported_rates = list_samplerates(&hwp)?;
-        debug!(
-            "{}: supported sample rates: {:?}",
-            direction, supported_rates
-        );
+
+        // Set samplerate
+        debug!("{}: {}", direction, list_samplerates_as_text(&hwp));
         debug!("{}: setting rate to {}", direction, samplerate);
         hwp.set_rate(samplerate, ValueOr::Nearest)?;
-        let supported_formats = list_formats(&hwp)?;
-        debug!(
-            "{}: supported capture formats: {:?}",
-            direction, supported_formats
-        );
+
+        // Set sample format
+        debug!("{}: {}", direction, list_formats_as_text(&hwp));
         debug!("{}: setting format to {}", direction, sample_format);
         match sample_format {
             SampleFormat::S16LE => hwp.set_format(Format::s16())?,
@@ -339,9 +368,13 @@ fn open_pcm(
             SampleFormat::FLOAT32LE => hwp.set_format(Format::float())?,
             SampleFormat::FLOAT64LE => hwp.set_format(Format::float64())?,
         }
+
+        // Set access mode, buffersize and periods
         hwp.set_access(Access::RWInterleaved)?;
         let _bufsize = hwp.set_buffer_size_near(2 * bufsize)?;
         let _period = hwp.set_period_size_near(bufsize / 4, alsa::ValueOr::Nearest)?;
+
+        // Apply
         pcmdev.hw_params(&hwp)?;
     }
 
