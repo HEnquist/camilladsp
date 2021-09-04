@@ -11,12 +11,14 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use std::time::Duration;
 
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::render_callback::{self, data};
-use coreaudio::audio_unit::{audio_unit_from_device_id, get_default_device_id, get_device_name, get_device_id_from_name};
-use coreaudio::audio_unit::{AudioUnit, Element, Scope, StreamFormat, RateListener};
+use coreaudio::audio_unit::{
+    audio_unit_from_device_id, get_default_device_id, get_device_id_from_name, get_device_name,
+    set_device_sample_rate,
+};
+use coreaudio::audio_unit::{AudioUnit, Element, RateListener, Scope, StreamFormat};
 use coreaudio::sys::*;
 
 use crate::{CaptureStatus, PlaybackStatus};
@@ -63,11 +65,7 @@ enum DisconnectReason {
     Error,
 }
 
-fn open_coreaudio_playback(
-    devname: &str,
-    samplerate: usize,
-    channels: usize,
-) -> Res<AudioUnit> {
+fn open_coreaudio_playback(devname: &str, samplerate: usize, channels: usize) -> Res<AudioUnit> {
     let device_id = if devname == "default" {
         match get_default_device_id(false) {
             Some(dev) => dev,
@@ -86,7 +84,11 @@ fn open_coreaudio_playback(
         }
     };
 
-    let mut audio_unit = audio_unit_from_device_id(device_id, false).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+    let mut audio_unit = audio_unit_from_device_id(device_id, false)
+        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+
+    set_device_sample_rate(device_id, samplerate as f64)
+        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
     let stream_format = StreamFormat {
         sample_rate: samplerate as f64,
@@ -97,17 +99,15 @@ fn open_coreaudio_playback(
 
     let id = kAudioUnitProperty_StreamFormat;
     let asbd = stream_format.to_asbd();
-    audio_unit.set_property(id, Scope::Input, Element::Output, Some(&asbd)).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+    audio_unit
+        .set_property(id, Scope::Input, Element::Output, Some(&asbd))
+        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
     debug!("Opened CoreAudio playback device {}", devname);
     Ok(audio_unit)
 }
 
-fn open_coreaudio_capture(
-    devname: &str,
-    samplerate: usize,
-    channels: usize,
-) -> Res<AudioUnit> {
+fn open_coreaudio_capture(devname: &str, samplerate: usize, channels: usize) -> Res<AudioUnit> {
     let device_id = if devname == "default" {
         match get_default_device_id(true) {
             Some(dev) => dev,
@@ -126,7 +126,11 @@ fn open_coreaudio_capture(
         }
     };
 
-    let mut audio_unit = audio_unit_from_device_id(device_id, true).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+    let mut audio_unit = audio_unit_from_device_id(device_id, true)
+        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+
+    set_device_sample_rate(device_id, samplerate as f64)
+        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
     let stream_format = StreamFormat {
         sample_rate: samplerate as f64,
@@ -137,24 +141,17 @@ fn open_coreaudio_capture(
 
     let id = kAudioUnitProperty_StreamFormat;
     let asbd = stream_format.to_asbd();
-    audio_unit.set_property(id, Scope::Output, Element::Input, Some(&asbd)).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+    audio_unit
+        .set_property(id, Scope::Output, Element::Input, Some(&asbd))
+        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
     debug!("Opened CoreAudio capture device {}", devname);
     Ok(audio_unit)
 }
 
-
-
-struct PlaybackSync {
-    rx_play: Receiver<PlaybackDeviceMessage>,
-    tx_cb: Sender<DisconnectReason>,
-    bufferfill: Arc<AtomicUsize>,
-}
-
 enum PlaybackDeviceMessage {
     Data(Vec<u8>),
 }
-
 
 /// Start a playback thread listening for AudioMessages via a channel.
 impl PlaybackDevice for CoreaudioPlaybackDevice {
@@ -186,18 +183,18 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     channel_capacity
                 );
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
-                let (tx_cb_dev, rx_cb_dev) = unbounded();
                 let buffer_fill = Arc::new(AtomicUsize::new(0));
                 let buffer_fill_clone = buffer_fill.clone();
                 let mut buffer_avg = countertimer::Averager::new();
                 let mut timer = countertimer::Stopwatch::new();
                 let mut chunk_stats;
-                let blockalign = 4*channels;
+                let blockalign = 4 * channels;
 
                 trace!("Build output stream");
                 let mut conversion_result;
-                let mut sample_queue: VecDeque<u8> = VecDeque::with_capacity(16 * chunksize * blockalign);
-            
+                let mut sample_queue: VecDeque<u8> =
+                    VecDeque::with_capacity(16 * chunksize * blockalign);
+
                 let mut audio_unit = match open_coreaudio_playback(&devname, samplerate, channels) {
                     Ok(audio_unit) => audio_unit,
                     Err(err) => {
@@ -210,14 +207,14 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 };
 
                 type Args = render_callback::Args<data::InterleavedBytes<f32>>;
-            
+
                 let mut running = true;
-            
+
                 let callback_res = audio_unit.set_render_callback(move |args: Args| {
                     let Args {
                         num_frames, data, ..
                     } = args;
-                    println!("output cb {} frames", num_frames);
+                    trace!("playback cb called with {} frames", num_frames);
                     while sample_queue.len() < (blockalign as usize * num_frames as usize) {
                         trace!("playback loop needs more samples, reading from channel");
                         match rx_dev.try_recv() {
@@ -248,10 +245,9 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         let byte = sample_queue.pop_front().unwrap_or(0);
                         *bufferbyte = byte;
                     }
-                    
-                    let curr_buffer_fill = sample_queue.len() / blockalign + rx_dev.len() * chunksize;
+                    let curr_buffer_fill =
+                        sample_queue.len() / blockalign + rx_dev.len() * chunksize;
                     buffer_fill_clone.store(curr_buffer_fill, Ordering::Relaxed);
-                    trace!("write ok");
                     Ok(())
                 });
                 match callback_res {
@@ -271,6 +267,15 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 debug!("Playback device ready and waiting");
                 barrier.wait();
                 debug!("Playback device starts now!");
+                match audio_unit.start() {
+                    Ok(()) => {}
+                    Err(err) => {
+                        status_channel
+                            .send(StatusMessage::PlaybackError(err.to_string()))
+                            .unwrap_or(());
+                        return;
+                    }
+                }
                 loop {
                     /*
                     match rx_state_dev.try_recv() {
@@ -318,22 +323,28 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             chunk_stats = chunk.get_stats();
                             playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
                             playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
-                            let mut buf =
-                                vec![
-                                    0u8;
-                                    channels * chunk.frames * SampleFormat::FLOAT32LE.bytes_per_sample()
-                                ];
-                            conversion_result =
-                                chunk_to_buffer_rawbytes(&chunk, &mut buf, &SampleFormat::FLOAT32LE);
+                            let mut buf = vec![
+                                0u8;
+                                channels
+                                    * chunk.frames
+                                    * SampleFormat::FLOAT32LE.bytes_per_sample()
+                            ];
+                            conversion_result = chunk_to_buffer_rawbytes(
+                                &chunk,
+                                &mut buf,
+                                &SampleFormat::FLOAT32LE,
+                            );
                             match tx_dev.send(PlaybackDeviceMessage::Data(buf)) {
                                 Ok(_) => {}
                                 Err(err) => {
                                     error!("Playback device channel error: {}", err);
+                                    /*
                                     send_error_or_playbackformatchange(
                                         &status_channel,
                                         &rx_cb_dev,
                                         err.to_string(),
                                     );
+                                    */
                                     break;
                                 }
                             }
@@ -350,11 +361,13 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         }
                         Err(err) => {
                             error!("Message channel error: {}", err);
+                            /*
                             send_error_or_playbackformatchange(
                                 &status_channel,
                                 &rx_cb_dev,
                                 err.to_string(),
                             );
+                            */
                             break;
                         }
                     }
@@ -364,6 +377,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
     }
 }
 
+/*
 fn check_for_format_change(rx: &Receiver<DisconnectReason>) -> bool {
     loop {
         match rx.try_recv() {
@@ -380,7 +394,9 @@ fn check_for_format_change(rx: &Receiver<DisconnectReason>) -> bool {
         }
     }
 }
+*/
 
+/*
 fn send_error_or_playbackformatchange(
     tx: &mpsc::Sender<StatusMessage>,
     rx: &Receiver<DisconnectReason>,
@@ -395,10 +411,12 @@ fn send_error_or_playbackformatchange(
         tx.send(StatusMessage::PlaybackError(err)).unwrap_or(());
     }
 }
+*/
 
+/*
 fn send_error_or_captureformatchange(
     tx: &mpsc::Sender<StatusMessage>,
-    rx: &Receiver<DisconnectReason>,
+    reason: DisconnectReason,
     err: String,
 ) {
     if check_for_format_change(rx) {
@@ -409,6 +427,7 @@ fn send_error_or_captureformatchange(
         tx.send(StatusMessage::CaptureError(err)).unwrap_or(());
     }
 }
+*/
 
 fn get_nbr_capture_frames(
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
@@ -445,7 +464,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let silence_threshold = self.silence_threshold;
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = (1000.0 * self.rate_measure_interval) as u64;
-        let blockalign = 4*channels;
+        let blockalign = 4 * channels;
 
         let handle = thread::Builder::new()
             .name("CoreaudioCapture".to_string())
@@ -466,8 +485,6 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let channel_capacity = 8*chunksize/1024 + 1;
                 debug!("Using a capture channel capacity of {} buffers.", channel_capacity);
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
-                let (tx_state_dev, rx_state_dev) = bounded(0);
-                let (tx_cb_dev, rx_cb_dev) = unbounded();
 
                 trace!("Build input stream");
                 let mut audio_unit = match open_coreaudio_capture(&devname, samplerate, channels) {
@@ -488,7 +505,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     let Args {
                         num_frames, data, ..
                     } = args;
-                    trace!("capturing");
+                    trace!("capture call, read {} frames", num_frames);
                     let mut new_data = vec![0u8; num_frames as usize * blockalign as usize];
                     for (databyte, bufferbyte) in data.buffer.iter().zip(new_data.iter_mut()) {
                         *bufferbyte = *databyte;
@@ -535,6 +552,14 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 }
                 barrier.wait();
                 debug!("Capture device starts now!");
+                match audio_unit.start() {
+                    Ok(()) => {},
+                    Err(err) => {
+                        channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                        status_channel.send(StatusMessage::CaptureError(err.to_string() )).unwrap_or(());
+                        return;
+                    },
+                }
                 loop {
                     match command_channel.try_recv() {
                         Ok(CommandMessage::Exit) => {
@@ -561,6 +586,8 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         },
                         Err(_) => {},
                     }
+
+                    /*
                     match rx_state_dev.try_recv() {
                         Ok(DeviceState::Ok) => {},
                         Ok(DeviceState::Error(err)) => {
@@ -575,6 +602,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             break;
                         }
                     }
+                    */
                     capture_frames = get_nbr_capture_frames(
                         &resampler,
                         capture_frames,
@@ -597,7 +625,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             Err(err) => {
                                 error!("Channel is closed");
                                 channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                                send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err.to_string());
+                                //send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err.to_string());
                                 return;
                             }
                         }

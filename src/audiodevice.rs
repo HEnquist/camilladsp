@@ -2,6 +2,8 @@
 #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
 use alsadevice;
 use config;
+#[cfg(target_os = "macos")]
+use coreaudiodevice;
 #[cfg(feature = "cpal-backend")]
 use cpaldevice;
 use filedevice;
@@ -20,8 +22,6 @@ use std::thread;
 use std::time::Instant;
 #[cfg(target_os = "windows")]
 use wasapidevice;
-#[cfg(target_os = "macos")]
-use coreaudiodevice;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
@@ -249,18 +249,17 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             sample_format: format,
         }),
         #[cfg(target_os = "macos")]
-        config::PlaybackDevice::CoreAudio {
-            channels,
-            device,
-        } => Box::new(coreaudiodevice::CoreaudioPlaybackDevice {
-            devname: device,
-            samplerate: conf.samplerate,
-            chunksize: conf.chunksize,
-            channels,
-            target_level: conf.target_level,
-            adjust_period: conf.adjust_period,
-            enable_rate_adjust: conf.enable_rate_adjust,
-        }),
+        config::PlaybackDevice::CoreAudio { channels, device } => {
+            Box::new(coreaudiodevice::CoreaudioPlaybackDevice {
+                devname: device,
+                samplerate: conf.samplerate,
+                chunksize: conf.chunksize,
+                channels,
+                target_level: conf.target_level,
+                adjust_period: conf.adjust_period,
+                enable_rate_adjust: conf.enable_rate_adjust,
+            })
+        }
         #[cfg(target_os = "windows")]
         config::PlaybackDevice::Wasapi {
             channels,
@@ -539,22 +538,21 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             rate_measure_interval: conf.rate_measure_interval,
         }),
         #[cfg(target_os = "macos")]
-        config::CaptureDevice::CoreAudio {
-            channels,
-            device,
-        } => Box::new(coreaudiodevice::CoreaudioCaptureDevice {
-            devname: device,
-            samplerate: conf.samplerate,
-            enable_resampling: conf.enable_resampling,
-            resampler_conf: conf.resampler_type,
-            capture_samplerate,
-            chunksize: conf.chunksize,
-            channels,
-            silence_threshold: conf.silence_threshold,
-            silence_timeout: conf.silence_timeout,
-            stop_on_rate_change: conf.stop_on_rate_change,
-            rate_measure_interval: conf.rate_measure_interval,
-        }),
+        config::CaptureDevice::CoreAudio { channels, device } => {
+            Box::new(coreaudiodevice::CoreaudioCaptureDevice {
+                devname: device,
+                samplerate: conf.samplerate,
+                enable_resampling: conf.enable_resampling,
+                resampler_conf: conf.resampler_type,
+                capture_samplerate,
+                chunksize: conf.chunksize,
+                channels,
+                silence_threshold: conf.silence_threshold,
+                silence_timeout: conf.silence_timeout,
+                stop_on_rate_change: conf.stop_on_rate_change,
+                rate_measure_interval: conf.rate_measure_interval,
+            })
+        }
         #[cfg(target_os = "windows")]
         config::CaptureDevice::Wasapi {
             channels,

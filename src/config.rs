@@ -222,7 +222,7 @@ impl CaptureDevice {
             CaptureDevice::File { format, .. } => format.clone(),
             CaptureDevice::Stdin { format, .. } => format.clone(),
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio  { .. } => SampleFormat::FLOAT32LE,
+            CaptureDevice::CoreAudio { .. } => SampleFormat::FLOAT32LE,
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { format, .. } => format.clone(),
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
