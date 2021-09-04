@@ -7,7 +7,7 @@ extern crate cpal;
 extern crate fftw;
 #[macro_use]
 extern crate lazy_static;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os="macos"))]
 extern crate crossbeam_channel;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
@@ -33,6 +33,8 @@ extern crate signal_hook;
 extern crate tungstenite;
 #[cfg(target_os = "windows")]
 extern crate wasapi;
+#[cfg(target_os = "macos")]
+extern crate coreaudio;
 
 #[macro_use]
 extern crate slog_scope;
@@ -90,6 +92,8 @@ pub mod pulsedevice;
 pub mod socketserver;
 #[cfg(target_os = "windows")]
 pub mod wasapidevice;
+#[cfg(target_os = "macos")]
+pub mod coreaudiodevice;
 
 pub enum StatusMessage {
     PlaybackReady,

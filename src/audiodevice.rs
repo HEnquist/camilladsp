@@ -20,6 +20,8 @@ use std::thread;
 use std::time::Instant;
 #[cfg(target_os = "windows")]
 use wasapidevice;
+#[cfg(target_os = "macos")]
+use coreaudiodevice;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
@@ -246,18 +248,15 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             sample_format: format,
         }),
-        #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+        #[cfg(target_os = "macos")]
         config::PlaybackDevice::CoreAudio {
             channels,
             device,
-            format,
-        } => Box::new(cpaldevice::CpalPlaybackDevice {
+        } => Box::new(coreaudiodevice::CoreaudioPlaybackDevice {
             devname: device,
-            host: cpaldevice::CpalHost::CoreAudio,
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            sample_format: format,
             target_level: conf.target_level,
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
@@ -539,21 +538,18 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             stop_on_rate_change: conf.stop_on_rate_change,
             rate_measure_interval: conf.rate_measure_interval,
         }),
-        #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+        #[cfg(target_os = "macos")]
         config::CaptureDevice::CoreAudio {
             channels,
             device,
-            format,
-        } => Box::new(cpaldevice::CpalCaptureDevice {
+        } => Box::new(coreaudiodevice::CoreaudioCaptureDevice {
             devname: device,
-            host: cpaldevice::CpalHost::CoreAudio,
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
             resampler_conf: conf.resampler_type,
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
-            sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
             stop_on_rate_change: conf.stop_on_rate_change,

@@ -167,13 +167,12 @@ pub enum CaptureDevice {
         #[serde(default)]
         read_bytes: usize,
     },
-    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    #[cfg(target_os = "macos")]
     #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
-        format: SampleFormat,
     },
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
@@ -205,7 +204,7 @@ impl CaptureDevice {
             CaptureDevice::Pulse { channels, .. } => *channels,
             CaptureDevice::File { channels, .. } => *channels,
             CaptureDevice::Stdin { channels, .. } => *channels,
-            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio { channels, .. } => *channels,
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { channels, .. } => *channels,
@@ -222,8 +221,8 @@ impl CaptureDevice {
             CaptureDevice::Pulse { format, .. } => format.clone(),
             CaptureDevice::File { format, .. } => format.clone(),
             CaptureDevice::Stdin { format, .. } => format.clone(),
-            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
-            CaptureDevice::CoreAudio { format, .. } => format.clone(),
+            #[cfg(target_os = "macos")]
+            CaptureDevice::CoreAudio  { .. } => SampleFormat::FLOAT32LE,
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { format, .. } => format.clone(),
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
@@ -265,13 +264,12 @@ pub enum PlaybackDevice {
         channels: usize,
         format: SampleFormat,
     },
-    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    #[cfg(target_os = "macos")]
     #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
-        format: SampleFormat,
     },
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
@@ -301,7 +299,7 @@ impl PlaybackDevice {
             PlaybackDevice::Pulse { channels, .. } => *channels,
             PlaybackDevice::File { channels, .. } => *channels,
             PlaybackDevice::Stdout { channels, .. } => *channels,
-            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            #[cfg(target_os = "macos")]
             PlaybackDevice::CoreAudio { channels, .. } => *channels,
             #[cfg(target_os = "windows")]
             PlaybackDevice::Wasapi { channels, .. } => *channels,
@@ -894,7 +892,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Pulse { channels, .. } => {
                 *channels = chans;
             }
-            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio { channels, .. } => {
                 *channels = chans;
             }
@@ -925,9 +923,9 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Pulse { format, .. } => {
                 *format = fmt;
             }
-            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
-            CaptureDevice::CoreAudio { format, .. } => {
-                *format = fmt;
+            #[cfg(target_os = "macos")]
+            CaptureDevice::CoreAudio { .. } => {
+                error!("Not possible to override capture format for CoreAudio, ignoring");
             }
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { format, .. } => {
