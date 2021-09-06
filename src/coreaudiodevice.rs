@@ -3,22 +3,22 @@ use config;
 use config::{ConfigError, SampleFormat};
 use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use countertimer;
-use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
+use crossbeam_channel::{bounded, TryRecvError, TrySendError};
 use rubato::VecResampler;
 use std::collections::VecDeque;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
+use std::time::Duration;
 
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{
-    audio_unit_from_device_id, get_default_device_id, get_device_id_from_name, get_device_name,
+    audio_unit_from_device_id, get_default_device_id, get_device_id_from_name,
     set_device_sample_rate,
 };
-use coreaudio::audio_unit::{AudioUnit, Element, RateListener, Scope, StreamFormat};
+use coreaudio::audio_unit::{AliveListener, AudioUnit, Element, RateListener, Scope, StreamFormat};
 use coreaudio::sys::*;
 
 use crate::{CaptureStatus, PlaybackStatus};
@@ -27,11 +27,6 @@ use PrcFmt;
 use ProcessingState;
 use Res;
 use StatusMessage;
-
-enum DeviceState {
-    Ok,
-    Error(String),
-}
 
 #[derive(Clone, Debug)]
 pub struct CoreaudioPlaybackDevice {
@@ -59,13 +54,11 @@ pub struct CoreaudioCaptureDevice {
     pub rate_measure_interval: f32,
 }
 
-#[derive(Clone, Debug)]
-enum DisconnectReason {
-    FormatChange,
-    Error,
-}
-
-fn open_coreaudio_playback(devname: &str, samplerate: usize, channels: usize) -> Res<AudioUnit> {
+fn open_coreaudio_playback(
+    devname: &str,
+    samplerate: usize,
+    channels: usize,
+) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if devname == "default" {
         match get_default_device_id(false) {
             Some(dev) => dev,
@@ -104,10 +97,14 @@ fn open_coreaudio_playback(devname: &str, samplerate: usize, channels: usize) ->
         .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
     debug!("Opened CoreAudio playback device {}", devname);
-    Ok(audio_unit)
+    Ok((audio_unit, device_id))
 }
 
-fn open_coreaudio_capture(devname: &str, samplerate: usize, channels: usize) -> Res<AudioUnit> {
+fn open_coreaudio_capture(
+    devname: &str,
+    samplerate: usize,
+    channels: usize,
+) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if devname == "default" {
         match get_default_device_id(true) {
             Some(dev) => dev,
@@ -146,7 +143,7 @@ fn open_coreaudio_capture(devname: &str, samplerate: usize, channels: usize) -> 
         .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
     debug!("Opened CoreAudio capture device {}", devname);
-    Ok(audio_unit)
+    Ok((audio_unit, device_id))
 }
 
 enum PlaybackDeviceMessage {
@@ -195,16 +192,17 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 let mut sample_queue: VecDeque<u8> =
                     VecDeque::with_capacity(16 * chunksize * blockalign);
 
-                let mut audio_unit = match open_coreaudio_playback(&devname, samplerate, channels) {
-                    Ok(audio_unit) => audio_unit,
-                    Err(err) => {
-                        status_channel
-                            .send(StatusMessage::PlaybackError(err.to_string()))
-                            .unwrap_or(());
-                        barrier.wait();
-                        return;
-                    }
-                };
+                let (mut audio_unit, device_id) =
+                    match open_coreaudio_playback(&devname, samplerate, channels) {
+                        Ok(audio_unit) => audio_unit,
+                        Err(err) => {
+                            status_channel
+                                .send(StatusMessage::PlaybackError(err.to_string()))
+                                .unwrap_or(());
+                            barrier.wait();
+                            return;
+                        }
+                    };
 
                 type Args = render_callback::Args<data::InterleavedBytes<f32>>;
 
@@ -260,6 +258,15 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         return;
                     }
                 }
+
+                let mut alive_listener = AliveListener::new(device_id);
+                if let Err(err) = alive_listener.register() {
+                    warn!(
+                        "Unable to register playback device alive listener, error: {}",
+                        err
+                    );
+                }
+
                 match status_channel.send(StatusMessage::PlaybackReady) {
                     Ok(()) => {}
                     Err(_err) => {}
@@ -276,25 +283,16 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         return;
                     }
                 }
-                loop {
-                    /*
-                    match rx_state_dev.try_recv() {
-                        Ok(DeviceState::Ok) => {}
-                        Ok(DeviceState::Error(err)) => {
-                            send_error_or_playbackformatchange(&status_channel, &rx_cb_dev, err);
-                            break;
-                        }
-                        Err(TryRecvError::Empty) => {}
-                        Err(err) => {
-                            send_error_or_playbackformatchange(
-                                &status_channel,
-                                &rx_cb_dev,
-                                err.to_string(),
-                            );
-                            break;
-                        }
+                'deviceloop: loop {
+                    if !alive_listener.is_alive() {
+                        error!("Playback device is no longer alive");
+                        status_channel
+                            .send(StatusMessage::PlaybackError(
+                                "Playback device is no longer alive".to_string(),
+                            ))
+                            .unwrap_or(());
+                        break 'deviceloop;
                     }
-                    */
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
                             buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
@@ -338,13 +336,9 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 Ok(_) => {}
                                 Err(err) => {
                                     error!("Playback device channel error: {}", err);
-                                    /*
-                                    send_error_or_playbackformatchange(
-                                        &status_channel,
-                                        &rx_cb_dev,
-                                        err.to_string(),
-                                    );
-                                    */
+                                    status_channel
+                                        .send(StatusMessage::PlaybackError(err.to_string()))
+                                        .unwrap_or(());
                                     break;
                                 }
                             }
@@ -361,13 +355,9 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         }
                         Err(err) => {
                             error!("Message channel error: {}", err);
-                            /*
-                            send_error_or_playbackformatchange(
-                                &status_channel,
-                                &rx_cb_dev,
-                                err.to_string(),
-                            );
-                            */
+                            status_channel
+                                .send(StatusMessage::PlaybackError(err.to_string()))
+                                .unwrap_or(());
                             break;
                         }
                     }
@@ -376,58 +366,6 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
         Ok(Box::new(handle))
     }
 }
-
-/*
-fn check_for_format_change(rx: &Receiver<DisconnectReason>) -> bool {
-    loop {
-        match rx.try_recv() {
-            Ok(DisconnectReason::Error) => {}
-            Ok(DisconnectReason::FormatChange) => {
-                return true;
-            }
-            Err(TryRecvError::Empty) => {
-                return false;
-            }
-            Err(_) => {
-                return false;
-            }
-        }
-    }
-}
-*/
-
-/*
-fn send_error_or_playbackformatchange(
-    tx: &mpsc::Sender<StatusMessage>,
-    rx: &Receiver<DisconnectReason>,
-    err: String,
-) {
-    if check_for_format_change(rx) {
-        debug!("Send PlaybackFormatChange");
-        tx.send(StatusMessage::PlaybackFormatChange(0))
-            .unwrap_or(());
-    } else {
-        debug!("Send PlaybackError");
-        tx.send(StatusMessage::PlaybackError(err)).unwrap_or(());
-    }
-}
-*/
-
-/*
-fn send_error_or_captureformatchange(
-    tx: &mpsc::Sender<StatusMessage>,
-    reason: DisconnectReason,
-    err: String,
-) {
-    if check_for_format_change(rx) {
-        debug!("Send CaptureFormatChange");
-        tx.send(StatusMessage::CaptureFormatChange(0)).unwrap_or(());
-    } else {
-        debug!("Send CaptureError");
-        tx.send(StatusMessage::CaptureError(err)).unwrap_or(());
-    }
-}
-*/
 
 fn get_nbr_capture_frames(
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
@@ -487,7 +425,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
 
                 trace!("Build input stream");
-                let mut audio_unit = match open_coreaudio_capture(&devname, samplerate, channels) {
+                let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, samplerate, channels) {
                     Ok(audio_unit) => audio_unit,
                     Err(err) => {
                         status_channel
@@ -530,6 +468,16 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         return;
                     },
                 }
+                let (rate_tx, rate_rx) = mpsc::channel();
+                let mut rate_listener = RateListener::new(device_id, Some(rate_tx));
+                if let Err(err) = rate_listener.register() {
+                    warn!("Unable to register capture rate listener, error: {}", err);
+                }
+                let mut alive_listener = AliveListener::new(device_id);
+                if let Err(err) = alive_listener.register() {
+                    warn!("Unable to register capture device alive listener, error: {}", err);
+                }
+
                 let chunksize_samples = channels * chunksize;
                 let mut capture_frames = chunksize;
                 let mut averager = countertimer::TimeAverage::new();
@@ -560,7 +508,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         return;
                     },
                 }
-                loop {
+                'deviceloop: loop {
                     match command_channel.try_recv() {
                         Ok(CommandMessage::Exit) => {
                             debug!("Exit message received, sending EndOfStream");
@@ -586,31 +534,37 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         },
                         Err(_) => {},
                     }
-
-                    /*
-                    match rx_state_dev.try_recv() {
-                        Ok(DeviceState::Ok) => {},
-                        Ok(DeviceState::Error(err)) => {
-                            channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                            send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err);
-                            break;
+                    match rate_rx.try_recv() {
+                        Ok(rate) => {
+                            debug!("Capture rate change event, new rate: {}",rate);
+                            if rate as usize != capture_samplerate {
+                                channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                                status_channel.send(StatusMessage::CaptureFormatChange(rate as usize)).unwrap_or(());
+                                break;
+                            }
                         },
-                        Err(TryRecvError::Empty) => {}
-                        Err(err) => {
+                        Err(mpsc::TryRecvError::Empty) => {}
+                        Err(_) => {
+                            error!("Rate event queue closed!");
                             channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                            send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err.to_string());
+                            status_channel.send(StatusMessage::CaptureError("Rate listener channel closed".to_string())).unwrap_or(());
                             break;
                         }
                     }
-                    */
+                    if !alive_listener.is_alive() {
+                        error!("Capture device is no longer alive");
+                        status_channel.send(StatusMessage::CaptureError("Capture device is no longer alive".to_string())).unwrap_or(());
+                        break 'deviceloop;
+                    }
                     capture_frames = get_nbr_capture_frames(
                         &resampler,
                         capture_frames,
                     );
                     let capture_bytes = blockalign * capture_frames;
-                    while data_queue.len() < (blockalign * capture_frames) {
+                    let mut tries = 0;
+                    while data_queue.len() < (blockalign * capture_frames) && tries < 10 {
                         trace!("capture device needs more samples to make chunk, reading from channel");
-                        match rx_dev.recv() {
+                        match rx_dev.try_recv() {
                             Ok((chunk_nbr, data)) => {
                                 trace!("got chunk, length {} bytes", data.len());
                                 expected_chunk_nbr += 1;
@@ -622,14 +576,22 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                                     data_queue.push_back(*element);
                                 }
                             }
+                            Err(TryRecvError::Empty) => {
+                                thread::sleep(Duration::from_millis(50));
+                            }
                             Err(err) => {
                                 error!("Channel is closed");
                                 channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                                //send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err.to_string());
+                                status_channel.send(StatusMessage::CaptureError(err.to_string())).unwrap_or(());
                                 return;
                             }
                         }
+                        tries += 1;
                     }
+                    if data_queue.len() < (blockalign * capture_frames) {
+                        continue;
+                    }
+
                     for element in data_buffer.iter_mut().take(capture_bytes) {
                         *element = data_queue.pop_front().unwrap();
                     }
