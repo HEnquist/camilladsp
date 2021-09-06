@@ -211,7 +211,7 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         playbacktypes.push("Jack".to_owned());
         capturetypes.push("Jack".to_owned());
     }
-    if cfg!(all(feature = "cpal-backend", target_os = "macos")) {
+    if cfg!(target_os = "macos") {
         playbacktypes.push("CoreAudio".to_owned());
         capturetypes.push("CoreAudio".to_owned());
     }

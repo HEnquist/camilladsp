@@ -176,7 +176,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --features cpal-backend
+          args: --release
 
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
@@ -209,7 +209,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args:  --release --target aarch64-apple-darwin --features cpal-backend
+          args:  --release --target aarch64-apple-darwin
         env:
           SDKROOT: /Applications/Xcode_12.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.0.sdk
           MACOSX_DEPLOYMENT_TARGET: 11.0

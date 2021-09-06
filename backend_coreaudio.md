@@ -2,7 +2,7 @@
 
 ## Introduction
 CoreAudio is the standard audio API of macOS. 
-In the current version of CamillaDSP (v0.6.0 at the time of writing), CoreAudio is supported via the [CPAL cross-platform sound library](https://github.com/RustAudio/cpal).
+The CoreAudio support of CamillaDSP is provided by [an updated and extended fork](https://github.com/HEnquist/coreaudio-rs) of the [coreaudio-rs library](https://github.com/RustAudio/coreaudio-rs). 
 
 ## Capturing audio from other applications
 
@@ -30,12 +30,10 @@ This example configuration will be used to explain the various options specific 
     type: CoreAudio
     channels: 2
     device: "Soundflower (2ch)"
-    format: FLOAT32LE
   playback:
     type: CoreAudio
     channels: 2
     device: "Built-in Output"
-    format: FLOAT32LE
 ```
 
 ### Device names
@@ -48,7 +46,7 @@ To help with finding the name of playback and capture devices, use the macOS ver
 Just download the binary and run it in a terminal. It will list all devices with the names.
 
 ### Sample format
-Currently, the sample format should always be set to 32-bit float, `FLOAT32LE`. This is the format that CoreAudio uses internally. 
+There is no option to select the sample format. CoreAudio uses 32-bit floats internally, and this is the format that CamillaDSP uses when transferring samples to and from CoreAudio. 
 The sample format used by the actual DAC is the one that has been configured in "Audio MIDI Setup". 
 Use "Audio MIDI Setup" to select a combination of sample rate and format, for example "2 ch 24-bit Integer 44.1 kHz".
 CamillaDSP will switch the sample rate, and leave the sample format unchanged.

@@ -138,7 +138,7 @@ See the [tutorial for a step-by-step guide.](./stepbystep.md)
 These are the key dependencies for CamillaDSP.
 * https://crates.io/crates/alsa - Alsa audio backend
 * https://crates.io/crates/clap - Command line argument parsing
-* https://crates.io/crates/cpal - Jack and CoreAudio audio backends
+* https://crates.io/crates/cpal - Jack audio backend
 * https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
 * https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
 * https://crates.io/crates/rustfft - FFT used for FIR filters
@@ -231,8 +231,8 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 All the available options, or "features" are:
 - `alsa-backend`: Alsa support
 - `pulse-backend`: PulseAudio support
-- `cpal-backend`: CoreAudio support
-- `jack-backend`: Jack support. This also enables the cpal-backend feature if building on macOS.
+- `cpal-backend`: Used for Jack support (automatically enabled when needed).
+- `jack-backend`: Jack support.
 - `websocket`: Websocket server for control
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
 - `FFTW`: Use FFTW instead of RustFFT
@@ -279,11 +279,11 @@ RUSTFLAGS='-C target-feature=+neon -C target-cpu=native' cargo build --release
 ```
 
 ## Building on Windows and macOS
-The Alsa and Pulse backends should not be included when building on Windows and macOS. The recommended build command is:
+The platform-specific backends are always enabled when building on Windows and macOS. The recommended build command is:
 
 macOS:
 ```
-RUSTFLAGS='-C target-cpu=native' cargo build --release --features cpal-backend
+RUSTFLAGS='-C target-cpu=native' cargo build --release
 ```
 
 Windows (cmd.exe command prompt):

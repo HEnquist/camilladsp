@@ -174,13 +174,11 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --no-default-features --features cpal-backend
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --no-default-features --features cpal-backend
 
 
   check_macos_arm:
@@ -202,7 +200,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --target aarch64-apple-darwin --no-default-features --features cpal-backend
+          args: --target aarch64-apple-darwin
         env:
           SDKROOT: /Applications/Xcode_12.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.0.sdk
           MACOSX_DEPLOYMENT_TARGET: 11.0

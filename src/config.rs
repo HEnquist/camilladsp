@@ -1116,24 +1116,6 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     if conf.devices.silence_timeout < 0.0 {
         return Err(ConfigError::new("silence_timeout cannot be negative").into());
     }
-    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
-    if let CaptureDevice::CoreAudio { format, .. } = &conf.devices.capture {
-        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
-            return Err(ConfigError::new(
-                "The CoreAudio capture backend only supports FLOAT32LE and S16LE sample formats",
-            )
-            .into());
-        }
-    }
-    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
-    if let PlaybackDevice::CoreAudio { format, .. } = &conf.devices.playback {
-        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
-            return Err(ConfigError::new(
-                "The CoreAudio playback backend only supports FLOAT32LE and S16LE sample formats",
-            )
-            .into());
-        }
-    }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi { format, .. } = &conf.devices.capture {
         if *format == SampleFormat::FLOAT64LE {
