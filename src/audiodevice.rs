@@ -1,5 +1,5 @@
 // Traits for audio devices
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use alsadevice;
 use config;
 #[cfg(target_os = "macos")]
@@ -200,7 +200,7 @@ pub trait CaptureDevice {
 /// Create a playback device.
 pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     match conf.playback {
-        #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+        #[cfg(target_os = "linux")]
         config::PlaybackDevice::Alsa {
             channels,
             device,
@@ -450,7 +450,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         info!("Using Async resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time.");
     }
     match conf.capture {
-        #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+        #[cfg(target_os = "linux")]
         config::CaptureDevice::Alsa {
             channels,
             device,

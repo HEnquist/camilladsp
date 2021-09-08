@@ -1,4 +1,4 @@
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 extern crate alsa;
 extern crate camillalib;
 extern crate chrono;
@@ -380,9 +380,6 @@ fn run(
 
 fn main_process() -> i32 {
     let mut features = Vec::new();
-    if cfg!(all(feature = "alsa-backend", target_os = "linux")) {
-        features.push("alsa-backend");
-    }
     if cfg!(feature = "pulse-backend") {
         features.push("pulse-backend");
     }

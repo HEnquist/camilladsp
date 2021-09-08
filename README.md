@@ -241,7 +241,6 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 
 ## Customized build
 All the available options, or "features" are:
-- `alsa-backend`: Alsa support
 - `pulse-backend`: PulseAudio support
 - `cpal-backend`: Used for Jack support (automatically enabled when needed).
 - `jack-backend`: Jack support.
@@ -251,7 +250,7 @@ All the available options, or "features" are:
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64)
 - `neon`: Enable the experimental Neon support for aarch64 in the resampler. Note that this only works on 64-bit arm, and requires a very recent nightly rust compiler.
 
-The first two (`alsa-backend`, `websocket`) are included in the default features, meaning if you don't specify anything you will get those two.
+The `websocket` feature is included in the default features, meaning it will e enabled if you don't specify anything.
 Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
 
 The `jack-backend` feature requires jack and its development files to be installed. To install:
@@ -259,18 +258,18 @@ The `jack-backend` feature requires jack and its development files to be install
 - Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
 - Arch:  ```sudo pacman -S jack```
 
-Example 1: You want `alsa-backend`, `websocket`, `pulse-backend` and `FFTW`. The first two are included by default so you only need to add `FFTW` and `pulse-backend`:
+Example 1: You want `websocket`, `pulse-backend` and `FFTW`. The first one is included by default so you only need to add `FFTW` and `pulse-backend`:
 ```
 cargo build --release --features FFTW --features pulse-backend
 (or)
 cargo install --path . --features FFTW --features pulse-backend
 ```
 
-Example 2: You want `alsa-backend`, `32bit` and `FFTW`. Since you don't want `websocket` you have to disable the defaults, and then add back `alsa-backend`:
+Example 2: You want `32bit` and `FFTW`. Since you don't want `websocket` you have to disable the defaults:
 ```
-cargo build --release --no-default-features --features alsa-backend --features FFTW --features 32bit
+cargo build --release --no-default-features --features FFTW --features 32bit
 (or)
-cargo install --path . --no-default-features --features alsa-backend --features FFTW --features 32bit
+cargo install --path . --no-default-features --features FFTW --features 32bit
 ```
 
 ## Optimize for your system

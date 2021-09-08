@@ -1,4 +1,4 @@
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 extern crate alsa;
 extern crate clap;
 #[cfg(feature = "cpal-backend")]
@@ -17,7 +17,7 @@ extern crate libpulse_binding as pulse;
 extern crate libpulse_simple_binding as psimple;
 #[cfg(feature = "secure-websocket")]
 extern crate native_tls;
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 extern crate nix;
 extern crate num_complex;
 extern crate num_integer;
@@ -62,7 +62,7 @@ impl<PrcFmt> NewValue<PrcFmt> for PrcFmt {
 
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 pub mod alsadevice;
 pub mod audiodevice;
 pub mod basicfilters;
@@ -199,7 +199,7 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     let mut playbacktypes = vec!["File".to_owned(), "Stdout".to_owned()];
     let mut capturetypes = vec!["File".to_owned(), "Stdin".to_owned()];
 
-    if cfg!(all(feature = "alsa-backend", target_os = "linux")) {
+    if cfg!(target_os = "linux") {
         playbacktypes.push("Alsa".to_owned());
         capturetypes.push("Alsa".to_owned());
     }

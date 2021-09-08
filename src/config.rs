@@ -122,7 +122,7 @@ impl fmt::Display for SampleFormat {
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum CaptureDevice {
-    #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -198,7 +198,7 @@ pub enum CaptureDevice {
 impl CaptureDevice {
     pub fn channels(&self) -> usize {
         match self {
-            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { channels, .. } => *channels,
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { channels, .. } => *channels,
@@ -215,7 +215,7 @@ impl CaptureDevice {
 
     pub fn sampleformat(&self) -> SampleFormat {
         match self {
-            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { format, .. } => format.clone(),
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { format, .. } => format.clone(),
@@ -235,7 +235,7 @@ impl CaptureDevice {
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum PlaybackDevice {
-    #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -293,7 +293,7 @@ pub enum PlaybackDevice {
 impl PlaybackDevice {
     pub fn channels(&self) -> usize {
         match self {
-            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             PlaybackDevice::Alsa { channels, .. } => *channels,
             #[cfg(feature = "pulse-backend")]
             PlaybackDevice::Pulse { channels, .. } => *channels,
@@ -884,7 +884,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Stdin { channels, .. } => {
                 *channels = chans;
             }
-            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { channels, .. } => {
                 *channels = chans;
             }
@@ -915,7 +915,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Stdin { format, .. } => {
                 *format = fmt;
             }
-            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { format, .. } => {
                 *format = fmt;
             }

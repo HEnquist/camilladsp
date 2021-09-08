@@ -1,3 +1,7 @@
+## 1.0.0
+New features:
+- New improved CoreAudio backend.
+
 ## 0.6.3
 Bugfixes:
 - Fix slow start with Alsa plug devices (regression in 0.6.2).
