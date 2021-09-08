@@ -38,6 +38,14 @@ pub fn run_processing(
                     }
                     break;
                 }
+                Ok(AudioMessage::Pause) => {
+                    trace!("AudioMessage::Pause received");
+                    let msg = AudioMessage::Pause;
+                    if tx_pb.send(msg).is_err() {
+                        info!("Playback thread has already stopped.");
+                    }
+                    break;
+                }
                 Err(err) => {
                     error!("Message channel error: {}", err);
                     let msg = AudioMessage::EndOfStream;

@@ -60,6 +60,7 @@ impl DeviceError {
 pub enum AudioMessage {
     //Quit,
     Audio(AudioChunk),
+    Pause,
     EndOfStream,
 }
 

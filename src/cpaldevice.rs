@@ -382,6 +382,9 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         chunk_stats.peak_db();
                                     tx_dev.send(chunk).unwrap();
                                 }
+                                Ok(AudioMessage::Pause) => {
+                                    debug!("Pause message received");
+                                }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
                                     break;

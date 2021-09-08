@@ -578,6 +578,9 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                     conversion_result.1;
                             }
                         }
+                        Ok(AudioMessage::Pause) => {
+                            debug!("Pause message received");
+                        }
                         Ok(AudioMessage::EndOfStream) => {
                             status_channel
                                 .send(StatusMessage::PlaybackDone)

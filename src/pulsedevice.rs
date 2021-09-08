@@ -207,6 +207,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                     //    chunk_stats.peak_db()
                                     //);
                                 }
+                                Ok(AudioMessage::Pause) => {
+                                    debug!("Pause message received");
+                                }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
                                     break;
