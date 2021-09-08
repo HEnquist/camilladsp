@@ -417,8 +417,7 @@ fn capture_loop(
                 info!("Processing thread has already stopped.");
                 break;
             }
-        }
-        else if state == ProcessingState::Paused {
+        } else if state == ProcessingState::Paused {
             let msg = AudioMessage::Pause;
             if msg_channels.audio.send(msg).is_err() {
                 info!("Processing thread has already stopped.");
