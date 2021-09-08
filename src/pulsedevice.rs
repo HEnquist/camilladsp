@@ -406,7 +406,17 @@ impl CaptureDevice for PulseCaptureDevice {
                                     chunk.waveforms = new_waves;
                                 }
                                 let msg = AudioMessage::Audio(chunk);
-                                channel.send(msg).unwrap();
+                                if channel.send(msg).is_err() {
+                                    info!("Processing thread has already stopped.");
+                                    break;
+                                }
+                            }
+                            else if state == ProcessingState::Paused {
+                                let msg = AudioMessage::Pause;
+                                if channel.send(msg).is_err() {
+                                    info!("Processing thread has already stopped.");
+                                    break;
+                                }
                             }
                             capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
                             capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();

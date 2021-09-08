@@ -413,7 +413,18 @@ fn capture_loop(
                 chunk.waveforms = new_waves;
             }
             let msg = AudioMessage::Audio(chunk);
-            msg_channels.audio.send(msg).unwrap_or(());
+            if msg_channels.audio.send(msg).is_err() {
+                info!("Processing thread has already stopped.");
+                break;
+            }
+        }
+        else if state == ProcessingState::Paused {
+            let msg = AudioMessage::Pause;
+            if msg_channels.audio.send(msg).is_err() {
+                info!("Processing thread has already stopped.");
+                break;
+            }
+            sleep_until_next(bytes_per_frame, params.capture_samplerate, capture_bytes);
         } else {
             sleep_until_next(bytes_per_frame, params.capture_samplerate, capture_bytes);
         }

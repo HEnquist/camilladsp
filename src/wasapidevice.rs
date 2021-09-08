@@ -921,6 +921,13 @@ impl CaptureDevice for WasapiCaptureDevice {
                             break;
                         }
                     }
+                    else if state == ProcessingState::Paused {
+                        let msg = AudioMessage::Pause;
+                        if channel.send(msg).is_err() {
+                            info!("Processing thread has already stopped.");
+                            break;
+                        }
+                    }
                 }
                 stop_signal.store(true, Ordering::Relaxed);
                 debug!("Wait for inner capture thread to exit");

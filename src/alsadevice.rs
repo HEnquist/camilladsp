@@ -673,7 +673,17 @@ fn capture_loop_bytes(
                 chunk.waveforms = new_waves;
             }
             let msg = AudioMessage::Audio(chunk);
-            channels.audio.send(msg).unwrap_or(());
+            if channels.audio.send(msg).is_err() {
+                info!("Processing thread has already stopped.");
+                break;
+            }
+        }
+        else if state == ProcessingState::Paused {
+            let msg = AudioMessage::Pause;
+            if channels.audio.send(msg).is_err() {
+                info!("Processing thread has already stopped.");
+                break;
+            }
         }
     }
     let mut capt_stat = params.capture_status.write().unwrap();
