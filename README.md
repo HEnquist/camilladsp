@@ -1,4 +1,4 @@
-# CamillaDSP v0.6.0
+# CamillaDSP v0.6.3
 ![CI test and lint](https://github.com/HEnquist/camilladsp/workflows/CI%20test%20and%20lint/badge.svg)
 
 A tool to create audio processing pipelines for applications such as active crossovers or room correction. It is written in Rust to benefit from the safety and elegant handling of threading that this language provides. 
@@ -149,17 +149,29 @@ These are the key dependencies for CamillaDSP.
 
 ## Related projects
 These are part of the CamillaDSP family:
-* https://github.com/HEnquist/pycamilladsp - Python library for communicating with CamillaDSP over websocket
-* https://github.com/HEnquist/pycamilladsp-plot - Plotting and visualization of configurations
-* https://github.com/HEnquist/camillagui-backend - Server for a web-based gui for CamillaDSP
-* https://github.com/HEnquist/camilladsp-config - Example configurations for things like running CamillaDSP as a systemd service
+* https://github.com/HEnquist/pycamilladsp - Python library for communicating with CamillaDSP over websocket.
+* https://github.com/HEnquist/pycamilladsp-plot - Plotting and visualization of configurations.
+* https://github.com/HEnquist/camillagui-backend - Server for a web-based gui for CamillaDSP.
+* https://github.com/HEnquist/camilladsp-config - Example configurations for things like running CamillaDSP as a systemd service.
 
 Other projects meant to be used with CamillaDSP:
-* https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels
-* https://github.com/Lykkedk/SuperPlayer_v2.0 - Automatic filter switching at sample rate change for squeezelite
+* https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels.
+* https://github.com/raptorlightning/I2S-Hat - An SPDIF Hat for the Raspberry Pi 2-X for SPDIF Communication 
+* https://github.com/daverz/camilla-remote-control - Interface for remote control of CamillaDSP using a FLIRC USB infrared receiver or remote keyboard.
+
+Music players:
+* https://moodeaudio.org/ - moOde audio player, audiophile-quality music playback for Raspberry Pi.
+* https://github.com/thoelf/Linux-Stream-Player - Play local files or streamed music with room EQ on Linux. 
+* https://github.com/Lykkedk/SuperPlayer_v2.0 - Automatic filter switching at sample rate change for squeezelite.
+
+Guides and example configs:
+* https://github.com/ynot123/CamillaDSP-Cfgs-FIR-Examples - Example Filter Configuration and Convolver Coefficients.
+* https://github.com/hughpyle/raspot - Hugh's raspotify config
+* https://github.com/jensgk/akg_k702_camilladsp_eq - Headphone EQ and Crossfeed for the AKG K702 headphones
+* https://github.com/phelluy/room_eq_mac_m1 - Room Equalization HowTo with REW and Apple Silicon 
 
 Projects of general nature which can be useful together with CamillaDSP:
-* https://github.com/scripple/alsa_hook_hwparams - Alsa hooks for reacting to sample rate and format changes
+* https://github.com/scripple/alsa_hook_hwparams - Alsa hooks for reacting to sample rate and format changes.
 * https://github.com/HEnquist/cpal-listdevices - List audio devices with names and supported formats under Windows and macOS. 
 
 

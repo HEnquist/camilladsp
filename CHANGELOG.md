@@ -1,18 +1,22 @@
+## 0.6.3
+Bugfixes:
+- Fix slow start with Alsa plug devices (regression in 0.6.2).
+
 ## 0.6.2
 New features:
-- Updated wasapi library
-- Add FivePointPeq biquad combo
-- Support wav with extended header
+- Updated wasapi library.
+- Add FivePointPeq biquad combo.
+- Support wav with extended header.
 
 Bugfixes:
-- Stop properly after failing to start with bad wasapi config
+- Stop properly after failing to start with bad wasapi config.
 
 ## 0.6.1
 New features:
-- Add lists of supported device types in help message
+- Add lists of supported device types in help message.
 
 Bugfixes:
-- Fix broken Wasapi shared mode
+- Fix broken Wasapi shared mode.
 - Correct "built with features" list in help.
 - Correct list of supported device types.
 
