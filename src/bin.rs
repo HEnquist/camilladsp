@@ -942,8 +942,5 @@ fn main_process() -> i32 {
 }
 
 fn main() {
-    //let drain = slog_async::Async::new(slog::Discard).build().fuse();
-    //let log = slog::Logger::root(drain, o!());
-    //let _guard = slog_scope::set_global_logger(log);
     std::process::exit(main_process());
 }
