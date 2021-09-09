@@ -154,15 +154,16 @@ These are part of the CamillaDSP family:
 * https://github.com/HEnquist/camillagui-backend - Server for a web-based gui for CamillaDSP.
 * https://github.com/HEnquist/camilladsp-config - Example configurations for things like running CamillaDSP as a systemd service.
 
-Other projects meant to be used with CamillaDSP:
+Other projects using CamillaDSP:
 * https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels.
-* https://github.com/raptorlightning/I2S-Hat - An SPDIF Hat for the Raspberry Pi 2-X for SPDIF Communication 
+* https://github.com/raptorlightning/I2S-Hat - An SPDIF Hat for the Raspberry Pi 2-X for SPDIF Communication, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/375834-i2s-hat-raspberry-pi-hat-spdif-i2s-communication-dsp.html).
 * https://github.com/daverz/camilla-remote-control - Interface for remote control of CamillaDSP using a FLIRC USB infrared receiver or remote keyboard.
+* https://audiodigitale.eu/?p=293 - Recursive Audio Converter is a software based on CamillaDSP and SoX to do offline batch audio file convertion, upsampling and convolution.
 
 Music players:
 * https://moodeaudio.org/ - moOde audio player, audiophile-quality music playback for Raspberry Pi.
 * https://github.com/thoelf/Linux-Stream-Player - Play local files or streamed music with room EQ on Linux. 
-* https://github.com/Lykkedk/SuperPlayer_v2.0 - Automatic filter switching at sample rate change for squeezelite.
+* https://github.com/Lykkedk/SuperPlayer_v2.0 - Automatic filter switching at sample rate change for squeezelite, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/361429-superplayer-dsp_engine-camilladsp-samplerate-switching-esp32-remote-control.html).
 
 Guides and example configs:
 * https://github.com/ynot123/CamillaDSP-Cfgs-FIR-Examples - Example Filter Configuration and Convolver Coefficients.
@@ -207,7 +208,9 @@ The recommended way to install rustc and cargo is by using the "rustup" tool. Th
 
 For Windows you also need the "Build Tools for Visual Studio". Get them from here: https://aka.ms/buildtools
 
-By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
+When building on Linux the Alsa backend is always enabled. Similarly, building on Windows always enables the Wasapi backend. And building on macOS always enables the CoreAudio backend.
+
+By default both the PulseAudio and Jack backends are disabled, but they can be enabled if desired. Leaving them disabled also means that the corresponding system Jack/Pulse packages aren't needed.
 
 By default the internal processing is done using 64-bit floats. There is a possibility to switch this to 32-bit floats. This might be useful for speeding up the processing when running on a 32-bit CPU (or a 64-bit CPU running in 32-bit mode), but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
 
@@ -317,8 +320,6 @@ brew install pulseaudio
 ```
 
 The FFTW feature can also be used on Windows. There is no need to install anything extra.
-
-
 
 
 # How to run
