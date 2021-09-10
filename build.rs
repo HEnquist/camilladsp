@@ -2,6 +2,7 @@ extern crate version_check;
 
 #[cfg(feature = "neon")]
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
     match version_check::Channel::read() {
         Some(c) if c.is_nightly() => {}
         Some(_) => panic!("The 'neon' feature requires a nightly compiler."),
@@ -19,6 +20,7 @@ fn main() {
 
 #[cfg(not(feature = "neon"))]
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
     match version_check::is_min_version("1.43.0") {
         Some(true) => {}
         Some(false) => panic!(

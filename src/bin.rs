@@ -66,12 +66,12 @@ fn custom_colored_logger_format(
     let level = record.level();
     write!(
         w,
-        "[{}] {} [{}:{}] {}",
-        flexi_logger::style(level, now.now().format("%Y-%m-%d %H:%M:%S%.6f")),
+        "{} {:<5} [{}:{}] {}",
+        now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
         flexi_logger::style(level, level),
         record.file().unwrap_or("<unnamed>"),
         record.line().unwrap_or(0),
-        flexi_logger::style(level, &record.args())
+        &record.args()
     )
 }
 
@@ -83,7 +83,7 @@ pub fn custom_logger_format(
 ) -> Result<(), std::io::Error> {
     write!(
         w,
-        "[{}] {} [{}:{}] {}",
+        "{} {:<5} [{}:{}] {}",
         now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
         record.level(),
         record.file().unwrap_or("<unnamed>"),
@@ -643,65 +643,6 @@ fn main_process() -> i32 {
         );
     let matches = clapapp.get_matches();
 
-    /*
-    let mut loglevel = match matches.occurrences_of("verbosity") {
-        0 => slog::Level::Info,
-        1 => slog::Level::Debug,
-        2 => slog::Level::Trace,
-        _ => slog::Level::Trace,
-    };
-    loglevel = match matches.value_of("loglevel") {
-        Some("trace") => slog::Level::Trace,
-        Some("debug") => slog::Level::Debug,
-        Some("info") => slog::Level::Info,
-        Some("warn") => slog::Level::Warning,
-        Some("error") => slog::Level::Error,
-        Some("off") => slog::Level::Critical,
-        _ => loglevel,
-    };
-
-    let drain = match matches.value_of("loglevel") {
-        Some("off") => {
-            let drain = slog::Discard;
-            slog_async::Async::new(drain).build().fuse()
-        }
-        _ => {
-            if let Some(logfile) = matches.value_of("logfile") {
-                let file = OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .truncate(true)
-                    .open(logfile)
-                    .unwrap();
-                let decorator = slog_term::PlainDecorator::new(file);
-                let drain = slog_term::FullFormat::new(decorator)
-                    .build()
-                    .filter_level(loglevel)
-                    .fuse();
-                slog_async::Async::new(drain).build().fuse()
-            } else {
-                let decorator = slog_term::TermDecorator::new().stderr().build();
-                let drain = slog_term::FullFormat::new(decorator)
-                    .build()
-                    .filter_level(loglevel)
-                    .fuse();
-                slog_async::Async::new(drain).build().fuse()
-            }
-        }
-    };
-
-    let log = slog::Logger::root(
-        drain,
-        o!("module" => {
-        slog::FnValue(
-            |rec : &slog::Record| { rec.module() }
-                )
-            }),
-    );
-
-    let _guard = slog_scope::set_global_logger(log);
-    */
-
     let mut loglevel = match matches.occurrences_of("verbosity") {
         0 => "info",
         1 => "debug",
@@ -731,7 +672,7 @@ fn main_process() -> i32 {
         flexi_logger::Logger::try_with_str(loglevel)
             .unwrap()
             .format(custom_colored_logger_format)
-            .set_palette("196;208;-;45;8".to_string())
+            .set_palette("196;208;-;27;8".to_string())
             .log_to_stderr()
             .write_mode(flexi_logger::WriteMode::Async)
             .start()
