@@ -428,7 +428,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
 
                 trace!("Build input stream");
-                let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, samplerate, channels) {
+                let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels) {
                     Ok(audio_unit) => audio_unit,
                     Err(err) => {
                         status_channel
