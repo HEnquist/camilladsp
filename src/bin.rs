@@ -68,7 +68,7 @@ fn custom_colored_logger_format(
         w,
         "{} {:<5} [{}:{}] {}",
         now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
-        flexi_logger::style(level, level),
+        flexi_logger::style(level).paint(level.to_string()),
         record.file().unwrap_or("<unnamed>"),
         record.line().unwrap_or(0),
         &record.args()
