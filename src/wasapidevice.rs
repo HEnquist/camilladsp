@@ -579,7 +579,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             }
                         }
                         Ok(AudioMessage::Pause) => {
-                            debug!("Pause message received");
+                            trace!("Pause message received");
                         }
                         Ok(AudioMessage::EndOfStream) => {
                             status_channel

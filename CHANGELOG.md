@@ -1,6 +1,7 @@
 ## 1.0.0
 New features:
 - New improved CoreAudio backend.
+- Switch fo faster logging library.
 
 ## 0.6.3
 Bugfixes:
