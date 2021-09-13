@@ -362,6 +362,7 @@ fn default_measure_interval() -> f32 {
     1.0
 }
 
+#[cfg(target_os = "macos")]
 fn default_ca_format() -> SampleFormat {
     SampleFormat::S32LE
 }
