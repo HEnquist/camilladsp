@@ -4,6 +4,8 @@
 CoreAudio is the standard audio API of macOS. 
 The CoreAudio support of CamillaDSP is provided by [an updated and extended fork](https://github.com/HEnquist/coreaudio-rs) of the [coreaudio-rs library](https://github.com/RustAudio/coreaudio-rs). 
 
+CoreAudio is a large API that offers several ways to accomplish most common tasks. CamillaDSP uses the low-level AudioUnits for playback and capture. An AudioUnit that represents a hardware device has two stream formats. One format is used for communicating with the application. This is typically 32-bit float, the same format that CoreAudio uses internally. The other format (called the physical format) is the one used to send or receive data to/from the sound card driver. 
+
 ## Capturing audio from other applications
 
 To capture audio from applications a virtual sound card is needed. 
@@ -21,6 +23,8 @@ Set the virtual sound card as the default playback device in the Sound preferenc
 When applications output their audio to the playback side of the virtual soundcard, then this audio can be captured from the capture side.
 This is done by giving the virtual soundcard as the capture device in the CamillaDSP configuration.
 
+### Sample rate change notifications
+CamillaDSP will listen for notifications from CoreAudio. If the sample rate of the capture device changes, then CoreAudio will stop providing new samples to any client currently capturing from it. To continue from this state, the capture device needs to be closed and reopened. For CamillaDSP this means that the configuration must be reloaded. If the capture device sample rate changes, then CamillaDSP will stop. Reading the "StopReason" via the websocket server tells that this was due to a sample rate change, and give the value for the new sample rate.
 
 ## Configuration of devices
 
@@ -30,11 +34,16 @@ This example configuration will be used to explain the various options specific 
     type: CoreAudio
     channels: 2
     device: "Soundflower (2ch)"
+    format: S32LE (*)
+    change_format: true (*)
   playback:
     type: CoreAudio
     channels: 2
     device: "Built-in Output"
+    format: S24LE (*)
+    change_format: true (*)
 ```
+The parameters marked (*) are optional.
 
 ### Device names
 The device names that are used for `device:` for both playback and capture are entered as shown in the "Audio MIDI Setup" that can be found under "Other" in Launchpad. 
@@ -46,7 +55,25 @@ To help with finding the name of playback and capture devices, use the macOS ver
 Just download the binary and run it in a terminal. It will list all devices with the names.
 
 ### Sample format
-There is no option to select the sample format. CoreAudio uses 32-bit floats internally, and this is the format that CamillaDSP uses when transferring samples to and from CoreAudio. 
-The sample format used by the actual DAC is the one that has been configured in "Audio MIDI Setup". 
-Use "Audio MIDI Setup" to select a combination of sample rate and format, for example "2 ch 24-bit Integer 44.1 kHz".
-CamillaDSP will switch the sample rate, and leave the sample format unchanged.
+CamillaDSP always uses 32-bit float uses when transferring data to and from CoreAudio. The conversion from 32-bit float to the sample format used by the actual DAC (the physical format) is performed by CoreAudio.
+
+The physical format can be set using the "Audio MIDI Setup" app.
+
+The option `change_format` determines whether CamillaDSP should change the physical format or not. If it is enabled, then CamillaDSP will change the setting to match the selected `format`. 
+To do this, it fetches a list of the supported stream formats for the device. 
+It then searches the list until it finds a suitable one. 
+The criteria is that it must have the right sample rate, the right number of bits, 
+and the right number type (float or integer). 
+There exact representation of the given format isn't used. 
+This means that S24LE and S24LE3 are equivalent, and the "LE" ending that means 
+little-endian for other backends is ignored.
+
+This table shows the mapping between the format setting in "Audio MIDI Setup" and the CamillaDSP `format`:
+- 16-bit Integer: S16LE
+- 24-bit Integer: S24LE or S24LE3
+- 32-bit Integer: S32LE
+- 32-bit Float: FLOAT32LE
+
+If the `change_format` is set to `false`, then CamillaDSP will leave the sample format unchanged, and only switch the sample rate.
+
+Both `format` and `change_format` are optional. If left out, `format` defaults to 32-bit integer (S32LE), and `change_format` to false.

@@ -678,9 +678,9 @@ Any parameter marked (*) in all examples in this section are optional. If they a
     |            | Alsa | Pulse | Wasapi | CoreAudio | Jack | File/Stdin/Stdout |
     |------------|------|-------|--------|-----------|------|-------------------|
     | S16LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
-    | S24LE      | Yes  | Yes   | Yes    | No        | No   | Yes               |
-    | S24LE3     | Yes  | Yes   | Yes    | No        | No   | Yes               |
-    | S32LE      | Yes  | Yes   | Yes    | No        | No   | Yes               |
+    | S24LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
+    | S24LE3     | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
+    | S32LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
     | FLOAT32LE  | Yes  | Yes   | Yes    | Yes       | Yes  | Yes               |
     | FLOAT64LE  | Yes  | No    | No     | No        | No   | Yes               |
   
