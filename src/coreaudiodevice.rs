@@ -15,8 +15,8 @@ use std::time::Duration;
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{
-    audio_unit_from_device_id, get_default_device_id, get_device_id_from_name,
-    set_device_sample_rate,
+    audio_unit_from_device_id, find_matching_physical_format, get_default_device_id,
+    get_device_id_from_name, set_device_physical_stream_format, set_device_sample_rate,
 };
 use coreaudio::audio_unit::{AliveListener, AudioUnit, Element, RateListener, Scope, StreamFormat};
 use coreaudio::sys::*;
@@ -34,6 +34,8 @@ pub struct CoreaudioPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
+    pub sample_format: SampleFormat,
+    pub change_format: bool,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -48,6 +50,8 @@ pub struct CoreaudioCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
+    pub sample_format: SampleFormat,
+    pub change_format: bool,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
@@ -58,6 +62,8 @@ fn open_coreaudio_playback(
     devname: &str,
     samplerate: usize,
     channels: usize,
+    sample_format: &SampleFormat,
+    change_format: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if devname == "default" {
         match get_default_device_id(false) {
@@ -80,8 +86,38 @@ fn open_coreaudio_playback(
     let mut audio_unit = audio_unit_from_device_id(device_id, false)
         .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
-    set_device_sample_rate(device_id, samplerate as f64)
-        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+    if change_format {
+        let phys_format = match *sample_format {
+            SampleFormat::S16LE => coreaudio::audio_unit::SampleFormat::I16,
+            SampleFormat::S24LE | SampleFormat::S24LE3 => coreaudio::audio_unit::SampleFormat::I24,
+            SampleFormat::S32LE => coreaudio::audio_unit::SampleFormat::I32,
+            SampleFormat::FLOAT32LE => coreaudio::audio_unit::SampleFormat::F32,
+            _ => {
+                let msg = format!("Sample format '{}' not supported!", sample_format);
+                return Err(ConfigError::new(&msg).into());
+            }
+        };
+
+        let physical_stream_format = StreamFormat {
+            sample_rate: samplerate as f64,
+            sample_format: phys_format,
+            flags: LinearPcmFlags::empty(),
+            channels: channels as u32,
+        };
+
+        if let Some(phys_asbd) = find_matching_physical_format(device_id, physical_stream_format) {
+            debug!("Set phys playback stream format");
+            set_device_physical_stream_format(device_id, phys_asbd).map_err(|_| {
+                ConfigError::new("Failed to find matching physical playback format")
+            })?;
+        } else {
+            let msg = "Failed to find matching physical playback format";
+            return Err(ConfigError::new(&msg).into());
+        }
+    } else {
+        set_device_sample_rate(device_id, samplerate as f64)
+            .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+    }
 
     let stream_format = StreamFormat {
         sample_rate: samplerate as f64,
@@ -104,6 +140,8 @@ fn open_coreaudio_capture(
     devname: &str,
     samplerate: usize,
     channels: usize,
+    sample_format: &SampleFormat,
+    change_format: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if devname == "default" {
         match get_default_device_id(true) {
@@ -126,9 +164,39 @@ fn open_coreaudio_capture(
     let mut audio_unit = audio_unit_from_device_id(device_id, true)
         .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
-    set_device_sample_rate(device_id, samplerate as f64)
-        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+    if change_format {
+        let phys_format = match *sample_format {
+            SampleFormat::S16LE => coreaudio::audio_unit::SampleFormat::I16,
+            SampleFormat::S24LE | SampleFormat::S24LE3 => coreaudio::audio_unit::SampleFormat::I24,
+            SampleFormat::S32LE => coreaudio::audio_unit::SampleFormat::I32,
+            SampleFormat::FLOAT32LE => coreaudio::audio_unit::SampleFormat::F32,
+            _ => {
+                let msg = format!("Sample format '{}' not supported!", sample_format);
+                return Err(ConfigError::new(&msg).into());
+            }
+        };
 
+        let physical_stream_format = StreamFormat {
+            sample_rate: samplerate as f64,
+            sample_format: phys_format,
+            flags: LinearPcmFlags::empty(),
+            channels: channels as u32,
+        };
+
+        if let Some(phys_asbd) = find_matching_physical_format(device_id, physical_stream_format) {
+            debug!("Set phys capture stream format");
+            set_device_physical_stream_format(device_id, phys_asbd)
+                .map_err(|_| ConfigError::new("Failed to find matching physical capture format"))?;
+        } else {
+            let msg = "Failed to find matching physical capture format";
+            return Err(ConfigError::new(&msg).into());
+        }
+    } else {
+        set_device_sample_rate(device_id, samplerate as f64)
+            .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+    }
+
+    debug!("Set capture stream format");
     let stream_format = StreamFormat {
         sample_rate: samplerate as f64,
         sample_format: coreaudio::audio_unit::SampleFormat::F32,
@@ -163,6 +231,8 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
+        let sample_format = self.sample_format.clone();
+        let change_format = self.change_format;
         let target_level = if self.target_level > 0 {
             self.target_level
         } else {
@@ -192,17 +262,22 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 let mut sample_queue: VecDeque<u8> =
                     VecDeque::with_capacity(16 * chunksize * blockalign);
 
-                let (mut audio_unit, device_id) =
-                    match open_coreaudio_playback(&devname, samplerate, channels) {
-                        Ok(audio_unit) => audio_unit,
-                        Err(err) => {
-                            status_channel
-                                .send(StatusMessage::PlaybackError(err.to_string()))
-                                .unwrap_or(());
-                            barrier.wait();
-                            return;
-                        }
-                    };
+                let (mut audio_unit, device_id) = match open_coreaudio_playback(
+                    &devname,
+                    samplerate,
+                    channels,
+                    &sample_format,
+                    change_format,
+                ) {
+                    Ok(audio_unit) => audio_unit,
+                    Err(err) => {
+                        status_channel
+                            .send(StatusMessage::PlaybackError(err.to_string()))
+                            .unwrap_or(());
+                        barrier.wait();
+                        return;
+                    }
+                };
 
                 type Args = render_callback::Args<data::InterleavedBytes<f32>>;
 
@@ -398,6 +473,8 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
+        let sample_format = self.sample_format.clone();
+        let change_format = self.change_format;
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let async_src = resampler_is_async(&resampler_conf);
@@ -428,7 +505,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
 
                 trace!("Build input stream");
-                let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels) {
+                let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels, &sample_format, change_format) {
                     Ok(audio_unit) => audio_unit,
                     Err(err) => {
                         status_channel

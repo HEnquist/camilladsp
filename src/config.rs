@@ -173,6 +173,10 @@ pub enum CaptureDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
+        #[serde(default = "default_ca_format")]
+        format: SampleFormat,
+        #[serde(default)]
+        change_format: bool,
     },
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
@@ -222,7 +226,7 @@ impl CaptureDevice {
             CaptureDevice::File { format, .. } => format.clone(),
             CaptureDevice::Stdin { format, .. } => format.clone(),
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio { .. } => SampleFormat::FLOAT32LE,
+            CaptureDevice::CoreAudio { format, .. } => format.clone(),
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { format, .. } => format.clone(),
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
@@ -270,6 +274,10 @@ pub enum PlaybackDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
+        #[serde(default = "default_ca_format")]
+        format: SampleFormat,
+        #[serde(default)]
+        change_format: bool,
     },
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
@@ -352,6 +360,11 @@ fn default_queuelimit() -> usize {
 
 fn default_measure_interval() -> f32 {
     1.0
+}
+
+#[cfg(target_os = "macos")]
+fn default_ca_format() -> SampleFormat {
+    SampleFormat::S32LE
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -924,8 +937,8 @@ fn apply_overrides(configuration: &mut Configuration) {
                 *format = fmt;
             }
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio { .. } => {
-                error!("Not possible to override capture format for CoreAudio, ignoring");
+            CaptureDevice::CoreAudio { format, .. } => {
+                *format = fmt;
             }
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { format, .. } => {
@@ -1176,7 +1189,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     if let CaptureDevice::Pulse { format, .. } = &conf.devices.capture {
         if *format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
-                "The PulseAudio playback backend does not support FLOAT64LE sample format",
+                "The PulseAudio capture backend does not support FLOAT64LE sample format",
             )
             .into());
         }
@@ -1186,6 +1199,24 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         if *format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The PulseAudio playback backend does not support FLOAT64LE sample format",
+            )
+            .into());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if let CaptureDevice::CoreAudio { format, .. } = &conf.devices.capture {
+        if *format == SampleFormat::FLOAT64LE {
+            return Err(ConfigError::new(
+                "The CoreAudio capture backend does not support FLOAT64LE sample format",
+            )
+            .into());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if let PlaybackDevice::CoreAudio { format, .. } = &conf.devices.playback {
+        if *format == SampleFormat::FLOAT64LE {
+            return Err(ConfigError::new(
+                "The CoreAudio playback backend does not support FLOAT64LE sample format",
             )
             .into());
         }
