@@ -266,7 +266,7 @@ fn playback_loop(
 
     let mut waited_millis = 0;
     trace!("Waiting for data to start playback, will time out after one second");
-    while sync.rx_play.len() < 2 && waited_millis < 1000 {
+    while sync.rx_play.len() < 2 && waited_millis < 2000 {
         thread::sleep(Duration::from_millis(10));
         waited_millis += 10;
     }
@@ -364,10 +364,20 @@ fn capture_loop(
             audio_client.stop_stream()?;
             return Ok(());
         }
-        if handle.wait_for_event(1000).is_err() {
-            error!("Capture error, stopping stream");
-            audio_client.stop_stream()?;
-            return Err(DeviceError::new("Error capturing data").into());
+        if handle.wait_for_event(250).is_err() {
+            error!("No data received, pausing stream");
+            let data = vec![0u8; 0];
+            match tx_capt.try_send((chunk_nbr, data)) {
+                Ok(()) | Err(TrySendError::Full(_)) => {}
+                Err(TrySendError::Disconnected(_)) => {
+                    error!("Error sending, channel disconnected");
+                    audio_client.stop_stream()?;
+                    return Err(DeviceError::new("Channel disconnected").into());
+                }
+            }
+            //audio_client.stop_stream()?;
+            //return Err(DeviceError::new("Error capturing data").into());
+            continue;
         }
         let available_frames = match capture_client.get_next_nbr_frames()? {
             Some(frames) => frames,
@@ -379,7 +389,7 @@ fn capture_loop(
             let mut data = vec![0u8; available_frames as usize * blockalign as usize];
             let nbr_frames_read =
                 capture_client.read_from_device(blockalign as usize, &mut data)?;
-            if nbr_frames_read != available_frames {
+                if nbr_frames_read != available_frames {
                 warn!(
                     "Expected {} frames, got {}",
                     available_frames, nbr_frames_read
@@ -395,6 +405,7 @@ fn capture_loop(
             }
             chunk_nbr += 1;
         }
+        
     }
 }
 
@@ -772,6 +783,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let mut rate_adjust = 0.0;
                 let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                 let mut state = ProcessingState::Running;
+                let mut saved_state = state;
                 let blockalign = bytes_per_sample*channels;
                 let mut data_queue: VecDeque<u8> = VecDeque::with_capacity(4 * blockalign * chunksize_samples );
                 // TODO check if this ever needs to be resized
@@ -835,8 +847,21 @@ impl CaptureDevice for WasapiCaptureDevice {
                             Ok((chunk_nbr, data)) => {
                                 trace!("got chunk, length {} bytes", data.len());
                                 expected_chunk_nbr += 1;
+                                if chunk_nbr < expected_chunk_nbr {
+                                    if state != ProcessingState::Inactive {
+                                        trace!("device became inactive");
+                                        saved_state = state;
+                                        state = ProcessingState::Inactive;
+                                        break;
+                                    }
+                                    else if data.len() > 0 {
+                                        trace!("device became active");
+                                        state = saved_state;
+                                        expected_chunk_nbr = chunk_nbr;
+                                    }
+                                }
                                 if chunk_nbr > expected_chunk_nbr {
-                                    warn!("Samples were dropped, missing {} buffers", chunk_nbr-expected_chunk_nbr);
+                                    warn!("Samples were dropped, missing {} buffers", chunk_nbr - expected_chunk_nbr);
                                     expected_chunk_nbr = chunk_nbr;
                                 }
                                 for element in data.iter() {
@@ -851,77 +876,79 @@ impl CaptureDevice for WasapiCaptureDevice {
                             }
                         }
                     }
-                    for element in data_buffer.iter_mut().take(capture_bytes) {
-                        *element = data_queue.pop_front().unwrap();
-                    }
-                    let mut chunk = buffer_to_chunk_rawbytes(
-                        &data_buffer[0..capture_bytes],
-                        channels,
-                        &sample_format,
-                        capture_bytes,
-                        &capture_status.read().unwrap().used_channels,
-                    );
-                    averager.add_value(capture_frames);
-                    if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
-                    {
-                        let samples_per_sec = averager.get_average();
-                        averager.restart();
-                        let measured_rate_f = samples_per_sec;
-                        debug!(
-                            "Measured sample rate is {} Hz",
-                            measured_rate_f
+                    if state != ProcessingState::Inactive {
+                        for element in data_buffer.iter_mut().take(capture_bytes) {
+                            *element = data_queue.pop_front().unwrap();
+                        }
+                        let mut chunk = buffer_to_chunk_rawbytes(
+                            &data_buffer[0..capture_bytes],
+                            channels,
+                            &sample_format,
+                            capture_bytes,
+                            &capture_status.read().unwrap().used_channels,
                         );
-                        let mut capture_status = capture_status.write().unwrap();
-                        capture_status.measured_samplerate = measured_rate_f as usize;
-                        capture_status.signal_range = value_range as f32;
-                        capture_status.rate_adjust = rate_adjust as f32;
-                        capture_status.state = state;
-                    }
-                    watcher_averager.add_value(capture_frames);
-                    if watcher_averager.larger_than_millis(rate_measure_interval)
-                    {
-                        let samples_per_sec = watcher_averager.get_average();
-                        watcher_averager.restart();
-                        let measured_rate_f = samples_per_sec;
-                        debug!(
-                            "Measured sample rate is {} Hz",
-                            measured_rate_f
-                        );
-                        let changed = valuewatcher.check_value(measured_rate_f as f32);
-                        if changed {
-                            warn!("sample rate change detected, last rate was {} Hz", measured_rate_f);
-                            if stop_on_rate_change {
-                                let msg = AudioMessage::EndOfStream;
-                                channel.send(msg).unwrap_or(());
-                                status_channel.send(StatusMessage::CaptureFormatChange(measured_rate_f as usize)).unwrap_or(());
+                        averager.add_value(capture_frames);
+                        if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
+                        {
+                            let samples_per_sec = averager.get_average();
+                            averager.restart();
+                            let measured_rate_f = samples_per_sec;
+                            debug!(
+                                "Measured sample rate is {} Hz",
+                                measured_rate_f
+                            );
+                            let mut capture_status = capture_status.write().unwrap();
+                            capture_status.measured_samplerate = measured_rate_f as usize;
+                            capture_status.signal_range = value_range as f32;
+                            capture_status.rate_adjust = rate_adjust as f32;
+                            capture_status.state = state;
+                        }
+                        watcher_averager.add_value(capture_frames);
+                        if watcher_averager.larger_than_millis(rate_measure_interval)
+                        {
+                            let samples_per_sec = watcher_averager.get_average();
+                            watcher_averager.restart();
+                            let measured_rate_f = samples_per_sec;
+                            debug!(
+                                "Measured sample rate is {} Hz",
+                                measured_rate_f
+                            );
+                            let changed = valuewatcher.check_value(measured_rate_f as f32);
+                            if changed {
+                                warn!("sample rate change detected, last rate was {} Hz", measured_rate_f);
+                                if stop_on_rate_change {
+                                    let msg = AudioMessage::EndOfStream;
+                                    channel.send(msg).unwrap_or(());
+                                    status_channel.send(StatusMessage::CaptureFormatChange(measured_rate_f as usize)).unwrap_or(());
+                                    break;
+                                }
+                            }
+                        }
+                        chunk_stats = chunk.get_stats();
+                        //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
+                        capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
+                        capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                        value_range = chunk.maxval - chunk.minval;
+                        state = silence_counter.update(value_range);
+                        if state == ProcessingState::Running {
+                            if let Some(resampl) = &mut resampler {
+                                let new_waves = resampl.process(&chunk.waveforms).unwrap();
+                                let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
+                                if chunk_frames == 0 {
+                                    chunk_frames = chunksize;
+                                }
+                                chunk.frames = chunk_frames;
+                                chunk.valid_frames = chunk.frames;
+                                chunk.waveforms = new_waves;
+                            }
+                            let msg = AudioMessage::Audio(chunk);
+                            if channel.send(msg).is_err() {
+                                info!("Processing thread has already stopped.");
                                 break;
                             }
                         }
                     }
-                    chunk_stats = chunk.get_stats();
-                    //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
-                    capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                    capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
-                    value_range = chunk.maxval - chunk.minval;
-                    state = silence_counter.update(value_range);
-                    if state == ProcessingState::Running {
-                        if let Some(resampl) = &mut resampler {
-                            let new_waves = resampl.process(&chunk.waveforms).unwrap();
-                            let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
-                            if chunk_frames == 0 {
-                                chunk_frames = chunksize;
-                            }
-                            chunk.frames = chunk_frames;
-                            chunk.valid_frames = chunk.frames;
-                            chunk.waveforms = new_waves;
-                        }
-                        let msg = AudioMessage::Audio(chunk);
-                        if channel.send(msg).is_err() {
-                            info!("Processing thread has already stopped.");
-                            break;
-                        }
-                    }
-                    else if state == ProcessingState::Paused {
+                    if state == ProcessingState::Paused || state == ProcessingState::Inactive {
                         let msg = AudioMessage::Pause;
                         if channel.send(msg).is_err() {
                             info!("Processing thread has already stopped.");
