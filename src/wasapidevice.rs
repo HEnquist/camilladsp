@@ -266,7 +266,7 @@ fn playback_loop(
 
     let mut waited_millis = 0;
     trace!("Waiting for data to start playback, will time out after one second");
-    while sync.rx_play.len() < 2 && waited_millis < 2000 {
+    while sync.rx_play.len() < 2 && waited_millis < 1000 {
         thread::sleep(Duration::from_millis(10));
         waited_millis += 10;
     }
@@ -356,6 +356,8 @@ fn capture_loop(
     let sessioncontrol = audio_client.get_audiosessioncontrol()?;
     sessioncontrol.register_session_notification(callbacks_weak)?;
 
+    let mut inactive = false;
+
     audio_client.start_stream()?;
     loop {
         trace!("capturing");
@@ -365,7 +367,10 @@ fn capture_loop(
             return Ok(());
         }
         if handle.wait_for_event(250).is_err() {
-            error!("No data received, pausing stream");
+            if !inactive {
+                warn!("No data received, pausing stream");
+                inactive = true;
+            }
             let data = vec![0u8; 0];
             match tx_capt.try_send((chunk_nbr, data)) {
                 Ok(()) | Err(TrySendError::Full(_)) => {}
@@ -375,9 +380,14 @@ fn capture_loop(
                     return Err(DeviceError::new("Channel disconnected").into());
                 }
             }
+            chunk_nbr += 1;
             //audio_client.stop_stream()?;
             //return Err(DeviceError::new("Error capturing data").into());
             continue;
+        }
+        if inactive {
+            info!("Data received, resuming stream");
+            inactive = false;
         }
         let available_frames = match capture_client.get_next_nbr_frames()? {
             Some(frames) => frames,
@@ -389,7 +399,7 @@ fn capture_loop(
             let mut data = vec![0u8; available_frames as usize * blockalign as usize];
             let nbr_frames_read =
                 capture_client.read_from_device(blockalign as usize, &mut data)?;
-                if nbr_frames_read != available_frames {
+            if nbr_frames_read != available_frames {
                 warn!(
                     "Expected {} frames, got {}",
                     available_frames, nbr_frames_read
@@ -405,7 +415,6 @@ fn capture_loop(
             }
             chunk_nbr += 1;
         }
-        
     }
 }
 
@@ -847,18 +856,17 @@ impl CaptureDevice for WasapiCaptureDevice {
                             Ok((chunk_nbr, data)) => {
                                 trace!("got chunk, length {} bytes", data.len());
                                 expected_chunk_nbr += 1;
-                                if chunk_nbr < expected_chunk_nbr {
+                                if data.is_empty() {
                                     if state != ProcessingState::Inactive {
-                                        trace!("device became inactive");
+                                        trace!("capture device became inactive");
                                         saved_state = state;
                                         state = ProcessingState::Inactive;
-                                        break;
                                     }
-                                    else if data.len() > 0 {
-                                        trace!("device became active");
-                                        state = saved_state;
-                                        expected_chunk_nbr = chunk_nbr;
-                                    }
+                                    break;
+                                }
+                                else if state == ProcessingState::Inactive {
+                                    trace!("capture device became active");
+                                    state = saved_state;
                                 }
                                 if chunk_nbr > expected_chunk_nbr {
                                     warn!("Samples were dropped, missing {} buffers", chunk_nbr - expected_chunk_nbr);
