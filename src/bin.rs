@@ -1,7 +1,6 @@
 #[cfg(target_os = "linux")]
 extern crate alsa;
 extern crate camillalib;
-extern crate chrono;
 extern crate clap;
 #[cfg(feature = "FFTW")]
 extern crate fftw;
@@ -22,6 +21,7 @@ extern crate signal_hook;
 extern crate tungstenite;
 
 extern crate flexi_logger;
+extern crate time;
 #[macro_use]
 extern crate log;
 
@@ -32,10 +32,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::thread;
-use std::time;
 
 use flexi_logger::DeferredNow;
 use log::Record;
+use time::format_description;
 
 use camillalib::Res;
 
@@ -57,6 +57,13 @@ const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
 const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
 const EXIT_OK: i32 = 0; // All ok
 
+// Time format string for logger
+const TS_S: &str = "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:6]";
+lazy_static::lazy_static! {
+    static ref TS: Vec<format_description::FormatItem<'static>>
+        = format_description::parse(TS_S).unwrap(/*ok*/);
+}
+
 // Customized version of `colored_opt_format` from flexi_logger.
 fn custom_colored_logger_format(
     w: &mut dyn std::io::Write,
@@ -67,7 +74,9 @@ fn custom_colored_logger_format(
     write!(
         w,
         "{} {:<5} [{}:{}] {}",
-        now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
+        now.now()
+            .format(&TS)
+            .unwrap_or_else(|_| "Timestamping failed".to_string()),
         flexi_logger::style(level).paint(level.to_string()),
         record.file().unwrap_or("<unnamed>"),
         record.line().unwrap_or(0),
@@ -84,7 +93,9 @@ pub fn custom_logger_format(
     write!(
         w,
         "{} {:<5} [{}:{}] {}",
-        now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
+        now.now()
+            .format(&TS)
+            .unwrap_or_else(|_| "Timestamping failed".to_string()),
         record.level(),
         record.file().unwrap_or("<unnamed>"),
         record.line().unwrap_or(0),
@@ -214,7 +225,7 @@ fn run(
         )
         .unwrap();
 
-    let delay = time::Duration::from_millis(100);
+    let delay = std::time::Duration::from_millis(100);
 
     let mut pb_ready = false;
     let mut cap_ready = false;
@@ -816,7 +827,7 @@ fn main_process() -> i32 {
         }
     }
 
-    let delay = time::Duration::from_millis(100);
+    let delay = std::time::Duration::from_millis(100);
     loop {
         debug!("Wait for config");
         while new_config.lock().unwrap().is_none() {
