@@ -23,8 +23,8 @@ pub fn multiply_elements(
             *res.get_unchecked_mut(6) = *val_a.get_unchecked(6) * *val_b.get_unchecked(6);
             *res.get_unchecked_mut(7) = *val_a.get_unchecked(7) * *val_b.get_unchecked(7);
             res = &mut res[8..];
-            val_a = &val_a.get_unchecked(8..);
-            val_b = &val_b.get_unchecked(8..);
+            val_a = val_a.get_unchecked(8..);
+            val_b = val_b.get_unchecked(8..);
         }
     }
     for (r, val) in res
@@ -57,8 +57,8 @@ pub fn multiply_add_elements(
             *res.get_unchecked_mut(6) += *val_a.get_unchecked(6) * *val_b.get_unchecked(6);
             *res.get_unchecked_mut(7) += *val_a.get_unchecked(7) * *val_b.get_unchecked(7);
             res = &mut res[8..];
-            val_a = &val_a.get_unchecked(8..);
-            val_b = &val_b.get_unchecked(8..);
+            val_a = val_a.get_unchecked(8..);
+            val_b = val_b.get_unchecked(8..);
         }
     }
     for (r, val) in res
