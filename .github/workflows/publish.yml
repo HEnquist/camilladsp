@@ -211,8 +211,8 @@ jobs:
           command: build
           args:  --release --target aarch64-apple-darwin
         env:
-          SDKROOT: /Applications/Xcode_12.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.0.sdk
-          MACOSX_DEPLOYMENT_TARGET: 11.0
+          SDKROOT: /Applications/Xcode_12.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.1.sdk
+          MACOSX_DEPLOYMENT_TARGET: 11.1
           DEVELOPER_DIR: /Applications/Xcode_12.4.app
 
       - name: Compress
