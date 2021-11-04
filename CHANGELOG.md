@@ -2,6 +2,7 @@
 New features:
 - New improved CoreAudio backend.
 - Switch fo faster logging library.
+- Improved support for Wasapi loopback capture.
 
 ## 0.6.3
 Bugfixes:
