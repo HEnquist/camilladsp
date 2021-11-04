@@ -12,18 +12,20 @@ pub fn multiply_elements(
     let mut val_a = &slice_a[..len];
     let mut val_b = &slice_b[..len];
 
-    while res.len() >= 8 {
-        res[0] = val_a[0] * val_b[0];
-        res[1] = val_a[1] * val_b[1];
-        res[2] = val_a[2] * val_b[2];
-        res[3] = val_a[3] * val_b[3];
-        res[4] = val_a[4] * val_b[4];
-        res[5] = val_a[5] * val_b[5];
-        res[6] = val_a[6] * val_b[6];
-        res[7] = val_a[7] * val_b[7];
-        res = &mut res[8..];
-        val_a = &val_a[8..];
-        val_b = &val_b[8..];
+    unsafe {
+        while res.len() >= 8 {
+            *res.get_unchecked_mut(0) = *val_a.get_unchecked(0) * *val_b.get_unchecked(0);
+            *res.get_unchecked_mut(1) = *val_a.get_unchecked(1) * *val_b.get_unchecked(1);
+            *res.get_unchecked_mut(2) = *val_a.get_unchecked(2) * *val_b.get_unchecked(2);
+            *res.get_unchecked_mut(3) = *val_a.get_unchecked(3) * *val_b.get_unchecked(3);
+            *res.get_unchecked_mut(4) = *val_a.get_unchecked(4) * *val_b.get_unchecked(4);
+            *res.get_unchecked_mut(5) = *val_a.get_unchecked(5) * *val_b.get_unchecked(5);
+            *res.get_unchecked_mut(6) = *val_a.get_unchecked(6) * *val_b.get_unchecked(6);
+            *res.get_unchecked_mut(7) = *val_a.get_unchecked(7) * *val_b.get_unchecked(7);
+            res = &mut res[8..];
+            val_a = val_a.get_unchecked(8..);
+            val_b = val_b.get_unchecked(8..);
+        }
     }
     for (r, val) in res
         .iter_mut()
@@ -44,18 +46,20 @@ pub fn multiply_add_elements(
     let mut val_a = &slice_a[..len];
     let mut val_b = &slice_b[..len];
 
-    while res.len() >= 8 {
-        res[0] += val_a[0] * val_b[0];
-        res[1] += val_a[1] * val_b[1];
-        res[2] += val_a[2] * val_b[2];
-        res[3] += val_a[3] * val_b[3];
-        res[4] += val_a[4] * val_b[4];
-        res[5] += val_a[5] * val_b[5];
-        res[6] += val_a[6] * val_b[6];
-        res[7] += val_a[7] * val_b[7];
-        res = &mut res[8..];
-        val_a = &val_a[8..];
-        val_b = &val_b[8..];
+    unsafe {
+        while res.len() >= 8 {
+            *res.get_unchecked_mut(0) += *val_a.get_unchecked(0) * *val_b.get_unchecked(0);
+            *res.get_unchecked_mut(1) += *val_a.get_unchecked(1) * *val_b.get_unchecked(1);
+            *res.get_unchecked_mut(2) += *val_a.get_unchecked(2) * *val_b.get_unchecked(2);
+            *res.get_unchecked_mut(3) += *val_a.get_unchecked(3) * *val_b.get_unchecked(3);
+            *res.get_unchecked_mut(4) += *val_a.get_unchecked(4) * *val_b.get_unchecked(4);
+            *res.get_unchecked_mut(5) += *val_a.get_unchecked(5) * *val_b.get_unchecked(5);
+            *res.get_unchecked_mut(6) += *val_a.get_unchecked(6) * *val_b.get_unchecked(6);
+            *res.get_unchecked_mut(7) += *val_a.get_unchecked(7) * *val_b.get_unchecked(7);
+            res = &mut res[8..];
+            val_a = val_a.get_unchecked(8..);
+            val_b = val_b.get_unchecked(8..);
+        }
     }
     for (r, val) in res
         .iter_mut()
