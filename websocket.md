@@ -201,7 +201,7 @@ In [12]: with open('/path/to/newconfig.yml') as f:
     ...:     cfg=f.read()
     ...:
 
-In [13]: ws.send(json.dumps({"SetConfig": cfg))
+In [13]: ws.send(json.dumps({"SetConfig": cfg}))
 Out[13]: 957
 
 In [14]: print(ws.recv())
