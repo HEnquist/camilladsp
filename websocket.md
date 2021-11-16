@@ -104,7 +104,7 @@ Commands for setting and getting the volume setting. These are only relevant if 
 Commands for reading and changing the active configuration
 - `GetConfig` : read the current configuration as yaml
   * returns the config in yaml as a string
-- `GetConfigjson` : read the current configuration as json
+- `GetConfigJson` : read the current configuration as json
   * returns the config in json as a string
 - `GetConfigName` : get name and path of current config file
   * returns the path as a string
