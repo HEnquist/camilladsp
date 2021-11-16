@@ -62,7 +62,7 @@ Commands for reading status parameters.
   * "Paused": processing is paused because the input signal is silent.
   * "Inactive": the program is inactive and waiting for a new configuration.
   * "Starting": the program is starting up processing with a new configuration.
-- `StopReason` : get the last reason why CamillaDSP stopped the processing. Possible values are:
+- `GetStopReason` : get the last reason why CamillaDSP stopped the processing. Possible values are:
   * "None": processing hasn't stopped.
   * "Done": processing stopped when the capture device reached the end of the stream.
   * "CaptureError": the capture device encountered an error.
