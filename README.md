@@ -1001,7 +1001,7 @@ filters:
     type: Conv
     parameters:
       type: Wav 
-      filename: path/to/filter.txt
+      filename: path/to/filter.wav
       channel: 0 (*)
 ```
 The `type` can be `Raw`, `Wav` or `Values`. Use `Wav` to load a standard .wav file, `Raw` to load a raw file (see list of allowed raw formats below), and `Values` for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases.
