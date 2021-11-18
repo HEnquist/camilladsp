@@ -71,7 +71,7 @@ The full configuration is given in a yaml file.
 The purpose of CamillaDSP is to enable audio processing with combinations of FIR and IIR filters. This functionality is available in EqualizerAPO, but for Windows only. For Linux the best known FIR filter engine is probably BruteFIR, which works very well but doesn't support IIR filters. 
 The goal of CamillaDSP is to provide both FIR and IIR filtering for Linux, Windows and macOS, to be stable, fast and flexible, and be easy to use and configure.  
 
-* BruteFIR: https://www.ludd.ltu.se/~torger/brutefir.html
+* BruteFIR: https://torger.se/anders/brutefir.html
 * EqualizerAPO: https://sourceforge.net/projects/equalizerapo/
 * The IIR filtering is heavily inspired by biquad-rs: https://github.com/korken89/biquad-rs 
 
