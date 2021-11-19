@@ -42,6 +42,7 @@ This example configuration will be used to explain the various options specific 
     device: "Built-in Output"
     format: S24LE (*)
     change_format: true (*)
+    exclusive: false (*)
 ```
 The parameters marked (*) are optional.
 
@@ -77,3 +78,7 @@ This table shows the mapping between the format setting in "Audio MIDI Setup" an
 If the `change_format` is set to `false`, then CamillaDSP will leave the sample format unchanged, and only switch the sample rate.
 
 Both `format` and `change_format` are optional. If left out, `format` defaults to 32-bit integer (S32LE), and `change_format` to false.
+
+The playback device has an `exclusive` setting for whether CamillaDSP should request exclusive
+access to the device or not. This is also known as hog mode. When enabled, no other application 
+can output sound to the device while CamillaDSP runs. The setting is optional and defaults to false if left out.

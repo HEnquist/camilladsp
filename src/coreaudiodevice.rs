@@ -13,12 +13,13 @@ use std::thread;
 use std::time::Duration;
 
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
-use coreaudio::audio_unit::render_callback::{self, data};
-use coreaudio::audio_unit::{
+use coreaudio::audio_unit::macos_helpers::{
     audio_unit_from_device_id, find_matching_physical_format, get_default_device_id,
-    get_device_id_from_name, set_device_physical_stream_format, set_device_sample_rate,
+    get_device_id_from_name, get_owner_pid, set_device_physical_stream_format,
+    set_device_sample_rate, switch_ownership, AliveListener, RateListener,
 };
-use coreaudio::audio_unit::{AliveListener, AudioUnit, Element, RateListener, Scope, StreamFormat};
+use coreaudio::audio_unit::render_callback::{self, data};
+use coreaudio::audio_unit::{AudioUnit, Element, Scope, StreamFormat};
 use coreaudio::sys::*;
 
 use crate::{CaptureStatus, PlaybackStatus};
@@ -36,6 +37,7 @@ pub struct CoreaudioPlaybackDevice {
     pub channels: usize,
     pub sample_format: SampleFormat,
     pub change_format: bool,
+    pub exclusive: bool,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -64,6 +66,7 @@ fn open_coreaudio_playback(
     channels: usize,
     sample_format: &SampleFormat,
     change_format: bool,
+    exclusive: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if devname == "default" {
         match get_default_device_id(false) {
@@ -85,6 +88,47 @@ fn open_coreaudio_playback(
 
     let mut audio_unit = audio_unit_from_device_id(device_id, false)
         .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+
+    if exclusive {
+        let device_pid =
+            get_owner_pid(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+        if device_pid != -1 {
+            warn!(
+                "Device is owned by another process with pid {}!",
+                device_pid
+            );
+        } else {
+            debug!("Device is free, trying to get exclusive access.");
+            let new_device_pid =
+                switch_ownership(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+            let camilla_pid = std::process::id();
+            if new_device_pid == camilla_pid as i32 {
+                debug!("We have exclusive access.");
+            } else {
+                warn!(
+                    "Could not get exclusive access. CamillaDSP pid: {}, device owner pid: {}",
+                    camilla_pid, new_device_pid
+                );
+            }
+        }
+    } else {
+        let device_owner_pid =
+            get_owner_pid(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+        let camilla_pid = std::process::id();
+        if device_owner_pid == camilla_pid as i32 {
+            debug!("Releasing exclusive access.");
+            let new_device_pid =
+                switch_ownership(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+            if new_device_pid == -1 {
+                debug!("Exclusive access released.");
+            } else {
+                println!(
+                    "Could not release exclusive access. CamillaDSP pid: {}, device owner pid: {}",
+                    camilla_pid, new_device_pid
+                );
+            }
+        }
+    }
 
     if change_format {
         let phys_format = match *sample_format {
@@ -233,6 +277,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
         let channels = self.channels;
         let sample_format = self.sample_format.clone();
         let change_format = self.change_format;
+        let exclusive = self.exclusive;
         let target_level = if self.target_level > 0 {
             self.target_level
         } else {
@@ -268,6 +313,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     channels,
                     &sample_format,
                     change_format,
+                    exclusive,
                 ) {
                     Ok(audio_unit) => audio_unit,
                     Err(err) => {
