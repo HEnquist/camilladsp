@@ -417,7 +417,13 @@ fn run(
                 }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            _ => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                warn!("Capture, Playback and Processing threads have exited");
+                status_structs.status.write().unwrap().stop_reason = StopReason::UnknownError(
+                    "Capture, Playback and Processing threads have exited".to_string(),
+                );
+                return Ok(ExitState::Restart);
+            }
         }
     }
 }

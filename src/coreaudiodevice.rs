@@ -658,7 +658,11 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                                 }
                             }
                         },
-                        Err(_) => {},
+                        Err(mpsc::TryRecvError::Empty) => {}
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            error!("Command channel was closed");
+                            break;
+                        }
                     }
                     match rate_rx.try_recv() {
                         Ok(rate) => {
@@ -670,7 +674,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             }
                         },
                         Err(mpsc::TryRecvError::Empty) => {}
-                        Err(_) => {
+                        Err(mpsc::TryRecvError::Disconnected) => {
                             error!("Rate event queue closed!");
                             channel.send(AudioMessage::EndOfStream).unwrap_or(());
                             status_channel.send(StatusMessage::CaptureError("Rate listener channel closed".to_string())).unwrap_or(());
@@ -705,10 +709,10 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             Err(TryRecvError::Empty) => {
                                 thread::sleep(Duration::from_millis(50));
                             }
-                            Err(err) => {
+                            Err(TryRecvError::Disconnected) => {
                                 error!("Channel is closed");
                                 channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                                status_channel.send(StatusMessage::CaptureError(err.to_string())).unwrap_or(());
+                                status_channel.send(StatusMessage::CaptureError("Inner capture thread has exited".to_string())).unwrap_or(());
                                 return;
                             }
                         }

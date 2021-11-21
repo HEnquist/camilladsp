@@ -251,6 +251,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                         running = false;
                                                         warn!("Playback interrupted, no data available");
                                                     }
+                                                    // Something went wrong, lets just clear the buffer
                                                     for sample in buffer.iter_mut() {
                                                         *sample = 0;
                                                     }
@@ -306,6 +307,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                         running = false;
                                                         warn!("Playback interrupted, no data available");
                                                     }
+                                                    // Something went wrong, lets just clear the buffer
                                                     for sample in buffer.iter_mut() {
                                                         *sample = 0.0;
                                                     }
@@ -574,7 +576,11 @@ impl CaptureDevice for CpalCaptureDevice {
                                         }
                                     }
                                 }
-                                Err(_) => {}
+                                Err(mpsc::TryRecvError::Empty) => {}
+                                Err(mpsc::TryRecvError::Disconnected) => {
+                                    error!("Command channel was closed");
+                                    break;
+                                }
                             };
                             capture_samples = get_nbr_capture_samples(
                                 &resampler,

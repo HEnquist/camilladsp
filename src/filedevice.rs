@@ -289,7 +289,11 @@ fn capture_loop(
                     }
                 }
             }
-            Err(_) => {}
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                error!("Command channel was closed");
+                break;
+            }
         };
         capture_bytes = get_nbr_capture_bytes(
             &resampler,

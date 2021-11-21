@@ -306,7 +306,7 @@ fn playback_loop(
                         warn!("Playback interrupted, no data available");
                     }
                 }
-                Err(_) => {
+                Err(TryRecvError::Disconnected) => {
                     error!("Channel is closed");
                     return Err(DeviceError::new("Data channel closed").into());
                 }
@@ -537,11 +537,11 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             break;
                         }
                         Err(TryRecvError::Empty) => {}
-                        Err(err) => {
+                        Err(TryRecvError::Disconnected) => {
                             send_error_or_playbackformatchange(
                                 &status_channel,
                                 &rx_cb_dev,
-                                err.to_string(),
+                                "Inner playback thread has exited".to_string(),
                             );
                             break;
                         }
@@ -642,7 +642,7 @@ fn check_for_format_change(rx: &Receiver<DisconnectReason>) -> bool {
             Err(TryRecvError::Empty) => {
                 return false;
             }
-            Err(_) => {
+            Err(TryRecvError::Disconnected) => {
                 return false;
             }
         }
@@ -829,7 +829,11 @@ impl CaptureDevice for WasapiCaptureDevice {
                                 }
                             }
                         },
-                        Err(_) => {},
+                        Err(mpsc::TryRecvError::Empty) => {}
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            error!("Command channel was closed");
+                            break;
+                        }
                     };
                     match rx_state_dev.try_recv() {
                         Ok(DeviceState::Ok) => {},
@@ -839,9 +843,9 @@ impl CaptureDevice for WasapiCaptureDevice {
                             break;
                         },
                         Err(TryRecvError::Empty) => {}
-                        Err(err) => {
+                        Err(TryRecvError::Disconnected) => {
                             channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                            send_error_or_captureformatchange(&status_channel, &rx_cb_dev, err.to_string());
+                            send_error_or_captureformatchange(&status_channel, &rx_cb_dev, "Inner capture thread exited".to_string());
                             break;
                         }
                     }

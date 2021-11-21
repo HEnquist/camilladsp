@@ -574,7 +574,11 @@ fn capture_loop_bytes(
                     }
                 }
             }
-            Err(_) => {}
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                error!("Command channel was closed");
+                break;
+            }
         };
         capture_bytes = get_nbr_capture_bytes(capture_bytes, &resampler, &params, &mut buffer);
         let capture_res = capture_buffer(

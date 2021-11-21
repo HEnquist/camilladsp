@@ -171,6 +171,7 @@ pub enum StopReason {
     Done,
     CaptureError(String),
     PlaybackError(String),
+    UnknownError(String),
     CaptureFormatChange(usize),
     PlaybackFormatChange(usize),
 }
