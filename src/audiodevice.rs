@@ -255,6 +255,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             device,
             format,
             change_format,
+            exclusive,
         } => Box::new(coreaudiodevice::CoreaudioPlaybackDevice {
             devname: device,
             samplerate: conf.samplerate,
@@ -265,6 +266,7 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
             change_format,
+            exclusive,
         }),
         #[cfg(target_os = "windows")]
         config::PlaybackDevice::Wasapi {

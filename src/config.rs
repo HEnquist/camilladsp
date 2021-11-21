@@ -278,6 +278,8 @@ pub enum PlaybackDevice {
         format: SampleFormat,
         #[serde(default)]
         change_format: bool,
+        #[serde(default)]
+        exclusive: bool,
     },
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
