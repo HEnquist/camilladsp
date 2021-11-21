@@ -10,7 +10,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use tungstenite::server::accept;
+use tungstenite::accept;
 use tungstenite::Message;
 use tungstenite::WebSocket;
 
