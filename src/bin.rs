@@ -229,7 +229,7 @@ fn run(
 
     let mut pb_ready = false;
     let mut cap_ready = false;
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&signal_reload))?;
     signal_hook::flag::register_usize(
         signal_hook::consts::SIGINT,

@@ -29,6 +29,53 @@ use ProcessingState;
 use Res;
 use StatusMessage;
 
+fn take_ownership(device_id: AudioDeviceID) -> Res<pid_t> {
+    let mut device_pid =
+        get_owner_pid(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+    let camilla_pid = std::process::id() as pid_t;
+    if device_pid == camilla_pid {
+        debug!("We already have exclusive access.");
+    } else if device_pid != -1 {
+        warn!(
+            "Device is owned by another process with pid {}!",
+            device_pid
+        );
+    } else {
+        debug!("Device is free, trying to get exclusive access.");
+        device_pid =
+            switch_ownership(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+        if device_pid == camilla_pid {
+            debug!("We have exclusive access.");
+        } else {
+            warn!(
+                "Could not get exclusive access. CamillaDSP pid: {}, device owner pid: {}",
+                camilla_pid, device_pid
+            );
+        }
+    }
+    Ok(device_pid)
+}
+
+fn release_ownership(device_id: AudioDeviceID) -> Res<()> {
+    let device_owner_pid =
+        get_owner_pid(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+    let camilla_pid = std::process::id() as pid_t;
+    if device_owner_pid == camilla_pid {
+        debug!("Releasing exclusive access.");
+        let new_device_pid =
+            switch_ownership(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+        if new_device_pid == -1 {
+            debug!("Exclusive access released.");
+        } else {
+            warn!(
+                "Could not release exclusive access. CamillaDSP pid: {}, device owner pid: {}",
+                camilla_pid, new_device_pid
+            );
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 pub struct CoreaudioPlaybackDevice {
     pub devname: String,
@@ -90,44 +137,9 @@ fn open_coreaudio_playback(
         .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
     if exclusive {
-        let device_pid =
-            get_owner_pid(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
-        if device_pid != -1 {
-            warn!(
-                "Device is owned by another process with pid {}!",
-                device_pid
-            );
-        } else {
-            debug!("Device is free, trying to get exclusive access.");
-            let new_device_pid =
-                switch_ownership(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
-            let camilla_pid = std::process::id();
-            if new_device_pid == camilla_pid as i32 {
-                debug!("We have exclusive access.");
-            } else {
-                warn!(
-                    "Could not get exclusive access. CamillaDSP pid: {}, device owner pid: {}",
-                    camilla_pid, new_device_pid
-                );
-            }
-        }
+        take_ownership(device_id)?;
     } else {
-        let device_owner_pid =
-            get_owner_pid(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
-        let camilla_pid = std::process::id();
-        if device_owner_pid == camilla_pid as i32 {
-            debug!("Releasing exclusive access.");
-            let new_device_pid =
-                switch_ownership(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
-            if new_device_pid == -1 {
-                debug!("Exclusive access released.");
-            } else {
-                println!(
-                    "Could not release exclusive access. CamillaDSP pid: {}, device owner pid: {}",
-                    camilla_pid, new_device_pid
-                );
-            }
-        }
+        release_ownership(device_id)?;
     }
 
     if change_format {
@@ -156,7 +168,7 @@ fn open_coreaudio_playback(
             })?;
         } else {
             let msg = "Failed to find matching physical playback format";
-            return Err(ConfigError::new(&msg).into());
+            return Err(ConfigError::new(msg).into());
         }
     } else {
         set_device_sample_rate(device_id, samplerate as f64)
@@ -233,7 +245,7 @@ fn open_coreaudio_capture(
                 .map_err(|_| ConfigError::new("Failed to find matching physical capture format"))?;
         } else {
             let msg = "Failed to find matching physical capture format";
-            return Err(ConfigError::new(&msg).into());
+            return Err(ConfigError::new(msg).into());
         }
     } else {
         set_device_sample_rate(device_id, samplerate as f64)
@@ -375,6 +387,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         status_channel
                             .send(StatusMessage::PlaybackError(err.to_string()))
                             .unwrap_or(());
+                        release_ownership(device_id).unwrap_or(());
                         barrier.wait();
                         return;
                     }
@@ -401,6 +414,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         status_channel
                             .send(StatusMessage::PlaybackError(err.to_string()))
                             .unwrap_or(());
+                        release_ownership(device_id).unwrap_or(());
                         return;
                     }
                 }
@@ -486,6 +500,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         }
                     }
                 }
+                release_ownership(device_id).unwrap_or(());
             })?;
         Ok(Box::new(handle))
     }
