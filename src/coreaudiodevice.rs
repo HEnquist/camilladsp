@@ -760,7 +760,6 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         &capture_status.read().unwrap().used_channels,
                     );
                     averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
-                    
                     if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                     {
                         let samples_per_sec = averager.get_average();
