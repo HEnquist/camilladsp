@@ -58,10 +58,11 @@ Commands for reading and changing settings for the websocket server.
 
 Commands for reading status parameters.
 - `GetState` : get the current state of the processing as a string. Possible values are: 
-  * "Running": the processing is running normally.
-  * "Paused": processing is paused because the input signal is silent.
-  * "Inactive": the program is inactive and waiting for a new configuration.
-  * "Starting": the program is starting up processing with a new configuration.
+  * "RUNNING": the processing is running normally.
+  * "PAUSED": processing is paused because the input signal is silent.
+  * "INACTIVE": the program is inactive and waiting for a new configuration.
+  * "STARTING": the program is starting up processing with a new configuration.
+  * "STALLED": the processing is stalled because the capture device isn't providing any data.
 - `StopReason` : get the last reason why CamillaDSP stopped the processing. Possible values are:
   * "None": processing hasn't stopped.
   * "Done": processing stopped when the capture device reached the end of the stream.

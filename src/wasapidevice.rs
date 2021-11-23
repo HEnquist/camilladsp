@@ -861,14 +861,14 @@ impl CaptureDevice for WasapiCaptureDevice {
                                 trace!("got chunk, length {} bytes", data.len());
                                 expected_chunk_nbr += 1;
                                 if data.is_empty() {
-                                    if state != ProcessingState::Inactive {
+                                    if state != ProcessingState::Stalled {
                                         trace!("capture device became inactive");
                                         saved_state = state;
-                                        state = ProcessingState::Inactive;
+                                        state = ProcessingState::Stalled;
                                     }
                                     break;
                                 }
-                                else if state == ProcessingState::Inactive {
+                                else if state == ProcessingState::Stalled {
                                     trace!("capture device became active");
                                     state = saved_state;
                                 }
@@ -888,7 +888,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             }
                         }
                     }
-                    if state != ProcessingState::Inactive {
+                    if state != ProcessingState::Stalled {
                         for element in data_buffer.iter_mut().take(capture_bytes) {
                             *element = data_queue.pop_front().unwrap();
                         }
@@ -960,7 +960,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             }
                         }
                     }
-                    if state == ProcessingState::Paused || state == ProcessingState::Inactive {
+                    if state == ProcessingState::Paused || state == ProcessingState::Stalled {
                         let msg = AudioMessage::Pause;
                         if channel.send(msg).is_err() {
                             info!("Processing thread has already stopped.");

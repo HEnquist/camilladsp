@@ -636,7 +636,7 @@ fn capture_loop_bytes(
             }
             Ok(CaptureResult::RecoverableError) => {
                 card_inactive = true;
-                params.capture_status.write().unwrap().state = ProcessingState::Paused;
+                params.capture_status.write().unwrap().state = ProcessingState::Stalled;
                 debug!("Card inactive, pausing");
             }
             Err(msg) => {
@@ -661,7 +661,7 @@ fn capture_loop_bytes(
         params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
         value_range = chunk.maxval - chunk.minval;
         if card_inactive {
-            state = ProcessingState::Paused;
+            state = ProcessingState::Stalled;
         } else {
             state = silence_counter.update(value_range);
         }
@@ -681,7 +681,7 @@ fn capture_loop_bytes(
                 info!("Processing thread has already stopped.");
                 break;
             }
-        } else if state == ProcessingState::Paused {
+        } else if state == ProcessingState::Paused || state == ProcessingState::Stalled {
             let msg = AudioMessage::Pause;
             if channels.audio.send(msg).is_err() {
                 info!("Processing thread has already stopped.");

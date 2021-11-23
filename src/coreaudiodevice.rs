@@ -634,6 +634,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 // TODO check if this ever needs to be resized
                 let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                 let mut expected_chunk_nbr = 0;
+                let mut prev_len = 0;
                 debug!("Capture device ready and waiting");
                 match status_channel.send(StatusMessage::CaptureReady) {
                     Ok(()) => {}
@@ -722,6 +723,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                                 }
                             }
                             Err(TryRecvError::Empty) => {
+                                trace!("No new data from inner capture thread, try {} of 10", tries);
                                 thread::sleep(Duration::from_millis(50));
                             }
                             Err(TryRecvError::Disconnected) => {
@@ -734,6 +736,16 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         tries += 1;
                     }
                     if data_queue.len() < (blockalign * capture_frames) {
+                        let mut capture_status = capture_status.write().unwrap();
+                        capture_status.measured_samplerate = 0;
+                        capture_status.signal_range = 0.0;
+                        capture_status.rate_adjust = 0.0;
+                        capture_status.state = ProcessingState::Stalled;
+                        let msg = AudioMessage::Pause;
+                        if channel.send(msg).is_err() {
+                            info!("Processing thread has already stopped.");
+                            break;
+                        }
                         continue;
                     }
 
@@ -747,7 +759,8 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         capture_bytes,
                         &capture_status.read().unwrap().used_channels,
                     );
-                    averager.add_value(capture_frames);
+                    averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
+                    
                     if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                     {
                         let samples_per_sec = averager.get_average();
@@ -763,14 +776,14 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         capture_status.rate_adjust = rate_adjust as f32;
                         capture_status.state = state;
                     }
-                    watcher_averager.add_value(capture_frames);
+                    watcher_averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
                     if watcher_averager.larger_than_millis(rate_measure_interval)
                     {
                         let samples_per_sec = watcher_averager.get_average();
                         watcher_averager.restart();
                         let measured_rate_f = samples_per_sec;
                         debug!(
-                            "Measured sample rate is {} Hz",
+                            "Rate watcher, measured sample rate is {} Hz",
                             measured_rate_f
                         );
                         let changed = valuewatcher.check_value(measured_rate_f as f32);
@@ -784,6 +797,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             }
                         }
                     }
+                    prev_len = data_queue.len();
                     chunk_stats = chunk.get_stats();
                     //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                     capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();

@@ -119,10 +119,16 @@ pub enum ExitState {
 
 #[derive(Clone, Debug, Copy, Serialize, PartialEq)]
 pub enum ProcessingState {
+    // Processing is running normally.
     Running,
+    // Processing is paused because input is silent.
     Paused,
+    // Processing is off and devices are closed, waiting for a new config.
     Inactive,
+    // Opening devices and starting up processing.
     Starting,
+    // Capture device isnt providing data, processing is stalled.
+    Stalled,
 }
 
 pub struct ExitRequest {}
@@ -191,6 +197,7 @@ impl fmt::Display for ProcessingState {
             ProcessingState::Paused => "PAUSED",
             ProcessingState::Inactive => "INACTIVE",
             ProcessingState::Starting => "STARTING",
+            ProcessingState::Stalled => "STALLED",
         };
         write!(f, "{}", desc)
     }
