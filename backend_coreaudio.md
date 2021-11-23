@@ -16,6 +16,8 @@ BlackHole has a 2-channel and a 16-channel version.
 There is currently a bug in the 2-channel version that in some cases can lead to choppy sound. 
 If this happens, try the 16-channel version instead. 
 
+Some player applications can use hog mode to get exclusive access to the playback device. Using this with a virtual soundcard like BlackHole causes problems, and is therefore not recommended.
+
 ### Sending all audio to the virtual card
 Set the virtual sound card as the default playback device in the Sound preferences. This will work for all applications that respect this setting, which in practice is nearly all. The exceptions are the ones that provide their own way of selecting playback device.
 
