@@ -167,6 +167,7 @@ Music players:
 Guides and example configs:
 * https://github.com/ynot123/CamillaDSP-Cfgs-FIR-Examples - Example Filter Configuration and Convolver Coefficients.
 * https://github.com/hughpyle/raspot - Hugh's raspotify config
+* https://github.com/Wang-Yue/camilladsp-crossfeed - Bauer stereophonic-to-binaural crossfeed for headphones
 * https://github.com/jensgk/akg_k702_camilladsp_eq - Headphone EQ and Crossfeed for the AKG K702 headphones
 * https://github.com/phelluy/room_eq_mac_m1 - Room Equalization HowTo with REW and Apple Silicon 
 
