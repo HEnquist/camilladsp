@@ -328,7 +328,7 @@ fn list_formats_as_text(hwp: &HwParams) -> String {
 
 /// Open an Alsa PCM device
 fn open_pcm(
-    devname: String,
+    devname: &str,
     samplerate: u32,
     bufsize: Frames,
     channels: u32,
@@ -338,9 +338,9 @@ fn open_pcm(
     // Open the device
     let pcmdev;
     if capture {
-        pcmdev = alsa::PCM::new(&devname, Direction::Capture, false)?;
+        pcmdev = alsa::PCM::new(devname, Direction::Capture, false)?;
     } else {
-        pcmdev = alsa::PCM::new(&devname, Direction::Playback, false)?;
+        pcmdev = alsa::PCM::new(devname, Direction::Playback, false)?;
     }
     // Set hardware parameters
     {
@@ -494,12 +494,15 @@ fn capture_loop_bytes(
     io: alsa::pcm::IO<u8>,
     params: CaptureParams,
     mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
+    devname: &str,
 ) {
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
     let subdevice = pcminfo.get_subdevice();
-    let h = HCtl::new(&format!("hw:{}", card), false).unwrap();
+    let cardname = devname.split(",").next().unwrap();
+    debug!("Getting controls for capture device, card: {}, device: {}, subdevice: {}, cardname: {}", card, device, subdevice, cardname);
+    let h = HCtl::new(cardname, false).unwrap();
     h.load().unwrap();
 
     let mut elid_loopback = ElemId::new(ElemIface::PCM);
@@ -738,7 +741,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
             .name("AlsaPlayback".to_string())
             .spawn(move || {
                 match open_pcm(
-                    devname,
+                    &devname,
                     samplerate as u32,
                     chunksize as Frames,
                     channels as u32,
@@ -832,7 +835,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                     None
                 };
                 match open_pcm(
-                    devname,
+                    &devname,
                     capture_samplerate as u32,
                     buffer_frames as Frames,
                     channels as u32,
@@ -876,6 +879,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             io,
                             cap_params,
                             resampler,
+                            &devname,
                         );
                     }
                     Err(err) => {
