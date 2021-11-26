@@ -695,6 +695,12 @@ fn main_process() -> i32 {
             .start()
             .unwrap()
     };
+    info!("CamillaDSP version {}", crate_version!());
+    info!(
+        "Running on {}, {}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
     // logging examples
     //trace!("trace message"); //with -vv
     //debug!("debug message"); //with -v

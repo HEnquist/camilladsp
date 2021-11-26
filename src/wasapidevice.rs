@@ -333,7 +333,8 @@ fn capture_loop(
     audio_client: wasapi::AudioClient,
     capture_client: wasapi::AudioCaptureClient,
     handle: wasapi::Handle,
-    tx_capt: Sender<(u64, Vec<u8>)>,
+    tx_capt: Sender<(u64, usize, Vec<u8>)>,
+    rx_capt_free: Receiver<Vec<u8>>,
     tx_cb: Sender<DisconnectReason>,
     blockalign: usize,
     stop_signal: Arc<AtomicBool>,
@@ -358,6 +359,8 @@ fn capture_loop(
 
     let mut inactive = false;
 
+    let mut saved_buffer: Option<Vec<u8>> = None;
+
     audio_client.start_stream()?;
     loop {
         trace!("capturing");
@@ -372,7 +375,7 @@ fn capture_loop(
                 inactive = true;
             }
             let data = vec![0u8; 0];
-            match tx_capt.try_send((chunk_nbr, data)) {
+            match tx_capt.try_send((chunk_nbr, 0, data)) {
                 Ok(()) | Err(TrySendError::Full(_)) => {}
                 Err(TrySendError::Disconnected(_)) => {
                     error!("Error sending, channel disconnected");
@@ -396,17 +399,31 @@ fn capture_loop(
         trace!("Available frames from capture dev: {}", available_frames);
         // If no available frames, just skip the rest of this loop iteration
         if available_frames > 0 {
-            let mut data = vec![0u8; available_frames as usize * blockalign as usize];
+            //let mut data = vec![0u8; available_frames as usize * blockalign as usize];
+            let mut data = match saved_buffer {
+                Some(buf) => {
+                    saved_buffer = None;
+                    buf
+                }
+                None => rx_capt_free.recv().unwrap(),
+            };
+            let nbr_bytes = available_frames as usize * blockalign as usize;
             let nbr_frames_read =
-                capture_client.read_from_device(blockalign as usize, &mut data)?;
+                capture_client.read_from_device(blockalign as usize, &mut data[0..nbr_bytes])?;
             if nbr_frames_read != available_frames {
                 warn!(
                     "Expected {} frames, got {}",
                     available_frames, nbr_frames_read
                 );
             }
-            match tx_capt.try_send((chunk_nbr, data)) {
-                Ok(()) | Err(TrySendError::Full(_)) => {}
+            match tx_capt.try_send((chunk_nbr, nbr_bytes, data)) {
+                // TODO never drop buffers!
+                // TODO can we pass references to a list instead of the buffers themselves?
+                Ok(()) => {}
+                Err(TrySendError::Full((nbr, length, data))) => {
+                    debug!("Dropping chunk {} with len {}", nbr, length);
+                    saved_buffer = Some(data);
+                }
                 Err(TrySendError::Disconnected(_)) => {
                     error!("Error sending, channel disconnected");
                     audio_client.stop_stream()?;
@@ -737,6 +754,11 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let channel_capacity = 8*chunksize/1024 + 1;
                 debug!("Using a capture channel capacity of {} buffers.", channel_capacity);
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
+                let (tx_dev_free, rx_dev_free) = bounded(channel_capacity+2);
+                for _ in 0..(channel_capacity+2) {
+                    let data = vec![0u8; 64*1024];
+                    tx_dev_free.send(data).unwrap();
+                }
                 let (tx_state_dev, rx_state_dev) = bounded(0);
                 let (tx_cb_dev, rx_cb_dev) = unbounded();
 
@@ -760,7 +782,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             }
                         };
                         let blockalign = wave_format.get_blockalign();
-                        let result = capture_loop(audio_client, capture_client, handle, tx_dev, tx_cb_dev, blockalign as usize, stop_signal_inner);
+                        let result = capture_loop(audio_client, capture_client, handle, tx_dev, rx_dev_free, tx_cb_dev, blockalign as usize, stop_signal_inner);
                         if let Err(err) = result {
                             let msg = format!("Capture failed with error: {}", err);
                             //error!("{}", msg);
@@ -857,10 +879,10 @@ impl CaptureDevice for WasapiCaptureDevice {
                     while data_queue.len() < (blockalign * capture_frames) {
                         trace!("capture device needs more samples to make chunk, reading from channel");
                         match rx_dev.recv() {
-                            Ok((chunk_nbr, data)) => {
-                                trace!("got chunk, length {} bytes", data.len());
+                            Ok((chunk_nbr, data_bytes, data)) => {
+                                trace!("got chunk, length {} bytes", data_bytes);
                                 expected_chunk_nbr += 1;
-                                if data.is_empty() {
+                                if data_bytes == 0 {
                                     if state != ProcessingState::Stalled {
                                         trace!("capture device became inactive");
                                         saved_state = state;
@@ -876,9 +898,11 @@ impl CaptureDevice for WasapiCaptureDevice {
                                     warn!("Samples were dropped, missing {} buffers", chunk_nbr - expected_chunk_nbr);
                                     expected_chunk_nbr = chunk_nbr;
                                 }
-                                for element in data.iter() {
+                                for element in data.iter().take(data_bytes) {
                                     data_queue.push_back(*element);
                                 }
+                                // Return the buffer to the queue
+                                tx_dev_free.send(data).unwrap();
                             }
                             Err(err) => {
                                 error!("Channel is closed");
