@@ -303,11 +303,11 @@ fn playback_loop(
         //println!("pos {} {}, f {}, time {}, diff {}", pos.0, pos.1, f, devtime, devtime-prevtime);
         //println!("{}",prev_inst.elapsed().as_micros());
         trace!(
-            "Device time ounted up by {} s",
+            "Device time counted up by {} s",
             device_time - device_prevtime
         );
-        if (device_time - device_prevtime) > 1.5 * (buffer_free_frame_count as f64 / samplerate) {
-            warn!("Missing event! Resetting stream");
+        if buffer_free_frame_count > 0 && (device_time - device_prevtime) > 1.5 * (buffer_free_frame_count as f64 / samplerate) {
+            warn!("Missing event! Resetting stream. Interval {} s, expected {} s", device_time - device_prevtime, buffer_free_frame_count as f64 / samplerate);
             audio_client.stop_stream()?;
             audio_client.reset_stream()?;
             audio_client.start_stream()?;
@@ -429,6 +429,7 @@ fn capture_loop(
             return Ok(());
         }
         if handle.wait_for_event(250).is_err() {
+            debug!("Timeout on capture event");
             if !inactive {
                 warn!("No data received, pausing stream");
                 inactive = true;
@@ -455,7 +456,7 @@ fn capture_loop(
             None => audio_client.get_bufferframecount()?,
         };
 
-        trace!("Available frames from capture dev: {}", available_frames);
+        debug!("Available frames from capture dev: {}", available_frames);
         // If no available frames, just skip the rest of this loop iteration
         if available_frames > 0 {
             //let mut data = vec![0u8; available_frames as usize * blockalign as usize];
@@ -464,7 +465,7 @@ fn capture_loop(
                     saved_buffer = None;
                     buf
                 }
-                None => channels.rx_empty.recv().unwrap(),
+                None => channels.rx_empty.try_recv().unwrap(),
             };
             let nbr_bytes = available_frames as usize * blockalign as usize;
             let nbr_frames_read =
@@ -521,7 +522,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
             .name("WasapiPlayback".to_string())
             .spawn(move || {
                 // Devices typically request around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = 8 * 1024 / chunksize + 1;
+                let channel_capacity = 16 * 1024 / chunksize + 2;
                 debug!(
                     "Using a playback channel capacity of {} chunks.",
                     channel_capacity
@@ -815,7 +816,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                     None
                 };
                 // Devices typically give around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = 8*chunksize/1024 + 1;
+                let channel_capacity = 64*chunksize/1024 + 2;
                 debug!("Using a capture channel capacity of {} buffers.", channel_capacity);
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let (tx_dev_free, rx_dev_free) = bounded(channel_capacity+2);
