@@ -1,8 +1,9 @@
 ## 1.0.0
 New features:
 - New improved CoreAudio backend.
-- Switch fo faster logging library.
+- Switch to faster logging library.
 - Improved support for Wasapi loopback capture.
+- Add "Stalled" state.
 
 ## 0.6.3
 Bugfixes:
