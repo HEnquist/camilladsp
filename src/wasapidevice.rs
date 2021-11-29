@@ -303,11 +303,17 @@ fn playback_loop(
         //println!("pos {} {}, f {}, time {}, diff {}", pos.0, pos.1, f, devtime, devtime-prevtime);
         //println!("{}",prev_inst.elapsed().as_micros());
         trace!(
-            "Device time ounted up by {} s",
+            "Device time counted up by {} s",
             device_time - device_prevtime
         );
-        if (device_time - device_prevtime) > 1.5 * (buffer_free_frame_count as f64 / samplerate) {
-            warn!("Missing event! Resetting stream");
+        if buffer_free_frame_count > 0
+            && (device_time - device_prevtime) > 1.5 * (buffer_free_frame_count as f64 / samplerate)
+        {
+            warn!(
+                "Missing event! Resetting stream. Interval {} s, expected {} s",
+                device_time - device_prevtime,
+                buffer_free_frame_count as f64 / samplerate
+            );
             audio_client.stop_stream()?;
             audio_client.reset_stream()?;
             audio_client.start_stream()?;
@@ -353,6 +359,7 @@ fn playback_loop(
             buffer_free_frame_count as usize,
             blockalign as usize,
             &mut sample_queue,
+            None,
         )?;
         let curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
         sync.bufferfill.store(curr_buffer_fill, Ordering::Relaxed);
@@ -429,6 +436,7 @@ fn capture_loop(
             return Ok(());
         }
         if handle.wait_for_event(250).is_err() {
+            debug!("Timeout on capture event");
             if !inactive {
                 warn!("No data received, pausing stream");
                 inactive = true;
@@ -456,6 +464,7 @@ fn capture_loop(
         };
 
         trace!("Available frames from capture dev: {}", available_frames);
+
         // If no available frames, just skip the rest of this loop iteration
         if available_frames > 0 {
             //let mut data = vec![0u8; available_frames as usize * blockalign as usize];
@@ -466,8 +475,12 @@ fn capture_loop(
                 }
                 None => channels.rx_empty.recv().unwrap(),
             };
-            let nbr_bytes = available_frames as usize * blockalign as usize;
-            let nbr_frames_read =
+
+            let mut nbr_bytes = available_frames as usize * blockalign as usize;
+            if data.len() < nbr_bytes {
+                data.resize(nbr_bytes, 0);
+            }
+            let (nbr_frames_read, flags) =
                 capture_client.read_from_device(blockalign as usize, &mut data[0..nbr_bytes])?;
             if nbr_frames_read != available_frames {
                 warn!(
@@ -475,12 +488,50 @@ fn capture_loop(
                     available_frames, nbr_frames_read
                 );
             }
+            if flags.silent {
+                debug!("Captured a buffer marked as silent");
+                data.iter_mut().take(nbr_bytes).for_each(|val| *val = 0);
+            }
+            if flags.data_discontinuity {
+                warn!("Capture device reported a buffer overrun");
+            }
+
+            // Workaround for an issue with capturing from VB-Audio Cable
+            // in shared mode. This device seems to misbehave and not provide
+            // the buffers right after the event occurs.
+            // Check if more samples are available and read again.
+            if let Some(extra_frames) = capture_client.get_next_nbr_frames()? {
+                if extra_frames > 0 {
+                    trace!("Workaround, reading {} frames more", extra_frames);
+                    let nbr_bytes_extra = extra_frames as usize * blockalign as usize;
+                    if data.len() < (nbr_bytes + nbr_bytes_extra) {
+                        data.resize(nbr_bytes + nbr_bytes_extra, 0);
+                    }
+                    let (nbr_frames_read, flags) = capture_client.read_from_device(
+                        blockalign as usize,
+                        &mut data[nbr_bytes..(nbr_bytes + nbr_bytes_extra)],
+                    )?;
+                    if nbr_frames_read != extra_frames {
+                        warn!("Expected {} frames, got {}", extra_frames, nbr_frames_read);
+                    }
+                    if flags.silent {
+                        debug!("Captured a buffer marked as silent");
+                        data.iter_mut()
+                            .skip(nbr_bytes)
+                            .take(nbr_bytes_extra)
+                            .for_each(|val| *val = 0);
+                    }
+                    if flags.data_discontinuity {
+                        warn!("Capture device reported a buffer overrun");
+                    }
+                    nbr_bytes += nbr_bytes_extra;
+                }
+            }
+
             match channels.tx_filled.try_send((chunk_nbr, nbr_bytes, data)) {
-                // TODO never drop buffers!
-                // TODO can we pass references to a list instead of the buffers themselves?
                 Ok(()) => {}
                 Err(TrySendError::Full((nbr, length, data))) => {
-                    debug!("Dropping chunk {} with len {}", nbr, length);
+                    debug!("Dropping captured chunk {} with len {}", nbr, length);
                     saved_buffer = Some(data);
                 }
                 Err(TrySendError::Disconnected(_)) => {
@@ -820,7 +871,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let (tx_dev_free, rx_dev_free) = bounded(channel_capacity+2);
                 for _ in 0..(channel_capacity+2) {
-                    let data = vec![0u8; 64*1024];
+                    let data = vec![0u8; 2*1024*bytes_per_sample*channels];
                     tx_dev_free.send(data).unwrap();
                 }
                 let (tx_state_dev, rx_state_dev) = bounded(0);
