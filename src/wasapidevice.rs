@@ -464,9 +464,7 @@ fn capture_loop(
         };
 
         trace!("Available frames from capture dev: {}", available_frames);
-        if available_frames == 0 {
-            info!("no frames");
-        }
+
         // If no available frames, just skip the rest of this loop iteration
         if available_frames > 0 {
             //let mut data = vec![0u8; available_frames as usize * blockalign as usize];
@@ -491,7 +489,7 @@ fn capture_loop(
                 );
             }
             if flags.silent {
-                debug!("Got a silent buffer");
+                debug!("Captured a buffer marked as silent");
                 data.iter_mut().take(nbr_bytes).for_each(|val| *val = 0);
             }
             if flags.data_discontinuity {
@@ -504,11 +502,7 @@ fn capture_loop(
             // Check if more samples are available and read again.
             if let Some(extra_frames) = capture_client.get_next_nbr_frames()? {
                 if extra_frames > 0 {
-                    trace!(
-                        "Workaround, first read {} frames, second {} frames",
-                        available_frames,
-                        extra_frames
-                    );
+                    trace!("Workaround, reading {} frames more", extra_frames);
                     let nbr_bytes_extra = extra_frames as usize * blockalign as usize;
                     if data.len() < (nbr_bytes + nbr_bytes_extra) {
                         data.resize(nbr_bytes + nbr_bytes_extra, 0);
@@ -521,7 +515,7 @@ fn capture_loop(
                         warn!("Expected {} frames, got {}", extra_frames, nbr_frames_read);
                     }
                     if flags.silent {
-                        debug!("Got a silent buffer");
+                        debug!("Captured a buffer marked as silent");
                         data.iter_mut()
                             .skip(nbr_bytes)
                             .take(nbr_bytes_extra)
@@ -537,7 +531,7 @@ fn capture_loop(
             match channels.tx_filled.try_send((chunk_nbr, nbr_bytes, data)) {
                 Ok(()) => {}
                 Err(TrySendError::Full((nbr, length, data))) => {
-                    debug!("Dropping chunk {} with len {}", nbr, length);
+                    debug!("Dropping captured chunk {} with len {}", nbr, length);
                     saved_buffer = Some(data);
                 }
                 Err(TrySendError::Disconnected(_)) => {
