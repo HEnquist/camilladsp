@@ -876,28 +876,29 @@ mixers:
         mute: false (*)
         sources:
           - channel: 0
-            gain: 0
-            inverted: false
+            gain: 0 (*)
+            inverted: false (*)
       - dest: 1
         mute: false (*)
         sources:
           - channel: 1
-            gain: 0
-            inverted: false
+            gain: 0 (*)
+            inverted: false (*)
       - dest: 2
         sources:
           - channel: 0
-            gain: 0
-            inverted: false
+            gain: 0 (*)
+            inverted: false (*)
       - dest: 3
         sources:
           - channel: 1
-            gain: 0
-            inverted: false
+            gain: 0 (*)
+            inverted: false (*)
 ```
 Parameters marked with (*) are optional. 
 The "channels" group define the number of input and output channels for the mixer. The mapping section then decides how to route the audio.
-This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value in dB, and if it should be `inverted` (true/false). A channel that has no sources will be filled with silence. The `mute` option determines if an output channel of the mixer should be muted. This parameter is optional, and defaults to not muted.
+This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value in dB, and if it should be `inverted` (true/false). A channel that has no sources will be filled with silence. The `mute` option determines if an output channel of the mixer should be muted. The `mute`, `gain` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 dB, and not inverted.
+
 Another example, a simple stereo to mono mixer:
 ```
 mixers:
@@ -910,10 +911,8 @@ mixers:
         sources:
           - channel: 0
             gain: -6
-            inverted: false
           - channel: 1
             gain: -6
-            inverted: false
 ```
 
 ### Skip processing of unused channels

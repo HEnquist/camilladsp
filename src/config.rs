@@ -748,7 +748,9 @@ pub struct MixerChannels {
 #[serde(deny_unknown_fields)]
 pub struct MixerSource {
     pub channel: usize,
+    #[serde(default)]
     pub gain: PrcFmt,
+    #[serde(default)]
     pub inverted: bool,
     #[serde(default)]
     pub mute: bool,
