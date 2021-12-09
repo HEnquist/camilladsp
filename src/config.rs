@@ -702,6 +702,8 @@ pub struct DelayParameters {
 pub enum TimeUnit {
     #[serde(rename = "ms")]
     Milliseconds,
+    #[serde(rename = "mm")]
+    Millimetres,
     #[serde(rename = "samples")]
     Samples,
 }

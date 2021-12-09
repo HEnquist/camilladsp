@@ -444,7 +444,7 @@ fn playback_loop_bytes(
                         let mut pb_stat = params.playback_status.write().unwrap();
                         pb_stat.buffer_level = av_delay as usize;
                         debug!(
-                            "Playback buffer level: {}, signal rms: {:?}",
+                            "Playback buffer level: {:.1}, signal rms: {:?}",
                             av_delay, pb_stat.signal_rms
                         );
                     }

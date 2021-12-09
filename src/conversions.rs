@@ -63,8 +63,9 @@ pub fn chunk_to_buffer_rawbytes(
     }
     if clipped > 0 {
         warn!(
-            "Clipping detected, {} samples clipped, peak {}%",
+            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
             clipped,
+            20.0 * peak.log10(),
             peak * 100.0
         );
     }
@@ -159,8 +160,9 @@ pub fn chunk_to_queue_int<T: num_traits::cast::NumCast>(
     }
     if clipped > 0 {
         warn!(
-            "Clipping detected, {} samples clipped, peak {}%",
+            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
             clipped,
+            20.0 * peak.log10(),
             peak * 100.0
         );
     }
@@ -243,8 +245,9 @@ pub fn chunk_to_queue_float<T: num_traits::cast::NumCast>(
     }
     if clipped > 0 {
         warn!(
-            "Clipping detected, {} samples clipped, peak {}%",
+            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
             clipped,
+            20.0 * peak.log10(),
             peak * 100.0
         );
     }

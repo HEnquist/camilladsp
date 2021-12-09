@@ -277,6 +277,7 @@ impl Delay {
     pub fn from_config(name: String, samplerate: usize, conf: config::DelayParameters) -> Self {
         let delay_samples = match conf.unit {
             config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (samplerate as PrcFmt),
+            config::TimeUnit::Millimetres => conf.delay / 1000.0 * (samplerate as PrcFmt) / 343.0,
             config::TimeUnit::Samples => conf.delay,
         };
         Delay::new(name, samplerate, delay_samples, conf.subsample)
@@ -303,6 +304,9 @@ impl Filter for Delay {
         if let config::Filter::Delay { parameters: conf } = conf {
             let delay_samples = match conf.unit {
                 config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (self.samplerate as PrcFmt),
+                config::TimeUnit::Millimetres => {
+                    conf.delay / 1000.0 * (self.samplerate as PrcFmt) / 343.0
+                }
                 config::TimeUnit::Samples => conf.delay,
             };
             let (integerdelay, biquad) = if conf.subsample {

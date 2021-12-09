@@ -4,6 +4,8 @@ New features:
 - Switch to faster logging library.
 - Improved support for Wasapi loopback capture.
 - Add "Stalled" state.
+- Some Mixer parameters made optional.
+- Delay value can be given in millimetres.
 
 ## 0.6.3
 Bugfixes:

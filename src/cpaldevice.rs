@@ -366,7 +366,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             timer.restart();
                                             buffer_avg.restart();
                                             debug!(
-                                                "Current buffer level {}, set capture rate to {}%",
+                                                "Current buffer level {:.1}, set capture rate to {:.4}%",
                                                 av_delay,
                                                 100.0 * speed
                                             );

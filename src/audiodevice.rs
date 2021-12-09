@@ -615,7 +615,7 @@ pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, 
     let rel_diff = (diff as f64) / (srate as f64);
     let speed = 1.0 - 0.5 * rel_diff / adjust_period as f64;
     debug!(
-        "Current buffer level: {}, corrected capture rate: {}%",
+        "Current buffer level: {:.1}, corrected capture rate: {:.4}%",
         avg_level,
         100.0 * speed
     );

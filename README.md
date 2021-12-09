@@ -610,6 +610,8 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   
   The `adjust_period` parameter is used to set the interval between corrections, in seconds. 
   The default is 10 seconds. Only applies when `enable_rate_adjust` is set to `true`.
+  A smaller value will make for a faster reaction time, which may be useful if there are occasional
+  buffer underruns when running with a small `target_level` to minimize latency.
 
 * `silence_threshold` & `silence_timeout` (optional)
   The fields `silence_threshold` and `silence_timeout` are optional 
@@ -979,7 +981,14 @@ Allowed ranges:
 - low_boost: 0 to 20
 
 ### Delay
-The delay filter provides a delay in milliseconds or samples. The `unit` can be `ms` or `samples`, and if left out it defaults to `ms`. If the `subsample` parameter is set to `true`, then it will use use an IIR filter to achieve subsample delay precision. If set to `false`, the value will instead be rounded to the nearest number of full samples. This is a little faster and should be used if subsample precision is not required. 
+The delay filter provides a delay in milliseconds, millimetres or samples. 
+The `unit` can be `ms`, `mm` or `samples`, and if left out it defaults to `ms`.
+When giving the delay in millimetres, the speed of sound of is assumed to be 343 m/s (dry air at 20 degrees Celsius).
+
+If the `subsample` parameter is set to `true`, then it will use use an IIR filter to achieve subsample delay precision.
+If set to `false`, the value will instead be rounded to the nearest number of full samples.
+This is a little faster and should be used if subsample precision is not required.
+ 
 
 The delay value must be positive or zero. 
 
@@ -1155,11 +1164,12 @@ Single Biquads are defined using the type "Biquad". The available filter types a
 
 * Peaking
   
-  A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
+  A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`. Use positive gain values to boost, and negative values to attenuate.
 
 * Notch
   
   A notch filter to attenuate a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
+  The notch filter is similar to a Peaking filter configured with a large negative gain.
 
 * Bandpass
   
