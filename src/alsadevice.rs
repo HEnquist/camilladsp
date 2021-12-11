@@ -153,6 +153,8 @@ fn capture_buffer(
         debug!("Starting capture");
         pcmdevice.start()?;
     }
+    let millis_per_chunk = 1000 * frames_to_read / samplerate;
+
     if avoid_blocking {
         let available = pcmdevice.avail();
         match available {
@@ -198,6 +200,40 @@ fn capture_buffer(
                 }
             }
         }
+    }
+    let mut available = if let Ok(frames) = pcmdevice.avail() {
+            frames
+        }
+        else {
+            warn!("Failed to read available frames.");
+            return Ok(CaptureResult::RecoverableError);
+        };
+    trace!("Reading {}", frames_to_read);
+    while (available as usize) < frames_to_read {
+        trace!("Waiting..");
+        match pcmdevice.wait(Some(2*millis_per_chunk as u32)) {
+            Ok(true) => {
+                available = pcmdevice.avail().unwrap();
+                trace!("Waited, ready, new avail {}", available);
+            }
+            Ok(false) => {
+                warn!("Device takes too long to get ready");
+                return Ok(CaptureResult::RecoverableError);
+            }
+            Err(err) => {
+                if retry {
+                    warn!("Capture failed while querying for available frames, error: {}, will try again.", err);
+                    return Ok(CaptureResult::RecoverableError);
+                } else {
+                    warn!(
+                        "Capture failed while querying for available frames, error: {}",
+                        err
+                    );
+                    return Err(Box::new(err));
+                }
+            }
+        }
+
     }
     let _frames = match io.readi(buffer) {
         Ok(frames) => frames,
@@ -330,6 +366,7 @@ fn list_formats_as_text(hwp: &HwParams) -> String {
 fn open_pcm(
     devname: String,
     samplerate: u32,
+    chunksize: Frames,
     bufsize: Frames,
     channels: u32,
     sample_format: &SampleFormat,
@@ -385,6 +422,7 @@ fn open_pcm(
         let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
         if capture {
             swp.set_start_threshold(0)?;
+            swp.set_avail_min(chunksize)?;
         } else {
             swp.set_start_threshold(act_bufsize / 2 - act_periodsize)?;
         }
@@ -741,6 +779,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     devname,
                     samplerate as u32,
                     chunksize as Frames,
+                    chunksize as Frames,
                     channels as u32,
                     &sample_format,
                     false,
@@ -834,6 +873,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                 match open_pcm(
                     devname,
                     capture_samplerate as u32,
+                    chunksize as Frames,
                     buffer_frames as Frames,
                     channels as u32,
                     &sample_format,
