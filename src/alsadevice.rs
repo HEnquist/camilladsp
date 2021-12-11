@@ -99,6 +99,8 @@ struct PlaybackParams {
     adjust_enabled: bool,
     sample_format: SampleFormat,
     playback_status: Arc<RwLock<PlaybackStatus>>,
+    chunksize: usize,
+    samplerate: usize,
 }
 
 enum CaptureResult {
@@ -112,6 +114,7 @@ fn play_buffer(
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
     target_delay: u64,
+    millis_per_chunk: usize,
 ) -> Res<()> {
     let playback_state = pcmdevice.state();
     //trace!("Playback state {:?}", playback_state);
@@ -122,6 +125,23 @@ fn play_buffer(
     } else if playback_state == State::Prepared {
         info!("Starting playback from Prepared state");
         thread::sleep(Duration::from_millis(target_delay));
+    }
+
+    match pcmdevice.wait(Some(2*millis_per_chunk as u32)) {
+        Ok(true) => {
+            trace!("Playback waited, ready");
+        }
+        Ok(false) => {
+            warn!("Wait timed out, playback device takes too long to free buffer");
+            panic!("Wait timed out, playback device takes too long to free buffer");
+        }
+        Err(err) => {
+            warn!(
+                "Playback device failed while waiting for available buffer space, error: {}",
+                err
+            );
+            return Err(Box::new(err));
+        }
     }
     let _frames = match io.writei(buffer) {
         Ok(frames) => frames,
@@ -155,85 +175,26 @@ fn capture_buffer(
     }
     let millis_per_chunk = 1000 * frames_to_read / samplerate;
 
-    if avoid_blocking {
-        let available = pcmdevice.avail();
-        match available {
-            Ok(frames) => {
-                if (frames as usize) < frames_to_read {
-                    trace!(
-                        "Not enough frames available: {}, need: {}, waiting...",
-                        frames,
-                        frames_to_read
-                    );
-                    // Let's wait for more frames, with 10% plus 1 ms of margin
-                    let millis =
-                        (1 + (1100 * (frames_to_read - frames as usize)) / samplerate) as u64;
-                    let start = Instant::now();
-                    thread::sleep(Duration::from_millis(millis));
-                    let slept_millis = start.elapsed().as_millis();
-                    trace!(
-                        "Requested sleep for {} ms, result was {} ms",
-                        millis,
-                        slept_millis
-                    );
-                    let frames_after_wait = pcmdevice.avail().unwrap_or(0) as usize;
-                    if frames_after_wait < frames_to_read {
-                        // Still not enough,
-                        warn!("Still not enough frames available: {}, need: {}. Capture timed out, will try again", frames_after_wait, frames_to_read);
-                        return Ok(CaptureResult::RecoverableError);
-                    }
-                }
-            }
-            Err(err) => {
-                if retry {
-                    warn!("Capture failed while querying for available frames, error: {}, will try again.", err);
-                    thread::sleep(Duration::from_millis(
-                        (1000 * frames_to_read as u64) / samplerate as u64,
-                    ));
-                    return Ok(CaptureResult::RecoverableError);
-                } else {
-                    warn!(
-                        "Capture failed while querying for available frames, error: {}",
-                        err
-                    );
-                    return Err(Box::new(err));
-                }
-            }
+    match pcmdevice.wait(Some(2*millis_per_chunk as u32)) {
+        Ok(true) => {
+            trace!("Capture waited, ready");
         }
-    }
-    let mut available = if let Ok(frames) = pcmdevice.avail() {
-            frames
-        }
-        else {
-            warn!("Failed to read available frames.");
+        Ok(false) => {
+            warn!("Wait timed out, capture device takes too long to capture frames");
             return Ok(CaptureResult::RecoverableError);
-        };
-    trace!("Reading {}", frames_to_read);
-    while (available as usize) < frames_to_read {
-        trace!("Waiting..");
-        match pcmdevice.wait(Some(2*millis_per_chunk as u32)) {
-            Ok(true) => {
-                available = pcmdevice.avail().unwrap();
-                trace!("Waited, ready, new avail {}", available);
-            }
-            Ok(false) => {
-                warn!("Device takes too long to get ready");
+        }
+        Err(err) => {
+            if retry {
+                warn!("Capture device failed while waiting for frames, error: {}, will try again.", err);
                 return Ok(CaptureResult::RecoverableError);
-            }
-            Err(err) => {
-                if retry {
-                    warn!("Capture failed while querying for available frames, error: {}, will try again.", err);
-                    return Ok(CaptureResult::RecoverableError);
-                } else {
-                    warn!(
-                        "Capture failed while querying for available frames, error: {}",
-                        err
-                    );
-                    return Err(Box::new(err));
-                }
+            } else {
+                warn!(
+                    "Capture device failed while waiting for available frames, error: {}",
+                    err
+                );
+                return Err(Box::new(err));
             }
         }
-
     }
     let _frames = match io.readi(buffer) {
         Ok(frames) => frames,
@@ -375,9 +336,9 @@ fn open_pcm(
     // Open the device
     let pcmdev;
     if capture {
-        pcmdev = alsa::PCM::new(&devname, Direction::Capture, false)?;
+        pcmdev = alsa::PCM::new(&devname, Direction::Capture, true)?;
     } else {
-        pcmdev = alsa::PCM::new(&devname, Direction::Playback, false)?;
+        pcmdev = alsa::PCM::new(&devname, Direction::Playback, true)?;
     }
     // Set hardware parameters
     {
@@ -422,10 +383,10 @@ fn open_pcm(
         let (act_bufsize, act_periodsize) = (hwp.get_buffer_size()?, hwp.get_period_size()?);
         if capture {
             swp.set_start_threshold(0)?;
-            swp.set_avail_min(chunksize)?;
         } else {
             swp.set_start_threshold(act_bufsize / 2 - act_periodsize)?;
         }
+        swp.set_avail_min(chunksize)?;
         //swp.set_avail_min(periodsize)?;
         debug!(
             "Opening audio device \"{}\" with parameters: {:?}, {:?}",
@@ -452,6 +413,7 @@ fn playback_loop_bytes(
     let mut conversion_result;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
     let target_delay = 1000 * (params.target_level as u64) / srate as u64;
+    let millis_per_chunk = 1000 * params.chunksize / params.samplerate;
     loop {
         match channels.audio.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
@@ -492,7 +454,7 @@ fn playback_loop_bytes(
                 params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
                 params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
 
-                let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay);
+                let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay, millis_per_chunk);
                 match playback_res {
                     Ok(_) => {}
                     Err(msg) => {
@@ -798,6 +760,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             adjust_enabled,
                             sample_format,
                             playback_status,
+                            chunksize,
+                            samplerate,
                         };
                         let pb_channels = PlaybackChannels {
                             audio: channel,
