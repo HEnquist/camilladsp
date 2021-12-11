@@ -127,7 +127,7 @@ fn play_buffer(
         thread::sleep(Duration::from_millis(target_delay));
     }
 
-    match pcmdevice.wait(Some(2*millis_per_chunk as u32)) {
+    match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
         Ok(true) => {
             trace!("Playback waited, ready");
         }
@@ -175,7 +175,7 @@ fn capture_buffer(
     }
     let millis_per_chunk = 1000 * frames_to_read / samplerate;
 
-    match pcmdevice.wait(Some(2*millis_per_chunk as u32)) {
+    match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
         Ok(true) => {
             trace!("Capture waited, ready");
         }
@@ -185,7 +185,10 @@ fn capture_buffer(
         }
         Err(err) => {
             if retry {
-                warn!("Capture device failed while waiting for frames, error: {}, will try again.", err);
+                warn!(
+                    "Capture device failed while waiting for frames, error: {}, will try again.",
+                    err
+                );
                 return Ok(CaptureResult::RecoverableError);
             } else {
                 warn!(
@@ -454,7 +457,8 @@ fn playback_loop_bytes(
                 params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
                 params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
 
-                let playback_res = play_buffer(&buffer, pcmdevice, &io, target_delay, millis_per_chunk);
+                let playback_res =
+                    play_buffer(&buffer, pcmdevice, &io, target_delay, millis_per_chunk);
                 match playback_res {
                     Ok(_) => {}
                     Err(msg) => {
