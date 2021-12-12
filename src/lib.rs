@@ -1,5 +1,7 @@
 #[cfg(target_os = "linux")]
 extern crate alsa;
+#[cfg(target_os = "linux")]
+extern crate alsa_sys;
 extern crate clap;
 #[cfg(feature = "cpal-backend")]
 extern crate cpal;

@@ -5,19 +5,19 @@ use alsa::ctl::{ElemType, ElemValue};
 use alsa::hctl::HCtl;
 use alsa::pcm::{Access, Format, Frames, HwParams, State};
 use alsa::{Direction, ValueOr};
+use alsa_sys;
 use audiodevice::*;
 use config;
 use config::SampleFormat;
 use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use countertimer;
-use nix::errno::Errno;
 use rubato::VecResampler;
 use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::{CaptureStatus, PlaybackStatus};
 use CommandMessage;
@@ -108,6 +108,30 @@ enum CaptureResult {
     RecoverableError,
 }
 
+fn state_desc(state: u32) -> String {
+    match state {
+        alsa_sys::SND_PCM_STATE_OPEN => "SND_PCM_STATE_OPEN, Open".to_string(),
+        alsa_sys::SND_PCM_STATE_SETUP => "SND_PCM_STATE_SETUP, Setup installed".to_string(),
+        alsa_sys::SND_PCM_STATE_PREPARED => "SND_PCM_STATE_PREPARED, Ready to start".to_string(),
+        alsa_sys::SND_PCM_STATE_RUNNING => "SND_PCM_STATE_RUNNING, Running".to_string(),
+        alsa_sys::SND_PCM_STATE_XRUN => {
+            "SND_PCM_STATE_XRUN, Stopped: underrun (playback) or overrun (capture) detected"
+                .to_string()
+        }
+        alsa_sys::SND_PCM_STATE_DRAINING => {
+            "SND_PCM_STATE_DRAINING, Draining: running (playback) or stopped (capture)".to_string()
+        }
+        alsa_sys::SND_PCM_STATE_PAUSED => "SND_PCM_STATE_PAUSED, Paused".to_string(),
+        alsa_sys::SND_PCM_STATE_SUSPENDED => {
+            "SND_PCM_STATE_SUSPENDED, Hardware is suspended".to_string()
+        }
+        alsa_sys::SND_PCM_STATE_DISCONNECTED => {
+            "SND_PCM_STATE_DISCONNECTED, Hardware is disconnected".to_string()
+        }
+        _ => format!("Unknown state with number {}", state),
+    }
+}
+
 /// Play a buffer.
 fn play_buffer(
     buffer: &[u8],
@@ -116,15 +140,24 @@ fn play_buffer(
     target_delay: u64,
     millis_per_chunk: usize,
 ) -> Res<()> {
-    let playback_state = pcmdevice.state();
+    let playback_state = pcmdevice.state_raw();
     //trace!("Playback state {:?}", playback_state);
-    if playback_state == State::XRun {
+    if playback_state < 0 {
+        // This should never happen but sometimes does anyway,
+        // for example if a USB device is unplugged.
+        return Err(Box::new(alsa::nix::errno::from_i32(playback_state)));
+    } else if playback_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("Prepare playback after buffer underrun");
         pcmdevice.prepare()?;
         thread::sleep(Duration::from_millis(target_delay));
-    } else if playback_state == State::Prepared {
+    } else if playback_state == alsa_sys::SND_PCM_STATE_PREPARED as i32 {
         info!("Starting playback from Prepared state");
         thread::sleep(Duration::from_millis(target_delay));
+    } else if playback_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+        warn!(
+            "Playback device is in an unexpected state: {}",
+            state_desc(playback_state as u32)
+        );
     }
 
     match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
@@ -165,12 +198,19 @@ fn capture_buffer(
     samplerate: usize,
     frames_to_read: usize,
 ) -> Res<CaptureResult> {
-    let capture_state = pcmdevice.state();
-    if capture_state == State::XRun {
+    let capture_state = pcmdevice.state_raw();
+    if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("Prepare capture device");
         pcmdevice.prepare()?;
-    } else if capture_state != State::Running {
-        debug!("Starting capture");
+    } else if capture_state < 0 {
+        // This should never happen but sometimes does anyway,
+        // for example if a USB device is unplugged.
+        return Err(Box::new(alsa::nix::errno::from_i32(capture_state)));
+    } else if capture_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+        debug!(
+            "Starting capture from state: {}",
+            state_desc(capture_state as u32)
+        );
         pcmdevice.start()?;
     }
     let millis_per_chunk = 1000 * frames_to_read / samplerate;
@@ -202,7 +242,7 @@ fn capture_buffer(
     let _frames = match io.readi(buffer) {
         Ok(frames) => frames,
         Err(err) => match err.nix_error() {
-            nix::Error::Sys(Errno::EIO) => {
+            alsa::nix::errno::Errno::EIO => {
                 if retry {
                     warn!("Capture failed with error: {}, will try again.", err);
                     return Ok(CaptureResult::RecoverableError);
@@ -213,7 +253,7 @@ fn capture_buffer(
             }
             // TODO: do we need separate handling of xruns that happen in the tiny
             // window between state() and readi()?
-            nix::Error::Sys(Errno::EPIPE) => {
+            alsa::nix::errno::Errno::EPIPE => {
                 if retry {
                     warn!("Retrying capture, error: {}", err);
                     pcmdevice.prepare()?;
