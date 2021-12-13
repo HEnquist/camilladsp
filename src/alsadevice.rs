@@ -3,7 +3,7 @@ extern crate nix;
 use alsa::ctl::{ElemId, ElemIface};
 use alsa::ctl::{ElemType, ElemValue};
 use alsa::hctl::HCtl;
-use alsa::pcm::{Access, Format, Frames, HwParams, State};
+use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::{Direction, ValueOr};
 use alsa_sys;
 use audiodevice::*;
@@ -199,7 +199,7 @@ fn capture_buffer(
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
     retry: bool,
-    avoid_blocking: bool,
+    _avoid_blocking: bool,
     samplerate: usize,
     frames_to_read: usize,
 ) -> Res<CaptureResult> {
