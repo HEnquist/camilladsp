@@ -145,8 +145,12 @@ fn play_buffer(
     if playback_state < 0 {
         // This should never happen but sometimes does anyway,
         // for example if a USB device is unplugged.
-        error!("Alsa snd_pcm_state() of playback device returned an unexpected error code: {}", playback_state);
-        return Err(Box::new(alsa::nix::errno::from_i32(playback_state)));
+        let nixerr = alsa::nix::errno::from_i32(-playback_state);
+        error!(
+            "Alsa snd_pcm_state() of playback device returned an unexpected error: {}",
+            nixerr
+        );
+        return Err(Box::new(nixerr));
     } else if playback_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("Prepare playback after buffer underrun");
         pcmdevice.prepare()?;
@@ -206,8 +210,12 @@ fn capture_buffer(
     } else if capture_state < 0 {
         // This should never happen but sometimes does anyway,
         // for example if a USB device is unplugged.
-        error!("Alsa snd_pcm_state() of capture device returned an unexpected error code: {}", capture_state);
-        return Err(Box::new(alsa::nix::errno::from_i32(capture_state)));
+        let nixerr = alsa::nix::errno::from_i32(-capture_state);
+        error!(
+            "Alsa snd_pcm_state() of capture device returned an unexpected error: {}",
+            capture_state
+        );
+        return Err(Box::new(nixerr));
     } else if capture_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
         debug!(
             "Starting capture from state: {}",
