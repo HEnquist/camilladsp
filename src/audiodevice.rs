@@ -1,12 +1,12 @@
 // Traits for audio devices
 #[cfg(target_os = "linux")]
-use alsadevice;
-use config;
+use crate::alsadevice;
+use crate::config;
 #[cfg(target_os = "macos")]
 use coreaudiodevice;
 #[cfg(feature = "cpal-backend")]
 use cpaldevice;
-use filedevice;
+use crate::filedevice;
 use num_integer as integer;
 #[cfg(feature = "pulse-backend")]
 use pulsedevice;
@@ -24,10 +24,10 @@ use std::time::Instant;
 use wasapidevice;
 
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use PrcFmt;
-use Res;
-use StatusMessage;
+use crate::CommandMessage;
+use crate::PrcFmt;
+use crate::Res;
+use crate::StatusMessage;
 
 pub const RATE_CHANGE_THRESHOLD_COUNT: usize = 3;
 pub const RATE_CHANGE_THRESHOLD_VALUE: f32 = 0.04;
@@ -624,7 +624,7 @@ pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, 
 
 #[cfg(test)]
 mod tests {
-    use audiodevice::{rms_and_peak, AudioChunk, ChunkStats};
+    use crate::audiodevice::{rms_and_peak, AudioChunk, ChunkStats};
 
     #[test]
     fn vec_rms_and_peak() {

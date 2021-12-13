@@ -1,14 +1,14 @@
 use std::sync::{Arc, RwLock};
 
 use crate::filters::Filter;
-use biquad::{Biquad, BiquadCoefficients};
-use config;
-use fifoqueue::FifoQueue;
+use crate::biquad::{Biquad, BiquadCoefficients};
+use crate::config;
+use crate::fifoqueue::FifoQueue;
 
-use NewValue;
-use PrcFmt;
-use ProcessingParameters;
-use Res;
+use crate::NewValue;
+use crate::PrcFmt;
+use crate::ProcessingParameters;
+use crate::Res;
 
 #[derive(Clone, Debug)]
 pub struct Gain {
@@ -367,8 +367,8 @@ pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
-    use basicfilters::{Delay, Gain};
-    use filters::Filter;
+    use crate::basicfilters::{Delay, Gain};
+    use crate::filters::Filter;
 
     fn is_close(left: f64, right: f64, maxdiff: f64) -> bool {
         println!("{} - {}", left, right);

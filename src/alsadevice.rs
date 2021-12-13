@@ -6,11 +6,11 @@ use alsa::hctl::HCtl;
 use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::{Direction, ValueOr};
 use alsa_sys;
-use audiodevice::*;
-use config;
-use config::SampleFormat;
-use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-use countertimer;
+use crate::audiodevice::*;
+use crate::config;
+use crate::config::SampleFormat;
+use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+use crate::countertimer;
 use rubato::VecResampler;
 use std::ffi::CString;
 use std::fmt::Debug;
@@ -20,11 +20,11 @@ use std::thread;
 use std::time::Duration;
 
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use PrcFmt;
-use ProcessingState;
-use Res;
-use StatusMessage;
+use crate::CommandMessage;
+use crate::PrcFmt;
+use crate::ProcessingState;
+use crate::Res;
+use crate::StatusMessage;
 
 const STANDARD_RATES: [u32; 17] = [
     5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,

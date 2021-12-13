@@ -18,10 +18,10 @@ use crate::{
     list_supported_devices, CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus,
     StopReason,
 };
-use config;
-use ExitRequest;
-use ProcessingState;
-use Res;
+use crate::config;
+use crate::ExitRequest;
+use crate::ProcessingState;
+use crate::Res;
 
 #[derive(Debug, Clone)]
 pub struct SharedData {
@@ -672,7 +672,7 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
 
 #[cfg(test)]
 mod tests {
-    use socketserver::{parse_command, WsCommand};
+    use crate::socketserver::{parse_command, WsCommand};
     use tungstenite::Message;
 
     #[test]

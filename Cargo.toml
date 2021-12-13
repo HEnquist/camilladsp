@@ -2,6 +2,7 @@
 name = "camilladsp"
 version = "1.0.0-alpha4"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
+edition = "2021"
 description = "A flexible tool for processing audio"
 
 [features]

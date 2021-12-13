@@ -1,8 +1,8 @@
-use audiodevice::*;
-use config;
-use config::SampleFormat;
-use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-use countertimer;
+use crate::audiodevice::*;
+use crate::config;
+use crate::config::SampleFormat;
+use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+use crate::countertimer;
 use std::fs::File;
 use std::io::ErrorKind;
 use std::io::{stdin, stdout, Read, Write};
@@ -14,11 +14,11 @@ use std::time::Duration;
 use rubato::VecResampler;
 
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use PrcFmt;
-use ProcessingState;
-use Res;
-use StatusMessage;
+use crate::CommandMessage;
+use crate::PrcFmt;
+use crate::ProcessingState;
+use crate::Res;
+use crate::StatusMessage;
 
 pub struct FilePlaybackDevice {
     pub destination: PlaybackDest,

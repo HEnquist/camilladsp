@@ -1,12 +1,12 @@
 use crate::filters::Filter;
-use biquad;
-use config;
+use crate::biquad;
+use crate::config;
 use std::sync::{Arc, RwLock};
 
-use NewValue;
-use PrcFmt;
-use ProcessingParameters;
-use Res;
+use crate::NewValue;
+use crate::PrcFmt;
+use crate::ProcessingParameters;
+use crate::Res;
 
 pub struct Loudness {
     pub name: String,

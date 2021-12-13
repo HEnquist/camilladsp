@@ -4,13 +4,13 @@
 //mod filters;
 
 use crate::filters::Filter;
-use biquad;
-use config;
+use crate::biquad;
+use crate::config;
 
 // Sample format
 //type SmpFmt = i16;
-use PrcFmt;
-use Res;
+use crate::PrcFmt;
+use crate::Res;
 
 #[derive(Clone, Debug)]
 pub struct BiquadCombo {
@@ -275,8 +275,8 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use biquadcombo;
-    use config;
+    use crate::biquadcombo;
+    use crate::config;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);
