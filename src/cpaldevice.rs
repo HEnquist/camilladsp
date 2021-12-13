@@ -1,10 +1,10 @@
-use audiodevice::*;
-use config;
-use config::{ConfigError, SampleFormat};
-use conversions::{
+use crate::audiodevice::*;
+use crate::config;
+use crate::config::{ConfigError, SampleFormat};
+use crate::conversions::{
     chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
 };
-use countertimer;
+use crate::countertimer;
 use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
@@ -17,13 +17,13 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time;
 
+use crate::CommandMessage;
+use crate::NewValue;
+use crate::PrcFmt;
+use crate::ProcessingState;
+use crate::Res;
+use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use NewValue;
-use PrcFmt;
-use ProcessingState;
-use Res;
-use StatusMessage;
 
 #[derive(Clone, Debug)]
 pub enum CpalHost {
@@ -423,7 +423,7 @@ fn get_nbr_capture_samples(
         trace!(
             "Resampler needs {} frames, will read {} samples",
             resampl.nbr_frames_needed(),
-            resampl.nbr_frames_needed() * channels;
+            resampl.nbr_frames_needed() * channels,
         );
         resampl.nbr_frames_needed() * channels
     } else {

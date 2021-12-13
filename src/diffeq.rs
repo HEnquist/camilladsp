@@ -1,5 +1,5 @@
-use crate::filters::Filter;
 use crate::config;
+use crate::filters::Filter;
 
 // Sample format
 //type SmpFmt = i16;
@@ -98,9 +98,9 @@ pub fn validate_config(_parameters: &config::DiffEqParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::PrcFmt;
     use crate::diffeq::DiffEq;
     use crate::filters::Filter;
+    use crate::PrcFmt;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);

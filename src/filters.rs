@@ -9,7 +9,7 @@ use crate::dither;
 #[cfg(not(feature = "FFTW"))]
 use crate::fftconv;
 #[cfg(feature = "FFTW")]
-use fftconv_fftw as fftconv;
+use crate::fftconv_fftw as fftconv;
 use crate::loudness;
 use crate::mixer;
 use rawsample::SampleReader;
@@ -526,10 +526,10 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::PrcFmt;
     use crate::config::FileFormat;
     use crate::filters::{find_data_in_wav, read_wav};
     use crate::filters::{pad_vector, read_coeff_file};
+    use crate::PrcFmt;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {} = {}", left, right, left - right);

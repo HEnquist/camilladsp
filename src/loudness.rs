@@ -1,6 +1,6 @@
-use crate::filters::Filter;
 use crate::biquad;
 use crate::config;
+use crate::filters::Filter;
 use std::sync::{Arc, RwLock};
 
 use crate::NewValue;

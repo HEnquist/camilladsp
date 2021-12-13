@@ -3,9 +3,9 @@
 
 //mod filters;
 
-use crate::filters::Filter;
 use crate::biquad;
 use crate::config;
+use crate::filters::Filter;
 
 // Sample format
 //type SmpFmt = i16;
@@ -274,9 +274,9 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
 
 #[cfg(test)]
 mod tests {
-    use crate::PrcFmt;
     use crate::biquadcombo;
     use crate::config;
+    use crate::PrcFmt;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);

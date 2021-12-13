@@ -1,7 +1,7 @@
-use std::time::{Duration, Instant};
 use crate::NewValue;
 use crate::PrcFmt;
 use crate::ProcessingState;
+use std::time::{Duration, Instant};
 
 pub struct Averager {
     sum: f64,
@@ -204,8 +204,8 @@ impl ValueWatcher {
 #[cfg(test)]
 mod tests {
     use crate::countertimer::{Averager, SilenceCounter, Stopwatch, TimeAverage, ValueWatcher};
-    use std::time::Instant;
     use crate::ProcessingState;
+    use std::time::Instant;
 
     fn spinsleep(time: u128) {
         let start = Instant::now();

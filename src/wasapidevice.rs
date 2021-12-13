@@ -1,8 +1,8 @@
-use audiodevice::*;
-use config;
-use config::{ConfigError, SampleFormat};
-use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-use countertimer;
+use crate::audiodevice::*;
+use crate::config;
+use crate::config::{ConfigError, SampleFormat};
+use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+use crate::countertimer;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
 use rubato::VecResampler;
 use std::collections::VecDeque;
@@ -16,12 +16,12 @@ use wasapi;
 //use winapi::um::avrt::AvSetMmThreadCharacteristicsA;
 //use std::ffi::CString;
 
+use crate::CommandMessage;
+use crate::PrcFmt;
+use crate::ProcessingState;
+use crate::Res;
+use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use PrcFmt;
-use ProcessingState;
-use Res;
-use StatusMessage;
 
 enum DeviceState {
     Ok,

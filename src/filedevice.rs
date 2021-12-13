@@ -13,12 +13,12 @@ use std::time::Duration;
 
 use rubato::VecResampler;
 
-use crate::{CaptureStatus, PlaybackStatus};
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
+use crate::{CaptureStatus, PlaybackStatus};
 
 pub struct FilePlaybackDevice {
     pub destination: PlaybackDest,

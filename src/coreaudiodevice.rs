@@ -1,8 +1,8 @@
-use audiodevice::*;
-use config;
-use config::{ConfigError, SampleFormat};
-use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-use countertimer;
+use crate::audiodevice::*;
+use crate::config;
+use crate::config::{ConfigError, SampleFormat};
+use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+use crate::countertimer;
 use crossbeam_channel::{bounded, TryRecvError, TrySendError};
 use rubato::VecResampler;
 use std::collections::VecDeque;
@@ -22,12 +22,12 @@ use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{AudioUnit, Element, Scope, StreamFormat};
 use coreaudio::sys::*;
 
+use crate::CommandMessage;
+use crate::PrcFmt;
+use crate::ProcessingState;
+use crate::Res;
+use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use PrcFmt;
-use ProcessingState;
-use Res;
-use StatusMessage;
 
 fn take_ownership(device_id: AudioDeviceID) -> Res<pid_t> {
     let mut device_pid =

@@ -3,13 +3,15 @@
 use crate::alsadevice;
 use crate::config;
 #[cfg(target_os = "macos")]
-use coreaudiodevice;
+use crate::coreaudiodevice;
 #[cfg(feature = "cpal-backend")]
-use cpaldevice;
+use crate::cpaldevice;
 use crate::filedevice;
-use num_integer as integer;
 #[cfg(feature = "pulse-backend")]
-use pulsedevice;
+use crate::pulsedevice;
+#[cfg(target_os = "windows")]
+use crate::wasapidevice;
+use num_integer as integer;
 use rubato::{
     FftFixedOut, InterpolationParameters, InterpolationType, SincFixedOut, VecResampler,
     WindowFunction,
@@ -20,14 +22,12 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Instant;
-#[cfg(target_os = "windows")]
-use wasapidevice;
 
-use crate::{CaptureStatus, PlaybackStatus};
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::Res;
 use crate::StatusMessage;
+use crate::{CaptureStatus, PlaybackStatus};
 
 pub const RATE_CHANGE_THRESHOLD_COUNT: usize = 3;
 pub const RATE_CHANGE_THRESHOLD_VALUE: f32 = 0.04;

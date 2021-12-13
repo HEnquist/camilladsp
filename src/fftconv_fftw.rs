@@ -1,18 +1,18 @@
+use crate::config;
+use crate::filters;
 use crate::filters::Filter;
-use config;
 use fftw::array::AlignedVec;
 use fftw::plan::*;
 use fftw::types::*;
-use filters;
 //use helpers::{multiply_add_elements, multiply_elements};
 
 // Sample format
-use PrcFmt;
+use crate::PrcFmt;
 #[cfg(feature = "32bit")]
 pub type ComplexFmt = c32;
 #[cfg(not(feature = "32bit"))]
 pub type ComplexFmt = c64;
-use Res;
+use crate::Res;
 
 // -- Duplcated from helpers.rs, needed until fftw updates to num-complex 0.3
 pub fn multiply_elements(

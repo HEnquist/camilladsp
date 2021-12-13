@@ -1,6 +1,6 @@
-use crate::filters::Filter;
 use crate::config;
 use crate::filters;
+use crate::filters::Filter;
 use crate::helpers::{multiply_add_elements, multiply_elements};
 use num_complex::Complex;
 use num_traits::Zero;
@@ -239,10 +239,10 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::PrcFmt;
     use crate::config::ConvParameters;
     use crate::fftconv::FftConv;
     use crate::filters::Filter;
+    use crate::PrcFmt;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);

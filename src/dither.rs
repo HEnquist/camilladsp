@@ -1,5 +1,5 @@
-use crate::filters::Filter;
 use crate::config;
+use crate::filters::Filter;
 use rand::thread_rng;
 use rand_distr::{Distribution, Triangular};
 
@@ -248,10 +248,10 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::PrcFmt;
     use crate::config::DitherParameters;
     use crate::dither::Dither;
     use crate::filters::Filter;
+    use crate::PrcFmt;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);

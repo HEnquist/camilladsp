@@ -1,9 +1,9 @@
 use std::sync::{Arc, RwLock};
 
-use crate::filters::Filter;
 use crate::biquad::{Biquad, BiquadCoefficients};
 use crate::config;
 use crate::fifoqueue::FifoQueue;
+use crate::filters::Filter;
 
 use crate::NewValue;
 use crate::PrcFmt;

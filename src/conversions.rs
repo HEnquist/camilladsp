@@ -1,5 +1,6 @@
 use crate::audiodevice::*;
 use crate::config::{FileFormat, SampleFormat};
+use crate::PrcFmt;
 #[cfg(feature = "cpal-backend")]
 use num_traits;
 use rawsample;
@@ -7,7 +8,6 @@ use rawsample::{SampleReader, SampleWriter};
 #[cfg(feature = "cpal-backend")]
 use std::collections::VecDeque;
 use std::io::Cursor;
-use crate::PrcFmt;
 
 pub fn map_formats(sampleformat: &SampleFormat) -> rawsample::SampleFormat {
     match sampleformat {
@@ -285,11 +285,11 @@ pub fn queue_to_chunk_float<T: num_traits::cast::AsPrimitive<PrcFmt>>(
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "cpal-backend")]
-    use crate::PrcFmt;
     use crate::audiodevice::AudioChunk;
     use crate::config::SampleFormat;
     use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+    #[cfg(feature = "cpal-backend")]
+    use crate::PrcFmt;
     #[cfg(feature = "cpal-backend")]
     use conversions::{
         chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,

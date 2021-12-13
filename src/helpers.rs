@@ -1,5 +1,5 @@
-use num_complex::Complex;
 use crate::PrcFmt;
+use num_complex::Complex;
 
 // element-wise product, result = slice_a * slice_b
 pub fn multiply_elements(

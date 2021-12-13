@@ -14,14 +14,14 @@ use tungstenite::accept;
 use tungstenite::Message;
 use tungstenite::WebSocket;
 
-use crate::{
-    list_supported_devices, CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus,
-    StopReason,
-};
 use crate::config;
 use crate::ExitRequest;
 use crate::ProcessingState;
 use crate::Res;
+use crate::{
+    list_supported_devices, CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus,
+    StopReason,
+};
 
 #[derive(Debug, Clone)]
 pub struct SharedData {
