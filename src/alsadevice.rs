@@ -170,8 +170,8 @@ fn play_buffer(
             trace!("Playback waited, ready");
         }
         Ok(false) => {
-            warn!("Wait timed out, playback device takes too long to free buffer");
-            panic!("Wait timed out, playback device takes too long to free buffer");
+            warn!("Wait timed out, playback device takes too long to drain buffer");
+            // TODO what action is suitable here?
         }
         Err(err) => {
             warn!(
@@ -181,7 +181,7 @@ fn play_buffer(
             return Err(Box::new(err));
         }
     }
-    let _frames = match io.writei(buffer) {
+    let frames = match io.writei(buffer) {
         Ok(frames) => frames,
         Err(err) => {
             warn!("Retrying playback, error: {}", err);
@@ -190,6 +190,7 @@ fn play_buffer(
             io.writei(buffer)?
         }
     };
+    trace!("Wrote {} frames to playback device", frames);
     Ok(())
 }
 
@@ -691,7 +692,7 @@ fn capture_loop_bytes(
             Ok(CaptureResult::RecoverableError) => {
                 card_inactive = true;
                 params.capture_status.write().unwrap().state = ProcessingState::Stalled;
-                debug!("Card inactive, pausing");
+                debug!("Capture device is inactive, processing is stalled");
             }
             Err(msg) => {
                 channels
