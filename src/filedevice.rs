@@ -19,6 +19,8 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
+#[cfg(not(target_os = "windows"))]
+use crate::filereader::NonBlockingReader;
 
 pub struct FilePlaybackDevice {
     pub destination: PlaybackDest,
@@ -80,6 +82,12 @@ struct CaptureParams {
     capture_status: Arc<RwLock<CaptureStatus>>,
     stop_on_rate_change: bool,
     rate_measure_interval: f32,
+}
+#[derive(Debug)]
+enum ReadResult{
+    Complete(usize),
+    Timeout(usize),
+    EndOfFile(usize),
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
@@ -265,6 +273,8 @@ fn capture_loop(
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     let mut state = ProcessingState::Running;
+    let mut prev_state = ProcessingState::Running;
+    let mut stalled = false;
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -305,11 +315,10 @@ fn capture_loop(
             get_capture_bytes(params.read_bytes, nbr_bytes_read, capture_bytes, &mut buf);
         let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         match read_res {
-            Ok(bytes) => {
-                //trace!("Captured {} bytes", bytes);
+            Ok(ReadResult::EndOfFile(bytes)) => {
                 bytes_read = bytes;
                 nbr_bytes_read += bytes;
-                if bytes > 0 && bytes < capture_bytes {
+                if bytes > 0 {
                     for item in buf.iter_mut().take(capture_bytes).skip(bytes) {
                         *item = 0;
                     }
@@ -326,7 +335,7 @@ fn capture_loop(
                         bytes_read += (extra_bytes_left as f32 / params.resampling_ratio) as usize;
                         extra_bytes_left = 0;
                     }
-                } else if bytes == 0 && capture_bytes > 0 {
+                } else {
                     debug!("Reached end of file");
                     let extra_samples =
                         extra_bytes_left / params.store_bytes_per_sample / params.channels;
@@ -344,6 +353,52 @@ fn capture_loop(
                         .unwrap_or(());
                     break;
                 }
+            }
+            Ok(ReadResult::Timeout(bytes)) => {
+                bytes_read = bytes;
+                nbr_bytes_read += bytes;
+                if bytes > 0 {
+                    for item in buf.iter_mut().take(capture_bytes).skip(bytes) {
+                        *item = 0;
+                    }
+                    debug!(
+                        "Timed out after reading {} of {} bytes",
+                        bytes, capture_bytes
+                    );
+                    let missing =
+                        ((capture_bytes - bytes) as f32 * params.resampling_ratio) as usize;
+                    if extra_bytes_left > missing {
+                        bytes_read = capture_bytes;
+                        extra_bytes_left -= missing;
+                    } else {
+                        bytes_read += (extra_bytes_left as f32 / params.resampling_ratio) as usize;
+                        extra_bytes_left = 0;
+                    }
+                } else {
+                    debug!("Read timed out");
+                    let msg = AudioMessage::Pause;
+                    msg_channels.audio.send(msg).unwrap_or(());
+                    
+                    if !stalled {
+                        stalled = true;
+                        prev_state = state;
+                        state = ProcessingState::Stalled; 
+                        let mut capt_stat = params.capture_status.write().unwrap();
+                        capt_stat.state = ProcessingState::Stalled;
+                    }
+                    continue;
+                }
+            }
+            Ok(ReadResult::Complete(bytes)) => {
+                //trace!("Captured {} bytes", bytes);
+                if stalled {
+                    stalled = false;
+                    state = prev_state;
+                    let mut capt_stat = params.capture_status.write().unwrap();
+                    capt_stat.state = state;
+                }
+                bytes_read = bytes;
+                nbr_bytes_read += bytes;
                 averager.add_value(bytes);
                 if averager.larger_than_millis(
                     params.capture_status.read().unwrap().update_interval as u64,
@@ -566,7 +621,9 @@ fn send_silence(
     }
 }
 
-fn read_retry(file: &mut dyn Read, mut buf: &mut [u8]) -> Res<usize> {
+
+
+fn read_retry(file: &mut dyn Read, mut buf: &mut [u8]) -> Res<ReadResult> {
     let requested = buf.len();
     while !buf.is_empty() {
         match file.read(buf) {
@@ -583,9 +640,9 @@ fn read_retry(file: &mut dyn Read, mut buf: &mut [u8]) -> Res<usize> {
         }
     }
     if !buf.is_empty() {
-        Ok(requested - buf.len())
+        Ok(ReadResult::EndOfFile(requested - buf.len()))
     } else {
-        Ok(requested)
+        Ok(ReadResult::Complete(requested))
     }
 }
 
