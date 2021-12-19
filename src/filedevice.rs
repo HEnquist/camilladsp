@@ -13,9 +13,9 @@ use std::time::Duration;
 
 use rubato::VecResampler;
 
-#[cfg(not(target_family = "unix"))]
+#[cfg(not(target_os = "linux"))]
 use crate::filereader::BlockingReader;
-#[cfg(target_family = "unix")]
+#[cfg(target_os = "linux")]
 use crate::filereader_nonblock::NonBlockingReader;
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -566,6 +566,13 @@ impl CaptureDevice for FileCaptureDevice {
                     stop_on_rate_change,
                     rate_measure_interval,
                 };
+                #[cfg(not(target_os = "linux"))]
+                let file_res: Result<Box<dyn Reader>, std::io::Error> = match source {
+                    CaptureSource::Filename(filename) => File::open(filename)
+                        .map(|f| Box::new(BlockingReader::new(f)) as Box<dyn Reader>),
+                    CaptureSource::Stdin => Ok(Box::new(BlockingReader::new(stdin()))),
+                };
+                #[cfg(target_os = "linux")]
                 let file_res: Result<Box<dyn Reader>, std::io::Error> = match source {
                     CaptureSource::Filename(filename) => File::open(filename).map(|f| {
                         Box::new(NonBlockingReader::new(

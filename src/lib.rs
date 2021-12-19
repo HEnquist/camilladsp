@@ -87,9 +87,9 @@ pub mod fftconv;
 pub mod fftconv_fftw;
 pub mod fifoqueue;
 pub mod filedevice;
-#[cfg(not(target_family = "unix"))]
+#[cfg(not(target_os = "linux"))]
 pub mod filereader;
-#[cfg(target_family = "unix")]
+#[cfg(target_os = "linux")]
 pub mod filereader_nonblock;
 pub mod filters;
 pub mod helpers;
