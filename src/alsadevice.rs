@@ -388,12 +388,11 @@ fn open_pcm(
     capture: bool,
 ) -> Res<alsa::PCM> {
     // Open the device
-    let pcmdev;
-    if capture {
-        pcmdev = alsa::PCM::new(&devname, Direction::Capture, true)?;
+    let pcmdev = if capture {
+        alsa::PCM::new(&devname, Direction::Capture, true)?
     } else {
-        pcmdev = alsa::PCM::new(&devname, Direction::Playback, true)?;
-    }
+        alsa::PCM::new(&devname, Direction::Playback, true)?
+    };
     // Set hardware parameters
     {
         let direction = if capture { "Capture" } else { "Playback" };
