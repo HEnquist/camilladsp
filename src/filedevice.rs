@@ -383,11 +383,12 @@ fn capture_loop(
                         extra_bytes_left = 0;
                     }
                 } else {
-                    debug!("Read timed out");
+                    trace!("Read timed out");
                     let msg = AudioMessage::Pause;
                     msg_channels.audio.send(msg).unwrap_or(());
 
                     if !stalled {
+                        debug!("Entering stalled state");
                         stalled = true;
                         prev_state = state;
                         state = ProcessingState::Stalled;
@@ -400,6 +401,7 @@ fn capture_loop(
             Ok(ReadResult::Complete(bytes)) => {
                 //trace!("Captured {} bytes", bytes);
                 if stalled {
+                    debug!("Leaving stalled state, resuming processing");
                     stalled = false;
                     state = prev_state;
                     let mut capt_stat = params.capture_status.write().unwrap();

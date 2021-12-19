@@ -53,8 +53,6 @@ impl<R: Read + AsRawFd> Reader for NonBlockingReader<R> {
                         let tmp = buf;
                         buf = &mut tmp[n..];
                         bytes_read += n;
-                        //println!("got: {:?}", buf);
-                        buf = &mut buf[n..];
                     }
                     Err(ref e) if e.kind() == ErrorKind::Interrupted => {
                         debug!("got Interrupted");
