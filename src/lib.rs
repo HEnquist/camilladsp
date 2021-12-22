@@ -1,5 +1,7 @@
 #[cfg(target_os = "linux")]
 extern crate alsa;
+#[cfg(target_os = "linux")]
+extern crate alsa_sys;
 extern crate clap;
 #[cfg(feature = "cpal-backend")]
 extern crate cpal;
@@ -85,6 +87,10 @@ pub mod fftconv;
 pub mod fftconv_fftw;
 pub mod fifoqueue;
 pub mod filedevice;
+#[cfg(not(target_os = "linux"))]
+pub mod filereader;
+#[cfg(target_os = "linux")]
+pub mod filereader_nonblock;
 pub mod filters;
 pub mod helpers;
 pub mod loudness;

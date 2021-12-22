@@ -1,10 +1,10 @@
-use audiodevice::*;
-use config;
-use filters;
+use crate::audiodevice::*;
+use crate::config;
+use crate::filters;
+use crate::ProcessingParameters;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use ProcessingParameters;
 
 pub fn run_processing(
     conf_proc: config::Configuration,

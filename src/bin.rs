@@ -261,7 +261,9 @@ fn run(
                         }
                         config::ConfigChange::Devices => {
                             debug!("Devices changed, restart required.");
-                            tx_command_cap.send(CommandMessage::Exit).unwrap();
+                            if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                                debug!("Capture thread has already exited");
+                            }
                             trace!("Wait for pb..");
                             pb_handle.join().unwrap();
                             trace!("Wait for cap..");
@@ -286,7 +288,9 @@ fn run(
                 ExitRequest::EXIT => {
                     debug!("Exit requested...");
                     signal_exit.store(0, Ordering::Relaxed);
-                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                        debug!("Capture thread has already exited");
+                    }
                     trace!("Wait for pb..");
                     pb_handle.join().unwrap();
                     trace!("Wait for cap..");
@@ -298,7 +302,9 @@ fn run(
                 ExitRequest::STOP => {
                     debug!("Stop requested...");
                     signal_exit.store(0, Ordering::Relaxed);
-                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                        debug!("Capture thread has already exited");
+                    }
                     trace!("Wait for pb..");
                     pb_handle.join().unwrap();
                     trace!("Wait for cap..");
@@ -336,7 +342,9 @@ fn run(
                 }
                 StatusMessage::PlaybackError(message) => {
                     error!("Playback error: {}", message);
-                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                        debug!("Capture thread has already exited");
+                    }
                     if is_starting {
                         debug!("Error while starting, release barrier");
                         barrier.wait();
@@ -367,7 +375,9 @@ fn run(
                 }
                 StatusMessage::PlaybackFormatChange(rate) => {
                     error!("Playback stopped due to external format change");
-                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                        debug!("Capture thread has already exited");
+                    }
                     if is_starting {
                         debug!("Error while starting, release barrier");
                         barrier.wait();
@@ -411,9 +421,12 @@ fn run(
                 }
                 StatusMessage::SetSpeed(speed) => {
                     debug!("SetSpeed message received");
-                    tx_command_cap
+                    if tx_command_cap
                         .send(CommandMessage::SetSpeed { speed })
-                        .unwrap();
+                        .is_err()
+                    {
+                        debug!("Capture thread has already exited");
+                    }
                 }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {}

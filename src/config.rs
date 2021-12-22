@@ -1,5 +1,5 @@
-use filters;
-use mixer;
+use crate::filters;
+use crate::mixer;
 use serde::{de, Deserialize, Serialize};
 use serde_with;
 use std::collections::HashMap;
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 //type SmpFmt = i16;
-use PrcFmt;
+use crate::PrcFmt;
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
 pub struct Overrides {

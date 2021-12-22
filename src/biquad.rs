@@ -3,14 +3,14 @@
 
 //mod filters;
 
+use crate::config;
 use crate::filters::Filter;
-use config;
 
 // Sample format
 //type SmpFmt = i16;
-use NewValue;
-use PrcFmt;
-use Res;
+use crate::NewValue;
+use crate::PrcFmt;
+use crate::Res;
 
 /// Struct to hold the biquad coefficients
 #[derive(Clone, Copy, Debug)]
@@ -521,10 +521,10 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 
 #[cfg(test)]
 mod tests {
+    use crate::biquad::{validate_config, Biquad, BiquadCoefficients};
+    use crate::config::{BiquadParameters, NotchWidth, PeakingWidth, ShelfSteepness};
+    use crate::filters::Filter;
     use crate::PrcFmt;
-    use biquad::{validate_config, Biquad, BiquadCoefficients};
-    use config::{BiquadParameters, NotchWidth, PeakingWidth, ShelfSteepness};
-    use filters::Filter;
     use num_complex::Complex;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {

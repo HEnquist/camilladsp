@@ -1,15 +1,17 @@
 // Traits for audio devices
 #[cfg(target_os = "linux")]
-use alsadevice;
-use config;
+use crate::alsadevice;
+use crate::config;
 #[cfg(target_os = "macos")]
-use coreaudiodevice;
+use crate::coreaudiodevice;
 #[cfg(feature = "cpal-backend")]
-use cpaldevice;
-use filedevice;
-use num_integer as integer;
+use crate::cpaldevice;
+use crate::filedevice;
 #[cfg(feature = "pulse-backend")]
-use pulsedevice;
+use crate::pulsedevice;
+#[cfg(target_os = "windows")]
+use crate::wasapidevice;
+use num_integer as integer;
 use rubato::{
     FftFixedOut, InterpolationParameters, InterpolationType, SincFixedOut, VecResampler,
     WindowFunction,
@@ -20,14 +22,12 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Instant;
-#[cfg(target_os = "windows")]
-use wasapidevice;
 
+use crate::CommandMessage;
+use crate::PrcFmt;
+use crate::Res;
+use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use PrcFmt;
-use Res;
-use StatusMessage;
 
 pub const RATE_CHANGE_THRESHOLD_COUNT: usize = 3;
 pub const RATE_CHANGE_THRESHOLD_VALUE: f32 = 0.04;
@@ -624,7 +624,7 @@ pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, 
 
 #[cfg(test)]
 mod tests {
-    use audiodevice::{rms_and_peak, AudioChunk, ChunkStats};
+    use crate::audiodevice::{rms_and_peak, AudioChunk, ChunkStats};
 
     #[test]
     fn vec_rms_and_peak() {

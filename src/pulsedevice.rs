@@ -3,23 +3,23 @@ use pulse;
 use pulse::sample;
 use pulse::stream::Direction;
 
-use audiodevice::*;
-use config;
-use config::SampleFormat;
-use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-use countertimer;
+use crate::audiodevice::*;
+use crate::config;
+use crate::config::SampleFormat;
+use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+use crate::countertimer;
 use rubato::VecResampler;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::CommandMessage;
+use crate::PrcFmt;
+use crate::ProcessingState;
+use crate::Res;
+use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use PrcFmt;
-use ProcessingState;
-use Res;
-use StatusMessage;
 
 #[derive(Debug)]
 pub struct PulseError {

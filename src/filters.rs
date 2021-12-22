@@ -1,17 +1,17 @@
-use audiodevice::AudioChunk;
-use basicfilters;
-use biquad;
-use biquadcombo;
-use config;
-use conversions;
-use diffeq;
-use dither;
+use crate::audiodevice::AudioChunk;
+use crate::basicfilters;
+use crate::biquad;
+use crate::biquadcombo;
+use crate::config;
+use crate::conversions;
+use crate::diffeq;
+use crate::dither;
 #[cfg(not(feature = "FFTW"))]
-use fftconv;
+use crate::fftconv;
 #[cfg(feature = "FFTW")]
-use fftconv_fftw as fftconv;
-use loudness;
-use mixer;
+use crate::fftconv_fftw as fftconv;
+use crate::loudness;
+use crate::mixer;
 use rawsample::SampleReader;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -20,9 +20,9 @@ use std::io::BufReader;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
 
-use PrcFmt;
-use ProcessingParameters;
-use Res;
+use crate::PrcFmt;
+use crate::ProcessingParameters;
+use crate::Res;
 
 /// Windows Guid
 /// Used to give sample format in the extended WAVEFORMATEXTENSIBLE wav header
@@ -526,10 +526,10 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::FileFormat;
+    use crate::filters::{find_data_in_wav, read_wav};
+    use crate::filters::{pad_vector, read_coeff_file};
     use crate::PrcFmt;
-    use config::FileFormat;
-    use filters::{find_data_in_wav, read_wav};
-    use filters::{pad_vector, read_coeff_file};
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {} = {}", left, right, left - right);
