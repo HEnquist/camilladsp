@@ -6,6 +6,7 @@ New features:
 - Add "Stalled" state.
 - Some Mixer parameters made optional.
 - Delay value can be given in millimetres.
+- Improved Alsa backend.
 
 ## 0.6.3
 Bugfixes:
