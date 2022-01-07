@@ -1,0 +1,46 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 4096
+  target_level: 2048
+  adjust_period: 3
+  enable_resampling: true
+  enable_rate_adjust: true
+  capture:
+    type: Pulse
+    channels: 2
+    device: "MySink.monitor"
+    format: S16LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+    format: S16LE
+    
+filters:
+  l_drc:
+    type: Conv
+    parameters:
+      type: Raw 
+      filename: /home/henrik/rustfir/rustfir/kladd/erbrps411.pcm
+      format: S16LE
+  r_drc:
+    type: Conv
+    parameters:
+      type: Raw 
+      filename: /home/henrik/rustfir/rustfir/kladd/erbrps411b.pcm
+      format: FLOAT32LE
+
+pipeline:
+  - type: Filter
+    channel: 0
+    names:
+      - l_drc
+  - type: Filter
+    channel: 1
+    names:
+      - r_drc
+
+
+   
+

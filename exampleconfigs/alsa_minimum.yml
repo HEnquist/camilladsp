@@ -1,0 +1,35 @@
+---
+devices:
+  samplerate: 44100
+  buffersize: 1024
+  capture:
+    type: Alsa
+    channels: 2
+    device: "camilla_loop"
+    format: S32LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Amanero"
+    format: S32LE
+
+filters:
+  highpass_test:
+    type: Biquad
+    parameters:
+      type: Highpass
+      freq: 300
+      q: 0.5
+
+
+pipeline:
+  - type: Filter
+    channel: 0
+    names:
+      - highpass_test
+  - type: Filter
+    channel: 1
+    names:
+      - highpass_test
+   
+

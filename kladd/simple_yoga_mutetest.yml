@@ -1,0 +1,76 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 4096
+  target_level: 2048
+  adjust_period: 3
+  enable_resampling: true
+  enable_rate_adjust: true
+  capture:
+    type: Pulse
+    channels: 2
+    device: "MySink.monitor"
+    format: S16LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+    format: S16LE
+
+filters:
+  gain1:
+    type: Gain
+    parameters:
+      gain: -6
+      mute: false
+  delay1:
+    type: Delay
+    parameters:
+      delay: 5.7
+      subsample: false
+      unit: samples
+  delay2:
+    type: Delay
+    parameters:
+      delay: 5.7
+      subsample: true
+      unit: samples
+
+mixers:
+  test:
+    channels:
+      in: 2
+      out: 2
+    mapping:
+      - dest: 0
+        mute: false
+        sources:
+          - channel: 0
+            gain: -1
+            inverted: false
+            mute: false
+      - dest: 1
+        mute: false
+        sources:
+          - channel: 1
+            gain: -1
+            inverted: false
+            mute: false
+
+pipeline:
+  - type: Mixer
+    name: test
+  - type: Filter
+    channel: 0
+    names:
+      - gain1
+      - delay1
+  - type: Filter
+    channel: 1
+    names:
+      - gain1
+      - delay2
+
+
+   
+

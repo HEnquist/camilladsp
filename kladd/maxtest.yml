@@ -1,0 +1,200 @@
+---
+devices:
+  samplerate: 192000
+  chunksize: 16384
+  target_level: 4096
+  enable_rate_adjust: false
+  enable_resampling: false
+  resampler_type: Synchronous
+  adjust_period: 10
+  #capture_samplerate: 44100
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,5"
+    format: S32LE
+  playback:
+    type: Alsa
+    channels: 8
+    device: "hw:Loopback,0,1"
+    format: S32LE
+
+filters:
+  fir65k:
+    type: Conv
+    parameters:
+      type: Values
+      values: [0.5, 0.5]
+      length: 262144
+
+mixers:
+  2to8:
+    channels:
+      in: 2
+      out: 8
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 2
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 3
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 4
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 5
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 6
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 7
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+
+pipeline:
+  - type: Mixer
+    name: 2to8
+  - type: Filter
+    channel: 0
+    names:
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+  - type: Filter
+    channel: 1
+    names:
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+  - type: Filter
+    channel: 2
+    names:
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+  - type: Filter
+    channel: 3
+    names:
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+  - type: Filter
+    channel: 4
+    names:
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+  - type: Filter
+    channel: 5
+    names:
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+  - type: Filter
+    channel: 6
+    names:
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+  - type: Filter
+    channel: 7
+    names:
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+      - fir65k
+

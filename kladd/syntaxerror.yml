@@ -1,0 +1,87 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,0"
+    format: S16LE
+  playback:
+		type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+    format: S32LE
+
+filters:
+  free_nbr1:
+    type: Biquad
+    parameters:
+      type: Free
+      a1: 1.0
+      a2: 1.0
+      b0: 1.0
+      b1: 1.0
+      b2: 1.0
+  hp_80:
+    type: Biquad
+    parameters:
+      type: Highpass
+      freq: 80
+      q: 0.5
+  peak_100:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 100
+      q: 0.5
+      gain: -7.3
+  lowpass_2k:
+    type: Conv
+    parameters:
+      type: Raw
+      filename: sometext.txt
+  highpass_2k:
+    type: Conv
+    parameters:
+      type: Raw
+      filename: sometext2.txt
+
+mixers:
+  mono:
+    channels:
+      in: 2
+      out: 4
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -3
+            inverted: false
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+          - channel: 1
+            gain: 0
+            inverted: false
+
+pipeline:
+  - type: Mixer
+    name: mono
+  - type: Filter
+    channel: 0
+    names:
+      - lowpass_2k
+      - notch_120 
+  - type: Filter
+    channel: 1
+    names:
+      - lowpass_2k
+      - notch_120 
+   
+

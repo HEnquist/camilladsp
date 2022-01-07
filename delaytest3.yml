@@ -1,0 +1,23 @@
+---
+devices:
+  samplerate: 176400
+  chunksize: 256
+  enable_resampling: true
+  capture_samplerate: 48000
+  resampler_type: AccurateSync
+  playback:
+    type: Raw
+    channels: 1
+    filename: "result3_f64.raw"
+    format: FLOAT64LE
+  capture:
+    type: Raw
+    channels: 1
+    filename: "result2_f64.raw"
+    format: FLOAT64LE
+    extra_samples: 0
+
+
+
+   
+

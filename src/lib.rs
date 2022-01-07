@@ -95,6 +95,7 @@ pub mod filters;
 pub mod helpers;
 pub mod loudness;
 pub mod mixer;
+pub mod compressor;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;

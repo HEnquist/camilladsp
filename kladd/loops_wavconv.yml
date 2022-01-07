@@ -1,0 +1,46 @@
+---
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  enable_resampling: true
+  resampler_type: Synchronous
+  capture_samplerate: 44100
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,5"
+    format: S32LE
+  capture:
+    type: Alsa
+    channels: 8
+    device: "hw:Loopback,0,1"
+    format: S32LE
+
+filters:
+  left:
+    type: Conv
+    parameters:
+      type: Wav
+      filename: Cor1S44.wav
+      channel: 0
+  right:
+    type: Conv
+    parameters:
+      type: Wav
+      filename: Cor1S44.wav
+      channel: 1
+
+
+pipeline:
+  - type: Filter
+    channel: 0
+    names:
+      - left
+  - type: Filter
+    channel: 1
+    names:
+      - right
+
+
+   
+

@@ -1,0 +1,22 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 4096
+  target_level: 4096
+  adjust_period: 3
+  enable_resampling: false
+  enable_rate_adjust: false
+  capture:
+    type: Pulse
+    channels: 2
+    device: "MySink.monitor"
+    format: S16LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:FXAUDIODACX6"
+    format: S24LE3
+
+
+   
+

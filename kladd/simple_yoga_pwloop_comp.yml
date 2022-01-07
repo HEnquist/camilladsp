@@ -1,0 +1,35 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 4096
+  target_level: 2048
+  adjust_period: 3
+  enable_resampling: false
+  enable_rate_adjust: true
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+    format: S16LE
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,0"
+    format: S32LE
+
+
+compressors:
+  testcomp:
+    channels: 2
+    attack: 0.025
+    release: 1.0
+    threshold: -20
+    factor: 4.0
+    makeup_gain: 15
+    soft_clip: true
+    clip_limit: -2 
+
+pipeline:
+  - type: Compressor
+    name: testcomp
+

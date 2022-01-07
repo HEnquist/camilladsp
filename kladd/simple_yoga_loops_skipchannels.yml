@@ -1,0 +1,74 @@
+---
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  enable_resampling: true
+  resampler_type: Synchronous
+  capture_samplerate: 44100
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,5"
+    format: S32LE
+  capture:
+    type: Alsa
+    channels: 8
+    device: "hw:Loopback,0,1"
+    format: S32LE
+
+
+mixers:
+  all8:
+    channels:
+      in: 8
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -6
+            inverted: false
+          - channel: 1
+            gain: -6
+            inverted: false
+          - channel: 2
+            gain: -6
+            inverted: false
+          - channel: 3
+            gain: -6
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 4
+            gain: -6
+            inverted: false
+          - channel: 5
+            gain: -6
+            inverted: false
+          - channel: 6
+            gain: -6
+            inverted: false
+          - channel: 7
+            gain: -6
+            inverted: false
+  only2:
+    channels:
+      in: 8
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 2
+            gain: -6
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 3
+            gain: -6
+            inverted: false
+
+pipeline:
+  - type: Mixer
+    name: only2
+   
+

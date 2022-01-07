@@ -9,9 +9,16 @@ use crate::dither;
 #[cfg(not(feature = "FFTW"))]
 use crate::fftconv;
 #[cfg(feature = "FFTW")]
+<<<<<<< HEAD
 use crate::fftconv_fftw as fftconv;
 use crate::loudness;
 use crate::mixer;
+=======
+use fftconv_fftw as fftconv;
+use loudness;
+use mixer;
+use compressor;
+>>>>>>> 823e5bf (WIP add a compressor)
 use rawsample::SampleReader;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -435,6 +442,7 @@ impl FilterGroup {
 pub enum PipelineStep {
     MixerStep(mixer::Mixer),
     FilterStep(FilterGroup),
+    CompressorStep(compressor::Compressor),
 }
 
 pub struct Pipeline {
@@ -467,6 +475,11 @@ impl Pipeline {
                     );
                     steps.push(PipelineStep::FilterStep(fltgrp));
                 }
+                config::PipelineStep::Compressor { name } => {
+                    let compconf = conf.compressors[&name].clone();
+                    let comp = compressor::Compressor::from_config(name, compconf, conf.devices.samplerate, conf.devices.chunksize);
+                    steps.push(PipelineStep::CompressorStep(comp));
+                }
             }
         }
         Pipeline { steps }
@@ -477,6 +490,7 @@ impl Pipeline {
         conf: config::Configuration,
         filters: Vec<String>,
         mixers: Vec<String>,
+        compressors: Vec<String>,
     ) {
         debug!("Updating parameters");
         for mut step in &mut self.steps {
@@ -488,6 +502,11 @@ impl Pipeline {
                 }
                 PipelineStep::FilterStep(flt) => {
                     flt.update_parameters(conf.filters.clone(), filters.clone());
+                }
+                PipelineStep::CompressorStep(comp) => {
+                    if compressors.iter().any(|n| n == &comp.name) {
+                        comp.update_parameters(conf.compressors[&comp.name].clone());
+                    }
                 }
             }
         }
@@ -502,6 +521,9 @@ impl Pipeline {
                 }
                 PipelineStep::FilterStep(flt) => {
                     flt.process_chunk(&mut chunk).unwrap();
+                }
+                PipelineStep::CompressorStep(comp) => {
+                    comp.process_chunk(&mut chunk);
                 }
             }
         }

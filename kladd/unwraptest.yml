@@ -1,0 +1,44 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  capture:
+    type: Alsa
+    channels: 2
+    device: "dummy"
+    format: S16LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "dummy"
+    format: S32LE
+
+filters:
+  peaking:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 1000
+      q: 2.0
+      gain: 12.0
+  notch:
+    type: Biquad
+    parameters:
+      type: Notch
+      freq: 1000
+      q: 2.0
+  allpass:
+    type: Biquad
+    parameters:
+      type: Allpass
+      freq: 1000
+      q: 0.5
+  lowpass_fir:
+    type: Conv
+    parameters:
+      type: Raw 
+      filename: filter.txt
+
+
+   
+

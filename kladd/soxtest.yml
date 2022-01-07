@@ -1,0 +1,15 @@
+devices:
+  samplerate: 88201
+  chunksize: 1024
+  enable_resampling: true
+  resampler_type: Synchronous
+  queuelimit: 128
+  capture_samplerate: 44100
+  capture:
+    type: Stdin
+    channels: 2
+    format: S24LE3
+  playback:
+    type: Stdout
+    channels: 2
+    format: S24LE3

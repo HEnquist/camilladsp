@@ -1,0 +1,21 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 4096
+  target_level: 2048
+  adjust_period: 3
+  enable_resampling: false
+  enable_rate_adjust: false
+  capture:
+    type: Stdin
+    channels: 2
+    format: S32LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,1"
+    format: S32LE
+
+
+   
+

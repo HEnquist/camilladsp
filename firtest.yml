@@ -1,0 +1,45 @@
+devices:
+  samplerate: 44100
+  chunksize: 4096
+  enable_resampling: false
+  resampler_type: BalancedAsync
+  queuelimit: 1
+  capture_samplerate: 44100
+  capture:
+    type: Raw
+    filename: /dev/stdin
+    channels: 1
+    format: FLOAT64LE
+    extra_samples: 10000
+  playback:
+    type: Raw
+    filename: /dev/stdout
+    channels: 1
+    format: FLOAT64LE
+
+filters:
+  fir16:
+    type: Conv
+    parameters:
+      type: Raw 
+      filename: test_44100Hz_16b.raw
+      format: S16LE
+  fir24:
+    type: Conv
+    parameters:
+      type: Raw 
+      filename: test_44100Hz_24b.raw
+      format: S24LE3
+  fir32:
+    type: Conv
+    parameters:
+      type: Raw 
+      filename: test_44100Hz_32b.raw
+      format: S32LE
+
+
+pipeline:
+  - type: Filter
+    channel: 0
+    names:
+      - fir24

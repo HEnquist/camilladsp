@@ -1,0 +1,22 @@
+---
+devices:
+  samplerate: 45100
+  chunksize: 4096
+  target_level: 2048
+  adjust_period: 3
+  enable_resampling: true
+  enable_rate_adjust: true
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+    format: S32LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,5"
+    format: S16LE
+
+
+   
+

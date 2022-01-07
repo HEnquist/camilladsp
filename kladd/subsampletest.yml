@@ -1,0 +1,64 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  target_level: 512
+  adjust_period: 10
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,1"
+    format: S16LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,5"
+    format: S32LE
+
+filters:
+  free:
+    type: Biquad
+    parameters:
+      type: Free
+      a1: 0.05
+      a2: 0
+      b0: 0.05
+      b1: 1
+      b2: 0
+
+mixers:
+  mono:
+    channels:
+      in: 2
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -6
+            inverted: false
+          - channel: 1
+            gain: -6
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 0
+            gain: -6
+            inverted: false
+          - channel: 1
+            gain: -6
+            inverted: false
+
+pipeline:
+  - type: Mixer
+    name: mono
+  - type: Filter
+    channel: 0
+    names:
+      - free
+  - type: Filter
+    channel: 1
+    names:
+      - free
+   
+

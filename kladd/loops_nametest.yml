@@ -1,0 +1,234 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 4096
+  target_level: 2048
+  adjust_period: 3
+  enable_resampling: false
+  enable_rate_adjust: true
+  playback:
+    type: Alsa
+    channels: 6
+    device: "hw:Loopback,0,5"
+    format: S32LE
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,1"
+    format: S32LE
+
+# comments adasda sasdjkfakjsdfbaksjf
+
+filters:
+  example_diffeq:
+    type: DiffEq
+    parameters:
+      a: [1.0, -0.1462978543780541, 0.005350765548905586]
+      b: [0.21476322779271284, 0.4295264555854257, 0.21476322779271284]
+  -30db:
+    parameters:
+      gain: -90
+      inverted: false
+    type: Gain
+  -6dB:
+    parameters:
+      gain: -6
+      inverted: false
+    type: Gain
+  HP90:
+    parameters:
+      freq: 40
+      q: 0.5
+      type: Highpass
+    type: Biquad
+  LP90:
+    parameters:
+      freq: 50
+      q: 0.5
+      type: Lowpass
+    type: Biquad
+  P12k-Q1-3:
+    parameters:
+      freq: 12000
+      gain: 2
+      q: 1.5
+      type: Peaking
+    type: Biquad
+  P150-Q2-1,5:
+    parameters:
+      freq: 150
+      gain: 1
+      q: 2
+      type: Peaking
+    type: Biquad
+  P1500-Q07-2:
+    parameters:
+      freq: 1500
+      gain: 2
+      q: 2
+      type: Peaking
+    type: Biquad
+  P3300-Q2--2:
+    parameters:
+      freq: 3300
+      gain: -2.5
+      q: 2
+      type: Peaking
+    type: Biquad
+  P350-0,7-1,5:
+    parameters:
+      freq: 350
+      gain: 2
+      q: 1
+      type: Peaking
+    type: Biquad
+  P400-Q2--2:
+    parameters:
+      freq: 400
+      gain: -3
+      q: 2
+      type: Peaking
+    type: Biquad
+  P800-Q2--2:
+    parameters:
+      freq: 800
+      gain: -2
+      q: 2.0
+      type: Peaking
+    type: Biquad
+  P200:
+    parameters:
+      freq: 200
+      gain: 1
+      q: 0.1
+      type: Peaking
+    type: Biquad
+  Sample Comp ch0/2 L:
+    parameters:
+      delay: 1
+      unit: ms
+    type: Delay
+  SubEQ:
+    parameters:
+      freq: 20
+      gain: 6
+      q: 1.5
+      type: Peaking
+    type: Biquad
+  glob FIR L:
+    parameters:
+      delay: 0
+      unit: ms
+    type: Delay
+  glob FIR R:
+    parameters:
+      delay: 0
+      unit: ms
+    type: Delay
+  sub_delay L:
+    parameters:
+      delay: 8
+      unit: ms
+    type: Delay
+  sub_delay R:
+    parameters:
+      delay: 9
+      unit: ms
+    type: Delay
+
+mixers:
+  Holl egg 90 subs soffa:
+    channels:
+      in: 2
+      out: 6
+    mapping:
+    - dest: 0
+      sources:
+      - channel: 0
+        gain: 0
+        inverted: false
+    - dest: 1
+      sources:
+      - channel: 1
+        gain: 0
+        inverted: false
+    - dest: 2
+      sources:
+      - channel: 0
+        gain: 0
+        inverted: false
+    - dest: 3
+      sources:
+      - channel: 1
+        gain: 0
+        inverted: false
+    - dest: 4
+      sources:
+      - channel: 0
+        gain: 0
+        inverted: false
+    - dest: 5
+      sources:
+      - channel: 1
+        gain: 0
+        inverted: false
+
+pipeline:
+- channel: 0
+  names:
+  - glob FIR L
+  type: Filter
+- channel: 1
+  names:
+  - glob FIR R
+  type: Filter
+- name: Holl egg 90 subs soffa
+  type: Mixer
+- channel: 0
+  names:
+  - HP90
+  - Sample Comp ch0/2 L
+  - P150-Q2-1,5
+  - P400-Q2--2
+  - P800-Q2--2
+  - P1500-Q07-2
+  - P3300-Q2--2
+  - P12k-Q1-3
+  - P350-0,7-1,5
+  type: Filter
+- channel: 1
+  names:
+  - -30db
+  type: Filter
+- channel: 2
+  names:
+  - -30db
+  type: Filter
+- channel: 3
+  names:
+  - HP90
+  - P150-Q2-1,5
+  - P400-Q2--2
+  - P800-Q2--2
+  - P1500-Q07-2
+  - P3300-Q2--2
+  - P12k-Q1-3
+  - P350-0,7-1,5
+  type: Filter
+- channel: 4
+  names:
+  - -6dB
+  - SubEQ
+  - sub_delay L
+  - Sample Comp ch0/2 L
+  - LP90
+  - LP90
+  type: Filter
+- channel: 5
+  names:
+  - -6dB
+  - SubEQ
+  - sub_delay R
+  - LP90
+  - LP90
+  type: Filter

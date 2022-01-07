@@ -1,0 +1,75 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 4096
+  target_level: 2048
+  adjust_period: 3
+  enable_resampling: false
+  enable_rate_adjust: true
+  playback:
+    type: Alsa
+    channels: 8
+    device: "hw:Loopback,0,5"
+    format: S32LE
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,0,1"
+    format: S32LE
+
+mixers:
+  2to8:
+    channels:
+      in: 2
+      out: 8
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 2
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 3
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 4
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 5
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 6
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 7
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+
+pipeline:
+  - type: Mixer
+    name: 2to8
+
+
+
+
+   
+

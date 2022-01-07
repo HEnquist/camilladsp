@@ -1,0 +1,21 @@
+---
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  adjust_period: 3
+  enable_resampling: false
+  enable_rate_adjust: false
+  capture:
+    type: Jack
+    channels: 2
+    device: "default"
+    format: FLOAT32LE
+  playback:
+    type: Jack
+    channels: 2
+    device: "default"
+    format: FLOAT32LE
+
+
+   
+

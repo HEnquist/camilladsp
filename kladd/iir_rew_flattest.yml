@@ -1,0 +1,69 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 4096
+  target_level: 2048
+  adjust_period: 3
+  enable_resampling: false
+  enable_rate_adjust: true
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+    format: S16LE
+  # playback:
+  #   type: Alsa
+  #   channels: 2
+  #   device: "hw:Loopback,0,5"
+  #   format: S32LE
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,1,0"
+    format: S32LE
+
+filters:
+  reduce:
+    parameters:
+      gain: -6
+      inverted: false
+    type: Gain
+  P100:
+    parameters:
+      freq: 100
+      gain: 5
+      q: 5
+      type: Peaking
+    type: Biquad
+  P1k:
+    parameters:
+      freq: 1000
+      gain: 6
+      q: 6
+      type: Peaking
+    type: Biquad
+  P10k:
+    parameters:
+      freq: 10000
+      gain: 3
+      q: 5
+      type: Peaking
+    type: Biquad
+
+# pipeline:
+# - channel: 0
+#   type: Filter
+#   names:
+#   - reduce
+#   - P100
+#   - P1k
+#   - P10k
+# - channel: 1
+#   type: Filter
+#   names:
+#   - reduce
+#   - P100
+#   - P1k
+#   - P10k
+   
+

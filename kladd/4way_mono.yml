@@ -1,0 +1,149 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  target_level: 512
+  adjust_period: 10
+  capture:
+    type: Alsa
+    channels: 1
+    device: "hw:Loopback,0,1"
+    format: S16LE
+  playback:
+    type: Alsa
+    channels: 4
+    device: "hw:Loopback,0,5"
+    format: S32LE
+
+filters:
+  lp50:
+    type: Biquad
+    parameters:
+      type: Lowpass 
+      freq: 50
+      q: 0.7
+  hp50:
+    type: Biquad
+    parameters:
+      type: Highpass 
+      freq: 50
+      q: 0.7
+  lp200:
+    type: Biquad
+    parameters:
+      type: Lowpass 
+      freq: 200
+      q: 0.7
+  hp200:
+    type: Biquad
+    parameters:
+      type: Highpass 
+      freq: 200
+      q: 0.7
+  lp2k:
+    type: Biquad
+    parameters:
+      type: Lowpass 
+      freq: 2000
+      q: 0.7
+  hp2k:
+    type: Biquad
+    parameters:
+      type: Highpass 
+      freq: 2000
+      q: 0.7
+
+mixers:
+  step1:
+    channels:
+      in: 1
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+  step2:
+    channels:
+      in: 2
+      out: 3
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 2
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+
+  step3:
+    channels:
+      in: 3
+      out: 4
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 2
+        sources:
+          - channel: 2
+            gain: 0
+            inverted: false
+      - dest: 3
+        sources:
+          - channel: 2
+            gain: 0
+            inverted: false
+
+pipeline:
+  - type: Mixer
+    name: step1
+  - type: Filter
+    channel: 0
+    names:
+      - lp50
+  - type: Filter
+    channel: 1
+    names:
+      - hp50
+  - type: Mixer
+    name: step2
+  - type: Filter
+    channel: 1
+    names:
+      - lp200
+  - type: Filter
+    channel: 2
+    names:
+      - hp200
+  - type: Mixer
+    name: step3
+  - type: Filter
+    channel: 2
+    names:
+      - lp2k
+  - type: Filter
+    channel: 3
+    names:
+      - hp2k

@@ -1,0 +1,81 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  enable_resampling: false
+  capture_samplerate: 44100
+  playback:
+    type: Raw
+    channels: 4
+    filename: "kladd/delaytest.dbl"
+    format: FLOAT64LE
+  capture:
+    type: Raw
+    channels: 1
+    filename: "spike_f64.raw"
+    format: FLOAT64LE
+    extra_samples: 0
+
+mixers:
+  to4:
+    channels:
+      in: 1
+      out: 4
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 2
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 3
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+
+
+filters:
+  d1:
+    type: Delay
+    parameters:
+      delay: 3.80
+      unit: ms
+  d2:
+    type: Delay
+    parameters:
+      delay: 3.82
+      unit: ms
+  d3:
+    type: Delay
+    parameters:
+      delay: 3.84
+      unit: ms
+
+pipeline:
+  - type: Mixer
+    name: to4
+  - type: Filter
+    channel: 1
+    names:
+      - d1
+  - type: Filter
+    channel: 2
+    names:
+      - d2
+  - type: Filter
+    channel: 3
+    names:
+      - d3
+
+
+

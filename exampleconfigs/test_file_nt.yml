@@ -1,0 +1,73 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  target_level: 512
+  adjust_period: 10
+  playback:
+    type: Raw
+    channels: 2
+    filename: "result_i32.raw"
+    format: S32LE
+  capture:
+    type: Raw
+    channels: 1
+    filename: "spike_i32.raw"
+    format: S32LE
+    extra_samples: 2500
+
+
+mixers:
+  splitter:
+    channels:
+      in: 1
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+
+
+filters:
+  testlp:
+    type: BiquadCombo
+    parameters:
+      type: ButterworthLowpass
+      freq: 1000
+      order: 4
+  test_nt_lp1:
+    type: Biquad
+    parameters:
+      type: Lowpass
+      freq: 1000
+      q: 0.9
+  test_nt_notch:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 2000
+      q: 1.2
+      gain: -60
+
+
+pipeline:
+  - type: Mixer
+    name: splitter
+  - type: Filter
+    channel: 0
+    names:
+      - testlp
+  - type: Filter
+    channel: 1
+    names:
+      - test_nt_lp1
+      - test_nt_notch
+   
+

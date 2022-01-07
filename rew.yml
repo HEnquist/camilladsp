@@ -1,0 +1,78 @@
+filters:
+  leftFront_1:
+    parameters:
+      freq: 102.0
+      gain: -9.8
+      q: 3.52
+      type: Peaking
+    type: Biquad
+  leftFront_2:
+    parameters:
+      freq: 154.0
+      gain: 5.1
+      q: 6.14
+      type: Peaking
+    type: Biquad
+  leftFront_3:
+    parameters:
+      freq: 350.0
+      gain: -3.9
+      q: 1.92
+      type: Peaking
+    type: Biquad
+  leftFront_4:
+    parameters:
+      freq: 395.0
+      gain: 2.0
+      q: 5.37
+      type: Peaking
+    type: Biquad
+  leftFront_5:
+    parameters:
+      freq: 516.0
+      gain: -2.0
+      q: 5.14
+      type: Peaking
+    type: Biquad
+  leftFront_6:
+    parameters:
+      freq: 1055.0
+      gain: 4.0
+      q: 1.28
+      type: Peaking
+    type: Biquad
+  leftFront_7:
+    parameters:
+      freq: 1190.0
+      gain: -3.5
+      q: 1.22
+      type: Peaking
+    type: Biquad
+  leftFront_8:
+    parameters:
+      freq: 5301.0
+      gain: -1.5
+      q: 2.38
+      type: Peaking
+    type: Biquad
+  leftFront_9:
+    parameters:
+      freq: 11052.0
+      gain: -1.4
+      q: 2.26
+      type: Peaking
+    type: Biquad
+pipeline:
+- channel: 0
+  names:
+  - leftFront_1
+  - leftFront_2
+  - leftFront_3
+  - leftFront_4
+  - leftFront_5
+  - leftFront_6
+  - leftFront_7
+  - leftFront_8
+  - leftFront_9
+  type: Filter
+

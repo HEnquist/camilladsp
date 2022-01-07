@@ -64,12 +64,12 @@ pub fn run_processing(
                             filters::Pipeline::from_config(new_config, processing_status.clone());
                         pipeline = new_pipeline;
                     }
-                    config::ConfigChange::FilterParameters { filters, mixers } => {
+                    config::ConfigChange::FilterParameters { filters, mixers , compressors} => {
                         debug!(
                             "Updating parameters of filters: {:?}, mixers: {:?}.",
                             filters, mixers
                         );
-                        pipeline.update_parameters(new_config, filters, mixers);
+                        pipeline.update_parameters(new_config, filters, mixers, compressors);
                     }
                     config::ConfigChange::Devices => {
                         let msg = AudioMessage::EndOfStream;

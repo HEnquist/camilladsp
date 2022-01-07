@@ -1,0 +1,34 @@
+---
+devices:
+
+  samplerate: 44100
+  chunksize: 4096 # Default 1024
+  queuelimit: 1 # Default 128
+#  silence_threshold: -60
+#  silence_timeout: 3.0
+#  target_level: 500 # Default 0.5 * chunksize ... 1.0 * chunksize
+#  adjust_period: 10 # Default 10 (seconds)
+  enable_rate_adjust: false
+  enable_resampling: true
+  resampler_type: BalancedAsync
+#    Free : # Free / FastSync / BalancedSync / AccurateSync / FastAsync / BalancedAsync / AccurateAsync
+#      f_cutoff: 0.95 # 0.8 ... 0.99
+#      sinc_len: 128
+#      window: Hann2 # Blackman2 / BlackmanHarris2 / Hann2
+#      oversampling_ratio: 128 # auto / n 128 ...1024
+#      interpolation: Cubic # Cubic / Nearest / Linear
+  capture_samplerate: 44100
+
+  capture:
+    type: Raw
+    channels: 2
+    extra_samples: 0
+    filename: /home/henrik/vaio/henrik/8bits.wav
+    format: S16LE
+    skip_bytes: 44
+
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+    format: S16LE
