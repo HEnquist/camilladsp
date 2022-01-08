@@ -98,6 +98,8 @@ impl Compressor {
         self.makeup_gain = config.makeup_gain;
         self.soft_clip = config.soft_clip;
         self.clip_limit = clip_limit;
+        debug!("Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {}", 
+                self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain, config.soft_clip, clip_limit);
     }
 
     /// Sum all chanels that are included in loudness monitoring, store result in self.scratch
