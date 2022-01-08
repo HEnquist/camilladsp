@@ -64,7 +64,11 @@ pub fn run_processing(
                             filters::Pipeline::from_config(new_config, processing_status.clone());
                         pipeline = new_pipeline;
                     }
-                    config::ConfigChange::FilterParameters { filters, mixers , compressors} => {
+                    config::ConfigChange::FilterParameters {
+                        filters,
+                        mixers,
+                        compressors,
+                    } => {
                         debug!(
                             "Updating parameters of filters: {:?}, mixers: {:?}.",
                             filters, mixers

@@ -72,6 +72,7 @@ pub mod audiodevice;
 pub mod basicfilters;
 pub mod biquad;
 pub mod biquadcombo;
+pub mod compressor;
 pub mod config;
 pub mod conversions;
 #[cfg(target_os = "macos")]
@@ -95,7 +96,6 @@ pub mod filters;
 pub mod helpers;
 pub mod loudness;
 pub mod mixer;
-pub mod compressor;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;
