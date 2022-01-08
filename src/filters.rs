@@ -2,6 +2,7 @@ use audiodevice::AudioChunk;
 use basicfilters;
 use biquad;
 use biquadcombo;
+use compressor;
 use config;
 use conversions;
 use diffeq;
@@ -12,7 +13,6 @@ use fftconv;
 use fftconv_fftw as fftconv;
 use loudness;
 use mixer;
-use compressor;
 use rawsample::SampleReader;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -471,7 +471,12 @@ impl Pipeline {
                 }
                 config::PipelineStep::Compressor { name } => {
                     let compconf = conf.compressors[&name].clone();
-                    let comp = compressor::Compressor::from_config(name, compconf, conf.devices.samplerate, conf.devices.chunksize);
+                    let comp = compressor::Compressor::from_config(
+                        name,
+                        compconf,
+                        conf.devices.samplerate,
+                        conf.devices.chunksize,
+                    );
                     steps.push(PipelineStep::CompressorStep(comp));
                 }
             }

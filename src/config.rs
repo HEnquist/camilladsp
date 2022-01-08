@@ -1,6 +1,6 @@
+use compressor;
 use filters;
 use mixer;
-use compressor;
 use serde::{de, Deserialize, Serialize};
 use serde_with;
 use std::collections::HashMap;
@@ -1015,7 +1015,7 @@ fn replace_tokens_in_config(config: &mut Configuration) {
             PipelineStep::Mixer { name } => {
                 *name = replace_tokens(name, samplerate, num_channels);
             }
-            PipelineStep::Compressor {name} => {
+            PipelineStep::Compressor { name } => {
                 *name = replace_tokens(name, samplerate, num_channels);
             }
         }
@@ -1143,7 +1143,11 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
             }
         }
     }
-    ConfigChange::FilterParameters { filters, mixers, compressors }
+    ConfigChange::FilterParameters {
+        filters,
+        mixers,
+        compressors,
+    }
 }
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
