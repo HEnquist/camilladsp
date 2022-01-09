@@ -1,8 +1,8 @@
-use audiodevice::AudioChunk;
-use config;
-use filters::Processor;
-use PrcFmt;
-use Res;
+use crate::audiodevice::AudioChunk;
+use crate::config;
+use crate::filters::Processor;
+use crate::PrcFmt;
+use crate::Res;
 
 #[derive(Clone, Debug)]
 pub struct Compressor {

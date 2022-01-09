@@ -1,3 +1,4 @@
+use crate::compressor;
 use crate::filters;
 use crate::mixer;
 use serde::{de, Deserialize, Serialize};

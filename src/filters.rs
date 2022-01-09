@@ -1,39 +1,18 @@
-<<<<<<< HEAD
 use crate::audiodevice::AudioChunk;
 use crate::basicfilters;
 use crate::biquad;
 use crate::biquadcombo;
+use crate::compressor;
 use crate::config;
 use crate::conversions;
 use crate::diffeq;
 use crate::dither;
-=======
-use audiodevice::AudioChunk;
-use basicfilters;
-use biquad;
-use biquadcombo;
-use compressor;
-use config;
-use conversions;
-use diffeq;
-use dither;
->>>>>>> 72ace73 (WIP compressor mostly working)
 #[cfg(not(feature = "FFTW"))]
 use crate::fftconv;
 #[cfg(feature = "FFTW")]
-<<<<<<< HEAD
 use crate::fftconv_fftw as fftconv;
 use crate::loudness;
 use crate::mixer;
-=======
-use fftconv_fftw as fftconv;
-use loudness;
-use mixer;
-<<<<<<< HEAD
-use compressor;
->>>>>>> 823e5bf (WIP add a compressor)
-=======
->>>>>>> 72ace73 (WIP compressor mostly working)
 use rawsample::SampleReader;
 use std::collections::HashMap;
 use std::convert::TryInto;
