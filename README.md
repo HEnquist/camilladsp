@@ -49,7 +49,7 @@ The full configuration is given in a yaml file.
 - **[Devices](#devices)**
 - **[Resampling](#resampling)**
 - **[Mixers](#mixers)**
- - **[Filters](#filters)**
+- **[Filters](#filters)**
    - **[Gain](#gain)**
    - **[Volume](#volume)**
    - **[Loudness](#loudness)**
@@ -58,6 +58,8 @@ The full configuration is given in a yaml file.
    - **[IIR](#iir)**
    - **[Dither](#dither)**
    - **[Difference equation](#difference-equation)**
+- **[Processors](#processors)**
+   - **[Compressor](#compressor)**
 - **[Pipeline](#pipeline)**
 - **[Visualizing the config](#visualizing-the-config)**
 
@@ -1271,6 +1273,7 @@ pipeline:
   - type: Processor
     name: democompr
 ``` 
+
   Parameters:
   * `channels`: number of channels, must match the number of channels of the pipeline where the compressor is inserted.
   * `attack`: time constant in seconds for attack, how fast the compressor reacts to an increase of the loudness.
