@@ -1,5 +1,6 @@
 use audiodevice::AudioChunk;
 use config;
+use filters::Processor;
 use PrcFmt;
 use Res;
 
@@ -25,7 +26,7 @@ impl Compressor {
     /// Creates a Compressor from a config struct
     pub fn from_config(
         name: String,
-        config: config::Compressor,
+        config: config::CompressorParameters,
         samplerate: usize,
         chunksize: usize,
     ) -> Self {
@@ -68,38 +69,6 @@ impl Compressor {
             scratch,
             prev_loudness: -100.0,
         }
-    }
-
-    pub fn update_parameters(&mut self, config: config::Compressor) {
-        let channels = config.channels;
-        let srate = self.samplerate as PrcFmt;
-        let mut monitor_channels = config.monitor_channels.clone();
-        if monitor_channels.is_empty() {
-            for n in 0..channels {
-                monitor_channels.push(n);
-            }
-        }
-        let mut process_channels = config.process_channels.clone();
-        if process_channels.is_empty() {
-            for n in 0..channels {
-                process_channels.push(n);
-            }
-        }
-        let attack = (-1.0 / srate / config.attack).exp();
-        let release = (-1.0 / srate / config.release).exp();
-        let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit / 20.0);
-
-        self.monitor_channels = monitor_channels;
-        self.process_channels = process_channels;
-        self.attack = attack;
-        self.release = release;
-        self.threshold = config.threshold;
-        self.factor = config.factor;
-        self.makeup_gain = config.makeup_gain;
-        self.soft_clip = config.soft_clip;
-        self.clip_limit = clip_limit;
-        debug!("Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {}", 
-                self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain, config.soft_clip, clip_limit);
     }
 
     /// Sum all chanels that are included in loudness monitoring, store result in self.scratch
@@ -158,9 +127,15 @@ impl Compressor {
             *val = scaled * self.clip_limit;
         }
     }
+}
+
+impl Processor for Compressor {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
 
     /// Apply a Compressor to an AudioChunk, modifying it in-place.
-    pub fn process_chunk(&mut self, input: &mut AudioChunk) {
+    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
         self.sum_monitor_channels(input);
         self.estimate_loudness();
         self.calculate_linear_gain();
@@ -170,11 +145,51 @@ impl Compressor {
                 self.apply_soft_clip(&mut input.waveforms[*ch]);
             }
         }
+        Ok(())
+    }
+
+    fn update_parameters(&mut self, config: config::Processor) {
+        // TODO remove when there is more than one type of Processor.
+        #[allow(irrefutable_let_patterns)]
+        if let config::Processor::Compressor { parameters: config } = config {
+            let channels = config.channels;
+            let srate = self.samplerate as PrcFmt;
+            let mut monitor_channels = config.monitor_channels.clone();
+            if monitor_channels.is_empty() {
+                for n in 0..channels {
+                    monitor_channels.push(n);
+                }
+            }
+            let mut process_channels = config.process_channels.clone();
+            if process_channels.is_empty() {
+                for n in 0..channels {
+                    process_channels.push(n);
+                }
+            }
+            let attack = (-1.0 / srate / config.attack).exp();
+            let release = (-1.0 / srate / config.release).exp();
+            let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit / 20.0);
+
+            self.monitor_channels = monitor_channels;
+            self.process_channels = process_channels;
+            self.attack = attack;
+            self.release = release;
+            self.threshold = config.threshold;
+            self.factor = config.factor;
+            self.makeup_gain = config.makeup_gain;
+            self.soft_clip = config.soft_clip;
+            self.clip_limit = clip_limit;
+            debug!("Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {}", 
+                self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain, config.soft_clip, clip_limit);
+        } else {
+            // This should never happen unless there is a bug somewhere else
+            panic!("Invalid config change!");
+        }
     }
 }
 
 /// Validate the compressor config, to give a helpful message intead of a panic.
-pub fn validate_compressor(config: &config::Compressor) -> Res<()> {
+pub fn validate_compressor(config: &config::CompressorParameters) -> Res<()> {
     let channels = config.channels;
     if config.attack <= 0.0 {
         let msg = "Attack value must be larger than zero.";

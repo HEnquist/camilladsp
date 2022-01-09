@@ -84,6 +84,15 @@ pub trait Filter {
     fn name(&self) -> String;
 }
 
+pub trait Processor {
+    // Filter a Vec
+    fn process_chunk(&mut self, chunk: &mut AudioChunk) -> Res<()>;
+
+    fn update_parameters(&mut self, config: config::Processor);
+
+    fn name(&self) -> String;
+}
+
 pub fn pad_vector(values: &[PrcFmt], length: usize) -> Vec<PrcFmt> {
     let new_len = if values.len() > length {
         values.len()
@@ -436,7 +445,7 @@ impl FilterGroup {
 pub enum PipelineStep {
     MixerStep(mixer::Mixer),
     FilterStep(FilterGroup),
-    CompressorStep(compressor::Compressor),
+    ProcessorStep(Box<dyn Processor>),
 }
 
 pub struct Pipeline {
@@ -469,15 +478,20 @@ impl Pipeline {
                     );
                     steps.push(PipelineStep::FilterStep(fltgrp));
                 }
-                config::PipelineStep::Compressor { name } => {
-                    let compconf = conf.compressors[&name].clone();
-                    let comp = compressor::Compressor::from_config(
-                        name,
-                        compconf,
-                        conf.devices.samplerate,
-                        conf.devices.chunksize,
-                    );
-                    steps.push(PipelineStep::CompressorStep(comp));
+                config::PipelineStep::Processor { name } => {
+                    let procconf = conf.processors[&name].clone();
+                    let proc = match procconf {
+                        config::Processor::Compressor { parameters } => {
+                            let comp = compressor::Compressor::from_config(
+                                name,
+                                parameters,
+                                conf.devices.samplerate,
+                                conf.devices.chunksize,
+                            );
+                            Box::new(comp)
+                        }
+                    };
+                    steps.push(PipelineStep::ProcessorStep(proc));
                 }
             }
         }
@@ -489,7 +503,7 @@ impl Pipeline {
         conf: config::Configuration,
         filters: Vec<String>,
         mixers: Vec<String>,
-        compressors: Vec<String>,
+        processors: Vec<String>,
     ) {
         debug!("Updating parameters");
         for mut step in &mut self.steps {
@@ -502,9 +516,9 @@ impl Pipeline {
                 PipelineStep::FilterStep(flt) => {
                     flt.update_parameters(conf.filters.clone(), filters.clone());
                 }
-                PipelineStep::CompressorStep(comp) => {
-                    if compressors.iter().any(|n| n == &comp.name) {
-                        comp.update_parameters(conf.compressors[&comp.name].clone());
+                PipelineStep::ProcessorStep(proc) => {
+                    if processors.iter().any(|n| n == &proc.name()) {
+                        proc.update_parameters(conf.processors[&proc.name()].clone());
                     }
                 }
             }
@@ -521,8 +535,8 @@ impl Pipeline {
                 PipelineStep::FilterStep(flt) => {
                     flt.process_chunk(&mut chunk).unwrap();
                 }
-                PipelineStep::CompressorStep(comp) => {
-                    comp.process_chunk(&mut chunk);
+                PipelineStep::ProcessorStep(comp) => {
+                    comp.process_chunk(&mut chunk).unwrap();
                 }
             }
         }
