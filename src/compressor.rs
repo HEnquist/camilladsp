@@ -4,6 +4,8 @@ use crate::filters::Processor;
 use crate::PrcFmt;
 use crate::Res;
 
+const CUBEFACTOR: PrcFmt = 1.0 / 6.75; // = 1 / (2 * 1.5^3)
+
 #[derive(Clone, Debug)]
 pub struct Compressor {
     pub name: String,
@@ -123,7 +125,7 @@ impl Compressor {
             } else if scaled < -1.5 {
                 scaled = -1.5;
             }
-            scaled -= 0.148148148148148148 * scaled.powi(3);
+            scaled -= CUBEFACTOR * scaled.powi(3);
             *val = scaled * self.clip_limit;
         }
     }
@@ -193,11 +195,11 @@ pub fn validate_compressor(config: &config::CompressorParameters) -> Res<()> {
     let channels = config.channels;
     if config.attack <= 0.0 {
         let msg = "Attack value must be larger than zero.";
-        return Err(config::ConfigError::new(&msg).into());
+        return Err(config::ConfigError::new(msg).into());
     }
     if config.release <= 0.0 {
         let msg = "Release value must be larger than zero.";
-        return Err(config::ConfigError::new(&msg).into());
+        return Err(config::ConfigError::new(msg).into());
     }
     for ch in config.monitor_channels.iter() {
         if *ch >= channels {
