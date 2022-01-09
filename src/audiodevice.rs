@@ -463,8 +463,6 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels,
             device,
             format,
-            retry_on_error,
-            avoid_blocking_read,
         } => Box::new(alsadevice::AlsaCaptureDevice {
             devname: device,
             samplerate: conf.samplerate,
@@ -476,8 +474,6 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
-            retry_on_error,
-            avoid_blocking_read,
             stop_on_rate_change: conf.stop_on_rate_change,
             rate_measure_interval: conf.rate_measure_interval,
         }),

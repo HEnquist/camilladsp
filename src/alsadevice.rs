@@ -59,8 +59,6 @@ pub struct AlsaCaptureDevice {
     pub sample_format: SampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
-    pub retry_on_error: bool,
-    pub avoid_blocking_read: bool,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
 }
@@ -87,8 +85,6 @@ struct CaptureParams {
     capture_samplerate: usize,
     async_src: bool,
     capture_status: Arc<RwLock<CaptureStatus>>,
-    retry_on_error: bool,
-    avoid_blocking_read: bool,
     stop_on_rate_change: bool,
     rate_measure_interval: f32,
 }
@@ -199,8 +195,6 @@ fn capture_buffer(
     buffer: &mut [u8],
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
-    retry: bool,
-    _avoid_blocking: bool,
     samplerate: usize,
     frames_to_read: usize,
 ) -> Res<CaptureResult> {
@@ -235,44 +229,25 @@ fn capture_buffer(
             return Ok(CaptureResult::RecoverableError);
         }
         Err(err) => {
-            if retry {
-                warn!(
-                    "Capture device failed while waiting for frames, error: {}, will try again.",
-                    err
-                );
-                return Ok(CaptureResult::RecoverableError);
-            } else {
-                warn!(
-                    "Capture device failed while waiting for available frames, error: {}",
-                    err
-                );
-                return Err(Box::new(err));
-            }
+            warn!(
+                "Capture device failed while waiting for available frames, error: {}",
+                err
+            );
+            return Err(Box::new(err));
         }
     }
     let _frames = match io.readi(buffer) {
         Ok(frames) => frames,
         Err(err) => match err.nix_error() {
             alsa::nix::errno::Errno::EIO => {
-                if retry {
-                    warn!("Capture failed with error: {}, will try again.", err);
-                    return Ok(CaptureResult::RecoverableError);
-                } else {
-                    warn!("Capture failed with error: {}", err);
-                    return Err(Box::new(err));
-                }
+                warn!("Capture failed with error: {}", err);
+                return Err(Box::new(err));
             }
             // TODO: do we need separate handling of xruns that happen in the tiny
             // window between state() and readi()?
             alsa::nix::errno::Errno::EPIPE => {
-                if retry {
-                    warn!("Retrying capture, error: {}", err);
-                    pcmdevice.prepare()?;
-                    io.readi(buffer)?
-                } else {
-                    warn!("Capture failed, error: {}", err);
-                    return Err(Box::new(err));
-                }
+                warn!("Capture failed, error: {}", err);
+                return Err(Box::new(err));
             }
             _ => {
                 warn!("Capture failed, error: {}", err);
@@ -639,8 +614,6 @@ fn capture_loop_bytes(
             &mut buffer[0..capture_bytes],
             pcmdevice,
             &io,
-            params.retry_on_error,
-            params.avoid_blocking_read,
             params.capture_samplerate,
             capture_bytes / (params.channels * params.store_bytes_per_sample),
         );
@@ -869,8 +842,6 @@ impl CaptureDevice for AlsaCaptureDevice {
         let enable_resampling = self.enable_resampling;
         let resampler_conf = self.resampler_conf.clone();
         let async_src = resampler_is_async(&resampler_conf);
-        let retry_on_error = self.retry_on_error;
-        let avoid_blocking_read = self.avoid_blocking_read;
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let handle = thread::Builder::new()
@@ -915,8 +886,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                             capture_samplerate,
                             async_src,
                             capture_status,
-                            retry_on_error,
-                            avoid_blocking_read,
                             stop_on_rate_change,
                             rate_measure_interval,
                         };
