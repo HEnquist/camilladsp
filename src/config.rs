@@ -773,9 +773,17 @@ pub struct Mixer {
     pub channels: MixerChannels,
     pub mapping: Vec<MixerMapping>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
+pub enum Processor {
+    Compressor { parameters: CompressorParameters },
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct Compressor {
+pub struct CompressorParameters {
     pub channels: usize,
     #[serde(default)]
     pub monitor_channels: Vec<usize>,
@@ -799,7 +807,7 @@ pub struct Compressor {
 pub enum PipelineStep {
     Mixer { name: String },
     Filter { channel: usize, names: Vec<String> },
-    Compressor { name: String },
+    Processor { name: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -812,7 +820,7 @@ pub struct Configuration {
     #[serde(deserialize_with = "serde_with::rust::maps_duplicate_key_is_error::deserialize")]
     pub filters: HashMap<String, Filter>,
     #[serde(default)]
-    pub compressors: HashMap<String, Compressor>,
+    pub processors: HashMap<String, Processor>,
     #[serde(default)]
     pub pipeline: Vec<PipelineStep>,
 }
@@ -1014,7 +1022,7 @@ fn replace_tokens_in_config(config: &mut Configuration) {
             PipelineStep::Mixer { name } => {
                 *name = replace_tokens(name, samplerate, num_channels);
             }
-            PipelineStep::Compressor { name } => {
+            PipelineStep::Processor { name } => {
                 *name = replace_tokens(name, samplerate, num_channels);
             }
         }
@@ -1071,7 +1079,7 @@ pub enum ConfigChange {
     FilterParameters {
         filters: Vec<String>,
         mixers: Vec<String>,
-        compressors: Vec<String>,
+        processors: Vec<String>,
     },
     MixerParameters,
     Pipeline,
@@ -1100,7 +1108,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     }
     let mut filters = Vec::<String>::new();
     let mut mixers = Vec::<String>::new();
-    let mut compressors = Vec::<String>::new();
+    let mut processors = Vec::<String>::new();
     for (filter, params) in &newconf.filters {
         // The pipeline didn't change, any added filter isn't included and can be skipped
         if let Some(current_filter) = currentconf.filters.get(filter) {
@@ -1134,18 +1142,18 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
             }
         }
     }
-    for (comp, params) in &newconf.compressors {
+    for (proc, params) in &newconf.processors {
         // The pipeline didn't change, any added compressor isn't included and can be skipped
-        if let Some(current_comp) = currentconf.compressors.get(comp) {
-            if params != current_comp {
-                compressors.push(comp.to_string());
+        if let Some(current_proc) = currentconf.processors.get(proc) {
+            if params != current_proc {
+                processors.push(proc.to_string());
             }
         }
     }
     ConfigChange::FilterParameters {
         filters,
         mixers,
-        compressors,
+        processors,
     }
 }
 
@@ -1312,24 +1320,30 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                     }
                 }
             }
-            PipelineStep::Compressor { name } => {
-                if !conf.compressors.contains_key(name) {
-                    let msg = format!("Use of missing compressor '{}'", name);
+            PipelineStep::Processor { name } => {
+                if !conf.processors.contains_key(name) {
+                    let msg = format!("Use of missing processor '{}'", name);
                     return Err(ConfigError::new(&msg).into());
                 } else {
-                    let channels = conf.compressors.get(name).unwrap().channels;
-                    if channels != num_channels {
-                        let msg = format!(
-                            "Compressor '{}' has wrong number of channels. Expected {}, found {}.",
-                            name, num_channels, channels
-                        );
-                        return Err(ConfigError::new(&msg).into());
-                    }
-                    match compressor::validate_compressor(conf.compressors.get(name).unwrap()) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            let msg = format!("Invalid compressor '{}'. Reason: {}", name, err);
-                            return Err(ConfigError::new(&msg).into());
+                    let procconf = conf.processors.get(name).unwrap();
+                    match procconf {
+                        Processor::Compressor { parameters } => {
+                            let channels = parameters.channels;
+                            if channels != num_channels {
+                                let msg = format!(
+                                    "Compressor '{}' has wrong number of channels. Expected {}, found {}.",
+                                    name, num_channels, channels
+                                );
+                                return Err(ConfigError::new(&msg).into());
+                            }
+                            match compressor::validate_compressor(parameters) {
+                                Ok(_) => {}
+                                Err(err) => {
+                                    let msg =
+                                        format!("Invalid processor '{}'. Reason: {}", name, err);
+                                    return Err(ConfigError::new(&msg).into());
+                                }
+                            }
                         }
                     }
                 }

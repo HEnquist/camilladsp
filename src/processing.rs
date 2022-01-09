@@ -67,13 +67,13 @@ pub fn run_processing(
                     config::ConfigChange::FilterParameters {
                         filters,
                         mixers,
-                        compressors,
+                        processors,
                     } => {
                         debug!(
                             "Updating parameters of filters: {:?}, mixers: {:?}.",
                             filters, mixers
                         );
-                        pipeline.update_parameters(new_config, filters, mixers, compressors);
+                        pipeline.update_parameters(new_config, filters, mixers, processors);
                     }
                     config::ConfigChange::Devices => {
                         let msg = AudioMessage::EndOfStream;
