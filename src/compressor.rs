@@ -221,9 +221,3 @@ pub fn validate_compressor(config: &config::CompressorParameters) -> Res<()> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use compressor;
-    use config::Compressor;
-}
