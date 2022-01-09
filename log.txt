@@ -1,5 +1,0 @@
-Dec 15 21:18:25.129 INFO info message, module: camilladsp
-Dec 15 21:18:25.129 WARN warn message, module: camilladsp
-Dec 15 21:18:25.129 ERRO error message, module: camilladsp
-Dec 15 21:18:25.132 INFO Capture device supports rate adjust, module: camillalib::alsadevice
-Dec 15 21:18:25.226 INFO Starting playback from Prepared state, module: camillalib::alsadevice

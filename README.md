@@ -1244,6 +1244,47 @@ H(z) = (b0 + b1*z^-1 + .. + bn*z^-n)/(a0 + a1*z^-1 + .. + an*z^-n). The coeffici
 This example implements a Biquad lowpass, but for a Biquad the Free Biquad type is faster and should be preferred. Both a and b are optional. If left out, they default to [1.0].
 
 
+## Processors
+The `processors` section contains the definitions for the Processors. These are special "filters" that work on several channels at the same time. At present only one type of processor, "Compressor", has been implemented.
+
+### Compressor
+The "Compressor" processor implements a standard dynamic range compressor. It is configured using the most common parameters. 
+
+Example:
+```
+processors:
+  democompr:
+    type: Compressor
+    parameters:
+      channels: 2
+      attack: 0.025
+      release: 1.0
+      threshold: -25
+      factor: 5.0
+      makeup_gain: 15 (*)
+      soft_clip: true (*)
+      clip_limit: 0.0 (*)
+      monitor_channels: [0, 1] (*)
+      process_channels: [0, 1] (*)
+
+pipeline:
+  - type: Processor
+    name: democompr
+``` 
+  Parameters:
+  * `channels`: number of channels, must match the number of channels of the pipeline where the compressor is inserted.
+  * `attack`: time constant in seconds for attack, how fast the compressor reacts to an increase of the loudness.
+  * `release`: time constant in seconds for release, how fast the compressor scales back the compression when the loudness decreases.
+  * `threshold`: the loudness threshold in dB where compression sets in.
+  * `factor`: the compression factor, giving the amount of compression over the threshold. A factor of 4 means a sound that is 4 dB over the threshold will be attenuated to 1 dB over the threshold.
+  * `makeup_gain`: amount of fixed gain in dB to apply after compression. Optional, defaults to 0 dB.
+  * `soft_clip`: apply soft clipping to the signal after compression. Optional, defaults to `false`.
+  * `clip_limit`: the level in dB to clip at. Optional, defaults to 0 dB.
+  * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
+  * `process_channels`: a list of channels that should be compressed. Optional, defaults to all channels.
+
+
+
 ## Pipeline
 The pipeline section defines the processing steps between input and output. The input and output devices are automatically added to the start and end. 
 The pipeline is essentially a list of filters and/or mixers. There are no rules for ordering or how many are added. For each mixer and for the output device the number of channels from the previous step must match the number of input channels.
