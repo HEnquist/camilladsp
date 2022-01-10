@@ -128,7 +128,7 @@ fn get_new_config(
         match config::load_config(&file) {
             Ok(mut conf) => match config::validate_config(&mut conf, Some(&file)) {
                 Ok(()) => {
-                    debug!("Reload using config file");
+                    info!("Reload using config file");
                     Ok(conf)
                 }
                 Err(err) => {
@@ -239,7 +239,7 @@ fn run(
 
     loop {
         if signal_reload.load(Ordering::Relaxed) {
-            debug!("Reloading configuration...");
+            info!("Reloading configuration...");
             signal_reload.store(false, Ordering::Relaxed);
             let new_config = get_new_config(&config_path, &new_config_shared);
 
@@ -723,7 +723,7 @@ fn main_process() -> i32 {
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     let _signal = unsafe {
-        signal_hook::low_level::register(signal_hook::consts::SIGHUP, || debug!("Received SIGHUP"))
+        signal_hook::low_level::register(signal_hook::consts::SIGHUP, || info!("Received SIGHUP"))
     };
 
     #[cfg(target_os = "windows")]
