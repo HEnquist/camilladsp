@@ -14,92 +14,9 @@ devices:
     format: S32LE
 
 filters:
-  lowshelf:
-    type: Biquad
-    parameters:
-      type: Lowshelf
-      freq: 1000
-      gain: -12
-      slope: 6
-  highshelf:
-    type: Biquad
-    parameters:
-      type: Highshelf
-      freq: 1000
-      slope: 6
-      gain: -12
-  lowshelf_fo:
-    type: Biquad
-    parameters:
-      type: LowshelfFO
-      freq: 100
-      gain: -6
-  highshelf_fo:
-    type: Biquad
-    parameters:
-      type: HighshelfFO
-      freq: 100
-      gain: -6
-  lowpass:
-    type: Biquad
-    parameters:
-      type: Lowpass
-      freq: 1000
-      q: 1.0
-  highpass:
-    type: Biquad
-    parameters:
-      type: Highpass
-      freq: 1000
-      q: 1.0
-  lowpass_fo:
-    type: Biquad
-    parameters:
-      type: LowpassFO
-      freq: 1000
-  highpass_fo:
-    type: Biquad
-    parameters:
-      type: HighpassFO
-      freq: 1000
-  peaking:
-    type: Biquad
-    parameters:
-      type: Peaking
-      freq: 1000
-      q: 2.0
-      gain: 12.0
-  notch:
-    type: Biquad
-    parameters:
-      type: Notch
-      freq: 1000
-      q: 2.0
-  bandpass:
-    type: Biquad
-    parameters:
-      type: Bandpass
-      freq: 1000
-      q: 0.5
-  allpass:
-    type: Biquad
-    parameters:
-      type: Allpass
-      freq: 1000
-      q: 0.5
-  allpass_fo:
-    type: Biquad
-    parameters:
-      type: AllpassFO
-      freq: 100
-  linkwitztrans:
-    type: Biquad
-    parameters:
-      type: LinkwitzTransform
-      freq_act: 100
-      q_act: 1.2
-      freq_target: 25
-      q_target: 0.7
+
+  # Free
+
   free:
     type: Biquad
     parameters:
@@ -109,6 +26,218 @@ filters:
       b0: 1.0051540967655406
       b1: -1.9114181152906082
       b2: 0.9103652925755905
+
+  # Highpass / Lowpass 2nd order
+
+  highpass:
+    type: Biquad
+    parameters:
+      type: Highpass
+      freq: 1000
+      q: 1.0
+
+  lowpass:
+    type: Biquad
+    parameters:
+      type: Lowpass
+      freq: 1000
+      q: 1.0
+
+  # Highpass / Lowpass 1st order
+
+  highpass_fo:
+    type: Biquad
+    parameters:
+      type: HighpassFO
+      freq: 1000
+
+  lowpass_fo:
+    type: Biquad
+    parameters:
+      type: LowpassFO
+      freq: 1000
+
+  # Highshelf and Lowshelf
+
+  highshelf_slope_type:
+    type: Biquad
+    parameters:
+      type: Highshelf
+      freq: 1000
+      gain: -12
+      slope: 6
+
+  highshelf_q_type:
+    type: Biquad
+    parameters:
+      type: Highshelf
+      freq: 1000
+      gain: -12
+      q: 0.6
+
+  lowshelf_slope_type:
+    type: Biquad
+    parameters:
+      type: Lowshelf
+      freq: 1000
+      gain: -12
+      slope: 6
+
+  lowshelf_q_type:
+    type: Biquad
+    parameters:
+      type: Lowshelf
+      freq: 1000
+      gain: -12
+      q: 0.6
+
+  highshelf_fo:
+    type: Biquad
+    parameters:
+      type: HighshelfFO
+      freq: 100
+      gain: -6
+
+  lowshelf_fo:
+    type: Biquad
+    parameters:
+      type: LowshelfFO
+      freq: 100
+      gain: -6
+
+  # Peaking / Notch / Bandpass
+
+  peaking_q_type:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 1000
+      gain: 12.0  # use negative gain to use as dip filter
+      q: 2.0
+
+  peaking_bandwidth_type:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 1000
+      gain: 12.0
+      bandwidth: 2.0
+
+  notch_q_type:
+    type: Biquad
+    parameters:
+      type: Notch
+      freq: 1000
+      q: 2.0
+
+  notch_bandwidth_type:
+    type: Biquad
+    parameters:
+      type: Notch
+      freq: 1000
+      bandwidth: 2.0
+
+  bandpass_q_type:
+    type: Biquad
+    parameters:
+      type: Bandpass
+      freq: 1000
+      q: 0.5
+
+  bandpass_bandwidth_type:
+    type: Biquad
+    parameters:
+      type: Bandpass
+      freq: 1000
+      bandwidth: 1.2
+
+  # Allpass
+
+  allpass_q_type:
+    type: Biquad
+    parameters:
+      type: Allpass
+      freq: 1000
+      q: 0.5
+
+  allpass_bandwidth_type:
+    type: Biquad
+    parameters:
+      type: Allpass
+      freq: 1000
+      bandwidth: 1.2
+
+  allpass_fo:
+    type: Biquad
+    parameters:
+      type: AllpassFO
+      freq: 1000
+
+  # Linkwitz transform
+
+  linkwitztrans:
+    type: Biquad
+    parameters:
+      type: LinkwitzTransform
+      freq_act: 100
+      q_act: 1.2
+      freq_target: 25
+      q_target: 0.7
+
+  # Biquad combo filters: Butterworth HP and LP / Linkwitz HP and LP / 5-Point parameetric Equalizer
+
+  BW_highpass:
+    type: BiquadCombo
+    parameters:
+      type: ButterworthHighpass
+      freq: 1000
+      order: 4
+
+  BW_lowpass:
+    type: BiquadCombo
+    parameters:
+      type: ButterworthLowpass
+      freq: 1000
+      order: 4
+
+  LR_highpass:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 1000
+      order: 4
+
+  LR_lowpass:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 1000
+      order: 4
+
+  FivePointParametricEqualizer:
+    type: BiquadCombo
+    parameters:
+      type: FivePointPeq
+      # LowShelf
+      fls: 125
+      gls: 1.0
+      qls: 0.7
+      # Peaking_1
+      fp1: 400
+      gp1: -0.5
+      qp1: 0.7
+      # Peaking_2
+      fp2: 1000
+      gp2: 1.5
+      qp2: 0.7
+      # Peaking_3
+      fp3: 2500
+      gp3: -0.25
+      qp3: 0.7
+      # HighShelf
+      fhs: 8000
+      ghs: 0.5
+      qhs: 0.7
 
 
    

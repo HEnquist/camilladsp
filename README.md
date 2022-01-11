@@ -637,14 +637,14 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   A device needs:
   * `type`: 
     The available types depend on which features that were included when compiling. All possible types are:
-    * `Alsa` 
-    * `Pulse`
-    * `Wasapi`
-    * `CoreAudio`
-    * `Jack`
     * `File`
     * `Stdin` (capture only)
     * `Stdout` (playback only)
+    * `Jack`
+    * `Wasapi`
+    * `CoreAudio`
+    * `Alsa` 
+    * `Pulse`
   * `channels`: number of channels
   * `device`: device name (for Alsa, Pulse, Wasapi, CoreAudio). For CoreAudio and Wasapi, "default" will give the default device.
   * `filename` path the the file (for File)
@@ -735,7 +735,7 @@ Any parameter marked (*) in all examples in this section are optional. If they a
 
   The `File` and `Stdin` capture devices support two additional optional parameters, for advanced handling of raw files and testing:
   * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream. This can be used to skip over the header of some formats like .wav (which typically has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
-  * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file or stream.
+  * `read_bytes`: Read only up until the specified number of bytes. Leave it out or set it to zero to read until the end of the file or stream.
 
   * Example, this will skip the first 50 bytes of the file (index 0-49) and then read the following 200 bytes (index 50-249).
     ```
@@ -1043,7 +1043,7 @@ To load coefficients from a raw file, use the `Raw` type. This is also used to l
 Raw files are often saved with a `.dbl`, `.raw`, or `.pcm` ending. The lack of a header means that the files doesn't contain any information about data format etc. CamillaDSP supports loading coefficients from such files that contain a single channel only (stereo files are not supported), in all the most common sample formats.
 The `Raw` type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
 * `skip_bytes_lines`: Number of bytes (for raw files) or lines (for text) to skip at the beginning of the file. This can be used to skip over a header. Leaving it out or setting to zero means no bytes or lines are skipped. 
-* `read_bytes_lines`: Read only up until the specified number of bytes (for raw files) or lines (for text). Leave it out to read until the end of the file.
+* `read_bytes_lines`: Read only up until the specified number of bytes (for raw files) or lines (for text). Leave it out or set it to zero to read until the end of the file.
 
 The filter coefficients can be provided either as text, or as raw samples. Each file can only hold one channel.
 The "format" parameter can be omitted, in which case it's assumed that the format is TEXT. This format is a simple text file with one value per row:
@@ -1089,29 +1089,29 @@ filters:
     parameters:
       type: Peaking
       freq: 100
-      q: 0.5
       gain: -7.3
+      q: 0.5
   peak_100_bw:
     type: Biquad
     parameters:
       type: Peaking
       freq: 100
-      bandwidth: 0.7
       gain: -7.3
+      bandwidth: 0.7
   exampleshelf:
     type: Biquad
     parameters:
       type: Highshelf
       freq: 1000
-      slope: 6
       gain: -12
+      slope: 6
   exampleshelf_q:
     type: Biquad
     parameters:
       type: Highshelf
       freq: 1000
-      q: 1.5
       gain: -12
+      q: 1.5
   LR_highpass:
     type: BiquadCombo
     parameters:
@@ -1129,7 +1129,7 @@ Single Biquads are defined using the type "Biquad". The available filter types a
 
   Second order high/lowpass filters (12dB/oct)
   
-  Defined by cutoff frequency `freq` and either Q-value `q` or bandwidth in octaves `bandwidth`.
+  Defined by cutoff frequency `freq` and Q-value `q`.
 
 * HighpassFO & LowpassFO
 
@@ -1142,14 +1142,22 @@ Single Biquads are defined using the type "Biquad". The available filter types a
   High / Low uniformly affects the high / low frequencies respectively while leaving the low / high part unaffected. In between there is a slope of variable steepness.
 
   Parameters:
+  * `freq` is the center frequency of the sloping section.
   * `gain` gives the gain of the filter
   * `slope` is the steepness in dB/octave. Values up to around +-12 are usable.
   * `q` is the Q-value and can be used instead of `slope` to define the steepness of the filter. Only one of `q` and `slope` can be given. 
+
+* HighshelfFO & LowshelfFO
+  
+  First order (6dB/oct) versions of the shelving functions.
+
+  Parameters:
   * `freq` is the center frequency of the sloping section.
+  * `gain` gives the gain of the filter
 
 * Peaking
   
-  A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`. Use positive gain values to boost, and negative values to attenuate.
+  A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`. Note that bandwidth and Q-value are inversely related, a small bandwidth corresponds to a large Q-value etc.Use positive gain values to boost, and negative values to attenuate.
 
 * Notch
   
@@ -1163,6 +1171,10 @@ Single Biquads are defined using the type "Biquad". The available filter types a
 * Allpass
 
   A second order allpass filter for a given frequency `freq` with a steepness given either by the Q-value `q` or bandwidth in octaves `bandwidth`
+
+* AllpassFO
+
+  A first order allpass filter for a given frequency `freq`.
 
 * LinkwitzTransform
   
@@ -1190,11 +1202,11 @@ To build more complex filters, use the type "BiquadCombo". This automatically ad
   This filter combo is mainly meant to be created by guis. Is defines a 5-point (or band) parametric equalizer by combining a Lowshelf, a Highshelf and three Peaking filters.
 
   Each individual filter is defined by frequency, gain and q. The parameter names are:
-  * Lowshelf: `gls`, `fls`, `qls` 
-  * Peaking 1: `gp1`, `fp1`, `qp1`
-  * Peaking 2: `gp2`, `fp2`, `qp2`
-  * Peaking 3: `gp3`, `fp3`, `qp3`
-  * Highshelf: `ghs`, `fhs`, `qhs`
+  * Lowshelf: `fls`, `gls`, `qls` 
+  * Peaking 1: `fp1`, `gp1`, `qp1`
+  * Peaking 2: `fp2`, `gp2`, `qp2`
+  * Peaking 3: `fp3`, `gp3`, `qp3`
+  * Highshelf: `fhs`, `ghs`, `qhs`
 
   All 15 parameters must be included in the config.
 
@@ -1210,7 +1222,7 @@ Example:
   dither_fancy:
     type: Dither
     parameters:
-      type: Lipshitz
+      type: Lipshitz441
       bits: 16
 ```
 The available types are 
