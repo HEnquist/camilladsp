@@ -647,7 +647,7 @@ Any parameter marked (*) in all examples in this section are optional. If they a
     * `Pulse`
   * `channels`: number of channels
   * `device`: device name (for Alsa, Pulse, Wasapi, CoreAudio). For CoreAudio and Wasapi, "default" will give the default device.
-  * `filename` path the the file (for File)
+  * `filename` path to the file (for File)
   * `format`: sample format (for all except Jack).
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
@@ -1157,7 +1157,7 @@ Single Biquads are defined using the type "Biquad". The available filter types a
 
 * Peaking
   
-  A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`. Note that bandwidth and Q-value are inversely related, a small bandwidth corresponds to a large Q-value etc.Use positive gain values to boost, and negative values to attenuate.
+  A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`. Note that bandwidth and Q-value are inversely related, a small bandwidth corresponds to a large Q-value etc. Use positive gain values to boost, and negative values to attenuate.
 
 * Notch
   
