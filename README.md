@@ -201,7 +201,7 @@ By default the internal processing is done using 64-bit floats. There is a possi
 
 CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "websocket". For usage see the section "Controlling via websocket".
 
-The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". When the chunksize is a power of two, like 1024 or 4096, FFTW is only a few percent faster than RustFFT. The difference gets much larger if the chunksize is a "strange" number, like a large prime. FFTW is a much larger and more complicated library, so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT much slower.
+The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". When the chunksize is a power of two, like 1024 or 4096, then FFTW and RustFFT are very similar in speed. But if the chunksize is a "strange" number like a large prime, then FFTW can be faster. FFTW is a much larger and more complicated library, so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT too slow.
 
 ## Building in Linux with standard features
 - Install pkg-config (very likely already installed):
@@ -212,10 +212,6 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 - - Fedora: ```sudo dnf install alsa-lib-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libasound2-dev```
 - - Arch: ```sudo pacman -S alsa-lib```
-- Install Pulse dependency:
-- - Fedora: ```sudo dnf install pulseaudio-libs-devel```
-- - Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
-- - Arch:  ```sudo pacman -S libpulse```
 - Install OpenSSL dependency:
 - - Fedora: ```sudo dnf install openssl openssl-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install openssl libssl-dev```
@@ -238,10 +234,16 @@ All the available options, or "features" are:
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64)
 - `neon`: Enable the experimental Neon support for aarch64 in the resampler. Note that this only works on 64-bit arm, and requires a very recent nightly rust compiler.
 
-The `websocket` feature is included in the default features, meaning it will e enabled if you don't specify anything.
+The `websocket` feature is included in the default features, meaning it will be enabled if you don't specify anything.
+
 Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
 
-The `jack-backend` feature requires jack and its development files to be installed. To install:
+The `pulse-backend` feature requires PulseAudio and its development files. To install:
+- Fedora: ```sudo dnf install pulseaudio-libs-devel```
+- Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
+- Arch:  ```sudo pacman -S libpulse```
+
+The `jack-backend` feature requires jack and its development files. To install:
 - Fedora: ```sudo dnf install jack-audio-connection-kit jack-audio-connection-kit-devel```
 - Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
 - Arch:  ```sudo pacman -S jack```
