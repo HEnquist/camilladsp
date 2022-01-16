@@ -7,7 +7,7 @@ New features:
 - Some Mixer parameters made optional.
 - Delay value can be given in millimetres.
 - Improved Alsa backend.
-- Handle subnormal numbers in biquads.
+- Handle subnormal numbers in IIR filters (Biquad and DiffEq).
 
 ## 0.6.3
 Bugfixes:
