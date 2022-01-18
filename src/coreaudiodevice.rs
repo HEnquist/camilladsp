@@ -621,6 +621,10 @@ impl CaptureDevice for CoreaudioCaptureDevice {
 
                 let chunksize_samples = channels * chunksize;
                 let mut capture_frames = chunksize;
+                capture_frames = get_nbr_capture_frames(
+                    &resampler,
+                    capture_frames,
+                );
                 let mut averager = countertimer::TimeAverage::new();
                 let mut watcher_averager = countertimer::TimeAverage::new();
                 let mut valuewatcher = countertimer::ValueWatcher::new(capture_samplerate as f32, RATE_CHANGE_THRESHOLD_VALUE, RATE_CHANGE_THRESHOLD_COUNT);
