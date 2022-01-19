@@ -9,7 +9,7 @@ use alsa::ctl::{ElemId, ElemIface};
 use alsa::ctl::{ElemType, ElemValue};
 use alsa::hctl::HCtl;
 use alsa::pcm::{Access, Format, Frames, HwParams};
-use alsa::{Direction, ValueOr};
+use alsa::{Direction, PCM, ValueOr};
 use alsa_sys;
 use rubato::VecResampler;
 use std::ffi::CString;
@@ -609,7 +609,17 @@ fn capture_loop_bytes(
                 break;
             }
         };
-        capture_bytes = get_nbr_capture_bytes(capture_bytes, &resampler, &params, &mut buffer);
+        // todo - rework get_nbr_capture_bytes!
+        let (new_capture_bytes, new_frames) = get_nbr_capture_bytes(capture_bytes, &resampler, &params, &mut buffer);
+        if new_capture_bytes != capture_bytes {
+            debug!("Updating capture bytes from {} to {}", capture_bytes, new_capture_bytes);
+            capture_bytes = new_capture_bytes;
+            // updating sw avail_min for snd_pcm_delay threshold
+            match update_avail_min(pcmdevice, new_frames) {
+                // ignored
+                _ => {}
+            };
+        }
         let capture_res = capture_buffer(
             &mut buffer[0..capture_bytes],
             pcmdevice,
@@ -720,23 +730,31 @@ fn capture_loop_bytes(
     capt_stat.state = ProcessingState::Inactive;
 }
 
+fn update_avail_min(pcmdevice: &PCM, frames: Frames) -> Res<()> {
+    let swp = pcmdevice.sw_params_current()?;
+    swp.set_avail_min(frames)?;
+    pcmdevice.sw_params(&swp)?;
+    Ok(())
+}
+
 fn get_nbr_capture_bytes(
     capture_bytes: usize,
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     params: &CaptureParams,
     buf: &mut Vec<u8>,
-) -> usize {
-    let capture_bytes_new = if let Some(resampl) = &resampler {
+) -> (usize, Frames) {
+    let (capture_bytes_new, frames_new) = if let Some(resampl) = &resampler {
         //trace!("Resampler needs {} frames", resampl.nbr_frames_needed());
-        resampl.nbr_frames_needed() * params.channels * params.store_bytes_per_sample
+        let frames = resampl.nbr_frames_needed();
+        (frames * params.channels * params.store_bytes_per_sample, frames as Frames)
     } else {
-        capture_bytes
+        (capture_bytes, 0)
     };
     if capture_bytes_new > buf.len() {
         debug!("Capture buffer too small, extending");
         buf.append(&mut vec![0u8; capture_bytes_new - buf.len()]);
     }
-    capture_bytes_new
+    (capture_bytes_new, frames_new)
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
