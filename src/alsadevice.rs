@@ -106,6 +106,11 @@ enum CaptureResult {
     Stalled,
 }
 
+enum PlaybackResult {
+    Normal,
+    Stalled,
+}
+
 fn state_desc(state: u32) -> String {
     match state {
         alsa_sys::SND_PCM_STATE_OPEN => "SND_PCM_STATE_OPEN, Open".to_string(),
@@ -138,7 +143,7 @@ fn play_buffer(
     target_delay: u64,
     millis_per_chunk: usize,
     bytes_per_frame: usize,
-) -> Res<()> {
+) -> Res<PlaybackResult> {
     let playback_state = pcmdevice.state_raw();
     //trace!("Playback state {:?}", playback_state);
     if playback_state < 0 {
@@ -172,6 +177,7 @@ fn play_buffer(
             Ok(false) => {
                 warn!("Wait timed out, playback device takes too long to drain buffer");
                 // TODO what action is suitable here?
+                return Ok(PlaybackResult::Stalled);
             }
             Err(err) => {
                 warn!(
@@ -205,7 +211,7 @@ fn play_buffer(
             }
         };
     }
-    Ok(())
+    Ok(PlaybackResult::Normal)
 }
 
 /// Capture a buffer.
