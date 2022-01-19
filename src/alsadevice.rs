@@ -130,11 +130,12 @@ fn state_desc(state: u32) -> String {
 
 /// Play a buffer.
 fn play_buffer(
-    buffer: &[u8],
+    mut buffer: &[u8],
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
     target_delay: u64,
     millis_per_chunk: usize,
+    bytes_per_frame: usize,
 ) -> Res<()> {
     let playback_state = pcmdevice.state_raw();
     //trace!("Playback state {:?}", playback_state);
@@ -161,32 +162,47 @@ fn play_buffer(
         );
     }
 
-    match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
-        Ok(true) => {
-            trace!("Playback waited, ready");
-        }
-        Ok(false) => {
-            warn!("Wait timed out, playback device takes too long to drain buffer");
-            // TODO what action is suitable here?
-        }
-        Err(err) => {
-            warn!(
+    loop {
+        match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
+            Ok(true) => {
+                trace!("Playback waited, ready");
+            }
+            Ok(false) => {
+                warn!("Wait timed out, playback device takes too long to drain buffer");
+                // TODO what action is suitable here?
+            }
+            Err(err) => {
+                warn!(
                 "Playback device failed while waiting for available buffer space, error: {}",
                 err
             );
-            return Err(Box::new(err));
+                return Err(Box::new(err));
+            }
         }
+
+        match io.writei(buffer) {
+            Ok(frames_written) => {
+                let frames_req = buffer.len()/bytes_per_frame;
+                trace!("Wrote {} frames to playback device", frames_written);
+                if frames_written == frames_req {
+                    // done writing
+                    break;
+                } else {
+                    warn!("Playback wrote {} instead of requested {}, writing the rest", frames_written, frames_req);
+                    buffer = &buffer[frames_written * bytes_per_frame..];
+                    // repeat writing
+                    continue;
+                }
+            }
+            Err(err) => {
+                warn!("Retrying playback, error: {}", err);
+                pcmdevice.prepare()?;
+                thread::sleep(Duration::from_millis(target_delay));
+                io.writei(buffer)?;
+                break;
+            }
+        };
     }
-    let frames = match io.writei(buffer) {
-        Ok(frames) => frames,
-        Err(err) => {
-            warn!("Retrying playback, error: {}", err);
-            pcmdevice.prepare()?;
-            thread::sleep(Duration::from_millis(target_delay));
-            io.writei(buffer)?
-        }
-    };
-    trace!("Wrote {} frames to playback device", frames);
     Ok(())
 }
 
@@ -433,6 +449,7 @@ fn playback_loop_bytes(
     pcmdevice: &alsa::PCM,
     io: alsa::pcm::IO<u8>,
     params: PlaybackParams,
+    bytes_per_frame: usize,
 ) {
     let srate = pcmdevice.hw_params_current().unwrap().get_rate().unwrap();
     let mut timer = countertimer::Stopwatch::new();
@@ -483,7 +500,7 @@ fn playback_loop_bytes(
                 params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
 
                 let playback_res =
-                    play_buffer(&buffer, pcmdevice, &io, target_delay, millis_per_chunk);
+                    play_buffer(&buffer, pcmdevice, &io, target_delay, millis_per_chunk, bytes_per_frame);
                 match playback_res {
                     Ok(_) => {}
                     Err(msg) => {
@@ -814,8 +831,9 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         };
 
                         let io = pcmdevice.io_bytes();
-                        let buffer = vec![0u8; chunksize * channels * bytes_per_sample];
-                        playback_loop_bytes(pb_channels, buffer, &pcmdevice, io, pb_params);
+                        let bytes_per_frame = channels * bytes_per_sample;
+                        let buffer = vec![0u8; chunksize * bytes_per_frame];
+                        playback_loop_bytes(pb_channels, buffer, &pcmdevice, io, pb_params, bytes_per_frame);
                     }
                     Err(err) => {
                         let send_result =
