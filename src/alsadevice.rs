@@ -16,6 +16,7 @@ use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
+use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::Duration;
 
@@ -106,6 +107,7 @@ enum CaptureResult {
     Stalled,
 }
 
+#[derive(Debug)]
 enum PlaybackResult {
     Normal,
     Stalled,
@@ -175,8 +177,7 @@ fn play_buffer(
                 trace!("Playback waited, ready");
             }
             Ok(false) => {
-                warn!("Wait timed out, playback device takes too long to drain buffer");
-                // TODO what action is suitable here?
+                trace!("Wait timed out, playback device takes too long to drain buffer");
                 return Ok(PlaybackResult::Stalled);
             }
             Err(err) => {
@@ -478,41 +479,26 @@ fn playback_loop_bytes(
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
     let target_delay = 1000 * (params.target_level as u64) / srate as u64;
     let millis_per_chunk = 1000 * params.chunksize / params.samplerate;
+    let mut device_stalled = false;
     loop {
-        match channels.audio.recv() {
+        let eos_in_drain = if device_stalled {
+            drain_check_eos(&channels.audio)
+        } else {
+            None
+        };
+        let msg = match eos_in_drain {
+            Some(eos) => Ok(eos),
+            None => channels.audio.recv() /* waiting for a new message */
+        };
+        match msg {
             Ok(AudioMessage::Audio(chunk)) => {
                 conversion_result =
                     chunk_to_buffer_rawbytes(&chunk, &mut buffer, &params.sample_format);
                 if conversion_result.1 > 0 {
                     params.playback_status.write().unwrap().clipped_samples += conversion_result.1;
                 }
-                if let Ok(status) = pcmdevice.status() {
-                    buffer_avg.add_value(status.get_delay() as f64)
-                }
-                if timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
-                    if let Some(av_delay) = buffer_avg.get_average() {
-                        timer.restart();
-                        buffer_avg.restart();
-                        if adjust {
-                            let speed = calculate_speed(
-                                av_delay,
-                                params.target_level,
-                                params.adjust_period,
-                                srate,
-                            );
-                            channels
-                                .status
-                                .send(StatusMessage::SetSpeed(speed))
-                                .unwrap_or(());
-                        }
-                        let mut pb_stat = params.playback_status.write().unwrap();
-                        pb_stat.buffer_level = av_delay as usize;
-                        debug!(
-                            "Playback buffer level: {:.1}, signal rms: {:?}",
-                            av_delay, pb_stat.signal_rms
-                        );
-                    }
-                }
+
+                let delay = pcmdevice.status().ok().map(|status| status.get_delay());
 
                 chunk_stats = chunk.get_stats();
                 params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
@@ -520,15 +506,61 @@ fn playback_loop_bytes(
 
                 let playback_res =
                     play_buffer(&buffer, pcmdevice, &io, target_delay, millis_per_chunk, params.bytes_per_frame);
-                match playback_res {
-                    Ok(_) => {}
+                device_stalled = match playback_res {
+                    Ok(PlaybackResult::Normal) => {
+                        if device_stalled {
+                            info!("Playback device resumed normal operation");
+                            timer.restart();
+                            buffer_avg.restart();
+                        }
+                        false
+                    }
+                    Ok(PlaybackResult::Stalled) => {
+                        if !device_stalled {
+                            warn!("Wait timed out, playback device takes too long to drain buffer");
+                        }
+                        true
+                    }
                     Err(msg) => {
-                        channels
-                            .status
+                        channels.status
                             .send(StatusMessage::PlaybackError(msg.to_string()))
                             .unwrap_or(());
+                        device_stalled
                     }
                 };
+                if !device_stalled {
+                    // updates only for non-stalled device
+                    if let Some(delay) = delay {
+                        if delay != 0 {
+                            buffer_avg.add_value(delay as f64);
+                        }
+                    }
+                    if timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
+                        if let Some(av_delay) = buffer_avg.get_average() {
+                            timer.restart();
+                            buffer_avg.restart();
+                            if adjust {
+                                let speed = calculate_speed(
+                                    av_delay,
+                                    params.target_level,
+                                    params.adjust_period,
+                                    srate,
+                                );
+
+                                channels
+                                    .status
+                                    .send(StatusMessage::SetSpeed(speed))
+                                    .unwrap_or(());
+                            }
+                            let mut pb_stat = params.playback_status.write().unwrap();
+                            pb_stat.buffer_level = av_delay as usize;
+                            debug!(
+                                "Playback buffer level: {:.1}, signal rms: {:?}",
+                                av_delay, pb_stat.signal_rms
+                            );
+                        }
+                    }
+                }
             }
             Ok(AudioMessage::Pause) => {
                 trace!("Pause message received");
@@ -550,6 +582,16 @@ fn playback_loop_bytes(
             }
         }
     }
+}
+
+fn drain_check_eos(audio: &Receiver<AudioMessage>) -> Option<AudioMessage> {
+    let mut eos: Option<AudioMessage> = None;
+    while let Some(msg) = audio.try_iter().next() {
+        if let AudioMessage::EndOfStream = msg {
+            eos = Some(msg);
+        }
+    }
+    return eos;
 }
 
 fn capture_loop_bytes(
