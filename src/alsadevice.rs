@@ -208,11 +208,12 @@ fn play_buffer(
 
 /// Capture a buffer.
 fn capture_buffer(
-    buffer: &mut [u8],
+    mut buffer: &mut [u8],
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
     samplerate: usize,
     frames_to_read: usize,
+    bytes_per_frame: usize,
 ) -> Res<CaptureResult> {
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
@@ -236,42 +237,53 @@ fn capture_buffer(
     }
     let millis_per_chunk = 1000 * frames_to_read / samplerate;
 
-    match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
-        Ok(true) => {
-            trace!("Capture waited, ready");
-        }
-        Ok(false) => {
-            warn!("Wait timed out, capture device takes too long to capture frames");
-            return Ok(CaptureResult::RecoverableError);
-        }
-        Err(err) => {
-            warn!(
+    loop {
+        match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
+            Ok(true) => {
+                trace!("Capture waited, ready");
+            }
+            Ok(false) => {
+                warn!("Wait timed out, capture device takes too long to capture frames");
+                return Ok(CaptureResult::RecoverableError);
+            }
+            Err(err) => {
+                warn!(
                 "Capture device failed while waiting for available frames, error: {}",
                 err
             );
-            return Err(Box::new(err));
+                return Err(Box::new(err));
+            }
         }
+        match io.readi(buffer) {
+            Ok(frames_read) => {
+                let frames_req = buffer.len()/bytes_per_frame;
+                if frames_read == frames_req {
+                    return Ok(CaptureResult::Normal);
+                } else {
+                    warn!("Capture read {} frames instead of the requested {}", frames_read, frames_req);
+                    buffer = &mut buffer[frames_read * bytes_per_frame..];
+                    // repeat reading
+                    continue;
+                }
+            }
+            Err(err) => match err.nix_error() {
+                alsa::nix::errno::Errno::EIO => {
+                    warn!("Capture failed with error: {}", err);
+                    return Err(Box::new(err));
+                }
+                // TODO: do we need separate handling of xruns that happen in the tiny
+                // window between state() and readi()?
+                alsa::nix::errno::Errno::EPIPE => {
+                    warn!("Capture failed, error: {}", err);
+                    return Err(Box::new(err));
+                }
+                _ => {
+                    warn!("Capture failed, error: {}", err);
+                    return Err(Box::new(err));
+                }
+            },
+        };
     }
-    let _frames = match io.readi(buffer) {
-        Ok(frames) => frames,
-        Err(err) => match err.nix_error() {
-            alsa::nix::errno::Errno::EIO => {
-                warn!("Capture failed with error: {}", err);
-                return Err(Box::new(err));
-            }
-            // TODO: do we need separate handling of xruns that happen in the tiny
-            // window between state() and readi()?
-            alsa::nix::errno::Errno::EPIPE => {
-                warn!("Capture failed, error: {}", err);
-                return Err(Box::new(err));
-            }
-            _ => {
-                warn!("Capture failed, error: {}", err);
-                return Err(Box::new(err));
-            }
-        },
-    };
-    Ok(CaptureResult::Normal)
 }
 
 fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {
@@ -540,6 +552,7 @@ fn capture_loop_bytes(
     io: alsa::pcm::IO<u8>,
     params: CaptureParams,
     mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
+    bytes_per_frame: usize,
 ) {
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
@@ -643,6 +656,7 @@ fn capture_loop_bytes(
             &io,
             params.capture_samplerate,
             capture_bytes / (params.channels * params.store_bytes_per_sample),
+            bytes_per_frame,
         );
         match capture_res {
             Ok(CaptureResult::Normal) => {
@@ -931,7 +945,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                             command: command_channel,
                         };
                         let io = pcmdevice.io_bytes();
-                        let buffer = vec![0u8; channels * buffer_frames * store_bytes_per_sample];
+                        let bytes_per_frame = channels * store_bytes_per_sample;
+                        let buffer = vec![0u8; buffer_frames * bytes_per_frame];
                         capture_loop_bytes(
                             cap_channels,
                             buffer,
@@ -939,6 +954,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             io,
                             cap_params,
                             resampler,
+                            bytes_per_frame
                         );
                     }
                     Err(err) => {
