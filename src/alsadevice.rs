@@ -479,6 +479,21 @@ fn playback_loop_bytes(
     let target_delay = 1000 * (params.target_level as u64) / srate as u64;
     let millis_per_chunk = 1000 * params.chunksize / params.samplerate;
     let mut device_stalled = false;
+
+    let pcminfo = pcmdevice.info().unwrap();
+    let card = pcminfo.get_card();
+    let device = pcminfo.get_device();
+    let subdevice = pcminfo.get_subdevice();
+    let h = HCtl::new(&format!("hw:{}", card), false).unwrap();
+    h.load().unwrap();
+    let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
+    elid_uac2_gadget.set_device(device);
+    elid_uac2_gadget.set_subdevice(subdevice);
+    elid_uac2_gadget.set_name(&CString::new("Playback Pitch 1000000").unwrap());
+    let element_uac2_gadget = h.find_elem(&elid_uac2_gadget);
+    if element_uac2_gadget.is_some() {
+        info!("Playback device supports rate adjust");
+    }
     loop {
         let eos_in_drain = if device_stalled {
             drain_check_eos(&channels.audio)
@@ -545,12 +560,17 @@ fn playback_loop_bytes(
                                     params.adjust_period,
                                     srate,
                                 );
-
+                                if let Some(elem_uac2_gadget) = &element_uac2_gadget {
+                                    let mut elval = ElemValue::new(ElemType::Integer).unwrap();
+                                    // speed is reciprocal on playback side
+                                    elval.set_integer(0, (1_000_000.0 / speed) as i32).unwrap();
+                                    elem_uac2_gadget.write(&elval).unwrap();
+                                } else {
                                     channels
                                         .status
                                         .send(StatusMessage::SetSpeed(speed))
                                         .unwrap_or(());
-
+                                }
                             }
                             let mut pb_stat = params.playback_status.write().unwrap();
                             pb_stat.buffer_level = av_delay as usize;
