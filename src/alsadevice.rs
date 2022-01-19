@@ -103,7 +103,7 @@ struct PlaybackParams {
 
 enum CaptureResult {
     Normal,
-    RecoverableError,
+    Stalled,
 }
 
 fn state_desc(state: u32) -> String {
@@ -245,8 +245,8 @@ fn capture_buffer(
                 trace!("Capture waited, ready");
             }
             Ok(false) => {
-                warn!("Wait timed out, capture device takes too long to capture frames");
-                return Ok(CaptureResult::RecoverableError);
+                trace!("Wait timed out, capture device takes too long to capture frames");
+                return Ok(CaptureResult::Stalled);
             }
             Err(err) => {
                 warn!(
@@ -602,7 +602,7 @@ fn capture_loop_bytes(
     let mut state = ProcessingState::Running;
     let mut value_range = 0.0;
     let mut chunk_stats;
-    let mut card_inactive = false;
+    let mut device_stalled = false;
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -685,7 +685,7 @@ fn capture_loop_bytes(
                     capt_stat.signal_range = value_range as f32;
                     capt_stat.rate_adjust = rate_adjust as f32;
                     capt_stat.state = state;
-                    card_inactive = false;
+                    device_stalled = false;
                 }
                 watcher_averager.add_value(capture_bytes);
                 if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
@@ -712,10 +712,13 @@ fn capture_loop_bytes(
                     trace!("Measured sample rate is {} Hz", measured_rate_f);
                 }
             }
-            Ok(CaptureResult::RecoverableError) => {
-                card_inactive = true;
-                params.capture_status.write().unwrap().state = ProcessingState::Stalled;
-                debug!("Capture device is inactive, processing is stalled");
+            Ok(CaptureResult::Stalled) => {
+                // only the first time
+                if !device_stalled {
+                    device_stalled = true;
+                    params.capture_status.write().unwrap().state = ProcessingState::Stalled;
+                    debug!("Capture device is stalled, processing is stalled");
+                }
             }
             Err(msg) => {
                 channels
@@ -738,7 +741,7 @@ fn capture_loop_bytes(
         params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
         params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
         value_range = chunk.maxval - chunk.minval;
-        if card_inactive {
+        if device_stalled {
             state = ProcessingState::Stalled;
         } else {
             state = silence_counter.update(value_range);
