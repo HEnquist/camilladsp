@@ -9,7 +9,7 @@ use alsa::ctl::{ElemId, ElemIface};
 use alsa::ctl::{ElemType, ElemValue};
 use alsa::hctl::HCtl;
 use alsa::pcm::{Access, Format, Frames, HwParams};
-use alsa::{Direction, PCM, ValueOr};
+use alsa::{Direction, ValueOr, PCM};
 use alsa_sys;
 use rubato::VecResampler;
 use std::ffi::CString;
@@ -553,6 +553,7 @@ fn capture_loop_bytes(
     }
 
     let mut capture_bytes = params.chunksize * params.channels * params.store_bytes_per_sample;
+    let mut capture_frames = params.chunksize as Frames;
     let mut averager = countertimer::TimeAverage::new();
     let mut watcher_averager = countertimer::TimeAverage::new();
     let mut valuewatcher = countertimer::ValueWatcher::new(
@@ -609,23 +610,32 @@ fn capture_loop_bytes(
                 break;
             }
         };
-        // todo - rework get_nbr_capture_bytes!
-        let (new_capture_bytes, new_frames) = get_nbr_capture_bytes(capture_bytes, &resampler, &params, &mut buffer);
+        let (new_capture_bytes, new_capture_frames) = get_nbr_capture_bytes_and_frames(
+            capture_bytes,
+            capture_frames,
+            &resampler,
+            &params,
+            &mut buffer,
+        );
         if new_capture_bytes != capture_bytes {
-            debug!("Updating capture bytes from {} to {}", capture_bytes, new_capture_bytes);
+            trace!(
+                "Updating capture bytes from {} to {}, and frames from {} to {}",
+                capture_bytes,
+                new_capture_bytes,
+                capture_frames,
+                new_capture_frames
+            );
             capture_bytes = new_capture_bytes;
+            capture_frames = new_capture_frames;
             // updating sw avail_min for snd_pcm_delay threshold
-            match update_avail_min(pcmdevice, new_frames) {
-                // ignored
-                _ => {}
-            };
+            update_avail_min(pcmdevice, new_capture_frames).unwrap_or(());
         }
         let capture_res = capture_buffer(
             &mut buffer[0..capture_bytes],
             pcmdevice,
             &io,
             params.capture_samplerate,
-            capture_bytes / (params.channels * params.store_bytes_per_sample),
+            capture_frames as usize,
         );
         match capture_res {
             Ok(CaptureResult::Normal) => {
@@ -737,24 +747,28 @@ fn update_avail_min(pcmdevice: &PCM, frames: Frames) -> Res<()> {
     Ok(())
 }
 
-fn get_nbr_capture_bytes(
+fn get_nbr_capture_bytes_and_frames(
     capture_bytes: usize,
+    capture_frames: Frames,
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     params: &CaptureParams,
     buf: &mut Vec<u8>,
 ) -> (usize, Frames) {
-    let (capture_bytes_new, frames_new) = if let Some(resampl) = &resampler {
+    let (capture_bytes_new, capture_frames_new) = if let Some(resampl) = &resampler {
         //trace!("Resampler needs {} frames", resampl.nbr_frames_needed());
         let frames = resampl.nbr_frames_needed();
-        (frames * params.channels * params.store_bytes_per_sample, frames as Frames)
+        (
+            frames * params.channels * params.store_bytes_per_sample,
+            frames as Frames,
+        )
     } else {
-        (capture_bytes, 0)
+        (capture_bytes, capture_frames)
     };
     if capture_bytes_new > buf.len() {
         debug!("Capture buffer too small, extending");
         buf.append(&mut vec![0u8; capture_bytes_new - buf.len()]);
     }
-    (capture_bytes_new, frames_new)
+    (capture_bytes_new, capture_frames_new)
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
