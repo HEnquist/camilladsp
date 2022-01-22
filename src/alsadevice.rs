@@ -495,6 +495,7 @@ fn playback_loop_bytes(
     if element_uac2_gadget.is_some() {
         info!("Playback device supports rate adjust");
     }
+    let zero_buf = vec![0u8; buffer.len()];
     loop {
         let eos_in_drain = if device_stalled {
             drain_check_eos(&channels.audio)
@@ -532,7 +533,15 @@ fn playback_loop_bytes(
                     }
                     Ok(PlaybackResult::Stalled) => {
                         if !device_stalled {
+                            // first stall detected
                             warn!("Wait timed out, playback device takes too long to drain buffer");
+                            // restarting the device to drop outdated samples
+                            pcmdevice.drop().unwrap_or_else(|err| { warn!("PB: Playback error {:?}", err) });
+                            pcmdevice.prepare().unwrap_or_else(|err| { warn!("PB: Playback error {:?}", err) });
+                            // // writing zeros to be able to check for un-stalling in pcmdevice.wait
+                            debug!("Writing zeros with result {:?}", io.writei(&zero_buf));
+                            debug!("Writing zeros with result {:?}", io.writei(&zero_buf));
+                            debug!("Writing zeros with result {:?}", io.writei(&zero_buf));
                         }
                         true
                     }
@@ -964,6 +973,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let samplerate = self.samplerate;
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
+        // buffer allocated at power of 2, larger to minimize later costly buffer increases for resampler input
         let buffer_frames = 2.0f32.powf(
             (1.2 * capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
                 .log2()
