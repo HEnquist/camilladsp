@@ -522,10 +522,6 @@ fn playback_loop_bytes(
                     params.playback_status.write().unwrap().clipped_samples += conversion_result.1;
                 }
 
-                chunk_stats = chunk.get_stats();
-                params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
-
                 let playback_res =
                     play_buffer(&buffer, pcmdevice, &io, millis_per_frame, params.bytes_per_frame, buf_manager);
                 device_stalled = match playback_res {
@@ -566,6 +562,10 @@ fn playback_loop_bytes(
                 };
                 if !device_stalled {
                     // updates only for non-stalled device
+                    chunk_stats = chunk.get_stats();
+                    params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
+                    params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+
                     if let Some(delay) = delay_at_chunk_recvd {
                         if delay != 0 {
                             buffer_avg.add_value(delay as f64);
