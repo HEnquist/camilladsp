@@ -153,20 +153,20 @@ fn play_buffer(
         // for example if a USB device is unplugged.
         let nixerr = alsa::nix::errno::from_i32(-playback_state);
         error!(
-            "Alsa snd_pcm_state() of playback device returned an unexpected error: {}",
+            "PB: Alsa snd_pcm_state() of playback device returned an unexpected error: {}",
             nixerr
         );
         return Err(Box::new(nixerr));
     } else if playback_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
-        warn!("Prepare playback after buffer underrun");
+        warn!("PB: Prepare playback after buffer underrun");
         pcmdevice.prepare()?;
         thread::sleep(Duration::from_millis(target_delay));
     } else if playback_state == alsa_sys::SND_PCM_STATE_PREPARED as i32 {
-        info!("Starting playback from Prepared state");
+        info!("PB: Starting playback from Prepared state");
         thread::sleep(Duration::from_millis(target_delay));
     } else if playback_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
         warn!(
-            "Playback device is in an unexpected state: {}",
+            "PB: device is in an unexpected state: {}",
             state_desc(playback_state as u32)
         );
     }
@@ -174,15 +174,15 @@ fn play_buffer(
     loop {
         match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
             Ok(true) => {
-                trace!("Playback waited, ready");
+                trace!("PB: device waited, ready");
             }
             Ok(false) => {
-                trace!("Wait timed out, playback device takes too long to drain buffer");
+                trace!("PB: Wait timed out, playback device takes too long to drain buffer");
                 return Ok(PlaybackResult::Stalled);
             }
             Err(err) => {
                 warn!(
-                "Playback device failed while waiting for available buffer space, error: {}",
+                "PB: device failed while waiting for available buffer space, error: {}",
                 err
             );
                 return Err(Box::new(err));
@@ -192,19 +192,19 @@ fn play_buffer(
         match io.writei(buffer) {
             Ok(frames_written) => {
                 let frames_req = buffer.len()/bytes_per_frame;
-                trace!("Wrote {} frames to playback device", frames_written);
+                trace!("PB:  wrote {} frames to playback device as requested", frames_written);
                 if frames_written == frames_req {
                     // done writing
                     break;
                 } else {
-                    warn!("Playback wrote {} instead of requested {}, writing the rest", frames_written, frames_req);
+                    warn!("PB: wrote {} instead of requested {}, writing the rest", frames_written, frames_req);
                     buffer = &buffer[frames_written * bytes_per_frame..];
                     // repeat writing
                     continue;
                 }
             }
             Err(err) => {
-                warn!("Retrying playback, error: {}", err);
+                warn!("PB: Retrying playback, error: {}", err);
                 pcmdevice.prepare()?;
                 thread::sleep(Duration::from_millis(target_delay));
                 io.writei(buffer)?;
@@ -526,7 +526,7 @@ fn playback_loop_bytes(
                 device_stalled = match playback_res {
                     Ok(PlaybackResult::Normal) => {
                         if device_stalled {
-                            info!("Playback device resumed normal operation");
+                            info!("PB: device resumed normal operation");
                             timer.restart();
                             buffer_avg.restart();
                         }
@@ -535,7 +535,7 @@ fn playback_loop_bytes(
                     Ok(PlaybackResult::Stalled) => {
                         if !device_stalled {
                             // first stall detected
-                            warn!("Wait timed out, playback device takes too long to drain buffer");
+                            warn!("PB: Wait timed out, playback device takes too long to drain buffer");
                             // restarting the device to drop outdated samples
                             pcmdevice.drop().unwrap_or_else(|err| { warn!("PB: Playback error {:?}", err) });
                             pcmdevice.prepare().unwrap_or_else(|err| { warn!("PB: Playback error {:?}", err) });
@@ -586,7 +586,7 @@ fn playback_loop_bytes(
                             let mut pb_stat = params.playback_status.write().unwrap();
                             pb_stat.buffer_level = av_delay as usize;
                             debug!(
-                                "Playback buffer level: {:.1}, signal rms: {:?}",
+                                "PB: buffer level: {:.1}, signal rms: {:?}",
                                 av_delay, pb_stat.signal_rms
                             );
                         }
@@ -594,7 +594,7 @@ fn playback_loop_bytes(
                 }
             }
             Ok(AudioMessage::Pause) => {
-                trace!("Pause message received");
+                trace!("PB: Pause message received");
             }
             Ok(AudioMessage::EndOfStream) => {
                 channels
@@ -604,7 +604,7 @@ fn playback_loop_bytes(
                 break;
             }
             Err(err) => {
-                error!("Message channel error: {}", err);
+                error!("PB: Message channel error: {}", err);
                 channels
                     .status
                     .send(StatusMessage::PlaybackError(err.to_string()))
