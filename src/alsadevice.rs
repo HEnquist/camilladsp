@@ -265,8 +265,9 @@ fn capture_buffer(
         }
         match io.readi(buffer) {
             Ok(frames_read) => {
-                let frames_req = buffer.len()/bytes_per_frame;
+                let frames_req = buffer.len() / bytes_per_frame;
                 if frames_read == frames_req {
+                    trace!("Capture read {} frames as requested", frames_read);
                     return Ok(CaptureResult::Normal);
                 } else {
                     warn!("Capture read {} frames instead of the requested {}", frames_read, frames_req);
@@ -793,9 +794,9 @@ fn capture_loop_bytes(
             Ok(CaptureResult::Stalled) => {
                 // only the first time
                 if !device_stalled {
+                    info!("Capture device is stalled, processing is stalled");
                     device_stalled = true;
                     params.capture_status.write().unwrap().state = ProcessingState::Stalled;
-                    debug!("Capture device is stalled, processing is stalled");
                 }
             }
             Err(msg) => {
