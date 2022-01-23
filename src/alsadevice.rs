@@ -796,6 +796,9 @@ fn capture_loop_bytes(
                 if !device_stalled {
                     info!("Capture device is stalled, processing is stalled");
                     device_stalled = true;
+                    // restarting the device to drop outdated samples
+                    pcmdevice.drop().unwrap_or_else(|err| { warn!("Capture error {:?}", err) });
+                    pcmdevice.prepare().unwrap_or_else(|err| { warn!("Capture error {:?}", err) });
                     params.capture_status.write().unwrap().state = ProcessingState::Stalled;
                 }
             }
