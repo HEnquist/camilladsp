@@ -468,7 +468,6 @@ fn playback_loop_bytes(
     params: PlaybackParams,
     buf_manager: &mut PlaybackBufferManager,
 ) {
-    let srate = pcmdevice.hw_params_current().unwrap().get_rate().unwrap();
     let mut timer = countertimer::Stopwatch::new();
     let mut chunk_stats;
     let mut buffer_avg = countertimer::Averager::new();
@@ -491,6 +490,8 @@ fn playback_loop_bytes(
     if element_uac2_gadget.is_some() {
         info!("Playback device supports rate adjust");
     }
+    let mut capture_speed: f64 = 1.0;
+    let mut prev_delay_diff: Option<f64> = None;
     loop {
         let eos_in_drain = if device_stalled {
             drain_check_eos(&channels.audio)
@@ -572,33 +573,38 @@ fn playback_loop_bytes(
                         }
                     }
                     if timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
-                        if let Some(av_delay) = buffer_avg.get_average() {
+                        if let Some(avg_delay) = buffer_avg.get_average() {
                             timer.restart();
                             buffer_avg.restart();
                             if adjust {
-                                let speed = calculate_speed(
-                                    av_delay,
+                                let (new_capture_speed, new_delay_diff) = adjust_speed(
+                                    avg_delay,
                                     params.target_level,
-                                    params.adjust_period,
-                                    srate,
+                                    prev_delay_diff,
+                                    capture_speed,
                                 );
-                                if let Some(elem_uac2_gadget) = &element_uac2_gadget {
-                                    let mut elval = ElemValue::new(ElemType::Integer).unwrap();
-                                    // speed is reciprocal on playback side
-                                    elval.set_integer(0, (1_000_000.0 / speed) as i32).unwrap();
-                                    elem_uac2_gadget.write(&elval).unwrap();
-                                } else {
-                                    channels
-                                        .status
-                                        .send(StatusMessage::SetSpeed(speed))
-                                        .unwrap_or(());
+                                if prev_delay_diff.is_some() {
+                                    // not first cycle
+                                    capture_speed = new_capture_speed;
+                                    if let Some(elem_uac2_gadget) = &element_uac2_gadget {
+                                        let mut elval = ElemValue::new(ElemType::Integer).unwrap();
+                                        // speed is reciprocal on playback side
+                                        elval.set_integer(0, (1_000_000.0 / capture_speed) as i32).unwrap();
+                                        elem_uac2_gadget.write(&elval).unwrap();
+                                    } else {
+                                        channels
+                                            .status
+                                            .send(StatusMessage::SetSpeed(capture_speed))
+                                            .unwrap_or(());
+                                    }
                                 }
+                                prev_delay_diff = Some(new_delay_diff);
                             }
                             let mut pb_stat = params.playback_status.write().unwrap();
-                            pb_stat.buffer_level = av_delay as usize;
+                            pb_stat.buffer_level = avg_delay as usize;
                             debug!(
                                 "PB: buffer level: {:.1}, signal rms: {:?}",
-                                av_delay, pb_stat.signal_rms
+                                avg_delay, pb_stat.signal_rms
                             );
                         }
                     }
@@ -624,6 +630,54 @@ fn playback_loop_bytes(
             }
         }
     }
+}
+
+pub fn adjust_speed(avg_delay: f64, target_delay: usize, prev_diff: Option<f64>, mut capture_speed: f64) -> (f64, f64) {
+    let latency = avg_delay * capture_speed;
+    let diff = latency - target_delay as f64;
+    match prev_diff {
+        None => return (1.0, diff),
+        Some(prev_diff) => {
+            let equality_range = target_delay as f64 / 100.0; // in frames
+            let speed_delta = 1e-5;
+            if diff > 0.0 {
+                if diff > (prev_diff + equality_range) {
+                    // playback latency grows, need to slow down capture more
+                    capture_speed -= 3.0 * speed_delta;
+                } else {
+                    if is_within(diff, prev_diff, equality_range) {
+                        // positive, not changed from last cycle, need to slow down capture a bit
+                        capture_speed -= speed_delta;
+                    }
+                }
+            } else {
+                if diff < 0.0 {
+                    if diff < (prev_diff - equality_range) {
+                        // playback latency sinks, need to speed up capture more
+                        capture_speed += 3.0 * speed_delta;
+                    } else {
+                        if is_within(diff, prev_diff, equality_range) {
+                            // negative, not changed from last cycle, need to speed up capture a bit
+                            capture_speed += speed_delta
+                        }
+                    }
+                }
+            }
+            debug!(
+                "Avg. buffer delay: {:.1}, target delay: {:.1}, diff: {}, prev_div: {}, corrected capture rate: {:.4}%",
+                avg_delay,
+                target_delay,
+                diff,
+                prev_diff,
+                100.0 * capture_speed
+            );
+            return (capture_speed, diff);
+        }
+    };
+}
+
+pub fn is_within(value: f64, target: f64, equality_range: f64) -> bool {
+    value <= (target + equality_range) && value >= (target - equality_range)
 }
 
 fn drain_check_eos(audio: &Receiver<AudioMessage>) -> Option<AudioMessage> {
