@@ -3,7 +3,7 @@ use crate::config;
 use crate::config::{ConfigError, SampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
-use crossbeam_channel::{bounded, TryRecvError, TrySendError};
+use crossbeam_channel::{bounded, RecvTimeoutError, TrySendError};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -591,7 +591,10 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     }
 
                     match tx_dev.try_send((chunk_counter, new_data)) {
-                        Ok(()) | Err(TrySendError::Full(_)) => {}
+                        Ok(()) => {},
+                        Err(TrySendError::Full(_)) => {
+                            trace!("Channel is full, dropping a callback data chunk");
+                        },
                         Err(_) => {
                             error!("Error sending, channel disconnected");
                         }
@@ -712,9 +715,9 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     );
                     let capture_bytes = blockalign * capture_frames;
                     let mut tries = 0;
-                    while data_queue.len() < (blockalign * capture_frames) && tries < 10 {
+                    while data_queue.len() < (blockalign * capture_frames) && tries < 100 {
                         trace!("capture device needs more samples to make chunk, reading from channel");
-                        match rx_dev.try_recv() {
+                        match rx_dev.recv_timeout(Duration::from_millis(10)) {
                             Ok((chunk_nbr, data)) => {
                                 trace!("got chunk, length {} bytes", data.len());
                                 expected_chunk_nbr += 1;
@@ -726,11 +729,10 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                                     data_queue.push_back(*element);
                                 }
                             }
-                            Err(TryRecvError::Empty) => {
-                                trace!("No new data from inner capture thread, try {} of 10", tries);
-                                thread::sleep(Duration::from_millis(50));
+                            Err(RecvTimeoutError::Timeout) => {
+                                trace!("No new data from inner capture thread, try {} of 100", tries);
                             }
-                            Err(TryRecvError::Disconnected) => {
+                            Err(RecvTimeoutError::Disconnected) => {
                                 error!("Channel is closed");
                                 channel.send(AudioMessage::EndOfStream).unwrap_or(());
                                 status_channel.send(StatusMessage::CaptureError("Inner capture thread has exited".to_string())).unwrap_or(());
