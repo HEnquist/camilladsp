@@ -3,7 +3,8 @@ use crate::config;
 use crate::config::{ConfigError, SampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
-use crossbeam_channel::{bounded, RecvTimeoutError, TrySendError};
+use crossbeam_channel::{bounded, TryRecvError, TrySendError};
+use dispatch::Semaphore;
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -313,6 +314,10 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 let mut timer = countertimer::Stopwatch::new();
                 let mut chunk_stats;
                 let blockalign = 4 * channels;
+                // Rough guess of the number of frames per callback.
+                let callback_frames = 512;
+                // TODO check if always 512!
+                //trace!("Estimated playback callback period to {} frames", callback_frames);
 
                 trace!("Build output stream");
                 let mut conversion_result;
@@ -376,8 +381,15 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         let byte = sample_queue.pop_front().unwrap_or(0);
                         *bufferbyte = byte;
                     }
-                    let curr_buffer_fill =
+                    let mut curr_buffer_fill =
                         sample_queue.len() / blockalign + rx_dev.len() * chunksize;
+                    // Reduce the measured buffer fill by approximtely one callback size
+                    // to force a larger.
+                    if curr_buffer_fill > callback_frames {
+                        curr_buffer_fill -= callback_frames;
+                    } else {
+                        curr_buffer_fill = 0;
+                    }
                     buffer_fill_clone.store(curr_buffer_fill, Ordering::Relaxed);
                     Ok(())
                 });
@@ -560,10 +572,23 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 } else {
                     None
                 };
-                // Devices typically give around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = 8*chunksize/1024 + 1;
+                // Rough guess of the number of frames per callback. 
+                //let callback_frames = samplerate / 85;
+                let callback_frames = 512;
+                // TODO check if always 512!
+                //trace!("Estimated playback callback period to {} frames", callback_frames);
+                let channel_capacity = 8*chunksize/callback_frames + 1;
                 debug!("Using a capture channel capacity of {} buffers.", channel_capacity);
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
+                let (tx_dev_free, rx_dev_free) = bounded(channel_capacity+2);
+                for _ in 0..(channel_capacity+2) {
+                    let data = vec![0u8; 4*callback_frames*blockalign];
+                    tx_dev_free.send(data).unwrap();
+                }
+
+                // Semaphore used to wake up the waiting capture thread from the callback.
+                let semaphore = Semaphore::new(0);
+                let device_sph = semaphore.clone();
 
                 trace!("Build input stream");
                 let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels, &sample_format, change_format) {
@@ -580,21 +605,34 @@ impl CaptureDevice for CoreaudioCaptureDevice {
 
                 type Args = render_callback::Args<data::InterleavedBytes<f32>>;
 
+                // Vec used to store the saved buffer between callback iterations. 
+                let mut saved_buffer: Vec<Vec<u8>> = Vec::new();
+
                 let callback_res = audio_unit.set_input_callback(move |args: Args| {
                     let Args {
                         num_frames, data, ..
                     } = args;
                     trace!("capture call, read {} frames", num_frames);
-                    let mut new_data = vec![0u8; num_frames as usize * blockalign as usize];
+                    let mut new_data = match saved_buffer.len() {
+                        0 => rx_dev_free.recv().unwrap(),
+                        _ => saved_buffer.pop().unwrap(),
+                    };
+                    let length_bytes = data.buffer.len();
+                    if length_bytes > new_data.len() {
+                        debug!("Buffer is too small, resizing from {} to {}", new_data.len(), length_bytes);
+                        new_data.resize(length_bytes, 0);
+                    }
                     for (databyte, bufferbyte) in data.buffer.iter().zip(new_data.iter_mut()) {
                         *bufferbyte = *databyte;
                     }
-
-                    match tx_dev.try_send((chunk_counter, new_data)) {
-                        Ok(()) => {},
-                        Err(TrySendError::Full(_)) => {
-                            trace!("Channel is full, dropping a callback data chunk");
+                    match tx_dev.try_send((chunk_counter, length_bytes, new_data)) {
+                        Ok(()) => {
+                            device_sph.signal();
                         },
+                        Err(TrySendError::Full((nbr, length_bytes, buf))) => {
+                            debug!("Dropping captured chunk {} with len {}", nbr, length_bytes);
+                            saved_buffer.push(buf);
+                        }
                         Err(_) => {
                             error!("Error sending, channel disconnected");
                         }
@@ -715,24 +753,27 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     );
                     let capture_bytes = blockalign * capture_frames;
                     let mut tries = 0;
-                    while data_queue.len() < (blockalign * capture_frames) && tries < 100 {
+                    while data_queue.len() < (blockalign * capture_frames) && tries < 50 {
                         trace!("capture device needs more samples to make chunk, reading from channel");
-                        match rx_dev.recv_timeout(Duration::from_millis(10)) {
-                            Ok((chunk_nbr, data)) => {
-                                trace!("got chunk, length {} bytes", data.len());
+                        let _ = semaphore.wait_timeout(Duration::from_millis(20));
+                        match rx_dev.try_recv() {
+                            Ok((chunk_nbr, length_bytes, data)) => {
+                                trace!("got chunk, length {} bytes", length_bytes);
                                 expected_chunk_nbr += 1;
                                 if chunk_nbr > expected_chunk_nbr {
                                     warn!("Samples were dropped, missing {} buffers", chunk_nbr-expected_chunk_nbr);
                                     expected_chunk_nbr = chunk_nbr;
                                 }
-                                for element in data.iter() {
+                                for element in data.iter().take(length_bytes) {
                                     data_queue.push_back(*element);
                                 }
+                                // Return the buffer to the queue
+                                tx_dev_free.send(data).unwrap();
                             }
-                            Err(RecvTimeoutError::Timeout) => {
-                                trace!("No new data from inner capture thread, try {} of 100", tries);
+                            Err(TryRecvError::Empty) => {
+                                trace!("No new data from inner capture thread, try {} of 50", tries);
                             }
-                            Err(RecvTimeoutError::Disconnected) => {
+                            Err(TryRecvError::Disconnected) => {
                                 error!("Channel is closed");
                                 channel.send(AudioMessage::EndOfStream).unwrap_or(());
                                 status_channel.send(StatusMessage::CaptureError("Inner capture thread has exited".to_string())).unwrap_or(());

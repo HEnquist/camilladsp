@@ -34,6 +34,7 @@ nix = "0.23"
 #coreaudio-rs = { path = "../coreaudio-rs" }
 coreaudio-rs = { git = "https://github.com/HEnquist/coreaudio-rs", tag="v0.11.1-rc1" }
 crossbeam-channel = "0.5"
+dispatch = "0.2.0"
 
 [target.'cfg(target_os="windows")'.dependencies]
 #wasapi = { path = "../../rust/wasapi" }
