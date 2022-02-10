@@ -221,6 +221,7 @@ fn open_capture(
     )?;
     debug!("initialized capture");
     let handle = audio_client.set_get_eventhandle()?;
+    trace!("capture got event handle");
     let capture_client = audio_client.get_audiocaptureclient()?;
     debug!("Opened Wasapi capture device {}", devname);
     Ok((device, audio_client, capture_client, handle, wave_format))
@@ -426,8 +427,9 @@ fn capture_loop(
         warn!("Failed to raise capture thread priority");
     }
     */
-
+    trace!("Starting capture stream");
     audio_client.start_stream()?;
+    trace!("Started capture stream");
     loop {
         trace!("capturing");
         if stop_signal.load(Ordering::Relaxed) {
@@ -492,9 +494,11 @@ fn capture_loop(
                 debug!("Captured a buffer marked as silent");
                 data.iter_mut().take(nbr_bytes).for_each(|val| *val = 0);
             }
-            if flags.data_discontinuity {
-                warn!("Capture device reported a buffer overrun");
-            }
+            // Disabled since VB-Audio Cable gives this all the time
+            // even though there seems to be no problem. Buggy?
+            //if flags.data_discontinuity {
+            //    warn!("Capture device reported a buffer overrun");
+            //}
 
             // Workaround for an issue with capturing from VB-Audio Cable
             // in shared mode. This device seems to misbehave and not provide
@@ -891,6 +895,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                                 (_device, audio_client, capture_client, handle, wave_format)
                             },
                             Err(err) => {
+                                error!("Failed to open capture device, error: {}", err);
                                 let msg = format!("Capture error: {}", err);
                                 tx_state_dev.send(DeviceState::Error(msg)).unwrap_or(());
                                 return;
@@ -1087,7 +1092,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         state = silence_counter.update(value_range);
                         if state == ProcessingState::Running {
                             if let Some(resampl) = &mut resampler {
-                                let new_waves = resampl.process(&chunk.waveforms).unwrap();
+                                let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
                                 let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                                 if chunk_frames == 0 {
                                     chunk_frames = chunksize;

@@ -38,8 +38,8 @@ dispatch = "0.2.0"
 
 [target.'cfg(target_os="windows")'.dependencies]
 #wasapi = { path = "../../rust/wasapi" }
-#wasapi = { git = "https://github.com/HEnquist/wasapi-rs" }
-wasapi = "0.9.0"
+wasapi = { git = "https://github.com/HEnquist/wasapi-rs", branch = "win0.32" }
+#wasapi = "0.9.0"
 crossbeam-channel = "0.5"
 #winapi = { version = "0.3", features = ["avrt"] }
 
@@ -48,7 +48,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 serde_json = "1.0"
 serde_with = "1.11"
-realfft = "2.0.1"
+realfft = "3.0.0"
+#realfft = { git = "https://github.com/HEnquist/realfft", branch = "better_errors" }
 fftw = { version = "0.7.0", optional = true }
 num-complex = "0.4"
 num-integer = "0.1.44"
@@ -65,12 +66,12 @@ tungstenite = { version = "0.16.0", optional = true, default-features = false }
 native-tls = { version = "0.2.7", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-rubato = "0.10.0"
-#rubato = { git = "https://github.com/HEnquist/rubato", branch = "objectsafe" }
+#rubato = "0.10.0"
+rubato = { git = "https://github.com/HEnquist/rubato", branch = "bigrange" }
 cpal = { version = "0.13.3", optional = true }
 #rawsample = { path = "../../rust/rawsample" }
 #rawsample = { git = "https://github.com/HEnquist/rawsample", branch = "main" }
-rawsample = "0.1.1"
+rawsample = "0.2.0"
 
 [build-dependencies]
 version_check = "0.9"
