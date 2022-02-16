@@ -13,8 +13,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Duration;
 use wasapi;
-//use winapi::um::avrt::AvSetMmThreadCharacteristicsA;
-//use std::ffi::CString;
+use windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW;
 
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -277,20 +276,16 @@ fn playback_loop(
     }
     debug!("Waited for data for {} ms", waited_millis);
 
-    /*
     // Raise priority
     let mut task_idx = 0;
-    let taskname = CString::new("Pro Audio").unwrap();
     unsafe {
-        AvSetMmThreadCharacteristicsA(taskname.as_ptr(), &mut task_idx);
+        AvSetMmThreadCharacteristicsW("Pro Audio", &mut task_idx);
     }
     if task_idx > 0 {
         debug!("Playback thread raised priority, task index: {}", task_idx);
-    }
-    else {
+    } else {
         warn!("Failed to raise playback thread priority");
     }
-    */
 
     audio_client.start_stream()?;
     let mut running = true;
@@ -413,20 +408,16 @@ fn capture_loop(
 
     let mut saved_buffer: Option<Vec<u8>> = None;
 
-    /*
     // Raise priority
     let mut task_idx = 0;
-    let taskname = CString::new("Pro Audio").unwrap();
     unsafe {
-        AvSetMmThreadCharacteristicsA(taskname.as_ptr(), &mut task_idx);
+        AvSetMmThreadCharacteristicsW("Pro Audio", &mut task_idx);
     }
     if task_idx > 0 {
         debug!("Capture thread raised priority, task index: {}", task_idx);
-    }
-    else {
+    } else {
         warn!("Failed to raise capture thread priority");
     }
-    */
     trace!("Starting capture stream");
     audio_client.start_stream()?;
     trace!("Started capture stream");
