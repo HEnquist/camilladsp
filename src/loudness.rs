@@ -116,7 +116,7 @@ impl Filter for Loudness {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         let shared_vol = self.processing_status.read().unwrap().volume;
         let shared_mute = self.processing_status.read().unwrap().mute;
 

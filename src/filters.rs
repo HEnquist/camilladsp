@@ -76,7 +76,7 @@ pub struct WavParams {
 
 pub trait Filter {
     // Filter a Vec
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()>;
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()>;
 
     fn update_parameters(&mut self, config: config::Filter);
 

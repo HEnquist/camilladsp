@@ -194,7 +194,7 @@ impl Filter for BiquadCombo {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         for filter in self.filters.iter_mut() {
             filter.process_waveform(waveform)?;
         }

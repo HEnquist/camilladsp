@@ -114,7 +114,7 @@ impl Filter for Volume {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         let shared_vol = self.processing_status.read().unwrap().volume;
         let shared_mute = self.processing_status.read().unwrap().mute;
 
@@ -215,7 +215,7 @@ impl Filter for Gain {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         for item in waveform.iter_mut() {
             *item *= self.gain;
         }
@@ -289,7 +289,7 @@ impl Filter for Delay {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         for item in waveform.iter_mut() {
             self.queue.push(*item)?;
             *item = self.queue.pop().unwrap();
