@@ -170,7 +170,7 @@ impl Filter for FftConv {
     }
 
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         // Copy to input buffer
         self.input_buf[0..self.npoints].copy_from_slice(waveform);
 
