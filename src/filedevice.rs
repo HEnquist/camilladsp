@@ -150,11 +150,32 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         playback_status.write().unwrap().clipped_samples +=
                                             nbr_clipped;
                                     }
+
                                     chunk_stats = chunk.get_stats();
-                                    playback_status.write().unwrap().signal_rms =
-                                        chunk_stats.rms_db();
-                                    playback_status.write().unwrap().signal_peak =
-                                        chunk_stats.peak_db();
+                                    let mut pbstat = playback_status.write().unwrap();
+
+                                    pbstat.signal_rms = chunk_stats.rms_db();
+                                    let mut tmp_rms: Vec<f32> = vec![];
+                                    if pbstat.signal_rms_history.len() == 0 {
+                                        pbstat.signal_rms_history = vec![-1000.0; pbstat.signal_rms.len()];
+                                    } else {
+                                        for (pos, e) in pbstat.signal_rms.iter().enumerate() {
+                                            tmp_rms.push(e.max(pbstat.signal_rms_history[pos as usize]));
+                                        }
+                                        pbstat.signal_rms_history = tmp_rms;
+                                    }
+
+                                    pbstat.signal_peak = chunk_stats.peak_db();
+                                    let mut tmp_peak: Vec<f32> = vec![];
+                                    if pbstat.signal_peak_history.len() == 0 {
+                                        pbstat.signal_peak_history = vec![-1000.0; pbstat.signal_peak.len()];
+                                    } else {
+                                        for (pos, e) in pbstat.signal_peak.iter().enumerate() {
+                                            tmp_peak.push(e.max(pbstat.signal_peak_history[pos as usize]));
+                                        }
+                                        pbstat.signal_peak_history = tmp_peak;
+                                    }
+
                                     trace!(
                                         "Playback signal RMS: {:?}, peak: {:?}",
                                         chunk_stats.rms_db(),

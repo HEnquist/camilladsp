@@ -64,7 +64,9 @@ enum WsCommand {
     GetCaptureSignalRms,
     GetCaptureSignalPeak,
     GetPlaybackSignalRms,
+    GetPlaybackSignalRmsHistory,
     GetPlaybackSignalPeak,
+    GetPlaybackSignalPeakHistory,
     GetCaptureRate,
     GetUpdateInterval,
     SetUpdateInterval(usize),
@@ -140,7 +142,15 @@ enum WsReply {
         result: WsResult,
         value: Vec<f32>,
     },
+    GetPlaybackSignalRmsHistory {
+        result: WsResult,
+        value: Vec<f32>,
+    },
     GetPlaybackSignalPeak {
+        result: WsResult,
+        value: Vec<f32>,
+    },
+    GetPlaybackSignalPeakHistory {
         result: WsResult,
         value: Vec<f32>,
     },
@@ -395,6 +405,16 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
                 value: pbstat.signal_rms.clone(),
             })
         }
+        WsCommand::GetPlaybackSignalRmsHistory => {
+            let mut pbstat = shared_data_inst.playback_status.write().unwrap();
+            let new_history: Vec<f32> = vec![-1000.0; pbstat.signal_rms_history.len()];
+            let ret: Vec<f32> = pbstat.signal_rms_history.clone();
+            pbstat.signal_rms_history = new_history;
+            Some(WsReply::GetPlaybackSignalRmsHistory {
+                result: WsResult::Ok,
+                value: ret,
+            })
+        }
         WsCommand::GetCaptureSignalPeak => {
             let capstat = shared_data_inst.capture_status.read().unwrap();
             Some(WsReply::GetCaptureSignalPeak {
@@ -407,6 +427,16 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
             Some(WsReply::GetPlaybackSignalPeak {
                 result: WsResult::Ok,
                 value: pbstat.signal_peak.clone(),
+            })
+        }
+        WsCommand::GetPlaybackSignalPeakHistory => {
+            let mut pbstat = shared_data_inst.playback_status.write().unwrap();
+            let new_history: Vec<f32> = vec![-1000.0; pbstat.signal_peak_history.len()];
+            let ret: Vec<f32> = pbstat.signal_peak_history.clone();
+            pbstat.signal_peak_history = new_history;
+            Some(WsReply::GetPlaybackSignalPeakHistory {
+                result: WsResult::Ok,
+                value: ret,
             })
         }
         WsCommand::GetVersion => Some(WsReply::GetVersion {

@@ -167,7 +167,9 @@ pub struct PlaybackStatus {
     pub clipped_samples: usize,
     pub buffer_level: usize,
     pub signal_rms: Vec<f32>,
+    pub signal_rms_history: Vec<f32>,
     pub signal_peak: Vec<f32>,
+    pub signal_peak_history: Vec<f32>,
 }
 
 #[derive(Clone, Debug)]

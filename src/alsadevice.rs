@@ -1,5 +1,6 @@
 extern crate alsa;
 extern crate nix;
+
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::SampleFormat;
@@ -479,8 +480,29 @@ fn playback_loop_bytes(
                 }
 
                 chunk_stats = chunk.get_stats();
-                params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                let mut pbstat = params.playback_status.write().unwrap();
+
+                pbstat.signal_rms = chunk_stats.rms_db();
+                let mut tmp_rms: Vec<f32> = vec![];
+                if pbstat.signal_rms_history.len() == 0 {
+                    pbstat.signal_rms_history = vec![-1000.0; pbstat.signal_rms.len()];
+                } else {
+                    for (pos, e) in pbstat.signal_rms.iter().enumerate() {
+                        tmp_rms.push(e.max(pbstat.signal_rms_history[pos as usize]));
+                    }
+                    pbstat.signal_rms_history = tmp_rms;
+                }
+
+                pbstat.signal_peak = chunk_stats.peak_db();
+                let mut tmp_peak: Vec<f32> = vec![];
+                if pbstat.signal_peak_history.len() == 0 {
+                    pbstat.signal_peak_history = vec![-1000.0; pbstat.signal_peak.len()];
+                } else {
+                    for (pos, e) in pbstat.signal_peak.iter().enumerate() {
+                        tmp_peak.push(e.max(pbstat.signal_peak_history[pos as usize]));
+                    }
+                    pbstat.signal_peak_history = tmp_peak;
+                }
 
                 let playback_res =
                     play_buffer(&buffer, pcmdevice, &io, target_delay, millis_per_chunk);

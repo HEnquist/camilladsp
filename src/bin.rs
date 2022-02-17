@@ -801,7 +801,9 @@ fn main_process() -> i32 {
         clipped_samples: 0,
         update_interval: 1000,
         signal_rms: Vec::new(),
+        signal_rms_history: Vec::new(),
         signal_peak: Vec::new(),
+        signal_peak_history: Vec::new(),
     }));
     let processing_status = Arc::new(RwLock::new(ProcessingParameters {
         volume: initial_volume,
