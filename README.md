@@ -1319,6 +1319,7 @@ Other projects using CamillaDSP:
 * https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels.
 * https://github.com/raptorlightning/I2S-Hat - An SPDIF Hat for the Raspberry Pi 2-X for SPDIF Communication, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/375834-i2s-hat-raspberry-pi-hat-spdif-i2s-communication-dsp.html).
 * https://github.com/daverz/camilla-remote-control - Interface for remote control of CamillaDSP using a FLIRC USB infrared receiver or remote keyboard.
+* https://github.com/Wang-Yue/CamillaDSP-Monitor - A script that provides similar DSP pipeline and spetral analyzer as the RME ADI-2 DAC/Pro.
 
 Music players:
 * https://moodeaudio.org/ - moOde audio player, audiophile-quality music playback for Raspberry Pi.
