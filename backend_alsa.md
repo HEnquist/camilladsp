@@ -82,10 +82,10 @@ This outputs the same table as for the aplay example above, but for a capture de
 
 ## Routing all audio through CamillaDSP
 
-To route all audio through CamillaDSP using ALSA, the audio output from any application must be redirected. This can be acheived either by using an [ALSA Loopback device](#alsa-loopback), or the [ALSA CamillaDSP "I/O" plugin](#alsa-camilladsp-"io"-plugin).
+To route all audio through CamillaDSP using ALSA, the audio output from any application must be redirected. This can be achieved either by using an [ALSA Loopback device](#alsa-loopback), or the [ALSA CamillaDSP "I/O" plugin](#alsa-camilladsp-"io"-plugin).
 
 ### ALSA Loopback
-An ALSA Loopback card can be used. This behaves like a sound card that presents two devices. The sound being send to the playback side on one device can then be captured from the capture side on the other device. 
+An ALSA Loopback card can be used. This behaves like a sound card that presents two devices. The sound being send to the playback side on one device can then be captured from the capture side on the other device.
 To load the kernel module type:
 ```
 sudo modprobe snd-aloop
@@ -103,10 +103,10 @@ The audio can then be captured from card "Loopback", device 0, subdevice 0, by r
 ```
 arecord -D hw:Loopback,0,0 sometrack_copy.wav
 ```
-The first application that opens either side of a Loopback decides the sample rate and format. If `aplay` is started first in this example, this means that `arecord` must use the same sample rate and format. 
+The first application that opens either side of a Loopback decides the sample rate and format. If `aplay` is started first in this example, this means that `arecord` must use the same sample rate and format.
 To change format or rate, both sides of the loopback must first be closed.
 
-When using the ALSA Loopback approach, see the separate repository [camilladsp-config](#camilladsp-config). 
+When using the ALSA Loopback approach, see the separate repository [camilladsp-config](#camilladsp-config).
 This contains example configuration files for setting up the entire system, and to have it start automatically after boot.
 
 ### ALSA CamillaDSP "I/O" plugin
@@ -140,15 +140,15 @@ See [Find name of device](#find-name-of-device) for what to write in the `device
 Please see [Find valid playback and capture parameters](#find-valid-playback-and-capture-parameters).
 
 ### Workarounds for device quirks
-The ALSA capture device has two optional extra properties that are used to work around quirks of some devices. 
+The ALSA capture device has two optional extra properties that are used to work around quirks of some devices.
 Both should normally be left out, or set to the default value of `false`.
-- `retry_on_error`: Set this to `true` if capturing from the USB gadget driver on for example a Raspberry Pi. 
-  This device stops providing data if playback is stopped or paused, and retrying capture after an error 
+- `retry_on_error`: Set this to `true` if capturing from the USB gadget driver on for example a Raspberry Pi.
+  This device stops providing data if playback is stopped or paused, and retrying capture after an error
   allows capture to continue when more data becomes available.
-- `avoid_blocking_read`: Some devices misbehave when using the blocking IO of Alsa, 
-  typically when there is no incoming data. Examples are spdif inputs when there is no signal present, 
-  or the USB gadget driver when the source isn't sending any data. 
-  Set this to `true` if you get capture errors when stopping the signal. This then allows processing to continue once the signal returns. 
+- `avoid_blocking_read`: Some devices misbehave when using the blocking IO of Alsa,
+  typically when there is no incoming data. Examples are spdif inputs when there is no signal present,
+  or the USB gadget driver when the source isn't sending any data.
+  Set this to `true` if you get capture errors when stopping the signal. This then allows processing to continue once the signal returns.
 
 ## Links
 ### ALSA Documentation

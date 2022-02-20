@@ -94,7 +94,7 @@ impl Mixer {
     }
 }
 
-/// Validate the mixer config, to give a helpful message intead of a panic.
+/// Validate the mixer config, to give a helpful message instead of a panic.
 pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
     let chan_in = mixer_config.channels.r#in;
     let chan_out = mixer_config.channels.out;

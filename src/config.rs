@@ -859,7 +859,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             debug!("Apply override for capture_samplerate: {}", rate);
             configuration.devices.capture_samplerate = rate;
             if rate == cfg_rate && !configuration.devices.enable_rate_adjust {
-                debug!("Disabling unneccesary 1:1 resampling");
+                debug!("Disabling unnecessary 1:1 resampling");
                 configuration.devices.enable_resampling = false;
             }
         }
@@ -979,7 +979,7 @@ fn replace_tokens_in_config(config: &mut Configuration) {
     }
 }
 
-// Check if coefficent files with relative paths are relative to the config file path, replace path if they are
+// Check if coefficient files with relative paths are relative to the config file path, replace path if they are
 fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str) {
     if let Ok(config_file) = PathBuf::from(configname.to_owned()).canonicalize() {
         if let Some(config_dir) = config_file.parent() {

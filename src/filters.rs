@@ -306,7 +306,7 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
     let params = find_data_in_wav(filename)?;
     if channel >= params.channels {
         let msg = format!(
-            "Cant read channel {} of file '{}' which contains {} channels.",
+            "Can't read channel {} of file '{}' which contains {} channels.",
             channel, filename, params.channels
         );
         return Err(config::ConfigError::new(&msg).into());
@@ -509,7 +509,7 @@ impl Pipeline {
     }
 }
 
-/// Validate the filter config, to give a helpful message intead of a panic.
+/// Validate the filter config, to give a helpful message instead of a panic.
 pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
     match filter_config {
         config::Filter::Conv { parameters } => fftconv::validate_config(parameters),
