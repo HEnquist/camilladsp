@@ -1,6 +1,6 @@
 [package]
 name = "camilladsp"
-version = "1.0.0-rc2"
+version = "1.0.0-rc3"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2021"
 description = "A flexible tool for processing audio"
@@ -43,7 +43,6 @@ dispatch = "0.2.0"
 wasapi = "0.10.0"
 crossbeam-channel = "0.5"
 windows = {version = "0.32.0", features = ["alloc", "Win32_System_Threading", "Win32_Foundation"] }
-#winapi = { version = "0.3", features = ["avrt"] }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

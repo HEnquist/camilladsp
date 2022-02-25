@@ -161,7 +161,7 @@ fn play_buffer(
         );
     }
 
-    match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
+    match pcmdevice.wait(Some(4 * millis_per_chunk as u32)) {
         Ok(true) => {
             trace!("Playback waited, ready");
         }
@@ -220,7 +220,7 @@ fn capture_buffer(
     }
     let millis_per_chunk = 1000 * frames_to_read / samplerate;
 
-    match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
+    match pcmdevice.wait(Some(4 * millis_per_chunk as u32)) {
         Ok(true) => {
             trace!("Capture waited, ready");
         }
