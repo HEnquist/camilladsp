@@ -3,9 +3,14 @@ use crate::config;
 use crate::config::SampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
+
 use std::error::Error;
 use std::fs::File;
+#[cfg(target_os = "linux")]
+use std::fs::OpenOptions;
 use std::io::{stdin, stdout, Write};
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
@@ -576,12 +581,16 @@ impl CaptureDevice for FileCaptureDevice {
                 };
                 #[cfg(target_os = "linux")]
                 let file_res: Result<Box<dyn Reader>, std::io::Error> = match source {
-                    CaptureSource::Filename(filename) => File::open(filename).map(|f| {
-                        Box::new(NonBlockingReader::new(
-                            f,
-                            2 * 1000 * chunksize as u64 / samplerate as u64,
-                        )) as Box<dyn Reader>
-                    }),
+                    CaptureSource::Filename(filename) => OpenOptions::new()
+                        .read(true)
+                        .custom_flags(nix::libc::O_NONBLOCK)
+                        .open(filename)
+                        .map(|f| {
+                            Box::new(NonBlockingReader::new(
+                                f,
+                                2 * 1000 * chunksize as u64 / samplerate as u64,
+                            )) as Box<dyn Reader>
+                        }),
                     CaptureSource::Stdin => Ok(Box::new(NonBlockingReader::new(
                         stdin(),
                         2 * 1000 * chunksize as u64 / samplerate as u64,
