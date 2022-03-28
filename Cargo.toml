@@ -1,6 +1,6 @@
 [package]
 name = "camilladsp"
-version = "1.0.0-rc2"
+version = "1.0.0-rc4"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2021"
 description = "A flexible tool for processing audio"
@@ -14,7 +14,7 @@ jack-backend = ["cpal-backend", "cpal/jack"]
 websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
 FFTW = ["fftw"]
-neon = ["rubato/neon"]
+neon = []
 debug = []
 
 [lib]
@@ -40,10 +40,9 @@ dispatch = "0.2.0"
 [target.'cfg(target_os="windows")'.dependencies]
 #wasapi = { path = "../../rust/wasapi" }
 #wasapi = { git = "https://github.com/HEnquist/wasapi-rs", branch = "win0.32" }
-wasapi = "0.10.0"
+wasapi = "0.12.0"
 crossbeam-channel = "0.5"
-windows = {version = "0.32.0", features = ["alloc", "Win32_System_Threading", "Win32_Foundation"] }
-#winapi = { version = "0.3", features = ["avrt"] }
+windows = {version = "0.34.0", features = ["alloc", "Win32_System_Threading", "Win32_Foundation"] }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -68,8 +67,8 @@ tungstenite = { version = "0.16.0", optional = true, default-features = false }
 native-tls = { version = "0.2.7", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-#rubato = "0.10.0"
-rubato = { git = "https://github.com/HEnquist/rubato", branch = "bigrange" }
+rubato = "0.12.0"
+#rubato = { git = "https://github.com/HEnquist/rubato", branch = "bigrange" }
 cpal = { version = "0.13.3", optional = true }
 #rawsample = { path = "../../rust/rawsample" }
 #rawsample = { git = "https://github.com/HEnquist/rawsample", branch = "main" }

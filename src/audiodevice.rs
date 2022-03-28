@@ -421,10 +421,11 @@ pub fn get_resampler(
         );
         Some(Box::new(SincFixedOut::<PrcFmt>::new(
             samplerate as f64 / capture_samplerate as f64,
+            1.1,
             parameters,
             chunksize,
             num_channels,
-        )))
+        ).unwrap()))
     } else {
         Some(Box::new(FftFixedOut::<PrcFmt>::new(
             capture_samplerate,
@@ -432,7 +433,7 @@ pub fn get_resampler(
             chunksize,
             2,
             num_channels,
-        )))
+        ).unwrap()))
     }
 }
 
