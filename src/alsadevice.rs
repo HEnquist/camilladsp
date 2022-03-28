@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -135,6 +135,7 @@ fn play_buffer(
     io: &alsa::pcm::IO<u8>,
     target_delay: u64,
     millis_per_chunk: usize,
+    frames_to_write: usize,
 ) -> Res<()> {
     let playback_state = pcmdevice.state_raw();
     //trace!("Playback state {:?}", playback_state);
@@ -160,28 +161,56 @@ fn play_buffer(
             state_desc(playback_state as u32)
         );
     }
+    let frames_avail = pcmdevice.avail()? as usize;
+    trace!("Frames available: {}", frames_avail);
 
-    match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
-        Ok(true) => {
-            trace!("Playback waited, ready");
+    if frames_avail < frames_to_write {
+        let timeout_millis = 4 * millis_per_chunk as u32;
+        trace!(
+            "Frames available: {}, needed: {}, waiting for up to {} ms",
+            frames_avail,
+            frames_to_write,
+            timeout_millis
+        );
+        let start = if log_enabled!(log::Level::Trace) {
+            Some(Instant::now())
+        } else {
+            None
+        };
+        let waitresult = pcmdevice.wait(Some(timeout_millis));
+        trace!("PB: device waited for {:?}", start.map(|s| s.elapsed()));
+        match waitresult {
+            Ok(true) => {
+                trace!("Playback waited, ready");
+            }
+            Ok(false) => {
+                warn!("Wait timed out, playback device takes too long to drain buffer");
+                // TODO what action is suitable here?
+            }
+            Err(err) => {
+                warn!(
+                    "Playback device failed while waiting for available buffer space, error: {}",
+                    err
+                );
+                return Err(Box::new(err));
+            }
         }
-        Ok(false) => {
-            warn!("Wait timed out, playback device takes too long to drain buffer");
-            // TODO what action is suitable here?
-        }
-        Err(err) => {
-            warn!(
-                "Playback device failed while waiting for available buffer space, error: {}",
-                err
-            );
-            return Err(Box::new(err));
-        }
+    } else {
+        trace!(
+            "Frames available: {}, needed: {}, skipping wait.",
+            frames_avail,
+            frames_to_write
+        );
     }
     let frames = match io.writei(buffer) {
         Ok(frames) => frames,
         Err(err) => {
             warn!("Retrying playback, error: {}", err);
-            pcmdevice.prepare()?;
+            if err.nix_error() != alsa::nix::errno::Errno::EAGAIN {
+                trace!("snd_pcm_prepare");
+                // Would recover() be better than prepare()?
+                pcmdevice.prepare()?;
+            }
             thread::sleep(Duration::from_millis(target_delay));
             io.writei(buffer)?
         }
@@ -220,7 +249,7 @@ fn capture_buffer(
     }
     let millis_per_chunk = 1000 * frames_to_read / samplerate;
 
-    match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
+    match pcmdevice.wait(Some(4 * millis_per_chunk as u32)) {
         Ok(true) => {
             trace!("Capture waited, ready");
         }
@@ -482,8 +511,14 @@ fn playback_loop_bytes(
                 params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
                 params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
 
-                let playback_res =
-                    play_buffer(&buffer, pcmdevice, &io, target_delay, millis_per_chunk);
+                let playback_res = play_buffer(
+                    &buffer,
+                    pcmdevice,
+                    &io,
+                    target_delay,
+                    millis_per_chunk,
+                    params.chunksize,
+                );
                 match playback_res {
                     Ok(_) => {}
                     Err(msg) => {
