@@ -419,21 +419,21 @@ pub fn get_resampler(
             "Creating asynchronous resampler with parameters: {:?}",
             parameters
         );
-        Some(Box::new(SincFixedOut::<PrcFmt>::new(
-            samplerate as f64 / capture_samplerate as f64,
-            1.1,
-            parameters,
-            chunksize,
-            num_channels,
-        ).unwrap()))
+        Some(Box::new(
+            SincFixedOut::<PrcFmt>::new(
+                samplerate as f64 / capture_samplerate as f64,
+                1.1,
+                parameters,
+                chunksize,
+                num_channels,
+            )
+            .unwrap(),
+        ))
     } else {
-        Some(Box::new(FftFixedOut::<PrcFmt>::new(
-            capture_samplerate,
-            samplerate,
-            chunksize,
-            2,
-            num_channels,
-        ).unwrap()))
+        Some(Box::new(
+            FftFixedOut::<PrcFmt>::new(capture_samplerate, samplerate, chunksize, 2, num_channels)
+                .unwrap(),
+        ))
     }
 }
 
