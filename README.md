@@ -507,8 +507,41 @@ TODO test with Jack.
 
 ## The YAML format
 CamillaDSP is using the YAML format for the configuration file. This is a standard format that was chosen because of its nice readable syntax. The Serde library is used for reading the configuration. 
-There are a few things to keep in mind with YAML. The configuration is a tree, and the level is determined by the indentation level. For YAML the indentation is as important as opening and closing brackets in other formats. If it's wrong, Serde might not be able to give a good description of what the error is, only that the file is invalid. 
-If you get strange errors, first check that the indentation is correct. Also check that you only use spaces and no tabs. Many text editors can help by highlighting syntax errors in the file. 
+There are a few things to keep in mind with YAML. The configuration is a tree, and the level is determined by the indentation level. For YAML the indentation is as important as opening and closing brackets in other formats. If it's wrong, Serde might not be able to give a good description of what the error is, only that the file is invalid.
+If you get strange errors, first check that the indentation is correct. Also check that you only use spaces and no tabs. Many text editors can help by highlighting syntax errors in the file.
+
+The items at each level of the tree can be placed in any order. Consider the following example:
+```
+filters:
+  example_fir_a:
+    type: Conv
+    parameters:
+      filename: path/to/filter.txt  <
+      format: TEXT                  <-- "filename", "format" and "type" can be in any order as long as they are properly indented to be part of the "parameters" block.
+      type: Raw                     <
+  example_fir_b:
+    parameters:                     <-- "parameters" can be placed before or after "type".
+      type: Wav 
+      filename: path/to/filter.wav
+    type: Conv
+
+mixers:
+  mono:
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -6
+          - gain: -6                <-- The order of "gain" and "channel" can be reversed.
+            channel: 1              <
+    channels:
+      out: 1
+      in: 2
+```
+On the root level it contains `filters` and `mixers`. The `mixers` section could just as well be placed before the `filters`.
+Looking at `filters`, the second filter swaps the order of `parameters` and `type`. Both variants are valid.
+The mixer example shows that the `gain` and `channel` properties can be ordered freely.
+
 
 ## Devices
 Example config:
