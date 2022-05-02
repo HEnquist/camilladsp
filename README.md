@@ -187,7 +187,7 @@ tar -xvf camilladsp-linux-amd64.tar.gz
 
 # Building
 
-Use recent stable versions of rustc and cargo. The minimum rustc version is 1.56.0.
+Use recent stable versions of rustc and cargo. The minimum rustc version is 1.61.0.
 
 The recommended way to install rustc and cargo is by using the "rustup" tool. This tool works on all supported platforms (Linux, macOS and Windows). Get it here: https://rustup.rs/
 

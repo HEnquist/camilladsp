@@ -1,9 +1,10 @@
 [package]
 name = "camilladsp"
-version = "1.0.0-rc4"
+version = "1.0.0"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2021"
 description = "A flexible tool for processing audio"
+rust-version = "1.61"
 
 [features]
 default = ["websocket"]
