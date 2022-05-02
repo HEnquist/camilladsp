@@ -1,4 +1,4 @@
-# CamillaDSP v0.6.3
+# CamillaDSP v1.0.0
 ![CI test and lint](https://github.com/HEnquist/camilladsp/workflows/CI%20test%20and%20lint/badge.svg)
 
 A tool to create audio processing pipelines for applications such as active crossovers or room correction. It is written in Rust to benefit from the safety and elegant handling of threading that this language provides. 
@@ -17,7 +17,8 @@ The full configuration is given in a yaml file.
 - **[System requirements](#system-requirements)**
 - **[Usage example: crossover for 2-way speakers](#usage-example-crossover-for-2-way-speakers)**
 - **[Dependencies](#dependencies)**
-- **[Related projects](#related-projects)**
+- **[Companion libraries and tools](#companion-libraries-and-tools)**
+- **[GUI](#gui)**
 
 **[Installing](#installing)**
 
@@ -60,9 +61,12 @@ The full configuration is given in a yaml file.
 - **[Pipeline](#pipeline)**
 - **[Visualizing the config](#visualizing-the-config)**
 
+**[Related projects](#related-projects)**
+
 **[Getting help](#getting-help)**
 - **[FAQ](#faq)**
 - **[Troubleshooting](#troubleshooting)**
+
 
 
 # Introduction
@@ -138,7 +142,7 @@ See the [tutorial for a step-by-step guide.](./stepbystep.md)
 These are the key dependencies for CamillaDSP.
 * https://crates.io/crates/alsa - Alsa audio backend
 * https://crates.io/crates/clap - Command line argument parsing
-* https://crates.io/crates/cpal - Jack and CoreAudio audio backends
+* https://crates.io/crates/cpal - Jack audio backend
 * https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend 
 * https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
 * https://crates.io/crates/rustfft - FFT used for FIR filters
@@ -147,20 +151,14 @@ These are the key dependencies for CamillaDSP.
 * https://crates.io/crates/tungstenite - Websocket server
 
 
-## Related projects
-These are part of the CamillaDSP family:
-* https://github.com/HEnquist/pycamilladsp - Python library for communicating with CamillaDSP over websocket
-* https://github.com/HEnquist/pycamilladsp-plot - Plotting and visualization of configurations
-* https://github.com/HEnquist/camillagui-backend - Server for a web-based gui for CamillaDSP
-* https://github.com/HEnquist/camilladsp-config - Example configurations for things like running CamillaDSP as a systemd service
+## Companion libraries and tools
+These projects are part of the CamillaDSP family:
+* https://github.com/HEnquist/pycamilladsp - Library for communicating with CamillaDSP over websocket.
+* https://github.com/HEnquist/pycamilladsp-plot - Plotting and visualization of configurations.
+* https://github.com/HEnquist/camilladsp-config - Example configurations for things like running CamillaDSP as a systemd service.
 
-Other projects meant to be used with CamillaDSP:
-* https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels
-* https://github.com/Lykkedk/SuperPlayer_v2.0 - Automatic filter switching at sample rate change for squeezelite
-
-Projects of general nature which can be useful together with CamillaDSP:
-* https://github.com/scripple/alsa_hook_hwparams - Alsa hooks for reacting to sample rate and format changes
-* https://github.com/HEnquist/cpal-listdevices - List audio devices with names and supported formats under Windows and macOS. 
+## GUI
+[CamillaGUI](https://github.com/HEnquist/camillagui-backend) is a user interface for CamillaDSP that is accessed via a web browser.
 
 
 # Installing
@@ -189,19 +187,21 @@ tar -xvf camilladsp-linux-amd64.tar.gz
 
 # Building
 
-Use recent stable versions of rustc and cargo. The minimum rustc version is 1.43.0. 
+Use recent stable versions of rustc and cargo. The minimum rustc version is 1.61.0.
 
 The recommended way to install rustc and cargo is by using the "rustup" tool. This tool works on all supported platforms (Linux, macOS and Windows). Get it here: https://rustup.rs/
 
 For Windows you also need the "Build Tools for Visual Studio". Get them from here: https://aka.ms/buildtools
 
-By default both the Alsa and PulseAudio backends are enabled, but they can be disabled if desired. That also removes the need for the the corresponding system Alsa/Pulse packages.
+When building on Linux the Alsa backend is always enabled. Similarly, building on Windows always enables the Wasapi backend. And building on macOS always enables the CoreAudio backend.
+
+By default both the PulseAudio and Jack backends are disabled, but they can be enabled if desired. Leaving them disabled also means that the corresponding system Jack/Pulse packages aren't needed.
 
 By default the internal processing is done using 64-bit floats. There is a possibility to switch this to 32-bit floats. This might be useful for speeding up the processing when running on a 32-bit CPU (or a 64-bit CPU running in 32-bit mode), but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
 
 CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "websocket". For usage see the section "Controlling via websocket".
 
-The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". When the chunksize is a power of two, like 1024 or 4096, FFTW is only a few percent faster than RustFFT. The difference gets much larger if the chunksize is a "strange" number, like a large prime. FFTW is a much larger and more complicated library, so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT much slower.
+The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". When the chunksize is a power of two, like 1024 or 4096, then FFTW and RustFFT are very similar in speed. But if the chunksize is a "strange" number like a large prime, then FFTW can be faster. FFTW is a much larger and more complicated library, so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT too slow.
 
 ## Building in Linux with standard features
 - Install pkg-config (very likely already installed):
@@ -212,10 +212,6 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 - - Fedora: ```sudo dnf install alsa-lib-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libasound2-dev```
 - - Arch: ```sudo pacman -S alsa-lib```
-- Install Pulse dependency:
-- - Fedora: ```sudo dnf install pulseaudio-libs-devel```
-- - Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
-- - Arch:  ```sudo pacman -S libpulse```
 - Install OpenSSL dependency:
 - - Fedora: ```sudo dnf install openssl openssl-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install openssl libssl-dev```
@@ -229,36 +225,41 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 
 ## Customized build
 All the available options, or "features" are:
-- `alsa-backend`: Alsa support
 - `pulse-backend`: PulseAudio support
-- `cpal-backend`: CoreAudio support
-- `jack-backend`: Jack support. This also enables the cpal-backend feature if building on macOS.
+- `cpal-backend`: Used for Jack support (automatically enabled when needed).
+- `jack-backend`: Jack support.
 - `websocket`: Websocket server for control
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
 - `FFTW`: Use FFTW instead of RustFFT
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64)
 - `neon`: Enable the experimental Neon support for aarch64 in the resampler. Note that this only works on 64-bit arm, and requires a very recent nightly rust compiler.
 
-The first two (`alsa-backend`, `websocket`) are included in the default features, meaning if you don't specify anything you will get those two.
+The `websocket` feature is included in the default features, meaning it will be enabled if you don't specify anything.
+
 Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
 
-The `jack-backend` feature requires jack and its development files to be installed. To install:
+The `pulse-backend` feature requires PulseAudio and its development files. To install:
+- Fedora: ```sudo dnf install pulseaudio-libs-devel```
+- Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
+- Arch:  ```sudo pacman -S libpulse```
+
+The `jack-backend` feature requires jack and its development files. To install:
 - Fedora: ```sudo dnf install jack-audio-connection-kit jack-audio-connection-kit-devel```
 - Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
 - Arch:  ```sudo pacman -S jack```
 
-Example 1: You want `alsa-backend`, `websocket`, `pulse-backend` and `FFTW`. The first two are included by default so you only need to add `FFTW` and `pulse-backend`:
+Example 1: You want `websocket`, `pulse-backend` and `FFTW`. The first one is included by default so you only need to add `FFTW` and `pulse-backend`:
 ```
 cargo build --release --features FFTW --features pulse-backend
 (or)
 cargo install --path . --features FFTW --features pulse-backend
 ```
 
-Example 2: You want `alsa-backend`, `32bit` and `FFTW`. Since you don't want `websocket` you have to disable the defaults, and then add back `alsa-backend`:
+Example 2: You want `32bit` and `FFTW`. Since you don't want `websocket` you have to disable the defaults:
 ```
-cargo build --release --no-default-features --features alsa-backend --features FFTW --features 32bit
+cargo build --release --no-default-features --features FFTW --features 32bit
 (or)
-cargo install --path . --no-default-features --features alsa-backend --features FFTW --features 32bit
+cargo install --path . --no-default-features --features FFTW --features 32bit
 ```
 
 ## Optimize for your system
@@ -279,11 +280,11 @@ RUSTFLAGS='-C target-feature=+neon -C target-cpu=native' cargo build --release
 ```
 
 ## Building on Windows and macOS
-The Alsa and Pulse backends should not be included when building on Windows and macOS. The recommended build command is:
+The platform-specific backends are always enabled when building on Windows and macOS. The recommended build command is:
 
 macOS:
 ```
-RUSTFLAGS='-C target-cpu=native' cargo build --release --features cpal-backend
+RUSTFLAGS='-C target-cpu=native' cargo build --release
 ```
 
 Windows (cmd.exe command prompt):
@@ -306,8 +307,6 @@ brew install pulseaudio
 ```
 
 The FFTW feature can also be used on Windows. There is no need to install anything extra.
-
-
 
 
 # How to run
@@ -508,8 +507,41 @@ TODO test with Jack.
 
 ## The YAML format
 CamillaDSP is using the YAML format for the configuration file. This is a standard format that was chosen because of its nice readable syntax. The Serde library is used for reading the configuration. 
-There are a few things to keep in mind with YAML. The configuration is a tree, and the level is determined by the indentation level. For YAML the indentation is as important as opening and closing brackets in other formats. If it's wrong, Serde might not be able to give a good description of what the error is, only that the file is invalid. 
-If you get strange errors, first check that the indentation is correct. Also check that you only use spaces and no tabs. Many text editors can help by highlighting syntax errors in the file. 
+There are a few things to keep in mind with YAML. The configuration is a tree, and the level is determined by the indentation level. For YAML the indentation is as important as opening and closing brackets in other formats. If it's wrong, Serde might not be able to give a good description of what the error is, only that the file is invalid.
+If you get strange errors, first check that the indentation is correct. Also check that you only use spaces and no tabs. Many text editors can help by highlighting syntax errors in the file.
+
+The items at each level of the tree can be placed in any order. Consider the following example:
+```
+filters:
+  example_fir_a:
+    type: Conv
+    parameters:
+      filename: path/to/filter.txt  <
+      format: TEXT                  <-- "filename", "format" and "type" can be in any order as long as they are properly indented to be part of the "parameters" block.
+      type: Raw                     <
+  example_fir_b:
+    parameters:                     <-- "parameters" can be placed before or after "type".
+      type: Wav 
+      filename: path/to/filter.wav
+    type: Conv
+
+mixers:
+  mono:
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -6
+          - gain: -6                <-- The order of "gain" and "channel" can be reversed.
+            channel: 1              <
+    channels:
+      out: 1
+      in: 2
+```
+On the root level it contains `filters` and `mixers`. The `mixers` section could just as well be placed before the `filters`.
+Looking at `filters`, the second filter swaps the order of `parameters` and `type`. Both variants are valid.
+The mixer example shows that the `gain` and `channel` properties can be ordered freely.
+
 
 ## Devices
 Example config:
@@ -598,6 +630,8 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   
   The `adjust_period` parameter is used to set the interval between corrections, in seconds. 
   The default is 10 seconds. Only applies when `enable_rate_adjust` is set to `true`.
+  A smaller value will make for a faster reaction time, which may be useful if there are occasional
+  buffer underruns when running with a small `target_level` to minimize latency.
 
 * `silence_threshold` & `silence_timeout` (optional)
   The fields `silence_threshold` and `silence_timeout` are optional 
@@ -638,17 +672,17 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   A device needs:
   * `type`: 
     The available types depend on which features that were included when compiling. All possible types are:
-    * `Alsa` 
-    * `Pulse`
-    * `Wasapi`
-    * `CoreAudio`
-    * `Jack`
     * `File`
     * `Stdin` (capture only)
     * `Stdout` (playback only)
+    * `Jack`
+    * `Wasapi`
+    * `CoreAudio`
+    * `Alsa` 
+    * `Pulse`
   * `channels`: number of channels
   * `device`: device name (for Alsa, Pulse, Wasapi, CoreAudio). For CoreAudio and Wasapi, "default" will give the default device.
-  * `filename` path the the file (for File)
+  * `filename` path to the file (for File)
   * `format`: sample format (for all except Jack).
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
@@ -666,9 +700,9 @@ Any parameter marked (*) in all examples in this section are optional. If they a
     |            | Alsa | Pulse | Wasapi | CoreAudio | Jack | File/Stdin/Stdout |
     |------------|------|-------|--------|-----------|------|-------------------|
     | S16LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
-    | S24LE      | Yes  | Yes   | Yes    | No        | No   | Yes               |
-    | S24LE3     | Yes  | Yes   | Yes    | No        | No   | Yes               |
-    | S32LE      | Yes  | Yes   | Yes    | No        | No   | Yes               |
+    | S24LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
+    | S24LE3     | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
+    | S32LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
     | FLOAT32LE  | Yes  | Yes   | Yes    | Yes       | Yes  | Yes               |
     | FLOAT64LE  | Yes  | No    | No     | No        | No   | Yes               |
   
@@ -736,7 +770,7 @@ Any parameter marked (*) in all examples in this section are optional. If they a
 
   The `File` and `Stdin` capture devices support two additional optional parameters, for advanced handling of raw files and testing:
   * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream. This can be used to skip over the header of some formats like .wav (which typically has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
-  * `read_bytes`: Read only up until the specified number of bytes. Leave it out to read until the end of the file or stream.
+  * `read_bytes`: Read only up until the specified number of bytes. Leave it out or set it to zero to read until the end of the file or stream.
 
   * Example, this will skip the first 50 bytes of the file (index 0-49) and then read the following 200 bytes (index 50-249).
     ```
@@ -864,28 +898,29 @@ mixers:
         mute: false (*)
         sources:
           - channel: 0
-            gain: 0
-            inverted: false
+            gain: 0 (*)
+            inverted: false (*)
       - dest: 1
         mute: false (*)
         sources:
           - channel: 1
-            gain: 0
-            inverted: false
+            gain: 0 (*)
+            inverted: false (*)
       - dest: 2
         sources:
           - channel: 0
-            gain: 0
-            inverted: false
+            gain: 0 (*)
+            inverted: false (*)
       - dest: 3
         sources:
           - channel: 1
-            gain: 0
-            inverted: false
+            gain: 0 (*)
+            inverted: false (*)
 ```
 Parameters marked with (*) are optional. 
 The "channels" group define the number of input and output channels for the mixer. The mapping section then decides how to route the audio.
-This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value in dB, and if it should be `inverted` (true/false). A channel that has no sources will be filled with silence. The `mute` option determines if an output channel of the mixer should be muted. This parameter is optional, and defaults to not muted.
+This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value in dB, and if it should be `inverted` (true/false). A channel that has no sources will be filled with silence. The `mute` option determines if an output channel of the mixer should be muted. The `mute`, `gain` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 dB, and not inverted.
+
 Another example, a simple stereo to mono mixer:
 ```
 mixers:
@@ -898,10 +933,8 @@ mixers:
         sources:
           - channel: 0
             gain: -6
-            inverted: false
           - channel: 1
             gain: -6
-            inverted: false
 ```
 
 ### Skip processing of unused channels
@@ -968,7 +1001,14 @@ Allowed ranges:
 - low_boost: 0 to 20
 
 ### Delay
-The delay filter provides a delay in milliseconds or samples. The `unit` can be `ms` or `samples`, and if left out it defaults to `ms`. If the `subsample` parameter is set to `true`, then it will use use an IIR filter to achieve subsample delay precision. If set to `false`, the value will instead be rounded to the nearest number of full samples. This is a little faster and should be used if subsample precision is not required. 
+The delay filter provides a delay in milliseconds, millimetres or samples. 
+The `unit` can be `ms`, `mm` or `samples`, and if left out it defaults to `ms`.
+When giving the delay in millimetres, the speed of sound of is assumed to be 343 m/s (dry air at 20 degrees Celsius).
+
+If the `subsample` parameter is set to `true`, then it will use use an IIR filter to achieve subsample delay precision.
+If set to `false`, the value will instead be rounded to the nearest number of full samples.
+This is a little faster and should be used if subsample precision is not required.
+ 
 
 The delay value must be positive or zero. 
 
@@ -1038,7 +1078,7 @@ To load coefficients from a raw file, use the `Raw` type. This is also used to l
 Raw files are often saved with a `.dbl`, `.raw`, or `.pcm` ending. The lack of a header means that the files doesn't contain any information about data format etc. CamillaDSP supports loading coefficients from such files that contain a single channel only (stereo files are not supported), in all the most common sample formats.
 The `Raw` type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
 * `skip_bytes_lines`: Number of bytes (for raw files) or lines (for text) to skip at the beginning of the file. This can be used to skip over a header. Leaving it out or setting to zero means no bytes or lines are skipped. 
-* `read_bytes_lines`: Read only up until the specified number of bytes (for raw files) or lines (for text). Leave it out to read until the end of the file.
+* `read_bytes_lines`: Read only up until the specified number of bytes (for raw files) or lines (for text). Leave it out or set it to zero to read until the end of the file.
 
 The filter coefficients can be provided either as text, or as raw samples. Each file can only hold one channel.
 The "format" parameter can be omitted, in which case it's assumed that the format is TEXT. This format is a simple text file with one value per row:
@@ -1084,29 +1124,29 @@ filters:
     parameters:
       type: Peaking
       freq: 100
-      q: 0.5
       gain: -7.3
+      q: 0.5
   peak_100_bw:
     type: Biquad
     parameters:
       type: Peaking
       freq: 100
-      bandwidth: 0.7
       gain: -7.3
+      bandwidth: 0.7
   exampleshelf:
     type: Biquad
     parameters:
       type: Highshelf
       freq: 1000
-      slope: 6
       gain: -12
+      slope: 6
   exampleshelf_q:
     type: Biquad
     parameters:
       type: Highshelf
       freq: 1000
-      q: 1.5
       gain: -12
+      q: 1.5
   LR_highpass:
     type: BiquadCombo
     parameters:
@@ -1124,7 +1164,7 @@ Single Biquads are defined using the type "Biquad". The available filter types a
 
   Second order high/lowpass filters (12dB/oct)
   
-  Defined by cutoff frequency `freq` and either Q-value `q` or bandwidth in octaves `bandwidth`.
+  Defined by cutoff frequency `freq` and Q-value `q`.
 
 * HighpassFO & LowpassFO
 
@@ -1137,18 +1177,27 @@ Single Biquads are defined using the type "Biquad". The available filter types a
   High / Low uniformly affects the high / low frequencies respectively while leaving the low / high part unaffected. In between there is a slope of variable steepness.
 
   Parameters:
+  * `freq` is the center frequency of the sloping section.
   * `gain` gives the gain of the filter
   * `slope` is the steepness in dB/octave. Values up to around +-12 are usable.
   * `q` is the Q-value and can be used instead of `slope` to define the steepness of the filter. Only one of `q` and `slope` can be given. 
+
+* HighshelfFO & LowshelfFO
+  
+  First order (6dB/oct) versions of the shelving functions.
+
+  Parameters:
   * `freq` is the center frequency of the sloping section.
+  * `gain` gives the gain of the filter
 
 * Peaking
   
-  A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
+  A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`. Note that bandwidth and Q-value are inversely related, a small bandwidth corresponds to a large Q-value etc. Use positive gain values to boost, and negative values to attenuate.
 
 * Notch
   
   A notch filter to attenuate a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
+  The notch filter is similar to a Peaking filter configured with a large negative gain.
 
 * Bandpass
   
@@ -1157,6 +1206,10 @@ Single Biquads are defined using the type "Biquad". The available filter types a
 * Allpass
 
   A second order allpass filter for a given frequency `freq` with a steepness given either by the Q-value `q` or bandwidth in octaves `bandwidth`
+
+* AllpassFO
+
+  A first order allpass filter for a given frequency `freq`.
 
 * LinkwitzTransform
   
@@ -1184,11 +1237,11 @@ To build more complex filters, use the type "BiquadCombo". This automatically ad
   This filter combo is mainly meant to be created by guis. Is defines a 5-point (or band) parametric equalizer by combining a Lowshelf, a Highshelf and three Peaking filters.
 
   Each individual filter is defined by frequency, gain and q. The parameter names are:
-  * Lowshelf: `gls`, `fls`, `qls` 
-  * Peaking 1: `gp1`, `fp1`, `qp1`
-  * Peaking 2: `gp2`, `fp2`, `qp2`
-  * Peaking 3: `gp3`, `fp3`, `qp3`
-  * Highshelf: `ghs`, `fhs`, `qhs`
+  * Lowshelf: `fls`, `gls`, `qls` 
+  * Peaking 1: `fp1`, `gp1`, `qp1`
+  * Peaking 2: `fp2`, `gp2`, `qp2`
+  * Peaking 3: `fp3`, `gp3`, `qp3`
+  * Highshelf: `fhs`, `ghs`, `qhs`
 
   All 15 parameters must be included in the config.
 
@@ -1204,7 +1257,7 @@ Example:
   dither_fancy:
     type: Dither
     parameters:
-      type: Lipshitz
+      type: Lipshitz441
       bits: 16
 ```
 The available types are 
@@ -1293,11 +1346,36 @@ The script requires the following:
 * Matplotlib
 * PyYAML
 
-## Getting help
 
-### FAQ
+# Related projects
+Other projects using CamillaDSP:
+* https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels.
+* https://github.com/raptorlightning/I2S-Hat - An SPDIF Hat for the Raspberry Pi 2-X for SPDIF Communication, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/375834-i2s-hat-raspberry-pi-hat-spdif-i2s-communication-dsp.html).
+* https://github.com/daverz/camilla-remote-control - Interface for remote control of CamillaDSP using a FLIRC USB infrared receiver or remote keyboard.
+* https://github.com/Wang-Yue/CamillaDSP-Monitor - A script that provides a DSP pipeline and a spectral analyzer similar to those of the RME ADI-2 DAC/Pro.
+
+Music players:
+* https://moodeaudio.org/ - moOde audio player, audiophile-quality music playback for Raspberry Pi.
+* https://github.com/thoelf/Linux-Stream-Player - Play local files or streamed music with room EQ on Linux. 
+* https://github.com/Lykkedk/SuperPlayer-v8.0.0---SamplerateChanger-v1.0.0 - Automatic filter switching at sample rate change for squeezelite, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/361429-superplayer-dsp_engine-camilladsp-samplerate-switching-esp32-remote-control.html).
+
+Guides and example configs:
+* https://github.com/ynot123/CamillaDSP-Cfgs-FIR-Examples - Example Filter Configuration and Convolver Coefficients.
+* https://github.com/hughpyle/raspot - Hugh's raspotify config
+* https://github.com/Wang-Yue/camilladsp-crossfeed - Bauer stereophonic-to-binaural crossfeed for headphones
+* https://github.com/jensgk/akg_k702_camilladsp_eq - Headphone EQ and Crossfeed for the AKG K702 headphones
+* https://github.com/phelluy/room_eq_mac_m1 - Room Equalization HowTo with REW and Apple Silicon 
+
+Projects of general nature which can be useful together with CamillaDSP:
+* https://github.com/scripple/alsa_hook_hwparams - Alsa hooks for reacting to sample rate and format changes.
+* https://github.com/HEnquist/cpal-listdevices - List audio devices with names and supported formats under Windows and macOS. 
+
+
+# Getting help
+
+## FAQ
 See the [list of frequently asked questions.](./FAQ.md)
 
-### Troubleshooting
+## Troubleshooting
 See the trouble [troubleshooting guide](./troubleshooting.md) for explanations of most error messages.
 

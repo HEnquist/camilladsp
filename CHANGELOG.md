@@ -1,3 +1,14 @@
+## 1.0.0
+New features:
+- New improved CoreAudio backend.
+- Switch to faster logging library.
+- Improved support for Wasapi loopback capture.
+- Add "Stalled" state.
+- Some Mixer parameters made optional.
+- Delay value can be given in millimetres.
+- Improved Alsa backend.
+- Handle subnormal numbers in IIR filters (Biquad and DiffEq).
+
 ## 0.6.3
 Bugfixes:
 - Fix slow start with Alsa plug devices (regression in 0.6.2).

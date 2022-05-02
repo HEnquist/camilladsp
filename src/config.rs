@@ -1,5 +1,5 @@
-use filters;
-use mixer;
+use crate::filters;
+use crate::mixer;
 use serde::{de, Deserialize, Serialize};
 use serde_with;
 use std::collections::HashMap;
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 //type SmpFmt = i16;
-use PrcFmt;
+use crate::PrcFmt;
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
 pub struct Overrides {
@@ -122,17 +122,13 @@ impl fmt::Display for SampleFormat {
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum CaptureDevice {
-    #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
         format: SampleFormat,
-        #[serde(default)]
-        retry_on_error: bool,
-        #[serde(default)]
-        avoid_blocking_read: bool,
     },
     #[cfg(feature = "pulse-backend")]
     #[serde(alias = "PULSE", alias = "pulse")]
@@ -167,13 +163,16 @@ pub enum CaptureDevice {
         #[serde(default)]
         read_bytes: usize,
     },
-    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    #[cfg(target_os = "macos")]
     #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
+        #[serde(default = "default_ca_format")]
         format: SampleFormat,
+        #[serde(default)]
+        change_format: bool,
     },
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
@@ -199,13 +198,13 @@ pub enum CaptureDevice {
 impl CaptureDevice {
     pub fn channels(&self) -> usize {
         match self {
-            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { channels, .. } => *channels,
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { channels, .. } => *channels,
             CaptureDevice::File { channels, .. } => *channels,
             CaptureDevice::Stdin { channels, .. } => *channels,
-            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio { channels, .. } => *channels,
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { channels, .. } => *channels,
@@ -216,13 +215,13 @@ impl CaptureDevice {
 
     pub fn sampleformat(&self) -> SampleFormat {
         match self {
-            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { format, .. } => format.clone(),
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { format, .. } => format.clone(),
             CaptureDevice::File { format, .. } => format.clone(),
             CaptureDevice::Stdin { format, .. } => format.clone(),
-            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio { format, .. } => format.clone(),
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { format, .. } => format.clone(),
@@ -236,7 +235,7 @@ impl CaptureDevice {
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum PlaybackDevice {
-    #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -265,13 +264,18 @@ pub enum PlaybackDevice {
         channels: usize,
         format: SampleFormat,
     },
-    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+    #[cfg(target_os = "macos")]
     #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
+        #[serde(default = "default_ca_format")]
         format: SampleFormat,
+        #[serde(default)]
+        change_format: bool,
+        #[serde(default)]
+        exclusive: bool,
     },
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
@@ -295,13 +299,13 @@ pub enum PlaybackDevice {
 impl PlaybackDevice {
     pub fn channels(&self) -> usize {
         match self {
-            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             PlaybackDevice::Alsa { channels, .. } => *channels,
             #[cfg(feature = "pulse-backend")]
             PlaybackDevice::Pulse { channels, .. } => *channels,
             PlaybackDevice::File { channels, .. } => *channels,
             PlaybackDevice::Stdout { channels, .. } => *channels,
-            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            #[cfg(target_os = "macos")]
             PlaybackDevice::CoreAudio { channels, .. } => *channels,
             #[cfg(target_os = "windows")]
             PlaybackDevice::Wasapi { channels, .. } => *channels,
@@ -354,6 +358,11 @@ fn default_queuelimit() -> usize {
 
 fn default_measure_interval() -> f32 {
     1.0
+}
+
+#[cfg(target_os = "macos")]
+fn default_ca_format() -> SampleFormat {
+    SampleFormat::S32LE
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -689,6 +698,8 @@ pub struct DelayParameters {
 pub enum TimeUnit {
     #[serde(rename = "ms")]
     Milliseconds,
+    #[serde(rename = "mm")]
+    Millimetres,
     #[serde(rename = "samples")]
     Samples,
 }
@@ -735,7 +746,9 @@ pub struct MixerChannels {
 #[serde(deny_unknown_fields)]
 pub struct MixerSource {
     pub channel: usize,
+    #[serde(default)]
     pub gain: PrcFmt,
+    #[serde(default)]
     pub inverted: bool,
     #[serde(default)]
     pub mute: bool,
@@ -886,7 +899,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Stdin { channels, .. } => {
                 *channels = chans;
             }
-            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { channels, .. } => {
                 *channels = chans;
             }
@@ -894,7 +907,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Pulse { channels, .. } => {
                 *channels = chans;
             }
-            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio { channels, .. } => {
                 *channels = chans;
             }
@@ -917,7 +930,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Stdin { format, .. } => {
                 *format = fmt;
             }
-            #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { format, .. } => {
                 *format = fmt;
             }
@@ -925,7 +938,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Pulse { format, .. } => {
                 *format = fmt;
             }
-            #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+            #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio { format, .. } => {
                 *format = fmt;
             }
@@ -1118,24 +1131,6 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     if conf.devices.silence_timeout < 0.0 {
         return Err(ConfigError::new("silence_timeout cannot be negative").into());
     }
-    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
-    if let CaptureDevice::CoreAudio { format, .. } = &conf.devices.capture {
-        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
-            return Err(ConfigError::new(
-                "The CoreAudio capture backend only supports FLOAT32LE and S16LE sample formats",
-            )
-            .into());
-        }
-    }
-    #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
-    if let PlaybackDevice::CoreAudio { format, .. } = &conf.devices.playback {
-        if !(*format == SampleFormat::FLOAT32LE || *format == SampleFormat::S16LE) {
-            return Err(ConfigError::new(
-                "The CoreAudio playback backend only supports FLOAT32LE and S16LE sample formats",
-            )
-            .into());
-        }
-    }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi { format, .. } = &conf.devices.capture {
         if *format == SampleFormat::FLOAT64LE {
@@ -1196,7 +1191,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     if let CaptureDevice::Pulse { format, .. } = &conf.devices.capture {
         if *format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
-                "The PulseAudio playback backend does not support FLOAT64LE sample format",
+                "The PulseAudio capture backend does not support FLOAT64LE sample format",
             )
             .into());
         }
@@ -1206,6 +1201,24 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         if *format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The PulseAudio playback backend does not support FLOAT64LE sample format",
+            )
+            .into());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if let CaptureDevice::CoreAudio { format, .. } = &conf.devices.capture {
+        if *format == SampleFormat::FLOAT64LE {
+            return Err(ConfigError::new(
+                "The CoreAudio capture backend does not support FLOAT64LE sample format",
+            )
+            .into());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if let PlaybackDevice::CoreAudio { format, .. } = &conf.devices.playback {
+        if *format == SampleFormat::FLOAT64LE {
+            return Err(ConfigError::new(
+                "The CoreAudio playback backend does not support FLOAT64LE sample format",
             )
             .into());
         }

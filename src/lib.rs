@@ -1,5 +1,7 @@
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 extern crate alsa;
+#[cfg(target_os = "linux")]
+extern crate alsa_sys;
 extern crate clap;
 #[cfg(feature = "cpal-backend")]
 extern crate cpal;
@@ -7,15 +9,19 @@ extern crate cpal;
 extern crate fftw;
 #[macro_use]
 extern crate lazy_static;
-#[cfg(target_os = "windows")]
+#[cfg(target_os = "macos")]
+extern crate coreaudio;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 extern crate crossbeam_channel;
+#[cfg(target_os = "macos")]
+extern crate dispatch;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
 #[cfg(feature = "secure-websocket")]
 extern crate native_tls;
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 extern crate nix;
 extern crate num_complex;
 extern crate num_integer;
@@ -33,9 +39,11 @@ extern crate signal_hook;
 extern crate tungstenite;
 #[cfg(target_os = "windows")]
 extern crate wasapi;
+//#[cfg(target_os = "windows")]
+//extern crate winapi;
 
 #[macro_use]
-extern crate slog_scope;
+extern crate log;
 
 use serde::Serialize;
 use std::error;
@@ -60,7 +68,7 @@ impl<PrcFmt> NewValue<PrcFmt> for PrcFmt {
 
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 pub mod alsadevice;
 pub mod audiodevice;
 pub mod basicfilters;
@@ -68,6 +76,8 @@ pub mod biquad;
 pub mod biquadcombo;
 pub mod config;
 pub mod conversions;
+#[cfg(target_os = "macos")]
+pub mod coreaudiodevice;
 pub mod countertimer;
 #[cfg(feature = "cpal-backend")]
 pub mod cpaldevice;
@@ -79,6 +89,10 @@ pub mod fftconv;
 pub mod fftconv_fftw;
 pub mod fifoqueue;
 pub mod filedevice;
+#[cfg(not(target_os = "linux"))]
+pub mod filereader;
+#[cfg(target_os = "linux")]
+pub mod filereader_nonblock;
 pub mod filters;
 pub mod helpers;
 pub mod loudness;
@@ -115,10 +129,16 @@ pub enum ExitState {
 
 #[derive(Clone, Debug, Copy, Serialize, PartialEq)]
 pub enum ProcessingState {
+    // Processing is running normally.
     Running,
+    // Processing is paused because input is silent.
     Paused,
+    // Processing is off and devices are closed, waiting for a new config.
     Inactive,
+    // Opening devices and starting up processing.
     Starting,
+    // Capture device isnt providing data, processing is stalled.
+    Stalled,
 }
 
 pub struct ExitRequest {}
@@ -167,6 +187,7 @@ pub enum StopReason {
     Done,
     CaptureError(String),
     PlaybackError(String),
+    UnknownError(String),
     CaptureFormatChange(usize),
     PlaybackFormatChange(usize),
 }
@@ -186,6 +207,7 @@ impl fmt::Display for ProcessingState {
             ProcessingState::Paused => "PAUSED",
             ProcessingState::Inactive => "INACTIVE",
             ProcessingState::Starting => "STARTING",
+            ProcessingState::Stalled => "STALLED",
         };
         write!(f, "{}", desc)
     }
@@ -195,7 +217,7 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     let mut playbacktypes = vec!["File".to_owned(), "Stdout".to_owned()];
     let mut capturetypes = vec!["File".to_owned(), "Stdin".to_owned()];
 
-    if cfg!(all(feature = "alsa-backend", target_os = "linux")) {
+    if cfg!(target_os = "linux") {
         playbacktypes.push("Alsa".to_owned());
         capturetypes.push("Alsa".to_owned());
     }
@@ -207,7 +229,7 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         playbacktypes.push("Jack".to_owned());
         capturetypes.push("Jack".to_owned());
     }
-    if cfg!(all(feature = "cpal-backend", target_os = "macos")) {
+    if cfg!(target_os = "macos") {
         playbacktypes.push("CoreAudio".to_owned());
         capturetypes.push("CoreAudio".to_owned());
     }

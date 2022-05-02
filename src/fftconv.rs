@@ -1,15 +1,15 @@
+use crate::config;
+use crate::filters;
 use crate::filters::Filter;
-use config;
-use filters;
-use helpers::{multiply_add_elements, multiply_elements};
+use crate::helpers::{multiply_add_elements, multiply_elements};
 use num_complex::Complex;
 use num_traits::Zero;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 use std::sync::Arc;
 
 // Sample format
-use PrcFmt;
-use Res;
+use crate::PrcFmt;
+use crate::Res;
 
 pub struct FftConv {
     name: String,
@@ -101,7 +101,7 @@ impl Filter for FftConv {
     }
 
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         // Copy to inut buffer and clear overlap area
         self.input_buf[0..self.npoints].copy_from_slice(waveform);
         for item in self
@@ -239,10 +239,10 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::ConvParameters;
+    use crate::fftconv::FftConv;
+    use crate::filters::Filter;
     use crate::PrcFmt;
-    use config::ConvParameters;
-    use fftconv::FftConv;
-    use filters::Filter;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);

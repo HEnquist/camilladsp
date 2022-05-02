@@ -1,11 +1,16 @@
-use audiodevice::*;
-use config;
-use config::SampleFormat;
-use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-use countertimer;
+use crate::audiodevice::*;
+use crate::config;
+use crate::config::SampleFormat;
+use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+use crate::countertimer;
+
+use std::error::Error;
 use std::fs::File;
-use std::io::ErrorKind;
-use std::io::{stdin, stdout, Read, Write};
+#[cfg(target_os = "linux")]
+use std::fs::OpenOptions;
+use std::io::{stdin, stdout, Write};
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
@@ -13,12 +18,16 @@ use std::time::Duration;
 
 use rubato::VecResampler;
 
+#[cfg(not(target_os = "linux"))]
+use crate::filereader::BlockingReader;
+#[cfg(target_os = "linux")]
+use crate::filereader_nonblock::NonBlockingReader;
+use crate::CommandMessage;
+use crate::PrcFmt;
+use crate::ProcessingState;
+use crate::Res;
+use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use PrcFmt;
-use ProcessingState;
-use Res;
-use StatusMessage;
 
 pub struct FilePlaybackDevice {
     pub destination: PlaybackDest,
@@ -80,6 +89,16 @@ struct CaptureParams {
     capture_status: Arc<RwLock<CaptureStatus>>,
     stop_on_rate_change: bool,
     rate_measure_interval: f32,
+}
+#[derive(Debug)]
+pub enum ReadResult {
+    Complete(usize),
+    Timeout(usize),
+    EndOfFile(usize),
+}
+
+pub trait Reader {
+    fn read(&mut self, data: &mut [u8]) -> Result<ReadResult, Box<dyn Error>>;
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
@@ -147,6 +166,9 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         chunk_stats.peak_db()
                                     );
                                 }
+                                Ok(AudioMessage::Pause) => {
+                                    trace!("Pause message received");
+                                }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel
                                         .send(StatusMessage::PlaybackDone)
@@ -185,14 +207,14 @@ fn get_nbr_capture_bytes(
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        //let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
+        //let new_capture_bytes = resampl.input_frames_next() * channels * store_bytes_per_sample;
         //trace!(
         //    "Resampler needs {} frames, will read {} bytes",
-        //    resampl.nbr_frames_needed(),
+        //    resampl.input_frames_next(),
         //    new_capture_bytes
         //);
         //new_capture_bytes
-        resampl.nbr_frames_needed() * channels * store_bytes_per_sample
+        resampl.input_frames_next() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }
@@ -230,7 +252,7 @@ fn get_capture_bytes(
 }
 
 fn capture_loop(
-    mut file: Box<dyn Read>,
+    mut file: Box<dyn Reader>,
     params: CaptureParams,
     msg_channels: CaptureChannels,
     mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
@@ -258,10 +280,13 @@ fn capture_loop(
         params.capture_samplerate,
         params.chunksize,
     );
+
     let mut chunk_stats;
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     let mut state = ProcessingState::Running;
+    let mut prev_state = ProcessingState::Running;
+    let mut stalled = false;
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -286,7 +311,11 @@ fn capture_loop(
                     }
                 }
             }
-            Err(_) => {}
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                error!("Command channel was closed");
+                break;
+            }
         };
         capture_bytes = get_nbr_capture_bytes(
             &resampler,
@@ -296,13 +325,13 @@ fn capture_loop(
         );
         capture_bytes_temp =
             get_capture_bytes(params.read_bytes, nbr_bytes_read, capture_bytes, &mut buf);
-        let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
+        //let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
+        let read_res = file.read(&mut buf[0..capture_bytes_temp]);
         match read_res {
-            Ok(bytes) => {
-                //trace!("Captured {} bytes", bytes);
+            Ok(ReadResult::EndOfFile(bytes)) => {
                 bytes_read = bytes;
                 nbr_bytes_read += bytes;
-                if bytes > 0 && bytes < capture_bytes {
+                if bytes > 0 {
                     for item in buf.iter_mut().take(capture_bytes).skip(bytes) {
                         *item = 0;
                     }
@@ -319,7 +348,7 @@ fn capture_loop(
                         bytes_read += (extra_bytes_left as f32 / params.resampling_ratio) as usize;
                         extra_bytes_left = 0;
                     }
-                } else if bytes == 0 && capture_bytes > 0 {
+                } else {
                     debug!("Reached end of file");
                     let extra_samples =
                         extra_bytes_left / params.store_bytes_per_sample / params.channels;
@@ -337,6 +366,54 @@ fn capture_loop(
                         .unwrap_or(());
                     break;
                 }
+            }
+            Ok(ReadResult::Timeout(bytes)) => {
+                bytes_read = bytes;
+                nbr_bytes_read += bytes;
+                if bytes > 0 {
+                    for item in buf.iter_mut().take(capture_bytes).skip(bytes) {
+                        *item = 0;
+                    }
+                    debug!(
+                        "Timed out after reading {} of {} bytes",
+                        bytes, capture_bytes
+                    );
+                    let missing =
+                        ((capture_bytes - bytes) as f32 * params.resampling_ratio) as usize;
+                    if extra_bytes_left > missing {
+                        bytes_read = capture_bytes;
+                        extra_bytes_left -= missing;
+                    } else {
+                        bytes_read += (extra_bytes_left as f32 / params.resampling_ratio) as usize;
+                        extra_bytes_left = 0;
+                    }
+                } else {
+                    trace!("Read timed out");
+                    let msg = AudioMessage::Pause;
+                    msg_channels.audio.send(msg).unwrap_or(());
+
+                    if !stalled {
+                        debug!("Entering stalled state");
+                        stalled = true;
+                        prev_state = state;
+                        state = ProcessingState::Stalled;
+                        let mut capt_stat = params.capture_status.write().unwrap();
+                        capt_stat.state = ProcessingState::Stalled;
+                    }
+                    continue;
+                }
+            }
+            Ok(ReadResult::Complete(bytes)) => {
+                //trace!("Captured {} bytes", bytes);
+                if stalled {
+                    debug!("Leaving stalled state, resuming processing");
+                    stalled = false;
+                    state = prev_state;
+                    let mut capt_stat = params.capture_status.write().unwrap();
+                    capt_stat.state = state;
+                }
+                bytes_read = bytes;
+                nbr_bytes_read += bytes;
                 averager.add_value(bytes);
                 if averager.larger_than_millis(
                     params.capture_status.read().unwrap().update_interval as u64,
@@ -399,7 +476,7 @@ fn capture_loop(
         state = silence_counter.update(value_range);
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
-                let new_waves = resampl.process(&chunk.waveforms).unwrap();
+                let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
                 let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                 if chunk_frames == 0 {
                     chunk_frames = params.chunksize;
@@ -410,7 +487,17 @@ fn capture_loop(
                 chunk.waveforms = new_waves;
             }
             let msg = AudioMessage::Audio(chunk);
-            msg_channels.audio.send(msg).unwrap_or(());
+            if msg_channels.audio.send(msg).is_err() {
+                info!("Processing thread has already stopped.");
+                break;
+            }
+        } else if state == ProcessingState::Paused {
+            let msg = AudioMessage::Pause;
+            if msg_channels.audio.send(msg).is_err() {
+                info!("Processing thread has already stopped.");
+                break;
+            }
+            sleep_until_next(bytes_per_frame, params.capture_samplerate, capture_bytes);
         } else {
             sleep_until_next(bytes_per_frame, params.capture_samplerate, capture_bytes);
         }
@@ -486,11 +573,28 @@ impl CaptureDevice for FileCaptureDevice {
                     stop_on_rate_change,
                     rate_measure_interval,
                 };
-                let file_res: Result<Box<dyn Read>, std::io::Error> = match source {
-                    CaptureSource::Filename(filename) => {
-                        File::open(filename).map(|f| Box::new(f) as Box<dyn Read>)
-                    }
-                    CaptureSource::Stdin => Ok(Box::new(stdin())),
+                #[cfg(not(target_os = "linux"))]
+                let file_res: Result<Box<dyn Reader>, std::io::Error> = match source {
+                    CaptureSource::Filename(filename) => File::open(filename)
+                        .map(|f| Box::new(BlockingReader::new(f)) as Box<dyn Reader>),
+                    CaptureSource::Stdin => Ok(Box::new(BlockingReader::new(stdin()))),
+                };
+                #[cfg(target_os = "linux")]
+                let file_res: Result<Box<dyn Reader>, std::io::Error> = match source {
+                    CaptureSource::Filename(filename) => OpenOptions::new()
+                        .read(true)
+                        .custom_flags(nix::libc::O_NONBLOCK)
+                        .open(filename)
+                        .map(|f| {
+                            Box::new(NonBlockingReader::new(
+                                f,
+                                2 * 1000 * chunksize as u64 / samplerate as u64,
+                            )) as Box<dyn Reader>
+                        }),
+                    CaptureSource::Stdin => Ok(Box::new(NonBlockingReader::new(
+                        stdin(),
+                        2 * 1000 * chunksize as u64 / samplerate as u64,
+                    ))),
                 };
                 match file_res {
                     Ok(mut file) => {
@@ -507,8 +611,9 @@ impl CaptureDevice for FileCaptureDevice {
                         if skip_bytes > 0 {
                             debug!("skipping the first {} bytes", skip_bytes);
                             let mut tempbuf = vec![0u8; skip_bytes];
-                            let _ = file.read_exact(&mut tempbuf);
+                            let _ = file.read(&mut tempbuf);
                         }
+
                         debug!("starting captureloop");
                         capture_loop(file, params, msg_channels, resampler);
                     }
@@ -546,29 +651,6 @@ fn send_silence(
         debug!("Sending extra chunk of {} frames", chunk_samples);
         audio_channel.send(msg).unwrap_or(());
         samples_left -= chunk_samples;
-    }
-}
-
-fn read_retry(file: &mut dyn Read, mut buf: &mut [u8]) -> Res<usize> {
-    let requested = buf.len();
-    while !buf.is_empty() {
-        match file.read(buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                let tmp = buf;
-                buf = &mut tmp[n..];
-            }
-            Err(ref e) if e.kind() == ErrorKind::Interrupted => {
-                debug!("got Interrupted");
-                thread::sleep(Duration::from_millis(10))
-            }
-            Err(e) => return Err(Box::new(e)),
-        }
-    }
-    if !buf.is_empty() {
-        Ok(requested - buf.len())
-    } else {
-        Ok(requested)
     }
 }
 

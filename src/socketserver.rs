@@ -10,18 +10,18 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use tungstenite::server::accept;
+use tungstenite::accept;
 use tungstenite::Message;
 use tungstenite::WebSocket;
 
+use crate::config;
+use crate::ExitRequest;
+use crate::ProcessingState;
+use crate::Res;
 use crate::{
     list_supported_devices, CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus,
     StopReason,
 };
-use config;
-use ExitRequest;
-use ProcessingState;
-use Res;
 
 #[derive(Debug, Clone)]
 pub struct SharedData {
@@ -672,7 +672,7 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
 
 #[cfg(test)]
 mod tests {
-    use socketserver::{parse_command, WsCommand};
+    use crate::socketserver::{parse_command, WsCommand};
     use tungstenite::Message;
 
     #[test]

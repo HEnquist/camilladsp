@@ -3,14 +3,14 @@
 
 //mod filters;
 
+use crate::config;
 use crate::filters::Filter;
-use config;
 
 // Sample format
 //type SmpFmt = i16;
-use NewValue;
-use PrcFmt;
-use Res;
+use crate::NewValue;
+use crate::PrcFmt;
+use crate::Res;
 
 /// Struct to hold the biquad coefficients
 #[derive(Clone, Copy, Debug)]
@@ -397,6 +397,18 @@ impl Biquad {
         self.s2 = self.coeffs.b2 * input - self.coeffs.a2 * out;
         out
     }
+
+    /// Flush stored subnormal numbers to zero.
+    fn flush_subnormals(&mut self) {
+        if self.s1.is_subnormal() {
+            trace!("Biquad filter '{}', flushing subnormal s1", self.name);
+            self.s1 = 0.0;
+        }
+        if self.s2.is_subnormal() {
+            trace!("Biquad filter '{}', flushing subnormal s2", self.name);
+            self.s2 = 0.0;
+        }
+    }
 }
 
 impl Filter for Biquad {
@@ -404,10 +416,11 @@ impl Filter for Biquad {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         for item in waveform.iter_mut() {
             *item = self.process_single(*item);
         }
+        self.flush_subnormals();
         Ok(())
     }
 
@@ -521,10 +534,10 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 
 #[cfg(test)]
 mod tests {
+    use crate::biquad::{validate_config, Biquad, BiquadCoefficients};
+    use crate::config::{BiquadParameters, NotchWidth, PeakingWidth, ShelfSteepness};
+    use crate::filters::Filter;
     use crate::PrcFmt;
-    use biquad::{validate_config, Biquad, BiquadCoefficients};
-    use config::{BiquadParameters, NotchWidth, PeakingWidth, ShelfSteepness};
-    use filters::Filter;
     use num_complex::Complex;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {

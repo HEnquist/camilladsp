@@ -1,12 +1,12 @@
+use crate::biquad;
+use crate::config;
 use crate::filters::Filter;
-use biquad;
-use config;
 use std::sync::{Arc, RwLock};
 
-use NewValue;
-use PrcFmt;
-use ProcessingParameters;
-use Res;
+use crate::NewValue;
+use crate::PrcFmt;
+use crate::ProcessingParameters;
+use crate::Res;
 
 pub struct Loudness {
     pub name: String,
@@ -116,7 +116,7 @@ impl Filter for Loudness {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         let shared_vol = self.processing_status.read().unwrap().volume;
         let shared_mute = self.processing_status.read().unwrap().mute;
 

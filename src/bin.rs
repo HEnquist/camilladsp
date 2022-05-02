@@ -1,7 +1,6 @@
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 extern crate alsa;
 extern crate camillalib;
-extern crate chrono;
 extern crate clap;
 #[cfg(feature = "FFTW")]
 extern crate fftw;
@@ -21,23 +20,22 @@ extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
 
+extern crate flexi_logger;
+extern crate time;
 #[macro_use]
-extern crate slog;
-extern crate slog_async;
-extern crate slog_term;
-#[macro_use]
-extern crate slog_scope;
-
-use slog::Drain;
+extern crate log;
 
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
 use std::env;
-use std::fs::OpenOptions;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::thread;
-use std::time;
+
+use flexi_logger::DeferredNow;
+use log::Record;
+use time::format_description;
 
 use camillalib::Res;
 
@@ -58,6 +56,52 @@ use camillalib::{
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
 const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
 const EXIT_OK: i32 = 0; // All ok
+
+// Time format string for logger
+const TS_S: &str = "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:6]";
+lazy_static::lazy_static! {
+    static ref TS: Vec<format_description::FormatItem<'static>>
+        = format_description::parse(TS_S).unwrap(/*ok*/);
+}
+
+// Customized version of `colored_opt_format` from flexi_logger.
+fn custom_colored_logger_format(
+    w: &mut dyn std::io::Write,
+    now: &mut DeferredNow,
+    record: &Record,
+) -> Result<(), std::io::Error> {
+    let level = record.level();
+    write!(
+        w,
+        "{} {:<5} [{}:{}] {}",
+        now.now()
+            .format(&TS)
+            .unwrap_or_else(|_| "Timestamping failed".to_string()),
+        flexi_logger::style(level).paint(level.to_string()),
+        record.file().unwrap_or("<unnamed>"),
+        record.line().unwrap_or(0),
+        &record.args()
+    )
+}
+
+// Customized version of `opt_format` from flexi_logger.
+pub fn custom_logger_format(
+    w: &mut dyn std::io::Write,
+    now: &mut DeferredNow,
+    record: &Record,
+) -> Result<(), std::io::Error> {
+    write!(
+        w,
+        "{} {:<5} [{}:{}] {}",
+        now.now()
+            .format(&TS)
+            .unwrap_or_else(|_| "Timestamping failed".to_string()),
+        record.level(),
+        record.file().unwrap_or("<unnamed>"),
+        record.line().unwrap_or(0),
+        &record.args()
+    )
+}
 
 fn get_new_config(
     config_path: &Arc<Mutex<Option<String>>>,
@@ -181,11 +225,11 @@ fn run(
         )
         .unwrap();
 
-    let delay = time::Duration::from_millis(100);
+    let delay = std::time::Duration::from_millis(100);
 
     let mut pb_ready = false;
     let mut cap_ready = false;
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&signal_reload))?;
     signal_hook::flag::register_usize(
         signal_hook::consts::SIGINT,
@@ -217,7 +261,9 @@ fn run(
                         }
                         config::ConfigChange::Devices => {
                             debug!("Devices changed, restart required.");
-                            tx_command_cap.send(CommandMessage::Exit).unwrap();
+                            if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                                debug!("Capture thread has already exited");
+                            }
                             trace!("Wait for pb..");
                             pb_handle.join().unwrap();
                             trace!("Wait for cap..");
@@ -242,7 +288,9 @@ fn run(
                 ExitRequest::EXIT => {
                     debug!("Exit requested...");
                     signal_exit.store(0, Ordering::Relaxed);
-                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                        debug!("Capture thread has already exited");
+                    }
                     trace!("Wait for pb..");
                     pb_handle.join().unwrap();
                     trace!("Wait for cap..");
@@ -254,7 +302,9 @@ fn run(
                 ExitRequest::STOP => {
                     debug!("Stop requested...");
                     signal_exit.store(0, Ordering::Relaxed);
-                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                        debug!("Capture thread has already exited");
+                    }
                     trace!("Wait for pb..");
                     pb_handle.join().unwrap();
                     trace!("Wait for cap..");
@@ -292,7 +342,9 @@ fn run(
                 }
                 StatusMessage::PlaybackError(message) => {
                     error!("Playback error: {}", message);
-                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                        debug!("Capture thread has already exited");
+                    }
                     if is_starting {
                         debug!("Error while starting, release barrier");
                         barrier.wait();
@@ -323,7 +375,9 @@ fn run(
                 }
                 StatusMessage::PlaybackFormatChange(rate) => {
                     error!("Playback stopped due to external format change");
-                    tx_command_cap.send(CommandMessage::Exit).unwrap();
+                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                        debug!("Capture thread has already exited");
+                    }
                     if is_starting {
                         debug!("Error while starting, release barrier");
                         barrier.wait();
@@ -367,22 +421,28 @@ fn run(
                 }
                 StatusMessage::SetSpeed(speed) => {
                     debug!("SetSpeed message received");
-                    tx_command_cap
+                    if tx_command_cap
                         .send(CommandMessage::SetSpeed { speed })
-                        .unwrap();
+                        .is_err()
+                    {
+                        debug!("Capture thread has already exited");
+                    }
                 }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            _ => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                warn!("Capture, Playback and Processing threads have exited");
+                status_structs.status.write().unwrap().stop_reason = StopReason::UnknownError(
+                    "Capture, Playback and Processing threads have exited".to_string(),
+                );
+                return Ok(ExitState::Restart);
+            }
         }
     }
 }
 
 fn main_process() -> i32 {
     let mut features = Vec::new();
-    if cfg!(all(feature = "alsa-backend", target_os = "linux")) {
-        features.push("alsa-backend");
-    }
     if cfg!(feature = "pulse-backend") {
         features.push("pulse-backend");
     }
@@ -614,62 +674,46 @@ fn main_process() -> i32 {
     let matches = clapapp.get_matches();
 
     let mut loglevel = match matches.occurrences_of("verbosity") {
-        0 => slog::Level::Info,
-        1 => slog::Level::Debug,
-        2 => slog::Level::Trace,
-        _ => slog::Level::Trace,
-    };
-    loglevel = match matches.value_of("loglevel") {
-        Some("trace") => slog::Level::Trace,
-        Some("debug") => slog::Level::Debug,
-        Some("info") => slog::Level::Info,
-        Some("warn") => slog::Level::Warning,
-        Some("error") => slog::Level::Error,
-        Some("off") => slog::Level::Critical,
-        _ => loglevel,
+        0 => "info",
+        1 => "debug",
+        2 => "trace",
+        _ => "trace",
     };
 
-    let drain = match matches.value_of("loglevel") {
-        Some("off") => {
-            let drain = slog::Discard;
-            slog_async::Async::new(drain).build().fuse()
-        }
-        _ => {
-            if let Some(logfile) = matches.value_of("logfile") {
-                let file = OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .truncate(true)
-                    .open(logfile)
-                    .unwrap();
-                let decorator = slog_term::PlainDecorator::new(file);
-                let drain = slog_term::FullFormat::new(decorator)
-                    .build()
-                    .filter_level(loglevel)
-                    .fuse();
-                slog_async::Async::new(drain).build().fuse()
-            } else {
-                let decorator = slog_term::TermDecorator::new().stderr().build();
-                let drain = slog_term::FullFormat::new(decorator)
-                    .build()
-                    .filter_level(loglevel)
-                    .fuse();
-                slog_async::Async::new(drain).build().fuse()
-            }
-        }
-    };
+    if let Some(level) = matches.value_of("loglevel") {
+        loglevel = level;
+    }
 
-    let log = slog::Logger::root(
-        drain,
-        o!("module" => {
-        slog::FnValue(
-            |rec : &slog::Record| { rec.module() }
-                )
-            }),
+    let _logger = if let Some(logfile) = matches.value_of("logfile") {
+        let mut path = PathBuf::from(logfile);
+        if !path.is_absolute() {
+            let mut fullpath = std::env::current_dir().unwrap();
+            fullpath.push(path);
+            path = fullpath;
+        }
+        flexi_logger::Logger::try_with_str(loglevel)
+            .unwrap()
+            .format(custom_logger_format)
+            .log_to_file(flexi_logger::FileSpec::try_from(path).unwrap())
+            .write_mode(flexi_logger::WriteMode::Async)
+            .start()
+            .unwrap()
+    } else {
+        flexi_logger::Logger::try_with_str(loglevel)
+            .unwrap()
+            .format(custom_colored_logger_format)
+            .set_palette("196;208;-;27;8".to_string())
+            .log_to_stderr()
+            .write_mode(flexi_logger::WriteMode::Async)
+            .start()
+            .unwrap()
+    };
+    info!("CamillaDSP version {}", crate_version!());
+    info!(
+        "Running on {}, {}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
     );
-
-    let _guard = slog_scope::set_global_logger(log);
-
     // logging examples
     //trace!("trace message"); //with -vv
     //debug!("debug message"); //with -v
@@ -677,7 +721,7 @@ fn main_process() -> i32 {
     //warn!("warn message");
     //error!("error message");
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let _signal = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGHUP, || debug!("Received SIGHUP"))
     };
@@ -808,7 +852,7 @@ fn main_process() -> i32 {
         }
     }
 
-    let delay = time::Duration::from_millis(100);
+    let delay = std::time::Duration::from_millis(100);
     loop {
         debug!("Wait for config");
         while new_config.lock().unwrap().is_none() {
@@ -875,8 +919,5 @@ fn main_process() -> i32 {
 }
 
 fn main() {
-    let drain = slog_async::Async::new(slog::Discard).build().fuse();
-    let log = slog::Logger::root(drain, o!());
-    let _guard = slog_scope::set_global_logger(log);
     std::process::exit(main_process());
 }

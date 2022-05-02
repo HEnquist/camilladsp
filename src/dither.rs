@@ -1,11 +1,11 @@
+use crate::config;
 use crate::filters::Filter;
-use config;
 use rand::thread_rng;
 use rand_distr::{Distribution, Triangular};
 
-use NewValue;
-use PrcFmt;
-use Res;
+use crate::NewValue;
+use crate::PrcFmt;
+use crate::Res;
 
 #[derive(Clone, Debug)]
 pub struct Dither {
@@ -164,7 +164,7 @@ impl Filter for Dither {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         //rand_nbrs = np.random.triangular(-1, 0, 1, len(wave_in))
 
         if self.filterlen > 0 {
@@ -248,10 +248,10 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::DitherParameters;
+    use crate::dither::Dither;
+    use crate::filters::Filter;
     use crate::PrcFmt;
-    use config::DitherParameters;
-    use dither::Dither;
-    use filters::Filter;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);

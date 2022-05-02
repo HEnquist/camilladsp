@@ -1,13 +1,17 @@
 // Traits for audio devices
-#[cfg(all(feature = "alsa-backend", target_os = "linux"))]
-use alsadevice;
-use config;
+#[cfg(target_os = "linux")]
+use crate::alsadevice;
+use crate::config;
+#[cfg(target_os = "macos")]
+use crate::coreaudiodevice;
 #[cfg(feature = "cpal-backend")]
-use cpaldevice;
-use filedevice;
-use num_integer as integer;
+use crate::cpaldevice;
+use crate::filedevice;
 #[cfg(feature = "pulse-backend")]
-use pulsedevice;
+use crate::pulsedevice;
+#[cfg(target_os = "windows")]
+use crate::wasapidevice;
+use num_integer as integer;
 use rubato::{
     FftFixedOut, InterpolationParameters, InterpolationType, SincFixedOut, VecResampler,
     WindowFunction,
@@ -18,14 +22,12 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Instant;
-#[cfg(target_os = "windows")]
-use wasapidevice;
 
+use crate::CommandMessage;
+use crate::PrcFmt;
+use crate::Res;
+use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use PrcFmt;
-use Res;
-use StatusMessage;
 
 pub const RATE_CHANGE_THRESHOLD_COUNT: usize = 3;
 pub const RATE_CHANGE_THRESHOLD_VALUE: f32 = 0.04;
@@ -58,6 +60,7 @@ impl DeviceError {
 pub enum AudioMessage {
     //Quit,
     Audio(AudioChunk),
+    Pause,
     EndOfStream,
 }
 
@@ -198,7 +201,7 @@ pub trait CaptureDevice {
 /// Create a playback device.
 pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     match conf.playback {
-        #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+        #[cfg(target_os = "linux")]
         config::PlaybackDevice::Alsa {
             channels,
             device,
@@ -246,14 +249,15 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             sample_format: format,
         }),
-        #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+        #[cfg(target_os = "macos")]
         config::PlaybackDevice::CoreAudio {
             channels,
             device,
             format,
-        } => Box::new(cpaldevice::CpalPlaybackDevice {
+            change_format,
+            exclusive,
+        } => Box::new(coreaudiodevice::CoreaudioPlaybackDevice {
             devname: device,
-            host: cpaldevice::CpalHost::CoreAudio,
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
@@ -261,6 +265,8 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             target_level: conf.target_level,
             adjust_period: conf.adjust_period,
             enable_rate_adjust: conf.enable_rate_adjust,
+            change_format,
+            exclusive,
         }),
         #[cfg(target_os = "windows")]
         config::PlaybackDevice::Wasapi {
@@ -413,20 +419,21 @@ pub fn get_resampler(
             "Creating asynchronous resampler with parameters: {:?}",
             parameters
         );
-        Some(Box::new(SincFixedOut::<PrcFmt>::new(
-            samplerate as f64 / capture_samplerate as f64,
-            parameters,
-            chunksize,
-            num_channels,
-        )))
+        Some(Box::new(
+            SincFixedOut::<PrcFmt>::new(
+                samplerate as f64 / capture_samplerate as f64,
+                1.1,
+                parameters,
+                chunksize,
+                num_channels,
+            )
+            .unwrap(),
+        ))
     } else {
-        Some(Box::new(FftFixedOut::<PrcFmt>::new(
-            capture_samplerate,
-            samplerate,
-            chunksize,
-            2,
-            num_channels,
-        )))
+        Some(Box::new(
+            FftFixedOut::<PrcFmt>::new(capture_samplerate, samplerate, chunksize, 2, num_channels)
+                .unwrap(),
+        ))
     }
 }
 
@@ -452,13 +459,11 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         info!("Using Async resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time.");
     }
     match conf.capture {
-        #[cfg(all(feature = "alsa-backend", target_os = "linux"))]
+        #[cfg(target_os = "linux")]
         config::CaptureDevice::Alsa {
             channels,
             device,
             format,
-            retry_on_error,
-            avoid_blocking_read,
         } => Box::new(alsadevice::AlsaCaptureDevice {
             devname: device,
             samplerate: conf.samplerate,
@@ -470,8 +475,6 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
-            retry_on_error,
-            avoid_blocking_read,
             stop_on_rate_change: conf.stop_on_rate_change,
             rate_measure_interval: conf.rate_measure_interval,
         }),
@@ -539,14 +542,14 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             stop_on_rate_change: conf.stop_on_rate_change,
             rate_measure_interval: conf.rate_measure_interval,
         }),
-        #[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+        #[cfg(target_os = "macos")]
         config::CaptureDevice::CoreAudio {
             channels,
             device,
             format,
-        } => Box::new(cpaldevice::CpalCaptureDevice {
+            change_format,
+        } => Box::new(coreaudiodevice::CoreaudioCaptureDevice {
             devname: device,
-            host: cpaldevice::CpalHost::CoreAudio,
             samplerate: conf.samplerate,
             enable_resampling: conf.enable_resampling,
             resampler_conf: conf.resampler_type,
@@ -554,6 +557,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             chunksize: conf.chunksize,
             channels,
             sample_format: format,
+            change_format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
             stop_on_rate_change: conf.stop_on_rate_change,
@@ -608,7 +612,7 @@ pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, 
     let rel_diff = (diff as f64) / (srate as f64);
     let speed = 1.0 - 0.5 * rel_diff / adjust_period as f64;
     debug!(
-        "Current buffer level: {}, corrected capture rate: {}%",
+        "Current buffer level: {:.1}, corrected capture rate: {:.4}%",
         avg_level,
         100.0 * speed
     );
@@ -617,7 +621,7 @@ pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, 
 
 #[cfg(test)]
 mod tests {
-    use audiodevice::{rms_and_peak, AudioChunk, ChunkStats};
+    use crate::audiodevice::{rms_and_peak, AudioChunk, ChunkStats};
 
     #[test]
     fn vec_rms_and_peak() {

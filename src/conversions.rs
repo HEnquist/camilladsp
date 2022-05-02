@@ -1,5 +1,6 @@
-use audiodevice::*;
-use config::{FileFormat, SampleFormat};
+use crate::audiodevice::*;
+use crate::config::{FileFormat, SampleFormat};
+use crate::PrcFmt;
 #[cfg(feature = "cpal-backend")]
 use num_traits;
 use rawsample;
@@ -7,7 +8,6 @@ use rawsample::{SampleReader, SampleWriter};
 #[cfg(feature = "cpal-backend")]
 use std::collections::VecDeque;
 use std::io::Cursor;
-use PrcFmt;
 
 pub fn map_formats(sampleformat: &SampleFormat) -> rawsample::SampleFormat {
     match sampleformat {
@@ -63,8 +63,9 @@ pub fn chunk_to_buffer_rawbytes(
     }
     if clipped > 0 {
         warn!(
-            "Clipping detected, {} samples clipped, peak {}%",
+            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
             clipped,
+            20.0 * peak.log10(),
             peak * 100.0
         );
     }
@@ -159,8 +160,9 @@ pub fn chunk_to_queue_int<T: num_traits::cast::NumCast>(
     }
     if clipped > 0 {
         warn!(
-            "Clipping detected, {} samples clipped, peak {}%",
+            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
             clipped,
+            20.0 * peak.log10(),
             peak * 100.0
         );
     }
@@ -243,8 +245,9 @@ pub fn chunk_to_queue_float<T: num_traits::cast::NumCast>(
     }
     if clipped > 0 {
         warn!(
-            "Clipping detected, {} samples clipped, peak {}%",
+            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
             clipped,
+            20.0 * peak.log10(),
             peak * 100.0
         );
     }
@@ -282,11 +285,11 @@ pub fn queue_to_chunk_float<T: num_traits::cast::AsPrimitive<PrcFmt>>(
 
 #[cfg(test)]
 mod tests {
+    use crate::audiodevice::AudioChunk;
+    use crate::config::SampleFormat;
+    use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
     #[cfg(feature = "cpal-backend")]
     use crate::PrcFmt;
-    use audiodevice::AudioChunk;
-    use config::SampleFormat;
-    use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
     #[cfg(feature = "cpal-backend")]
     use conversions::{
         chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,

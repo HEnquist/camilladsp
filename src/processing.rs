@@ -1,10 +1,10 @@
-use audiodevice::*;
-use config;
-use filters;
+use crate::audiodevice::*;
+use crate::config;
+use crate::filters;
+use crate::ProcessingParameters;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use ProcessingParameters;
 
 pub fn run_processing(
     conf_proc: config::Configuration,
@@ -37,6 +37,14 @@ pub fn run_processing(
                         info!("Playback thread has already stopped.");
                     }
                     break;
+                }
+                Ok(AudioMessage::Pause) => {
+                    trace!("AudioMessage::Pause received");
+                    let msg = AudioMessage::Pause;
+                    if tx_pb.send(msg).is_err() {
+                        info!("Playback thread has already stopped.");
+                        break;
+                    }
                 }
                 Err(err) => {
                     error!("Message channel error: {}", err);

@@ -20,7 +20,7 @@ For commands that take an argument, they are instead given as a key and a value:
 The return values are also JSON. The commands that don't return a value return a structure containing the command name and the result, which is either Ok or Error:
 ```json
 {
-  "SetUpdateInterval: {
+  "SetUpdateInterval": {
     "result": "Ok"
   }
 }
@@ -29,7 +29,7 @@ The return values are also JSON. The commands that don't return a value return a
 The commands that return a value also include a "value" field:
 ```json
 {
-  "GetUpdateInterval: {
+  "GetUpdateInterval": {
     "result": "Ok",
     "value": 500
   }
@@ -62,6 +62,7 @@ Commands for reading status parameters.
   * "Paused": processing is paused because the input signal is silent.
   * "Inactive": the program is inactive and waiting for a new configuration.
   * "Starting": the program is starting up processing with a new configuration.
+  * "Stalled": processing is stalled because the capture device isn't providing any data.
 - `GetStopReason` : get the last reason why CamillaDSP stopped the processing. Possible values are:
   * "None": processing hasn't stopped.
   * "Done": processing stopped when the capture device reached the end of the stream.

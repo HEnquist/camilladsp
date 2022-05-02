@@ -1,10 +1,10 @@
-use audiodevice::*;
-use config;
-use config::{ConfigError, SampleFormat};
-use conversions::{
+use crate::audiodevice::*;
+use crate::config;
+use crate::config::{ConfigError, SampleFormat};
+use crate::conversions::{
     chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
 };
-use countertimer;
+use crate::countertimer;
 use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
@@ -17,13 +17,13 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time;
 
+use crate::CommandMessage;
+use crate::NewValue;
+use crate::PrcFmt;
+use crate::ProcessingState;
+use crate::Res;
+use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use NewValue;
-use PrcFmt;
-use ProcessingState;
-use Res;
-use StatusMessage;
 
 #[derive(Clone, Debug)]
 pub enum CpalHost {
@@ -251,6 +251,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                         running = false;
                                                         warn!("Playback interrupted, no data available");
                                                     }
+                                                    // Something went wrong, lets just clear the buffer
                                                     for sample in buffer.iter_mut() {
                                                         *sample = 0;
                                                     }
@@ -306,6 +307,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                         running = false;
                                                         warn!("Playback interrupted, no data available");
                                                     }
+                                                    // Something went wrong, lets just clear the buffer
                                                     for sample in buffer.iter_mut() {
                                                         *sample = 0.0;
                                                     }
@@ -364,7 +366,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             timer.restart();
                                             buffer_avg.restart();
                                             debug!(
-                                                "Current buffer level {}, set capture rate to {}%",
+                                                "Current buffer level {:.1}, set capture rate to {:.4}%",
                                                 av_delay,
                                                 100.0 * speed
                                             );
@@ -381,6 +383,9 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                     playback_status.write().unwrap().signal_peak =
                                         chunk_stats.peak_db();
                                     tx_dev.send(chunk).unwrap();
+                                }
+                                Ok(AudioMessage::Pause) => {
+                                    trace!("Pause message received");
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
@@ -417,10 +422,10 @@ fn get_nbr_capture_samples(
         #[cfg(feature = "debug")]
         trace!(
             "Resampler needs {} frames, will read {} samples",
-            resampl.nbr_frames_needed(),
-            resampl.nbr_frames_needed() * channels;
+            resampl.input_frames_next(),
+            resampl.input_frames_next() * channels,
         );
-        resampl.nbr_frames_needed() * channels
+        resampl.input_frames_next() * channels
     } else {
         capture_samples
     }
@@ -571,7 +576,11 @@ impl CaptureDevice for CpalCaptureDevice {
                                         }
                                     }
                                 }
-                                Err(_) => {}
+                                Err(mpsc::TryRecvError::Empty) => {}
+                                Err(mpsc::TryRecvError::Disconnected) => {
+                                    error!("Command channel was closed");
+                                    break;
+                                }
                             };
                             capture_samples = get_nbr_capture_samples(
                                 &resampler,
@@ -669,7 +678,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
-                                    let new_waves = resampl.process(&chunk.waveforms).unwrap();
+                                    let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
                                     let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                                     if chunk_frames == 0 {
                                         chunk_frames = chunksize;
@@ -679,7 +688,17 @@ impl CaptureDevice for CpalCaptureDevice {
                                     chunk.waveforms = new_waves;
                                 }
                                 let msg = AudioMessage::Audio(chunk);
-                                channel.send(msg).unwrap();
+                                if channel.send(msg).is_err() {
+                                    info!("Processing thread has already stopped.");
+                                    break;
+                                }
+                            }
+                            else if state == ProcessingState::Paused {
+                                let msg = AudioMessage::Pause;
+                                if channel.send(msg).is_err() {
+                                    info!("Processing thread has already stopped.");
+                                    break;
+                                }
                             }
                         }
                         let mut capt_stat = capture_status.write().unwrap();

@@ -1,7 +1,7 @@
-use audiodevice::AudioChunk;
-use config;
-use PrcFmt;
-use Res;
+use crate::audiodevice::AudioChunk;
+use crate::config;
+use crate::PrcFmt;
+use crate::Res;
 
 #[derive(Clone)]
 pub struct Mixer {
@@ -139,9 +139,9 @@ pub fn get_used_input_channels(mixer_config: &config::Mixer) -> Vec<bool> {
 
 #[cfg(test)]
 mod tests {
-    use config::{Mixer, MixerChannels, MixerMapping, MixerSource};
-    use mixer;
-    use mixer::get_used_input_channels;
+    use crate::config::{Mixer, MixerChannels, MixerMapping, MixerSource};
+    use crate::mixer;
+    use crate::mixer::get_used_input_channels;
 
     #[test]
     fn check_all_used() {

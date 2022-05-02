@@ -17,11 +17,11 @@ jobs:
       - name: Install utils
         run: sudo apt-get install curl wget -y
 
-      - name: Install stable toolchain
+      - name: Install nightly toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
           components: rustfmt, clippy
 
@@ -72,11 +72,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install stable toolchain
+      - name: Install nightly toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           target: armv7-unknown-linux-gnueabihf
           override: true
 
@@ -104,11 +104,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install stable toolchain
+      - name: Install nightly toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           target: aarch64-unknown-linux-gnu
           override: true
 
@@ -137,11 +137,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install stable toolchain
+      - name: Install nightly toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
 
       - name: Run cargo check
@@ -163,24 +163,22 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install stable toolchain
+      - name: Install nightly toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --no-default-features --features cpal-backend
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --no-default-features --features cpal-backend
 
 
   check_macos_arm:
@@ -190,11 +188,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install stable toolchain for arm
+      - name: Install nightly toolchain for arm
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
           target: aarch64-apple-darwin
 
@@ -202,11 +200,11 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --target aarch64-apple-darwin --no-default-features --features cpal-backend
+          args: --target aarch64-apple-darwin
         env:
-          SDKROOT: /Applications/Xcode_12.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.0.sdk
-          MACOSX_DEPLOYMENT_TARGET: 11.0
-          DEVELOPER_DIR: /Applications/Xcode_12.2.app
+          SDKROOT: /Applications/Xcode_12.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.1.sdk
+          MACOSX_DEPLOYMENT_TARGET: 11.1
+          DEVELOPER_DIR: /Applications/Xcode_12.4.app
 
 
 

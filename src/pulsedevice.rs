@@ -3,23 +3,23 @@ use pulse;
 use pulse::sample;
 use pulse::stream::Direction;
 
-use audiodevice::*;
-use config;
-use config::SampleFormat;
-use conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-use countertimer;
+use crate::audiodevice::*;
+use crate::config;
+use crate::config::SampleFormat;
+use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+use crate::countertimer;
 use rubato::VecResampler;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::CommandMessage;
+use crate::PrcFmt;
+use crate::ProcessingState;
+use crate::Res;
+use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
-use CommandMessage;
-use PrcFmt;
-use ProcessingState;
-use Res;
-use StatusMessage;
 
 #[derive(Debug)]
 pub struct PulseError {
@@ -207,6 +207,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                     //    chunk_stats.peak_db()
                                     //);
                                 }
+                                Ok(AudioMessage::Pause) => {
+                                    trace!("Pause message received");
+                                }
                                 Ok(AudioMessage::EndOfStream) => {
                                     status_channel.send(StatusMessage::PlaybackDone).unwrap();
                                     break;
@@ -241,14 +244,14 @@ fn get_nbr_capture_bytes(
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        //let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
+        //let new_capture_bytes = resampl.input_frames_next() * channels * store_bytes_per_sample;
         //trace!(
         //    "Resampler needs {} frames, will read {} bytes",
-        //    resampl.nbr_frames_needed(),
+        //    resampl.input_frames_next(),
         //    new_capture_bytes
         //);
         //new_capture_bytes
-        resampl.nbr_frames_needed() * channels * store_bytes_per_sample
+        resampl.input_frames_next() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }
@@ -346,7 +349,11 @@ impl CaptureDevice for PulseCaptureDevice {
                                         }
                                     }
                                 }
-                                Err(_) => {}
+                                Err(mpsc::TryRecvError::Empty) => {}
+                                Err(mpsc::TryRecvError::Disconnected) => {
+                                    error!("Command channel was closed");
+                                    break;
+                                }
                             };
                             capture_bytes = get_nbr_capture_bytes(
                                 &resampler,
@@ -393,7 +400,7 @@ impl CaptureDevice for PulseCaptureDevice {
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
-                                    let new_waves = resampl.process(&chunk.waveforms).unwrap();
+                                    let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
                                     let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                                     if chunk_frames == 0 {
                                         chunk_frames = chunksize;
@@ -403,7 +410,17 @@ impl CaptureDevice for PulseCaptureDevice {
                                     chunk.waveforms = new_waves;
                                 }
                                 let msg = AudioMessage::Audio(chunk);
-                                channel.send(msg).unwrap();
+                                if channel.send(msg).is_err() {
+                                    info!("Processing thread has already stopped.");
+                                    break;
+                                }
+                            }
+                            else if state == ProcessingState::Paused {
+                                let msg = AudioMessage::Pause;
+                                if channel.send(msg).is_err() {
+                                    info!("Processing thread has already stopped.");
+                                    break;
+                                }
                             }
                             capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
                             capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();

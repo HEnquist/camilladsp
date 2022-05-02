@@ -1,14 +1,14 @@
 use std::sync::{Arc, RwLock};
 
+use crate::biquad::{Biquad, BiquadCoefficients};
+use crate::config;
+use crate::fifoqueue::FifoQueue;
 use crate::filters::Filter;
-use biquad::{Biquad, BiquadCoefficients};
-use config;
-use fifoqueue::FifoQueue;
 
-use NewValue;
-use PrcFmt;
-use ProcessingParameters;
-use Res;
+use crate::NewValue;
+use crate::PrcFmt;
+use crate::ProcessingParameters;
+use crate::Res;
 
 #[derive(Clone, Debug)]
 pub struct Gain {
@@ -114,7 +114,7 @@ impl Filter for Volume {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         let shared_vol = self.processing_status.read().unwrap().volume;
         let shared_mute = self.processing_status.read().unwrap().mute;
 
@@ -215,7 +215,7 @@ impl Filter for Gain {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         for item in waveform.iter_mut() {
             *item *= self.gain;
         }
@@ -277,6 +277,7 @@ impl Delay {
     pub fn from_config(name: String, samplerate: usize, conf: config::DelayParameters) -> Self {
         let delay_samples = match conf.unit {
             config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (samplerate as PrcFmt),
+            config::TimeUnit::Millimetres => conf.delay / 1000.0 * (samplerate as PrcFmt) / 343.0,
             config::TimeUnit::Samples => conf.delay,
         };
         Delay::new(name, samplerate, delay_samples, conf.subsample)
@@ -288,7 +289,7 @@ impl Filter for Delay {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         for item in waveform.iter_mut() {
             self.queue.push(*item)?;
             *item = self.queue.pop().unwrap();
@@ -303,6 +304,9 @@ impl Filter for Delay {
         if let config::Filter::Delay { parameters: conf } = conf {
             let delay_samples = match conf.unit {
                 config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (self.samplerate as PrcFmt),
+                config::TimeUnit::Millimetres => {
+                    conf.delay / 1000.0 * (self.samplerate as PrcFmt) / 343.0
+                }
                 config::TimeUnit::Samples => conf.delay,
             };
             let (integerdelay, biquad) = if conf.subsample {
@@ -363,8 +367,8 @@ pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
-    use basicfilters::{Delay, Gain};
-    use filters::Filter;
+    use crate::basicfilters::{Delay, Gain};
+    use crate::filters::Filter;
 
     fn is_close(left: f64, right: f64, maxdiff: f64) -> bool {
         println!("{} - {}", left, right);

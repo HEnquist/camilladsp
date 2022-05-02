@@ -72,7 +72,7 @@ impl<T: Clone + Default> FifoQueue<T> {
 
 #[cfg(test)]
 mod tests {
-    use fifoqueue::FifoQueue;
+    use crate::fifoqueue::FifoQueue;
 
     #[test]
     fn make_empty() {
