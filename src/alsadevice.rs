@@ -18,7 +18,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::sync::mpsc::Receiver;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -209,9 +209,13 @@ fn play_buffer(
             }
             Err(err) => {
                 warn!("PB: Retrying playback, error: {}", err);
-                pcmdevice.prepare()?;
-                buf_manager.sleep_for_target_delay(millis_per_frame);
-                io.writei(buffer)?;
+                if err.nix_error() != alsa::nix::errno::Errno::EAGAIN {
+                    trace!("snd_pcm_prepare");
+                    // Would recover() be better than prepare()?
+                    pcmdevice.prepare()?;
+                }
+                thread::sleep(Duration::from_millis(target_delay));
+                io.writei(buffer)?
                 break;
             }
         };
@@ -937,8 +941,8 @@ fn get_nbr_capture_bytes_and_frames(
     buf: &mut Vec<u8>,
 ) -> (usize, Frames) {
     let (capture_bytes_new, capture_frames_new) = if let Some(resampl) = &resampler {
-        //trace!("Resampler needs {} frames", resampl.nbr_frames_needed());
-        let frames = resampl.nbr_frames_needed();
+        //trace!("Resampler needs {} frames", resampl.input_frames_next());
+        let frames = resampl.input_frames_next();
         (
             frames * params.channels * params.store_bytes_per_sample,
             frames as Frames,
