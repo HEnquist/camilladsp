@@ -18,7 +18,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::sync::mpsc::Receiver;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -141,6 +141,7 @@ fn play_buffer(
     mut buffer: &[u8],
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
+    target_delay: u64,
     millis_per_frame: f32,
     bytes_per_frame: usize,
     buf_manager: &mut PlaybackBufferManager,
@@ -215,7 +216,7 @@ fn play_buffer(
                     pcmdevice.prepare()?;
                 }
                 thread::sleep(Duration::from_millis(target_delay));
-                io.writei(buffer)?
+                io.writei(buffer)?;
                 break;
             }
         };
@@ -472,12 +473,14 @@ fn playback_loop_bytes(
     params: PlaybackParams,
     buf_manager: &mut PlaybackBufferManager,
 ) {
+    let srate = pcmdevice.hw_params_current().unwrap().get_rate().unwrap();
     let mut timer = countertimer::Stopwatch::new();
     let mut chunk_stats;
     let mut buffer_avg = countertimer::Averager::new();
     let mut conversion_result;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
     let millis_per_frame: f32 = 1000.0 / params.samplerate as f32;
+    let target_delay = 1000 * (params.target_level as u64) / srate as u64;
     let mut device_stalled = false;
 
     let pcminfo = pcmdevice.info().unwrap();
@@ -528,7 +531,7 @@ fn playback_loop_bytes(
                 }
 
                 let playback_res =
-                    play_buffer(&buffer, pcmdevice, &io, millis_per_frame, params.bytes_per_frame, buf_manager);
+                    play_buffer(&buffer, pcmdevice, &io, target_delay, millis_per_frame, params.bytes_per_frame, buf_manager);
                 device_stalled = match playback_res {
                     Ok(PlaybackResult::Normal) => {
                         if device_stalled {
