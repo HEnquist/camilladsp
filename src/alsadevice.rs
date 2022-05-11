@@ -672,7 +672,7 @@ pub fn adjust_speed(
     let latency = avg_delay * capture_speed;
     let diff = latency - target_delay as f64;
     match prev_diff {
-        None => return (1.0, diff),
+        None => (1.0, diff),
         Some(prev_diff) => {
             let equality_range = target_delay as f64 / 100.0; // in frames
             let speed_delta = 1e-5;
@@ -680,23 +680,17 @@ pub fn adjust_speed(
                 if diff > (prev_diff + equality_range) {
                     // playback latency grows, need to slow down capture more
                     capture_speed -= 3.0 * speed_delta;
-                } else {
-                    if is_within(diff, prev_diff, equality_range) {
-                        // positive, not changed from last cycle, need to slow down capture a bit
-                        capture_speed -= speed_delta;
-                    }
+                } else if is_within(diff, prev_diff, equality_range) {
+                    // positive, not changed from last cycle, need to slow down capture a bit
+                    capture_speed -= speed_delta;
                 }
-            } else {
-                if diff < 0.0 {
-                    if diff < (prev_diff - equality_range) {
-                        // playback latency sinks, need to speed up capture more
-                        capture_speed += 3.0 * speed_delta;
-                    } else {
-                        if is_within(diff, prev_diff, equality_range) {
-                            // negative, not changed from last cycle, need to speed up capture a bit
-                            capture_speed += speed_delta
-                        }
-                    }
+            } else if diff < 0.0 {
+                if diff < (prev_diff - equality_range) {
+                    // playback latency sinks, need to speed up capture more
+                    capture_speed += 3.0 * speed_delta;
+                } else if is_within(diff, prev_diff, equality_range) {
+                    // negative, not changed from last cycle, need to speed up capture a bit
+                    capture_speed += speed_delta
                 }
             }
             debug!(
@@ -707,9 +701,9 @@ pub fn adjust_speed(
                 prev_diff,
                 100.0 * capture_speed
             );
-            return (capture_speed, diff);
+            (capture_speed, diff)
         }
-    };
+    }
 }
 
 pub fn is_within(value: f64, target: f64, equality_range: f64) -> bool {
@@ -723,7 +717,7 @@ fn drain_check_eos(audio: &Receiver<AudioMessage>) -> Option<AudioMessage> {
             eos = Some(msg);
         }
     }
-    return eos;
+    eos
 }
 
 fn capture_loop_bytes(
