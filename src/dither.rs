@@ -164,7 +164,7 @@ impl Filter for Dither {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         //rand_nbrs = np.random.triangular(-1, 0, 1, len(wave_in))
 
         if self.filterlen > 0 {

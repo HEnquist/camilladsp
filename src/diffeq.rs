@@ -66,6 +66,30 @@ impl DiffEq {
         self.y[self.idx_y] = out;
         out
     }
+
+    /// Flush stored subnormal numbers to zero.
+    fn flush_subnormals(&mut self) {
+        for (n, x) in self.x.iter_mut().enumerate() {
+            if x.is_subnormal() {
+                trace!(
+                    "DiffEq filter '{}', flushing subnormal x at index {}",
+                    self.name,
+                    n
+                );
+                *x = 0.0;
+            }
+        }
+        for (n, y) in self.y.iter_mut().enumerate() {
+            if y.is_subnormal() {
+                trace!(
+                    "DiffEq filter '{}', flushing subnormal y at index {}",
+                    self.name,
+                    n
+                );
+                *y = 0.0;
+            }
+        }
+    }
 }
 
 impl Filter for DiffEq {
@@ -73,10 +97,11 @@ impl Filter for DiffEq {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         for item in waveform.iter_mut() {
             *item = self.process_single(*item);
         }
+        self.flush_subnormals();
         Ok(())
     }
 

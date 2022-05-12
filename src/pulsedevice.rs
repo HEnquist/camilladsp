@@ -244,14 +244,14 @@ fn get_nbr_capture_bytes(
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        //let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
+        //let new_capture_bytes = resampl.input_frames_next() * channels * store_bytes_per_sample;
         //trace!(
         //    "Resampler needs {} frames, will read {} bytes",
-        //    resampl.nbr_frames_needed(),
+        //    resampl.input_frames_next(),
         //    new_capture_bytes
         //);
         //new_capture_bytes
-        resampl.nbr_frames_needed() * channels * store_bytes_per_sample
+        resampl.input_frames_next() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }
@@ -400,7 +400,7 @@ impl CaptureDevice for PulseCaptureDevice {
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
-                                    let new_waves = resampl.process(&chunk.waveforms).unwrap();
+                                    let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
                                     let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                                     if chunk_frames == 0 {
                                         chunk_frames = chunksize;

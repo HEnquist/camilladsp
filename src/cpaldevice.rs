@@ -422,10 +422,10 @@ fn get_nbr_capture_samples(
         #[cfg(feature = "debug")]
         trace!(
             "Resampler needs {} frames, will read {} samples",
-            resampl.nbr_frames_needed(),
-            resampl.nbr_frames_needed() * channels,
+            resampl.input_frames_next(),
+            resampl.input_frames_next() * channels,
         );
-        resampl.nbr_frames_needed() * channels
+        resampl.input_frames_next() * channels
     } else {
         capture_samples
     }
@@ -678,7 +678,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
-                                    let new_waves = resampl.process(&chunk.waveforms).unwrap();
+                                    let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
                                     let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                                     if chunk_frames == 0 {
                                         chunk_frames = chunksize;

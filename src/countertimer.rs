@@ -111,6 +111,7 @@ impl Averager {
     }
 
     pub fn restart(&mut self) {
+        trace!("Restarting averager");
         self.sum = 0.0;
         self.nbr_values = 0;
     }
@@ -118,6 +119,7 @@ impl Averager {
     pub fn add_value(&mut self, value: f64) {
         self.sum += value;
         self.nbr_values += 1;
+        trace!("Averager: added value {}, nb. {}", value, self.nbr_values);
     }
 
     pub fn get_average(&self) -> Option<f64> {

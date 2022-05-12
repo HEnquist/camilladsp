@@ -63,7 +63,7 @@ Commands for reading status parameters.
   * "Inactive": the program is inactive and waiting for a new configuration.
   * "Starting": the program is starting up processing with a new configuration.
   * "Stalled": processing is stalled because the capture device isn't providing any data.
-- `StopReason` : get the last reason why CamillaDSP stopped the processing. Possible values are:
+- `GetStopReason` : get the last reason why CamillaDSP stopped the processing. Possible values are:
   * "None": processing hasn't stopped.
   * "Done": processing stopped when the capture device reached the end of the stream.
   * "CaptureError": the capture device encountered an error.
@@ -105,7 +105,7 @@ Commands for setting and getting the volume setting. These are only relevant if 
 Commands for reading and changing the active configuration
 - `GetConfig` : read the current configuration as yaml
   * returns the config in yaml as a string
-- `GetConfigjson` : read the current configuration as json
+- `GetConfigJson` : read the current configuration as json
   * returns the config in json as a string
 - `GetConfigName` : get name and path of current config file
   * returns the path as a string
@@ -202,7 +202,7 @@ In [12]: with open('/path/to/newconfig.yml') as f:
     ...:     cfg=f.read()
     ...:
 
-In [13]: ws.send(json.dumps({"SetConfig": cfg))
+In [13]: ws.send(json.dumps({"SetConfig": cfg}))
 Out[13]: 957
 
 In [14]: print(ws.recv())

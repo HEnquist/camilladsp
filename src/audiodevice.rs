@@ -419,20 +419,21 @@ pub fn get_resampler(
             "Creating asynchronous resampler with parameters: {:?}",
             parameters
         );
-        Some(Box::new(SincFixedOut::<PrcFmt>::new(
-            samplerate as f64 / capture_samplerate as f64,
-            parameters,
-            chunksize,
-            num_channels,
-        )))
+        Some(Box::new(
+            SincFixedOut::<PrcFmt>::new(
+                samplerate as f64 / capture_samplerate as f64,
+                1.1,
+                parameters,
+                chunksize,
+                num_channels,
+            )
+            .unwrap(),
+        ))
     } else {
-        Some(Box::new(FftFixedOut::<PrcFmt>::new(
-            capture_samplerate,
-            samplerate,
-            chunksize,
-            2,
-            num_channels,
-        )))
+        Some(Box::new(
+            FftFixedOut::<PrcFmt>::new(capture_samplerate, samplerate, chunksize, 2, num_channels)
+                .unwrap(),
+        ))
     }
 }
 
@@ -463,8 +464,6 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels,
             device,
             format,
-            retry_on_error,
-            avoid_blocking_read,
         } => Box::new(alsadevice::AlsaCaptureDevice {
             devname: device,
             samplerate: conf.samplerate,
@@ -476,8 +475,6 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             sample_format: format,
             silence_threshold: conf.silence_threshold,
             silence_timeout: conf.silence_timeout,
-            retry_on_error,
-            avoid_blocking_read,
             stop_on_rate_change: conf.stop_on_rate_change,
             rate_measure_interval: conf.rate_measure_interval,
         }),
@@ -615,8 +612,9 @@ pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, 
     let rel_diff = (diff as f64) / (srate as f64);
     let speed = 1.0 - 0.5 * rel_diff / adjust_period as f64;
     debug!(
-        "Current buffer level: {:.1}, corrected capture rate: {:.4}%",
+        "Avg. buffer level: {:.1}, target level: {:.1}, corrected capture rate: {:.4}%",
         avg_level,
+        target_level,
         100.0 * speed
     );
     speed

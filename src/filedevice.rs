@@ -3,9 +3,14 @@ use crate::config;
 use crate::config::SampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
+
 use std::error::Error;
 use std::fs::File;
+#[cfg(target_os = "linux")]
+use std::fs::OpenOptions;
 use std::io::{stdin, stdout, Write};
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
@@ -202,14 +207,14 @@ fn get_nbr_capture_bytes(
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        //let new_capture_bytes = resampl.nbr_frames_needed() * channels * store_bytes_per_sample;
+        //let new_capture_bytes = resampl.input_frames_next() * channels * store_bytes_per_sample;
         //trace!(
         //    "Resampler needs {} frames, will read {} bytes",
-        //    resampl.nbr_frames_needed(),
+        //    resampl.input_frames_next(),
         //    new_capture_bytes
         //);
         //new_capture_bytes
-        resampl.nbr_frames_needed() * channels * store_bytes_per_sample
+        resampl.input_frames_next() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }
@@ -471,7 +476,7 @@ fn capture_loop(
         state = silence_counter.update(value_range);
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
-                let new_waves = resampl.process(&chunk.waveforms).unwrap();
+                let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
                 let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                 if chunk_frames == 0 {
                     chunk_frames = params.chunksize;
@@ -576,12 +581,16 @@ impl CaptureDevice for FileCaptureDevice {
                 };
                 #[cfg(target_os = "linux")]
                 let file_res: Result<Box<dyn Reader>, std::io::Error> = match source {
-                    CaptureSource::Filename(filename) => File::open(filename).map(|f| {
-                        Box::new(NonBlockingReader::new(
-                            f,
-                            2 * 1000 * chunksize as u64 / samplerate as u64,
-                        )) as Box<dyn Reader>
-                    }),
+                    CaptureSource::Filename(filename) => OpenOptions::new()
+                        .read(true)
+                        .custom_flags(nix::libc::O_NONBLOCK)
+                        .open(filename)
+                        .map(|f| {
+                            Box::new(NonBlockingReader::new(
+                                f,
+                                2 * 1000 * chunksize as u64 / samplerate as u64,
+                            )) as Box<dyn Reader>
+                        }),
                     CaptureSource::Stdin => Ok(Box::new(NonBlockingReader::new(
                         stdin(),
                         2 * 1000 * chunksize as u64 / samplerate as u64,

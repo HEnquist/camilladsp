@@ -13,8 +13,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Duration;
 use wasapi;
-//use winapi::um::avrt::AvSetMmThreadCharacteristicsA;
-//use std::ffi::CString;
+use windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW;
 
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -221,6 +220,7 @@ fn open_capture(
     )?;
     debug!("initialized capture");
     let handle = audio_client.set_get_eventhandle()?;
+    trace!("capture got event handle");
     let capture_client = audio_client.get_audiocaptureclient()?;
     debug!("Opened Wasapi capture device {}", devname);
     Ok((device, audio_client, capture_client, handle, wave_format))
@@ -276,20 +276,16 @@ fn playback_loop(
     }
     debug!("Waited for data for {} ms", waited_millis);
 
-    /*
     // Raise priority
     let mut task_idx = 0;
-    let taskname = CString::new("Pro Audio").unwrap();
     unsafe {
-        AvSetMmThreadCharacteristicsA(taskname.as_ptr(), &mut task_idx);
+        AvSetMmThreadCharacteristicsW("Pro Audio", &mut task_idx);
     }
     if task_idx > 0 {
         debug!("Playback thread raised priority, task index: {}", task_idx);
-    }
-    else {
+    } else {
         warn!("Failed to raise playback thread priority");
     }
-    */
 
     audio_client.start_stream()?;
     let mut running = true;
@@ -412,22 +408,19 @@ fn capture_loop(
 
     let mut saved_buffer: Option<Vec<u8>> = None;
 
-    /*
     // Raise priority
     let mut task_idx = 0;
-    let taskname = CString::new("Pro Audio").unwrap();
     unsafe {
-        AvSetMmThreadCharacteristicsA(taskname.as_ptr(), &mut task_idx);
+        AvSetMmThreadCharacteristicsW("Pro Audio", &mut task_idx);
     }
     if task_idx > 0 {
         debug!("Capture thread raised priority, task index: {}", task_idx);
-    }
-    else {
+    } else {
         warn!("Failed to raise capture thread priority");
     }
-    */
-
+    trace!("Starting capture stream");
     audio_client.start_stream()?;
+    trace!("Started capture stream");
     loop {
         trace!("capturing");
         if stop_signal.load(Ordering::Relaxed) {
@@ -492,9 +485,11 @@ fn capture_loop(
                 debug!("Captured a buffer marked as silent");
                 data.iter_mut().take(nbr_bytes).for_each(|val| *val = 0);
             }
-            if flags.data_discontinuity {
-                warn!("Capture device reported a buffer overrun");
-            }
+            // Disabled since VB-Audio Cable gives this all the time
+            // even though there seems to be no problem. Buggy?
+            //if flags.data_discontinuity {
+            //    warn!("Capture device reported a buffer overrun");
+            //}
 
             // Workaround for an issue with capturing from VB-Audio Cable
             // in shared mode. This device seems to misbehave and not provide
@@ -816,8 +811,8 @@ fn get_nbr_capture_frames(
 ) -> usize {
     if let Some(resampl) = &resampler {
         #[cfg(feature = "debug")]
-        trace!("Resampler needs {} frames", resampl.nbr_frames_needed());
-        resampl.nbr_frames_needed()
+        trace!("Resampler needs {} frames", resampl.input_frames_next());
+        resampl.input_frames_next()
     } else {
         capture_frames
     }
@@ -891,6 +886,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                                 (_device, audio_client, capture_client, handle, wave_format)
                             },
                             Err(err) => {
+                                error!("Failed to open capture device, error: {}", err);
                                 let msg = format!("Capture error: {}", err);
                                 tx_state_dev.send(DeviceState::Error(msg)).unwrap_or(());
                                 return;
@@ -1087,7 +1083,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         state = silence_counter.update(value_range);
                         if state == ProcessingState::Running {
                             if let Some(resampl) = &mut resampler {
-                                let new_waves = resampl.process(&chunk.waveforms).unwrap();
+                                let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
                                 let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                                 if chunk_frames == 0 {
                                     chunk_frames = chunksize;

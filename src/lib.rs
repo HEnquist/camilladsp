@@ -13,6 +13,8 @@ extern crate lazy_static;
 extern crate coreaudio;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 extern crate crossbeam_channel;
+#[cfg(target_os = "macos")]
+extern crate dispatch;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]

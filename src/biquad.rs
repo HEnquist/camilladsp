@@ -397,6 +397,18 @@ impl Biquad {
         self.s2 = self.coeffs.b2 * input - self.coeffs.a2 * out;
         out
     }
+
+    /// Flush stored subnormal numbers to zero.
+    fn flush_subnormals(&mut self) {
+        if self.s1.is_subnormal() {
+            trace!("Biquad filter '{}', flushing subnormal s1", self.name);
+            self.s1 = 0.0;
+        }
+        if self.s2.is_subnormal() {
+            trace!("Biquad filter '{}', flushing subnormal s2", self.name);
+            self.s2 = 0.0;
+        }
+    }
 }
 
 impl Filter for Biquad {
@@ -404,10 +416,11 @@ impl Filter for Biquad {
         self.name.clone()
     }
 
-    fn process_waveform(&mut self, waveform: &mut Vec<PrcFmt>) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         for item in waveform.iter_mut() {
             *item = self.process_single(*item);
         }
+        self.flush_subnormals();
         Ok(())
     }
 

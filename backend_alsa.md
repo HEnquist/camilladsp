@@ -124,8 +124,6 @@ This example configuration will be used to explain the various options specific 
     channels: 2
     device: "hw:0,1"
     format: S16LE
-    retry_on_error: false (*)
-    avoid_blocking_read: false (*)
   playback:
     type: Alsa
     channels: 2
@@ -138,17 +136,6 @@ See [Find name of device](#find-name-of-device) for what to write in the `device
 
 ### Sample rate and format
 Please see [Find valid playback and capture parameters](#find-valid-playback-and-capture-parameters).
-
-### Workarounds for device quirks
-The ALSA capture device has two optional extra properties that are used to work around quirks of some devices. 
-Both should normally be left out, or set to the default value of `false`.
-- `retry_on_error`: Set this to `true` if capturing from the USB gadget driver on for example a Raspberry Pi. 
-  This device stops providing data if playback is stopped or paused, and retrying capture after an error 
-  allows capture to continue when more data becomes available.
-- `avoid_blocking_read`: Some devices misbehave when using the blocking IO of Alsa, 
-  typically when there is no incoming data. Examples are spdif inputs when there is no signal present, 
-  or the USB gadget driver when the source isn't sending any data. 
-  Set this to `true` if you get capture errors when stopping the signal. This then allows processing to continue once the signal returns. 
 
 ## Links
 ### ALSA Documentation
