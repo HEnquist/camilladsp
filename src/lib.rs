@@ -96,6 +96,7 @@ pub mod filereader;
 pub mod filereader_nonblock;
 pub mod filters;
 pub mod helpers;
+pub mod limiter;
 pub mod loudness;
 pub mod mixer;
 pub mod processing;

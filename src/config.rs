@@ -439,6 +439,9 @@ pub enum Filter {
     DiffEq {
         parameters: DiffEqParameters,
     },
+    Limiter {
+        parameters: LimiterParameters,
+    }
 }
 
 #[allow(clippy::upper_case_acronyms)]
@@ -792,6 +795,15 @@ pub struct CompressorParameters {
     pub factor: PrcFmt,
     #[serde(default)]
     pub makeup_gain: PrcFmt,
+    #[serde(default)]
+    pub soft_clip: bool,
+    #[serde(default)]
+    pub clip_limit: PrcFmt,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LimiterParameters {
     #[serde(default)]
     pub soft_clip: bool,
     #[serde(default)]
