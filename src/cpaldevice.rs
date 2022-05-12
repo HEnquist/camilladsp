@@ -422,10 +422,10 @@ fn get_nbr_capture_samples(
         #[cfg(feature = "debug")]
         trace!(
             "Resampler needs {} frames, will read {} samples",
-            resampl.nbr_frames_needed(),
-            resampl.nbr_frames_needed() * channels,
+            resampl.input_frames_next(),
+            resampl.input_frames_next() * channels,
         );
-        resampl.nbr_frames_needed() * channels
+        resampl.input_frames_next() * channels
     } else {
         capture_samples
     }

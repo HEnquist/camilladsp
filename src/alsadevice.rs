@@ -15,8 +15,8 @@ use rubato::VecResampler;
 use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -184,9 +184,9 @@ fn play_buffer(
             }
             Err(err) => {
                 warn!(
-                "PB: device failed while waiting for available buffer space, error: {}",
-                err
-            );
+                    "PB: device failed while waiting for available buffer space, error: {}",
+                    err
+                );
                 return Err(Box::new(err));
             }
         }
@@ -195,13 +195,19 @@ fn play_buffer(
         match io.writei(buffer) {
             Ok(frames_written) => {
                 let cur_frames_to_write = buffer.len() / bytes_per_frame;
-                trace!("PB:  wrote {} frames to playback device as requested", frames_written);
+                trace!(
+                    "PB:  wrote {} frames to playback device as requested",
+                    frames_written
+                );
                 //trace!("Delay AFTER writing {} is {:?} frames", frames_written, pcmdevice.status().ok().map(|status| status.get_delay()));
                 if frames_written == cur_frames_to_write {
                     // done writing
                     break;
                 } else {
-                    warn!("PB: wrote {} instead of requested {}, writing the rest", frames_written, cur_frames_to_write);
+                    warn!(
+                        "PB: wrote {} instead of requested {}, writing the rest",
+                        frames_written, cur_frames_to_write
+                    );
                     buffer = &buffer[frames_written * bytes_per_frame..];
                     // repeat writing
                     continue;
@@ -209,7 +215,11 @@ fn play_buffer(
             }
             Err(err) => {
                 warn!("PB: Retrying playback, error: {}", err);
-                pcmdevice.prepare()?;
+                if err.nix_error() != alsa::nix::errno::Errno::EAGAIN {
+                    trace!("snd_pcm_prepare");
+                    // Would recover() be better than prepare()?
+                    pcmdevice.prepare()?;
+                }
                 buf_manager.sleep_for_target_delay(millis_per_frame);
                 io.writei(buffer)?;
                 break;
@@ -261,9 +271,9 @@ fn capture_buffer(
             }
             Err(err) => {
                 warn!(
-                "Capture device failed while waiting for available frames, error: {}",
-                err
-            );
+                    "Capture device failed while waiting for available frames, error: {}",
+                    err
+                );
                 return Err(Box::new(err));
             }
         }
@@ -274,7 +284,10 @@ fn capture_buffer(
                     trace!("Capture read {} frames as requested", frames_read);
                     return Ok(CaptureResult::Normal);
                 } else {
-                    warn!("Capture read {} frames instead of the requested {}", frames_read, frames_req);
+                    warn!(
+                        "Capture read {} frames instead of the requested {}",
+                        frames_read, frames_req
+                    );
                     buffer = &mut buffer[frames_read * bytes_per_frame..];
                     // repeat reading
                     continue;
@@ -508,9 +521,10 @@ fn playback_loop_bytes(
         };
         match msg {
             Ok(AudioMessage::Audio(chunk)) => {
-
                 // measure delay only on running non-stalled device
-                let delay_at_chunk_recvd = if !device_stalled && pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+                let delay_at_chunk_recvd = if !device_stalled
+                    && pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32
+                {
                     pcmdevice.status().ok().map(|status| status.get_delay())
                 } else {
                     None
@@ -523,8 +537,14 @@ fn playback_loop_bytes(
                     params.playback_status.write().unwrap().clipped_samples += conversion_result.1;
                 }
 
-                let playback_res =
-                    play_buffer(&buffer, pcmdevice, &io, millis_per_frame, params.bytes_per_frame, buf_manager);
+                let playback_res = play_buffer(
+                    &buffer,
+                    pcmdevice,
+                    &io,
+                    millis_per_frame,
+                    params.bytes_per_frame,
+                    buf_manager,
+                );
                 device_stalled = match playback_res {
                     Ok(PlaybackResult::Normal) => {
                         if device_stalled {
@@ -539,10 +559,18 @@ fn playback_loop_bytes(
                             // first stall detected
                             info!("PB: device stalled");
                             // restarting the device to drop outdated samples
-                            pcmdevice.drop().unwrap_or_else(|err| { warn!("PB: Playback error {:?}", err) });
-                            pcmdevice.prepare().unwrap_or_else(|err| { warn!("PB: Playback error {:?}", err) });
+                            pcmdevice
+                                .drop()
+                                .unwrap_or_else(|err| warn!("PB: Playback error {:?}", err));
+                            pcmdevice
+                                .prepare()
+                                .unwrap_or_else(|err| warn!("PB: Playback error {:?}", err));
                             // writing zeros to be able to check for un-stalling in pcmdevice.wait
-                            let zero_buf = vec![0u8; buf_manager.get_frames_to_stall() as usize * params.bytes_per_frame];
+                            let zero_buf = vec![
+                                0u8;
+                                buf_manager.get_frames_to_stall() as usize
+                                    * params.bytes_per_frame
+                            ];
                             match io.writei(&zero_buf) {
                                 Ok(frames) => {
                                     trace!("PB: Wrote {} zero frames", frames);
@@ -555,7 +583,8 @@ fn playback_loop_bytes(
                         true
                     }
                     Err(msg) => {
-                        channels.status
+                        channels
+                            .status
                             .send(StatusMessage::PlaybackError(msg.to_string()))
                             .unwrap_or(());
                         device_stalled
@@ -589,7 +618,9 @@ fn playback_loop_bytes(
                                     if let Some(elem_uac2_gadget) = &element_uac2_gadget {
                                         let mut elval = ElemValue::new(ElemType::Integer).unwrap();
                                         // speed is reciprocal on playback side
-                                        elval.set_integer(0, (1_000_000.0 / capture_speed) as i32).unwrap();
+                                        elval
+                                            .set_integer(0, (1_000_000.0 / capture_speed) as i32)
+                                            .unwrap();
                                         elem_uac2_gadget.write(&elval).unwrap();
                                     } else {
                                         channels
@@ -632,11 +663,16 @@ fn playback_loop_bytes(
     }
 }
 
-pub fn adjust_speed(avg_delay: f64, target_delay: usize, prev_diff: Option<f64>, mut capture_speed: f64) -> (f64, f64) {
+pub fn adjust_speed(
+    avg_delay: f64,
+    target_delay: usize,
+    prev_diff: Option<f64>,
+    mut capture_speed: f64,
+) -> (f64, f64) {
     let latency = avg_delay * capture_speed;
     let diff = latency - target_delay as f64;
     match prev_diff {
-        None => return (1.0, diff),
+        None => (1.0, diff),
         Some(prev_diff) => {
             let equality_range = target_delay as f64 / 100.0; // in frames
             let speed_delta = 1e-5;
@@ -644,23 +680,17 @@ pub fn adjust_speed(avg_delay: f64, target_delay: usize, prev_diff: Option<f64>,
                 if diff > (prev_diff + equality_range) {
                     // playback latency grows, need to slow down capture more
                     capture_speed -= 3.0 * speed_delta;
-                } else {
-                    if is_within(diff, prev_diff, equality_range) {
-                        // positive, not changed from last cycle, need to slow down capture a bit
-                        capture_speed -= speed_delta;
-                    }
+                } else if is_within(diff, prev_diff, equality_range) {
+                    // positive, not changed from last cycle, need to slow down capture a bit
+                    capture_speed -= speed_delta;
                 }
-            } else {
-                if diff < 0.0 {
-                    if diff < (prev_diff - equality_range) {
-                        // playback latency sinks, need to speed up capture more
-                        capture_speed += 3.0 * speed_delta;
-                    } else {
-                        if is_within(diff, prev_diff, equality_range) {
-                            // negative, not changed from last cycle, need to speed up capture a bit
-                            capture_speed += speed_delta
-                        }
-                    }
+            } else if diff < 0.0 {
+                if diff < (prev_diff - equality_range) {
+                    // playback latency sinks, need to speed up capture more
+                    capture_speed += 3.0 * speed_delta;
+                } else if is_within(diff, prev_diff, equality_range) {
+                    // negative, not changed from last cycle, need to speed up capture a bit
+                    capture_speed += speed_delta
                 }
             }
             debug!(
@@ -671,9 +701,9 @@ pub fn adjust_speed(avg_delay: f64, target_delay: usize, prev_diff: Option<f64>,
                 prev_diff,
                 100.0 * capture_speed
             );
-            return (capture_speed, diff);
+            (capture_speed, diff)
         }
-    };
+    }
 }
 
 pub fn is_within(value: f64, target: f64, equality_range: f64) -> bool {
@@ -687,7 +717,7 @@ fn drain_check_eos(audio: &Receiver<AudioMessage>) -> Option<AudioMessage> {
             eos = Some(msg);
         }
     }
-    return eos;
+    eos
 }
 
 fn capture_loop_bytes(
@@ -863,8 +893,12 @@ fn capture_loop_bytes(
                     info!("Capture device is stalled, processing is stalled");
                     device_stalled = true;
                     // restarting the device to drop outdated samples
-                    pcmdevice.drop().unwrap_or_else(|err| { warn!("Capture error {:?}", err) });
-                    pcmdevice.prepare().unwrap_or_else(|err| { warn!("Capture error {:?}", err) });
+                    pcmdevice
+                        .drop()
+                        .unwrap_or_else(|err| warn!("Capture error {:?}", err));
+                    pcmdevice
+                        .prepare()
+                        .unwrap_or_else(|err| warn!("Capture error {:?}", err));
                     params.capture_status.write().unwrap().state = ProcessingState::Stalled;
                 }
             }
@@ -922,7 +956,11 @@ fn capture_loop_bytes(
     capt_stat.state = ProcessingState::Inactive;
 }
 
-fn update_avail_min(pcmdevice: &PCM, frames: Frames, buf_manager: &mut dyn DeviceBufferManager) -> Res<()> {
+fn update_avail_min(
+    pcmdevice: &PCM,
+    frames: Frames,
+    buf_manager: &mut dyn DeviceBufferManager,
+) -> Res<()> {
     let swp = pcmdevice.sw_params_current()?;
     buf_manager.update_io_size(&swp, frames)?;
     pcmdevice.sw_params(&swp)?;
@@ -937,8 +975,8 @@ fn get_nbr_capture_bytes_and_frames(
     buf: &mut Vec<u8>,
 ) -> (usize, Frames) {
     let (capture_bytes_new, capture_frames_new) = if let Some(resampl) = &resampler {
-        //trace!("Resampler needs {} frames", resampl.nbr_frames_needed());
-        let frames = resampl.nbr_frames_needed();
+        //trace!("Resampler needs {} frames", resampl.input_frames_next());
+        let frames = resampl.input_frames_next();
         (
             frames * params.channels * params.store_bytes_per_sample,
             frames as Frames,
@@ -975,7 +1013,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let channels = self.channels;
         let bytes_per_sample = self.sample_format.bytes_per_sample();
         let sample_format = self.sample_format.clone();
-        let mut buf_manager = PlaybackBufferManager::new(chunksize as Frames, target_level as Frames);
+        let mut buf_manager =
+            PlaybackBufferManager::new(chunksize as Frames, target_level as Frames);
         let handle = thread::Builder::new()
             .name("AlsaPlayback".to_string())
             .spawn(move || {
@@ -1011,7 +1050,14 @@ impl PlaybackDevice for AlsaPlaybackDevice {
 
                         let io = pcmdevice.io_bytes();
                         let buffer = vec![0u8; chunksize * pb_params.bytes_per_frame];
-                        playback_loop_bytes(pb_channels, buffer, &pcmdevice, io, pb_params, &mut buf_manager);
+                        playback_loop_bytes(
+                            pb_channels,
+                            buffer,
+                            &pcmdevice,
+                            io,
+                            pb_params,
+                            &mut buf_manager,
+                        );
                     }
                     Err(err) => {
                         let send_result =
@@ -1184,7 +1230,7 @@ struct DeviceBufferData {
     period: Frames,
     threshold: Frames,
     avail_min: Frames,
-    io_size: Frames,    /* size of read/write block */
+    io_size: Frames, /* size of read/write block */
 }
 
 struct CaptureBufferManager {
@@ -1200,7 +1246,7 @@ impl CaptureBufferManager {
                 threshold: 0,
                 avail_min: 0,
                 io_size: init_io_size,
-            }
+            },
         }
     }
 }
@@ -1240,7 +1286,11 @@ impl PlaybackBufferManager {
 
     fn sleep_for_target_delay(&mut self, millis_per_frame: f32) {
         let sleep_millis = (self.target_level as f32 * millis_per_frame) as u64;
-        trace!("Sleeping for {} frames = {} ms", self.target_level, sleep_millis);
+        trace!(
+            "Sleeping for {} frames = {} ms",
+            self.target_level,
+            sleep_millis
+        );
         thread::sleep(Duration::from_millis(sleep_millis));
     }
 }
