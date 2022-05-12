@@ -441,7 +441,7 @@ pub enum Filter {
     },
     Limiter {
         parameters: LimiterParameters,
-    }
+    },
 }
 
 #[allow(clippy::upper_case_acronyms)]

@@ -14,15 +14,13 @@ pub struct Limiter {
 
 impl Limiter {
     /// Creates a Compressor from a config struct
-    pub fn from_config(
-        name: String,
-        config: config::LimiterParameters,
-    ) -> Self {
-
+    pub fn from_config(name: String, config: config::LimiterParameters) -> Self {
         let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit / 20.0);
 
-        debug!("Creating limiter '{}', soft_clip: {}, clip_limit dB: {}, linear: {}", 
-                name, config.soft_clip, config.clip_limit, clip_limit);
+        debug!(
+            "Creating limiter '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
+            name, config.soft_clip, config.clip_limit, clip_limit
+        );
 
         Limiter {
             name,
@@ -56,8 +54,7 @@ impl Filter for Limiter {
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         if self.soft_clip {
             self.apply_soft_clip(waveform);
-        }
-        else {
+        } else {
             self.apply_hard_clip(waveform);
         }
         Ok(())
@@ -69,8 +66,10 @@ impl Filter for Limiter {
 
             self.soft_clip = config.soft_clip;
             self.clip_limit = clip_limit;
-            debug!("Updated limiter '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
-                self.name, config.soft_clip, config.clip_limit, clip_limit);
+            debug!(
+                "Updated limiter '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
+                self.name, config.soft_clip, config.clip_limit, clip_limit
+            );
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
