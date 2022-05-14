@@ -552,6 +552,7 @@ fn playback_loop_bytes(
                     params.playback_status.write().unwrap().clipped_samples += conversion_result.1;
                 }
 
+                trace!("PB: {:?}", buf_manager);
                 let playback_res = play_buffer(
                     &buffer,
                     pcmdevice,
@@ -850,6 +851,7 @@ fn capture_loop_bytes(
             // updating sw avail_min for snd_pcm_delay threshold
             update_avail_min(pcmdevice, new_capture_frames, buf_manager).unwrap_or(());
         }
+        trace!("Capture: {:?}", buf_manager);
         let capture_res = capture_buffer(
             &mut buffer[0..capture_bytes],
             pcmdevice,
@@ -1240,6 +1242,7 @@ trait DeviceBufferManager {
     }
 }
 
+#[derive(Debug)]
 struct DeviceBufferData {
     bufsize: Frames,
     period: Frames,
@@ -1248,6 +1251,7 @@ struct DeviceBufferData {
     io_size: Frames, /* size of read/write block */
 }
 
+#[derive(Debug)]
 struct CaptureBufferManager {
     data: DeviceBufferData,
 }
@@ -1280,6 +1284,7 @@ impl DeviceBufferManager for CaptureBufferManager {
     }
 }
 
+#[derive(Debug)]
 struct PlaybackBufferManager {
     data: DeviceBufferData,
     target_level: Frames,
