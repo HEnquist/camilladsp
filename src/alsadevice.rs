@@ -1122,7 +1122,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let async_src = resampler_is_async(&resampler_conf);
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
-        let mut buf_manager = CaptureBufferManager::new(chunksize as Frames);
+        let mut buf_manager = CaptureBufferManager::new(buffer_frames as Frames);
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
             .spawn(move || {
