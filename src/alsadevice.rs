@@ -18,7 +18,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -173,10 +173,18 @@ fn play_buffer(
     let frames_to_write = buffer.len() / bytes_per_frame;
     loop {
         let timeout_millis = (2.0 * millis_per_frame * frames_to_write as f32) as u32;
-        trace!("PB: pcmdevice.wait timeout is {} ms", timeout_millis);
+        trace!("PB: pcmdevice.wait with timeout {} ms", timeout_millis);
+        let start = if log_enabled!(log::Level::Trace) {
+            Some(Instant::now())
+        } else {
+            None
+        };
         match pcmdevice.wait(Some(timeout_millis)) {
             Ok(true) => {
-                trace!("PB: device waited, ready");
+                trace!(
+                    "PB: device waited for {:?}, ready",
+                    start.map(|s| s.elapsed())
+                );
             }
             Ok(false) => {
                 trace!("PB: Wait timed out, playback device takes too long to drain buffer");
@@ -261,9 +269,16 @@ fn capture_buffer(
     let millis_per_chunk = 1000 * frames_to_read / samplerate;
 
     loop {
-        match pcmdevice.wait(Some(2 * millis_per_chunk as u32)) {
+        let timeout_millis = 2 * millis_per_chunk as u32;
+        let start = if log_enabled!(log::Level::Trace) {
+            Some(Instant::now())
+        } else {
+            None
+        };
+        trace!("Capture pcmdevice.wait with timeout {} ms", timeout_millis);
+        match pcmdevice.wait(Some(timeout_millis)) {
             Ok(true) => {
-                trace!("Capture waited, ready");
+                trace!("Capture waited for {:?}, ready", start.map(|s| s.elapsed()));
             }
             Ok(false) => {
                 trace!("Wait timed out, capture device takes too long to capture frames");
@@ -537,6 +552,7 @@ fn playback_loop_bytes(
                     params.playback_status.write().unwrap().clipped_samples += conversion_result.1;
                 }
 
+                trace!("PB: {:?}", buf_manager);
                 let playback_res = play_buffer(
                     &buffer,
                     pcmdevice,
@@ -835,6 +851,7 @@ fn capture_loop_bytes(
             // updating sw avail_min for snd_pcm_delay threshold
             update_avail_min(pcmdevice, new_capture_frames, buf_manager).unwrap_or(());
         }
+        trace!("Capture: {:?}", buf_manager);
         let capture_res = capture_buffer(
             &mut buffer[0..capture_bytes],
             pcmdevice,
@@ -1225,6 +1242,7 @@ trait DeviceBufferManager {
     }
 }
 
+#[derive(Debug)]
 struct DeviceBufferData {
     bufsize: Frames,
     period: Frames,
@@ -1233,6 +1251,7 @@ struct DeviceBufferData {
     io_size: Frames, /* size of read/write block */
 }
 
+#[derive(Debug)]
 struct CaptureBufferManager {
     data: DeviceBufferData,
 }
@@ -1265,6 +1284,7 @@ impl DeviceBufferManager for CaptureBufferManager {
     }
 }
 
+#[derive(Debug)]
 struct PlaybackBufferManager {
     data: DeviceBufferData,
     target_level: Frames,
