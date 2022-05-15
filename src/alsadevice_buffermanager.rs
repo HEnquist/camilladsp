@@ -14,20 +14,35 @@ pub trait DeviceBufferManager {
 
     fn apply_buffer_size(&mut self, hwp: &HwParams) -> Res<()> {
         let data = self.get_data();
-        data.bufsize = hwp.set_buffer_size_near(data.io_size * 2)?;
+        let buffer_frames = 2.0f32.powf(
+            (1.2 * data.chunksize as f32 / data.resampling_ratio)
+                .log2()
+                .ceil(),
+        ) as Frames;
+        data.bufsize = hwp.set_buffer_size_near(buffer_frames)?;
+        if data.bufsize < buffer_frames {
+            warn!("Unable to set the desired device buffer size, requested {}, got {}", buffer_frames, data.bufsize);
+        }
         Ok(())
     }
     fn apply_period_size(&mut self, hwp: &HwParams) -> Res<()> {
         let data = self.get_data();
-        data.period = hwp.set_period_size_near(data.io_size / 4, alsa::ValueOr::Nearest)?;
+        data.period = hwp.set_period_size_near(data.bufsize / 4, alsa::ValueOr::Nearest)?;
         Ok(())
     }
 
     fn apply_avail_min(&mut self, swp: &SwParams) -> Res<()> {
         let data = self.get_data();
         // maximum timing safety - headroom for one io_size only
-        data.avail_min = data.io_size;
-        swp.set_avail_min(data.io_size)?;
+        if data.io_size <= data.period {data.avail_min = data.io_size;
+            // what is the actual rule here??
+            warn!("Trying to set avail_min to {}, must be larger than period of {}", data.io_size, data.period);
+            data.avail_min = data.period+1;
+        }
+        else {
+            data.avail_min = data.io_size;
+        }
+        swp.set_avail_min(data.avail_min)?;
         Ok(())
     }
 
@@ -56,6 +71,8 @@ pub struct DeviceBufferData {
     threshold: Frames,
     avail_min: Frames,
     io_size: Frames, /* size of read/write block */
+    chunksize: Frames,
+    resampling_ratio: f32,
 }
 
 #[derive(Debug)]
@@ -64,7 +81,8 @@ pub struct CaptureBufferManager {
 }
 
 impl CaptureBufferManager {
-    pub fn new(init_io_size: Frames) -> Self {
+    pub fn new(chunksize: Frames, resampling_ratio: f32) -> Self {
+        let init_io_size = (chunksize as f32 / resampling_ratio) as Frames;
         CaptureBufferManager {
             data: DeviceBufferData {
                 bufsize: 0,
@@ -72,7 +90,10 @@ impl CaptureBufferManager {
                 threshold: 0,
                 avail_min: 0,
                 io_size: init_io_size,
+                resampling_ratio,
+                chunksize,
             },
+            
         }
     }
 }
@@ -98,14 +119,16 @@ pub struct PlaybackBufferManager {
 }
 
 impl PlaybackBufferManager {
-    pub fn new(init_io_size: Frames, target_level: Frames) -> Self {
+    pub fn new(chunksize: Frames, target_level: Frames) -> Self {
         PlaybackBufferManager {
             data: DeviceBufferData {
                 bufsize: 0,
                 period: 0,
                 threshold: 0,
                 avail_min: 0,
-                io_size: init_io_size,
+                io_size: chunksize,
+                resampling_ratio: 1.0,
+                chunksize,
             },
             target_level,
         }
