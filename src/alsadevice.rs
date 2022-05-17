@@ -94,6 +94,7 @@ struct PlaybackParams {
     playback_status: Arc<RwLock<PlaybackStatus>>,
     bytes_per_frame: usize,
     samplerate: usize,
+    chunksize: usize,
 }
 
 enum CaptureResult {
@@ -367,9 +368,7 @@ fn open_pcm(
 
 fn playback_loop_bytes(
     channels: PlaybackChannels,
-    mut buffer: Vec<u8>,
     pcmdevice: &alsa::PCM,
-    io: alsa::pcm::IO<u8>,
     params: PlaybackParams,
     buf_manager: &mut PlaybackBufferManager,
 ) {
@@ -381,6 +380,9 @@ fn playback_loop_bytes(
     let millis_per_frame: f32 = 1000.0 / params.samplerate as f32;
     let mut device_stalled = false;
 
+    let io = pcmdevice.io_bytes();
+    debug!("Playback loop uses a buffer of {} frames", params.chunksize);
+    let mut buffer = vec![0u8; params.chunksize * params.bytes_per_frame];
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
@@ -568,13 +570,12 @@ fn drain_check_eos(audio: &Receiver<AudioMessage>) -> Option<AudioMessage> {
 
 fn capture_loop_bytes(
     channels: CaptureChannels,
-    mut buffer: Vec<u8>,
     pcmdevice: &alsa::PCM,
-    io: alsa::pcm::IO<u8>,
     params: CaptureParams,
     mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
     buf_manager: &mut CaptureBufferManager,
 ) {
+    let io = pcmdevice.io_bytes();
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
@@ -602,6 +603,10 @@ fn capture_loop_bytes(
             warn!("Async resampler not needed since capture device supports rate adjust. Switch to Sync type to save CPU time.");
         }
     }
+
+    let buffer_frames = buf_manager.get_data().get_buffersize() as usize;
+    debug!("Capture loop uses a buffer of {} frames", buffer_frames);
+    let mut buffer = vec![0u8; buffer_frames * params.bytes_per_frame];
 
     let mut capture_bytes = params.chunksize * params.channels * params.store_bytes_per_sample;
     let mut capture_frames = params.chunksize as Frames;
@@ -889,22 +894,13 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             playback_status,
                             bytes_per_frame: channels * bytes_per_sample,
                             samplerate,
+                            chunksize,
                         };
                         let pb_channels = PlaybackChannels {
                             audio: channel,
                             status: status_channel,
                         };
-
-                        let io = pcmdevice.io_bytes();
-                        let buffer = vec![0u8; chunksize * pb_params.bytes_per_frame];
-                        playback_loop_bytes(
-                            pb_channels,
-                            buffer,
-                            &pcmdevice,
-                            io,
-                            pb_params,
-                            &mut buf_manager,
-                        );
+                        playback_loop_bytes(pb_channels, &pcmdevice, pb_params, &mut buf_manager);
                     }
                     Err(err) => {
                         let send_result =
@@ -950,8 +946,7 @@ impl CaptureDevice for AlsaCaptureDevice {
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
         );
-        let buffer_frames = buf_manager.calculate_buffer_size() as usize;
-        debug!("Buffer frames {}", buffer_frames);
+
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
             .spawn(move || {
@@ -1002,13 +997,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                             status: status_channel,
                             command: command_channel,
                         };
-                        let io = pcmdevice.io_bytes();
-                        let buffer = vec![0u8; buffer_frames * cap_params.bytes_per_frame];
                         capture_loop_bytes(
                             cap_channels,
-                            buffer,
                             &pcmdevice,
-                            io,
                             cap_params,
                             resampler,
                             &mut buf_manager,

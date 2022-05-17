@@ -93,6 +93,12 @@ pub struct DeviceBufferData {
     resampling_ratio: f32,
 }
 
+impl DeviceBufferData {
+    pub fn get_buffersize(&self) -> Frames {
+        self.bufsize
+    }
+}
+
 #[derive(Debug)]
 pub struct CaptureBufferManager {
     pub data: DeviceBufferData,
