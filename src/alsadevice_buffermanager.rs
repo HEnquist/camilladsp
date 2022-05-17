@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::thread;
 use std::time::Duration;
 
+use crate::config;
 use crate::Res;
 
 pub trait DeviceBufferManager {
@@ -55,10 +56,10 @@ pub trait DeviceBufferManager {
                 data.io_size, data.period
             );
         } else if data.io_size > data.bufsize {
-            warn!(
-                "Trying to set avail_min to {}, must be smaller than or equal to device buffer size of {}",
-                data.io_size, data.bufsize
-            );
+            let msg = format!("Trying to set avail_min to {}, must be smaller than or equal to device buffer size of {}",
+                data.io_size, data.bufsize);
+            error!("{}", msg);
+            return Err(config::ConfigError::new(&msg).into());
         }
         data.avail_min = data.io_size;
         swp.set_avail_min(data.avail_min)?;
