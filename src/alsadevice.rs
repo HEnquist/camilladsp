@@ -935,13 +935,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let samplerate = self.samplerate;
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
-        // buffer allocated at power of 2, larger to minimize later costly buffer increases for resampler input
-        let buffer_frames = 2.0f32.powf(
-            (1.2 * capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
-                .log2()
-                .ceil(),
-        ) as usize;
-        debug!("Buffer frames {}", buffer_frames);
+
         let channels = self.channels;
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let silence_timeout = self.silence_timeout;
@@ -952,7 +946,12 @@ impl CaptureDevice for AlsaCaptureDevice {
         let async_src = resampler_is_async(&resampler_conf);
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
-        let mut buf_manager = CaptureBufferManager::new(buffer_frames as Frames);
+        let mut buf_manager = CaptureBufferManager::new(
+            chunksize as Frames,
+            samplerate as f32 / capture_samplerate as f32,
+        );
+        let buffer_frames = buf_manager.calculate_buffer_size() as usize;
+        debug!("Buffer frames {}", buffer_frames);
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
             .spawn(move || {
