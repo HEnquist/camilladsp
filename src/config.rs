@@ -798,6 +798,8 @@ pub struct CompressorParameters {
     #[serde(default)]
     pub soft_clip: bool,
     #[serde(default)]
+    pub enable_clip: bool,
+    #[serde(default)]
     pub clip_limit: PrcFmt,
 }
 

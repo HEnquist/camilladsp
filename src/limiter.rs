@@ -43,6 +43,14 @@ impl Limiter {
             *val = val.clamp(-self.clip_limit, self.clip_limit);
         }
     }
+
+    pub fn apply_clip(&self, input: &mut [PrcFmt]) {
+        if self.soft_clip {
+            self.apply_soft_clip(input);
+        } else {
+            self.apply_hard_clip(input);
+        }
+    }
 }
 
 impl Filter for Limiter {
@@ -52,11 +60,7 @@ impl Filter for Limiter {
 
     /// Apply a Compressor to an AudioChunk, modifying it in-place.
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        if self.soft_clip {
-            self.apply_soft_clip(waveform);
-        } else {
-            self.apply_hard_clip(waveform);
-        }
+        self.apply_clip(waveform);
         Ok(())
     }
 
@@ -77,7 +81,7 @@ impl Filter for Limiter {
     }
 }
 
-/// Validate the limiter config, always ok for now.
+/// Validate the limiter config, always return ok to allow any config.
 pub fn validate_config(_config: &config::LimiterParameters) -> Res<()> {
     Ok(())
 }

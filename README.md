@@ -57,6 +57,7 @@ The full configuration is given in a yaml file.
    - **[FIR](#fir)**
    - **[IIR](#iir)**
    - **[Dither](#dither)**
+   - **[Limiter](#limiter)**
    - **[Difference equation](#difference-equation)**
 - **[Processors](#processors)**
    - **[Compressor](#compressor)**
@@ -1279,6 +1280,22 @@ To test the different types, set the target bit depth to something very small li
 For sample rates above 48 kHz there is no need for anything more advanced than the "Simple" type. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20kHz up to 48 or 96kHz where the noise can be placed without issues. The Simple type will place almost all of it there.
 
 
+### Limiter
+The "Limiter" filter is used to limit the signal to a given level. It can use hard or soft clipping. 
+Note that soft clipping introduces some harmonic distortion to the signal.
+
+Example:
+```
+  example_limiter:
+    type: Limiter
+    parameters:
+      soft_clip: false (*)
+      clip_limit: -10.0 (*)
+```
+
+Parameters:
+  * `soft_clip`: enable soft clipping. Set to `false` to use hard clipping. Optional, defaults to `false`.
+  * `clip_limit`: the level in dB to clip at. Optional, defaults to 0 dB.
 
 ### Difference equation
 The "DiffEq" filter implements a generic difference equation filter with transfer function:
@@ -1302,7 +1319,7 @@ The "Compressor" processor implements a standard dynamic range compressor. It is
 Example:
 ```
 processors:
-  democompr:
+  democompressor:
     type: Compressor
     parameters:
       channels: 2
@@ -1311,6 +1328,7 @@ processors:
       threshold: -25
       factor: 5.0
       makeup_gain: 15 (*)
+      enable_clip: true (*)
       soft_clip: true (*)
       clip_limit: 0.0 (*)
       monitor_channels: [0, 1] (*)
@@ -1318,7 +1336,7 @@ processors:
 
 pipeline:
   - type: Processor
-    name: democompr
+    name: democompressor
 ``` 
 
   Parameters:
@@ -1328,8 +1346,9 @@ pipeline:
   * `threshold`: the loudness threshold in dB where compression sets in.
   * `factor`: the compression factor, giving the amount of compression over the threshold. A factor of 4 means a sound that is 4 dB over the threshold will be attenuated to 1 dB over the threshold.
   * `makeup_gain`: amount of fixed gain in dB to apply after compression. Optional, defaults to 0 dB.
-  * `soft_clip`: apply soft clipping to the signal after compression. Optional, defaults to `false`.
-  * `clip_limit`: the level in dB to clip at. Optional, defaults to 0 dB.
+  * `enable_clip`: apply clipping to the signal after compression. Optional, defaults to `false`.
+  * `soft_clip`: enable soft clipping. Set to `false` to use hard clipping. Note that soft clipping introduces some harmonic distortion to the signal. This setting is ignored if `enable_clip = false`. Optional, defaults to `false`.
+  * `clip_limit`: the level in dB to clip at. This setting is ignored if `enable_clip = false`. Optional, defaults to 0 dB.
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels that should be compressed. Optional, defaults to all channels.
 

@@ -86,7 +86,7 @@ pub trait Filter {
 }
 
 pub trait Processor {
-    // Filter a Vec
+    // Process a chunk containing several channels.
     fn process_chunk(&mut self, chunk: &mut AudioChunk) -> Res<()>;
 
     fn update_parameters(&mut self, config: config::Processor);

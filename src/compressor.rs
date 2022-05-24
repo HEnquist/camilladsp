@@ -1,10 +1,9 @@
 use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::filters::Processor;
+use crate::limiter::Limiter;
 use crate::PrcFmt;
 use crate::Res;
-
-const CUBEFACTOR: PrcFmt = 1.0 / 6.75; // = 1 / (2 * 1.5^3)
 
 #[derive(Clone, Debug)]
 pub struct Compressor {
@@ -17,8 +16,7 @@ pub struct Compressor {
     pub threshold: PrcFmt,
     pub factor: PrcFmt,
     pub makeup_gain: PrcFmt,
-    pub soft_clip: bool,
-    pub clip_limit: PrcFmt,
+    pub limiter: Option<Limiter>,
     pub samplerate: usize,
     pub scratch: Vec<PrcFmt>,
     pub prev_loudness: PrcFmt,
@@ -54,6 +52,15 @@ impl Compressor {
 
         debug!("Creating compressor '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {}", 
                 name, channels, process_channels, monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain, config.soft_clip, clip_limit);
+        let limiter = if config.enable_clip {
+            let limitconf = config::LimiterParameters {
+                clip_limit: config.clip_limit,
+                soft_clip: config.soft_clip,
+            };
+            Some(Limiter::from_config("Limiter".to_owned(), limitconf))
+        } else {
+            None
+        };
 
         Compressor {
             name,
@@ -65,15 +72,14 @@ impl Compressor {
             threshold: config.threshold,
             factor: config.factor,
             makeup_gain: config.makeup_gain,
-            soft_clip: config.soft_clip,
-            clip_limit,
+            limiter,
             samplerate,
             scratch,
             prev_loudness: -100.0,
         }
     }
 
-    /// Sum all chanels that are included in loudness monitoring, store result in self.scratch
+    /// Sum all channels that are included in loudness monitoring, store result in self.scratch
     fn sum_monitor_channels(&mut self, input: &AudioChunk) {
         let ch = self.monitor_channels[0];
         self.scratch.copy_from_slice(&input.waveforms[ch]);
@@ -84,7 +90,7 @@ impl Compressor {
         }
     }
 
-    /// Estimate loundness, store result in self.scratch
+    /// Estimate loudness, store result in self.scratch
     fn estimate_loudness(&mut self) {
         for val in self.scratch.iter_mut() {
             // convert to dB
@@ -117,16 +123,9 @@ impl Compressor {
         }
     }
 
-    fn apply_soft_clip(&self, input: &mut [PrcFmt]) {
-        for val in input.iter_mut() {
-            let mut scaled = *val / self.clip_limit;
-            if scaled > 1.5 {
-                scaled = 1.5;
-            } else if scaled < -1.5 {
-                scaled = -1.5;
-            }
-            scaled -= CUBEFACTOR * scaled.powi(3);
-            *val = scaled * self.clip_limit;
+    fn apply_limiter(&self, input: &mut [PrcFmt]) {
+        if let Some(limiter) = &self.limiter {
+            limiter.apply_clip(input);
         }
     }
 }
@@ -143,9 +142,7 @@ impl Processor for Compressor {
         self.calculate_linear_gain();
         for ch in self.process_channels.iter() {
             self.apply_gain(&mut input.waveforms[*ch]);
-            if self.soft_clip {
-                self.apply_soft_clip(&mut input.waveforms[*ch]);
-            }
+            self.apply_limiter(&mut input.waveforms[*ch]);
         }
         Ok(())
     }
@@ -172,6 +169,16 @@ impl Processor for Compressor {
             let release = (-1.0 / srate / config.release).exp();
             let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit / 20.0);
 
+            let limiter = if config.enable_clip {
+                let limitconf = config::LimiterParameters {
+                    clip_limit: config.clip_limit,
+                    soft_clip: config.soft_clip,
+                };
+                Some(Limiter::from_config("Limiter".to_owned(), limitconf))
+            } else {
+                None
+            };
+
             self.monitor_channels = monitor_channels;
             self.process_channels = process_channels;
             self.attack = attack;
@@ -179,8 +186,8 @@ impl Processor for Compressor {
             self.threshold = config.threshold;
             self.factor = config.factor;
             self.makeup_gain = config.makeup_gain;
-            self.soft_clip = config.soft_clip;
-            self.clip_limit = clip_limit;
+            self.limiter = limiter;
+
             debug!("Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {}", 
                 self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain, config.soft_clip, clip_limit);
         } else {
