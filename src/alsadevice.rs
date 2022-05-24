@@ -8,7 +8,7 @@ use crate::countertimer;
 use alsa::ctl::{ElemId, ElemIface};
 use alsa::ctl::{ElemType, ElemValue};
 use alsa::hctl::HCtl;
-use alsa::pcm::{Access, Format, Frames, HwParams, SwParams};
+use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::{Direction, ValueOr, PCM};
 use alsa_sys;
 use rubato::VecResampler;
@@ -18,25 +18,20 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
+use crate::alsadevice_buffermanager::{
+    CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
+};
+use crate::alsadevice_utils::{
+    adjust_speed, list_channels_as_text, list_formats_as_text, list_samplerates_as_text, state_desc,
+};
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
-
-const STANDARD_RATES: [u32; 17] = [
-    5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
-    352800, 384000, 705600, 768000,
-];
-
-#[derive(Debug)]
-enum SupportedValues {
-    Range(u32, u32),
-    Discrete(Vec<u32>),
-}
 
 pub struct AlsaPlaybackDevice {
     pub devname: String,
@@ -99,6 +94,7 @@ struct PlaybackParams {
     playback_status: Arc<RwLock<PlaybackStatus>>,
     bytes_per_frame: usize,
     samplerate: usize,
+    chunksize: usize,
 }
 
 enum CaptureResult {
@@ -110,30 +106,6 @@ enum CaptureResult {
 enum PlaybackResult {
     Normal,
     Stalled,
-}
-
-fn state_desc(state: u32) -> String {
-    match state {
-        alsa_sys::SND_PCM_STATE_OPEN => "SND_PCM_STATE_OPEN, Open".to_string(),
-        alsa_sys::SND_PCM_STATE_SETUP => "SND_PCM_STATE_SETUP, Setup installed".to_string(),
-        alsa_sys::SND_PCM_STATE_PREPARED => "SND_PCM_STATE_PREPARED, Ready to start".to_string(),
-        alsa_sys::SND_PCM_STATE_RUNNING => "SND_PCM_STATE_RUNNING, Running".to_string(),
-        alsa_sys::SND_PCM_STATE_XRUN => {
-            "SND_PCM_STATE_XRUN, Stopped: underrun (playback) or overrun (capture) detected"
-                .to_string()
-        }
-        alsa_sys::SND_PCM_STATE_DRAINING => {
-            "SND_PCM_STATE_DRAINING, Draining: running (playback) or stopped (capture)".to_string()
-        }
-        alsa_sys::SND_PCM_STATE_PAUSED => "SND_PCM_STATE_PAUSED, Paused".to_string(),
-        alsa_sys::SND_PCM_STATE_SUSPENDED => {
-            "SND_PCM_STATE_SUSPENDED, Hardware is suspended".to_string()
-        }
-        alsa_sys::SND_PCM_STATE_DISCONNECTED => {
-            "SND_PCM_STATE_DISCONNECTED, Hardware is disconnected".to_string()
-        }
-        _ => format!("Unknown state with number {}", state),
-    }
 }
 
 /// Play a buffer.
@@ -328,100 +300,6 @@ fn capture_buffer(
     }
 }
 
-fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {
-    let min_rate = hwp.get_rate_min()?;
-    let max_rate = hwp.get_rate_max()?;
-    if min_rate == max_rate {
-        // Only one rate is supported.
-        return Ok(SupportedValues::Discrete(vec![min_rate]));
-    } else if hwp.test_rate(min_rate + 1).is_ok() {
-        // If min_rate + 1 is sipported, then this must be a range.
-        return Ok(SupportedValues::Range(min_rate, max_rate));
-    }
-    let mut rates = Vec::new();
-    // Loop through and test all the standard rates.
-    for rate in STANDARD_RATES.iter() {
-        if hwp.test_rate(*rate).is_ok() {
-            rates.push(*rate);
-        }
-    }
-    Ok(SupportedValues::Discrete(rates))
-}
-
-fn list_samplerates_as_text(hwp: &HwParams) -> String {
-    let supported_rates_res = list_samplerates(hwp);
-    if let Ok(rates) = supported_rates_res {
-        format!("supported samplerates: {:?}", rates)
-    } else {
-        "failed checking supported samplerates".to_string()
-    }
-}
-
-fn list_nbr_channels(hwp: &HwParams) -> Res<(u32, u32, Vec<u32>)> {
-    let min_channels = hwp.get_channels_min()?;
-    let max_channels = hwp.get_channels_max()?;
-    if min_channels == max_channels {
-        return Ok((min_channels, max_channels, vec![min_channels]));
-    }
-    let mut channels = Vec::new();
-
-    let mut check_max = max_channels;
-    if check_max > 32 {
-        check_max = 32;
-    }
-    for chan in min_channels..(check_max + 1) {
-        if hwp.test_channels(chan).is_ok() {
-            channels.push(chan);
-        }
-    }
-    Ok((min_channels, max_channels, channels))
-}
-
-fn list_channels_as_text(hwp: &HwParams) -> String {
-    let supported_channels_res = list_nbr_channels(hwp);
-    if let Ok((min_ch, max_ch, ch_list)) = supported_channels_res {
-        format!(
-            "supported channels, min: {}, max: {}, list: {:?}",
-            min_ch, max_ch, ch_list
-        )
-    } else {
-        "failed checking supported channels".to_string()
-    }
-}
-
-fn list_formats(hwp: &HwParams) -> Res<Vec<SampleFormat>> {
-    let mut formats = Vec::new();
-    // Let's just check the formats supported by CamillaDSP
-    if hwp.test_format(Format::s16()).is_ok() {
-        formats.push(SampleFormat::S16LE);
-    }
-    if hwp.test_format(Format::s24()).is_ok() {
-        formats.push(SampleFormat::S24LE);
-    }
-    if hwp.test_format(Format::S243LE).is_ok() {
-        formats.push(SampleFormat::S24LE3);
-    }
-    if hwp.test_format(Format::s32()).is_ok() {
-        formats.push(SampleFormat::S32LE);
-    }
-    if hwp.test_format(Format::float()).is_ok() {
-        formats.push(SampleFormat::FLOAT32LE);
-    }
-    if hwp.test_format(Format::float64()).is_ok() {
-        formats.push(SampleFormat::FLOAT64LE);
-    }
-    Ok(formats)
-}
-
-fn list_formats_as_text(hwp: &HwParams) -> String {
-    let supported_formats_res = list_formats(hwp);
-    if let Ok(formats) = supported_formats_res {
-        format!("supported sample formats: {:?}", formats)
-    } else {
-        "failed checking supported sample formats".to_string()
-    }
-}
-
 /// Open an Alsa PCM device
 fn open_pcm(
     devname: String,
@@ -490,9 +368,7 @@ fn open_pcm(
 
 fn playback_loop_bytes(
     channels: PlaybackChannels,
-    mut buffer: Vec<u8>,
     pcmdevice: &alsa::PCM,
-    io: alsa::pcm::IO<u8>,
     params: PlaybackParams,
     buf_manager: &mut PlaybackBufferManager,
 ) {
@@ -504,6 +380,9 @@ fn playback_loop_bytes(
     let millis_per_frame: f32 = 1000.0 / params.samplerate as f32;
     let mut device_stalled = false;
 
+    let io = pcmdevice.io_bytes();
+    debug!("Playback loop uses a buffer of {} frames", params.chunksize);
+    let mut buffer = vec![0u8; params.chunksize * params.bytes_per_frame];
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
@@ -679,53 +558,6 @@ fn playback_loop_bytes(
     }
 }
 
-pub fn adjust_speed(
-    avg_delay: f64,
-    target_delay: usize,
-    prev_diff: Option<f64>,
-    mut capture_speed: f64,
-) -> (f64, f64) {
-    let latency = avg_delay * capture_speed;
-    let diff = latency - target_delay as f64;
-    match prev_diff {
-        None => (1.0, diff),
-        Some(prev_diff) => {
-            let equality_range = target_delay as f64 / 100.0; // in frames
-            let speed_delta = 1e-5;
-            if diff > 0.0 {
-                if diff > (prev_diff + equality_range) {
-                    // playback latency grows, need to slow down capture more
-                    capture_speed -= 3.0 * speed_delta;
-                } else if is_within(diff, prev_diff, equality_range) {
-                    // positive, not changed from last cycle, need to slow down capture a bit
-                    capture_speed -= speed_delta;
-                }
-            } else if diff < 0.0 {
-                if diff < (prev_diff - equality_range) {
-                    // playback latency sinks, need to speed up capture more
-                    capture_speed += 3.0 * speed_delta;
-                } else if is_within(diff, prev_diff, equality_range) {
-                    // negative, not changed from last cycle, need to speed up capture a bit
-                    capture_speed += speed_delta
-                }
-            }
-            debug!(
-                "Avg. buffer delay: {:.1}, target delay: {:.1}, diff: {}, prev_div: {}, corrected capture rate: {:.4}%",
-                avg_delay,
-                target_delay,
-                diff,
-                prev_diff,
-                100.0 * capture_speed
-            );
-            (capture_speed, diff)
-        }
-    }
-}
-
-pub fn is_within(value: f64, target: f64, equality_range: f64) -> bool {
-    value <= (target + equality_range) && value >= (target - equality_range)
-}
-
 fn drain_check_eos(audio: &Receiver<AudioMessage>) -> Option<AudioMessage> {
     let mut eos: Option<AudioMessage> = None;
     while let Some(msg) = audio.try_iter().next() {
@@ -738,13 +570,12 @@ fn drain_check_eos(audio: &Receiver<AudioMessage>) -> Option<AudioMessage> {
 
 fn capture_loop_bytes(
     channels: CaptureChannels,
-    mut buffer: Vec<u8>,
     pcmdevice: &alsa::PCM,
-    io: alsa::pcm::IO<u8>,
     params: CaptureParams,
     mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
     buf_manager: &mut CaptureBufferManager,
 ) {
+    let io = pcmdevice.io_bytes();
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
@@ -772,6 +603,10 @@ fn capture_loop_bytes(
             warn!("Async resampler not needed since capture device supports rate adjust. Switch to Sync type to save CPU time.");
         }
     }
+
+    let buffer_frames = buf_manager.get_data().get_buffersize() as usize;
+    debug!("Capture loop uses a buffer of {} frames", buffer_frames);
+    let mut buffer = vec![0u8; buffer_frames * params.bytes_per_frame];
 
     let mut capture_bytes = params.chunksize * params.channels * params.store_bytes_per_sample;
     let mut capture_frames = params.chunksize as Frames;
@@ -1059,22 +894,13 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             playback_status,
                             bytes_per_frame: channels * bytes_per_sample,
                             samplerate,
+                            chunksize,
                         };
                         let pb_channels = PlaybackChannels {
                             audio: channel,
                             status: status_channel,
                         };
-
-                        let io = pcmdevice.io_bytes();
-                        let buffer = vec![0u8; chunksize * pb_params.bytes_per_frame];
-                        playback_loop_bytes(
-                            pb_channels,
-                            buffer,
-                            &pcmdevice,
-                            io,
-                            pb_params,
-                            &mut buf_manager,
-                        );
+                        playback_loop_bytes(pb_channels, &pcmdevice, pb_params, &mut buf_manager);
                     }
                     Err(err) => {
                         let send_result =
@@ -1105,13 +931,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let samplerate = self.samplerate;
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
-        // buffer allocated at power of 2, larger to minimize later costly buffer increases for resampler input
-        let buffer_frames = 2.0f32.powf(
-            (1.2 * capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
-                .log2()
-                .ceil(),
-        ) as usize;
-        debug!("Buffer frames {}", buffer_frames);
+
         let channels = self.channels;
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let silence_timeout = self.silence_timeout;
@@ -1122,7 +942,11 @@ impl CaptureDevice for AlsaCaptureDevice {
         let async_src = resampler_is_async(&resampler_conf);
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
-        let mut buf_manager = CaptureBufferManager::new(buffer_frames as Frames);
+        let mut buf_manager = CaptureBufferManager::new(
+            chunksize as Frames,
+            samplerate as f32 / capture_samplerate as f32,
+        );
+
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
             .spawn(move || {
@@ -1173,13 +997,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                             status: status_channel,
                             command: command_channel,
                         };
-                        let io = pcmdevice.io_bytes();
-                        let buffer = vec![0u8; buffer_frames * cap_params.bytes_per_frame];
                         capture_loop_bytes(
                             cap_channels,
-                            buffer,
                             &pcmdevice,
-                            io,
                             cap_params,
                             resampler,
                             &mut buf_manager,
@@ -1197,134 +1017,5 @@ impl CaptureDevice for AlsaCaptureDevice {
             })
             .unwrap();
         Ok(Box::new(handle))
-    }
-}
-
-trait DeviceBufferManager {
-    // intended for internal use
-    fn get_data(&mut self) -> &mut DeviceBufferData;
-    fn apply_start_threshold(&mut self, swp: &SwParams) -> Res<()>;
-
-    fn apply_buffer_size(&mut self, hwp: &HwParams) -> Res<()> {
-        let data = self.get_data();
-        data.bufsize = hwp.set_buffer_size_near(data.io_size * 2)?;
-        Ok(())
-    }
-    fn apply_period_size(&mut self, hwp: &HwParams) -> Res<()> {
-        let data = self.get_data();
-        data.period = hwp.set_period_size_near(data.io_size / 4, alsa::ValueOr::Nearest)?;
-        Ok(())
-    }
-
-    fn apply_avail_min(&mut self, swp: &SwParams) -> Res<()> {
-        let data = self.get_data();
-        // maximum timing safety - headroom for one io_size only
-        data.avail_min = data.io_size;
-        swp.set_avail_min(data.io_size)?;
-        Ok(())
-    }
-
-    fn update_io_size(&mut self, swp: &SwParams, io_size: Frames) -> Res<()> {
-        let data = self.get_data();
-        data.io_size = io_size;
-        // must update avail_min
-        swp.set_avail_min(io_size)?;
-        data.avail_min = io_size;
-        // must update threshold
-        self.apply_start_threshold(swp)?;
-        Ok(())
-    }
-
-    fn get_frames_to_stall(&mut self) -> Frames {
-        let data = self.get_data();
-        // +1 to make sure the device really stalls
-        data.bufsize - data.avail_min + 1
-    }
-}
-
-#[derive(Debug)]
-struct DeviceBufferData {
-    bufsize: Frames,
-    period: Frames,
-    threshold: Frames,
-    avail_min: Frames,
-    io_size: Frames, /* size of read/write block */
-}
-
-#[derive(Debug)]
-struct CaptureBufferManager {
-    data: DeviceBufferData,
-}
-
-impl CaptureBufferManager {
-    fn new(init_io_size: Frames) -> Self {
-        CaptureBufferManager {
-            data: DeviceBufferData {
-                bufsize: 0,
-                period: 0,
-                threshold: 0,
-                avail_min: 0,
-                io_size: init_io_size,
-            },
-        }
-    }
-}
-
-impl DeviceBufferManager for CaptureBufferManager {
-    fn get_data(&mut self) -> &mut DeviceBufferData {
-        &mut self.data
-    }
-
-    fn apply_start_threshold(&mut self, swp: &SwParams) -> Res<()> {
-        // immediate start after pcmdev.prepare
-        let threshold = 0;
-        swp.set_start_threshold(threshold)?;
-        self.data.threshold = threshold;
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct PlaybackBufferManager {
-    data: DeviceBufferData,
-    target_level: Frames,
-}
-
-impl PlaybackBufferManager {
-    fn new(init_io_size: Frames, target_level: Frames) -> Self {
-        PlaybackBufferManager {
-            data: DeviceBufferData {
-                bufsize: 0,
-                period: 0,
-                threshold: 0,
-                avail_min: 0,
-                io_size: init_io_size,
-            },
-            target_level,
-        }
-    }
-
-    fn sleep_for_target_delay(&mut self, millis_per_frame: f32) {
-        let sleep_millis = (self.target_level as f32 * millis_per_frame) as u64;
-        trace!(
-            "Sleeping for {} frames = {} ms",
-            self.target_level,
-            sleep_millis
-        );
-        thread::sleep(Duration::from_millis(sleep_millis));
-    }
-}
-
-impl DeviceBufferManager for PlaybackBufferManager {
-    fn get_data(&mut self) -> &mut DeviceBufferData {
-        &mut self.data
-    }
-
-    fn apply_start_threshold(&mut self, swp: &SwParams) -> Res<()> {
-        // start on first write of any size
-        let threshold = 1;
-        swp.set_start_threshold(threshold)?;
-        self.data.threshold = threshold;
-        Ok(())
     }
 }
