@@ -3,21 +3,8 @@ use crate::PrcFmt;
 use crate::ProcessingState;
 use std::time::{Duration, Instant};
 
-pub struct Averager {
-    sum: f64,
-    nbr_values: usize,
-}
-
-pub struct Stopwatch {
-    start_time: Instant,
-    pub value: Duration,
-}
-
-pub struct TimeAverage {
-    sum: usize,
-    timer: Stopwatch,
-}
-
+/// A counter for watching if the signal has been silent
+/// for longer than a given limit.
 pub struct SilenceCounter {
     silence_threshold: PrcFmt,
     silence_limit_nbr: usize,
@@ -64,6 +51,12 @@ impl SilenceCounter {
     }
 }
 
+/// A simple stopwatch for measuring time.
+pub struct Stopwatch {
+    start_time: Instant,
+    pub value: Duration,
+}
+
 impl Stopwatch {
     pub fn new() -> Stopwatch {
         let start_time = Instant::now();
@@ -102,6 +95,12 @@ impl Default for Stopwatch {
     }
 }
 
+/// Calculate the average of a series of numbers.
+pub struct Averager {
+    sum: f64,
+    nbr_values: usize,
+}
+
 impl Averager {
     pub fn new() -> Averager {
         Averager {
@@ -137,6 +136,12 @@ impl Default for Averager {
     }
 }
 
+/// Calculate the average number of added counts per second.
+pub struct TimeAverage {
+    sum: usize,
+    timer: Stopwatch,
+}
+
 impl TimeAverage {
     pub fn new() -> TimeAverage {
         TimeAverage {
@@ -170,6 +175,7 @@ impl Default for TimeAverage {
     }
 }
 
+/// Check if a value stays within a given range.
 pub struct ValueWatcher {
     min_value: f32,
     max_value: f32,
