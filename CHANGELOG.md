@@ -1,3 +1,7 @@
+## Unreleased
+New features:
+- Added dynamic range compressor
+
 ## 1.0.0
 New features:
 - New improved CoreAudio backend.

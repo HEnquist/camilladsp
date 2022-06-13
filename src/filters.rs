@@ -2,6 +2,7 @@ use crate::audiodevice::AudioChunk;
 use crate::basicfilters;
 use crate::biquad;
 use crate::biquadcombo;
+use crate::compressor;
 use crate::config;
 use crate::conversions;
 use crate::diffeq;
@@ -10,6 +11,7 @@ use crate::dither;
 use crate::fftconv;
 #[cfg(feature = "FFTW")]
 use crate::fftconv_fftw as fftconv;
+use crate::limiter;
 use crate::loudness;
 use crate::mixer;
 use rawsample::SampleReader;
@@ -79,6 +81,15 @@ pub trait Filter {
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()>;
 
     fn update_parameters(&mut self, config: config::Filter);
+
+    fn name(&self) -> String;
+}
+
+pub trait Processor {
+    // Process a chunk containing several channels.
+    fn process_chunk(&mut self, chunk: &mut AudioChunk) -> Res<()>;
+
+    fn update_parameters(&mut self, config: config::Processor);
 
     fn name(&self) -> String;
 }
@@ -401,6 +412,9 @@ impl FilterGroup {
                     config::Filter::DiffEq { parameters } => {
                         Box::new(diffeq::DiffEq::from_config(name, parameters))
                     }
+                    config::Filter::Limiter { parameters } => {
+                        Box::new(limiter::Limiter::from_config(name, parameters))
+                    }
                 };
             filters.push(filter);
         }
@@ -435,6 +449,7 @@ impl FilterGroup {
 pub enum PipelineStep {
     MixerStep(mixer::Mixer),
     FilterStep(FilterGroup),
+    ProcessorStep(Box<dyn Processor>),
 }
 
 pub struct Pipeline {
@@ -467,6 +482,21 @@ impl Pipeline {
                     );
                     steps.push(PipelineStep::FilterStep(fltgrp));
                 }
+                config::PipelineStep::Processor { name } => {
+                    let procconf = conf.processors[&name].clone();
+                    let proc = match procconf {
+                        config::Processor::Compressor { parameters } => {
+                            let comp = compressor::Compressor::from_config(
+                                name,
+                                parameters,
+                                conf.devices.samplerate,
+                                conf.devices.chunksize,
+                            );
+                            Box::new(comp)
+                        }
+                    };
+                    steps.push(PipelineStep::ProcessorStep(proc));
+                }
             }
         }
         Pipeline { steps }
@@ -477,6 +507,7 @@ impl Pipeline {
         conf: config::Configuration,
         filters: Vec<String>,
         mixers: Vec<String>,
+        processors: Vec<String>,
     ) {
         debug!("Updating parameters");
         for mut step in &mut self.steps {
@@ -488,6 +519,11 @@ impl Pipeline {
                 }
                 PipelineStep::FilterStep(flt) => {
                     flt.update_parameters(conf.filters.clone(), filters.clone());
+                }
+                PipelineStep::ProcessorStep(proc) => {
+                    if processors.iter().any(|n| n == &proc.name()) {
+                        proc.update_parameters(conf.processors[&proc.name()].clone());
+                    }
                 }
             }
         }
@@ -502,6 +538,9 @@ impl Pipeline {
                 }
                 PipelineStep::FilterStep(flt) => {
                     flt.process_chunk(&mut chunk).unwrap();
+                }
+                PipelineStep::ProcessorStep(comp) => {
+                    comp.process_chunk(&mut chunk).unwrap();
                 }
             }
         }
@@ -521,6 +560,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
         config::Filter::Volume { parameters } => basicfilters::validate_volume_config(parameters),
         config::Filter::Loudness { parameters } => loudness::validate_config(parameters),
         config::Filter::BiquadCombo { parameters } => biquadcombo::validate_config(fs, parameters),
+        config::Filter::Limiter { parameters } => limiter::validate_config(parameters),
     }
 }
 
