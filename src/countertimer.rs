@@ -1,6 +1,7 @@
 use crate::NewValue;
 use crate::PrcFmt;
 use crate::ProcessingState;
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 /// A counter for watching if the signal has been silent
@@ -209,9 +210,68 @@ impl ValueWatcher {
     }
 }
 
+pub struct HistoryRecord {
+    time: Instant,
+    values: Vec<f32>,
+}
+
+pub struct ValueHistory {
+    buffer: VecDeque<HistoryRecord>,
+    nbr_values: usize,
+}
+
+impl ValueHistory {
+    pub fn new(history_length: usize, nbr_values: usize) -> Self {
+        Self {
+            buffer: VecDeque::<HistoryRecord>::with_capacity(history_length),
+            nbr_values,
+        }
+    }
+
+    pub fn add_record(&mut self, values: Vec<f32>) {
+        if values.len() == self.nbr_values {
+            let time = Instant::now();
+            let record = HistoryRecord { time, values };
+            if self.buffer.len() == self.buffer.capacity() {
+                self.buffer.pop_back();
+            }
+            self.buffer.push_front(record);
+        } else {
+            warn!(
+                "Ignoring record with wrong number of values. Got {}, expected {}",
+                values.len(),
+                self.nbr_values
+            );
+        }
+    }
+
+    pub fn get_average_since(&self, time: Instant) -> Option<Vec<f32>> {
+        let mut scratch = vec![0.0; self.nbr_values];
+        let mut nbr_summed = 0;
+        for record in self.buffer.iter() {
+            if record.time < time {
+                break;
+            }
+            for (val, acc) in record.values.iter().zip(scratch.iter_mut()) {
+                *acc += *val;
+            }
+            nbr_summed += 1;
+        }
+        if nbr_summed == 0 {
+            return None;
+        }
+        for val in scratch.iter_mut() {
+            *val /= nbr_summed as f32;
+        }
+        Some(scratch)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::countertimer::{Averager, SilenceCounter, Stopwatch, TimeAverage, ValueWatcher};
+    use crate::countertimer::{
+        Averager, SilenceCounter, Stopwatch, TimeAverage, ValueHistory, ValueWatcher,
+    };
     use crate::ProcessingState;
     use std::time::Instant;
 
@@ -348,5 +408,26 @@ mod tests {
         for _ in 0..5 {
             assert_eq!(watcher.check_value(88200.0), true);
         }
+    }
+
+    #[test]
+    fn test_valuehistory() {
+        let mut hist = ValueHistory::new(10, 2);
+        let start1 = Instant::now();
+        hist.add_record(vec![1.0, 2.0]);
+        hist.add_record(vec![2.0, 3.0]);
+        hist.add_record(vec![3.0, 4.0]);
+        let start2 = Instant::now();
+        hist.add_record(vec![5.0, 8.0]);
+        hist.add_record(vec![6.0, 9.0]);
+        hist.add_record(vec![7.0, 10.0]);
+        assert_eq!(
+            format!("{:?}", vec![4.0, 6.0]),
+            format!("{:?}", hist.get_average_since(start1).unwrap())
+        );
+        assert_eq!(
+            format!("{:?}", vec![6.0, 9.0]),
+            format!("{:?}", hist.get_average_since(start2).unwrap())
+        );
     }
 }
