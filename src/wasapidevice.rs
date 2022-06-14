@@ -699,8 +699,16 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                 }
                             }
                             chunk_stats = chunk.get_stats();
-                            playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                            playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                            playback_status
+                                .write()
+                                .unwrap()
+                                .signal_rms
+                                .add_record_squared(chunk_stats.rms_db());
+                            playback_status
+                                .write()
+                                .unwrap()
+                                .signal_peak
+                                .add_record(chunk_stats.peak_db());
                             let mut buf =
                                 vec![
                                     0u8;
@@ -1077,8 +1085,8 @@ impl CaptureDevice for WasapiCaptureDevice {
                         }
                         chunk_stats = chunk.get_stats();
                         //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
-                        capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                        capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                        capture_status.write().unwrap().signal_rms.add_record_squared(chunk_stats.rms_db());
+                        capture_status.write().unwrap().signal_peak.add_record(chunk_stats.peak_db());
                         value_range = chunk.maxval - chunk.minval;
                         state = silence_counter.update(value_range);
                         if state == ProcessingState::Running {

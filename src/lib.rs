@@ -160,8 +160,8 @@ pub struct CaptureStatus {
     pub update_interval: usize,
     pub measured_samplerate: usize,
     pub signal_range: f32,
-    pub signal_rms: Vec<f32>,
-    pub signal_peak: Vec<f32>,
+    pub signal_rms: countertimer::ValueHistory,
+    pub signal_peak: countertimer::ValueHistory,
     pub state: ProcessingState,
     pub rate_adjust: f32,
     pub used_channels: Vec<bool>,
@@ -172,8 +172,8 @@ pub struct PlaybackStatus {
     pub update_interval: usize,
     pub clipped_samples: usize,
     pub buffer_level: usize,
-    pub signal_rms: Vec<f32>,
-    pub signal_peak: Vec<f32>,
+    pub signal_rms: countertimer::ValueHistory,
+    pub signal_peak: countertimer::ValueHistory,
 }
 
 #[derive(Clone, Debug)]

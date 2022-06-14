@@ -210,11 +210,13 @@ impl ValueWatcher {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct HistoryRecord {
     time: Instant,
     values: Vec<f32>,
 }
 
+#[derive(Clone, Debug)]
 pub struct ValueHistory {
     buffer: VecDeque<HistoryRecord>,
     nbr_values: usize,
@@ -232,20 +234,21 @@ impl ValueHistory {
 
     // Add a record
     pub fn add_record(&mut self, values: Vec<f32>) {
-        if values.len() == self.nbr_values {
-            let time = Instant::now();
-            let record = HistoryRecord { time, values };
-            if self.buffer.len() == self.history_length {
-                self.buffer.pop_back();
-            }
-            self.buffer.push_front(record);
-        } else {
-            warn!(
-                "Ignoring record with wrong number of values. Got {}, expected {}",
+        if values.len() != self.nbr_values {
+            debug!(
+                "Number of values changed. New {}, prev {}. Clearing history.",
                 values.len(),
                 self.nbr_values
             );
+            self.nbr_values = values.len();
+            self.buffer.clear();
         }
+        let time = Instant::now();
+        let record = HistoryRecord { time, values };
+        if self.buffer.len() == self.history_length {
+            self.buffer.pop_back();
+        }
+        self.buffer.push_front(record);
     }
 
     // Add a record but square the numbers (used for RMS history)
@@ -496,6 +499,22 @@ mod tests {
         assert_eq!(
             format!("{:?}", vec![2.0]),
             format!("{:?}", hist.get_last_sqrt().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_valuehistory_change_nbr() {
+        let mut hist = ValueHistory::new(10, 2);
+        hist.add_record(vec![1.0, 1.0]);
+        hist.add_record(vec![2.0, 2.0]);
+        assert_eq!(
+            format!("{:?}", vec![2.0, 2.0]),
+            format!("{:?}", hist.get_last().unwrap())
+        );
+        hist.add_record(vec![3.0]);
+        assert_eq!(
+            format!("{:?}", vec![3.0]),
+            format!("{:?}", hist.get_last().unwrap())
         );
     }
 }
