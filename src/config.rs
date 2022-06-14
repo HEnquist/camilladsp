@@ -58,7 +58,7 @@ impl ConfigError {
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum SampleFormat {
     S16LE,
@@ -119,7 +119,7 @@ impl fmt::Display for SampleFormat {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum CaptureDevice {
@@ -232,7 +232,7 @@ impl CaptureDevice {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum PlaybackDevice {
@@ -388,7 +388,7 @@ impl Default for Resampler {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum WindowFunction {
     Hann,
@@ -399,7 +399,7 @@ pub enum WindowFunction {
     BlackmanHarris2,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum InterpolationType {
     Cubic,
@@ -445,7 +445,7 @@ pub enum Filter {
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum FileFormat {
     TEXT,
@@ -697,7 +697,7 @@ pub struct DelayParameters {
     pub subsample: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum TimeUnit {
     #[serde(rename = "ms")]
@@ -737,7 +737,7 @@ pub struct DiffEqParameters {
     pub b: Vec<PrcFmt>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct MixerChannels {
     #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -812,7 +812,7 @@ pub struct LimiterParameters {
     pub clip_limit: PrcFmt,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum PipelineStep {

@@ -160,7 +160,8 @@ fn run(
 ) -> Res<ExitState> {
     status_structs.capture.write().unwrap().state = ProcessingState::Starting;
     let mut is_starting = true;
-    let conf = match new_config_shared.lock().unwrap().clone() {
+    let conf_option = new_config_shared.lock().unwrap().clone();
+    let conf = match conf_option {
         Some(cfg) => cfg,
         None => {
             error!("Tried to start without config!");

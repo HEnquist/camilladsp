@@ -84,7 +84,7 @@ enum WsCommand {
     None,
 }
 
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, Eq, PartialEq, Serialize)]
 enum WsResult {
     Ok,
     Error,

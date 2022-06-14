@@ -133,7 +133,7 @@ pub enum ExitState {
     Exit,
 }
 
-#[derive(Clone, Debug, Copy, Serialize, PartialEq)]
+#[derive(Clone, Debug, Copy, Serialize, Eq, PartialEq)]
 pub enum ProcessingState {
     // Processing is running normally.
     Running,
@@ -187,7 +187,7 @@ pub struct ProcessingStatus {
     pub stop_reason: StopReason,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum StopReason {
     None,
     Done,
