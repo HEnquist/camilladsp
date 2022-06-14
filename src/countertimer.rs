@@ -218,6 +218,7 @@ pub struct HistoryRecord {
 pub struct ValueHistory {
     buffer: VecDeque<HistoryRecord>,
     nbr_values: usize,
+    history_length: usize,
 }
 
 impl ValueHistory {
@@ -225,14 +226,16 @@ impl ValueHistory {
         Self {
             buffer: VecDeque::<HistoryRecord>::with_capacity(history_length),
             nbr_values,
+            history_length,
         }
     }
 
+    // Add a record
     pub fn add_record(&mut self, values: Vec<f32>) {
         if values.len() == self.nbr_values {
             let time = Instant::now();
             let record = HistoryRecord { time, values };
-            if self.buffer.len() == self.buffer.capacity() {
+            if self.buffer.len() == self.history_length {
                 self.buffer.pop_back();
             }
             self.buffer.push_front(record);
@@ -245,6 +248,13 @@ impl ValueHistory {
         }
     }
 
+    // Add a record but square the numbers (used for RMS history)
+    pub fn add_record_squared(&mut self, mut values: Vec<f32>) {
+        values.iter_mut().for_each(|val| *val = *val * *val);
+        self.add_record(values);
+    }
+
+    // Get the average since the given Instance
     pub fn get_average_since(&self, time: Instant) -> Option<Vec<f32>> {
         let mut scratch = vec![0.0; self.nbr_values];
         let mut nbr_summed = 0;
@@ -252,18 +262,40 @@ impl ValueHistory {
             if record.time < time {
                 break;
             }
-            for (val, acc) in record.values.iter().zip(scratch.iter_mut()) {
-                *acc += *val;
-            }
+            record
+                .values
+                .iter()
+                .zip(scratch.iter_mut())
+                .for_each(|(val, acc)| *acc += *val);
             nbr_summed += 1;
         }
         if nbr_summed == 0 {
             return None;
         }
-        for val in scratch.iter_mut() {
-            *val /= nbr_summed as f32;
-        }
+        scratch.iter_mut().for_each(|val| *val /= nbr_summed as f32);
         Some(scratch)
+    }
+
+    // Get the square root of the average since the given Instance.
+    // Used for RMS history.
+    // Assumes that every record is the (squared) RMS value for an equally long interval.
+    pub fn get_average_sqrt_since(&self, time: Instant) -> Option<Vec<f32>> {
+        self.get_average_since(time).map(|mut values| {
+            values.iter_mut().for_each(|val| *val = val.sqrt());
+            values
+        })
+    }
+
+    pub fn get_last(&self) -> Option<Vec<f32>> {
+        self.buffer.get(0).map(|record| record.values.clone())
+    }
+
+    pub fn get_last_sqrt(&self) -> Option<Vec<f32>> {
+        self.buffer.get(0).map(|record| {
+            let mut values = record.values.clone();
+            values.iter_mut().for_each(|val| *val = val.sqrt());
+            values
+        })
     }
 }
 
@@ -412,7 +444,7 @@ mod tests {
 
     #[test]
     fn test_valuehistory() {
-        let mut hist = ValueHistory::new(10, 2);
+        let mut hist = ValueHistory::new(6, 2);
         let start1 = Instant::now();
         hist.add_record(vec![1.0, 2.0]);
         hist.add_record(vec![2.0, 3.0]);
@@ -428,6 +460,42 @@ mod tests {
         assert_eq!(
             format!("{:?}", vec![6.0, 9.0]),
             format!("{:?}", hist.get_average_since(start2).unwrap())
+        );
+        hist.add_record(vec![5.0, 8.0]);
+        hist.add_record(vec![6.0, 9.0]);
+        hist.add_record(vec![7.0, 10.0]);
+        assert_eq!(
+            format!("{:?}", vec![6.0, 9.0]),
+            format!("{:?}", hist.get_average_since(start1).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_valuehistory_rms() {
+        let mut hist = ValueHistory::new(10, 1);
+        let start1 = Instant::now();
+        hist.add_record_squared(vec![7.0]);
+        hist.add_record_squared(vec![1.0]);
+        assert_eq!(
+            format!("{:?}", vec![5.0]),
+            format!("{:?}", hist.get_average_sqrt_since(start1).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_valuehistory_last() {
+        let mut hist = ValueHistory::new(10, 1);
+        hist.add_record(vec![1.0]);
+        hist.add_record(vec![2.0]);
+        hist.add_record(vec![3.0]);
+        hist.add_record(vec![4.0]);
+        assert_eq!(
+            format!("{:?}", vec![4.0]),
+            format!("{:?}", hist.get_last().unwrap())
+        );
+        assert_eq!(
+            format!("{:?}", vec![2.0]),
+            format!("{:?}", hist.get_last_sqrt().unwrap())
         );
     }
 }
