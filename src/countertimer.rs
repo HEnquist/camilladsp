@@ -449,10 +449,12 @@ mod tests {
     fn test_valuehistory() {
         let mut hist = ValueHistory::new(6, 2);
         let start1 = Instant::now();
+        spinsleep(10);
         hist.add_record(vec![1.0, 2.0]);
         hist.add_record(vec![2.0, 3.0]);
         hist.add_record(vec![3.0, 4.0]);
         let start2 = Instant::now();
+        spinsleep(10);
         hist.add_record(vec![5.0, 8.0]);
         hist.add_record(vec![6.0, 9.0]);
         hist.add_record(vec![7.0, 10.0]);
@@ -477,6 +479,7 @@ mod tests {
     fn test_valuehistory_rms() {
         let mut hist = ValueHistory::new(10, 1);
         let start1 = Instant::now();
+        spinsleep(10);
         hist.add_record_squared(vec![7.0]);
         hist.add_record_squared(vec![1.0]);
         assert_eq!(
