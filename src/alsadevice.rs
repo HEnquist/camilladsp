@@ -488,8 +488,18 @@ fn playback_loop_bytes(
                 if !device_stalled {
                     // updates only for non-stalled device
                     chunk_stats = chunk.get_stats();
-                    params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                    params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                    params
+                        .playback_status
+                        .write()
+                        .unwrap()
+                        .signal_rms
+                        .add_record_squared(chunk_stats.rms_linear());
+                    params
+                        .playback_status
+                        .write()
+                        .unwrap()
+                        .signal_peak
+                        .add_record(chunk_stats.peak_linear());
 
                     if let Some(delay) = delay_at_chunk_recvd {
                         if delay != 0 {
@@ -772,8 +782,18 @@ fn capture_loop_bytes(
             &params.capture_status.read().unwrap().used_channels,
         );
         chunk_stats = chunk.get_stats();
-        params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-        params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+        params
+            .capture_status
+            .write()
+            .unwrap()
+            .signal_rms
+            .add_record_squared(chunk_stats.rms_linear());
+        params
+            .capture_status
+            .write()
+            .unwrap()
+            .signal_peak
+            .add_record(chunk_stats.peak_linear());
         value_range = chunk.maxval - chunk.minval;
         if device_stalled {
             state = ProcessingState::Stalled;

@@ -160,12 +160,12 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         .write()
                                         .unwrap()
                                         .signal_rms
-                                        .add_record_squared(chunk_stats.rms_db());
+                                        .add_record_squared(chunk_stats.rms_linear());
                                     playback_status
                                         .write()
                                         .unwrap()
                                         .signal_peak
-                                        .add_record(chunk_stats.peak_db());
+                                        .add_record(chunk_stats.peak_linear());
                                     trace!(
                                         "Playback signal RMS: {:?}, peak: {:?}",
                                         chunk_stats.rms_db(),
@@ -482,13 +482,13 @@ fn capture_loop(
             .write()
             .unwrap()
             .signal_rms
-            .add_record_squared(chunk_stats.rms_db());
+            .add_record_squared(chunk_stats.rms_linear());
         params
             .capture_status
             .write()
             .unwrap()
             .signal_peak
-            .add_record(chunk_stats.peak_db());
+            .add_record(chunk_stats.peak_linear());
         state = silence_counter.update(value_range);
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
