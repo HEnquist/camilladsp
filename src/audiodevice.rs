@@ -96,10 +96,7 @@ impl ChunkStats {
     }
 
     pub fn rms_linear(&self) -> Vec<f32> {
-        self.rms
-            .iter()
-            .map(|val| *val as f32)
-            .collect()
+        self.rms.iter().map(|val| *val as f32).collect()
     }
 
     pub fn peak_db(&self) -> Vec<f32> {
@@ -116,10 +113,7 @@ impl ChunkStats {
     }
 
     pub fn peak_linear(&self) -> Vec<f32> {
-        self.peak
-            .iter()
-            .map(|val| *val as f32)
-            .collect()
+        self.peak.iter().map(|val| *val as f32).collect()
     }
 }
 

@@ -68,3 +68,16 @@ pub fn multiply_add_elements(
         *r += val;
     }
 }
+
+pub fn linear_to_db(values: &[f32]) -> Vec<f32> {
+    values
+        .iter()
+        .map(|val| {
+            if *val == 0.0 {
+                -1000.0
+            } else {
+                20.0 * val.log10()
+            }
+        })
+        .collect()
+}

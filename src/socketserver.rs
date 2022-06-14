@@ -15,6 +15,7 @@ use tungstenite::Message;
 use tungstenite::WebSocket;
 
 use crate::config;
+use crate::helpers::linear_to_db;
 use crate::ExitRequest;
 use crate::ProcessingState;
 use crate::Res;
@@ -385,28 +386,28 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
             let capstat = shared_data_inst.capture_status.read().unwrap();
             Some(WsReply::GetCaptureSignalRms {
                 result: WsResult::Ok,
-                value: capstat.signal_rms.get_last_sqrt().unwrap_or(vec![]), //TODO recalc to dB
+                value: linear_to_db(&capstat.signal_rms.get_last_sqrt().unwrap_or(vec![])),
             })
         }
         WsCommand::GetPlaybackSignalRms => {
             let pbstat = shared_data_inst.playback_status.read().unwrap();
             Some(WsReply::GetPlaybackSignalRms {
                 result: WsResult::Ok,
-                value: pbstat.signal_rms.get_last_sqrt().unwrap_or(vec![]), //TODO recalc to dB
+                value: linear_to_db(&pbstat.signal_rms.get_last_sqrt().unwrap_or(vec![])),
             })
         }
         WsCommand::GetCaptureSignalPeak => {
             let capstat = shared_data_inst.capture_status.read().unwrap();
             Some(WsReply::GetCaptureSignalPeak {
                 result: WsResult::Ok,
-                value: capstat.signal_peak.get_last().unwrap_or(vec![]), //TODO recalc to dB
+                value: linear_to_db(&capstat.signal_peak.get_last().unwrap_or(vec![])),
             })
         }
         WsCommand::GetPlaybackSignalPeak => {
             let pbstat = shared_data_inst.playback_status.read().unwrap();
             Some(WsReply::GetPlaybackSignalPeak {
                 result: WsResult::Ok,
-                value: pbstat.signal_peak.get_last().unwrap_or(vec![]), //TODO recalc to dB
+                value: linear_to_db(&pbstat.signal_peak.get_last().unwrap_or(vec![])),
             })
         }
         WsCommand::GetVersion => Some(WsReply::GetVersion {
