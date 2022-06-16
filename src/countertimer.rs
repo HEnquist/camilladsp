@@ -219,6 +219,7 @@ pub struct HistoryRecord {
 #[derive(Clone, Debug)]
 pub struct ValueHistory {
     buffer: VecDeque<HistoryRecord>,
+    peak: Vec<f32>,
     nbr_values: usize,
     history_length: usize,
 }
@@ -227,6 +228,7 @@ impl ValueHistory {
     pub fn new(history_length: usize, nbr_values: usize) -> Self {
         Self {
             buffer: VecDeque::<HistoryRecord>::with_capacity(history_length),
+            peak: vec![0.0; nbr_values],
             nbr_values,
             history_length,
         }
@@ -242,8 +244,17 @@ impl ValueHistory {
             );
             self.nbr_values = values.len();
             self.buffer.clear();
+            self.peak = vec![0.0; self.nbr_values];
         }
         let time = Instant::now();
+        self.peak
+            .iter_mut()
+            .zip(values.iter())
+            .for_each(|(max, val)| {
+                if *val > *max {
+                    *max = *val;
+                }
+            });
         let record = HistoryRecord { time, values };
         if self.buffer.len() == self.history_length {
             self.buffer.pop_back();
@@ -279,6 +290,36 @@ impl ValueHistory {
         Some(scratch)
     }
 
+    // Get the max since the given Instance
+    pub fn get_max_since(&self, time: Instant) -> Option<Vec<f32>> {
+        let mut scratch = vec![0.0; self.nbr_values];
+        let mut valid = false;
+        for record in self.buffer.iter() {
+            if record.time < time {
+                break;
+            }
+            record
+                .values
+                .iter()
+                .zip(scratch.iter_mut())
+                .for_each(|(val, max)| {
+                    if *val > *max {
+                        *max = *val;
+                    }
+                });
+            valid = true;
+        }
+        if valid {
+            return Some(scratch);
+        }
+        None
+    }
+
+    // Get the max since the start
+    pub fn get_global_max(&self) -> Vec<f32> {
+        self.peak.clone()
+    }
+
     // Get the square root of the average since the given Instance.
     // Used for RMS history.
     // Assumes that every record is the (squared) RMS value for an equally long interval.
@@ -309,10 +350,16 @@ mod tests {
     };
     use crate::ProcessingState;
     use std::time::Instant;
+    use std::{thread, time};
 
     fn spinsleep(time: u128) {
         let start = Instant::now();
         while Instant::now().duration_since(start).as_millis() <= time {}
+    }
+
+    fn sleep(time: u64) {
+        let millis = time::Duration::from_millis(time);
+        thread::sleep(millis);
     }
 
     #[test]
@@ -449,12 +496,12 @@ mod tests {
     fn test_valuehistory() {
         let mut hist = ValueHistory::new(6, 2);
         let start1 = Instant::now();
-        spinsleep(10);
+        sleep(10);
         hist.add_record(vec![1.0, 2.0]);
         hist.add_record(vec![2.0, 3.0]);
         hist.add_record(vec![3.0, 4.0]);
         let start2 = Instant::now();
-        spinsleep(10);
+        sleep(10);
         hist.add_record(vec![5.0, 8.0]);
         hist.add_record(vec![6.0, 9.0]);
         hist.add_record(vec![7.0, 10.0]);
@@ -479,12 +526,39 @@ mod tests {
     fn test_valuehistory_rms() {
         let mut hist = ValueHistory::new(10, 1);
         let start1 = Instant::now();
-        spinsleep(10);
+        sleep(10);
         hist.add_record_squared(vec![7.0]);
         hist.add_record_squared(vec![1.0]);
         assert_eq!(
             format!("{:?}", vec![5.0]),
             format!("{:?}", hist.get_average_sqrt_since(start1).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_valuehistory_peak() {
+        let mut hist = ValueHistory::new(10, 1);
+        hist.add_record(vec![8.0]);
+        hist.add_record(vec![9.0]);
+        sleep(10);
+        let start1 = Instant::now();
+        hist.add_record(vec![5.0]);
+        hist.add_record(vec![6.0]);
+        sleep(10);
+        let start2 = Instant::now();
+        hist.add_record(vec![1.0]);
+        hist.add_record(vec![2.0]);
+        assert_eq!(
+            format!("{:?}", vec![6.0]),
+            format!("{:?}", hist.get_max_since(start1).unwrap())
+        );
+        assert_eq!(
+            format!("{:?}", vec![2.0]),
+            format!("{:?}", hist.get_max_since(start2).unwrap())
+        );
+        assert_eq!(
+            format!("{:?}", vec![9.0]),
+            format!("{:?}", hist.get_global_max())
         );
     }
 
