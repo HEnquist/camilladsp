@@ -69,15 +69,13 @@ pub fn multiply_add_elements(
     }
 }
 
-pub fn linear_to_db(values: &[f32]) -> Vec<f32> {
-    values
-        .iter()
-        .map(|val| {
-            if *val == 0.0 {
-                -1000.0
-            } else {
-                20.0 * val.log10()
-            }
-        })
-        .collect()
+// Inplace recalculation of values positive values 0..1 to dB.
+pub fn linear_to_db(values: &mut [f32]) {
+    values.iter_mut().for_each(|val| {
+        if *val == 0.0 {
+            *val = -1000.0;
+        } else {
+            *val = 20.0 * val.log10();
+        }
+    });
 }

@@ -212,8 +212,8 @@ impl ValueWatcher {
 
 #[derive(Clone, Debug)]
 pub struct HistoryRecord {
-    time: Instant,
-    values: Vec<f32>,
+    pub time: Instant,
+    pub values: Vec<f32>,
 }
 
 #[derive(Clone, Debug)]
@@ -288,7 +288,7 @@ impl ValueHistory {
         }
         let last = self.get_last().unwrap();
         scratch.iter_mut().for_each(|val| *val /= nbr_summed as f32);
-        Some(HistoryRecord{
+        Some(HistoryRecord {
             values: scratch,
             time: last.time,
         })
@@ -315,7 +315,7 @@ impl ValueHistory {
         }
         if valid {
             let last = self.get_last().unwrap();
-            return Some(HistoryRecord{
+            return Some(HistoryRecord {
                 values: scratch,
                 time: last.time,
             });
@@ -330,8 +330,13 @@ impl ValueHistory {
 
     // Reset the global max
     pub fn reset_global_max(&mut self) {
-        self.peak.iter_mut()
-            .for_each(|val| *val = 0.0);
+        self.peak.iter_mut().for_each(|val| *val = 0.0);
+    }
+
+    // Clear the history and global peak
+    pub fn clear_history(&mut self) {
+        self.buffer.clear();
+        self.reset_global_max();
     }
 
     // Get the square root of the average since the given Instance.
@@ -346,11 +351,11 @@ impl ValueHistory {
     }
 
     pub fn get_last(&self) -> Option<HistoryRecord> {
-        self.buffer.get(0).map(|record| record.clone())
+        self.buffer.get(0).cloned()
     }
 
     pub fn get_last_sqrt(&self) -> Option<HistoryRecord> {
-        let mut result = self.buffer.get(0).map(|record| record.clone());
+        let mut result = self.buffer.get(0).cloned();
         if let Some(ref mut record) = result {
             record.values.iter_mut().for_each(|val| *val = val.sqrt())
         };
