@@ -1,6 +1,8 @@
 ## Unreleased
 New features:
-- Added dynamic range compressor
+- Added dynamic range compressor.
+- Added websocket commands to read peak and rms history.
+- Better handling of USB gadget in Alsa backend.
 
 ## 1.0.0
 New features:
