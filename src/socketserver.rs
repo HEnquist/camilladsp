@@ -77,19 +77,17 @@ enum WsCommand {
     GetCaptureSignalPeak,
     GetCaptureSignalPeakSince(f32),
     GetCaptureSignalPeakSinceLast,
-    //GetCaptureSignalPeakSinceStart,
-    //ResetCaptureSignalPeakSinceStart,
     GetPlaybackSignalRms,
     GetPlaybackSignalRmsSince(f32),
     GetPlaybackSignalRmsSinceLast,
     GetPlaybackSignalPeak,
     GetPlaybackSignalPeakSince(f32),
     GetPlaybackSignalPeakSinceLast,
-    //GetPlaybackSignalPeakSinceStart,
-    //ResetPlaybackSignalPeakSinceStart,
     GetSignalLevels,
     GetSignalLevelsSince(f32),
     GetSignalLevelsSinceLast,
+    GetSignalPeaksSinceStart,
+    ResetSignalPeaksSinceStart,
     GetCaptureRate,
     GetUpdateInterval,
     SetUpdateInterval(usize),
@@ -121,6 +119,12 @@ struct AllLevels {
     playback_peak: Vec<f32>,
     capture_rms: Vec<f32>,
     capture_peak: Vec<f32>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+struct PbCapLevels {
+    playback: Vec<f32>,
+    capture: Vec<f32>,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -228,6 +232,13 @@ enum WsReply {
     GetSignalLevelsSinceLast {
         result: WsResult,
         value: AllLevels,
+    },
+    GetSignalPeaksSinceStart {
+        result: WsResult,
+        value: PbCapLevels,
+    },
+    ResetSignalPeaksSinceStart {
+        result: WsResult,
     },
     GetCaptureRate {
         result: WsResult,
@@ -593,6 +604,25 @@ fn handle_command(
             let result = WsReply::GetSignalLevelsSinceLast {
                 result: WsResult::Ok,
                 value: levels,
+            };
+            Some(result)
+        }
+        WsCommand::GetSignalPeaksSinceStart => {
+            let levels = PbCapLevels {
+                playback: get_playback_signal_global_peak(shared_data_inst),
+                capture: get_capture_signal_global_peak(shared_data_inst),
+            };
+            let result = WsReply::GetSignalPeaksSinceStart {
+                result: WsResult::Ok,
+                value: levels,
+            };
+            Some(result)
+        }
+        WsCommand::ResetSignalPeaksSinceStart => {
+            reset_playback_signal_global_peak(shared_data_inst);
+            reset_capture_signal_global_peak(shared_data_inst);
+            let result = WsReply::ResetSignalPeaksSinceStart {
+                result: WsResult::Ok,
             };
             Some(result)
         }
@@ -1021,6 +1051,24 @@ fn get_playback_signal_peak(shared_data: &SharedData) -> Vec<f32> {
     }
 }
 
+fn get_playback_signal_global_peak(shared_data: &SharedData) -> Vec<f32> {
+    shared_data
+        .playback_status
+        .read()
+        .unwrap()
+        .signal_peak
+        .get_global_max()
+}
+
+fn reset_playback_signal_global_peak(shared_data: &SharedData) {
+    shared_data
+        .playback_status
+        .write()
+        .unwrap()
+        .signal_peak
+        .reset_global_max();
+}
+
 fn get_playback_signal_rms(shared_data: &SharedData) -> Vec<f32> {
     let res = shared_data
         .playback_status
@@ -1051,6 +1099,24 @@ fn get_capture_signal_peak(shared_data: &SharedData) -> Vec<f32> {
         }
         None => vec![],
     }
+}
+
+fn get_capture_signal_global_peak(shared_data: &SharedData) -> Vec<f32> {
+    shared_data
+        .capture_status
+        .read()
+        .unwrap()
+        .signal_peak
+        .get_global_max()
+}
+
+fn reset_capture_signal_global_peak(shared_data: &SharedData) {
+    shared_data
+        .capture_status
+        .write()
+        .unwrap()
+        .signal_peak
+        .reset_global_max();
 }
 
 fn get_capture_signal_rms(shared_data: &SharedData) -> Vec<f32> {

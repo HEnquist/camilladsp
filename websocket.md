@@ -56,7 +56,7 @@ Commands for reading and changing settings for the websocket server.
 
 ### Read processing status
 
-Commands for reading status parameters.
+#### Commands for reading status parameters.
 - `GetState` : get the current state of the processing as a string. Possible values are: 
   * "Running": the processing is running normally.
   * "Paused": processing is paused because the input signal is silent.
@@ -74,20 +74,44 @@ Commands for reading status parameters.
   * return the value as an integer
 - `GetSignalRange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)
   * returns the value as a float
-- `GetCaptureSignalPeak` : get the peak value in the last chunk for all channels on the capture side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
-- `GetCaptureSignalRms` : get the RMS value in the last chunk for all channels on the capture side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
-- `GetPlaybackSignalPeak` : get the peak value in the last chunk for all channels on the playback side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
-- `GetPlaybackSignalRms` : get the RMS value in the last chunk for all channels on the playback side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
 - `GetRateAdjust` : get the adjustment factor applied to the asynchronous resampler.
   * returns the value as a float
 - `GetBufferLevel` : get the current buffer level of the playback device when rate adjust is enabled, returns zero otherwise.
   * returns the value as an integer
 - `GetClippedSamples` : get the number of clipped samples since the config was loaded.
   * returns the value as an integer
+
+#### Commands for reading signal RMS and peak. 
+These commands all return a vector of floats, with one value per channel. The values are the channel levels in dB, where 0 dB means full level.
+
+Get the peak or RMS value in the last chunk on the capture or playback side.
+- `GetCaptureSignalPeak`
+- `GetCaptureSignalRms`
+- `GetPlaybackSignalPeak`
+- `GetPlaybackSignalRms`
+
+Get the peak or RMS value measured during a specified time interval. Takes a time in seconds (n.nn),
+and returns the values measured during the last n.nn seconds.
+- `GetCaptureSignalPeakSince`
+- `GetCaptureSignalRmsSince`
+- `GetPlaybackSignalPeakSince`
+- `GetPlaybackSignalRmsSince`
+
+Get the peak or RMS value measured since the last call to the same command from the same client. The first time a client calls this command it returns the values measured since the client connected.
+If the command is repeated very quickly, it may happen that there is no new data. The response is then an empty vector.
+- `GetCaptureSignalPeakSinceLast`
+- `GetCaptureSignalRmsSinceLast`
+- `GetPlaybackSignalPeakSinceLast`
+- `GetPlaybackSignalRmsSinceLast`
+
+Combined commands for reading several levels with a single request. These commands provide the same data as calling all the four commands in each of the groups above. The values are returned as a json object with keys `playback_peak`, `playback_rms`, `capture_peak` and `capture_rms`.
+- `GetSignalLevels`
+- `GetSignalLevelsSince`
+- `GetSignalLevelsSinceLast`
+
+Get the peak since start.
+- `GetSignalPeaksSinceStart` : Get the playback and capture peak level since processing started. The values are returned as a json object with keys `playback` and `capture`.
+- `ResetSignalPeaksSinceStart` : Reset the peak values. Note that this resets the peak for all clients.
 
 
 ### Volume control
