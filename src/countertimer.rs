@@ -273,7 +273,7 @@ impl ValueHistory {
         let mut scratch = vec![0.0; self.nbr_values];
         let mut nbr_summed = 0;
         for record in self.buffer.iter() {
-            if record.time < time {
+            if record.time <= time {
                 break;
             }
             record
@@ -299,7 +299,7 @@ impl ValueHistory {
         let mut scratch = vec![0.0; self.nbr_values];
         let mut valid = false;
         for record in self.buffer.iter() {
-            if record.time < time {
+            if record.time <= time {
                 break;
             }
             record
@@ -525,10 +525,12 @@ mod tests {
         hist.add_record(vec![5.0, 8.0]);
         hist.add_record(vec![6.0, 9.0]);
         hist.add_record(vec![7.0, 10.0]);
+        // This must include all values.
         assert_eq!(
             format!("{:?}", vec![4.0, 6.0]),
             format!("{:?}", hist.get_average_since(start1).unwrap().values)
         );
+        // This must only include the last three.
         assert_eq!(
             format!("{:?}", vec![6.0, 9.0]),
             format!("{:?}", hist.get_average_since(start2).unwrap().values)
@@ -536,10 +538,15 @@ mod tests {
         hist.add_record(vec![5.0, 8.0]);
         hist.add_record(vec![6.0, 9.0]);
         hist.add_record(vec![7.0, 10.0]);
+        // This must include the last 6 since the history length is set to 6.
         assert_eq!(
             format!("{:?}", vec![6.0, 9.0]),
             format!("{:?}", hist.get_average_since(start1).unwrap().values)
         );
+
+        let last = hist.get_last().unwrap().time;
+        // No new data, should be empty
+        assert!(hist.get_average_since(last).is_none());
     }
 
     #[test]
@@ -568,18 +575,25 @@ mod tests {
         let start2 = Instant::now();
         hist.add_record(vec![1.0]);
         hist.add_record(vec![2.0]);
+        // This must include only values added after start1.
         assert_eq!(
             format!("{:?}", vec![6.0]),
             format!("{:?}", hist.get_max_since(start1).unwrap().values)
         );
+        // This must include only values added after start2.
         assert_eq!(
             format!("{:?}", vec![2.0]),
             format!("{:?}", hist.get_max_since(start2).unwrap().values)
         );
+        // This must include all values.
         assert_eq!(
             format!("{:?}", vec![9.0]),
             format!("{:?}", hist.get_global_max())
         );
+
+        let last = hist.get_last().unwrap().time;
+        // No new data, should be empty
+        assert!(hist.get_max_since(last).is_none());
     }
 
     #[test]
