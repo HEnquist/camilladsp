@@ -8,14 +8,19 @@ By default the websocket server binds to the address 127.0.0.1, which means it's
 
 
 ## Command syntax
-All commands are sent as JSON. For commands without arguments, this is just a string with the command name within quotes:
+All commands are sent as the string text representation of a JSON object.
+
+For commands without arguments, this is just a string with the command name within quotes:
 ```
 "GetVersion"
 ```
+
 For commands that take an argument, they are instead given as a key and a value:
 ```json
 {"SetUpdateInterval": 500}
 ```
+
+Note, if you are using NodeJS/javascript then simply wrap your JSON object with JSON.stringify() before sending. IE ``` ws.send(JSON.stringify({"SetUpdateInterval": 1000}))```;
 
 The return values are also JSON. The commands that don't return a value return a structure containing the command name and the result, which is either Ok or Error:
 ```json
