@@ -8,21 +8,16 @@ By default the websocket server binds to the address 127.0.0.1, which means it's
 
 
 ## Command syntax
-All commands are sent as the string text representation of a JSON object.
-
-For commands without arguments, this is just a string with the command name within quotes:
+For commands without arguments, this is just a string *with the command name within quotes*:
 ```
 "GetVersion"
 ```
-
 For commands that take an argument, they are instead given as a key and a value:
 ```json
 {"SetUpdateInterval": 500}
 ```
 
-Note, if you are using NodeJS/javascript then simply wrap your JSON object with JSON.stringify() before sending. IE ``` ws.send(JSON.stringify({"SetUpdateInterval": 1000}))```;
-
-The return values are also JSON. The commands that don't return a value return a structure containing the command name and the result, which is either Ok or Error:
+The return values are also JSON (in string format). The commands that don't return a value return a structure containing the command name and the result, which is either Ok or Error:
 ```json
 {
   "SetUpdateInterval": {
@@ -40,6 +35,35 @@ The commands that return a value also include a "value" field:
   }
 }
 ```
+
+## String formatting, notably for NodeJS etc
+
+All commands and responses are sent as the string text representation of a JSON object. Your system/language may automatically do the "stringify" / "parse" processes automaticaly for you, many won't. 
+
+IE if you are using NodeJS/javascript then simply wrap your JSON object with JSON.stringify() before sending. 
+``` 
+ws.send(JSON.stringify({"SetUpdateInterval": 1000}))
+```
+
+Likewise on receiving the value from the websocket server, the JSON **will be in string format**. Complicating it further, if you're using the defacto 'ws' NodeJS library, it's likely received as a buffer array that you need to convert to string first. Either way, you'll need to parse the text with the JSON.parse function.
+```
+ws.on('message', function message(data) {
+    // data is buffer array
+    let replyString = Buffer.from(data).toString();
+    let parsed = {};
+    try {
+      parsed = JSON.parse(replyString);
+    }
+    catch (err){
+      console.error('Parse error', err);
+    }
+
+    if (parsed.hasOwnProperty('GetVolume')){
+      console.log('GetVolume response received', parsed.GetVolume.value);
+    }
+});
+```
+*Wrapped the parse with a try/catch as that's good practice to avoid crashes with improperly formatted JSON etc.*
 
 ## All commands
 The available commands are listed below. All commands return the result, and for the ones that return a value are this described here.
