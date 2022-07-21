@@ -16,7 +16,7 @@ use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::thread;
 use std::time::Instant;
 
@@ -32,6 +32,10 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
+
+lazy_static! {
+    static ref ALSA_MUTEX: Mutex<()> = Mutex::new(());
+}
 
 pub struct AlsaPlaybackDevice {
     pub devname: String,
@@ -309,6 +313,8 @@ fn open_pcm(
     buf_manager: &mut dyn DeviceBufferManager,
     capture: bool,
 ) -> Res<alsa::PCM> {
+    // Acquire the lock
+    let _lock = ALSA_MUTEX.lock().unwrap();
     // Open the device
     let pcmdev = if capture {
         alsa::PCM::new(&devname, Direction::Capture, true)?
@@ -488,8 +494,18 @@ fn playback_loop_bytes(
                 if !device_stalled {
                     // updates only for non-stalled device
                     chunk_stats = chunk.get_stats();
-                    params.playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                    params.playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                    params
+                        .playback_status
+                        .write()
+                        .unwrap()
+                        .signal_rms
+                        .add_record_squared(chunk_stats.rms_linear());
+                    params
+                        .playback_status
+                        .write()
+                        .unwrap()
+                        .signal_peak
+                        .add_record(chunk_stats.peak_linear());
 
                     if let Some(delay) = delay_at_chunk_recvd {
                         if delay != 0 {
@@ -772,8 +788,18 @@ fn capture_loop_bytes(
             &params.capture_status.read().unwrap().used_channels,
         );
         chunk_stats = chunk.get_stats();
-        params.capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-        params.capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+        params
+            .capture_status
+            .write()
+            .unwrap()
+            .signal_rms
+            .add_record_squared(chunk_stats.rms_linear());
+        params
+            .capture_status
+            .write()
+            .unwrap()
+            .signal_peak
+            .add_record(chunk_stats.peak_linear());
         value_range = chunk.maxval - chunk.minval;
         if device_stalled {
             state = ProcessingState::Stalled;

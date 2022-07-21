@@ -1,23 +1,11 @@
 use crate::NewValue;
 use crate::PrcFmt;
 use crate::ProcessingState;
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-pub struct Averager {
-    sum: f64,
-    nbr_values: usize,
-}
-
-pub struct Stopwatch {
-    start_time: Instant,
-    pub value: Duration,
-}
-
-pub struct TimeAverage {
-    sum: usize,
-    timer: Stopwatch,
-}
-
+/// A counter for watching if the signal has been silent
+/// for longer than a given limit.
 pub struct SilenceCounter {
     silence_threshold: PrcFmt,
     silence_limit_nbr: usize,
@@ -64,6 +52,12 @@ impl SilenceCounter {
     }
 }
 
+/// A simple stopwatch for measuring time.
+pub struct Stopwatch {
+    start_time: Instant,
+    pub value: Duration,
+}
+
 impl Stopwatch {
     pub fn new() -> Stopwatch {
         let start_time = Instant::now();
@@ -102,6 +96,12 @@ impl Default for Stopwatch {
     }
 }
 
+/// Calculate the average of a series of numbers.
+pub struct Averager {
+    sum: f64,
+    nbr_values: usize,
+}
+
 impl Averager {
     pub fn new() -> Averager {
         Averager {
@@ -137,6 +137,12 @@ impl Default for Averager {
     }
 }
 
+/// Calculate the average number of added counts per second.
+pub struct TimeAverage {
+    sum: usize,
+    timer: Stopwatch,
+}
+
 impl TimeAverage {
     pub fn new() -> TimeAverage {
         TimeAverage {
@@ -170,6 +176,7 @@ impl Default for TimeAverage {
     }
 }
 
+/// Check if a value stays within a given range.
 pub struct ValueWatcher {
     min_value: f32,
     max_value: f32,
@@ -203,15 +210,176 @@ impl ValueWatcher {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct HistoryRecord {
+    pub time: Instant,
+    pub values: Vec<f32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ValueHistory {
+    buffer: VecDeque<HistoryRecord>,
+    peak: Vec<f32>,
+    nbr_values: usize,
+    history_length: usize,
+}
+
+impl ValueHistory {
+    pub fn new(history_length: usize, nbr_values: usize) -> Self {
+        Self {
+            buffer: VecDeque::<HistoryRecord>::with_capacity(history_length),
+            peak: vec![0.0; nbr_values],
+            nbr_values,
+            history_length,
+        }
+    }
+
+    // Add a record
+    pub fn add_record(&mut self, values: Vec<f32>) {
+        if values.len() != self.nbr_values {
+            debug!(
+                "Number of values changed. New {}, prev {}. Clearing history.",
+                values.len(),
+                self.nbr_values
+            );
+            self.nbr_values = values.len();
+            self.buffer.clear();
+            self.peak = vec![0.0; self.nbr_values];
+        }
+        let time = Instant::now();
+        self.peak
+            .iter_mut()
+            .zip(values.iter())
+            .for_each(|(max, val)| {
+                if *val > *max {
+                    *max = *val;
+                }
+            });
+        let record = HistoryRecord { time, values };
+        if self.buffer.len() == self.history_length {
+            self.buffer.pop_back();
+        }
+        self.buffer.push_front(record);
+    }
+
+    // Add a record but square the numbers (used for RMS history)
+    pub fn add_record_squared(&mut self, mut values: Vec<f32>) {
+        values.iter_mut().for_each(|val| *val = *val * *val);
+        self.add_record(values);
+    }
+
+    // Get the average since the given Instance
+    pub fn get_average_since(&self, time: Instant) -> Option<HistoryRecord> {
+        let mut scratch = vec![0.0; self.nbr_values];
+        let mut nbr_summed = 0;
+        for record in self.buffer.iter() {
+            if record.time <= time {
+                break;
+            }
+            record
+                .values
+                .iter()
+                .zip(scratch.iter_mut())
+                .for_each(|(val, acc)| *acc += *val);
+            nbr_summed += 1;
+        }
+        if nbr_summed == 0 {
+            return None;
+        }
+        let last = self.get_last().unwrap();
+        scratch.iter_mut().for_each(|val| *val /= nbr_summed as f32);
+        Some(HistoryRecord {
+            values: scratch,
+            time: last.time,
+        })
+    }
+
+    // Get the max since the given Instance
+    pub fn get_max_since(&self, time: Instant) -> Option<HistoryRecord> {
+        let mut scratch = vec![0.0; self.nbr_values];
+        let mut valid = false;
+        for record in self.buffer.iter() {
+            if record.time <= time {
+                break;
+            }
+            record
+                .values
+                .iter()
+                .zip(scratch.iter_mut())
+                .for_each(|(val, max)| {
+                    if *val > *max {
+                        *max = *val;
+                    }
+                });
+            valid = true;
+        }
+        if valid {
+            let last = self.get_last().unwrap();
+            return Some(HistoryRecord {
+                values: scratch,
+                time: last.time,
+            });
+        }
+        None
+    }
+
+    // Get the max since the start
+    pub fn get_global_max(&self) -> Vec<f32> {
+        self.peak.clone()
+    }
+
+    // Reset the global max
+    pub fn reset_global_max(&mut self) {
+        self.peak.iter_mut().for_each(|val| *val = 0.0);
+    }
+
+    // Clear the history and global peak
+    pub fn clear_history(&mut self) {
+        self.buffer.clear();
+        self.reset_global_max();
+    }
+
+    // Get the square root of the average since the given Instance.
+    // Used for RMS history.
+    // Assumes that every record is the (squared) RMS value for an equally long interval.
+    pub fn get_average_sqrt_since(&self, time: Instant) -> Option<HistoryRecord> {
+        let mut result = self.get_average_since(time);
+        if let Some(ref mut record) = result {
+            record.values.iter_mut().for_each(|val| *val = val.sqrt());
+        };
+        result
+    }
+
+    pub fn get_last(&self) -> Option<HistoryRecord> {
+        self.buffer.get(0).cloned()
+    }
+
+    pub fn get_last_sqrt(&self) -> Option<HistoryRecord> {
+        let mut result = self.buffer.get(0).cloned();
+        if let Some(ref mut record) = result {
+            record.values.iter_mut().for_each(|val| *val = val.sqrt())
+        };
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::countertimer::{Averager, SilenceCounter, Stopwatch, TimeAverage, ValueWatcher};
+    use crate::countertimer::{
+        Averager, SilenceCounter, Stopwatch, TimeAverage, ValueHistory, ValueWatcher,
+    };
     use crate::ProcessingState;
     use std::time::Instant;
+    use std::{thread, time};
 
     fn spinsleep(time: u128) {
         let start = Instant::now();
         while Instant::now().duration_since(start).as_millis() <= time {}
+    }
+
+    fn sleep(time: u64) {
+        let millis = time::Duration::from_millis(time);
+        thread::sleep(millis);
     }
 
     #[test]
@@ -342,5 +510,122 @@ mod tests {
         for _ in 0..5 {
             assert_eq!(watcher.check_value(88200.0), true);
         }
+    }
+
+    #[test]
+    fn test_valuehistory() {
+        let mut hist = ValueHistory::new(6, 2);
+        let start1 = Instant::now();
+        sleep(10);
+        hist.add_record(vec![1.0, 2.0]);
+        hist.add_record(vec![2.0, 3.0]);
+        hist.add_record(vec![3.0, 4.0]);
+        let start2 = Instant::now();
+        sleep(10);
+        hist.add_record(vec![5.0, 8.0]);
+        hist.add_record(vec![6.0, 9.0]);
+        hist.add_record(vec![7.0, 10.0]);
+        // This must include all values.
+        assert_eq!(
+            format!("{:?}", vec![4.0, 6.0]),
+            format!("{:?}", hist.get_average_since(start1).unwrap().values)
+        );
+        // This must only include the last three.
+        assert_eq!(
+            format!("{:?}", vec![6.0, 9.0]),
+            format!("{:?}", hist.get_average_since(start2).unwrap().values)
+        );
+        hist.add_record(vec![5.0, 8.0]);
+        hist.add_record(vec![6.0, 9.0]);
+        hist.add_record(vec![7.0, 10.0]);
+        // This must include the last 6 since the history length is set to 6.
+        assert_eq!(
+            format!("{:?}", vec![6.0, 9.0]),
+            format!("{:?}", hist.get_average_since(start1).unwrap().values)
+        );
+
+        let last = hist.get_last().unwrap().time;
+        // No new data, should be empty
+        assert!(hist.get_average_since(last).is_none());
+    }
+
+    #[test]
+    fn test_valuehistory_rms() {
+        let mut hist = ValueHistory::new(10, 1);
+        let start1 = Instant::now();
+        sleep(10);
+        hist.add_record_squared(vec![7.0]);
+        hist.add_record_squared(vec![1.0]);
+        assert_eq!(
+            format!("{:?}", vec![5.0]),
+            format!("{:?}", hist.get_average_sqrt_since(start1).unwrap().values)
+        );
+    }
+
+    #[test]
+    fn test_valuehistory_peak() {
+        let mut hist = ValueHistory::new(10, 1);
+        hist.add_record(vec![8.0]);
+        hist.add_record(vec![9.0]);
+        sleep(10);
+        let start1 = Instant::now();
+        hist.add_record(vec![5.0]);
+        hist.add_record(vec![6.0]);
+        sleep(10);
+        let start2 = Instant::now();
+        hist.add_record(vec![1.0]);
+        hist.add_record(vec![2.0]);
+        // This must include only values added after start1.
+        assert_eq!(
+            format!("{:?}", vec![6.0]),
+            format!("{:?}", hist.get_max_since(start1).unwrap().values)
+        );
+        // This must include only values added after start2.
+        assert_eq!(
+            format!("{:?}", vec![2.0]),
+            format!("{:?}", hist.get_max_since(start2).unwrap().values)
+        );
+        // This must include all values.
+        assert_eq!(
+            format!("{:?}", vec![9.0]),
+            format!("{:?}", hist.get_global_max())
+        );
+
+        let last = hist.get_last().unwrap().time;
+        // No new data, should be empty
+        assert!(hist.get_max_since(last).is_none());
+    }
+
+    #[test]
+    fn test_valuehistory_last() {
+        let mut hist = ValueHistory::new(10, 1);
+        hist.add_record(vec![1.0]);
+        hist.add_record(vec![2.0]);
+        hist.add_record(vec![3.0]);
+        hist.add_record(vec![4.0]);
+        assert_eq!(
+            format!("{:?}", vec![4.0]),
+            format!("{:?}", hist.get_last().unwrap().values)
+        );
+        assert_eq!(
+            format!("{:?}", vec![2.0]),
+            format!("{:?}", hist.get_last_sqrt().unwrap().values)
+        );
+    }
+
+    #[test]
+    fn test_valuehistory_change_nbr() {
+        let mut hist = ValueHistory::new(10, 2);
+        hist.add_record(vec![1.0, 1.0]);
+        hist.add_record(vec![2.0, 2.0]);
+        assert_eq!(
+            format!("{:?}", vec![2.0, 2.0]),
+            format!("{:?}", hist.get_last().unwrap().values)
+        );
+        hist.add_record(vec![3.0]);
+        assert_eq!(
+            format!("{:?}", vec![3.0]),
+            format!("{:?}", hist.get_last().unwrap().values)
+        );
     }
 }

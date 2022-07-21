@@ -10,11 +10,13 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
+use std::time::{Duration, Instant};
 use tungstenite::accept;
 use tungstenite::Message;
 use tungstenite::WebSocket;
 
 use crate::config;
+use crate::helpers::linear_to_db;
 use crate::ExitRequest;
 use crate::ProcessingState;
 use crate::Res;
@@ -35,6 +37,14 @@ pub struct SharedData {
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
     pub processing_status: Arc<RwLock<ProcessingParameters>>,
     pub status: Arc<RwLock<ProcessingStatus>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalData {
+    pub last_cap_rms_time: Instant,
+    pub last_cap_peak_time: Instant,
+    pub last_pb_rms_time: Instant,
+    pub last_pb_peak_time: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -62,16 +72,31 @@ enum WsCommand {
     GetConfigName,
     GetSignalRange,
     GetCaptureSignalRms,
+    GetCaptureSignalRmsSince(f32),
+    GetCaptureSignalRmsSinceLast,
     GetCaptureSignalPeak,
+    GetCaptureSignalPeakSince(f32),
+    GetCaptureSignalPeakSinceLast,
     GetPlaybackSignalRms,
+    GetPlaybackSignalRmsSince(f32),
+    GetPlaybackSignalRmsSinceLast,
     GetPlaybackSignalPeak,
+    GetPlaybackSignalPeakSince(f32),
+    GetPlaybackSignalPeakSinceLast,
+    GetSignalLevels,
+    GetSignalLevelsSince(f32),
+    GetSignalLevelsSinceLast,
+    GetSignalPeaksSinceStart,
+    ResetSignalPeaksSinceStart,
     GetCaptureRate,
     GetUpdateInterval,
     SetUpdateInterval(usize),
     GetVolume,
     SetVolume(f32),
+    AdjustVolume(f32),
     GetMute,
     SetMute(bool),
+    ToggleMute,
     GetVersion,
     GetState,
     GetStopReason,
@@ -88,6 +113,20 @@ enum WsCommand {
 enum WsResult {
     Ok,
     Error,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+struct AllLevels {
+    playback_rms: Vec<f32>,
+    playback_peak: Vec<f32>,
+    capture_rms: Vec<f32>,
+    capture_peak: Vec<f32>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+struct PbCapLevels {
+    playback: Vec<f32>,
+    capture: Vec<f32>,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -140,7 +179,23 @@ enum WsReply {
         result: WsResult,
         value: Vec<f32>,
     },
+    GetPlaybackSignalRmsSince {
+        result: WsResult,
+        value: Vec<f32>,
+    },
+    GetPlaybackSignalRmsSinceLast {
+        result: WsResult,
+        value: Vec<f32>,
+    },
     GetPlaybackSignalPeak {
+        result: WsResult,
+        value: Vec<f32>,
+    },
+    GetPlaybackSignalPeakSince {
+        result: WsResult,
+        value: Vec<f32>,
+    },
+    GetPlaybackSignalPeakSinceLast {
         result: WsResult,
         value: Vec<f32>,
     },
@@ -148,9 +203,44 @@ enum WsReply {
         result: WsResult,
         value: Vec<f32>,
     },
+    GetCaptureSignalRmsSince {
+        result: WsResult,
+        value: Vec<f32>,
+    },
+    GetCaptureSignalRmsSinceLast {
+        result: WsResult,
+        value: Vec<f32>,
+    },
     GetCaptureSignalPeak {
         result: WsResult,
         value: Vec<f32>,
+    },
+    GetCaptureSignalPeakSince {
+        result: WsResult,
+        value: Vec<f32>,
+    },
+    GetCaptureSignalPeakSinceLast {
+        result: WsResult,
+        value: Vec<f32>,
+    },
+    GetSignalLevels {
+        result: WsResult,
+        value: AllLevels,
+    },
+    GetSignalLevelsSince {
+        result: WsResult,
+        value: AllLevels,
+    },
+    GetSignalLevelsSinceLast {
+        result: WsResult,
+        value: AllLevels,
+    },
+    GetSignalPeaksSinceStart {
+        result: WsResult,
+        value: PbCapLevels,
+    },
+    ResetSignalPeaksSinceStart {
+        result: WsResult,
     },
     GetCaptureRate {
         result: WsResult,
@@ -170,10 +260,18 @@ enum WsReply {
         result: WsResult,
         value: f32,
     },
+    AdjustVolume {
+        result: WsResult,
+        value: f32,
+    },
     SetMute {
         result: WsResult,
     },
     GetMute {
+        result: WsResult,
+        value: bool,
+    },
+    ToggleMute {
         result: WsResult,
         value: bool,
     },
@@ -266,6 +364,13 @@ pub fn start_server(parameters: ServerParameters, shared_data: SharedData) {
         if let Ok(server) = ws_result {
             for stream in server.incoming() {
                 let shared_data_inst = shared_data.clone();
+                let now = Instant::now();
+                let local_data = LocalData {
+                    last_cap_peak_time: now,
+                    last_cap_rms_time: now,
+                    last_pb_peak_time: now,
+                    last_pb_rms_time: now,
+                };
                 #[cfg(feature = "secure-websocket")]
                 let acceptor_inst = acceptor.clone();
 
@@ -273,17 +378,17 @@ pub fn start_server(parameters: ServerParameters, shared_data: SharedData) {
                 thread::spawn(move || match acceptor_inst {
                     None => {
                         let websocket_res = accept_plain_stream(stream);
-                        handle_tcp(websocket_res, &shared_data_inst);
+                        handle_tcp(websocket_res, &shared_data_inst, local_data);
                     }
                     Some(acc) => {
                         let websocket_res = accept_secure_stream(acc, stream);
-                        handle_tls(websocket_res, &shared_data_inst);
+                        handle_tls(websocket_res, &shared_data_inst, local_data);
                     }
                 });
                 #[cfg(not(feature = "secure-websocket"))]
                 thread::spawn(move || {
                     let websocket_res = accept_plain_stream(stream);
-                    handle_tcp(websocket_res, &shared_data_inst);
+                    handle_tcp(websocket_res, &shared_data_inst, local_data);
                 });
             }
         } else if let Err(err) = ws_result {
@@ -294,7 +399,11 @@ pub fn start_server(parameters: ServerParameters, shared_data: SharedData) {
 
 macro_rules! make_handler {
     ($t:ty, $n:ident) => {
-        fn $n(websocket_res: Res<WebSocket<$t>>, shared_data_inst: &SharedData) {
+        fn $n(
+            websocket_res: Res<WebSocket<$t>>,
+            shared_data_inst: &SharedData,
+            mut local_data: LocalData,
+        ) {
             match websocket_res {
                 Ok(mut websocket) => loop {
                     let msg_res = websocket.read_message();
@@ -304,7 +413,7 @@ macro_rules! make_handler {
                             let command = parse_command(msg);
                             debug!("parsed command: {:?}", command);
                             let reply = match command {
-                                Ok(cmd) => handle_command(cmd, &shared_data_inst),
+                                Ok(cmd) => handle_command(cmd, &shared_data_inst, &mut local_data),
                                 Err(err) => Some(WsReply::Invalid {
                                     error: err.to_string(),
                                 }),
@@ -357,7 +466,11 @@ fn accept_plain_stream(
     Ok(ws)
 }
 
-fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<WsReply> {
+fn handle_command(
+    command: WsCommand,
+    shared_data_inst: &SharedData,
+    local_data: &mut LocalData,
+) -> Option<WsReply> {
     match command {
         WsCommand::Reload => {
             shared_data_inst
@@ -382,32 +495,146 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
             })
         }
         WsCommand::GetCaptureSignalRms => {
-            let capstat = shared_data_inst.capture_status.read().unwrap();
+            let values = get_capture_signal_rms(shared_data_inst);
             Some(WsReply::GetCaptureSignalRms {
                 result: WsResult::Ok,
-                value: capstat.signal_rms.clone(),
+                value: values,
+            })
+        }
+        WsCommand::GetCaptureSignalRmsSince(secs) => {
+            let values = get_capture_signal_rms_since(shared_data_inst, secs);
+            Some(WsReply::GetCaptureSignalRmsSince {
+                result: WsResult::Ok,
+                value: values,
+            })
+        }
+        WsCommand::GetCaptureSignalRmsSinceLast => {
+            let values = get_capture_signal_rms_since_last(shared_data_inst, local_data);
+            Some(WsReply::GetCaptureSignalRmsSinceLast {
+                result: WsResult::Ok,
+                value: values,
             })
         }
         WsCommand::GetPlaybackSignalRms => {
-            let pbstat = shared_data_inst.playback_status.read().unwrap();
+            let values = get_playback_signal_rms(shared_data_inst);
             Some(WsReply::GetPlaybackSignalRms {
                 result: WsResult::Ok,
-                value: pbstat.signal_rms.clone(),
+                value: values,
+            })
+        }
+        WsCommand::GetPlaybackSignalRmsSince(secs) => {
+            let values = get_playback_signal_rms_since(shared_data_inst, secs);
+            Some(WsReply::GetPlaybackSignalRmsSince {
+                result: WsResult::Ok,
+                value: values,
+            })
+        }
+        WsCommand::GetPlaybackSignalRmsSinceLast => {
+            let values = get_playback_signal_rms_since_last(shared_data_inst, local_data);
+            Some(WsReply::GetPlaybackSignalRmsSinceLast {
+                result: WsResult::Ok,
+                value: values,
             })
         }
         WsCommand::GetCaptureSignalPeak => {
-            let capstat = shared_data_inst.capture_status.read().unwrap();
+            let values = get_capture_signal_peak(shared_data_inst);
             Some(WsReply::GetCaptureSignalPeak {
                 result: WsResult::Ok,
-                value: capstat.signal_peak.clone(),
+                value: values,
+            })
+        }
+        WsCommand::GetCaptureSignalPeakSince(secs) => {
+            let values = get_capture_signal_peak_since(shared_data_inst, secs);
+            Some(WsReply::GetCaptureSignalPeakSince {
+                result: WsResult::Ok,
+                value: values,
+            })
+        }
+        WsCommand::GetCaptureSignalPeakSinceLast => {
+            let values = get_capture_signal_peak_since_last(shared_data_inst, local_data);
+            Some(WsReply::GetCaptureSignalPeakSinceLast {
+                result: WsResult::Ok,
+                value: values,
             })
         }
         WsCommand::GetPlaybackSignalPeak => {
-            let pbstat = shared_data_inst.playback_status.read().unwrap();
+            let values = get_playback_signal_peak(shared_data_inst);
             Some(WsReply::GetPlaybackSignalPeak {
                 result: WsResult::Ok,
-                value: pbstat.signal_peak.clone(),
+                value: values,
             })
+        }
+        WsCommand::GetPlaybackSignalPeakSince(secs) => {
+            let values = get_playback_signal_peak_since(shared_data_inst, secs);
+            Some(WsReply::GetPlaybackSignalPeakSince {
+                result: WsResult::Ok,
+                value: values,
+            })
+        }
+        WsCommand::GetPlaybackSignalPeakSinceLast => {
+            let values = get_playback_signal_peak_since_last(shared_data_inst, local_data);
+            Some(WsReply::GetPlaybackSignalPeakSinceLast {
+                result: WsResult::Ok,
+                value: values,
+            })
+        }
+        WsCommand::GetSignalLevels => {
+            let levels = AllLevels {
+                playback_rms: get_playback_signal_rms(shared_data_inst),
+                playback_peak: get_playback_signal_peak(shared_data_inst),
+                capture_rms: get_capture_signal_rms(shared_data_inst),
+                capture_peak: get_capture_signal_peak(shared_data_inst),
+            };
+            let result = WsReply::GetSignalLevels {
+                result: WsResult::Ok,
+                value: levels,
+            };
+            Some(result)
+        }
+        WsCommand::GetSignalLevelsSince(secs) => {
+            let levels = AllLevels {
+                playback_rms: get_playback_signal_rms_since(shared_data_inst, secs),
+                playback_peak: get_playback_signal_peak_since(shared_data_inst, secs),
+                capture_rms: get_capture_signal_rms_since(shared_data_inst, secs),
+                capture_peak: get_capture_signal_peak_since(shared_data_inst, secs),
+            };
+            let result = WsReply::GetSignalLevelsSince {
+                result: WsResult::Ok,
+                value: levels,
+            };
+            Some(result)
+        }
+        WsCommand::GetSignalLevelsSinceLast => {
+            let levels = AllLevels {
+                playback_rms: get_playback_signal_rms_since_last(shared_data_inst, local_data),
+                playback_peak: get_playback_signal_peak_since_last(shared_data_inst, local_data),
+                capture_rms: get_capture_signal_rms_since_last(shared_data_inst, local_data),
+                capture_peak: get_capture_signal_peak_since_last(shared_data_inst, local_data),
+            };
+            let result = WsReply::GetSignalLevelsSinceLast {
+                result: WsResult::Ok,
+                value: levels,
+            };
+            Some(result)
+        }
+        WsCommand::GetSignalPeaksSinceStart => {
+            let levels = PbCapLevels {
+                playback: get_playback_signal_global_peak(shared_data_inst),
+                capture: get_capture_signal_global_peak(shared_data_inst),
+            };
+            let result = WsReply::GetSignalPeaksSinceStart {
+                result: WsResult::Ok,
+                value: levels,
+            };
+            Some(result)
+        }
+        WsCommand::ResetSignalPeaksSinceStart => {
+            reset_playback_signal_global_peak(shared_data_inst);
+            reset_capture_signal_global_peak(shared_data_inst);
+            let result = WsReply::ResetSignalPeaksSinceStart {
+                result: WsResult::Ok,
+            };
+            Some(result)
         }
         WsCommand::GetVersion => Some(WsReply::GetVersion {
             result: WsResult::Ok,
@@ -481,8 +708,32 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
         WsCommand::SetVolume(nbr) => {
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
             procstat.volume = nbr;
+            // Clamp to -150 .. 50 dB, probably larger than needed..
+            if procstat.volume < -150.0 {
+                procstat.volume = -150.0;
+                warn!("Clamped volume at -150 dB")
+            } else if procstat.volume > 50.0 {
+                procstat.volume = 50.0;
+                warn!("Clamped volume at +50 dB")
+            }
             Some(WsReply::SetVolume {
                 result: WsResult::Ok,
+            })
+        }
+        WsCommand::AdjustVolume(nbr) => {
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.volume += nbr;
+            // Clamp to -150 .. 50 dB, probably larger than needed..
+            if procstat.volume < -150.0 {
+                procstat.volume = -150.0;
+                warn!("Clamped volume at -150 dB")
+            } else if procstat.volume > 50.0 {
+                procstat.volume = 50.0;
+                warn!("Clamped volume at +50 dB")
+            }
+            Some(WsReply::AdjustVolume {
+                result: WsResult::Ok,
+                value: procstat.volume,
             })
         }
         WsCommand::GetMute => {
@@ -497,6 +748,14 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
             procstat.mute = mute;
             Some(WsReply::SetMute {
                 result: WsResult::Ok,
+            })
+        }
+        WsCommand::ToggleMute => {
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.mute = !procstat.mute;
+            Some(WsReply::ToggleMute {
+                result: WsResult::Ok,
+                value: procstat.mute,
             })
         }
         WsCommand::GetConfig => Some(WsReply::GetConfig {
@@ -667,6 +926,254 @@ fn handle_command(command: WsCommand, shared_data_inst: &SharedData) -> Option<W
             })
         }
         WsCommand::None => None,
+    }
+}
+
+fn get_playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
+    let time_instant = Instant::now() - Duration::from_secs_f32(time);
+    let res = shared_data
+        .playback_status
+        .read()
+        .unwrap()
+        .signal_peak
+        .get_max_since(time_instant);
+    match res {
+        Some(mut record) => {
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
+    }
+}
+
+fn get_playback_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
+    let time_instant = Instant::now() - Duration::from_secs_f32(time);
+    let res = shared_data
+        .playback_status
+        .read()
+        .unwrap()
+        .signal_rms
+        .get_average_sqrt_since(time_instant);
+    match res {
+        Some(mut record) => {
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
+    }
+}
+
+fn get_capture_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
+    let time_instant = Instant::now() - Duration::from_secs_f32(time);
+    let res = shared_data
+        .capture_status
+        .read()
+        .unwrap()
+        .signal_peak
+        .get_max_since(time_instant);
+    match res {
+        Some(mut record) => {
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
+    }
+}
+
+fn get_capture_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
+    let time_instant = Instant::now() - Duration::from_secs_f32(time);
+    let res = shared_data
+        .capture_status
+        .read()
+        .unwrap()
+        .signal_rms
+        .get_average_sqrt_since(time_instant);
+    match res {
+        Some(mut record) => {
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
+    }
+}
+
+fn get_playback_signal_peak_since_last(
+    shared_data: &SharedData,
+    local_data: &mut LocalData,
+) -> Vec<f32> {
+    let res = shared_data
+        .playback_status
+        .read()
+        .unwrap()
+        .signal_peak
+        .get_max_since(local_data.last_pb_peak_time);
+    match res {
+        Some(mut record) => {
+            local_data.last_pb_peak_time = record.time;
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
+    }
+}
+
+fn get_playback_signal_rms_since_last(
+    shared_data: &SharedData,
+    local_data: &mut LocalData,
+) -> Vec<f32> {
+    let res = shared_data
+        .playback_status
+        .read()
+        .unwrap()
+        .signal_rms
+        .get_average_sqrt_since(local_data.last_pb_rms_time);
+    match res {
+        Some(mut record) => {
+            local_data.last_pb_rms_time = record.time;
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
+    }
+}
+
+fn get_capture_signal_peak_since_last(
+    shared_data: &SharedData,
+    local_data: &mut LocalData,
+) -> Vec<f32> {
+    let res = shared_data
+        .capture_status
+        .read()
+        .unwrap()
+        .signal_peak
+        .get_max_since(local_data.last_cap_peak_time);
+    match res {
+        Some(mut record) => {
+            local_data.last_cap_peak_time = record.time;
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
+    }
+}
+
+fn get_capture_signal_rms_since_last(
+    shared_data: &SharedData,
+    local_data: &mut LocalData,
+) -> Vec<f32> {
+    let res = shared_data
+        .capture_status
+        .read()
+        .unwrap()
+        .signal_rms
+        .get_average_sqrt_since(local_data.last_cap_rms_time);
+    match res {
+        Some(mut record) => {
+            local_data.last_cap_rms_time = record.time;
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
+    }
+}
+
+fn get_playback_signal_peak(shared_data: &SharedData) -> Vec<f32> {
+    let res = shared_data
+        .playback_status
+        .read()
+        .unwrap()
+        .signal_peak
+        .get_last();
+    match res {
+        Some(mut record) => {
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
+    }
+}
+
+fn get_playback_signal_global_peak(shared_data: &SharedData) -> Vec<f32> {
+    shared_data
+        .playback_status
+        .read()
+        .unwrap()
+        .signal_peak
+        .get_global_max()
+}
+
+fn reset_playback_signal_global_peak(shared_data: &SharedData) {
+    shared_data
+        .playback_status
+        .write()
+        .unwrap()
+        .signal_peak
+        .reset_global_max();
+}
+
+fn get_playback_signal_rms(shared_data: &SharedData) -> Vec<f32> {
+    let res = shared_data
+        .playback_status
+        .read()
+        .unwrap()
+        .signal_rms
+        .get_last_sqrt();
+    match res {
+        Some(mut record) => {
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
+    }
+}
+
+fn get_capture_signal_peak(shared_data: &SharedData) -> Vec<f32> {
+    let res = shared_data
+        .capture_status
+        .read()
+        .unwrap()
+        .signal_peak
+        .get_last();
+    match res {
+        Some(mut record) => {
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
+    }
+}
+
+fn get_capture_signal_global_peak(shared_data: &SharedData) -> Vec<f32> {
+    shared_data
+        .capture_status
+        .read()
+        .unwrap()
+        .signal_peak
+        .get_global_max()
+}
+
+fn reset_capture_signal_global_peak(shared_data: &SharedData) {
+    shared_data
+        .capture_status
+        .write()
+        .unwrap()
+        .signal_peak
+        .reset_global_max();
+}
+
+fn get_capture_signal_rms(shared_data: &SharedData) -> Vec<f32> {
+    let res = shared_data
+        .capture_status
+        .read()
+        .unwrap()
+        .signal_rms
+        .get_last_sqrt();
+    match res {
+        Some(mut record) => {
+            linear_to_db(&mut record.values);
+            record.values
+        }
+        None => vec![],
     }
 }
 

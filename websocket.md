@@ -8,7 +8,7 @@ By default the websocket server binds to the address 127.0.0.1, which means it's
 
 
 ## Command syntax
-All commands are sent as JSON. For commands without arguments, this is just a string with the command name within quotes:
+For commands without arguments, this is just a string *with the command name within quotes*:
 ```
 "GetVersion"
 ```
@@ -17,7 +17,7 @@ For commands that take an argument, they are instead given as a key and a value:
 {"SetUpdateInterval": 500}
 ```
 
-The return values are also JSON. The commands that don't return a value return a structure containing the command name and the result, which is either Ok or Error:
+The return values are also JSON (in string format). The commands that don't return a value return a structure containing the command name and the result, which is either Ok or Error:
 ```json
 {
   "SetUpdateInterval": {
@@ -35,6 +35,35 @@ The commands that return a value also include a "value" field:
   }
 }
 ```
+
+## String formatting, notably for NodeJS etc
+
+All commands and responses are sent as the string text representation of a JSON object. Your system/language may automatically do the "stringify" / "parse" processes automaticaly for you, many won't. 
+
+IE if you are using NodeJS/javascript then simply wrap your JSON object with JSON.stringify() before sending. 
+``` 
+ws.send(JSON.stringify({"SetUpdateInterval": 1000}))
+```
+
+Likewise on receiving the value from the websocket server, the JSON **will be in string format**. Complicating it further, if you're using the defacto 'ws' NodeJS library, it's likely received as a buffer array that you need to convert to string first. Either way, you'll need to parse the text with the JSON.parse function.
+```
+ws.on('message', function message(data) {
+    // data is buffer array
+    let replyString = Buffer.from(data).toString();
+    let parsed = {};
+    try {
+      parsed = JSON.parse(replyString);
+    }
+    catch (err){
+      console.error('Parse error', err);
+    }
+
+    if (parsed.hasOwnProperty('GetVolume')){
+      console.log('GetVolume response received', parsed.GetVolume.value);
+    }
+});
+```
+*Wrapped the parse with a try/catch as that's good practice to avoid crashes with improperly formatted JSON etc.*
 
 ## All commands
 The available commands are listed below. All commands return the result, and for the ones that return a value are this described here.
@@ -56,7 +85,7 @@ Commands for reading and changing settings for the websocket server.
 
 ### Read processing status
 
-Commands for reading status parameters.
+#### Commands for reading status parameters.
 - `GetState` : get the current state of the processing as a string. Possible values are: 
   * "Running": the processing is running normally.
   * "Paused": processing is paused because the input signal is silent.
@@ -74,14 +103,6 @@ Commands for reading status parameters.
   * return the value as an integer
 - `GetSignalRange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)
   * returns the value as a float
-- `GetCaptureSignalPeak` : get the peak value in the last chunk for all channels on the capture side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
-- `GetCaptureSignalRms` : get the RMS value in the last chunk for all channels on the capture side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
-- `GetPlaybackSignalPeak` : get the peak value in the last chunk for all channels on the playback side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
-- `GetPlaybackSignalRms` : get the RMS value in the last chunk for all channels on the playback side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
 - `GetRateAdjust` : get the adjustment factor applied to the asynchronous resampler.
   * returns the value as a float
 - `GetBufferLevel` : get the current buffer level of the playback device when rate adjust is enabled, returns zero otherwise.
@@ -89,32 +110,68 @@ Commands for reading status parameters.
 - `GetClippedSamples` : get the number of clipped samples since the config was loaded.
   * returns the value as an integer
 
+#### Commands for reading signal RMS and peak. 
+These commands all return a vector of floats, with one value per channel. The values are the channel levels in dB, where 0 dB means full level.
+
+Get the peak or RMS value in the last chunk on the capture or playback side.
+- `GetCaptureSignalPeak`
+- `GetCaptureSignalRms`
+- `GetPlaybackSignalPeak`
+- `GetPlaybackSignalRms`
+
+Get the peak or RMS value measured during a specified time interval. Takes a time in seconds (n.nn),
+and returns the values measured during the last n.nn seconds.
+- `GetCaptureSignalPeakSince`
+- `GetCaptureSignalRmsSince`
+- `GetPlaybackSignalPeakSince`
+- `GetPlaybackSignalRmsSince`
+
+Get the peak or RMS value measured since the last call to the same command from the same client. The first time a client calls this command it returns the values measured since the client connected.
+If the command is repeated very quickly, it may happen that there is no new data. The response is then an empty vector.
+- `GetCaptureSignalPeakSinceLast`
+- `GetCaptureSignalRmsSinceLast`
+- `GetPlaybackSignalPeakSinceLast`
+- `GetPlaybackSignalRmsSinceLast`
+
+Combined commands for reading several levels with a single request. These commands provide the same data as calling all the four commands in each of the groups above. The values are returned as a json object with keys `playback_peak`, `playback_rms`, `capture_peak` and `capture_rms`.
+- `GetSignalLevels`
+- `GetSignalLevelsSince`
+- `GetSignalLevelsSinceLast`
+
+Get the peak since start.
+- `GetSignalPeaksSinceStart` : Get the playback and capture peak level since processing started. The values are returned as a json object with keys `playback` and `capture`.
+- `ResetSignalPeaksSinceStart` : Reset the peak values. Note that this resets the peak for all clients.
+
 
 ### Volume control
 
 Commands for setting and getting the volume setting. These are only relevant if the pipeline includes "Volume" or "Loudness" filters.
-- `GetVolume` : get the current volume setting in dB.
-  * returns the value as a float
-- `SetVolume` : set the volume control to the given value in dB.
-- `GetMute` : get the current mute setting.
-  * returns the muting status as a boolean
-- `SetMute` : set muting to the given value.
+- `GetVolume` : Get the current volume setting in dB.
+  * Returns the value as a float.
+- `SetVolume` : Set the volume control to the given value in dB. Clamped to the range -150 to +50 dB.
+- `AdjustVolume` : Change the volume setting by the given number of dB, positive or negative. The resulting volume is clamped to the range -150 to +50 dB.
+  * Returns the new value as a float.
+- `GetMute` : Get the current mute setting.
+  * Returns the muting status as a boolean.
+- `SetMute` : Set muting to the given value.
+- `ToggleMute` : Toggle muting.
+  * Returns the new muting status as a boolean.
 
 ### Config management
 
-Commands for reading and changing the active configuration
-- `GetConfig` : read the current configuration as yaml
-  * returns the config in yaml as a string
-- `GetConfigJson` : read the current configuration as json
-  * returns the config in json as a string
-- `GetConfigName` : get name and path of current config file
-  * returns the path as a string
-- `GetPreviousConfig` : read the previous configuration as yaml
-  * returns the previously active config in yaml as a string
-- `SetConfigName` : change config file name given as a string, not applied until `Reload` is called
-- `SetConfig:` : provide a new config as a yaml string. Applied directly.
-- `SetConfigJson` : provide a new config as a JSON string. Applied directly.
-- `Reload` : reload current config file (same as SIGHUP)
+Commands for reading and changing the active configuration.
+- `GetConfig` : Read the current configuration as yaml.
+  * Returns the config in yaml as a string.
+- `GetConfigJson` : Read the current configuration as json.
+  * Returns the config in json as a string.
+- `GetConfigName` : Get name and path of current config file.
+  * Returns the path as a string.
+- `GetPreviousConfig` : Read the previous configuration as yaml.
+  * Returns the previously active config in yaml as a string.
+- `SetConfigName` : Change config file name given as a string, not applied until `Reload` is called.
+- `SetConfig:` : Provide a new config as a yaml string. Applied directly.
+- `SetConfigJson` : Provide a new config as a JSON string. Applied directly.
+- `Reload` : Reload current config file (same as SIGHUP).
 
 
 ### Config reading and checking

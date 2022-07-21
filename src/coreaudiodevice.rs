@@ -465,8 +465,16 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 }
                             }
                             chunk_stats = chunk.get_stats();
-                            playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                            playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                            playback_status
+                                .write()
+                                .unwrap()
+                                .signal_rms
+                                .add_record_squared(chunk_stats.rms_linear());
+                            playback_status
+                                .write()
+                                .unwrap()
+                                .signal_peak
+                                .add_record(chunk_stats.peak_linear());
                             let mut buf = vec![
                                 0u8;
                                 channels
@@ -845,8 +853,8 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     prev_len = data_queue.len();
                     chunk_stats = chunk.get_stats();
                     //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
-                    capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                    capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                    capture_status.write().unwrap().signal_rms.add_record_squared(chunk_stats.rms_linear());
+                    capture_status.write().unwrap().signal_peak.add_record(chunk_stats.peak_linear());
                     value_range = chunk.maxval - chunk.minval;
                     state = silence_counter.update(value_range);
                     if state == ProcessingState::Running {

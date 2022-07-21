@@ -41,6 +41,7 @@ use camillalib::Res;
 
 use camillalib::audiodevice;
 use camillalib::config;
+use camillalib::countertimer;
 use camillalib::processing;
 #[cfg(feature = "websocket")]
 use camillalib::socketserver;
@@ -793,16 +794,16 @@ fn main_process() -> i32 {
         signal_range: 0.0,
         rate_adjust: 0.0,
         state: ProcessingState::Inactive,
-        signal_rms: Vec::new(),
-        signal_peak: Vec::new(),
+        signal_rms: countertimer::ValueHistory::new(1024, 2),
+        signal_peak: countertimer::ValueHistory::new(1024, 2),
         used_channels: Vec::new(),
     }));
     let playback_status = Arc::new(RwLock::new(PlaybackStatus {
         buffer_level: 0,
         clipped_samples: 0,
         update_interval: 1000,
-        signal_rms: Vec::new(),
-        signal_peak: Vec::new(),
+        signal_rms: countertimer::ValueHistory::new(1024, 2),
+        signal_peak: countertimer::ValueHistory::new(1024, 2),
     }));
     let processing_status = Arc::new(RwLock::new(ProcessingParameters {
         volume: initial_volume,
