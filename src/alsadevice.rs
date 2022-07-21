@@ -16,7 +16,7 @@ use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::thread;
 use std::time::Instant;
 
@@ -32,6 +32,10 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
+
+lazy_static! {
+    static ref ALSA_MUTEX: Mutex<()> = Mutex::new(());
+}
 
 pub struct AlsaPlaybackDevice {
     pub devname: String,
@@ -309,6 +313,8 @@ fn open_pcm(
     buf_manager: &mut dyn DeviceBufferManager,
     capture: bool,
 ) -> Res<alsa::PCM> {
+    // Acquire the lock
+    let _lock = ALSA_MUTEX.lock().unwrap();
     // Open the device
     let pcmdev = if capture {
         alsa::PCM::new(&devname, Direction::Capture, true)?

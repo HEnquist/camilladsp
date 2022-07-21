@@ -4,6 +4,10 @@ New features:
 - Added websocket commands to read peak and rms history.
 - Better handling of USB gadget in Alsa backend.
 
+## 1.0.1
+Bugfixes:
+- Alsa: Avoid opening capture and playback devices at the same time since this causes trouble with some devices.
+
 ## 1.0.0
 New features:
 - New improved CoreAudio backend.
