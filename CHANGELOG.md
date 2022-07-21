@@ -2,6 +2,8 @@
 New features:
 - Added dynamic range compressor.
 - Added websocket commands to read peak and rms history.
+- Add ToggleMute websocket command.
+- Add AdjustVolume websocket command for relative volume changes.
 - Better handling of USB gadget in Alsa backend.
 
 ## 1.0.1

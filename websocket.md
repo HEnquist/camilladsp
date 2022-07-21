@@ -146,28 +146,32 @@ Get the peak since start.
 ### Volume control
 
 Commands for setting and getting the volume setting. These are only relevant if the pipeline includes "Volume" or "Loudness" filters.
-- `GetVolume` : get the current volume setting in dB.
-  * returns the value as a float
-- `SetVolume` : set the volume control to the given value in dB.
-- `GetMute` : get the current mute setting.
-  * returns the muting status as a boolean
-- `SetMute` : set muting to the given value.
+- `GetVolume` : Get the current volume setting in dB.
+  * Returns the value as a float.
+- `SetVolume` : Set the volume control to the given value in dB. Clamped to the range -150 to +50 dB.
+- `AdjustVolume` : Change the volume setting by the given number of dB, positive or negative. The resulting volume is clamped to the range -150 to +50 dB.
+  * Returns the new value as a float.
+- `GetMute` : Get the current mute setting.
+  * Returns the muting status as a boolean.
+- `SetMute` : Set muting to the given value.
+- `ToggleMute` : Toggle muting.
+  * Returns the new muting status as a boolean.
 
 ### Config management
 
-Commands for reading and changing the active configuration
-- `GetConfig` : read the current configuration as yaml
-  * returns the config in yaml as a string
-- `GetConfigJson` : read the current configuration as json
-  * returns the config in json as a string
-- `GetConfigName` : get name and path of current config file
-  * returns the path as a string
-- `GetPreviousConfig` : read the previous configuration as yaml
-  * returns the previously active config in yaml as a string
-- `SetConfigName` : change config file name given as a string, not applied until `Reload` is called
-- `SetConfig:` : provide a new config as a yaml string. Applied directly.
-- `SetConfigJson` : provide a new config as a JSON string. Applied directly.
-- `Reload` : reload current config file (same as SIGHUP)
+Commands for reading and changing the active configuration.
+- `GetConfig` : Read the current configuration as yaml.
+  * Returns the config in yaml as a string.
+- `GetConfigJson` : Read the current configuration as json.
+  * Returns the config in json as a string.
+- `GetConfigName` : Get name and path of current config file.
+  * Returns the path as a string.
+- `GetPreviousConfig` : Read the previous configuration as yaml.
+  * Returns the previously active config in yaml as a string.
+- `SetConfigName` : Change config file name given as a string, not applied until `Reload` is called.
+- `SetConfig:` : Provide a new config as a yaml string. Applied directly.
+- `SetConfigJson` : Provide a new config as a JSON string. Applied directly.
+- `Reload` : Reload current config file (same as SIGHUP).
 
 
 ### Config reading and checking
