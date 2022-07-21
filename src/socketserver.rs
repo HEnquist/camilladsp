@@ -93,8 +93,10 @@ enum WsCommand {
     SetUpdateInterval(usize),
     GetVolume,
     SetVolume(f32),
+    AdjustVolume(f32),
     GetMute,
     SetMute(bool),
+    ToggleMute,
     GetVersion,
     GetState,
     GetStopReason,
@@ -258,10 +260,18 @@ enum WsReply {
         result: WsResult,
         value: f32,
     },
+    AdjustVolume {
+        result: WsResult,
+        value: f32,
+    },
     SetMute {
         result: WsResult,
     },
     GetMute {
+        result: WsResult,
+        value: bool,
+    },
+    ToggleMute {
         result: WsResult,
         value: bool,
     },
@@ -698,8 +708,32 @@ fn handle_command(
         WsCommand::SetVolume(nbr) => {
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
             procstat.volume = nbr;
+            // Clamp to -150 .. 50 dB, probably larger than needed..
+            if procstat.volume < -150.0 {
+                procstat.volume = -150.0;
+                warn!("Clamped volume at -150 dB")
+            } else if procstat.volume > 50.0 {
+                procstat.volume = 50.0;
+                warn!("Clamped volume at +50 dB")
+            }
             Some(WsReply::SetVolume {
                 result: WsResult::Ok,
+            })
+        }
+        WsCommand::AdjustVolume(nbr) => {
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.volume += nbr;
+            // Clamp to -150 .. 50 dB, probably larger than needed..
+            if procstat.volume < -150.0 {
+                procstat.volume = -150.0;
+                warn!("Clamped volume at -150 dB")
+            } else if procstat.volume > 50.0 {
+                procstat.volume = 50.0;
+                warn!("Clamped volume at +50 dB")
+            }
+            Some(WsReply::AdjustVolume {
+                result: WsResult::Ok,
+                value: procstat.volume,
             })
         }
         WsCommand::GetMute => {
@@ -714,6 +748,14 @@ fn handle_command(
             procstat.mute = mute;
             Some(WsReply::SetMute {
                 result: WsResult::Ok,
+            })
+        }
+        WsCommand::ToggleMute => {
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.mute = !procstat.mute;
+            Some(WsReply::ToggleMute {
+                result: WsResult::Ok,
+                value: procstat.mute,
             })
         }
         WsCommand::GetConfig => Some(WsReply::GetConfig {
