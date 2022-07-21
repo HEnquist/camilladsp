@@ -15,7 +15,7 @@ use rubato::VecResampler;
 use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -25,6 +25,10 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
+
+lazy_static! {
+    static ref ALSA_MUTEX: Mutex<()> = Mutex::new(());
+}
 
 const STANDARD_RATES: [u32; 17] = [
     5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
@@ -391,6 +395,8 @@ fn open_pcm(
     sample_format: &SampleFormat,
     capture: bool,
 ) -> Res<alsa::PCM> {
+    // Acquire the lock
+    let _lock = ALSA_MUTEX.lock().unwrap();
     // Open the device
     let pcmdev = if capture {
         alsa::PCM::new(&devname, Direction::Capture, true)?
