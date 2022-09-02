@@ -505,6 +505,19 @@ See the "camilladsp-config" repository under [Related projects](#related-project
 
 TODO test with Jack.
 
+### BlueALSA
+BlueALSA ([bluez-alsa](https://github.com/Arkq/bluez-alsa)) is a project to receive or send audio through Bluetooth A2DP. The `Bluez` source will connect to D-Bus of BlueALSA and get the audio directly from there, avoiding instability of ALSA loopback interface. Currently only capture (a2dp-sink) is supported.
+
+```
+  capture:
+    type: Bluez
+    format: S16LE
+    channels: 2
+    dbus_path: /org/bluealsa/hci0/dev_F8_87_F1_87_BF_30/a2dpsnk/source
+    service: org.bluealsa # Optional, specify if you have more than one instance of bluealsa running
+```
+
+The dbus path can be listed from `gdbus call -y --dest org.bluealsa -o /org/bluealsa -m org.freedesktop.DBus.ObjectManager.GetManagedObjects`. You have to specify correct capture sample rate, channel count and format. These parameters can be fetched from `bluealsa-aplay -L`.
 
 # Configuration
 

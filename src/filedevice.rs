@@ -18,6 +18,8 @@ use std::time::Duration;
 
 use rubato::VecResampler;
 
+#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
+use crate::filedevice_bluez;
 #[cfg(not(target_os = "linux"))]
 use crate::filereader::BlockingReader;
 #[cfg(target_os = "linux")]
@@ -41,6 +43,8 @@ pub struct FilePlaybackDevice {
 pub enum CaptureSource {
     Filename(String),
     Stdin,
+    #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
+    BluezDBus(String, String),
 }
 
 #[derive(Clone)]
@@ -410,7 +414,6 @@ fn capture_loop(
                 }
             }
             Ok(ReadResult::Complete(bytes)) => {
-                //trace!("Captured {} bytes", bytes);
                 if stalled {
                     debug!("Leaving stalled state, resuming processing");
                     stalled = false;
@@ -596,7 +599,7 @@ impl CaptureDevice for FileCaptureDevice {
                     CaptureSource::Stdin => Ok(Box::new(BlockingReader::new(stdin()))),
                 };
                 #[cfg(target_os = "linux")]
-                let file_res: Result<Box<dyn Reader>, std::io::Error> = match source {
+                let file_res: Result<Box<dyn Reader>, Box<dyn Error>> = match source {
                     CaptureSource::Filename(filename) => OpenOptions::new()
                         .read(true)
                         .custom_flags(nix::libc::O_NONBLOCK)
@@ -606,11 +609,18 @@ impl CaptureDevice for FileCaptureDevice {
                                 f,
                                 2 * 1000 * chunksize as u64 / samplerate as u64,
                             )) as Box<dyn Reader>
-                        }),
+                        })
+                        .map_err(|e| e.into()),
                     CaptureSource::Stdin => Ok(Box::new(NonBlockingReader::new(
                         stdin(),
                         2 * 1000 * chunksize as u64 / samplerate as u64,
                     ))),
+                    #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
+                    CaptureSource::BluezDBus(service, path) => {
+                        filedevice_bluez::open_bluez_dbus_fd(service, path, chunksize, samplerate)
+                            .map(|r| r as Box<dyn Reader>)
+                            .map_err(|e| e.into())
+                    }
                 };
                 match file_res {
                     Ok(mut file) => {
