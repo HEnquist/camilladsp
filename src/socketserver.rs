@@ -706,16 +706,17 @@ fn handle_command(
             })
         }
         WsCommand::SetVolume(nbr) => {
-            let mut procstat = shared_data_inst.processing_status.write().unwrap();
-            procstat.volume = nbr;
+            let mut new_vol = nbr;
             // Clamp to -150 .. 50 dB, probably larger than needed..
-            if procstat.volume < -150.0 {
-                procstat.volume = -150.0;
+            if new_vol < -150.0 {
+                new_vol = -150.0;
                 warn!("Clamped volume at -150 dB")
-            } else if procstat.volume > 50.0 {
-                procstat.volume = 50.0;
+            } else if new_vol > 50.0 {
+                new_vol = 50.0;
                 warn!("Clamped volume at +50 dB")
             }
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.volume = new_vol;
             Some(WsReply::SetVolume {
                 result: WsResult::Ok,
             })
