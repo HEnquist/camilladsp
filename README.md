@@ -592,32 +592,28 @@ Any parameter marked (*) in all examples in this section are optional. If they a
 
   The duration in seconds of a chunk is `chunksize/samplerate`, so the suggested values corresponds to about 22 ms per chunk. This is a reasonable value, and making it shorter can increase the cpu usage and make buffer underruns more likely.
 
-  If you have long FIR filters you can reduce CPU usage by making the chunksize larger. 
-  When increasing, try increasing in factors of two, like 1024 -> 2048 or 4096 -> 8192. 
+  If you have long FIR filters you can reduce CPU usage by making the chunksize larger.
+  When increasing, try increasing in factors of two, like 1024 -> 2048 or 4096 -> 8192.
   
 
 * `queuelimit` (optional, defaults to 4)
 
-  The field `queuelimit` should normally be left out to use the default of 4. 
-  It sets the limit for the length of the queues between the capture device and the processing thread, 
-  and between the processing thread and the playback device. 
-  The total queue size limit will be `2*chunksize*queuelimit` samples per channel. 
-  The maximum RAM usage is `8*2*chunksize*queuelimit` bytes. 
-  For example at the default setting of 128 and a chunksize of 1024, the total size limit of the queues 
-  is about 2MB (or 1MB if the 32bit compile option is used). 
-  The queues are allocated as needed, this value only sets an upper limit. 
+  The field `queuelimit` should normally be left out to use the default of 4.
+  It sets the limit for the length of the queues between the capture device and the processing thread,
+  as well as between the processing thread and the playback device.
+  The total queue size limit will be `2*chunksize*queuelimit` samples per channel.
 
-  The value should only be changed if the capture device can provide data faster 
+  The value should only be changed if the capture device can provide data faster
   than the playback device can play it, like when using the Alsa "cdsp" plugin.
   If this case, set `queuelimit` to a low value like 1.
 
 * `enable_rate_adjust` (optional, defaults to false)
 
-  This enables the playback device to control the rate of the capture device, 
-  in order to avoid buffer underruns of a slowly increasing latency. This is currently supported when using an Alsa, Wasapi or CoreAudio playback device.
+  This enables the playback device to control the rate of the capture device,
+  in order to avoid buffer underruns or a slowly increasing latency. This is currently supported when using an Alsa, Wasapi or CoreAudio playback device (and any capture device).
   Setting the rate can be done in two ways.
-  * If the capture device is an Alsa Loopback device, the adjustment is done by tuning the virtual sample clock of the Loopback device. This avoids any need for resampling.
-  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` must then be one of the "Async" variants.
+  * If the capture device is an Alsa Loopback device or a USB Audio gadget device, the adjustment is done by tuning the virtual sample clock of the Loopback or Gadget device. This avoids any need for resampling.
+  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` must then be one of the "Async" variants. This is supported for all capture devices.
   
 
 * `target_level` (optional, defaults to the `chunksize` value)
@@ -1355,8 +1351,14 @@ pipeline:
 
 
 ## Pipeline
-The pipeline section defines the processing steps between input and output. The input and output devices are automatically added to the start and end. 
-The pipeline is essentially a list of filters and/or mixers. There are no rules for ordering or how many are added. For each mixer and for the output device the number of channels from the previous step must match the number of input channels.
+The pipeline section defines the processing steps between input and output.
+The input and output devices are automatically added to the start and end.
+The pipeline is section of the config is list that determines which processing steps that will be applied, and in which order.
+A step can be a Filter, a Mixer or a Processor.
+The filters, mixers and processors must be defined in the corresponding section of the configuration, and the pipeline refers to them by their name.
+During processing, the steps are applied in the listed order.
+For each mixer and for the output device the number of channels from the previous step must match the number of input channels.
+Apart from this, there are no rules for ordering of the steps or how many are added.
 
 Example:
 ```
@@ -1382,8 +1384,13 @@ pipeline:
     names:
       - highpass_fir
 ```
-In this config first a mixer is used to copy a stereo input to four channels. Then for each channel a filter step is added. A filter block can contain one or several filters that must be define in the "Filters" section. Here channel 0 and 1 get filtered by "lowpass_fir" and "peak1", while 2 and 3 get filtered by just "highpass_fir". 
-If the names of mixers or filters includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filter name `fir_$samplerate$` will be updated to `fir_44100`. 
+In this config first a mixer is used to copy a stereo input to four channels.
+Then for each channel a filter step is added.
+A filter block can contain one or several filters that must be define in the "Filters" section.
+Here channel 0 and 1 get filtered by "lowpass_fir" and "peak1", while 2 and 3 get filtered by just "highpass_fir".
+If the names of mixers or filters includes the tokens `$samplerate$` or `$channels$`,
+these will be replaced by the corresponding values from the config.
+For example, if samplerate is 44100, the filter name `fir_$samplerate$` will be updated to `fir_44100`.
 
 ## Translating filters exported by REW
 REW can automatically generate a set of filters for correcting the response. These can then be exported as an `.xml`-file. This file can then be translated to CamillaDSP filters using the `translate_rew_xml.py` Python script. This will generate filters and pipeline steps that can be pasted into a CamillaDSP config file. This script currently supports only `Peaking` filters.
