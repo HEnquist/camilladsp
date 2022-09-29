@@ -551,7 +551,7 @@ Example config:
 ```
 devices:
   samplerate: 96000
-  chunksize: 1024
+  chunksize: 2048
   queuelimit: 4 (*)
   silence_threshold: -60 (*)
   silence_timeout: 3.0 (*)
