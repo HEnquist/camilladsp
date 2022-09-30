@@ -1365,35 +1365,53 @@ Example:
 pipeline:
   - type: Mixer
     name: to4channels
+    bypassed: false (*)
   - type: Filter
     channel: 0
+    bypassed: false (*)
     names:
       - lowpass_fir
       - peak1
   - type: Filter
     channel: 1
+    bypassed: false (*)
     names:
       - lowpass_fir
       - peak1
   - type: Filter
     channel: 2
+    bypassed: false (*)
     names:
       - highpass_fir
   - type: Filter
     channel: 3
+    bypassed: false (*)
     names:
       - highpass_fir
+  - type: Processor
+    name: my_compressor
+    bypassed: false (*)
 ```
 In this config first a mixer is used to copy a stereo input to four channels.
-Then for each channel a filter step is added.
-A filter block can contain one or several filters that must be define in the "Filters" section.
+This is then followed by a filter step for each channel.
+Then a compressor is added as the last step.
+
+A filter block can contain one or several filters that must be defined in the "Filters" section.
 Here channel 0 and 1 get filtered by "lowpass_fir" and "peak1", while 2 and 3 get filtered by just "highpass_fir".
 If the names of mixers or filters includes the tokens `$samplerate$` or `$channels$`,
 these will be replaced by the corresponding values from the config.
 For example, if samplerate is 44100, the filter name `fir_$samplerate$` will be updated to `fir_44100`.
 
+Each pipeline step has an optional `bypassed` property. Setting this to `true` removes this step from the pipeline.
+Take care when bypassing mixers. If a mixer is used to change the number of channels (like the one in the example above),
+then bypassing it will make the pipeline output the wrong number of channels.
+In this case, the bypass may be used to switch between mixers with different settings.
+
 ## Translating filters exported by REW
-REW can automatically generate a set of filters for correcting the response. These can then be exported as an `.xml`-file. This file can then be translated to CamillaDSP filters using the `translate_rew_xml.py` Python script. This will generate filters and pipeline steps that can be pasted into a CamillaDSP config file. This script currently supports only `Peaking` filters.
+REW can automatically generate a set of filters for correcting the response. These can then be exported as an `.xml`-file.
+This file can then be translated to CamillaDSP filters using the `translate_rew_xml.py` Python script.
+This will generate filters and pipeline steps that can be pasted into a CamillaDSP config file.
+This script currently supports only `Peaking` filters.
 
 
 ## Visualizing the config

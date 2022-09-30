@@ -447,9 +447,9 @@ impl FilterGroup {
 /// A Pipeline is made up of a series of PipelineSteps,
 /// each one can be a single Mixer of a group of Filters
 pub enum PipelineStep {
-    MixerStep(mixer::Mixer),
-    FilterStep(FilterGroup),
-    ProcessorStep(Box<dyn Processor>),
+    MixerStep(mixer::Mixer, bool),
+    FilterStep(FilterGroup, bool),
+    ProcessorStep(Box<dyn Processor>, bool),
 }
 
 pub struct Pipeline {
@@ -466,12 +466,16 @@ impl Pipeline {
         let mut steps = Vec::<PipelineStep>::new();
         for step in conf.pipeline {
             match step {
-                config::PipelineStep::Mixer { name } => {
+                config::PipelineStep::Mixer { name, bypassed } => {
                     let mixconf = conf.mixers[&name].clone();
                     let mixer = mixer::Mixer::from_config(name, mixconf);
-                    steps.push(PipelineStep::MixerStep(mixer));
+                    steps.push(PipelineStep::MixerStep(mixer, bypassed));
                 }
-                config::PipelineStep::Filter { channel, names } => {
+                config::PipelineStep::Filter {
+                    channel,
+                    names,
+                    bypassed,
+                } => {
                     let fltgrp = FilterGroup::from_config(
                         channel,
                         names,
@@ -480,9 +484,9 @@ impl Pipeline {
                         conf.devices.samplerate,
                         processing_status.clone(),
                     );
-                    steps.push(PipelineStep::FilterStep(fltgrp));
+                    steps.push(PipelineStep::FilterStep(fltgrp, bypassed));
                 }
-                config::PipelineStep::Processor { name } => {
+                config::PipelineStep::Processor { name, bypassed } => {
                     let procconf = conf.processors[&name].clone();
                     let proc = match procconf {
                         config::Processor::Compressor { parameters } => {
@@ -495,7 +499,7 @@ impl Pipeline {
                             Box::new(comp)
                         }
                     };
-                    steps.push(PipelineStep::ProcessorStep(proc));
+                    steps.push(PipelineStep::ProcessorStep(proc, bypassed));
                 }
             }
         }
@@ -512,15 +516,15 @@ impl Pipeline {
         debug!("Updating parameters");
         for mut step in &mut self.steps {
             match &mut step {
-                PipelineStep::MixerStep(mix) => {
+                PipelineStep::MixerStep(mix, _) => {
                     if mixers.iter().any(|n| n == &mix.name) {
                         mix.update_parameters(conf.mixers[&mix.name].clone());
                     }
                 }
-                PipelineStep::FilterStep(flt) => {
+                PipelineStep::FilterStep(flt, _) => {
                     flt.update_parameters(conf.filters.clone(), filters.clone());
                 }
-                PipelineStep::ProcessorStep(proc) => {
+                PipelineStep::ProcessorStep(proc, _) => {
                     if processors.iter().any(|n| n == &proc.name()) {
                         proc.update_parameters(conf.processors[&proc.name()].clone());
                     }
@@ -533,14 +537,20 @@ impl Pipeline {
     pub fn process_chunk(&mut self, mut chunk: AudioChunk) -> AudioChunk {
         for mut step in &mut self.steps {
             match &mut step {
-                PipelineStep::MixerStep(mix) => {
-                    chunk = mix.process_chunk(&chunk);
+                PipelineStep::MixerStep(mix, bypassed) => {
+                    if !*bypassed {
+                        chunk = mix.process_chunk(&chunk);
+                    }
                 }
-                PipelineStep::FilterStep(flt) => {
-                    flt.process_chunk(&mut chunk).unwrap();
+                PipelineStep::FilterStep(flt, bypassed) => {
+                    if !*bypassed {
+                        flt.process_chunk(&mut chunk).unwrap();
+                    }
                 }
-                PipelineStep::ProcessorStep(comp) => {
-                    comp.process_chunk(&mut chunk).unwrap();
+                PipelineStep::ProcessorStep(comp, bypassed) => {
+                    if !*bypassed {
+                        comp.process_chunk(&mut chunk).unwrap();
+                    }
                 }
             }
         }
