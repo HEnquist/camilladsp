@@ -447,9 +447,9 @@ impl FilterGroup {
 /// A Pipeline is made up of a series of PipelineSteps,
 /// each one can be a single Mixer of a group of Filters
 pub enum PipelineStep {
-    MixerStep(mixer::Mixer, bool),
-    FilterStep(FilterGroup, bool),
-    ProcessorStep(Box<dyn Processor>, bool),
+    MixerStep(mixer::Mixer),
+    FilterStep(FilterGroup),
+    ProcessorStep(Box<dyn Processor>),
 }
 
 pub struct Pipeline {
@@ -467,39 +467,45 @@ impl Pipeline {
         for step in conf.pipeline {
             match step {
                 config::PipelineStep::Mixer { name, bypassed } => {
-                    let mixconf = conf.mixers[&name].clone();
-                    let mixer = mixer::Mixer::from_config(name, mixconf);
-                    steps.push(PipelineStep::MixerStep(mixer, bypassed));
+                    if !bypassed {
+                        let mixconf = conf.mixers[&name].clone();
+                        let mixer = mixer::Mixer::from_config(name, mixconf);
+                        steps.push(PipelineStep::MixerStep(mixer));
+                    }
                 }
                 config::PipelineStep::Filter {
                     channel,
                     names,
                     bypassed,
                 } => {
-                    let fltgrp = FilterGroup::from_config(
-                        channel,
-                        names,
-                        conf.filters.clone(),
-                        conf.devices.chunksize,
-                        conf.devices.samplerate,
-                        processing_status.clone(),
-                    );
-                    steps.push(PipelineStep::FilterStep(fltgrp, bypassed));
+                    if !bypassed {
+                        let fltgrp = FilterGroup::from_config(
+                            channel,
+                            names,
+                            conf.filters.clone(),
+                            conf.devices.chunksize,
+                            conf.devices.samplerate,
+                            processing_status.clone(),
+                        );
+                        steps.push(PipelineStep::FilterStep(fltgrp));
+                    }
                 }
                 config::PipelineStep::Processor { name, bypassed } => {
-                    let procconf = conf.processors[&name].clone();
-                    let proc = match procconf {
-                        config::Processor::Compressor { parameters } => {
-                            let comp = compressor::Compressor::from_config(
-                                name,
-                                parameters,
-                                conf.devices.samplerate,
-                                conf.devices.chunksize,
-                            );
-                            Box::new(comp)
-                        }
-                    };
-                    steps.push(PipelineStep::ProcessorStep(proc, bypassed));
+                    if !bypassed {
+                        let procconf = conf.processors[&name].clone();
+                        let proc = match procconf {
+                            config::Processor::Compressor { parameters } => {
+                                let comp = compressor::Compressor::from_config(
+                                    name,
+                                    parameters,
+                                    conf.devices.samplerate,
+                                    conf.devices.chunksize,
+                                );
+                                Box::new(comp)
+                            }
+                        };
+                        steps.push(PipelineStep::ProcessorStep(proc));
+                    }
                 }
             }
         }
@@ -516,15 +522,15 @@ impl Pipeline {
         debug!("Updating parameters");
         for mut step in &mut self.steps {
             match &mut step {
-                PipelineStep::MixerStep(mix, _) => {
+                PipelineStep::MixerStep(mix) => {
                     if mixers.iter().any(|n| n == &mix.name) {
                         mix.update_parameters(conf.mixers[&mix.name].clone());
                     }
                 }
-                PipelineStep::FilterStep(flt, _) => {
+                PipelineStep::FilterStep(flt) => {
                     flt.update_parameters(conf.filters.clone(), filters.clone());
                 }
-                PipelineStep::ProcessorStep(proc, _) => {
+                PipelineStep::ProcessorStep(proc) => {
                     if processors.iter().any(|n| n == &proc.name()) {
                         proc.update_parameters(conf.processors[&proc.name()].clone());
                     }
@@ -537,20 +543,14 @@ impl Pipeline {
     pub fn process_chunk(&mut self, mut chunk: AudioChunk) -> AudioChunk {
         for mut step in &mut self.steps {
             match &mut step {
-                PipelineStep::MixerStep(mix, bypassed) => {
-                    if !*bypassed {
-                        chunk = mix.process_chunk(&chunk);
-                    }
+                PipelineStep::MixerStep(mix) => {
+                    chunk = mix.process_chunk(&chunk);
                 }
-                PipelineStep::FilterStep(flt, bypassed) => {
-                    if !*bypassed {
-                        flt.process_chunk(&mut chunk).unwrap();
-                    }
+                PipelineStep::FilterStep(flt) => {
+                    flt.process_chunk(&mut chunk).unwrap();
                 }
-                PipelineStep::ProcessorStep(comp, bypassed) => {
-                    if !*bypassed {
-                        comp.process_chunk(&mut chunk).unwrap();
-                    }
+                PipelineStep::ProcessorStep(comp) => {
+                    comp.process_chunk(&mut chunk).unwrap();
                 }
             }
         }
