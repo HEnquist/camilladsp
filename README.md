@@ -62,6 +62,11 @@ The full configuration is given in a yaml file.
 - **[Processors](#processors)**
    - **[Compressor](#compressor)**
 - **[Pipeline](#pipeline)**
+   - **[Filter step](#filter-step)**
+   - **[Mixer and Processor step](#mixer-and-processor-step)**
+   - **[Tokens in names](#tokens-in-names)**
+   - **[Bypassing steps](#bypassing-steps)**
+- **[Translating filters exported by REW](#translating-filters-exported-by-rew)**
 - **[Visualizing the config](#visualizing-the-config)**
 
 **[Related projects](#related-projects)**
@@ -1431,8 +1436,8 @@ This script currently supports only `Peaking` filters.
 
 
 ## Visualizing the config
-Please note that the `show_config.py` script mentioned here is deprecated, and has been replaced by the `plotcamillaconf` tool from the pycamilladsp-plot library. 
-The new tool provides the same functionality as well as many improvements. The `show_config.py` does not support any of newer config options, and the script will be removed in a future version.
+Please note that the `show_config.py` script mentioned here is deprecated, and has been replaced by the `plotcamillaconf` tool from the pycamilladsp-plot library.
+The new tool provides the same functionality as well as many improvements. The `show_config.py` does not support any of the newer config options, and the script will be removed in a future version.
 
 A Python script is included to view the configuration. This plots the transfer functions of all included filters, as well as plots a flowchart of the entire processing pipeline. Run it with:
 ```
