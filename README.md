@@ -1353,11 +1353,14 @@ pipeline:
 ## Pipeline
 The pipeline section defines the processing steps between input and output.
 The input and output devices are automatically added to the start and end.
-The pipeline is section of the config is list that determines which processing steps that will be applied, and in which order.
-A step can be a Filter, a Mixer or a Processor.
+The pipeline section of the config is a list of processing steps.
+This determines both what processing steps that are applied, and in which order they are applied.
+A step can be a filter, a mixer or a processor.
 The filters, mixers and processors must be defined in the corresponding section of the configuration, and the pipeline refers to them by their name.
 During processing, the steps are applied in the listed order.
 For each mixer and for the output device the number of channels from the previous step must match the number of input channels.
+For filter steps, the channel number must exist at that point of the pipeline.
+Channels are numbered starting from zero.
 Apart from this, there are no rules for ordering of the steps or how many are added.
 
 Example:
@@ -1393,15 +1396,28 @@ pipeline:
     bypassed: false (*)
 ```
 In this config first a mixer is used to copy a stereo input to four channels.
-This is then followed by a filter step for each channel.
-Then a compressor is added as the last step.
+Before the mixer, only channels 0 and 1 exist.
+After the mixer, four channels are available, with numbers 0 to 3.
+The mixer is followed by a filter step for each channel.
+Finally a compressor is added as the last step.
 
-A filter block can contain one or several filters that must be defined in the "Filters" section.
-Here channel 0 and 1 get filtered by "lowpass_fir" and "peak1", while 2 and 3 get filtered by just "highpass_fir".
-If the names of mixers or filters includes the tokens `$samplerate$` or `$channels$`,
+### Filter step
+A filter step, `type: Filter`, can contain one or several filters.
+The filters must be defined in the `Filters` section.
+In the example above, channel 0 and 1 get filtered by `lowpass_fir` and `peak1`, while 2 and 3 get filtered by just `highpass_fir`.
+If several filters are to be applied to a channel, it is recommended to put then in a single filter step.
+This makes the config easier to overview and gives a minor performance benefit, compared to adding each filter in a separate step,
+
+### Mixer and Processor step
+Mixer steps, `type: Mixer`, and processor steps, `type: Processor`, are defined in a similar way.
+These steps take just the the name of a mixer of processor defined in the `Mixers` or `Processors` section.
+
+### Tokens in names
+If the name of a mixer, processor or filter includes the tokens `$samplerate$` or `$channels$`,
 these will be replaced by the corresponding values from the config.
-For example, if samplerate is 44100, the filter name `fir_$samplerate$` will be updated to `fir_44100`.
+For example, if the samplerate is 44100, the filter name `fir_$samplerate$` will be updated to `fir_44100`.
 
+### Bypassing steps
 Each pipeline step has an optional `bypassed` property. Setting this to `true` removes this step from the pipeline.
 Take care when bypassing mixers. If a mixer is used to change the number of channels (like the one in the example above),
 then bypassing it will make the pipeline output the wrong number of channels.
