@@ -1,10 +1,11 @@
 ## Unreleased
 New features:
-- Added dynamic range compressor.
-- Added websocket commands to read peak and rms history.
+- Add dynamic range compressor.
+- Add websocket commands to read peak and rms history.
 - Add ToggleMute websocket command.
 - Add AdjustVolume websocket command for relative volume changes.
 - Better handling of USB gadget in Alsa backend.
+- Add option to bypass pipeline steps.
 
 ## 1.0.1
 Bugfixes:
