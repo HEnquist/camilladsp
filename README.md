@@ -231,6 +231,7 @@ All the available options, or "features" are:
 - `pulse-backend`: PulseAudio support
 - `cpal-backend`: Used for Jack support (automatically enabled when needed).
 - `jack-backend`: Jack support.
+- `bluez-backend`: Bluetooth support via BlueALSA (Linux only)
 - `websocket`: Websocket server for control
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
 - `FFTW`: Use FFTW instead of RustFFT
@@ -505,6 +506,65 @@ See the "camilladsp-config" repository under [Related projects](#related-project
 
 TODO test with Jack.
 
+### BlueALSA
+BlueALSA ([bluez-alsa](https://github.com/Arkq/bluez-alsa)) is a project to receive or send audio through Bluetooth A2DP.
+The `Bluez` source will connect to BlueALSA via D-Bus to get a file descriptor.
+It will then read the audio directly from there, avoiding the need to go via ALSA. 
+Currently only capture (a2dp-sink) is supported.
+BlueALSA is supported on Linux only, and requires building CamillaDSP with the `bluez-backend` Cargo feature.
+
+#### Prerequisites
+Start by installing `bluez-alsa`.
+Both Pipewire and PulseAudio will interfere with BlueALSA and must be disabled.
+The source device should be paired after disabling Pipewire or PulseAudio and enabling BlueALSA. 
+
+#### Configuration
+
+Example configuration:
+```
+devices:
+  samplerate: 44100
+  chunksize: 4096
+  target_level: 8000
+  adjust_period: 3
+  enable_resampling: true
+  enable_rate_adjust: true
+  capture:
+    type: Bluez
+    format: S16LE
+    channels: 2
+    dbus_path: /org/bluealsa/hci0/dev_A0_B1_C2_D3_E4_F5/a2dpsnk/source
+    service: org.bluealsa (*)
+```
+
+After connecting an A2DP device, for example a mobile phone, the D-Bus path can be found with this command:
+```
+gdbus call -y --dest org.bluealsa -o /org/bluealsa -m org.freedesktop.DBus.ObjectManager.GetManagedObjects
+```
+This should produce output similar to this:
+```
+({objectpath '/org/bluealsa/hci0/dev_A0_B1_C2_D3_E4_F5/a2dpsnk/source': {'org.bluealsa.PCM1': {'Device': <objectpath '/org/bluez/hci0/dev_A0_B1_C2_D3_E4_F5'>, 'Sequence': <uint32 0>, 'Transport': <'A2DP-sink'>, 'Mode': <'source'>, 'Format': <uint16 33296>, 'Channels': <byte 0x02>, 'Sampling': <uint32 44100>, 'Codec': <'AAC'>, 'CodecConfiguration': <[byte 0x80, 0x01, 0x04, 0x03, 0x5b, 0x60]>, 'Delay': <uint16 150>, 'SoftVolume': <true>, 'Volume': <uint16 32639>}}},)
+```
+The wanted path is the string after `objectpath`.
+If the output is looking like `(@a{oa{sa{sv}}} {},)`, then no A2DP source is connected or detected. 
+Connect an A2DP device and try again. If a device is already connected, try removing and pairing the device again.
+
+The `service` property can be left out to get the default. This only needs changing if there is more than one instance of BlueALSA running.
+
+You have to specify correct capture sample rate, number of channel and sample format.
+These parameters can be found with `bluealsa-aplay`: 
+```
+> bluealsa-aplay -L
+
+bluealsa:DEV=A0:B1:C2:D3:E4:F5,PROFILE=a2dp,SRV=org.bluealsa
+    MyPhone, trusted phone, capture
+    A2DP (AAC): S16_LE 2 channels 44100 Hz
+```
+
+Note that Bluetooth transfers data in chunks, and the time between chunks can vary. 
+To avoid underruns, use a large chunksize and a large target_level.
+The values in the example above are a good starting point.
+Rate adjust should also be enabled.
 
 # Configuration
 
@@ -674,6 +734,7 @@ Any parameter marked (*) in all examples in this section are optional. If they a
     * `File`
     * `Stdin` (capture only)
     * `Stdout` (playback only)
+    * `Bluez` (capture only)
     * `Jack`
     * `Wasapi`
     * `CoreAudio`

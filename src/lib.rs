@@ -94,6 +94,8 @@ pub mod fftconv;
 pub mod fftconv_fftw;
 pub mod fifoqueue;
 pub mod filedevice;
+#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
+pub mod filedevice_bluez;
 #[cfg(not(target_os = "linux"))]
 pub mod filereader;
 #[cfg(target_os = "linux")]
@@ -230,6 +232,9 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     if cfg!(feature = "pulse-backend") {
         playbacktypes.push("Pulse".to_owned());
         capturetypes.push("Pulse".to_owned());
+    }
+    if cfg!(feature = "bluez-backend") {
+        capturetypes.push("Bluez".to_owned());
     }
     if cfg!(feature = "jack-backend") {
         playbacktypes.push("Jack".to_owned());
