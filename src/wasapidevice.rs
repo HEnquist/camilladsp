@@ -335,8 +335,8 @@ fn playback_loop(
                     return Ok(());
                 }
                 Err(TryRecvError::Empty) => {
-                    for _ in 0..((blockalign * buffer_free_frame_count as usize)
-                        - sample_queue.len())
+                    for _ in
+                        0..((blockalign * buffer_free_frame_count as usize) - sample_queue.len())
                     {
                         sample_queue.push_back(0);
                     }
