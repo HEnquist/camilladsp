@@ -56,7 +56,7 @@ impl Volume {
             ramptime_in_chunks,
             current_volume: current_volume as PrcFmt,
             ramp_start: current_volume as PrcFmt,
-            target_volume: current_volume as f32,
+            target_volume: current_volume,
             target_linear_gain,
             mute,
             ramp_step: 0,

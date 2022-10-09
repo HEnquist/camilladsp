@@ -142,7 +142,7 @@ fn open_playback(
     );
     audio_client.initialize_client(
         &wave_format,
-        def_time as i64,
+        def_time,
         &wasapi::Direction::Render,
         &sharemode,
         false,
@@ -213,7 +213,7 @@ fn open_capture(
     );
     audio_client.initialize_client(
         &wave_format,
-        def_time as i64,
+        def_time,
         &wasapi::Direction::Capture,
         &sharemode,
         loopback,
@@ -316,7 +316,7 @@ fn playback_loop(
         }
         device_prevtime = device_time;
 
-        while sample_queue.len() < (blockalign as usize * buffer_free_frame_count as usize) {
+        while sample_queue.len() < (blockalign * buffer_free_frame_count as usize) {
             trace!("playback loop needs more samples, reading from channel");
             match sync.rx_play.try_recv() {
                 Ok(PlaybackDeviceMessage::Data(chunk)) => {
@@ -335,7 +335,7 @@ fn playback_loop(
                     return Ok(());
                 }
                 Err(TryRecvError::Empty) => {
-                    for _ in 0..((blockalign as usize * buffer_free_frame_count as usize)
+                    for _ in 0..((blockalign * buffer_free_frame_count as usize)
                         - sample_queue.len())
                     {
                         sample_queue.push_back(0);
@@ -353,7 +353,7 @@ fn playback_loop(
         }
         render_client.write_to_device_from_deque(
             buffer_free_frame_count as usize,
-            blockalign as usize,
+            blockalign,
             &mut sample_queue,
             None,
         )?;
@@ -469,12 +469,12 @@ fn capture_loop(
                 None => channels.rx_empty.recv().unwrap(),
             };
 
-            let mut nbr_bytes = available_frames as usize * blockalign as usize;
+            let mut nbr_bytes = available_frames as usize * blockalign;
             if data.len() < nbr_bytes {
                 data.resize(nbr_bytes, 0);
             }
             let (nbr_frames_read, flags) =
-                capture_client.read_from_device(blockalign as usize, &mut data[0..nbr_bytes])?;
+                capture_client.read_from_device(blockalign, &mut data[0..nbr_bytes])?;
             if nbr_frames_read != available_frames {
                 warn!(
                     "Expected {} frames, got {}",
@@ -498,12 +498,12 @@ fn capture_loop(
             if let Some(extra_frames) = capture_client.get_next_nbr_frames()? {
                 if extra_frames > 0 {
                     trace!("Workaround, reading {} frames more", extra_frames);
-                    let nbr_bytes_extra = extra_frames as usize * blockalign as usize;
+                    let nbr_bytes_extra = extra_frames as usize * blockalign;
                     if data.len() < (nbr_bytes + nbr_bytes_extra) {
                         data.resize(nbr_bytes + nbr_bytes_extra, 0);
                     }
                     let (nbr_frames_read, flags) = capture_client.read_from_device(
-                        blockalign as usize,
+                        blockalign,
                         &mut data[nbr_bytes..(nbr_bytes + nbr_bytes_extra)],
                     )?;
                     if nbr_frames_read != extra_frames {

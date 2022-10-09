@@ -28,13 +28,8 @@ pub struct Loudness {
 }
 
 fn get_rel_boost(level: f32, reference: f32) -> f32 {
-    let mut rel_boost = (reference - level) / 20.0;
-    if rel_boost < 0.0 {
-        rel_boost = 0.0;
-    } else if rel_boost > 1.0 {
-        rel_boost = 1.0;
-    }
-    rel_boost
+    let rel_boost = (reference - level) / 20.0;
+    rel_boost.clamp(0.0, 1.0)
 }
 
 impl Loudness {
@@ -73,7 +68,7 @@ impl Loudness {
             ramptime_in_chunks,
             current_volume: current_volume as PrcFmt,
             ramp_start: current_volume as PrcFmt,
-            target_volume: current_volume as f32,
+            target_volume: current_volume,
             target_linear_gain,
             mute,
             reference_level: conf.reference_level,
