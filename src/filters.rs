@@ -466,36 +466,46 @@ impl Pipeline {
         let mut steps = Vec::<PipelineStep>::new();
         for step in conf.pipeline {
             match step {
-                config::PipelineStep::Mixer { name } => {
-                    let mixconf = conf.mixers[&name].clone();
-                    let mixer = mixer::Mixer::from_config(name, mixconf);
-                    steps.push(PipelineStep::MixerStep(mixer));
+                config::PipelineStep::Mixer { name, bypassed } => {
+                    if !bypassed {
+                        let mixconf = conf.mixers[&name].clone();
+                        let mixer = mixer::Mixer::from_config(name, mixconf);
+                        steps.push(PipelineStep::MixerStep(mixer));
+                    }
                 }
-                config::PipelineStep::Filter { channel, names } => {
-                    let fltgrp = FilterGroup::from_config(
-                        channel,
-                        names,
-                        conf.filters.clone(),
-                        conf.devices.chunksize,
-                        conf.devices.samplerate,
-                        processing_status.clone(),
-                    );
-                    steps.push(PipelineStep::FilterStep(fltgrp));
+                config::PipelineStep::Filter {
+                    channel,
+                    names,
+                    bypassed,
+                } => {
+                    if !bypassed {
+                        let fltgrp = FilterGroup::from_config(
+                            channel,
+                            names,
+                            conf.filters.clone(),
+                            conf.devices.chunksize,
+                            conf.devices.samplerate,
+                            processing_status.clone(),
+                        );
+                        steps.push(PipelineStep::FilterStep(fltgrp));
+                    }
                 }
-                config::PipelineStep::Processor { name } => {
-                    let procconf = conf.processors[&name].clone();
-                    let proc = match procconf {
-                        config::Processor::Compressor { parameters } => {
-                            let comp = compressor::Compressor::from_config(
-                                name,
-                                parameters,
-                                conf.devices.samplerate,
-                                conf.devices.chunksize,
-                            );
-                            Box::new(comp)
-                        }
-                    };
-                    steps.push(PipelineStep::ProcessorStep(proc));
+                config::PipelineStep::Processor { name, bypassed } => {
+                    if !bypassed {
+                        let procconf = conf.processors[&name].clone();
+                        let proc = match procconf {
+                            config::Processor::Compressor { parameters } => {
+                                let comp = compressor::Compressor::from_config(
+                                    name,
+                                    parameters,
+                                    conf.devices.samplerate,
+                                    conf.devices.chunksize,
+                                );
+                                Box::new(comp)
+                            }
+                        };
+                        steps.push(PipelineStep::ProcessorStep(proc));
+                    }
                 }
             }
         }
