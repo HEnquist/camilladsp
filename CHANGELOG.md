@@ -6,6 +6,7 @@ New features:
 - Add AdjustVolume websocket command for relative volume changes.
 - Better handling of USB gadget in Alsa backend.
 - Add option to bypass pipeline steps.
+- Bluetooth capture support on Linux via Bluez.
 
 ## 1.0.1
 Bugfixes:
