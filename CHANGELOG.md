@@ -1,3 +1,8 @@
+## 1.0.2
+Bugfixes:
+ - Optimize inefficient peak and rms calculations.
+ - Switch to stable compiler for release builds, fixes memory leak in pre-built v1.0.1 binary on macOS.
+
 ## 1.0.1
 Bugfixes:
 - Alsa: Avoid opening capture and playback devices at the same time since this causes trouble with some devices.
