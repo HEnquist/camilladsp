@@ -311,7 +311,10 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 let buffer_fill_clone = buffer_fill.clone();
                 let mut buffer_avg = countertimer::Averager::new();
                 let mut timer = countertimer::Stopwatch::new();
-                let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
+                let mut chunk_stats = ChunkStats {
+                    rms: vec![0.0; channels],
+                    peak: vec![0.0; channels],
+                };
                 let blockalign = 4 * channels;
                 // Rough guess of the number of frames per callback.
                 let callback_frames = 512;

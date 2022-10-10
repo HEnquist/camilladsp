@@ -158,7 +158,10 @@ impl PlaybackDevice for PulsePlaybackDevice {
                             Err(_err) => {}
                         }
                         let mut conversion_result;
-                        let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
+                        let mut chunk_stats = ChunkStats {
+                            rms: vec![0.0; channels],
+                            peak: vec![0.0; channels],
+                        };
                         let bytes_per_frame = channels * store_bytes_per_sample;
                         barrier.wait();
                         let mut last_instant = Instant::now();

@@ -94,6 +94,7 @@ struct CaptureParams {
 }
 
 struct PlaybackParams {
+    channels: usize,
     target_level: usize,
     adjust_period: f32,
     adjust_enabled: bool,
@@ -471,7 +472,10 @@ fn playback_loop_bytes(
 ) {
     let srate = pcmdevice.hw_params_current().unwrap().get_rate().unwrap();
     let mut timer = countertimer::Stopwatch::new();
-    let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
+    let mut chunk_stats = ChunkStats {
+        rms: vec![0.0; params.channels],
+        peak: vec![0.0; params.channels],
+    };
     let mut buffer_avg = countertimer::Averager::new();
     let mut conversion_result;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
@@ -612,7 +616,10 @@ fn capture_loop_bytes(
     );
     let mut state = ProcessingState::Running;
     let mut value_range = 0.0;
-    let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
+    let mut chunk_stats = ChunkStats {
+        rms: vec![0.0; params.channels],
+        peak: vec![0.0; params.channels],
+    };
     let mut card_inactive = false;
     loop {
         match channels.command.try_recv() {
@@ -855,6 +862,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         barrier.wait();
                         debug!("Starting playback loop");
                         let pb_params = PlaybackParams {
+                            channels,
                             target_level,
                             adjust_period,
                             adjust_enabled,
