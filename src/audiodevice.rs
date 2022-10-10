@@ -156,6 +156,16 @@ impl AudioChunk {
         let peak: Vec<PrcFmt> = rms_peak.iter().map(|rp| rp.1).collect();
         ChunkStats { rms, peak }
     }
+
+    pub fn update_stats(&self, stats: &mut ChunkStats) {
+        stats.rms.resize(self.channels, 0.0);
+        stats.peak.resize(self.channels, 0.0);
+        for (wf, (peakval, rmsval)) in self.waveforms.iter().zip(stats.peak.iter_mut().zip(stats.rms.iter_mut())) {
+            let (rms, peak) = rms_and_peak(&wf);
+            *peakval = peak;
+            *rmsval = rms;
+        }
+    }
 }
 
 /// Get RMS and peak value of a vector

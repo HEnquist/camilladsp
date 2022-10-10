@@ -130,7 +130,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let mut chunk_stats;
+                        let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
                         barrier.wait();
                         debug!("starting playback loop");
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
@@ -155,7 +155,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         playback_status.write().unwrap().clipped_samples +=
                                             nbr_clipped;
                                     }
-                                    chunk_stats = chunk.get_stats();
+                                    chunk.update_stats(&mut chunk_stats);
                                     playback_status.write().unwrap().signal_rms =
                                         chunk_stats.rms_db();
                                     playback_status.write().unwrap().signal_peak =
@@ -281,7 +281,7 @@ fn capture_loop(
         params.chunksize,
     );
 
-    let mut chunk_stats;
+    let mut chunk_stats = ChunkStats{rms: vec![0.0; params.channels], peak: vec![0.0; params.channels]};
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     let mut state = ProcessingState::Running;
@@ -465,7 +465,7 @@ fn capture_loop(
         let mut chunk = build_chunk(&buf[0..capture_bytes], &params, bytes_read);
 
         value_range = chunk.maxval - chunk.minval;
-        chunk_stats = chunk.get_stats();
+        chunk.update_stats(&mut chunk_stats);
         //trace!(
         //    "Capture rms {:?}, peak {:?}",
         //    chunk_stats.rms_db(),
