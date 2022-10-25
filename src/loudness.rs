@@ -47,16 +47,10 @@ impl Loudness {
     ) -> Self {
         let current_volume = processing_status.read().unwrap().volume;
         let mute = processing_status.read().unwrap().mute;
-        let current_volume_with_mute = if mute {
-            -100.0
-        }
-        else {
-            current_volume
-        };
+        let current_volume_with_mute = if mute { -100.0 } else { current_volume };
         let target_linear_gain = if mute {
             0.0
-        }
-        else {
+        } else {
             let tempgain: PrcFmt = 10.0;
             tempgain.powf(current_volume as PrcFmt / 20.0)
         };
