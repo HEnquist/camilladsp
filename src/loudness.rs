@@ -47,10 +47,21 @@ impl Loudness {
     ) -> Self {
         let current_volume = processing_status.read().unwrap().volume;
         let mute = processing_status.read().unwrap().mute;
+        let current_volume_with_mute = if mute {
+            -100.0
+        }
+        else {
+            current_volume
+        };
+        let target_linear_gain = if mute {
+            0.0
+        }
+        else {
+            let tempgain: PrcFmt = 10.0;
+            tempgain.powf(current_volume as PrcFmt / 20.0)
+        };
         let ramptime_in_chunks =
             (conf.ramp_time / (1000.0 * chunksize as f32 / samplerate as f32)).round() as usize;
-        let tempgain: PrcFmt = 10.0;
-        let target_linear_gain = tempgain.powf(current_volume as PrcFmt / 20.0);
         let relboost = get_rel_boost(current_volume, conf.reference_level);
         let highshelf_conf = config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
             freq: 3500.0,
@@ -71,7 +82,7 @@ impl Loudness {
         Loudness {
             name,
             ramptime_in_chunks,
-            current_volume: current_volume as PrcFmt,
+            current_volume: current_volume_with_mute as PrcFmt,
             ramp_start: current_volume as PrcFmt,
             target_volume: current_volume as f32,
             target_linear_gain,

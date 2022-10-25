@@ -1,3 +1,7 @@
+## 1.0.3
+Bugfixes:
+ - Volume and Loudness filters keep mute state on config reload.
+
 ## 1.0.2
 Bugfixes:
  - Optimize inefficient peak and rms calculations.
