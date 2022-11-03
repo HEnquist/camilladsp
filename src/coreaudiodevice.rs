@@ -12,6 +12,10 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Duration;
+use std::mem;
+use std::ptr::{null, null_mut};
+use std::ffi::CStr;
+use std::os::raw::{c_char, c_void};
 
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
@@ -604,6 +608,108 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         return;
                     }
                 };
+                let property_address = AudioObjectPropertyAddress {
+                    mSelector: kAudioDevicePropertyClockSource,
+                    mScope: kAudioObjectPropertyScopeGlobal,
+                    mElement: kAudioObjectPropertyElementMain,
+                };
+                let source_id: u32 = 1;
+                let data_size = mem::size_of::<u32>() as u32;
+                let status = unsafe {
+                    AudioObjectSetPropertyData(
+                        device_id,
+                        &property_address as *const _,
+                        0,
+                        null(),
+                        data_size,
+                        &source_id as *const _ as *mut _,
+                    )
+                };
+                println!("set status {}", status);
+                let source_id: u32 = 99;
+                let index: u32 = 1;
+                let data_size = mem::size_of::<u32>() as u32;
+                let status = unsafe {
+                    AudioObjectGetPropertyData(
+                        device_id,
+                        &property_address as *const _,
+                        4,
+                        &index as *const _ as *const c_void,
+                        &data_size as *const _ as *mut _,
+                        &source_id as *const _ as *mut _,
+                    )
+                };
+                //Error::from_os_status(status)?;
+                println!("source {}, status {}", source_id, status);
+
+                let property_address = AudioObjectPropertyAddress {
+                    mSelector: kAudioDevicePropertyClockSources,
+                    mScope: kAudioObjectPropertyScopeGlobal,
+                    mElement: kAudioObjectPropertyElementMain,
+                };
+                let data_size = 0u32;
+                let _status = unsafe {
+                    AudioObjectGetPropertyDataSize(
+                        device_id,
+                        &property_address as *const _,
+                        0,
+                        null(),
+                        &data_size as *const _ as *mut _,
+                    )
+                };
+                let sources: [u32; 2] = [101, 102];
+                let status = unsafe {
+                    AudioObjectGetPropertyData(
+                        device_id,
+                        &property_address as *const _,
+                        0,
+                        null(),
+                        &data_size as *const _ as *mut _,
+                        &sources as *const _ as *mut _,
+                    )
+                };
+                println!("sources {:?}, status {}", sources, status);
+                for source in sources.iter() {
+                    let name = get_item_name(device_id, kAudioDevicePropertyClockSourceNameForIDCFString, *source);
+                    println!("name {}: {}", source, name);
+                }
+
+                let property_address = AudioObjectPropertyAddress {
+                    mSelector: kAudioDevicePropertyStereoPan,
+                    mScope: kAudioObjectPropertyScopeOutput,
+                    mElement: kAudioObjectPropertyElementMain,
+                };
+
+                let pan: f32 = 0.1;
+                let data_size = mem::size_of::<f32>() as u32;
+                let status = unsafe {
+                    AudioObjectGetPropertyData(
+                        device_id,
+                        &property_address as *const _,
+                        0,
+                        null(),
+                        &data_size as *const _ as *mut _,
+                        &pan as *const _ as *mut _,
+                    )
+                };
+                //Error::from_os_status(status)?;
+                println!("pan {}, status {}", pan, status);
+
+                let pan: f32 = 0.63;
+                let status = unsafe {
+                    AudioObjectSetPropertyData(
+                        device_id,
+                        &property_address as *const _,
+                        0,
+                        null(),
+                        data_size,
+                        &pan as *const _ as *mut _,
+                    )
+                };
+                println!("pan {}, status {}", pan, status);
+                //audio_unit
+                //    .get_property(id, Scope::Global, Element::Output, Some(&asbd))
+                //    .unwrap();
                 let mut chunk_counter = 0;
 
                 type Args = render_callback::Args<data::InterleavedBytes<f32>>;
@@ -885,4 +991,41 @@ impl CaptureDevice for CoreaudioCaptureDevice {
             })?;
         Ok(Box::new(handle))
     }
+}
+
+
+/// Get the device name for a device id.
+pub fn get_item_name(device_id: AudioDeviceID, selector: u32, index: u32) -> String {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: selector,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMaster,
+    };
+    let mut index: u32 = index;
+    let mut devname: CFStringRef = null_mut();
+    let device_name = AudioValueTranslation {
+        mInputData: &mut index as *mut u32 as *mut c_void,
+        mInputDataSize: mem::size_of::<u32>() as u32,
+        mOutputData: &mut devname as *mut CFStringRef as *mut c_void,
+        mOutputDataSize: mem::size_of::<CFStringRef>() as u32,
+    };
+    let data_size = mem::size_of::<AudioValueTranslation>() as u32;
+    println!("a0, {}", data_size);
+    let c_str = unsafe {
+        let status = AudioObjectGetPropertyData(
+            device_id,
+            &property_address as *const _,
+            4,
+            &index as *const _ as *const c_void,
+            &data_size as *const _ as *mut _,
+            &device_name as *const _ as *mut _,
+        );
+        println!("a2 {}, {:?}", status, device_name);
+        //try_status_or_return!(status);
+
+        let c_string: *const c_char = CFStringGetCStringPtr(devname as CFStringRef, kCFStringEncodingUTF8);
+        println!("a3 {:p}", c_string);
+        CStr::from_ptr(c_string as *mut _)
+    };
+    c_str.to_string_lossy().into_owned()
 }
