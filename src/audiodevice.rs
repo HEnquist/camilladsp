@@ -12,8 +12,8 @@ use crate::pulsedevice;
 #[cfg(target_os = "windows")]
 use crate::wasapidevice;
 use rubato::{
-    FftFixedOut, SincInterpolationParameters, SincInterpolationType, SincFixedOut, VecResampler,
-    WindowFunction, calculate_cutoff, PolynomialDegree, FastFixedOut
+    calculate_cutoff, FastFixedOut, FftFixedOut, PolynomialDegree, SincFixedOut,
+    SincInterpolationParameters, SincInterpolationType, VecResampler, WindowFunction,
 };
 use std::error;
 use std::fmt;
@@ -454,11 +454,17 @@ pub fn get_resampler(
             config::Resampler::CubicPoly => PolynomialDegree::Cubic,
             config::Resampler::QuinticPoly => PolynomialDegree::Quintic,
             config::Resampler::SepticPoly => PolynomialDegree::Septic,
-            _ => unreachable!()
+            _ => unreachable!(),
         };
         Some(Box::new(
-            FastFixedOut::<PrcFmt>::new(samplerate as f64 / capture_samplerate as f64, 1.1, degree, chunksize, num_channels)
-                .unwrap(),
+            FastFixedOut::<PrcFmt>::new(
+                samplerate as f64 / capture_samplerate as f64,
+                1.1,
+                degree,
+                chunksize,
+                num_channels,
+            )
+            .unwrap(),
         ))
     } else {
         Some(Box::new(

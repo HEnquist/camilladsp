@@ -13,6 +13,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Duration;
 use wasapi;
+use windows::w;
 use windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW;
 
 use crate::CommandMessage;
@@ -71,20 +72,25 @@ fn get_wave_format(
 ) -> wasapi::WaveFormat {
     match sample_format {
         SampleFormat::S16LE => {
-            wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels)
+            wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels, None)
         }
         SampleFormat::S24LE => {
-            wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels)
+            wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
         SampleFormat::S24LE3 => {
-            wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels)
+            wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
         SampleFormat::S32LE => {
-            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels)
+            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        SampleFormat::FLOAT32LE => {
-            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Float, samplerate, channels)
-        }
+        SampleFormat::FLOAT32LE => wasapi::WaveFormat::new(
+            32,
+            32,
+            &wasapi::SampleType::Float,
+            samplerate,
+            channels,
+            None,
+        ),
         _ => panic!("Unsupported sample format"),
     }
 }
@@ -279,7 +285,7 @@ fn playback_loop(
     // Raise priority
     let mut task_idx = 0;
     unsafe {
-        AvSetMmThreadCharacteristicsW("Pro Audio", &mut task_idx);
+        let _ = AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx);
     }
     if task_idx > 0 {
         debug!("Playback thread raised priority, task index: {}", task_idx);
@@ -411,7 +417,7 @@ fn capture_loop(
     // Raise priority
     let mut task_idx = 0;
     unsafe {
-        AvSetMmThreadCharacteristicsW("Pro Audio", &mut task_idx);
+        let _ = AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx);
     }
     if task_idx > 0 {
         debug!("Capture thread raised priority, task index: {}", task_idx);
