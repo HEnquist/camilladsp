@@ -158,7 +158,10 @@ impl PlaybackDevice for PulsePlaybackDevice {
                             Err(_err) => {}
                         }
                         let mut conversion_result;
-                        let mut chunk_stats;
+                        let mut chunk_stats = ChunkStats {
+                            rms: vec![0.0; channels],
+                            peak: vec![0.0; channels],
+                        };
                         let bytes_per_frame = channels * store_bytes_per_sample;
                         barrier.wait();
                         let mut last_instant = Instant::now();
@@ -196,7 +199,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         playback_status.write().unwrap().clipped_samples +=
                                             conversion_result.1;
                                     }
-                                    chunk_stats = chunk.get_stats();
+                                    chunk.update_stats(&mut chunk_stats);
                                     playback_status
                                         .write()
                                         .unwrap()
@@ -330,7 +333,7 @@ impl CaptureDevice for PulseCaptureDevice {
                         let mut value_range = 0.0;
                         let mut rate_adjust = 0.0;
                         let mut state = ProcessingState::Running;
-                        let mut chunk_stats;
+                        let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
                         let bytes_per_frame = channels * store_bytes_per_sample;
                         let mut last_instant = Instant::now();
                         loop {
@@ -400,7 +403,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                 }
                             };
                             let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &sample_format, capture_bytes, &capture_status.read().unwrap().used_channels);
-                            chunk_stats = chunk.get_stats();
+                            chunk.update_stats(&mut chunk_stats);
                             //trace!("Capture signal rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);

@@ -214,7 +214,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         let buffer_fill_clone = buffer_fill.clone();
                         let mut buffer_avg = countertimer::Averager::new();
                         let mut timer = countertimer::Stopwatch::new();
-                        let mut chunk_stats;
+                        let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
 
                         let stream = match sample_format {
                             SampleFormat::S16LE => {
@@ -377,7 +377,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                 av_delay as usize;
                                         }
                                     }
-                                    chunk_stats = chunk.get_stats();
+                                    chunk.update_stats(&mut chunk_stats);
                                     playback_status.write().unwrap().signal_rms.add_record_squared(chunk_stats.rms_linear());
                                     playback_status.write().unwrap().signal_peak.add_record(chunk_stats.peak_linear());
                                     tx_dev.send(chunk).unwrap();
@@ -547,7 +547,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             countertimer::ValueWatcher::new(capture_samplerate as f32, RATE_CHANGE_THRESHOLD_VALUE, RATE_CHANGE_THRESHOLD_COUNT);
                         let rate_measure_interval_ms = (1000.0 * rate_measure_interval) as u64;
                         let mut value_range = 0.0;
-                        let mut chunk_stats;
+                        let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
                         let mut rate_adjust = 0.0;
                         let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                         let mut state = ProcessingState::Running;
@@ -668,7 +668,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 }
                                 trace!("Measured sample rate is {} Hz", measured_rate_f);
                             }
-                            chunk_stats = chunk.get_stats();
+                            chunk.update_stats(&mut chunk_stats);
                             //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             capture_status.write().unwrap().signal_rms.add_record_squared(chunk_stats.rms_linear());
                             capture_status.write().unwrap().signal_peak.add_record(chunk_stats.peak_linear());

@@ -7,6 +7,15 @@ New features:
 - Better handling of USB gadget in Alsa backend.
 - Add option to bypass pipeline steps.
 - Bluetooth capture support on Linux via Bluez.
+ß
+## 1.0.3
+Bugfixes:
+ - Volume and Loudness filters keep mute state on config reload.
+
+## 1.0.2
+Bugfixes:
+ - Optimize inefficient peak and rms calculations.
+ - Switch to stable compiler for release builds, fixes memory leak in pre-built v1.0.1 binary on macOS.
 
 ## 1.0.1
 Bugfixes:

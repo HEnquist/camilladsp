@@ -91,6 +91,7 @@ struct CaptureParams {
 }
 
 struct PlaybackParams {
+    channels: usize,
     target_level: usize,
     adjust_period: f32,
     adjust_enabled: bool,
@@ -379,7 +380,10 @@ fn playback_loop_bytes(
     buf_manager: &mut PlaybackBufferManager,
 ) {
     let mut timer = countertimer::Stopwatch::new();
-    let mut chunk_stats;
+    let mut chunk_stats = ChunkStats {
+        rms: vec![0.0; params.channels],
+        peak: vec![0.0; params.channels],
+    };
     let mut buffer_avg = countertimer::Averager::new();
     let mut conversion_result;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
@@ -493,7 +497,8 @@ fn playback_loop_bytes(
                 };
                 if !device_stalled {
                     // updates only for non-stalled device
-                    chunk_stats = chunk.get_stats();
+
+                    chunk.update_stats(&mut chunk_stats);
                     params
                         .playback_status
                         .write()
@@ -643,8 +648,11 @@ fn capture_loop_bytes(
     );
     let mut state = ProcessingState::Running;
     let mut value_range = 0.0;
-    let mut chunk_stats;
     let mut device_stalled = false;
+    let mut chunk_stats = ChunkStats {
+        rms: vec![0.0; params.channels],
+        peak: vec![0.0; params.channels],
+    };
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -787,7 +795,7 @@ fn capture_loop_bytes(
             capture_bytes,
             &params.capture_status.read().unwrap().used_channels,
         );
-        chunk_stats = chunk.get_stats();
+        chunk.update_stats(&mut chunk_stats);
         params
             .capture_status
             .write()
@@ -913,6 +921,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         barrier.wait();
                         debug!("Starting playback loop");
                         let pb_params = PlaybackParams {
+                            channels,
                             target_level,
                             adjust_period,
                             adjust_enabled,
