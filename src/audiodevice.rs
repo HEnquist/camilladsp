@@ -11,10 +11,9 @@ use crate::filedevice;
 use crate::pulsedevice;
 #[cfg(target_os = "windows")]
 use crate::wasapidevice;
-use num_integer as integer;
 use rubato::{
-    FftFixedOut, InterpolationParameters, InterpolationType, SincFixedOut, VecResampler,
-    WindowFunction,
+    FftFixedOut, SincInterpolationParameters, SincInterpolationType, SincFixedOut, VecResampler,
+    WindowFunction, calculate_cutoff, PolynomialDegree, FastFixedOut
 };
 use std::error;
 use std::fmt;
@@ -325,6 +324,10 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
 }
 
 pub fn resampler_is_async(conf: &config::Resampler) -> bool {
+    resampler_is_sinc(conf) || resampler_is_polynomial(conf)
+}
+
+pub fn resampler_is_sinc(conf: &config::Resampler) -> bool {
     matches!(
         &conf,
         config::Resampler::FastAsync
@@ -334,19 +337,25 @@ pub fn resampler_is_async(conf: &config::Resampler) -> bool {
     )
 }
 
-pub fn get_async_parameters(
-    conf: &config::Resampler,
-    samplerate: usize,
-    capture_samplerate: usize,
-) -> InterpolationParameters {
+pub fn resampler_is_polynomial(conf: &config::Resampler) -> bool {
+    matches!(
+        &conf,
+        config::Resampler::LinearPoly
+            | config::Resampler::CubicPoly
+            | config::Resampler::QuinticPoly
+            | config::Resampler::SepticPoly
+    )
+}
+
+pub fn get_async_parameters(conf: &config::Resampler) -> SincInterpolationParameters {
     match &conf {
         config::Resampler::FastAsync => {
             let sinc_len = 64;
-            let f_cutoff = 0.915_602_15;
             let oversampling_factor = 1024;
-            let interpolation = InterpolationType::Linear;
+            let interpolation = SincInterpolationType::Linear;
             let window = WindowFunction::Hann2;
-            InterpolationParameters {
+            let f_cutoff = calculate_cutoff(sinc_len, window);
+            SincInterpolationParameters {
                 sinc_len,
                 f_cutoff,
                 oversampling_factor,
@@ -356,11 +365,11 @@ pub fn get_async_parameters(
         }
         config::Resampler::BalancedAsync => {
             let sinc_len = 128;
-            let f_cutoff = 0.925_914_65;
             let oversampling_factor = 1024;
-            let interpolation = InterpolationType::Linear;
+            let interpolation = SincInterpolationType::Linear;
             let window = WindowFunction::Blackman2;
-            InterpolationParameters {
+            let f_cutoff = calculate_cutoff(sinc_len, window);
+            SincInterpolationParameters {
                 sinc_len,
                 f_cutoff,
                 oversampling_factor,
@@ -370,26 +379,11 @@ pub fn get_async_parameters(
         }
         config::Resampler::AccurateAsync => {
             let sinc_len = 256;
-            let f_cutoff = 0.947_337_15;
             let oversampling_factor = 256;
-            let interpolation = InterpolationType::Cubic;
+            let interpolation = SincInterpolationType::Cubic;
             let window = WindowFunction::BlackmanHarris2;
-            InterpolationParameters {
-                sinc_len,
-                f_cutoff,
-                oversampling_factor,
-                interpolation,
-                window,
-            }
-        }
-        config::Resampler::Synchronous => {
-            let sinc_len = 64;
-            let f_cutoff = 0.915_602_15;
-            let gcd = integer::gcd(samplerate, capture_samplerate);
-            let oversampling_factor = samplerate / gcd;
-            let interpolation = InterpolationType::Nearest;
-            let window = WindowFunction::Hann2;
-            InterpolationParameters {
+            let f_cutoff = calculate_cutoff(sinc_len, window);
+            SincInterpolationParameters {
                 sinc_len,
                 f_cutoff,
                 oversampling_factor,
@@ -405,9 +399,9 @@ pub fn get_async_parameters(
             f_cutoff,
         } => {
             let interp = match interpolation {
-                config::InterpolationType::Cubic => InterpolationType::Cubic,
-                config::InterpolationType::Linear => InterpolationType::Linear,
-                config::InterpolationType::Nearest => InterpolationType::Nearest,
+                config::InterpolationType::Cubic => SincInterpolationType::Cubic,
+                config::InterpolationType::Linear => SincInterpolationType::Linear,
+                config::InterpolationType::Nearest => SincInterpolationType::Nearest,
             };
             let wind = match window {
                 config::WindowFunction::Hann => WindowFunction::Hann,
@@ -417,13 +411,16 @@ pub fn get_async_parameters(
                 config::WindowFunction::BlackmanHarris => WindowFunction::BlackmanHarris,
                 config::WindowFunction::BlackmanHarris2 => WindowFunction::BlackmanHarris2,
             };
-            InterpolationParameters {
+            SincInterpolationParameters {
                 sinc_len: *sinc_len,
                 f_cutoff: *f_cutoff,
                 oversampling_factor: *oversampling_ratio,
                 interpolation: interp,
                 window: wind,
             }
+        }
+        _ => {
+            unreachable!("This function is never called for other resampler types")
         }
     }
 }
@@ -435,8 +432,8 @@ pub fn get_resampler(
     capture_samplerate: usize,
     chunksize: usize,
 ) -> Option<Box<dyn VecResampler<PrcFmt>>> {
-    if resampler_is_async(conf) {
-        let parameters = get_async_parameters(conf, samplerate, capture_samplerate);
+    if resampler_is_sinc(conf) {
+        let parameters = get_async_parameters(conf);
         debug!(
             "Creating asynchronous resampler with parameters: {:?}",
             parameters
@@ -450,6 +447,18 @@ pub fn get_resampler(
                 num_channels,
             )
             .unwrap(),
+        ))
+    } else if resampler_is_polynomial(conf) {
+        let degree = match conf {
+            config::Resampler::LinearPoly => PolynomialDegree::Linear,
+            config::Resampler::CubicPoly => PolynomialDegree::Cubic,
+            config::Resampler::QuinticPoly => PolynomialDegree::Quintic,
+            config::Resampler::SepticPoly => PolynomialDegree::Septic,
+            _ => unreachable!()
+        };
+        Some(Box::new(
+            FastFixedOut::<PrcFmt>::new(samplerate as f64 / capture_samplerate as f64, 1.1, degree, chunksize, num_channels)
+                .unwrap(),
         ))
     } else {
         Some(Box::new(

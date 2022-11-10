@@ -694,37 +694,37 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   
 * `adjust_period` (optional, defaults to 10)
   
-  The `adjust_period` parameter is used to set the interval between corrections, in seconds. 
+  The `adjust_period` parameter is used to set the interval between corrections, in seconds.
   The default is 10 seconds. Only applies when `enable_rate_adjust` is set to `true`.
   A smaller value will make for a faster reaction time, which may be useful if there are occasional
   buffer underruns when running with a small `target_level` to minimize latency.
 
 * `silence_threshold` & `silence_timeout` (optional)
-  The fields `silence_threshold` and `silence_timeout` are optional 
+  The fields `silence_threshold` and `silence_timeout` are optional
   and used to pause processing if the input is silent. 
-  The threshold is the threshold level in dB, and the level is calculated as the difference 
-  between the minimum and maximum sample values for all channels in the capture buffer. 
+  The threshold is the threshold level in dB, and the level is calculated as the difference
+  between the minimum and maximum sample values for all channels in the capture buffer.
   0 dB is full level. Some experimentation might be needed to find the right threshold.
 
-  The `silence_timeout` (in seconds) is for how long the signal should be silent before pausing processing. 
+  The `silence_timeout` (in seconds) is for how long the signal should be silent before pausing processing.
   Set this to zero, or leave it out, to never pause.
 
 * `enable_resampling` (optional, defaults to false)
 
-  Set this to `true` to enable resampling of the input signal. 
-  In addition to resampling the input to a different sample rate, 
+  Set this to `true` to enable resampling of the input signal.
+  In addition to resampling the input to a different sample rate,
   this can be useful for rate-matching capture and playback devices with independent clocks.
 
 * `resampler_type` (optional, defaults to "BalancedAsync")
 
-  The resampler type to use. Valid choices are "Synchronous", "FastAsync", "BalancedAsync", "AccurateAsync", "FreeAsync".
+  The resampler type to use. Valid choices are "Synchronous", "FastAsync", "BalancedAsync", "AccurateAsync", "FreeAsync", "LinearPoly", "CubicPoly", "QuinticPoly" and "SepticPoly".
 
-  If used for rate matching with `enable_rate_adjust: true` the one of the "Async" variants must be used. 
-  See also the [Resampling section.](#resampling) 
+  If used for rate matching with `enable_rate_adjust: true` the one of the "Async" or "Poly" variants must be used.
+  See also the [Resampling section.](#resampling)
 
 * `capture_samplerate` (optional, defaults to value of `samplerate`)
 
-  The capture samplerate. If the resampler is only used for rate-matching then the capture samplerate 
+  The capture samplerate. If the resampler is only used for rate-matching then the capture samplerate
   is the same as the overall samplerate, and this setting can be left out.
 
 * `stop_on_rate_change` and `rate_measure_interval` (both optional)
@@ -890,9 +890,16 @@ Any parameter marked (*) in all examples in this section are optional. If they a
 
 Resampling is provided by the [Rubato library.](https://github.com/HEnquist/rubato)
 
-This library does asynchronous and synchronous resampling with adjustable parameters. 
-For asynchronous resampling, the overall strategy is to use a sinc interpolation filter with a fixed oversampling ratio, 
+This library does asynchronous and synchronous resampling with adjustable parameters.
+Asynchronous resampling can be done with or without anti-aliasing.
+
+For asynchronous resampling with anti-aliasing, the overall strategy is to use a sinc interpolation filter with a fixed oversampling ratio,
 and then use polynomial interpolation to get values for arbitrary times between those fixed points.
+
+Asynchronous resampling without anti-aliasing works by performing polynomial interpolation between the sample points.
+This skips the computationally expensive sinc interpolation filter and is therefore considerably faster.
+This method produces a result that isn't as clean as with anti-aliasing, but the difference is small and often inaudible.
+
 For synchronous resampling it instead works by transforming the waveform with FFT, modifying the spectrum, and then 
 getting the resampled waveform by inverse FFT.
 
@@ -901,14 +908,19 @@ CamillaDSP provides four preset profiles for the resampler:
 * FastAsync
 * BalancedAsync
 * AccurateAsync
+* LinearPoly
+* CubicPoly
+* QuinticPoly
+* SepticPoly
 
-The "BalancedAsync" preset is the best choice in most cases, if an asynchronous resampler is needed. 
+### Asynchronous resampling with anti-aliasing
+The "BalancedAsync" preset is the best choice in most cases, if an asynchronous resampler is needed.
 It provides good resampling quality with a noise threshold in the range 
-of -150 dB along with reasonable CPU usage. 
+of -150 dB along with reasonable CPU usage.
 As -150 dB is way beyond the resolution limit of even the best commercial DACs, 
 this preset is thus sufficient for all audio use.
 The "FastAsync" preset is faster but have a little more high-frequency roll-off 
-and give a bit higher resampling artefacts. 
+and give a bit higher resampling artefacts.
 The "AccurateAsync" preset provide the highest quality result, 
 with all resampling artefacts below -200dB, at the expense of higher CPU usage.
 There is also a "FreeAsync" mode as well where all parameters can be set freely. The configuration is specified like this:
@@ -931,17 +943,38 @@ For reference, the asynchronous presets are defined according to this table:
 |oversampling_ratio | 1024      | 1024          | 256           |
 |interpolation      | Linear    | Linear        | Cubic         |
 |window             | Hann2     | Blackman2     | BlackmanHarris2 |
-|f_cutoff           | 0.915     | 0.925         | 0.947           |
+|f_cutoff           | 0.915 (*) | 0.925 (*)     | 0.947 (*)     |
 
+(*) These cutoff values are approximate. The actual values used are calculated automatically
+at runtime for the combination of sinc length and window.
 
+### Asynchronous resampling without anti-aliasing
+There are four presets provided for asynchronous resampling without anti-aliasing.
+They all perform polynomial interpolation on the _N_ nearest samples, with different polynomial degrees.
+
+|            | Polynomial degree | Samples fitted |
+|------------|-------------------|----------------|
+|LinearPoly  | 1                 | 2              |
+|CubicPoly   | 3                 | 4              |
+|QuinticPoly | 5                 | 6              |
+|SepticPoly  | 7                 | 8              |
+
+Higher polynomial degrees produce higher quality results but use more processing power.
+All are however considerably faster than the "Async" presets.
+In theory these produce inferior quality to the presets with anti-aliasing,
+however in practice the difference is small.
+Use one of these presets to save processing power, with little or no perceived quality loss.
+
+### Synchronous resampling
 For performing fixed ratio resampling, like resampling 
 from 44.1kHz to 96kHz (which corresponds to a precise ratio of 147/320)
-choose the "Synchronous" variant. 
+choose the "Synchronous" variant.
 This is considerably faster than the asynchronous variants, but does not support rate adjust.
-The quality is comparable to the "AccurateAsync" preset.
+The quality is similar to the "AccurateAsync" preset.
 
+### Rate adjust via resampling
 When using the rate adjust feature to match capture and playback devices, 
-one of the "Async" variants must be used. 
+one of the "Async" or "Poly" variants must be used. 
 These asynchronous presets do not rely on a fixed resampling ratio.
 When rate adjust is enabled the resampling ratio is dynamically adjusted in order to compensate 
 for drifts and mismatches between the input and output sample clocks.  

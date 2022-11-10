@@ -390,6 +390,10 @@ fn default_ca_format() -> SampleFormat {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum Resampler {
+    LinearPoly,
+    CubicPoly,
+    QuinticPoly,
+    SepticPoly,
     FastAsync,
     BalancedAsync,
     AccurateAsync,

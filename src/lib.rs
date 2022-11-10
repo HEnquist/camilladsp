@@ -24,7 +24,6 @@ extern crate native_tls;
 #[cfg(target_os = "linux")]
 extern crate nix;
 extern crate num_complex;
-extern crate num_integer;
 extern crate num_traits;
 extern crate rand;
 extern crate rand_distr;

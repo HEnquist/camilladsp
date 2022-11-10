@@ -720,7 +720,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             if let Some(resampl) = &mut resampler {
                                 debug!("Adjusting resampler rate to {}", speed);
                                 if async_src {
-                                    if resampl.set_resample_ratio_relative(speed).is_err() {
+                                    if resampl.set_resample_ratio_relative(speed, true).is_err() {
                                         debug!("Failed to set resampling speed to {}", speed);
                                     }
                                 }
