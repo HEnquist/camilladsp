@@ -961,7 +961,7 @@ They all perform polynomial interpolation on the _N_ nearest samples, with diffe
 
 Higher polynomial degrees produce higher quality results but use more processing power.
 All are however considerably faster than the "Async" presets.
-In theory these produce inferior quality to the presets with anti-aliasing,
+In theory these produce inferior quality compared to the presets with anti-aliasing,
 however in practice the difference is small.
 Use one of these presets to save processing power, with little or no perceived quality loss.
 
