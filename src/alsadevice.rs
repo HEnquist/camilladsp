@@ -653,6 +653,7 @@ fn capture_loop_bytes(
         rms: vec![0.0; params.channels],
         peak: vec![0.0; params.channels],
     };
+    let mut channel_mask = vec![true; params.channels];
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -816,7 +817,10 @@ fn capture_loop_bytes(
         }
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
-                let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
+                chunk.update_channel_mask(&mut channel_mask);
+                let new_waves = resampl
+                    .process(&chunk.waveforms, Some(&channel_mask))
+                    .unwrap();
                 let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                 if chunk_frames == 0 {
                     chunk_frames = params.chunksize;

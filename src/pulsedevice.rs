@@ -335,6 +335,7 @@ impl CaptureDevice for PulseCaptureDevice {
                         let mut state = ProcessingState::Running;
                         let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
                         let bytes_per_frame = channels * store_bytes_per_sample;
+                        let mut channel_mask = vec![true; channels];
                         let mut last_instant = Instant::now();
                         loop {
                             match command_channel.try_recv() {
@@ -409,7 +410,8 @@ impl CaptureDevice for PulseCaptureDevice {
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
-                                    let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
+                                    chunk.update_channel_mask(&mut channel_mask);
+                                    let new_waves = resampl.process(&chunk.waveforms, Some(&channel_mask)).unwrap();
                                     let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                                     if chunk_frames == 0 {
                                         chunk_frames = chunksize;

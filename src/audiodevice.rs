@@ -177,6 +177,12 @@ impl AudioChunk {
             *rmsval = rms;
         }
     }
+
+    pub fn update_channel_mask(&self, mask: &mut [bool]) {
+        mask.iter_mut()
+            .zip(self.waveforms.iter())
+            .for_each(|(m, w)| *m = !w.is_empty());
+    }
 }
 
 /// Get RMS and peak value of a vector

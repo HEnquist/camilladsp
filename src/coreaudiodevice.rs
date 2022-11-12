@@ -690,6 +690,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                 let mut expected_chunk_nbr = 0;
                 let mut prev_len = 0;
+                let mut channel_mask = vec![true; channels];
                 debug!("Capture device ready and waiting");
                 match status_channel.send(StatusMessage::CaptureReady) {
                     Ok(()) => {}
@@ -862,7 +863,8 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     state = silence_counter.update(value_range);
                     if state == ProcessingState::Running {
                         if let Some(resampl) = &mut resampler {
-                            let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
+                            chunk.update_channel_mask(&mut channel_mask);
+                            let new_waves = resampl.process(&chunk.waveforms, Some(&channel_mask)).unwrap();
                             let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                             if chunk_frames == 0 {
                                 chunk_frames = chunksize;

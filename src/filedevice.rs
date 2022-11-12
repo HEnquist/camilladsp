@@ -303,6 +303,7 @@ fn capture_loop(
     let mut state = ProcessingState::Running;
     let mut prev_state = ProcessingState::Running;
     let mut stalled = false;
+    let mut channel_mask = vec![true; params.channels];
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -501,7 +502,10 @@ fn capture_loop(
         state = silence_counter.update(value_range);
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
-                let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
+                chunk.update_channel_mask(&mut channel_mask);
+                let new_waves = resampl
+                    .process(&chunk.waveforms, Some(&channel_mask))
+                    .unwrap();
                 let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                 if chunk_frames == 0 {
                     chunk_frames = params.chunksize;
