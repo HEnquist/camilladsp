@@ -59,7 +59,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: armv7-unknown-linux-gnueabihf
-          components: cross
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build image
         run: docker build -t cross/armv7:v1 --file Dockerfile_armv7 ./
@@ -81,7 +83,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-unknown-linux-gnu
-          components: cross
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build image
         run: docker build -t cross/armv8:v1 --file Dockerfile_armv8 ./ 
@@ -136,7 +140,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
-          components: cross
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Run cargo check for arm
         run: cross check --target aarch64-apple-darwin
