@@ -374,6 +374,7 @@ fn capture_loop(
                         params.channels,
                         params.chunksize,
                         &msg_channels.audio,
+                        &mut resampler,
                     );
                     let msg = AudioMessage::EndOfStream;
                     msg_channels.audio.send(msg).unwrap_or(());
@@ -673,6 +674,7 @@ fn send_silence(
     channels: usize,
     chunksize: usize,
     audio_channel: &mpsc::SyncSender<AudioMessage>,
+    resampler: &mut Option<Box<dyn VecResampler<PrcFmt>>>,
 ) {
     let mut samples_left = samples;
     while samples_left > 0 {
@@ -681,7 +683,12 @@ fn send_silence(
         } else {
             samples_left
         };
-        let waveforms = vec![vec![0.0; chunksize]; channels];
+        let waveforms = if let Some(resamp) = resampler {
+            resamp.process_partial(None, None).unwrap()
+        } else {
+            vec![vec![0.0; chunksize]; channels]
+        };
+        // Take a shortcut and set maxval = minval = 0 because we are anyway very near the end.
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunksize, chunk_samples);
         let msg = AudioMessage::Audio(chunk);
         debug!("Sending extra chunk of {} frames", chunk_samples);
