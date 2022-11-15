@@ -724,7 +724,7 @@ Any parameter marked (*) in all examples in this section are optional. If they a
 
 * `resampler_profile` (optional, defaults to "Balanced")
 
-  The quality profile for the resampler. Valid choices are "Fast", "Balanced", "Accurate" and "VeryAccurate".
+  The quality profile for the resampler. Valid choices are "VeryFast", "Fast", "Balanced" and "Accurate".
 
 * `capture_samplerate` (optional, defaults to value of `samplerate`)
 
@@ -919,10 +919,10 @@ The three resampler types mentioned above are named:
 * Synchronous
 
 There is also a choice of profiles via `resampler_profile`. The options are:
+* VeryFast
 * Fast
 * Balanced
 * Accurate
-* VeryAccurate
 
 
 ### `AsyncSinc`: Asynchronous resampling with anti-aliasing
@@ -931,14 +931,14 @@ It provides good resampling quality with a noise threshold in the range
 of -150 dB along with reasonable CPU usage.
 As -150 dB is way beyond the resolution limit of even the best commercial DACs, 
 this preset is thus sufficient for all audio use.
-The "Fast" profile is faster but have a little more high-frequency roll-off 
+The "Fast and "VeryFast" profiles are faster but have a little more high-frequency roll-off 
 and give a bit higher resampling artefacts.
-The "VeryAccurate" profile provide the highest quality result, 
+The "Accurate" profile provides the highest quality result, 
 with all resampling artefacts below -200dB, at the expense of higher CPU usage.
 
 For reference, the asynchronous presets are defined according to this table:
 
-|                   | Fast         | Balanced         | Accurate               | VeryAccurate           |
+|                   | VeryFast     | Fast             | Balanced               | Accurate               |
 |-------------------|--------------|------------------|------------------------|------------------------|
 |sinc_len           | 64           | 128              | 256                    | 256                    |
 |oversampling_ratio | 1024         | 1024             | 1024                   | 256                    |
@@ -955,10 +955,10 @@ The polynomial degree depends on the selected profile.
 
 | Profile      | Polynomial degree | Samples fitted |
 |--------------|-------------------|----------------|
-| Fast         | 1                 | 2              |
-| Balanced     | 3                 | 4              |
-| Accurate     | 5                 | 6              |
-| VeryAccurate | 7                 | 8              |
+| VeryFast     | 1                 | 2              |
+| Fast         | 3                 | 4              |
+| Balanced     | 5                 | 6              |
+| Accurate     | 7                 | 8              |
 
 Higher polynomial degrees produce higher quality results but use more processing power.
 All are however considerably faster than the "AsyncSinc" types.
@@ -972,7 +972,7 @@ from 44.1kHz to 96kHz (which corresponds to a precise ratio of 147/320)
 choose the "Synchronous" type.
 This is considerably faster than the asynchronous variants, but does not support rate adjust.
 There is only one quality setting, and the profile setting is ignored.
-The quality is similar to the "AsyncSinc" type with the "VeryAccurate" profile.
+The quality is similar to the "AsyncSinc" type with the "Accurate" profile.
 
 ### Rate adjust via resampling
 When using the rate adjust feature to match capture and playback devices, 

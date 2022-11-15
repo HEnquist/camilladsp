@@ -340,7 +340,7 @@ pub fn get_async_sinc_parameters(
     quality: &config::ResamplerProfile,
 ) -> SincInterpolationParameters {
     match &quality {
-        config::ResamplerProfile::Fast => {
+        config::ResamplerProfile::VeryFast => {
             let sinc_len = 64;
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
@@ -354,7 +354,7 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::ResamplerProfile::Balanced => {
+        config::ResamplerProfile::Fast => {
             let sinc_len = 128;
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
@@ -368,7 +368,7 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::ResamplerProfile::Accurate => {
+        config::ResamplerProfile::Balanced => {
             let sinc_len = 256;
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
@@ -382,7 +382,7 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::ResamplerProfile::VeryAccurate => {
+        config::ResamplerProfile::Accurate => {
             let sinc_len = 256;
             let oversampling_factor = 256;
             let interpolation = SincInterpolationType::Cubic;
@@ -427,10 +427,10 @@ pub fn get_resampler(
         }
         config::Resampler::AsyncPoly => {
             let degree = match resampler_profile {
-                config::ResamplerProfile::Fast => PolynomialDegree::Linear,
-                config::ResamplerProfile::Balanced => PolynomialDegree::Cubic,
-                config::ResamplerProfile::Accurate => PolynomialDegree::Quintic,
-                config::ResamplerProfile::VeryAccurate => PolynomialDegree::Septic,
+                config::ResamplerProfile::VeryFast => PolynomialDegree::Linear,
+                config::ResamplerProfile::Fast => PolynomialDegree::Cubic,
+                config::ResamplerProfile::Balanced => PolynomialDegree::Quintic,
+                config::ResamplerProfile::Accurate => PolynomialDegree::Septic,
             };
             Some(Box::new(
                 FastFixedOut::<PrcFmt>::new(

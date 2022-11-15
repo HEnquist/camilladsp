@@ -404,35 +404,16 @@ impl Default for Resampler {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum ResamplerProfile {
+    VeryFast,
     Fast,
     Balanced,
     Accurate,
-    VeryAccurate,
 }
 
 impl Default for ResamplerProfile {
     fn default() -> Self {
         ResamplerProfile::Balanced
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub enum WindowFunction {
-    Hann,
-    Hann2,
-    Blackman,
-    Blackman2,
-    BlackmanHarris,
-    BlackmanHarris2,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub enum InterpolationType {
-    Cubic,
-    Linear,
-    Nearest,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
