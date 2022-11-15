@@ -8,6 +8,7 @@ New features:
 - Add option to bypass pipeline steps.
 - Bluetooth capture support on Linux via Bluez.
 - Updated resampler with faster lower quality options.
+- Separate config options for resampler type and quality.
 
 ## 1.0.3
 Bugfixes:

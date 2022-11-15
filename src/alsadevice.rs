@@ -53,7 +53,8 @@ pub struct AlsaCaptureDevice {
     pub samplerate: usize,
     pub enable_resampling: bool,
     pub capture_samplerate: usize,
-    pub resampler_conf: config::Resampler,
+    pub resampler_type: config::Resampler,
+    pub resampler_profile: config::ResamplerProfile,
     pub chunksize: usize,
     pub channels: usize,
     pub sample_format: SampleFormat,
@@ -977,8 +978,9 @@ impl CaptureDevice for AlsaCaptureDevice {
         let silence_threshold = self.silence_threshold;
         let sample_format = self.sample_format.clone();
         let enable_resampling = self.enable_resampling;
-        let resampler_conf = self.resampler_conf.clone();
-        let async_src = resampler_is_async(&resampler_conf);
+        let resampler_type = self.resampler_type.clone();
+        let resampler_profile = self.resampler_profile.clone();
+        let async_src = resampler_is_async(&resampler_type);
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let mut buf_manager = CaptureBufferManager::new(
@@ -992,7 +994,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                 let resampler = if enable_resampling {
                     debug!("Creating resampler");
                     get_resampler(
-                        &resampler_conf,
+                        &resampler_type,
+                        &resampler_profile,
                         channels,
                         samplerate,
                         capture_samplerate,

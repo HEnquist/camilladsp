@@ -3,7 +3,7 @@ devices:
   samplerate: 96000
   chunksize: 1024
   enable_resampling: true
-  resampler_type: AccurateSync
+  resampler_type: Synchronous
   capture_samplerate: 44100
   playback:
     type: Raw

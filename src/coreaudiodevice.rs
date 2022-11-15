@@ -94,7 +94,8 @@ pub struct CoreaudioPlaybackDevice {
 pub struct CoreaudioCaptureDevice {
     pub devname: String,
     pub samplerate: usize,
-    pub resampler_conf: config::Resampler,
+    pub resampler_type: config::Resampler,
+    pub resampler_profile: config::ResamplerProfile,
     pub enable_resampling: bool,
     pub capture_samplerate: usize,
     pub chunksize: usize,
@@ -559,8 +560,9 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let sample_format = self.sample_format.clone();
         let change_format = self.change_format;
         let enable_resampling = self.enable_resampling;
-        let resampler_conf = self.resampler_conf.clone();
-        let async_src = resampler_is_async(&resampler_conf);
+        let resampler_type = self.resampler_type.clone();
+        let resampler_profile = self.resampler_profile.clone();
+        let async_src = resampler_is_async(&resampler_type);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let stop_on_rate_change = self.stop_on_rate_change;
@@ -573,7 +575,8 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let mut resampler = if enable_resampling {
                     debug!("Creating resampler");
                     get_resampler(
-                        &resampler_conf,
+                        &resampler_type,
+                        &resampler_profile,
                         channels,
                         samplerate,
                         capture_samplerate,

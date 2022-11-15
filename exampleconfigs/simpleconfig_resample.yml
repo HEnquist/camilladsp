@@ -5,7 +5,7 @@ devices:
   target_level: 1024
   adjust_period: 3
   enable_resampling: true
-  resampler_type:  BalancedAsync
+  resampler_type:  AsyncSinc
   capture_samplerate: 44100
   capture:
     type: Alsa
