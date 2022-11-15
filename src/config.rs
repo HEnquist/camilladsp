@@ -363,6 +363,8 @@ pub struct Devices {
     #[serde(default)]
     pub resampler_type: Resampler,
     #[serde(default)]
+    pub resampler_profile: ResamplerProfile,
+    #[serde(default)]
     pub capture_samplerate: usize,
     #[serde(default)]
     pub stop_on_rate_change: bool,
@@ -387,49 +389,31 @@ fn default_ca_format() -> SampleFormat {
     SampleFormat::S32LE
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum Resampler {
-    LinearPoly,
-    CubicPoly,
-    QuinticPoly,
-    SepticPoly,
-    FastAsync,
-    BalancedAsync,
-    AccurateAsync,
+    AsyncPoly,
+    AsyncSinc,
     Synchronous,
-    FreeAsync {
-        sinc_len: usize,
-        oversampling_ratio: usize,
-        interpolation: InterpolationType,
-        window: WindowFunction,
-        f_cutoff: f32,
-    },
 }
 
 impl Default for Resampler {
     fn default() -> Self {
-        Resampler::BalancedAsync
+        Resampler::AsyncSinc
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub enum WindowFunction {
-    Hann,
-    Hann2,
-    Blackman,
-    Blackman2,
-    BlackmanHarris,
-    BlackmanHarris2,
+pub enum ResamplerProfile {
+    VeryFast,
+    Fast,
+    Balanced,
+    Accurate,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub enum InterpolationType {
-    Cubic,
-    Linear,
-    Nearest,
+impl Default for ResamplerProfile {
+    fn default() -> Self {
+        ResamplerProfile::Balanced
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

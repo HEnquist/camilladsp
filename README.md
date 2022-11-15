@@ -626,7 +626,8 @@ devices:
   adjust_period: 10 (*)
   enable_rate_adjust: true (*)
   enable_resampling: true (*)
-  resampler_type: BalancedAsync (*)
+  resampler_type: AsyncSinc (*)
+  resampler_profile: Balanced (*)
   capture_samplerate: 44100 (*)
   stop_on_rate_change: false (*)
   rate_measure_interval: 1.0 (*)
@@ -680,9 +681,8 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   in order to avoid buffer underruns or a slowly increasing latency. This is currently supported when using an Alsa, Wasapi or CoreAudio playback device (and any capture device).
   Setting the rate can be done in two ways.
   * If the capture device is an Alsa Loopback device or a USB Audio gadget device, the adjustment is done by tuning the virtual sample clock of the Loopback or Gadget device. This avoids any need for resampling.
-  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` must then be one of the "Async" variants. This is supported for all capture devices.
+  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` must then be one of the "Async" types. This is supported for all capture devices.
   
-
 * `target_level` (optional, defaults to the `chunksize` value)
 
   The value is the number of samples that should be left in the buffer of the playback device
@@ -715,12 +715,16 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   In addition to resampling the input to a different sample rate,
   this can be useful for rate-matching capture and playback devices with independent clocks.
 
-* `resampler_type` (optional, defaults to "BalancedAsync")
+* `resampler_type` (optional, defaults to "AsyncSinc")
 
-  The resampler type to use. Valid choices are "Synchronous", "FastAsync", "BalancedAsync", "AccurateAsync", "FreeAsync", "LinearPoly", "CubicPoly", "QuinticPoly" and "SepticPoly".
+  The resampler type to use. Valid choices are "AsyncSinc", "AsyncPoly" and "Synchronous".
 
-  If used for rate matching with `enable_rate_adjust: true` the one of the "Async" or "Poly" variants must be used.
+  If used for rate matching with `enable_rate_adjust: true` the one of the "Async" types must be used.
   See also the [Resampling section.](#resampling)
+
+* `resampler_profile` (optional, defaults to "Balanced")
+
+  The quality profile for the resampler. Valid choices are "VeryFast", "Fast", "Balanced" and "Accurate".
 
 * `capture_samplerate` (optional, defaults to value of `samplerate`)
 
@@ -903,82 +907,80 @@ This method produces a result that isn't as clean as with anti-aliasing, but the
 For synchronous resampling it instead works by transforming the waveform with FFT, modifying the spectrum, and then 
 getting the resampled waveform by inverse FFT.
 
-CamillaDSP provides four preset profiles for the resampler:
-* Synchronous
-* FastAsync
-* BalancedAsync
-* AccurateAsync
-* LinearPoly
-* CubicPoly
-* QuinticPoly
-* SepticPoly
+### Resampler configuration
 
-### Asynchronous resampling with anti-aliasing
-The "BalancedAsync" preset is the best choice in most cases, if an asynchronous resampler is needed.
+Two parameters in the config file are used to specify the resampler. 
+
+The resampler type is given by `resampler_type`, and the available options are:
+
+The three resampler types mentioned above are named:
+* AsyncSinc
+* AsincPoly
+* Synchronous
+
+There is also a choice of profiles via `resampler_profile`. The options are:
+* VeryFast
+* Fast
+* Balanced
+* Accurate
+
+
+### `AsyncSinc`: Asynchronous resampling with anti-aliasing
+The "Balanced" profile is the best choice in most cases, if an asynchronous resampler is needed.
 It provides good resampling quality with a noise threshold in the range 
 of -150 dB along with reasonable CPU usage.
 As -150 dB is way beyond the resolution limit of even the best commercial DACs, 
 this preset is thus sufficient for all audio use.
-The "FastAsync" preset is faster but have a little more high-frequency roll-off 
+The "Fast and "VeryFast" profiles are faster but have a little more high-frequency roll-off 
 and give a bit higher resampling artefacts.
-The "AccurateAsync" preset provide the highest quality result, 
+The "Accurate" profile provides the highest quality result, 
 with all resampling artefacts below -200dB, at the expense of higher CPU usage.
-There is also a "FreeAsync" mode as well where all parameters can be set freely. The configuration is specified like this:
-```
-...
-  resampler_type:
-    FreeAsync:
-      f_cutoff: 0.9
-      sinc_len: 128
-      window: Hann2
-      oversampling_ratio: 128
-      interpolation: Cubic
-```
 
 For reference, the asynchronous presets are defined according to this table:
 
-|                   | FastAsync | BalancedAsync | AccurateAsync |
-|-------------------|-----------|---------------|---------------|
-|sinc_len           | 64        | 128           | 256           |
-|oversampling_ratio | 1024      | 1024          | 256           |
-|interpolation      | Linear    | Linear        | Cubic         |
-|window             | Hann2     | Blackman2     | BlackmanHarris2 |
-|f_cutoff           | 0.915 (*) | 0.925 (*)     | 0.947 (*)     |
+|                   | VeryFast     | Fast             | Balanced               | Accurate               |
+|-------------------|--------------|------------------|------------------------|------------------------|
+|sinc_len           | 64           | 128              | 256                    | 256                    |
+|oversampling_ratio | 1024         | 1024             | 1024                   | 256                    |
+|interpolation      | Linear       | Linear           | Linear                 | Cubic                  |
+|window             | squared Hann | squared Blackman | squared BlackmanHarris | squared BlackmanHarris |
+|f_cutoff           | 0.915 (*)    | 0.925 (*)        | 0.947 (*)              | 0.947 (*)              |
 
 (*) These cutoff values are approximate. The actual values used are calculated automatically
 at runtime for the combination of sinc length and window.
 
-### Asynchronous resampling without anti-aliasing
-There are four presets provided for asynchronous resampling without anti-aliasing.
-They all perform polynomial interpolation on the _N_ nearest samples, with different polynomial degrees.
+### `AsyncPoly`: Asynchronous resampling without anti-aliasing
+The `AsyncPoly` resampler type performs polynomial interpolation on the _N_ nearest samples.
+The polynomial degree depends on the selected profile.
 
-|            | Polynomial degree | Samples fitted |
-|------------|-------------------|----------------|
-|LinearPoly  | 1                 | 2              |
-|CubicPoly   | 3                 | 4              |
-|QuinticPoly | 5                 | 6              |
-|SepticPoly  | 7                 | 8              |
+| Profile      | Polynomial degree | Samples fitted |
+|--------------|-------------------|----------------|
+| VeryFast     | 1                 | 2              |
+| Fast         | 3                 | 4              |
+| Balanced     | 5                 | 6              |
+| Accurate     | 7                 | 8              |
 
 Higher polynomial degrees produce higher quality results but use more processing power.
-All are however considerably faster than the "Async" presets.
-In theory these produce inferior quality compared to the presets with anti-aliasing,
+All are however considerably faster than the "AsyncSinc" types.
+In theory these produce inferior quality compared to the "AsyncSinc" type with anti-aliasing,
 however in practice the difference is small.
-Use one of these presets to save processing power, with little or no perceived quality loss.
+Use the `AsyncPoly` type to save processing power, with little or no perceived quality loss.
 
-### Synchronous resampling
+### `Synchronous`: Synchronous resampling with anti-aliasing
 For performing fixed ratio resampling, like resampling 
 from 44.1kHz to 96kHz (which corresponds to a precise ratio of 147/320)
-choose the "Synchronous" variant.
+choose the "Synchronous" type.
 This is considerably faster than the asynchronous variants, but does not support rate adjust.
-The quality is similar to the "AccurateAsync" preset.
+There is only one quality setting, and the profile setting is ignored.
+The quality is similar to the "AsyncSinc" type with the "Accurate" profile.
 
 ### Rate adjust via resampling
 When using the rate adjust feature to match capture and playback devices, 
-one of the "Async" or "Poly" variants must be used. 
-These asynchronous presets do not rely on a fixed resampling ratio.
+one of the "Async" types must be used. 
+These asynchronous resamplers do not rely on a fixed resampling ratio.
 When rate adjust is enabled the resampling ratio is dynamically adjusted in order to compensate 
 for drifts and mismatches between the input and output sample clocks.  
-Using the "Synchronous" variant with rate adjust enabled will print warnings, 
+Using the "Synchronous" type with rate adjust enabled will print warnings, 
 and any rate adjust request will be ignored.
 
 See the library documentation for more details. [Rubato on docs.rs](https://docs.rs/rubato/0.1.0/rubato/)

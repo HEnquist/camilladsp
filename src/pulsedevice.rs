@@ -61,7 +61,8 @@ pub struct PulsePlaybackDevice {
 pub struct PulseCaptureDevice {
     pub devname: String,
     pub samplerate: usize,
-    pub resampler_conf: config::Resampler,
+    pub resampler_type: config::Resampler,
+    pub resampler_profile: config::ResamplerProfile,
     pub enable_resampling: bool,
     pub capture_samplerate: usize,
     pub chunksize: usize,
@@ -292,8 +293,9 @@ impl CaptureDevice for PulseCaptureDevice {
             * store_bytes_per_sample;
         let sample_format = self.sample_format.clone();
         let enable_resampling = self.enable_resampling;
-        let resampler_conf = self.resampler_conf.clone();
-        let async_src = resampler_is_async(&resampler_conf);
+        let resampler_type = self.resampler_type.clone();
+        let resampler_profile = self.resampler_profile.clone();
+        let async_src = resampler_is_async(&resampler_type);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let handle = thread::Builder::new()
@@ -302,7 +304,8 @@ impl CaptureDevice for PulseCaptureDevice {
                 let mut resampler = if enable_resampling {
                     debug!("Creating resampler");
                     get_resampler(
-                        &resampler_conf,
+                        &resampler_type,
+                        &resampler_profile,
                         channels,
                         samplerate,
                         capture_samplerate,

@@ -59,7 +59,8 @@ pub struct FileCaptureDevice {
     pub samplerate: usize,
     pub enable_resampling: bool,
     pub capture_samplerate: usize,
-    pub resampler_conf: config::Resampler,
+    pub resampler_type: config::Resampler,
+    pub resampler_profile: config::ResamplerProfile,
     pub channels: usize,
     pub sample_format: SampleFormat,
     pub silence_threshold: PrcFmt,
@@ -562,8 +563,9 @@ impl CaptureDevice for FileCaptureDevice {
             * store_bytes_per_sample;
         let sample_format = self.sample_format.clone();
         let enable_resampling = self.enable_resampling;
-        let resampler_conf = self.resampler_conf.clone();
-        let async_src = resampler_is_async(&resampler_conf);
+        let resampler_type = self.resampler_type.clone();
+        let resampler_profile = self.resampler_profile.clone();
+        let async_src = resampler_is_async(&resampler_type);
         let extra_bytes = self.extra_samples * store_bytes_per_sample * channels;
         let skip_bytes = self.skip_bytes;
         let read_bytes = self.read_bytes;
@@ -577,7 +579,8 @@ impl CaptureDevice for FileCaptureDevice {
                 let resampler = if enable_resampling {
                     debug!("Creating resampler");
                     get_resampler(
-                        &resampler_conf,
+                        &resampler_type,
+                        &resampler_profile,
                         channels,
                         samplerate,
                         capture_samplerate,
