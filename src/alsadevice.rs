@@ -622,7 +622,7 @@ fn capture_loop_bytes(
         if params.samplerate == params.capture_samplerate && resampler.is_some() {
             warn!("Needless 1:1 sample rate conversion active. Not needed since capture device supports rate adjust");
         } else if params.async_src && resampler.is_some() {
-            warn!("Async resampler not needed since capture device supports rate adjust. Switch to Sync type to save CPU time.");
+            warn!("Async resampler is used but not needed since capture device supports rate adjust. Consider switching to Synchronous type to save CPU time.");
         }
     }
 
