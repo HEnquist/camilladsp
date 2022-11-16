@@ -552,7 +552,7 @@ fn playback_loop_bytes(
                             pb_stat.buffer_level = avg_delay as usize;
                             debug!(
                                 "PB: buffer level: {:.1}, signal rms: {:?}",
-                                avg_delay, pb_stat.signal_rms
+                                avg_delay, pb_stat.signal_rms.get_last()
                             );
                         }
                     }

@@ -391,7 +391,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                         trace!(
                                             "Measured sample rate is {} Hz, signal RMS is {:?}",
                                             measured_rate_f,
-                                            capture_status.read().unwrap().signal_rms,
+                                            capture_status.read().unwrap().signal_rms.get_last(),
                                         );
                                         let mut capt_stat = capture_status.write().unwrap();
                                         capt_stat.measured_samplerate = measured_rate_f as usize;
