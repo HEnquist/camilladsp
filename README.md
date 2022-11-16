@@ -915,7 +915,7 @@ The resampler type is given by `resampler_type`, and the available options are:
 
 The three resampler types mentioned above are named:
 * AsyncSinc
-* AsincPoly
+* AsyncPoly
 * Synchronous
 
 There is also a choice of profiles via `resampler_profile`. The options are:
