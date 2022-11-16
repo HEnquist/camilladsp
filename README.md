@@ -243,7 +243,6 @@ All the available options, or "features" are:
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
 - `FFTW`: Use FFTW instead of RustFFT.
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64).
-- `neon`: Enable the experimental Neon support for aarch64 in the resampler. Note that this only works on 64-bit arm, and requires a very recent nightly rust compiler. __TODO this feature is no longer needed, delete!__
 
 The `websocket` feature is included in the default features, meaning it will be enabled if you don't specify anything.
 

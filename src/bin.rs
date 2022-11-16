@@ -469,9 +469,6 @@ fn main_process() -> i32 {
     if cfg!(feature = "32bit") {
         features.push("32bit");
     }
-    if cfg!(feature = "neon") {
-        features.push("neon");
-    }
     if cfg!(feature = "debug") {
         features.push("debug");
     }

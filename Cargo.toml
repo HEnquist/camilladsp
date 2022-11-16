@@ -16,7 +16,6 @@ bluez-backend = ["zbus"]
 websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
 FFTW = ["fftw"]
-neon = []
 debug = []
 
 [lib]
