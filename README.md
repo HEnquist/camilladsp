@@ -235,29 +235,21 @@ The default FFT library is RustFFT, but it's also possible to use FFTW. This is 
 
 ## Customized build
 All the available options, or "features" are:
-- `pulse-backend`: PulseAudio support
+- `pulse-backend`: PulseAudio support.
 - `cpal-backend`: Used for Jack support (automatically enabled when needed).
 - `jack-backend`: Jack support.
-- `bluez-backend`: Bluetooth support via BlueALSA (Linux only)
-- `websocket`: Websocket server for control
-- `secure-websocket`: Enable secure websocket, also enables the `websocket` feature
-- `FFTW`: Use FFTW instead of RustFFT
-- `32bit`: Perform all calculations with 32-bit floats (instead of 64)
-- `neon`: Enable the experimental Neon support for aarch64 in the resampler. Note that this only works on 64-bit arm, and requires a very recent nightly rust compiler.
+- `bluez-backend`: Bluetooth support via BlueALSA (Linux only).
+- `websocket`: Websocket server for control.
+- `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
+- `FFTW`: Use FFTW instead of RustFFT.
+- `32bit`: Perform all calculations with 32-bit floats (instead of 64).
+- `neon`: Enable the experimental Neon support for aarch64 in the resampler. Note that this only works on 64-bit arm, and requires a very recent nightly rust compiler. __TODO this feature is no longer needed, delete!__
 
 The `websocket` feature is included in the default features, meaning it will be enabled if you don't specify anything.
 
-Cargo doesn't allow disabling a single default feature, but you can disable the whole group with the `--no-default-features` flag. Then you have to manually add all the ones you want.
-
-The `pulse-backend` feature requires PulseAudio and its development files. To install:
-- Fedora: ```sudo dnf install pulseaudio-libs-devel```
-- Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
-- Arch:  ```sudo pacman -S libpulse```
-
-The `jack-backend` feature requires jack and its development files. To install:
-- Fedora: ```sudo dnf install jack-audio-connection-kit jack-audio-connection-kit-devel```
-- Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
-- Arch:  ```sudo pacman -S jack```
+Cargo doesn't allow disabling a single default feature,
+but you can disable the whole group with the `--no-default-features` flag.
+Then you have to manually add all the ones you want.
 
 Example 1: You want `websocket`, `pulse-backend` and `FFTW`. The first one is included by default so you only need to add `FFTW` and `pulse-backend`:
 ```
@@ -272,6 +264,18 @@ cargo build --release --no-default-features --features FFTW --features 32bit
 (or)
 cargo install --path . --no-default-features --features FFTW --features 32bit
 ```
+
+### Additional dependencies
+
+The `pulse-backend` feature requires PulseAudio and its development files. To install:
+- Fedora: ```sudo dnf install pulseaudio-libs-devel```
+- Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
+- Arch:  ```sudo pacman -S libpulse```
+
+The `jack-backend` feature requires jack and its development files. To install:
+- Fedora: ```sudo dnf install jack-audio-connection-kit jack-audio-connection-kit-devel```
+- Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
+- Arch:  ```sudo pacman -S jack```
 
 ## Optimize for your system
 By default Cargo builds for a generic system, meaning the resulting binary might not run as fast as possible on your system.
