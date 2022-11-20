@@ -332,15 +332,15 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
 pub fn resampler_is_async(conf: &config::Resampler) -> bool {
     matches!(
         &conf,
-        config::Resampler::AsyncSinc | config::Resampler::AsyncPoly
+        config::Resampler::AsyncSinc { .. } | config::Resampler::AsyncPoly { .. }
     )
 }
 
 pub fn get_async_sinc_parameters(
-    quality: &config::ResamplerProfile,
+    resampler_conf: &config::AsyncSincParameters,
 ) -> SincInterpolationParameters {
-    match &quality {
-        config::ResamplerProfile::VeryFast => {
+    match &resampler_conf {
+        config::AsyncSincParameters::VeryFast => {
             let sinc_len = 64;
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
@@ -354,7 +354,7 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::ResamplerProfile::Fast => {
+        config::AsyncSincParameters::Fast => {
             let sinc_len = 128;
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
@@ -368,7 +368,7 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::ResamplerProfile::Balanced => {
+        config::AsyncSincParameters::Balanced => {
             let sinc_len = 256;
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
@@ -382,7 +382,7 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::ResamplerProfile::Accurate => {
+        config::AsyncSincParameters::Accurate => {
             let sinc_len = 256;
             let oversampling_factor = 256;
             let interpolation = SincInterpolationType::Cubic;
@@ -396,41 +396,74 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
+        config::AsyncSincParameters::Free {
+            sinc_len,
+            window,
+            f_cutoff,
+            interpolation,
+            oversampling_factor,
+        } => {
+            let interpolation = match interpolation {
+                config::AsyncSincInterpolation::Nearest => SincInterpolationType::Nearest,
+                config::AsyncSincInterpolation::Linear => SincInterpolationType::Linear,
+                config::AsyncSincInterpolation::Cubic => SincInterpolationType::Cubic,
+            };
+
+            let wind = match window {
+                config::AsyncSincWindow::Hann => WindowFunction::Hann,
+                config::AsyncSincWindow::Hann2 => WindowFunction::Hann2,
+                config::AsyncSincWindow::Blackman => WindowFunction::Blackman,
+                config::AsyncSincWindow::Blackman2 => WindowFunction::Blackman2,
+                config::AsyncSincWindow::BlackmanHarris => WindowFunction::BlackmanHarris,
+                config::AsyncSincWindow::BlackmanHarris2 => WindowFunction::BlackmanHarris2,
+            };
+            let cutoff = if let Some(co) = f_cutoff {
+                *co
+            } else {
+                calculate_cutoff(*sinc_len, wind)
+            };
+            SincInterpolationParameters {
+                sinc_len: *sinc_len,
+                f_cutoff: cutoff,
+                oversampling_factor: *oversampling_factor,
+                interpolation,
+                window: wind,
+            }
+        }
     }
 }
 
 pub fn get_resampler(
-    resampler_type: &config::Resampler,
-    resampler_profile: &config::ResamplerProfile,
+    resampler_conf: &config::Resampler,
     num_channels: usize,
     samplerate: usize,
     capture_samplerate: usize,
     chunksize: usize,
 ) -> Option<Box<dyn VecResampler<PrcFmt>>> {
-    match &resampler_type {
-        config::Resampler::AsyncSinc => {
-            let parameters = get_async_sinc_parameters(resampler_profile);
+    match &resampler_conf {
+        config::Resampler::AsyncSinc { parameters } => {
+            let sinc_params = get_async_sinc_parameters(parameters);
             debug!(
                 "Creating asynchronous resampler with parameters: {:?}",
-                parameters
+                sinc_params
             );
             Some(Box::new(
                 SincFixedOut::<PrcFmt>::new(
                     samplerate as f64 / capture_samplerate as f64,
                     1.1,
-                    parameters,
+                    sinc_params,
                     chunksize,
                     num_channels,
                 )
                 .unwrap(),
             ))
         }
-        config::Resampler::AsyncPoly => {
-            let degree = match resampler_profile {
-                config::ResamplerProfile::VeryFast => PolynomialDegree::Linear,
-                config::ResamplerProfile::Fast => PolynomialDegree::Cubic,
-                config::ResamplerProfile::Balanced => PolynomialDegree::Quintic,
-                config::ResamplerProfile::Accurate => PolynomialDegree::Septic,
+        config::Resampler::AsyncPoly { parameters } => {
+            let degree = match parameters {
+                config::AsyncPolyParameters::Linear => PolynomialDegree::Linear,
+                config::AsyncPolyParameters::Cubic => PolynomialDegree::Cubic,
+                config::AsyncPolyParameters::Quintic => PolynomialDegree::Quintic,
+                config::AsyncPolyParameters::Septic => PolynomialDegree::Septic,
             };
             Some(Box::new(
                 FastFixedOut::<PrcFmt>::new(
@@ -447,27 +480,29 @@ pub fn get_resampler(
             FftFixedOut::<PrcFmt>::new(capture_samplerate, samplerate, chunksize, 2, num_channels)
                 .unwrap(),
         )),
+        config::Resampler::Disabled => None,
     }
 }
 
 /// Create a capture device.
 pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     //let resampler = get_resampler(&conf);
-    let capture_samplerate = if conf.capture_samplerate > 0 && conf.enable_resampling {
-        conf.capture_samplerate
-    } else {
-        conf.samplerate
-    };
+    let capture_samplerate =
+        if conf.capture_samplerate > 0 && conf.resampler != config::Resampler::Disabled {
+            conf.capture_samplerate
+        } else {
+            conf.samplerate
+        };
     let diff_rates = capture_samplerate != conf.samplerate;
     // Check for non-optimal resampling settings
-    if !diff_rates && conf.enable_resampling && !conf.enable_rate_adjust {
+    if !diff_rates && conf.resampler != config::Resampler::Disabled && !conf.enable_rate_adjust {
         warn!(
             "Needless 1:1 sample rate conversion active. Not needed since enable_rate_adjust=False"
         );
     } else if diff_rates
-        && conf.enable_resampling
+        && conf.resampler != config::Resampler::Disabled
         && !conf.enable_rate_adjust
-        && resampler_is_async(&conf.resampler_type)
+        && resampler_is_async(&conf.resampler)
     {
         info!("Using Async resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time.");
     }
@@ -520,10 +555,8 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(filedevice::FileCaptureDevice {
             source: filedevice::CaptureSource::Filename(filename),
             samplerate: conf.samplerate,
-            enable_resampling: conf.enable_resampling,
             capture_samplerate,
-            resampler_type: conf.resampler_type,
-            resampler_profile: conf.resampler_profile,
+            resampler_config: conf.resampler,
             chunksize: conf.chunksize,
             channels,
             sample_format: format,
@@ -544,10 +577,8 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(filedevice::FileCaptureDevice {
             source: filedevice::CaptureSource::Stdin,
             samplerate: conf.samplerate,
-            enable_resampling: conf.enable_resampling,
             capture_samplerate,
-            resampler_type: conf.resampler_type,
-            resampler_profile: conf.resampler_profile,
+            resampler_config: conf.resampler,
             chunksize: conf.chunksize,
             channels,
             sample_format: format,
@@ -592,9 +623,7 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(coreaudiodevice::CoreaudioCaptureDevice {
             devname: device,
             samplerate: conf.samplerate,
-            enable_resampling: conf.enable_resampling,
-            resampler_type: conf.resampler_type,
-            resampler_profile: conf.resampler_profile,
+            resampler_config: conf.resampler,
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,

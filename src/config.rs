@@ -359,11 +359,7 @@ pub struct Devices {
     #[serde(default = "default_period")]
     pub adjust_period: f32,
     #[serde(default)]
-    pub enable_resampling: bool,
-    #[serde(default)]
-    pub resampler_type: Resampler,
-    #[serde(default)]
-    pub resampler_profile: ResamplerProfile,
+    pub resampler: Resampler,
     #[serde(default)]
     pub capture_samplerate: usize,
     #[serde(default)]
@@ -390,29 +386,73 @@ fn default_ca_format() -> SampleFormat {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub enum Resampler {
-    AsyncPoly,
-    AsyncSinc,
-    Synchronous,
+pub enum AsyncSincInterpolation {
+    Nearest,
+    Linear,
+    Cubic,
 }
 
-impl Default for Resampler {
-    fn default() -> Self {
-        Resampler::AsyncSinc
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub enum ResamplerProfile {
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum AsyncSincParameters {
     VeryFast,
     Fast,
     Balanced,
     Accurate,
+    Free {
+        sinc_len: usize,
+        interpolation: AsyncSincInterpolation,
+        window: AsyncSincWindow,
+        f_cutoff: Option<f32>,
+        oversampling_factor: usize,
+    },
 }
 
-impl Default for ResamplerProfile {
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub enum AsyncSincWindow {
+    Hann,
+    Hann2,
+    Blackman,
+    Blackman2,
+    BlackmanHarris,
+    BlackmanHarris2,
+}
+
+impl Default for AsyncSincParameters {
     fn default() -> Self {
-        ResamplerProfile::Balanced
+        AsyncSincParameters::Balanced
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum AsyncPolyParameters {
+    Linear,
+    Cubic,
+    Quintic,
+    Septic,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
+pub enum Resampler {
+    AsyncPoly { parameters: AsyncPolyParameters },
+    AsyncSinc { parameters: AsyncSincParameters },
+    Synchronous,
+    Disabled,
+}
+
+impl Default for Resampler {
+    fn default() -> Self {
+        Resampler::AsyncSinc {
+            parameters: AsyncSincParameters::Balanced,
+        }
+    }
+}
+
+impl Resampler {
+    pub fn is_enabled(&self) -> bool {
+        !matches!(self, Resampler::Disabled)
     }
 }
 
@@ -908,7 +948,7 @@ fn apply_overrides(configuration: &mut Configuration) {
         let cfg_rate = configuration.devices.samplerate;
         let cfg_chunksize = configuration.devices.chunksize;
 
-        if !configuration.devices.enable_resampling {
+        if !configuration.devices.resampler.is_enabled() {
             debug!("Apply override for samplerate: {}", rate);
             configuration.devices.samplerate = rate;
             let scaled_chunksize = if rate > cfg_rate {
@@ -940,7 +980,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             configuration.devices.capture_samplerate = rate;
             if rate == cfg_rate && !configuration.devices.enable_rate_adjust {
                 debug!("Disabling unneccesary 1:1 resampling");
-                configuration.devices.enable_resampling = false;
+                configuration.devices.resampler = Resampler::Disabled;
             }
         }
     }
