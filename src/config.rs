@@ -393,6 +393,8 @@ pub enum AsyncSincInterpolation {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
 pub enum AsyncSincParameters {
     VeryFast,
     Fast,
@@ -444,9 +446,7 @@ pub enum Resampler {
 
 impl Default for Resampler {
     fn default() -> Self {
-        Resampler::AsyncSinc {
-            parameters: AsyncSincParameters::Balanced,
-        }
+        Resampler::Disabled
     }
 }
 
