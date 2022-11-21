@@ -1066,7 +1066,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             averager.restart();
                             let measured_rate_f = samples_per_sec;
                             debug!(
-                                "Measured sample rate is {} Hz",
+                                "Measured sample rate is {:.1} Hz",
                                 measured_rate_f
                             );
                             let mut capture_status = capture_status.write().unwrap();
@@ -1082,7 +1082,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             watcher_averager.restart();
                             let measured_rate_f = samples_per_sec;
                             debug!(
-                                "Measured sample rate is {} Hz",
+                                "Measured sample rate is {:.1} Hz",
                                 measured_rate_f
                             );
                             let changed = valuewatcher.check_value(measured_rate_f as f32);

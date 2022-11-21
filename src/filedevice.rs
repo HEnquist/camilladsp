@@ -58,7 +58,7 @@ pub struct FileCaptureDevice {
     pub chunksize: usize,
     pub samplerate: usize,
     pub capture_samplerate: usize,
-    pub resampler_config: config::Resampler,
+    pub resampler_config: Option<config::Resampler>,
     pub channels: usize,
     pub sample_format: SampleFormat,
     pub silence_threshold: PrcFmt,
@@ -438,7 +438,7 @@ fn capture_loop(
                     averager.restart();
                     let measured_rate_f =
                         bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
-                    trace!("Measured sample rate is {} Hz", measured_rate_f);
+                    trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                     let mut capt_stat = params.capture_status.write().unwrap();
                     capt_stat.measured_samplerate = measured_rate_f as usize;
                     capt_stat.signal_range = value_range as f32;
@@ -467,7 +467,7 @@ fn capture_loop(
                             break;
                         }
                     }
-                    trace!("Measured sample rate is {} Hz", measured_rate_f);
+                    trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                 }
             }
             Err(err) => {

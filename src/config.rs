@@ -359,9 +359,9 @@ pub struct Devices {
     #[serde(default = "default_period")]
     pub adjust_period: f32,
     #[serde(default)]
-    pub resampler: Resampler,
+    pub resampler: Option<Resampler>,
     #[serde(default)]
-    pub capture_samplerate: usize,
+    pub capture_samplerate: Option<usize>,
     #[serde(default)]
     pub stop_on_rate_change: bool,
     #[serde(default = "default_measure_interval")]
@@ -427,6 +427,8 @@ impl Default for AsyncSincParameters {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
 pub enum AsyncPolyParameters {
     Linear,
     Cubic,
@@ -441,19 +443,6 @@ pub enum Resampler {
     AsyncPoly { parameters: AsyncPolyParameters },
     AsyncSinc { parameters: AsyncSincParameters },
     Synchronous,
-    Disabled,
-}
-
-impl Default for Resampler {
-    fn default() -> Self {
-        Resampler::Disabled
-    }
-}
-
-impl Resampler {
-    pub fn is_enabled(&self) -> bool {
-        !matches!(self, Resampler::Disabled)
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -948,7 +937,7 @@ fn apply_overrides(configuration: &mut Configuration) {
         let cfg_rate = configuration.devices.samplerate;
         let cfg_chunksize = configuration.devices.chunksize;
 
-        if !configuration.devices.resampler.is_enabled() {
+        if configuration.devices.resampler.is_none() {
             debug!("Apply override for samplerate: {}", rate);
             configuration.devices.samplerate = rate;
             let scaled_chunksize = if rate > cfg_rate {
@@ -977,10 +966,10 @@ fn apply_overrides(configuration: &mut Configuration) {
             }
         } else {
             debug!("Apply override for capture_samplerate: {}", rate);
-            configuration.devices.capture_samplerate = rate;
+            configuration.devices.capture_samplerate = Some(rate);
             if rate == cfg_rate && !configuration.devices.enable_rate_adjust {
                 debug!("Disabling unneccesary 1:1 resampling");
-                configuration.devices.resampler = Resampler::Disabled;
+                configuration.devices.resampler = None;
             }
         }
     }
@@ -1262,6 +1251,14 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     if conf.devices.silence_timeout < 0.0 {
         return Err(ConfigError::new("silence_timeout cannot be negative").into());
+    }
+    if let Some(rate) = conf.devices.capture_samplerate {
+        if rate != conf.devices.samplerate && conf.devices.resampler.is_none() {
+            return Err(ConfigError::new(
+                "capture_samplerate must match samplerate when resampling is disabled",
+            )
+            .into());
+        }
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi { format, .. } = &conf.devices.capture {

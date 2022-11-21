@@ -329,10 +329,10 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     }
 }
 
-pub fn resampler_is_async(conf: &config::Resampler) -> bool {
+pub fn resampler_is_async(conf: &Option<config::Resampler>) -> bool {
     matches!(
         &conf,
-        config::Resampler::AsyncSinc { .. } | config::Resampler::AsyncPoly { .. }
+        Some(config::Resampler::AsyncSinc { .. }) | Some(config::Resampler::AsyncPoly { .. })
     )
 }
 
@@ -434,14 +434,14 @@ pub fn get_async_sinc_parameters(
 }
 
 pub fn get_resampler(
-    resampler_conf: &config::Resampler,
+    resampler_conf: &Option<config::Resampler>,
     num_channels: usize,
     samplerate: usize,
     capture_samplerate: usize,
     chunksize: usize,
 ) -> Option<Box<dyn VecResampler<PrcFmt>>> {
     match &resampler_conf {
-        config::Resampler::AsyncSinc { parameters } => {
+        Some(config::Resampler::AsyncSinc { parameters }) => {
             let sinc_params = get_async_sinc_parameters(parameters);
             debug!(
                 "Creating asynchronous resampler with parameters: {:?}",
@@ -458,7 +458,7 @@ pub fn get_resampler(
                 .unwrap(),
             ))
         }
-        config::Resampler::AsyncPoly { parameters } => {
+        Some(config::Resampler::AsyncPoly { parameters }) => {
             let degree = match parameters {
                 config::AsyncPolyParameters::Linear => PolynomialDegree::Linear,
                 config::AsyncPolyParameters::Cubic => PolynomialDegree::Cubic,
@@ -476,35 +476,40 @@ pub fn get_resampler(
                 .unwrap(),
             ))
         }
-        config::Resampler::Synchronous => Some(Box::new(
+        Some(config::Resampler::Synchronous) => Some(Box::new(
             FftFixedOut::<PrcFmt>::new(capture_samplerate, samplerate, chunksize, 2, num_channels)
                 .unwrap(),
         )),
-        config::Resampler::Disabled => None,
+        None => None,
     }
 }
 
 /// Create a capture device.
 pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     //let resampler = get_resampler(&conf);
-    let capture_samplerate =
-        if conf.capture_samplerate > 0 && conf.resampler != config::Resampler::Disabled {
-            conf.capture_samplerate
-        } else {
-            conf.samplerate
-        };
+    let capture_samplerate = if conf.capture_samplerate.is_some() && conf.resampler.is_some() {
+        conf.capture_samplerate.unwrap()
+    } else {
+        conf.samplerate
+    };
     let diff_rates = capture_samplerate != conf.samplerate;
     // Check for non-optimal resampling settings
-    if !diff_rates && conf.resampler != config::Resampler::Disabled && !conf.enable_rate_adjust {
+    if !diff_rates && conf.resampler.is_some() && !conf.enable_rate_adjust {
         warn!(
             "Needless 1:1 sample rate conversion active. Not needed since enable_rate_adjust=False"
         );
     } else if diff_rates
-        && conf.resampler != config::Resampler::Disabled
+        && conf.resampler.is_some()
         && !conf.enable_rate_adjust
-        && resampler_is_async(&conf.resampler)
+        && matches!(&conf.resampler, Some(config::Resampler::AsyncSinc { .. }))
     {
-        info!("Using Async resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time.");
+        info!("Using AsyncSinc resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time.");
+    } else if diff_rates
+        && conf.resampler.is_some()
+        && !conf.enable_rate_adjust
+        && matches!(&conf.resampler, Some(config::Resampler::AsyncPoly { .. }))
+    {
+        info!("Using AsyncPoly resampler for synchronous resampling. Consider switching to \"Synchronous\" to increase resampling quality.");
     }
     match conf.capture {
         #[cfg(target_os = "linux")]

@@ -94,7 +94,7 @@ pub struct CoreaudioPlaybackDevice {
 pub struct CoreaudioCaptureDevice {
     pub devname: String,
     pub samplerate: usize,
-    pub resampler_config: config::Resampler,
+    pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
@@ -817,7 +817,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         averager.restart();
                         let measured_rate_f = samples_per_sec;
                         debug!(
-                            "Measured sample rate is {} Hz",
+                            "Measured sample rate is {:.1} Hz",
                             measured_rate_f
                         );
                         let mut capture_status = capture_status.write().unwrap();
@@ -833,7 +833,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         watcher_averager.restart();
                         let measured_rate_f = samples_per_sec;
                         debug!(
-                            "Rate watcher, measured sample rate is {} Hz",
+                            "Rate watcher, measured sample rate is {:.1} Hz",
                             measured_rate_f
                         );
                         let changed = valuewatcher.check_value(measured_rate_f as f32);

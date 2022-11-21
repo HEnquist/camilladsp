@@ -733,7 +733,7 @@ fn capture_loop_bytes(
                     averager.restart();
                     let measured_rate_f =
                         bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
-                    trace!("Measured sample rate is {} Hz", measured_rate_f);
+                    trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                     let mut capt_stat = params.capture_status.write().unwrap();
                     capt_stat.measured_samplerate = measured_rate_f as usize;
                     capt_stat.signal_range = value_range as f32;
@@ -763,7 +763,7 @@ fn capture_loop_bytes(
                             break;
                         }
                     }
-                    trace!("Measured sample rate is {} Hz", measured_rate_f);
+                    trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                 }
             }
             Ok(CaptureResult::Stalled) => {

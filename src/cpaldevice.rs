@@ -641,7 +641,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 averager.restart();
                                 let measured_rate_f = samples_per_sec / channels as f64;
                                 trace!(
-                                    "Measured sample rate is {} Hz",
+                                    "Measured sample rate is {:.1} Hz",
                                     measured_rate_f
                                 );
                                 let mut capt_stat = capture_status.write().unwrap();
@@ -670,7 +670,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                         break;
                                     }
                                 }
-                                trace!("Measured sample rate is {} Hz", measured_rate_f);
+                                trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                             }
                             chunk.update_stats(&mut chunk_stats);
                             //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
