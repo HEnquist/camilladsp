@@ -537,7 +537,10 @@ devices:
   chunksize: 4096
   target_level: 8000
   adjust_period: 3
-  enable_resampling: true
+  resampler:
+    type: AsyncSinc
+    parameters:
+      type: Balanced
   enable_rate_adjust: true
   capture:
     type: Bluez
@@ -628,9 +631,7 @@ devices:
   target_level: 500 (*)
   adjust_period: 10 (*)
   enable_rate_adjust: true (*)
-  enable_resampling: true (*)
-  resampler_type: AsyncSinc (*)
-  resampler_profile: Balanced (*)
+  resampler: null (*)
   capture_samplerate: 44100 (*)
   stop_on_rate_change: false (*)
   rate_measure_interval: 1.0 (*)
@@ -684,7 +685,7 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   in order to avoid buffer underruns or a slowly increasing latency. This is currently supported when using an Alsa, Wasapi or CoreAudio playback device (and any capture device).
   Setting the rate can be done in two ways.
   * If the capture device is an Alsa Loopback device or a USB Audio gadget device, the adjustment is done by tuning the virtual sample clock of the Loopback or Gadget device. This avoids any need for resampling.
-  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` must then be one of the "Async" types. This is supported for all capture devices.
+  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. Then `resampler` must be set to one of the "Async" types. This is supported for all capture devices.
   
 * `target_level` (optional, defaults to the `chunksize` value)
 
@@ -712,26 +713,18 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   The `silence_timeout` (in seconds) is for how long the signal should be silent before pausing processing.
   Set this to zero, or leave it out, to never pause.
 
-* `enable_resampling` (optional, defaults to false)
+* `resampler` (optional, defaults to `null`)
 
-  Set this to `true` to enable resampling of the input signal.
+  Use this to configure a resampler. Setting it to `null` or leaving it out disables resampling .
+  Configure a resampler to enable resampling of the input signal.
   In addition to resampling the input to a different sample rate,
   this can be useful for rate-matching capture and playback devices with independent clocks.
+  See the [Resampling section](#resampling) for more details.
 
-* `resampler_type` (optional, defaults to "AsyncSinc")
+* `capture_samplerate` (optional, defaults to `null`)
 
-  The resampler type to use. Valid choices are "AsyncSinc", "AsyncPoly" and "Synchronous".
-
-  If used for rate matching with `enable_rate_adjust: true` the one of the "Async" types must be used.
-  See also the [Resampling section.](#resampling)
-
-* `resampler_profile` (optional, defaults to "Balanced")
-
-  The quality profile for the resampler. Valid choices are "VeryFast", "Fast", "Balanced" and "Accurate".
-
-* `capture_samplerate` (optional, defaults to value of `samplerate`)
-
-  The capture samplerate. If the resampler is only used for rate-matching then the capture samplerate
+  The capture samplerate. Setting it to `null` sets the capture samplerate to the same value as `samplerate`.
+  If the resampler is only used for rate-matching, then the capture samplerate
   is the same as the overall samplerate, and this setting can be left out.
 
 * `stop_on_rate_change` and `rate_measure_interval` (both optional)
@@ -912,70 +905,103 @@ getting the resampled waveform by inverse FFT.
 
 ### Resampler configuration
 
-Two parameters in the config file are used to specify the resampler. 
+The `resampler` section under `devices` is used to specify the resampler.
 
-The resampler type is given by `resampler_type`, and the available options are:
+Example:
+```
+  resampler:
+    type: AsyncSinc
+    parameters:
+      type: Balanced
+```
 
-The three resampler types mentioned above are named:
+The resampler type is given by `type`, and the available options are:
 * AsyncSinc
 * AsyncPoly
 * Synchronous
 
-There is also a choice of profiles via `resampler_profile`. The options are:
-* VeryFast
-* Fast
-* Balanced
-* Accurate
-
+The types `AsyncPoly` and `AsyncSinc` take extra parameters under the `parameters` subsection.
+See each type below for the available options.
 
 ### `AsyncSinc`: Asynchronous resampling with anti-aliasing
-The "Balanced" profile is the best choice in most cases, if an asynchronous resampler is needed.
+The AsyncSinc resampler takes an additional `type` parameter under `parameters`. This is used to select a profile
+The `Balanced` profile is the best choice in most cases.
 It provides good resampling quality with a noise threshold in the range 
 of -150 dB along with reasonable CPU usage.
 As -150 dB is way beyond the resolution limit of even the best commercial DACs, 
 this preset is thus sufficient for all audio use.
-The "Fast and "VeryFast" profiles are faster but have a little more high-frequency roll-off 
+The `Fast` and `VeryFast` profiles are faster but have a little more high-frequency roll-off 
 and give a bit higher resampling artefacts.
-The "Accurate" profile provides the highest quality result, 
+The `Accurate` profile provides the highest quality result, 
 with all resampling artefacts below -200dB, at the expense of higher CPU usage.
+
+There is also a `Free` profile, where all parameters can be selected freely.
+
+Example: 
+```
+  resampler:
+    type: AsyncSinc
+    parameters:
+      type: Free
+      sinc_len: 128
+      interpolation: Cubic
+      window: Hann2
+      f_cutoff: null
+```
+
+TODO explain Free parameters.
 
 For reference, the asynchronous presets are defined according to this table:
 
 |                   | VeryFast     | Fast             | Balanced               | Accurate               |
 |-------------------|--------------|------------------|------------------------|------------------------|
-|sinc_len           | 64           | 128              | 256                    | 256                    |
+|sinc_len           | 64           | 128              | 256                    | 256                    | 
 |oversampling_ratio | 1024         | 1024             | 1024                   | 256                    |
 |interpolation      | Linear       | Linear           | Linear                 | Cubic                  |
 |window             | squared Hann | squared Blackman | squared BlackmanHarris | squared BlackmanHarris |
 |f_cutoff           | 0.915 (*)    | 0.925 (*)        | 0.947 (*)              | 0.947 (*)              |
 
 (*) These cutoff values are approximate. The actual values used are calculated automatically
-at runtime for the combination of sinc length and window.
+at runtime for the combination of sinc length and window. TODO update these values!
 
 ### `AsyncPoly`: Asynchronous resampling without anti-aliasing
 The `AsyncPoly` resampler type performs polynomial interpolation on the _N_ nearest samples.
-The polynomial degree depends on the selected profile.
+The polynomial degree depends on the selected subtype.
 
-| Profile      | Polynomial degree | Samples fitted |
+```
+  resampler:
+    type: AsyncPoly
+    parameters:
+      type: Cubic
+```
+
+
+| Type         | Polynomial degree | Samples fitted |
 |--------------|-------------------|----------------|
-| VeryFast     | 1                 | 2              |
-| Fast         | 3                 | 4              |
-| Balanced     | 5                 | 6              |
-| Accurate     | 7                 | 8              |
+| Linear       | 1                 | 2              |
+| Cubic        | 3                 | 4              |
+| Quintic      | 5                 | 6              |
+| Septic       | 7                 | 8              |
 
 Higher polynomial degrees produce higher quality results but use more processing power.
-All are however considerably faster than the "AsyncSinc" types.
-In theory these produce inferior quality compared to the "AsyncSinc" type with anti-aliasing,
+All are however considerably faster than the `AsyncSinc` type.
+In theory these produce inferior quality compared to the `AsyncSinc` type with anti-aliasing,
 however in practice the difference is small.
 Use the `AsyncPoly` type to save processing power, with little or no perceived quality loss.
 
 ### `Synchronous`: Synchronous resampling with anti-aliasing
 For performing fixed ratio resampling, like resampling 
 from 44.1kHz to 96kHz (which corresponds to a precise ratio of 147/320)
-choose the "Synchronous" type.
+choose the `Synchronous` type.
 This is considerably faster than the asynchronous variants, but does not support rate adjust.
 There is only one quality setting, and the profile setting is ignored.
-The quality is similar to the "AsyncSinc" type with the "Accurate" profile.
+The quality is similar to the `AsyncSinc` type with the `Accurate` profile.
+
+The `Synchronous` type takes no additional parameters:
+```
+  resampler:
+    type: Synchronous
+```
 
 ### Rate adjust via resampling
 When using the rate adjust feature to match capture and playback devices, 
