@@ -340,7 +340,7 @@ pub fn get_async_sinc_parameters(
     resampler_conf: &config::AsyncSincParameters,
 ) -> SincInterpolationParameters {
     match &resampler_conf {
-        config::AsyncSincParameters::VeryFast => {
+        config::AsyncSincParameters::Profile { profile: config::AsyncSincProfile::VeryFast } => {
             let sinc_len = 64;
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
@@ -354,7 +354,7 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::AsyncSincParameters::Fast => {
+        config::AsyncSincParameters::Profile { profile: config::AsyncSincProfile::Fast } => {
             let sinc_len = 128;
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
@@ -368,10 +368,10 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::AsyncSincParameters::Balanced => {
-            let sinc_len = 256;
-            let oversampling_factor = 1024;
-            let interpolation = SincInterpolationType::Linear;
+        config::AsyncSincParameters::Profile { profile: config::AsyncSincProfile::Balanced } => {
+            let sinc_len = 192;
+            let oversampling_factor = 512;
+            let interpolation = SincInterpolationType::Quadratic;
             let window = WindowFunction::BlackmanHarris2;
             let f_cutoff = calculate_cutoff(sinc_len, window);
             SincInterpolationParameters {
@@ -382,7 +382,7 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::AsyncSincParameters::Accurate => {
+        config::AsyncSincParameters::Profile { profile: config::AsyncSincProfile::Accurate } => {
             let sinc_len = 256;
             let oversampling_factor = 256;
             let interpolation = SincInterpolationType::Cubic;
@@ -406,6 +406,7 @@ pub fn get_async_sinc_parameters(
             let interpolation = match interpolation {
                 config::AsyncSincInterpolation::Nearest => SincInterpolationType::Nearest,
                 config::AsyncSincInterpolation::Linear => SincInterpolationType::Linear,
+                config::AsyncSincInterpolation::Quadratic => SincInterpolationType::Quadratic,
                 config::AsyncSincInterpolation::Cubic => SincInterpolationType::Cubic,
             };
 
@@ -441,7 +442,7 @@ pub fn get_resampler(
     chunksize: usize,
 ) -> Option<Box<dyn VecResampler<PrcFmt>>> {
     match &resampler_conf {
-        Some(config::Resampler::AsyncSinc { parameters }) => {
+        Some(config::Resampler::AsyncSinc(parameters)) => {
             let sinc_params = get_async_sinc_parameters(parameters);
             debug!(
                 "Creating asynchronous resampler with parameters: {:?}",
@@ -458,12 +459,12 @@ pub fn get_resampler(
                 .unwrap(),
             ))
         }
-        Some(config::Resampler::AsyncPoly { parameters }) => {
-            let degree = match parameters {
-                config::AsyncPolyParameters::Linear => PolynomialDegree::Linear,
-                config::AsyncPolyParameters::Cubic => PolynomialDegree::Cubic,
-                config::AsyncPolyParameters::Quintic => PolynomialDegree::Quintic,
-                config::AsyncPolyParameters::Septic => PolynomialDegree::Septic,
+        Some(config::Resampler::AsyncPoly { interpolation }) => {
+            let degree = match interpolation {
+                config::AsyncPolyInterpolation::Linear => PolynomialDegree::Linear,
+                config::AsyncPolyInterpolation::Cubic => PolynomialDegree::Cubic,
+                config::AsyncPolyInterpolation::Quintic => PolynomialDegree::Quintic,
+                config::AsyncPolyInterpolation::Septic => PolynomialDegree::Septic,
             };
             Some(Box::new(
                 FastFixedOut::<PrcFmt>::new(

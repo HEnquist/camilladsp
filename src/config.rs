@@ -389,17 +389,23 @@ fn default_ca_format() -> SampleFormat {
 pub enum AsyncSincInterpolation {
     Nearest,
     Linear,
+    Quadratic,
     Cubic,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type")]
-#[serde(deny_unknown_fields)]
-pub enum AsyncSincParameters {
+pub enum AsyncSincProfile {
     VeryFast,
     Fast,
     Balanced,
     Accurate,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+#[serde(deny_unknown_fields)]
+pub enum AsyncSincParameters {
+    Profile {profile: AsyncSincProfile},
     Free {
         sinc_len: usize,
         interpolation: AsyncSincInterpolation,
@@ -422,14 +428,12 @@ pub enum AsyncSincWindow {
 
 impl Default for AsyncSincParameters {
     fn default() -> Self {
-        AsyncSincParameters::Balanced
+        AsyncSincParameters::Profile { profile: AsyncSincProfile::Balanced }
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(tag = "type")]
-#[serde(deny_unknown_fields)]
-pub enum AsyncPolyParameters {
+pub enum AsyncPolyInterpolation {
     Linear,
     Cubic,
     Quintic,
@@ -440,8 +444,8 @@ pub enum AsyncPolyParameters {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum Resampler {
-    AsyncPoly { parameters: AsyncPolyParameters },
-    AsyncSinc { parameters: AsyncSincParameters },
+    AsyncPoly { interpolation: AsyncPolyInterpolation },
+    AsyncSinc(AsyncSincParameters),
     Synchronous,
 }
 
