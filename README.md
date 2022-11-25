@@ -765,7 +765,7 @@ Any parameter marked (*) in all examples in this section are optional. If they a
     ### Supported formats
 
     |            | Alsa | Pulse | Wasapi | CoreAudio | Jack | File/Stdin/Stdout |
-    |------------|------|-------|--------|-----------|------|-------------------|
+    |------------|:----:|:-----:|:------:|:---------:|:----:|:-----------------:|
     | S16LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
     | S24LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
     | S24LE3     | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
@@ -893,16 +893,6 @@ Resampling is provided by the [Rubato library.](https://github.com/HEnquist/ruba
 This library does asynchronous and synchronous resampling with adjustable parameters.
 Asynchronous resampling can be done with or without anti-aliasing.
 
-For asynchronous resampling with anti-aliasing, the overall strategy is to use a sinc interpolation filter with a fixed oversampling ratio,
-and then use polynomial interpolation to get values for arbitrary times between those fixed points.
-
-Asynchronous resampling without anti-aliasing works by performing polynomial interpolation between the sample points.
-This skips the computationally expensive sinc interpolation filter and is therefore considerably faster.
-This method produces a result that isn't as clean as with anti-aliasing, but the difference is small and often inaudible.
-
-For synchronous resampling it instead works by transforming the waveform with FFT, modifying the spectrum, and then 
-getting the resampled waveform by inverse FFT.
-
 ### Resampler configuration
 
 The `resampler` section under `devices` is used to specify the resampler.
@@ -911,8 +901,7 @@ Example:
 ```
   resampler:
     type: AsyncSinc
-    parameters:
-      type: Balanced
+    profile: Balanced
 ```
 
 The resampler type is given by `type`, and the available options are:
@@ -920,68 +909,98 @@ The resampler type is given by `type`, and the available options are:
 * AsyncPoly
 * Synchronous
 
-The types `AsyncPoly` and `AsyncSinc` take extra parameters under the `parameters` subsection.
-See each type below for the available options.
+The types `AsyncPoly` and `AsyncSinc` need additional parameters, see each type below for details.
 
 ### `AsyncSinc`: Asynchronous resampling with anti-aliasing
-The AsyncSinc resampler takes an additional `type` parameter under `parameters`. This is used to select a profile
+
+For asynchronous resampling with anti-aliasing, the overall strategy is to use a sinc interpolation filter
+with a fixed oversampling factor,
+and then use polynomial interpolation to get values for arbitrary times between those fixed points.
+
+The AsyncSinc resampler takes an additional parameter `profile`.
+This is used to select a pre-defined profile.
 The `Balanced` profile is the best choice in most cases.
 It provides good resampling quality with a noise threshold in the range 
-of -150 dB along with reasonable CPU usage.
-As -150 dB is way beyond the resolution limit of even the best commercial DACs, 
+of -170 dB along with reasonable CPU usage.
+As -170 dB is way beyond the resolution limit of even the best commercial DACs, 
 this preset is thus sufficient for all audio use.
 The `Fast` and `VeryFast` profiles are faster but have a little more high-frequency roll-off 
 and give a bit higher resampling artefacts.
 The `Accurate` profile provides the highest quality result, 
 with all resampling artefacts below -200dB, at the expense of higher CPU usage.
 
-There is also a `Free` profile, where all parameters can be selected freely.
+Example:
+```
+  resampler:
+    type: AsyncSinc
+    profile: VeryFast
+```
+
+It is also possible to specify all parameters of the resampler instead of using the pre-defined profiles.
 
 Example: 
 ```
   resampler:
     type: AsyncSinc
-    parameters:
-      type: Free
-      sinc_len: 128
-      interpolation: Cubic
-      window: Hann2
-      f_cutoff: null
+    sinc_len: 128
+    oversampling_factor: 256
+    interpolation: Cubic
+    window: Hann2
+    f_cutoff: null
 ```
+The `f_cutoff` parameter is the relative cutoff frequency of the anti-aliasing filter.
+A value of 1.0 means the Nyquist limit. Useful values are in the range 0.9 - 0.99.
+It can also be calculated automatically by setting `f_cutoff` to `null`. 
 
-TODO explain Free parameters.
+Available interpolation types:
 
-For reference, the asynchronous presets are defined according to this table:
+| Interpolation  | Polynomial degree | Samples fitted |
+|----------------|:-----------------:|:--------------:|
+| Nearest        | 0                 | 1              |
+| Linear         | 1                 | 2              |
+| Quadratic      | 2                 | 3              |
+| Cubic          | 3                 | 4              |
 
-|                   | VeryFast     | Fast             | Balanced               | Accurate               |
-|-------------------|--------------|------------------|------------------------|------------------------|
-|sinc_len           | 64           | 128              | 256                    | 256                    | 
-|oversampling_ratio | 1024         | 1024             | 1024                   | 256                    |
-|interpolation      | Linear       | Linear           | Linear                 | Cubic                  |
-|window             | squared Hann | squared Blackman | squared BlackmanHarris | squared BlackmanHarris |
-|f_cutoff           | 0.915 (*)    | 0.925 (*)        | 0.947 (*)              | 0.947 (*)              |
+See the [Rubato documentation](https://docs.rs/rubato/latest/rubato/index.html)
+for a desciption of the other parameters.
+
+For reference, the profiles are defined according to this table:
+
+|                   | VeryFast     | Fast             | Balanced           | Accurate           |
+|-------------------|:------------:|:----------------:|:------------------:|:------------------:|
+|sinc_len           | 64           | 128              | 192                | 256                | 
+|oversampling_ratio | 1024         | 1024             | 512                | 256                |
+|interpolation      | Linear       | Linear           | Quadratic          | Cubic              |
+|window             | Hann2        | Blackman2        | BlackmanHarris2    | BlackmanHarris2    |
+|f_cutoff           | 0.91 (*)     | 0.92 (*)         | 0.93 (*)           | 0.95 (*)           |
 
 (*) These cutoff values are approximate. The actual values used are calculated automatically
-at runtime for the combination of sinc length and window. TODO update these values!
+at runtime for the combination of sinc length and window. 
 
 ### `AsyncPoly`: Asynchronous resampling without anti-aliasing
-The `AsyncPoly` resampler type performs polynomial interpolation on the _N_ nearest samples.
-The polynomial degree depends on the selected subtype.
 
+Asynchronous resampling without anti-aliasing works by performing polynomial interpolation between the sample points.
+This skips the computationally expensive sinc interpolation filter and is therefore considerably faster.
+This method produces a result that isn't as clean as with anti-aliasing, but the difference is small and often inaudible.
+
+The polynomial interpolation uses the _N_ nearest samples,
+where the number of samples depends on the selected `interpolation`.
+
+Example:
 ```
   resampler:
     type: AsyncPoly
-    parameters:
-      type: Cubic
+    interpolation: Cubic
 ```
 
+Available interpolation types:
 
-| Type         | Polynomial degree | Samples fitted |
-|--------------|-------------------|----------------|
-| Linear       | 1                 | 2              |
-| Cubic        | 3                 | 4              |
-| Quintic      | 5                 | 6              |
-| Septic       | 7                 | 8              |
+| Interpolation  | Polynomial degree | Samples fitted |
+|----------------|:-----------------:|:--------------:|
+| Linear         | 1                 | 2              |
+| Cubic          | 3                 | 4              |
+| Quintic        | 5                 | 6              |
+| Septic         | 7                 | 8              |
 
 Higher polynomial degrees produce higher quality results but use more processing power.
 All are however considerably faster than the `AsyncSinc` type.
@@ -990,12 +1009,17 @@ however in practice the difference is small.
 Use the `AsyncPoly` type to save processing power, with little or no perceived quality loss.
 
 ### `Synchronous`: Synchronous resampling with anti-aliasing
+
 For performing fixed ratio resampling, like resampling 
 from 44.1kHz to 96kHz (which corresponds to a precise ratio of 147/320)
 choose the `Synchronous` type.
+
+This works by transforming the waveform with FFT, modifying the spectrum, and then 
+getting the resampled waveform by inverse FFT.
+
 This is considerably faster than the asynchronous variants, but does not support rate adjust.
-There is only one quality setting, and the profile setting is ignored.
-The quality is similar to the `AsyncSinc` type with the `Accurate` profile.
+
+The resampling quality is similar to the `AsyncSinc` type with the `Accurate` profile.
 
 The `Synchronous` type takes no additional parameters:
 ```
@@ -1011,8 +1035,6 @@ When rate adjust is enabled the resampling ratio is dynamically adjusted in orde
 for drifts and mismatches between the input and output sample clocks.  
 Using the "Synchronous" type with rate adjust enabled will print warnings, 
 and any rate adjust request will be ignored.
-
-See the library documentation for more details. [Rubato on docs.rs](https://docs.rs/rubato/0.1.0/rubato/)
 
 
 ## Mixers

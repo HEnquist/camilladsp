@@ -405,7 +405,9 @@ pub enum AsyncSincProfile {
 #[serde(untagged)]
 #[serde(deny_unknown_fields)]
 pub enum AsyncSincParameters {
-    Profile {profile: AsyncSincProfile},
+    Profile {
+        profile: AsyncSincProfile,
+    },
     Free {
         sinc_len: usize,
         interpolation: AsyncSincInterpolation,
@@ -428,7 +430,9 @@ pub enum AsyncSincWindow {
 
 impl Default for AsyncSincParameters {
     fn default() -> Self {
-        AsyncSincParameters::Profile { profile: AsyncSincProfile::Balanced }
+        AsyncSincParameters::Profile {
+            profile: AsyncSincProfile::Balanced,
+        }
     }
 }
 
@@ -444,7 +448,9 @@ pub enum AsyncPolyInterpolation {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum Resampler {
-    AsyncPoly { interpolation: AsyncPolyInterpolation },
+    AsyncPoly {
+        interpolation: AsyncPolyInterpolation,
+    },
     AsyncSinc(AsyncSincParameters),
     Synchronous,
 }

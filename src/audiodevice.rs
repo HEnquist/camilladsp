@@ -340,7 +340,9 @@ pub fn get_async_sinc_parameters(
     resampler_conf: &config::AsyncSincParameters,
 ) -> SincInterpolationParameters {
     match &resampler_conf {
-        config::AsyncSincParameters::Profile { profile: config::AsyncSincProfile::VeryFast } => {
+        config::AsyncSincParameters::Profile {
+            profile: config::AsyncSincProfile::VeryFast,
+        } => {
             let sinc_len = 64;
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
@@ -354,7 +356,9 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::AsyncSincParameters::Profile { profile: config::AsyncSincProfile::Fast } => {
+        config::AsyncSincParameters::Profile {
+            profile: config::AsyncSincProfile::Fast,
+        } => {
             let sinc_len = 128;
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
@@ -368,7 +372,9 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::AsyncSincParameters::Profile { profile: config::AsyncSincProfile::Balanced } => {
+        config::AsyncSincParameters::Profile {
+            profile: config::AsyncSincProfile::Balanced,
+        } => {
             let sinc_len = 192;
             let oversampling_factor = 512;
             let interpolation = SincInterpolationType::Quadratic;
@@ -382,7 +388,9 @@ pub fn get_async_sinc_parameters(
                 window,
             }
         }
-        config::AsyncSincParameters::Profile { profile: config::AsyncSincProfile::Accurate } => {
+        config::AsyncSincParameters::Profile {
+            profile: config::AsyncSincProfile::Accurate,
+        } => {
             let sinc_len = 256;
             let oversampling_factor = 256;
             let interpolation = SincInterpolationType::Cubic;
