@@ -393,7 +393,7 @@ pub enum AsyncSincInterpolation {
     Cubic,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum AsyncSincProfile {
     VeryFast,
     Fast,
