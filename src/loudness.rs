@@ -49,18 +49,19 @@ impl Loudness {
             let tempgain: PrcFmt = 10.0;
             tempgain.powf(current_volume as PrcFmt / 20.0)
         };
-        let ramptime_in_chunks =
-            (conf.ramp_time / (1000.0 * chunksize as f32 / samplerate as f32)).round() as usize;
+        let ramptime_in_chunks = (conf.get_ramp_time()
+            / (1000.0 * chunksize as f32 / samplerate as f32))
+            .round() as usize;
         let relboost = get_rel_boost(current_volume, conf.reference_level);
         let highshelf_conf = config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
             freq: 3500.0,
             slope: 12.0,
-            gain: (relboost * conf.high_boost) as PrcFmt,
+            gain: (relboost * conf.get_high_boost()) as PrcFmt,
         });
         let lowshelf_conf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Slope {
             freq: 70.0,
             slope: 12.0,
-            gain: (relboost * conf.low_boost) as PrcFmt,
+            gain: (relboost * conf.get_low_boost()) as PrcFmt,
         });
         let high_biquad_coeffs =
             biquad::BiquadCoefficients::from_config(samplerate, highshelf_conf);
@@ -77,8 +78,8 @@ impl Loudness {
             target_linear_gain,
             mute,
             reference_level: conf.reference_level,
-            high_boost: conf.high_boost,
-            low_boost: conf.low_boost,
+            high_boost: conf.get_high_boost(),
+            low_boost: conf.get_low_boost(),
             high_biquad,
             low_biquad,
             ramp_step: 0,
@@ -207,7 +208,7 @@ impl Filter for Loudness {
 
     fn update_parameters(&mut self, conf: config::Filter) {
         if let config::Filter::Loudness { parameters: conf } = conf {
-            self.ramptime_in_chunks = (conf.ramp_time
+            self.ramptime_in_chunks = (conf.get_ramp_time()
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
             let current_volume = self.processing_status.read().unwrap().volume;
@@ -216,12 +217,12 @@ impl Filter for Loudness {
                 config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
                     freq: 3500.0,
                     slope: 12.0,
-                    gain: (relboost * conf.high_boost) as PrcFmt,
+                    gain: (relboost * conf.get_high_boost()) as PrcFmt,
                 });
             let lowshelf_conf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Slope {
                 freq: 70.0,
                 slope: 12.0,
-                gain: (relboost * conf.low_boost) as PrcFmt,
+                gain: (relboost * conf.get_low_boost()) as PrcFmt,
             });
             self.high_biquad.update_parameters(config::Filter::Biquad {
                 parameters: highshelf_conf,
@@ -230,8 +231,8 @@ impl Filter for Loudness {
                 parameters: lowshelf_conf,
             });
             self.reference_level = conf.reference_level;
-            self.high_boost = conf.high_boost;
-            self.low_boost = conf.low_boost;
+            self.high_boost = conf.get_high_boost();
+            self.low_boost = conf.get_low_boost();
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
@@ -245,15 +246,15 @@ pub fn validate_config(conf: &config::LoudnessParameters) -> Res<()> {
         return Err(config::ConfigError::new("Reference level must be less than 0").into());
     } else if conf.reference_level < -100.0 {
         return Err(config::ConfigError::new("Reference level must be higher than -100").into());
-    } else if conf.high_boost < 0.0 {
+    } else if conf.get_high_boost() < 0.0 {
         return Err(config::ConfigError::new("High boost cannot be less than 0").into());
-    } else if conf.low_boost < 0.0 {
+    } else if conf.get_low_boost() < 0.0 {
         return Err(config::ConfigError::new("Low boost cannot be less than 0").into());
-    } else if conf.high_boost > 20.0 {
+    } else if conf.get_high_boost() > 20.0 {
         return Err(config::ConfigError::new("High boost cannot be larger than 20").into());
-    } else if conf.low_boost > 20.0 {
+    } else if conf.get_low_boost() > 20.0 {
         return Err(config::ConfigError::new("Low boost cannot be larger than 20").into());
-    } else if conf.ramp_time < 0.0 {
+    } else if conf.get_ramp_time() < 0.0 {
         return Err(config::ConfigError::new("Ramp time cannot be negative").into());
     }
     Ok(())

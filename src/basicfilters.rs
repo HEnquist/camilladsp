@@ -82,7 +82,7 @@ impl Volume {
         let mute = processing_status.read().unwrap().mute;
         Volume::new(
             name,
-            conf.ramp_time,
+            conf.get_ramp_time(),
             current_volume,
             mute,
             chunksize,
@@ -183,7 +183,7 @@ impl Filter for Volume {
 
     fn update_parameters(&mut self, conf: config::Filter) {
         if let config::Filter::Volume { parameters: conf } = conf {
-            self.ramptime_in_chunks = (conf.ramp_time
+            self.ramptime_in_chunks = (conf.get_ramp_time()
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
         } else {
@@ -354,7 +354,7 @@ pub fn validate_delay_config(conf: &config::DelayParameters) -> Res<()> {
 
 /// Validate a Volume config.
 pub fn validate_volume_config(conf: &config::VolumeParameters) -> Res<()> {
-    if conf.ramp_time < 0.0 {
+    if conf.get_ramp_time() < 0.0 {
         return Err(config::ConfigError::new("Ramp time cannot be negative").into());
     }
     Ok(())

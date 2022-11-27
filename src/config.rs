@@ -514,14 +514,6 @@ pub enum AsyncSincWindow {
     BlackmanHarris2,
 }
 
-impl Default for AsyncSincParameters {
-    fn default() -> Self {
-        AsyncSincParameters::Profile {
-            profile: AsyncSincProfile::Balanced,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum AsyncPolyInterpolation {
     Linear,
@@ -788,27 +780,40 @@ pub enum BiquadComboParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VolumeParameters {
-    #[serde(default = "default_ramp_time")]
-    pub ramp_time: f32,
+    #[serde(default)]
+    pub ramp_time: Option<f32>,
 }
+
+impl VolumeParameters {
+    pub fn get_ramp_time(&self) -> f32 {
+        self.ramp_time.unwrap_or(200.0)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LoudnessParameters {
-    #[serde(default = "default_ramp_time")]
-    pub ramp_time: f32,
+    #[serde(default)]
+    pub ramp_time: Option<f32>,
     pub reference_level: f32,
-    #[serde(default = "default_loudness_boost")]
-    pub high_boost: f32,
-    #[serde(default = "default_loudness_boost")]
-    pub low_boost: f32,
+    #[serde(default)]
+    pub high_boost: Option<f32>,
+    #[serde(default)]
+    pub low_boost: Option<f32>,
 }
 
-fn default_loudness_boost() -> f32 {
-    10.0
-}
+impl LoudnessParameters {
+    pub fn get_ramp_time(&self) -> f32 {
+        self.ramp_time.unwrap_or(200.0)
+    }
 
-fn default_ramp_time() -> f32 {
-    200.0
+    pub fn get_high_boost(&self) -> f32 {
+        self.high_boost.unwrap_or(10.0)
+    }
+
+    pub fn get_low_boost(&self) -> f32 {
+        self.low_boost.unwrap_or(10.0)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
