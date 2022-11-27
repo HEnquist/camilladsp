@@ -58,7 +58,7 @@ impl ConfigError {
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum SampleFormat {
     S16LE,
@@ -241,10 +241,10 @@ impl CaptureDevice {
             CaptureDevice::Bluez { format, .. } => format.clone(),
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { format, .. } => format.clone(),
-            CaptureDevice::File { format, .. } => format.clone(),
-            CaptureDevice::Stdin { format, .. } => format.clone(),
+            CaptureDevice::File { format, .. } => *format,
+            CaptureDevice::Stdin { format, .. } => *format,
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio { format, .. } => format.clone(),
+            CaptureDevice::CoreAudio { format, .. } => *format,
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { format, .. } => format.clone(),
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
@@ -344,40 +344,68 @@ pub struct Devices {
     // alias to allow old name buffersize
     #[serde(alias = "buffersize")]
     pub chunksize: usize,
-    #[serde(default = "default_queuelimit")]
-    pub queuelimit: usize,
     #[serde(default)]
-    pub silence_threshold: PrcFmt,
+    pub queuelimit: Option<usize>,
     #[serde(default)]
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: Option<PrcFmt>,
+    #[serde(default)]
+    pub silence_timeout: Option<PrcFmt>,
     pub capture: CaptureDevice,
     pub playback: PlaybackDevice,
     #[serde(default)]
-    pub enable_rate_adjust: bool,
+    pub enable_rate_adjust: Option<bool>,
     #[serde(default)]
-    pub target_level: usize,
-    #[serde(default = "default_period")]
-    pub adjust_period: f32,
+    pub target_level: Option<usize>,
+    #[serde(default)]
+    pub adjust_period: Option<f32>,
     #[serde(default)]
     pub resampler: Option<Resampler>,
     #[serde(default)]
     pub capture_samplerate: Option<usize>,
     #[serde(default)]
-    pub stop_on_rate_change: bool,
-    #[serde(default = "default_measure_interval")]
-    pub rate_measure_interval: f32,
+    pub stop_on_rate_change: Option<bool>,
+    #[serde(default)]
+    pub rate_measure_interval: Option<f32>,
 }
 
-fn default_period() -> f32 {
-    10.0
-}
+// Getters for all the defaults
+impl Devices {
+    pub fn get_queuelimit(&self) -> usize {
+        self.queuelimit.unwrap_or(4)
+    }
 
-fn default_queuelimit() -> usize {
-    4
-}
+    pub fn get_adjust_period(&self) -> f32 {
+        self.adjust_period.unwrap_or(10.0)
+    }
 
-fn default_measure_interval() -> f32 {
-    1.0
+    pub fn get_rate_measure_interval(&self) -> f32 {
+        self.rate_measure_interval.unwrap_or(1.0)
+    }
+
+    pub fn get_silence_threshold(&self) -> PrcFmt {
+        self.silence_threshold.unwrap_or(0.0)
+    }
+
+    pub fn get_silence_timeout(&self) -> PrcFmt {
+        self.silence_timeout.unwrap_or(0.0)
+    }
+
+    pub fn get_capture_samplerate(&self) -> usize {
+        self.capture_samplerate.unwrap_or(self.samplerate)
+    }
+
+    pub fn get_target_level(&self) -> usize {
+        self.target_level.unwrap_or(self.chunksize)
+    }
+
+    pub fn get_stop_on_rate_change(&self) -> bool {
+        self.stop_on_rate_change.unwrap_or(false)
+    }
+
+    pub fn get_enable_rate_adjust(&self) -> bool {
+        self.enable_rate_adjust.unwrap_or(false)
+    }
+
 }
 
 #[cfg(target_os = "macos")]
@@ -385,7 +413,7 @@ fn default_ca_format() -> SampleFormat {
     SampleFormat::S32LE
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum AsyncSincInterpolation {
     Nearest,
     Linear,
@@ -393,7 +421,7 @@ pub enum AsyncSincInterpolation {
     Cubic,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum AsyncSincProfile {
     VeryFast,
     Fast,
@@ -401,7 +429,7 @@ pub enum AsyncSincProfile {
     Accurate,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 #[serde(deny_unknown_fields)]
 pub enum AsyncSincParameters {
@@ -417,7 +445,7 @@ pub enum AsyncSincParameters {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub enum AsyncSincWindow {
     Hann,
@@ -436,7 +464,7 @@ impl Default for AsyncSincParameters {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum AsyncPolyInterpolation {
     Linear,
     Cubic,
@@ -444,7 +472,7 @@ pub enum AsyncPolyInterpolation {
     Septic,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum Resampler {
@@ -977,7 +1005,7 @@ fn apply_overrides(configuration: &mut Configuration) {
         } else {
             debug!("Apply override for capture_samplerate: {}", rate);
             configuration.devices.capture_samplerate = Some(rate);
-            if rate == cfg_rate && !configuration.devices.enable_rate_adjust {
+            if rate == cfg_rate && !configuration.devices.get_enable_rate_adjust() {
                 debug!("Disabling unneccesary 1:1 resampling");
                 configuration.devices.resampler = None;
             }
@@ -1031,7 +1059,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             }
         }
     }
-    if let Some(fmt) = OVERRIDES.read().unwrap().sample_format.clone() {
+    if let Some(fmt) = OVERRIDES.read().unwrap().sample_format {
         debug!("Apply override for capture sample format: {}", fmt);
         match &mut configuration.devices.capture {
             CaptureDevice::File { format, .. } => {
@@ -1246,21 +1274,29 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         replace_relative_paths_in_config(conf, fname);
     }
 
-    if conf.devices.target_level >= 2 * conf.devices.chunksize {
+    if conf.devices.get_target_level() >= 2 * conf.devices.chunksize {
         let msg = format!(
             "target_level can't be larger than {}",
             2 * conf.devices.chunksize
         );
         return Err(ConfigError::new(&msg).into());
     }
-    if conf.devices.adjust_period <= 0.0 {
-        return Err(ConfigError::new("adjust_period must be positive and > 0").into());
+    if let Some(period) = conf.devices.adjust_period {
+        if period <= 0.0 {
+            return Err(ConfigError::new("adjust_period must be positive and > 0").into());
+        }
     }
-    if conf.devices.silence_threshold > 0.0 {
-        return Err(ConfigError::new("silence_threshold must be less than or equal to 0").into());
+    if let Some(threshold) = conf.devices.silence_threshold {
+        if threshold > 0.0 {
+            return Err(
+                ConfigError::new("silence_threshold must be less than or equal to 0").into(),
+            );
+        }
     }
-    if conf.devices.silence_timeout < 0.0 {
-        return Err(ConfigError::new("silence_timeout cannot be negative").into());
+    if let Some(timeout) = conf.devices.silence_timeout {
+        if timeout < 0.0 {
+            return Err(ConfigError::new("silence_timeout cannot be negative").into());
+        }
     }
     if let Some(rate) = conf.devices.capture_samplerate {
         if rate != conf.devices.samplerate && conf.devices.resampler.is_none() {

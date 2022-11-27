@@ -279,19 +279,19 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
         #[cfg(target_os = "macos")]
         config::PlaybackDevice::CoreAudio {
             channels,
-            device,
+            ref device,
             format,
             change_format,
             exclusive,
         } => Box::new(coreaudiodevice::CoreaudioPlaybackDevice {
-            devname: device,
+            devname: device.clone(),
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
             sample_format: format,
-            target_level: conf.target_level,
-            adjust_period: conf.adjust_period,
-            enable_rate_adjust: conf.enable_rate_adjust,
+            target_level: conf.get_target_level(),
+            adjust_period: conf.get_adjust_period(),
+            enable_rate_adjust: conf.get_enable_rate_adjust(),
             change_format,
             exclusive,
         }),
@@ -503,19 +503,19 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     };
     let diff_rates = capture_samplerate != conf.samplerate;
     // Check for non-optimal resampling settings
-    if !diff_rates && conf.resampler.is_some() && !conf.enable_rate_adjust {
+    if !diff_rates && conf.resampler.is_some() && !conf.get_enable_rate_adjust() {
         warn!(
             "Needless 1:1 sample rate conversion active. Not needed since enable_rate_adjust=False"
         );
     } else if diff_rates
         && conf.resampler.is_some()
-        && !conf.enable_rate_adjust
+        && !conf.get_enable_rate_adjust()
         && matches!(&conf.resampler, Some(config::Resampler::AsyncSinc { .. }))
     {
         info!("Using AsyncSinc resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time.");
     } else if diff_rates
         && conf.resampler.is_some()
-        && !conf.enable_rate_adjust
+        && !conf.get_enable_rate_adjust()
         && matches!(&conf.resampler, Some(config::Resampler::AsyncPoly { .. }))
     {
         info!("Using AsyncPoly resampler for synchronous resampling. Consider switching to \"Synchronous\" to increase resampling quality.");
@@ -561,13 +561,13 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         }),
         config::CaptureDevice::File {
             channels,
-            filename,
+            ref filename,
             format,
             extra_samples,
             skip_bytes,
             read_bytes,
         } => Box::new(filedevice::FileCaptureDevice {
-            source: filedevice::CaptureSource::Filename(filename),
+            source: filedevice::CaptureSource::Filename(filename.clone()),
             samplerate: conf.samplerate,
             capture_samplerate,
             resampler_config: conf.resampler,
@@ -575,12 +575,12 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels,
             sample_format: format,
             extra_samples,
-            silence_threshold: conf.silence_threshold,
-            silence_timeout: conf.silence_timeout,
+            silence_threshold: conf.get_silence_threshold(),
+            silence_timeout: conf.get_silence_timeout(),
             skip_bytes,
             read_bytes,
-            stop_on_rate_change: conf.stop_on_rate_change,
-            rate_measure_interval: conf.rate_measure_interval,
+            stop_on_rate_change: conf.get_stop_on_rate_change(),
+            rate_measure_interval: conf.get_rate_measure_interval(),
         }),
         config::CaptureDevice::Stdin {
             channels,
@@ -597,12 +597,12 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels,
             sample_format: format,
             extra_samples,
-            silence_threshold: conf.silence_threshold,
-            silence_timeout: conf.silence_timeout,
+            silence_threshold: conf.get_silence_threshold(),
+            silence_timeout: conf.get_silence_timeout(),
             skip_bytes,
             read_bytes,
-            stop_on_rate_change: conf.stop_on_rate_change,
-            rate_measure_interval: conf.rate_measure_interval,
+            stop_on_rate_change: conf.get_stop_on_rate_change(),
+            rate_measure_interval: conf.get_rate_measure_interval(),
         }),
         #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
         config::CaptureDevice::Bluez {
@@ -631,11 +631,11 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         #[cfg(target_os = "macos")]
         config::CaptureDevice::CoreAudio {
             channels,
-            device,
+            ref device,
             format,
             change_format,
         } => Box::new(coreaudiodevice::CoreaudioCaptureDevice {
-            devname: device,
+            devname: device.clone(),
             samplerate: conf.samplerate,
             resampler_config: conf.resampler,
             capture_samplerate,
@@ -643,10 +643,10 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels,
             sample_format: format,
             change_format,
-            silence_threshold: conf.silence_threshold,
-            silence_timeout: conf.silence_timeout,
-            stop_on_rate_change: conf.stop_on_rate_change,
-            rate_measure_interval: conf.rate_measure_interval,
+            silence_threshold: conf.get_silence_threshold(),
+            silence_timeout: conf.get_silence_timeout(),
+            stop_on_rate_change: conf.get_stop_on_rate_change(),
+            rate_measure_interval: conf.get_rate_measure_interval(),
         }),
         #[cfg(target_os = "windows")]
         config::CaptureDevice::Wasapi {

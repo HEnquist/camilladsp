@@ -286,7 +286,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let sample_format = self.sample_format.clone();
+        let sample_format = self.sample_format;
         let change_format = self.change_format;
         let exclusive = self.exclusive;
         let target_level = if self.target_level > 0 {
@@ -555,9 +555,9 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let sample_format = self.sample_format.clone();
+        let sample_format = self.sample_format;
         let change_format = self.change_format;
-        let resampler_config = self.resampler_config.clone();
+        let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;

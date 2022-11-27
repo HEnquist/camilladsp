@@ -117,7 +117,7 @@ impl PlaybackDevice for FilePlaybackDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
-        let sample_format = self.sample_format.clone();
+        let sample_format = self.sample_format;
         let handle = thread::Builder::new()
             .name("FilePlayback".to_string())
             .spawn(move || {
@@ -559,8 +559,8 @@ impl CaptureDevice for FileCaptureDevice {
             * 2
             * channels
             * store_bytes_per_sample;
-        let sample_format = self.sample_format.clone();
-        let resampler_config = self.resampler_config.clone();
+        let sample_format = self.sample_format;
+        let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
         let extra_bytes = self.extra_samples * store_bytes_per_sample * channels;
         let skip_bytes = self.skip_bytes;

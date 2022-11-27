@@ -169,8 +169,8 @@ fn run(
             return Ok(ExitState::Exit);
         }
     };
-    let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.queuelimit);
-    let (tx_cap, rx_cap) = mpsc::sync_channel(conf.devices.queuelimit);
+    let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.get_queuelimit());
+    let (tx_cap, rx_cap) = mpsc::sync_channel(conf.devices.get_queuelimit());
 
     let (tx_status, rx_status) = mpsc::channel();
     let tx_status_pb = tx_status.clone();
