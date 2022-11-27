@@ -389,7 +389,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                         averager.restart();
                                         let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
                                         trace!(
-                                            "Measured sample rate is {} Hz, signal RMS is {:?}",
+                                            "Measured sample rate is {:.1} Hz, signal RMS is {:?}",
                                             measured_rate_f,
                                             capture_status.read().unwrap().signal_rms.get_last(),
                                         );

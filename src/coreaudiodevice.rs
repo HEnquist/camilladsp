@@ -78,7 +78,7 @@ fn release_ownership(device_id: AudioDeviceID) -> Res<()> {
 
 #[derive(Clone, Debug)]
 pub struct CoreaudioPlaybackDevice {
-    pub devname: String,
+    pub devname: Option<String>,
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
@@ -92,7 +92,7 @@ pub struct CoreaudioPlaybackDevice {
 
 #[derive(Clone, Debug)]
 pub struct CoreaudioCaptureDevice {
-    pub devname: String,
+    pub devname: Option<String>,
     pub samplerate: usize,
     pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
@@ -107,26 +107,26 @@ pub struct CoreaudioCaptureDevice {
 }
 
 fn open_coreaudio_playback(
-    devname: &str,
+    devname: &Option<String>,
     samplerate: usize,
     channels: usize,
     sample_format: &SampleFormat,
     change_format: bool,
     exclusive: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
-    let device_id = if devname == "default" {
-        match get_default_device_id(false) {
+    let device_id = if let Some(name) = devname {
+        match get_device_id_from_name(name) {
             Some(dev) => dev,
             None => {
-                let msg = "Could not get default playback device".to_string();
+                let msg = format!("Could not find playback device '{}'", name);
                 return Err(ConfigError::new(&msg).into());
             }
         }
     } else {
-        match get_device_id_from_name(devname) {
+        match get_default_device_id(false) {
             Some(dev) => dev,
             None => {
-                let msg = format!("Could not find playback device '{}'", devname);
+                let msg = "Could not get default playback device".to_string();
                 return Err(ConfigError::new(&msg).into());
             }
         }
@@ -187,30 +187,30 @@ fn open_coreaudio_playback(
         .set_property(id, Scope::Input, Element::Output, Some(&asbd))
         .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
-    debug!("Opened CoreAudio playback device {}", devname);
+    debug!("Opened CoreAudio playback device {:?}", devname);
     Ok((audio_unit, device_id))
 }
 
 fn open_coreaudio_capture(
-    devname: &str,
+    devname: &Option<String>,
     samplerate: usize,
     channels: usize,
     sample_format: &SampleFormat,
     change_format: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
-    let device_id = if devname == "default" {
-        match get_default_device_id(true) {
+    let device_id = if let Some(name) = devname {
+        match get_device_id_from_name(name) {
             Some(dev) => dev,
             None => {
-                let msg = "Could not get default capture device".to_string();
+                let msg = format!("Could not find capture device '{}'", name);
                 return Err(ConfigError::new(&msg).into());
             }
         }
     } else {
-        match get_device_id_from_name(devname) {
+        match get_default_device_id(true) {
             Some(dev) => dev,
             None => {
-                let msg = format!("Could not find capture device '{}'", devname);
+                let msg = "Could not get default capture device".to_string();
                 return Err(ConfigError::new(&msg).into());
             }
         }
@@ -265,7 +265,7 @@ fn open_coreaudio_capture(
         .set_property(id, Scope::Output, Element::Input, Some(&asbd))
         .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
-    debug!("Opened CoreAudio capture device {}", devname);
+    debug!("Opened CoreAudio capture device {:?}", devname);
     Ok((audio_unit, device_id))
 }
 

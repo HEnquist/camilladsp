@@ -157,41 +157,12 @@ pub enum CaptureDevice {
         format: SampleFormat,
     },
     #[serde(alias = "FILE", alias = "file")]
-    File {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        filename: String,
-        format: SampleFormat,
-        #[serde(default)]
-        extra_samples: usize,
-        #[serde(default)]
-        skip_bytes: usize,
-        #[serde(default)]
-        read_bytes: usize,
-    },
+    File(CaptureDeviceFile),
     #[serde(alias = "STDIN", alias = "stdin")]
-    Stdin {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        format: SampleFormat,
-        #[serde(default)]
-        extra_samples: usize,
-        #[serde(default)]
-        skip_bytes: usize,
-        #[serde(default)]
-        read_bytes: usize,
-    },
+    Stdin(CaptureDeviceStdin),
     #[cfg(target_os = "macos")]
     #[serde(alias = "COREAUDIO", alias = "coreaudio")]
-    CoreAudio {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-        #[serde(default = "default_ca_format")]
-        format: SampleFormat,
-        #[serde(default)]
-        change_format: bool,
-    },
+    CoreAudio(CaptureDeviceCA),
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi {
@@ -222,10 +193,10 @@ impl CaptureDevice {
             CaptureDevice::Bluez { channels, .. } => *channels,
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { channels, .. } => *channels,
-            CaptureDevice::File { channels, .. } => *channels,
-            CaptureDevice::Stdin { channels, .. } => *channels,
+            CaptureDevice::File(dev) => dev.channels,
+            CaptureDevice::Stdin(dev) => dev.channels,
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio { channels, .. } => *channels,
+            CaptureDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { channels, .. } => *channels,
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
@@ -241,15 +212,90 @@ impl CaptureDevice {
             CaptureDevice::Bluez { format, .. } => format.clone(),
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { format, .. } => format.clone(),
-            CaptureDevice::File { format, .. } => *format,
-            CaptureDevice::Stdin { format, .. } => *format,
+            CaptureDevice::File(dev) => dev.format,
+            CaptureDevice::Stdin(dev) => dev.format,
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio { format, .. } => *format,
+            CaptureDevice::CoreAudio(dev) => dev.get_format(),
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { format, .. } => format.clone(),
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
             CaptureDevice::Jack { .. } => SampleFormat::FLOAT32LE,
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceFile {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub filename: String,
+    pub format: SampleFormat,
+    #[serde(default)]
+    pub extra_samples: Option<usize>,
+    #[serde(default)]
+    pub skip_bytes: Option<usize>,
+    #[serde(default)]
+    pub read_bytes: Option<usize>,
+}
+
+impl CaptureDeviceFile {
+    pub fn get_extra_samples(&self) -> usize {
+        self.extra_samples.unwrap_or_default()
+    }
+    pub fn get_skip_bytes(&self) -> usize {
+        self.skip_bytes.unwrap_or_default()
+    }
+    pub fn get_read_bytes(&self) -> usize {
+        self.read_bytes.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceStdin {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub format: SampleFormat,
+    #[serde(default)]
+    pub extra_samples: Option<usize>,
+    #[serde(default)]
+    pub skip_bytes: Option<usize>,
+    #[serde(default)]
+    pub read_bytes: Option<usize>,
+}
+
+impl CaptureDeviceStdin {
+    pub fn get_extra_samples(&self) -> usize {
+        self.extra_samples.unwrap_or_default()
+    }
+    pub fn get_skip_bytes(&self) -> usize {
+        self.skip_bytes.unwrap_or_default()
+    }
+    pub fn get_read_bytes(&self) -> usize {
+        self.read_bytes.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceCA {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub device: Option<String>,
+    #[serde(default)]
+    format: Option<SampleFormat>,
+    #[serde(default)]
+    change_format: Option<bool>,
+}
+
+impl CaptureDeviceCA {
+    pub fn get_format(&self) -> SampleFormat {
+        self.format.unwrap_or(SampleFormat::S32LE)
+    }
+
+    pub fn get_change_format(&self) -> bool {
+        self.change_format.unwrap_or_default()
     }
 }
 
@@ -288,17 +334,7 @@ pub enum PlaybackDevice {
     },
     #[cfg(target_os = "macos")]
     #[serde(alias = "COREAUDIO", alias = "coreaudio")]
-    CoreAudio {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-        #[serde(default = "default_ca_format")]
-        format: SampleFormat,
-        #[serde(default)]
-        change_format: bool,
-        #[serde(default)]
-        exclusive: bool,
-    },
+    CoreAudio(PlaybackDeviceCA),
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi {
@@ -328,12 +364,40 @@ impl PlaybackDevice {
             PlaybackDevice::File { channels, .. } => *channels,
             PlaybackDevice::Stdout { channels, .. } => *channels,
             #[cfg(target_os = "macos")]
-            PlaybackDevice::CoreAudio { channels, .. } => *channels,
+            PlaybackDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
             PlaybackDevice::Wasapi { channels, .. } => *channels,
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
             PlaybackDevice::Jack { channels, .. } => *channels,
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PlaybackDeviceCA {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub device: Option<String>,
+    #[serde(default)]
+    format: Option<SampleFormat>,
+    #[serde(default)]
+    change_format: Option<bool>,
+    #[serde(default)]
+    exclusive: Option<bool>,
+}
+
+impl PlaybackDeviceCA {
+    pub fn get_format(&self) -> SampleFormat {
+        self.format.unwrap_or(SampleFormat::S32LE)
+    }
+
+    pub fn get_change_format(&self) -> bool {
+        self.change_format.unwrap_or_default()
+    }
+
+    pub fn get_exclusive(&self) -> bool {
+        self.exclusive.unwrap_or_default()
     }
 }
 
@@ -405,12 +469,6 @@ impl Devices {
     pub fn get_enable_rate_adjust(&self) -> bool {
         self.enable_rate_adjust.unwrap_or(false)
     }
-
-}
-
-#[cfg(target_os = "macos")]
-fn default_ca_format() -> SampleFormat {
-    SampleFormat::S32LE
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -990,15 +1048,23 @@ fn apply_overrides(configuration: &mut Configuration) {
             configuration.devices.chunksize = scaled_chunksize;
             #[allow(unreachable_patterns)]
             match &mut configuration.devices.capture {
-                CaptureDevice::File { extra_samples, .. } => {
-                    let new_extra = *extra_samples * rate / cfg_rate;
-                    debug!("Scale extra samples: {} -> {}", *extra_samples, new_extra);
-                    *extra_samples = new_extra;
+                CaptureDevice::File(dev) => {
+                    let new_extra = dev.get_extra_samples() * rate / cfg_rate;
+                    debug!(
+                        "Scale extra samples: {} -> {}",
+                        dev.get_extra_samples(),
+                        new_extra
+                    );
+                    dev.extra_samples = Some(new_extra);
                 }
-                CaptureDevice::Stdin { extra_samples, .. } => {
-                    let new_extra = *extra_samples * rate / cfg_rate;
-                    debug!("Scale extra samples: {} -> {}", *extra_samples, new_extra);
-                    *extra_samples = new_extra;
+                CaptureDevice::Stdin(dev) => {
+                    let new_extra = dev.get_extra_samples() * rate / cfg_rate;
+                    debug!(
+                        "Scale extra samples: {} -> {}",
+                        dev.get_extra_samples(),
+                        new_extra
+                    );
+                    dev.extra_samples = Some(new_extra);
                 }
                 _ => {}
             }
@@ -1015,11 +1081,11 @@ fn apply_overrides(configuration: &mut Configuration) {
         debug!("Apply override for extra_samples: {}", extra);
         #[allow(unreachable_patterns)]
         match &mut configuration.devices.capture {
-            CaptureDevice::File { extra_samples, .. } => {
-                *extra_samples = extra;
+            CaptureDevice::File(dev) => {
+                dev.extra_samples = Some(extra);
             }
-            CaptureDevice::Stdin { extra_samples, .. } => {
-                *extra_samples = extra;
+            CaptureDevice::Stdin(dev) => {
+                dev.extra_samples = Some(extra);
             }
             _ => {}
         }
@@ -1027,11 +1093,11 @@ fn apply_overrides(configuration: &mut Configuration) {
     if let Some(chans) = OVERRIDES.read().unwrap().channels {
         debug!("Apply override for capture channels: {}", chans);
         match &mut configuration.devices.capture {
-            CaptureDevice::File { channels, .. } => {
-                *channels = chans;
+            CaptureDevice::File(dev) => {
+                dev.channels = chans;
             }
-            CaptureDevice::Stdin { channels, .. } => {
-                *channels = chans;
+            CaptureDevice::Stdin(dev) => {
+                dev.channels = chans;
             }
             #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { channels, .. } => {
@@ -1046,8 +1112,8 @@ fn apply_overrides(configuration: &mut Configuration) {
                 *channels = chans;
             }
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio { channels, .. } => {
-                *channels = chans;
+            CaptureDevice::CoreAudio(dev) => {
+                dev.channels = chans;
             }
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { channels, .. } => {
@@ -1062,11 +1128,11 @@ fn apply_overrides(configuration: &mut Configuration) {
     if let Some(fmt) = OVERRIDES.read().unwrap().sample_format {
         debug!("Apply override for capture sample format: {}", fmt);
         match &mut configuration.devices.capture {
-            CaptureDevice::File { format, .. } => {
-                *format = fmt;
+            CaptureDevice::File(dev) => {
+                dev.format = fmt;
             }
-            CaptureDevice::Stdin { format, .. } => {
-                *format = fmt;
+            CaptureDevice::Stdin(dev) => {
+                dev.format = fmt;
             }
             #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { format, .. } => {
@@ -1081,8 +1147,8 @@ fn apply_overrides(configuration: &mut Configuration) {
                 *format = fmt;
             }
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio { format, .. } => {
-                *format = fmt;
+            CaptureDevice::CoreAudio(dev) => {
+                dev.format = Some(fmt);
             }
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi { format, .. } => {
@@ -1381,8 +1447,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "macos")]
-    if let CaptureDevice::CoreAudio { format, .. } = &conf.devices.capture {
-        if *format == SampleFormat::FLOAT64LE {
+    if let CaptureDevice::CoreAudio(dev) = &conf.devices.capture {
+        if dev.get_format() == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The CoreAudio capture backend does not support FLOAT64LE sample format",
             )
@@ -1390,8 +1456,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "macos")]
-    if let PlaybackDevice::CoreAudio { format, .. } = &conf.devices.playback {
-        if *format == SampleFormat::FLOAT64LE {
+    if let PlaybackDevice::CoreAudio(dev) = &conf.devices.playback {
+        if dev.get_format() == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The CoreAudio playback backend does not support FLOAT64LE sample format",
             )
