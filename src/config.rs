@@ -277,6 +277,7 @@ impl CaptureDeviceStdin {
     }
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CaptureDeviceCA {
@@ -289,6 +290,7 @@ pub struct CaptureDeviceCA {
     change_format: Option<bool>,
 }
 
+#[cfg(target_os = "macos")]
 impl CaptureDeviceCA {
     pub fn get_format(&self) -> SampleFormat {
         self.format.unwrap_or(SampleFormat::S32LE)
@@ -373,6 +375,7 @@ impl PlaybackDevice {
     }
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PlaybackDeviceCA {
@@ -387,6 +390,7 @@ pub struct PlaybackDeviceCA {
     exclusive: Option<bool>,
 }
 
+#[cfg(target_os = "macos")]
 impl PlaybackDeviceCA {
     pub fn get_format(&self) -> SampleFormat {
         self.format.unwrap_or(SampleFormat::S32LE)
