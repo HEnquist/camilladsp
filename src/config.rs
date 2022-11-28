@@ -890,9 +890,19 @@ pub enum DitherParameters {
 #[serde(deny_unknown_fields)]
 pub struct DiffEqParameters {
     #[serde(default)]
-    pub a: Vec<PrcFmt>,
+    pub a: Option<Vec<PrcFmt>>,
     #[serde(default)]
-    pub b: Vec<PrcFmt>,
+    pub b: Option<Vec<PrcFmt>>,
+}
+
+impl DiffEqParameters {
+    pub fn get_a(&self) -> Vec<PrcFmt> {
+        self.a.clone().unwrap_or_default()
+    }
+
+    pub fn get_b(&self) -> Vec<PrcFmt> {
+        self.b.clone().unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -909,11 +919,25 @@ pub struct MixerChannels {
 pub struct MixerSource {
     pub channel: usize,
     #[serde(default)]
-    pub gain: PrcFmt,
+    pub gain: Option<PrcFmt>,
     #[serde(default)]
-    pub inverted: bool,
+    pub inverted: Option<bool>,
     #[serde(default)]
-    pub mute: bool,
+    pub mute: Option<bool>,
+}
+
+impl MixerSource {
+    pub fn get_gain(&self) -> PrcFmt {
+        self.gain.unwrap_or_default()
+    }
+
+    pub fn get_inverted(&self) -> bool {
+        self.inverted.unwrap_or_default()
+    }
+
+    pub fn get_mute(&self) -> bool {
+        self.mute.unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -922,7 +946,13 @@ pub struct MixerMapping {
     pub dest: usize,
     pub sources: Vec<MixerSource>,
     #[serde(default)]
-    pub mute: bool,
+    pub mute: Option<bool>,
+}
+
+impl MixerMapping {
+    pub fn get_mute(&self) -> bool {
+        self.mute.unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
