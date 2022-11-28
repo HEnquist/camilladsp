@@ -209,8 +209,8 @@ impl Gain {
 
     pub fn from_config(name: String, conf: config::GainParameters) -> Self {
         let gain = conf.gain;
-        let inverted = conf.inverted;
-        let mute = conf.mute;
+        let inverted = conf.get_inverted();
+        let mute = conf.get_mute();
         Gain::new(name, gain, inverted, mute)
     }
 }
@@ -230,13 +230,13 @@ impl Filter for Gain {
     fn update_parameters(&mut self, conf: config::Filter) {
         if let config::Filter::Gain { parameters: conf } = conf {
             let gain_db = conf.gain;
-            let inverted = conf.inverted;
+            let inverted = conf.get_inverted();
             let mut gain: PrcFmt = 10.0;
             gain = gain.powf(gain_db / 20.0);
             if inverted {
                 gain = -gain;
             }
-            if conf.mute {
+            if conf.get_mute() {
                 gain = 0.0;
             }
             self.gain = gain;
@@ -280,12 +280,12 @@ impl Delay {
     }
 
     pub fn from_config(name: String, samplerate: usize, conf: config::DelayParameters) -> Self {
-        let delay_samples = match conf.unit {
+        let delay_samples = match conf.get_unit() {
             config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (samplerate as PrcFmt),
             config::TimeUnit::Millimetres => conf.delay / 1000.0 * (samplerate as PrcFmt) / 343.0,
             config::TimeUnit::Samples => conf.delay,
         };
-        Delay::new(name, samplerate, delay_samples, conf.subsample)
+        Delay::new(name, samplerate, delay_samples, conf.get_subsample())
     }
 }
 
@@ -307,14 +307,14 @@ impl Filter for Delay {
 
     fn update_parameters(&mut self, conf: config::Filter) {
         if let config::Filter::Delay { parameters: conf } = conf {
-            let delay_samples = match conf.unit {
+            let delay_samples = match conf.get_unit() {
                 config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (self.samplerate as PrcFmt),
                 config::TimeUnit::Millimetres => {
                     conf.delay / 1000.0 * (self.samplerate as PrcFmt) / 343.0
                 }
                 config::TimeUnit::Samples => conf.delay,
             };
-            let (integerdelay, biquad) = if conf.subsample {
+            let (integerdelay, biquad) = if conf.get_subsample() {
                 let full_samples = delay_samples.floor();
                 let fraction = delay_samples - full_samples;
                 let bqcoeffs =

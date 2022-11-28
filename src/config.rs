@@ -825,9 +825,19 @@ impl LoudnessParameters {
 pub struct GainParameters {
     pub gain: PrcFmt,
     #[serde(default)]
-    pub inverted: bool,
+    pub inverted: Option<bool>,
     #[serde(default)]
-    pub mute: bool,
+    pub mute: Option<bool>,
+}
+
+impl GainParameters {
+    pub fn get_inverted(&self) -> bool {
+        self.inverted.unwrap_or_default()
+    }
+
+    pub fn get_mute(&self) -> bool {
+        self.mute.unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -835,12 +845,22 @@ pub struct GainParameters {
 pub struct DelayParameters {
     pub delay: PrcFmt,
     #[serde(default)]
-    pub unit: TimeUnit,
+    pub unit: Option<TimeUnit>,
     #[serde(default)]
-    pub subsample: bool,
+    pub subsample: Option<bool>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+impl DelayParameters {
+    pub fn get_unit(&self) -> TimeUnit {
+        self.unit.unwrap_or(TimeUnit::Milliseconds)
+    }
+
+    pub fn get_subsample(&self) -> bool {
+        self.subsample.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum TimeUnit {
     #[serde(rename = "ms")]
@@ -849,11 +869,6 @@ pub enum TimeUnit {
     Millimetres,
     #[serde(rename = "samples")]
     Samples,
-}
-impl Default for TimeUnit {
-    fn default() -> Self {
-        TimeUnit::Milliseconds
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
