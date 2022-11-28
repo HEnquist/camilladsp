@@ -32,13 +32,13 @@ impl Compressor {
     ) -> Self {
         let channels = config.channels;
         let srate = samplerate as PrcFmt;
-        let mut monitor_channels = config.monitor_channels.clone();
+        let mut monitor_channels = config.get_monitor_channels();
         if monitor_channels.is_empty() {
             for n in 0..channels {
                 monitor_channels.push(n);
             }
         }
-        let mut process_channels = config.process_channels.clone();
+        let mut process_channels = config.get_process_channels();
         if process_channels.is_empty() {
             for n in 0..channels {
                 process_channels.push(n);
@@ -46,13 +46,13 @@ impl Compressor {
         }
         let attack = (-1.0 / srate / config.attack).exp();
         let release = (-1.0 / srate / config.release).exp();
-        let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit / 20.0);
+        let clip_limit = (10.0 as PrcFmt).powf(config.get_clip_limit() / 20.0);
 
         let scratch = vec![0.0; chunksize];
 
         debug!("Creating compressor '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {}", 
-                name, channels, process_channels, monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain, config.soft_clip, clip_limit);
-        let limiter = if config.enable_clip {
+                name, channels, process_channels, monitor_channels, attack, release, config.threshold, config.factor, config.get_makeup_gain(), config.get_soft_clip(), clip_limit);
+        let limiter = if config.get_enable_clip() {
             let limitconf = config::LimiterParameters {
                 clip_limit: config.clip_limit,
                 soft_clip: config.soft_clip,
@@ -71,7 +71,7 @@ impl Compressor {
             release,
             threshold: config.threshold,
             factor: config.factor,
-            makeup_gain: config.makeup_gain,
+            makeup_gain: config.get_makeup_gain(),
             limiter,
             samplerate,
             scratch,
@@ -153,13 +153,13 @@ impl Processor for Compressor {
         if let config::Processor::Compressor { parameters: config } = config {
             let channels = config.channels;
             let srate = self.samplerate as PrcFmt;
-            let mut monitor_channels = config.monitor_channels.clone();
+            let mut monitor_channels = config.get_monitor_channels();
             if monitor_channels.is_empty() {
                 for n in 0..channels {
                     monitor_channels.push(n);
                 }
             }
-            let mut process_channels = config.process_channels.clone();
+            let mut process_channels = config.get_process_channels();
             if process_channels.is_empty() {
                 for n in 0..channels {
                     process_channels.push(n);
@@ -167,9 +167,9 @@ impl Processor for Compressor {
             }
             let attack = (-1.0 / srate / config.attack).exp();
             let release = (-1.0 / srate / config.release).exp();
-            let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit / 20.0);
+            let clip_limit = (10.0 as PrcFmt).powf(config.get_clip_limit() / 20.0);
 
-            let limiter = if config.enable_clip {
+            let limiter = if config.get_enable_clip() {
                 let limitconf = config::LimiterParameters {
                     clip_limit: config.clip_limit,
                     soft_clip: config.soft_clip,
@@ -185,11 +185,11 @@ impl Processor for Compressor {
             self.release = release;
             self.threshold = config.threshold;
             self.factor = config.factor;
-            self.makeup_gain = config.makeup_gain;
+            self.makeup_gain = config.get_makeup_gain();
             self.limiter = limiter;
 
             debug!("Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {}", 
-                self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain, config.soft_clip, clip_limit);
+                self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.factor, config.get_makeup_gain(), config.get_soft_clip(), clip_limit);
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
@@ -208,7 +208,7 @@ pub fn validate_compressor(config: &config::CompressorParameters) -> Res<()> {
         let msg = "Release value must be larger than zero.";
         return Err(config::ConfigError::new(msg).into());
     }
-    for ch in config.monitor_channels.iter() {
+    for ch in config.get_monitor_channels().iter() {
         if *ch >= channels {
             let msg = format!(
                 "Invalid monitor channel: {}, max is: {}.",
@@ -218,7 +218,7 @@ pub fn validate_compressor(config: &config::CompressorParameters) -> Res<()> {
             return Err(config::ConfigError::new(&msg).into());
         }
     }
-    for ch in config.process_channels.iter() {
+    for ch in config.get_process_channels().iter() {
         if *ch >= channels {
             let msg = format!(
                 "Invalid channel to process: {}, max is: {}.",

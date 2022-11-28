@@ -974,30 +974,66 @@ pub enum Processor {
 pub struct CompressorParameters {
     pub channels: usize,
     #[serde(default)]
-    pub monitor_channels: Vec<usize>,
+    pub monitor_channels: Option<Vec<usize>>,
     #[serde(default)]
-    pub process_channels: Vec<usize>,
+    pub process_channels: Option<Vec<usize>>,
     pub attack: PrcFmt,
     pub release: PrcFmt,
     pub threshold: PrcFmt,
     pub factor: PrcFmt,
     #[serde(default)]
-    pub makeup_gain: PrcFmt,
+    pub makeup_gain: Option<PrcFmt>,
     #[serde(default)]
-    pub soft_clip: bool,
+    pub soft_clip: Option<bool>,
     #[serde(default)]
-    pub enable_clip: bool,
+    pub enable_clip: Option<bool>,
     #[serde(default)]
-    pub clip_limit: PrcFmt,
+    pub clip_limit: Option<PrcFmt>,
+}
+
+impl CompressorParameters {
+    pub fn get_monitor_channels(&self) -> Vec<usize> {
+        self.monitor_channels.clone().unwrap_or_default()
+    }
+
+    pub fn get_process_channels(&self) -> Vec<usize> {
+        self.process_channels.clone().unwrap_or_default()
+    }
+
+    pub fn get_makeup_gain(&self) -> PrcFmt {
+        self.makeup_gain.unwrap_or_default()
+    }
+
+    pub fn get_soft_clip(&self) -> bool {
+        self.soft_clip.unwrap_or_default()
+    }
+
+    pub fn get_enable_clip(&self) -> bool {
+        self.enable_clip.unwrap_or_default()
+    }
+
+    pub fn get_clip_limit(&self) -> PrcFmt {
+        self.clip_limit.unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LimiterParameters {
     #[serde(default)]
-    pub soft_clip: bool,
+    pub soft_clip: Option<bool>,
     #[serde(default)]
-    pub clip_limit: PrcFmt,
+    pub clip_limit: Option<PrcFmt>,
+}
+
+impl LimiterParameters {
+    pub fn get_soft_clip(&self) -> bool {
+        self.soft_clip.unwrap_or_default()
+    }
+
+    pub fn get_clip_limit(&self) -> PrcFmt {
+        self.clip_limit.unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
