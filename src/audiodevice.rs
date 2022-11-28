@@ -292,21 +292,16 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             })
         }
         #[cfg(target_os = "windows")]
-        config::PlaybackDevice::Wasapi {
-            channels,
-            device,
-            format,
-            exclusive,
-        } => Box::new(wasapidevice::WasapiPlaybackDevice {
-            devname: device,
+        config::PlaybackDevice::Wasapi(ref dev) => Box::new(wasapidevice::WasapiPlaybackDevice {
+            devname: dev.device.clone(),
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
-            exclusive,
-            channels,
-            sample_format: format,
-            target_level: conf.target_level,
-            adjust_period: conf.adjust_period,
-            enable_rate_adjust: conf.enable_rate_adjust,
+            exclusive: dev.get_exclusive(),
+            channels: dev.channels,
+            sample_format: dev.format,
+            target_level: conf.get_target_level(),
+            adjust_period: conf.get_adjust_period(),
+            enable_rate_adjust: conf.get_enable_rate_adjust(),
         }),
         #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
         config::PlaybackDevice::Jack { channels, device } => {
@@ -631,26 +626,24 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         #[cfg(target_os = "windows")]
         config::CaptureDevice::Wasapi {
             channels,
-            device,
+            ref device,
             format,
             exclusive,
             loopback,
         } => Box::new(wasapidevice::WasapiCaptureDevice {
-            devname: device,
+            devname: device.clone(),
             samplerate: conf.samplerate,
             exclusive,
             loopback,
-            enable_resampling: conf.enable_resampling,
-            resampler_type: conf.resampler_type,
-            resampler_profile: conf.resampler_profile,
+            resampler_config: conf.resampler,
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
             sample_format: format,
-            silence_threshold: conf.silence_threshold,
-            silence_timeout: conf.silence_timeout,
-            stop_on_rate_change: conf.stop_on_rate_change,
-            rate_measure_interval: conf.rate_measure_interval,
+            silence_threshold: conf.get_silence_threshold(),
+            silence_timeout: conf.get_silence_timeout(),
+            stop_on_rate_change: conf.get_stop_on_rate_change(),
+            rate_measure_interval: conf.get_rate_measure_interval(),
         }),
         #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
         config::CaptureDevice::Jack { channels, device } => {

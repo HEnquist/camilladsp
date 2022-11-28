@@ -217,7 +217,7 @@ impl CaptureDevice {
             #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => dev.get_format(),
             #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi { format, .. } => format.clone(),
+            CaptureDevice::Wasapi { format, .. } => *format,
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
             CaptureDevice::Jack { .. } => SampleFormat::FLOAT32LE,
         }
@@ -339,14 +339,7 @@ pub enum PlaybackDevice {
     CoreAudio(PlaybackDeviceCA),
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
-    Wasapi {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-        format: SampleFormat,
-        #[serde(default)]
-        exclusive: bool,
-    },
+    Wasapi(PlaybackDeviceWasapi),
     #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
     #[serde(alias = "JACK", alias = "jack")]
     Jack {
@@ -368,10 +361,29 @@ impl PlaybackDevice {
             #[cfg(target_os = "macos")]
             PlaybackDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
-            PlaybackDevice::Wasapi { channels, .. } => *channels,
+            PlaybackDevice::Wasapi(dev) => dev.channels,
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
             PlaybackDevice::Jack { channels, .. } => *channels,
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PlaybackDeviceWasapi {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub device: Option<String>,
+    pub format: SampleFormat,
+    #[serde(default)]
+    exclusive: Option<bool>,
+}
+
+#[cfg(target_os = "windows")]
+impl PlaybackDeviceWasapi {
+    pub fn get_exclusive(&self) -> bool {
+        self.exclusive.unwrap_or_default()
     }
 }
 
@@ -1462,8 +1474,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "windows")]
-    if let PlaybackDevice::Wasapi { format, .. } = &conf.devices.playback {
-        if *format == SampleFormat::FLOAT64LE {
+    if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {
+        if dev.format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The Wasapi playback backend does not support FLOAT64LE sample format",
             )
@@ -1471,11 +1483,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "windows")]
-    if let PlaybackDevice::Wasapi {
-        format, exclusive, ..
-    } = &conf.devices.playback
-    {
-        if *format != SampleFormat::FLOAT32LE && !*exclusive {
+    if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {
+        if dev.format != SampleFormat::FLOAT32LE && !dev.get_exclusive() {
             return Err(ConfigError::new(
                 "Wasapi shared mode playback must use FLOAT32LE sample format",
             )

@@ -30,7 +30,7 @@ enum DeviceState {
 
 #[derive(Clone, Debug)]
 pub struct WasapiPlaybackDevice {
-    pub devname: String,
+    pub devname: Option<String>,
     pub exclusive: bool,
     pub samplerate: usize,
     pub chunksize: usize,
@@ -47,9 +47,7 @@ pub struct WasapiCaptureDevice {
     pub exclusive: bool,
     pub loopback: bool,
     pub samplerate: usize,
-    pub resampler_type: config::Resampler,
-    pub resampler_profile: config::ResamplerProfile,
-    pub enable_resampling: bool,
+    pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
@@ -97,7 +95,7 @@ fn get_wave_format(
 }
 
 fn open_playback(
-    devname: &str,
+    devname: &Option<String>,
     samplerate: usize,
     channels: usize,
     sample_format: &SampleFormat,
@@ -113,13 +111,13 @@ fn open_playback(
         true => wasapi::ShareMode::Exclusive,
         false => wasapi::ShareMode::Shared,
     };
-    let device = if devname == "default" {
-        wasapi::get_default_device(&wasapi::Direction::Render)?
-    } else {
+    let device = if let Some(name) = devname {
         let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
-        collection.get_device_with_name(devname)?
+        collection.get_device_with_name(name)?
+    } else {
+        wasapi::get_default_device(&wasapi::Direction::Render)?
     };
-    trace!("Found playback device {}", devname);
+    trace!("Found playback device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got playback iaudioclient");
     let wave_format = get_wave_format(sample_format, samplerate, channels);
@@ -157,7 +155,7 @@ fn open_playback(
     debug!("initialized capture");
     let handle = audio_client.set_get_eventhandle()?;
     let render_client = audio_client.get_audiorenderclient()?;
-    debug!("Opened Wasapi playback device {}", devname);
+    debug!("Opened Wasapi playback device {:?}", devname);
     Ok((device, audio_client, render_client, handle, wave_format))
 }
 
@@ -568,8 +566,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
-        let sample_format = self.sample_format.clone();
-        let sample_format_dev = self.sample_format.clone();
+        let sample_format = self.sample_format;
+        let sample_format_dev = self.sample_format;
         let handle = thread::Builder::new()
             .name("WasapiPlayback".to_string())
             .spawn(move || {
@@ -854,12 +852,10 @@ impl CaptureDevice for WasapiCaptureDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let bytes_per_sample = self.sample_format.bytes_per_sample();
-        let sample_format = self.sample_format.clone();
-        let sample_format_dev = self.sample_format.clone();
-        let enable_resampling = self.enable_resampling;
-        let resampler_type = self.resampler_type.clone();
-        let resampler_profile = self.resampler_profile.clone();
-        let async_src = resampler_is_async(&resampler_type);
+        let sample_format = self.sample_format;
+        let sample_format_dev = self.sample_format;
+        let resampler_conf = self.resampler_config;
+        let async_src = resampler_is_async(&resampler_conf);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let stop_on_rate_change = self.stop_on_rate_change;
@@ -867,19 +863,13 @@ impl CaptureDevice for WasapiCaptureDevice {
         let handle = thread::Builder::new()
             .name("WasapiCapture".to_string())
             .spawn(move || {
-                let mut resampler = if enable_resampling {
-                    debug!("Creating resampler");
-                    get_resampler(
-                        &resampler_type,
-                        &resampler_profile,
+                let mut resampler = get_resampler(
+                        &resampler_conf,
                         channels,
                         samplerate,
                         capture_samplerate,
                         chunksize,
-                    )
-                } else {
-                    None
-                };
+                );
                 // Devices typically give around 1000 frames per buffer, set a reasonable capacity for the channel
                 let channel_capacity = 8*chunksize/1024 + 1;
                 debug!("Using a capture channel capacity of {} buffers.", channel_capacity);
