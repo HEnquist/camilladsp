@@ -165,16 +165,7 @@ pub enum CaptureDevice {
     CoreAudio(CaptureDeviceCA),
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
-    Wasapi {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-        format: SampleFormat,
-        #[serde(default)]
-        exclusive: bool,
-        #[serde(default)]
-        loopback: bool,
-    },
+    Wasapi(CaptureDeviceWasapi),
     #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
     #[serde(alias = "JACK", alias = "jack")]
     Jack {
@@ -198,7 +189,7 @@ impl CaptureDevice {
             #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi { channels, .. } => *channels,
+            CaptureDevice::Wasapi(dev) => dev.channels,
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
             CaptureDevice::Jack { channels, .. } => *channels,
         }
@@ -217,7 +208,7 @@ impl CaptureDevice {
             #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => dev.get_format(),
             #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi { format, .. } => *format,
+            CaptureDevice::Wasapi(dev) => dev.format,
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
             CaptureDevice::Jack { .. } => SampleFormat::FLOAT32LE,
         }
@@ -274,6 +265,31 @@ impl CaptureDeviceStdin {
     }
     pub fn get_read_bytes(&self) -> usize {
         self.read_bytes.unwrap_or_default()
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceWasapi {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub device: Option<String>,
+    pub format: SampleFormat,
+    #[serde(default)]
+    exclusive: Option<bool>,
+    #[serde(default)]
+    loopback: Option<bool>,
+}
+
+#[cfg(target_os = "windows")]
+impl CaptureDeviceWasapi {
+    pub fn get_exclusive(&self) -> bool {
+        self.exclusive.unwrap_or_default()
+    }
+
+    pub fn get_loopback(&self) -> bool {
+        self.loopback.unwrap_or_default()
     }
 }
 
@@ -1182,8 +1198,8 @@ fn apply_overrides(configuration: &mut Configuration) {
                 dev.channels = chans;
             }
             #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi { channels, .. } => {
-                *channels = chans;
+            CaptureDevice::Wasapi(dev) => {
+                dev.channels = chans;
             }
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
             CaptureDevice::Jack { channels, .. } => {
@@ -1217,8 +1233,8 @@ fn apply_overrides(configuration: &mut Configuration) {
                 dev.format = Some(fmt);
             }
             #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi { format, .. } => {
-                *format = fmt;
+            CaptureDevice::Wasapi(dev) => {
+                dev.format = fmt;
             }
             #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
             CaptureDevice::Jack { .. } => {
@@ -1439,8 +1455,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi { format, .. } = &conf.devices.capture {
-        if *format == SampleFormat::FLOAT64LE {
+    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
+        if dev.format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The Wasapi capture backend does not support FLOAT64LE sample format",
             )
@@ -1448,11 +1464,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi {
-        format, exclusive, ..
-    } = &conf.devices.capture
-    {
-        if *format != SampleFormat::FLOAT32LE && !*exclusive {
+    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
+        if dev.format != SampleFormat::FLOAT32LE && !dev.get_exclusive() {
             return Err(ConfigError::new(
                 "Wasapi shared mode capture must use FLOAT32LE sample format",
             )
@@ -1460,13 +1473,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi {
-        loopback,
-        exclusive,
-        ..
-    } = &conf.devices.capture
-    {
-        if *loopback && *exclusive {
+    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
+        if dev.get_loopback() && dev.get_exclusive() {
             return Err(ConfigError::new(
                 "Wasapi loopback capture is only supported in shared mode",
             )

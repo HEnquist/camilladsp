@@ -43,7 +43,7 @@ pub struct WasapiPlaybackDevice {
 
 #[derive(Clone, Debug)]
 pub struct WasapiCaptureDevice {
-    pub devname: String,
+    pub devname: Option<String>,
     pub exclusive: bool,
     pub loopback: bool,
     pub samplerate: usize,
@@ -160,7 +160,7 @@ fn open_playback(
 }
 
 fn open_capture(
-    devname: &str,
+    devname: &Option<String>,
     samplerate: usize,
     channels: usize,
     sample_format: &SampleFormat,
@@ -177,18 +177,21 @@ fn open_capture(
         true => wasapi::ShareMode::Exclusive,
         false => wasapi::ShareMode::Shared,
     };
-    let device = if devname == "default" && !loopback {
-        wasapi::get_default_device(&wasapi::Direction::Capture)?
-    } else if devname == "default" && loopback {
-        wasapi::get_default_device(&wasapi::Direction::Render)?
+    let device = if let Some(name) = devname {
+        if !loopback {
+            let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Capture)?;
+            collection.get_device_with_name(name)?
+        } else {
+            let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
+            collection.get_device_with_name(name)?
+        }
     } else if !loopback {
-        let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Capture)?;
-        collection.get_device_with_name(devname)?
+        wasapi::get_default_device(&wasapi::Direction::Capture)?
     } else {
-        let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
-        collection.get_device_with_name(devname)?
+        wasapi::get_default_device(&wasapi::Direction::Render)?
     };
-    trace!("Found capture device {}", devname);
+
+    trace!("Found capture device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got capture iaudioclient");
     let wave_format = get_wave_format(sample_format, samplerate, channels);
@@ -227,7 +230,7 @@ fn open_capture(
     let handle = audio_client.set_get_eventhandle()?;
     trace!("capture got event handle");
     let capture_client = audio_client.get_audiocaptureclient()?;
-    debug!("Opened Wasapi capture device {}", devname);
+    debug!("Opened Wasapi capture device {:?}", devname);
     Ok((device, audio_client, capture_client, handle, wave_format))
 }
 

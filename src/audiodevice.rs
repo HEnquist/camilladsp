@@ -624,22 +624,16 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             })
         }
         #[cfg(target_os = "windows")]
-        config::CaptureDevice::Wasapi {
-            channels,
-            ref device,
-            format,
-            exclusive,
-            loopback,
-        } => Box::new(wasapidevice::WasapiCaptureDevice {
-            devname: device.clone(),
+        config::CaptureDevice::Wasapi(ref dev) => Box::new(wasapidevice::WasapiCaptureDevice {
+            devname: dev.device.clone(),
             samplerate: conf.samplerate,
-            exclusive,
-            loopback,
+            exclusive: dev.get_exclusive(),
+            loopback: dev.get_loopback(),
             resampler_config: conf.resampler,
             capture_samplerate,
             chunksize: conf.chunksize,
-            channels,
-            sample_format: format,
+            channels: dev.channels,
+            sample_format: dev.format,
             silence_threshold: conf.get_silence_threshold(),
             silence_timeout: conf.get_silence_timeout(),
             stop_on_rate_change: conf.get_stop_on_rate_change(),
