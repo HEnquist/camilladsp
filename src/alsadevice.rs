@@ -51,10 +51,8 @@ pub struct AlsaPlaybackDevice {
 pub struct AlsaCaptureDevice {
     pub devname: String,
     pub samplerate: usize,
-    pub enable_resampling: bool,
     pub capture_samplerate: usize,
-    pub resampler_type: config::Resampler,
-    pub resampler_profile: config::ResamplerProfile,
+    pub resampler_config: Option<config::Resampler>,
     pub chunksize: usize,
     pub channels: usize,
     pub sample_format: SampleFormat,
@@ -978,10 +976,8 @@ impl CaptureDevice for AlsaCaptureDevice {
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let sample_format = self.sample_format.clone();
-        let enable_resampling = self.enable_resampling;
-        let resampler_type = self.resampler_type.clone();
-        let resampler_profile = self.resampler_profile.clone();
-        let async_src = resampler_is_async(&resampler_type);
+        let resampler_config = self.resampler_config.clone();
+        let async_src = resampler_is_async(&resampler_config);
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let mut buf_manager = CaptureBufferManager::new(
@@ -992,19 +988,13 @@ impl CaptureDevice for AlsaCaptureDevice {
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
             .spawn(move || {
-                let resampler = if enable_resampling {
-                    debug!("Creating resampler");
-                    get_resampler(
-                        &resampler_type,
-                        &resampler_profile,
-                        channels,
-                        samplerate,
-                        capture_samplerate,
-                        chunksize,
-                    )
-                } else {
-                    None
-                };
+                let resampler = get_resampler(
+                    &resampler_config,
+                    channels,
+                    samplerate,
+                    capture_samplerate,
+                    chunksize,
+                );
                 match open_pcm(
                     devname,
                     capture_samplerate as u32,

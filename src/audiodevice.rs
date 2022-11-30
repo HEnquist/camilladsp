@@ -231,17 +231,17 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
         #[cfg(target_os = "linux")]
         config::PlaybackDevice::Alsa {
             channels,
-            device,
+            ref device,
             format,
         } => Box::new(alsadevice::AlsaPlaybackDevice {
-            devname: device,
+            devname: device.clone(),
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
             sample_format: format,
-            target_level: conf.target_level,
-            adjust_period: conf.adjust_period,
-            enable_rate_adjust: conf.enable_rate_adjust,
+            target_level: conf.get_target_level(),
+            adjust_period: conf.get_adjust_period(),
+            enable_rate_adjust: conf.get_enable_rate_adjust(),
         }),
         #[cfg(feature = "pulse-backend")]
         config::PlaybackDevice::Pulse {
@@ -515,22 +515,20 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         #[cfg(target_os = "linux")]
         config::CaptureDevice::Alsa {
             channels,
-            device,
+            ref device,
             format,
         } => Box::new(alsadevice::AlsaCaptureDevice {
-            devname: device,
+            devname: device.clone(),
             samplerate: conf.samplerate,
-            enable_resampling: conf.enable_resampling,
             capture_samplerate,
-            resampler_type: conf.resampler_type,
-            resampler_profile: conf.resampler_profile,
+            resampler_config: conf.resampler,
             chunksize: conf.chunksize,
             channels,
             sample_format: format,
-            silence_threshold: conf.silence_threshold,
-            silence_timeout: conf.silence_timeout,
-            stop_on_rate_change: conf.stop_on_rate_change,
-            rate_measure_interval: conf.rate_measure_interval,
+            silence_threshold: conf.get_silence_threshold(),
+            silence_timeout: conf.get_silence_timeout(),
+            stop_on_rate_change: conf.get_stop_on_rate_change(),
+            rate_measure_interval: conf.get_rate_measure_interval(),
         }),
         #[cfg(feature = "pulse-backend")]
         config::CaptureDevice::Pulse {
