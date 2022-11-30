@@ -51,9 +51,7 @@ pub struct CpalCaptureDevice {
     pub devname: String,
     pub host: CpalHost,
     pub samplerate: usize,
-    pub resampler_type: config::Resampler,
-    pub resampler_profile: config::ResamplerProfile,
-    pub enable_resampling: bool,
+    pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
@@ -458,10 +456,8 @@ impl CaptureDevice for CpalCaptureDevice {
         let channels = self.channels;
         let bits_per_sample = self.sample_format.bits_per_sample() as i32;
         let sample_format = self.sample_format.clone();
-        let enable_resampling = self.enable_resampling;
-        let resampler_type = self.resampler_type.clone();
-        let resampler_profile = self.resampler_profile.clone();
-        let async_src = resampler_is_async(&resampler_type);
+        let resampler_config = self.resampler_config.clone();
+        let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let stop_on_rate_change = self.stop_on_rate_change;
@@ -469,19 +465,13 @@ impl CaptureDevice for CpalCaptureDevice {
         let handle = thread::Builder::new()
             .name("CpalCapture".to_string())
             .spawn(move || {
-                let mut resampler = if enable_resampling {
-                    debug!("Creating resampler");
-                    get_resampler(
-                        &resampler_type,
-                        &resampler_profile,
+                let mut resampler = get_resampler(
+                        &resampler_config,
                         channels,
                         samplerate,
                         capture_samplerate,
                         chunksize,
-                    )
-                } else {
-                    None
-                };
+                    );
                 match open_cpal_capture(host_cfg, &devname, capture_samplerate, channels, &sample_format) {
                     Ok((device, stream_config, _sample_format)) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
