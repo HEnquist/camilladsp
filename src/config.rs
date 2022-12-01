@@ -166,7 +166,16 @@ pub enum CaptureDevice {
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi(CaptureDeviceWasapi),
-    #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+    #[cfg(all(
+        feature = "cpal-backend",
+        feature = "jack-backend",
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd"
+        )
+    ))]
     #[serde(alias = "JACK", alias = "jack")]
     Jack {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -190,7 +199,16 @@ impl CaptureDevice {
             CaptureDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => dev.channels,
-            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "jack-backend",
+                any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd"
+                )
+            ))]
             CaptureDevice::Jack { channels, .. } => *channels,
         }
     }
@@ -198,18 +216,27 @@ impl CaptureDevice {
     pub fn sampleformat(&self) -> SampleFormat {
         match self {
             #[cfg(target_os = "linux")]
-            CaptureDevice::Alsa { format, .. } => format.clone(),
+            CaptureDevice::Alsa { format, .. } => format,
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez { format, .. } => format.clone(),
+            CaptureDevice::Bluez { format, .. } => format,
             #[cfg(feature = "pulse-backend")]
-            CaptureDevice::Pulse { format, .. } => format.clone(),
+            CaptureDevice::Pulse { format, .. } => format,
             CaptureDevice::File(dev) => dev.format,
             CaptureDevice::Stdin(dev) => dev.format,
             #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => dev.get_format(),
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => dev.format,
-            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "jack-backend",
+                any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd"
+                )
+            ))]
             CaptureDevice::Jack { .. } => SampleFormat::FLOAT32LE,
         }
     }
@@ -356,7 +383,16 @@ pub enum PlaybackDevice {
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi(PlaybackDeviceWasapi),
-    #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+    #[cfg(all(
+        feature = "cpal-backend",
+        feature = "jack-backend",
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd"
+        )
+    ))]
     #[serde(alias = "JACK", alias = "jack")]
     Jack {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -378,7 +414,16 @@ impl PlaybackDevice {
             PlaybackDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
             PlaybackDevice::Wasapi(dev) => dev.channels,
-            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "jack-backend",
+                any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd"
+                )
+            ))]
             PlaybackDevice::Jack { channels, .. } => *channels,
         }
     }
@@ -1237,7 +1282,16 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Wasapi(dev) => {
                 dev.channels = chans;
             }
-            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "jack-backend",
+                any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd"
+                )
+            ))]
             CaptureDevice::Jack { channels, .. } => {
                 *channels = chans;
             }
@@ -1272,7 +1326,16 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Wasapi(dev) => {
                 dev.format = fmt;
             }
-            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "jack-backend",
+                any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd"
+                )
+            ))]
             CaptureDevice::Jack { .. } => {
                 error!("Not possible to override capture format for Jack, ignoring");
             }

@@ -29,7 +29,15 @@ use crate::{CaptureStatus, PlaybackStatus};
 pub enum CpalHost {
     #[cfg(target_os = "macos")]
     CoreAudio,
-    #[cfg(feature = "jack-backend")]
+    #[cfg(all(
+        feature = "jack-backend",
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd"
+        )
+    ))]
     Jack,
 }
 
@@ -72,7 +80,15 @@ fn open_cpal_playback(
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
-        #[cfg(feature = "jack-backend")]
+        #[cfg(all(
+            feature = "jack-backend",
+            any(
+                target_os = "linux",
+                target_os = "dragonfly",
+                target_os = "freebsd",
+                target_os = "netbsd"
+            )
+        ))]
         CpalHost::Jack => HostId::Jack,
     };
     let host = cpal::host_from_id(host_id)?;
@@ -121,7 +137,15 @@ fn open_cpal_capture(
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
-        #[cfg(feature = "jack-backend")]
+        #[cfg(all(
+            feature = "jack-backend",
+            any(
+                target_os = "linux",
+                target_os = "dragonfly",
+                target_os = "freebsd",
+                target_os = "netbsd"
+            )
+        ))]
         CpalHost::Jack => HostId::Jack,
     };
     let host = cpal::host_from_id(host_id)?;
@@ -195,7 +219,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
         let channels_clone = channels;
 
         let bits_per_sample = self.sample_format.bits_per_sample() as i32;
-        let sample_format = self.sample_format.clone();
+        let sample_format = self.sample_format;
         let playback_status_clone = playback_status.clone();
         let handle = thread::Builder::new()
             .name("CpalPlayback".to_string())
@@ -224,7 +248,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                     VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
                                 let stream = device.build_output_stream(
                                     &stream_config,
-                                    move |mut buffer: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                                    move |buffer: &mut [i16], _: &cpal::OutputCallbackInfo| {
                                         #[cfg(feature = "debug")]
                                         trace!("Playback device requests {} samples", buffer.len());
                                         while sample_queue.len() < buffer.len() {
@@ -258,7 +282,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                 }
                                             }
                                         }
-                                        write_data_to_device(&mut buffer, &mut sample_queue);
+                                        write_data_to_device(buffer, &mut sample_queue);
                                         buffer_fill_clone
                                             .store(sample_queue.len(), Ordering::Relaxed);
                                         if clipped > 0 {
@@ -281,7 +305,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                     VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
                                 let stream = device.build_output_stream(
                                     &stream_config,
-                                    move |mut buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                                    move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
                                         #[cfg(feature = "debug")]
                                         trace!("Playback device requests {} samples", buffer.len());
                                         while sample_queue.len() < buffer.len() {
@@ -314,7 +338,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                 }
                                             }
                                         }
-                                        write_data_to_device(&mut buffer, &mut sample_queue);
+                                        write_data_to_device(buffer, &mut sample_queue);
                                         buffer_fill_clone
                                             .store(sample_queue.len(), Ordering::Relaxed);
                                         if clipped > 0 {
@@ -455,8 +479,8 @@ impl CaptureDevice for CpalCaptureDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let bits_per_sample = self.sample_format.bits_per_sample() as i32;
-        let sample_format = self.sample_format.clone();
-        let resampler_config = self.resampler_config.clone();
+        let sample_format = self.sample_format;
+        let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
@@ -490,7 +514,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                         #[cfg(feature = "debug")]
                                         trace!("Capture device provides {} samples", buffer.len());
                                         let mut buffer_copy = Vec::new();
-                                        buffer_copy.extend_from_slice(&buffer);
+                                        buffer_copy.extend_from_slice(buffer);
                                         tx_dev_i.send(buffer_copy).unwrap();
                                     },
                                     move |err| error!("an error occurred on stream: {}", err)
@@ -506,7 +530,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                         #[cfg(feature = "debug")]
                                         trace!("Capture device provides {} samples", buffer.len());
                                         let mut buffer_copy = Vec::new();
-                                        buffer_copy.extend_from_slice(&buffer);
+                                        buffer_copy.extend_from_slice(buffer);
                                         tx_dev_f.send(buffer_copy).unwrap();
                                     },
                                     move |err| error!("an error occurred on stream: {}", err)

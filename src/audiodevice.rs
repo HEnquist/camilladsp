@@ -4,7 +4,16 @@ use crate::alsadevice;
 use crate::config;
 #[cfg(target_os = "macos")]
 use crate::coreaudiodevice;
-#[cfg(feature = "cpal-backend")]
+#[cfg(all(
+    feature = "cpal-backend",
+    feature = "jack-backend",
+    any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd"
+    )
+))]
 use crate::cpaldevice;
 use crate::filedevice;
 #[cfg(feature = "pulse-backend")]
@@ -303,7 +312,16 @@ pub fn get_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             adjust_period: conf.get_adjust_period(),
             enable_rate_adjust: conf.get_enable_rate_adjust(),
         }),
-        #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+        #[cfg(all(
+            feature = "cpal-backend",
+            feature = "jack-backend",
+            any(
+                target_os = "linux",
+                target_os = "dragonfly",
+                target_os = "freebsd",
+                target_os = "netbsd"
+            )
+        ))]
         config::PlaybackDevice::Jack {
             channels,
             ref device,
@@ -634,7 +652,16 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             stop_on_rate_change: conf.get_stop_on_rate_change(),
             rate_measure_interval: conf.get_rate_measure_interval(),
         }),
-        #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+        #[cfg(all(
+            feature = "cpal-backend",
+            feature = "jack-backend",
+            any(
+                target_os = "linux",
+                target_os = "dragonfly",
+                target_os = "freebsd",
+                target_os = "netbsd"
+            )
+        ))]
         config::CaptureDevice::Jack {
             channels,
             ref device,

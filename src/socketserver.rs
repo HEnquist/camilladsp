@@ -337,7 +337,7 @@ fn make_acceptor_with_cert(cert: &str, key: &str) -> Res<Arc<TlsAcceptor>> {
 #[cfg(feature = "secure-websocket")]
 fn make_acceptor(cert_file: &Option<&str>, cert_key: &Option<&str>) -> Option<Arc<TlsAcceptor>> {
     if let (Some(cert), Some(key)) = (cert_file, cert_key) {
-        let acceptor = make_acceptor_with_cert(&cert, &key);
+        let acceptor = make_acceptor_with_cert(cert, key);
         match acceptor {
             Ok(acc) => {
                 debug!("Created TLS acceptor");
