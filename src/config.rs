@@ -216,11 +216,11 @@ impl CaptureDevice {
     pub fn sampleformat(&self) -> SampleFormat {
         match self {
             #[cfg(target_os = "linux")]
-            CaptureDevice::Alsa { format, .. } => format,
+            CaptureDevice::Alsa { format, .. } => *format,
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez { format, .. } => format,
+            CaptureDevice::Bluez { format, .. } => *format,
             #[cfg(feature = "pulse-backend")]
-            CaptureDevice::Pulse { format, .. } => format,
+            CaptureDevice::Pulse { format, .. } => *format,
             CaptureDevice::File(dev) => dev.format,
             CaptureDevice::Stdin(dev) => dev.format,
             #[cfg(target_os = "macos")]
