@@ -580,19 +580,14 @@ pub fn get_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             rate_measure_interval: conf.get_rate_measure_interval(),
         }),
         #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-        config::CaptureDevice::Bluez {
-            ref service,
-            ref dbus_path,
-            channels,
-            format,
-        } => Box::new(filedevice::FileCaptureDevice {
-            source: filedevice::CaptureSource::BluezDBus(service.clone(), dbus_path.clone()),
+        config::CaptureDevice::Bluez(ref dev) => Box::new(filedevice::FileCaptureDevice {
+            source: filedevice::CaptureSource::BluezDBus(dev.get_service(), dev.dbus_path.clone()),
             samplerate: conf.samplerate,
             capture_samplerate,
             resampler_config: conf.resampler,
             chunksize: conf.chunksize,
-            channels,
-            sample_format: format,
+            channels: dev.channels,
+            sample_format: dev.format,
             extra_samples: 0,
             silence_threshold: conf.get_silence_threshold(),
             silence_timeout: conf.get_silence_timeout(),

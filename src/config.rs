@@ -119,11 +119,6 @@ impl fmt::Display for SampleFormat {
     }
 }
 
-#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-fn bluez_default_srv() -> String {
-    "org.bluealsa".to_string()
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
@@ -138,16 +133,7 @@ pub enum CaptureDevice {
     },
     #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
     #[serde(alias = "BLUEZ", alias = "bluez")]
-    Bluez {
-        #[serde(default = "bluez_default_srv")]
-        service: String,
-        // TODO: Allow the user to specify mac address rather than D-Bus path
-        dbus_path: String,
-        // TODO: sample format, sample rate and channel count should be determined
-        // from D-Bus properties
-        format: SampleFormat,
-        channels: usize,
-    },
+    Bluez(CaptureDeviceBluez),
     #[cfg(feature = "pulse-backend")]
     #[serde(alias = "PULSE", alias = "pulse")]
     Pulse {
@@ -181,7 +167,7 @@ impl CaptureDevice {
             #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { channels, .. } => *channels,
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez { channels, .. } => *channels,
+            CaptureDevice::Bluez(dev) => dev.channels,
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { channels, .. } => *channels,
             CaptureDevice::File(dev) => dev.channels,
@@ -200,7 +186,7 @@ impl CaptureDevice {
             #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { format, .. } => format.clone(),
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez { format, .. } => format.clone(),
+            CaptureDevice::Bluez(dev)=> dev.format,
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { format, .. } => format.clone(),
             CaptureDevice::File(dev) => dev.format,
@@ -265,6 +251,27 @@ impl CaptureDeviceStdin {
     }
     pub fn get_read_bytes(&self) -> usize {
         self.read_bytes.unwrap_or_default()
+    }
+}
+
+#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceBluez {
+    #[serde(default)]
+    service: Option<String>,
+    // TODO: Allow the user to specify mac address rather than D-Bus path
+    pub dbus_path: String,
+    // TODO: sample format, sample rate and channel count should be determined
+    // from D-Bus properties
+    pub format: SampleFormat,
+    pub channels: usize,
+}
+
+#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
+impl CaptureDeviceBluez{
+    pub fn get_service(&self) -> String {
+        self.service.clone().unwrap_or("org.bluealsa".to_string())
     }
 }
 
@@ -1222,8 +1229,8 @@ fn apply_overrides(configuration: &mut Configuration) {
                 *channels = chans;
             }
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez { channels, .. } => {
-                *channels = chans;
+            CaptureDevice::Bluez(dev) => {
+                dev.channels = chans;
             }
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { channels, .. } => {
@@ -1257,8 +1264,8 @@ fn apply_overrides(configuration: &mut Configuration) {
                 *format = fmt;
             }
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez { format, .. } => {
-                *format = fmt;
+            CaptureDevice::Bluez(dev) => {
+                dev.format = fmt;
             }
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { format, .. } => {
