@@ -1120,22 +1120,49 @@ impl LimiterParameters {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum PipelineStep {
-    Mixer {
-        name: String,
-        #[serde(default)]
-        bypassed: bool,
-    },
-    Filter {
-        channel: usize,
-        names: Vec<String>,
-        #[serde(default)]
-        bypassed: bool,
-    },
-    Processor {
-        name: String,
-        #[serde(default)]
-        bypassed: bool,
-    },
+    Mixer(PipelineStepMixer),
+    Filter(PipelineStepFilter),
+    Processor(PipelineStepProcessor),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct PipelineStepMixer {
+    pub name: String,
+    #[serde(default)]
+    bypassed: Option<bool>,
+}
+
+impl PipelineStepMixer {
+    pub fn get_bypassed(&self) -> bool {
+        self.bypassed.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct PipelineStepFilter {
+    pub channel: usize,
+    pub names: Vec<String>,
+    #[serde(default)]
+    bypassed: Option<bool>,
+}
+
+impl PipelineStepFilter {
+    pub fn get_bypassed(&self) -> bool {
+        self.bypassed.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct PipelineStepProcessor {
+    pub name: String,
+    #[serde(default)]
+    bypassed: Option<bool>,
+}
+
+impl PipelineStepProcessor {
+    pub fn get_bypassed(&self) -> bool {
+        self.bypassed.unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1376,16 +1403,16 @@ fn replace_tokens_in_config(config: &mut Configuration) {
     }
     for mut step in config.pipeline.iter_mut() {
         match &mut step {
-            PipelineStep::Filter { names, .. } => {
-                for name in names.iter_mut() {
+            PipelineStep::Filter(step) => {
+                for name in step.names.iter_mut() {
                     *name = replace_tokens(name, samplerate, num_channels);
                 }
             }
-            PipelineStep::Mixer { name, .. } => {
-                *name = replace_tokens(name, samplerate, num_channels);
+            PipelineStep::Mixer(step) => {
+                step.name = replace_tokens(&step.name, samplerate, num_channels);
             }
-            PipelineStep::Processor { name, .. } => {
-                *name = replace_tokens(name, samplerate, num_channels);
+            PipelineStep::Processor(step) => {
+                step.name = replace_tokens(&step.name, samplerate, num_channels);
             }
         }
     }
@@ -1645,42 +1672,39 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     let fs = conf.devices.samplerate;
     for step in &conf.pipeline {
         match step {
-            PipelineStep::Mixer { name, bypassed } => {
-                if !*bypassed {
-                    if !conf.mixers.contains_key(name) {
-                        let msg = format!("Use of missing mixer '{}'", name);
+            PipelineStep::Mixer(step) => {
+                if !step.get_bypassed() {
+                    if !conf.mixers.contains_key(&step.name) {
+                        let msg = format!("Use of missing mixer '{}'", &step.name);
                         return Err(ConfigError::new(&msg).into());
                     } else {
-                        let chan_in = conf.mixers.get(name).unwrap().channels.r#in;
+                        let chan_in = conf.mixers.get(&step.name).unwrap().channels.r#in;
                         if chan_in != num_channels {
                             let msg = format!(
                                 "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
-                                name, num_channels, chan_in
+                                &step.name, num_channels, chan_in
                             );
                             return Err(ConfigError::new(&msg).into());
                         }
-                        num_channels = conf.mixers.get(name).unwrap().channels.out;
-                        match mixer::validate_mixer(conf.mixers.get(name).unwrap()) {
+                        num_channels = conf.mixers.get(&step.name).unwrap().channels.out;
+                        match mixer::validate_mixer(conf.mixers.get(&step.name).unwrap()) {
                             Ok(_) => {}
                             Err(err) => {
-                                let msg = format!("Invalid mixer '{}'. Reason: {}", name, err);
+                                let msg =
+                                    format!("Invalid mixer '{}'. Reason: {}", &step.name, err);
                                 return Err(ConfigError::new(&msg).into());
                             }
                         }
                     }
                 }
             }
-            PipelineStep::Filter {
-                channel,
-                names,
-                bypassed,
-            } => {
-                if !*bypassed {
-                    if *channel >= num_channels {
-                        let msg = format!("Use of non existing channel {}", channel);
+            PipelineStep::Filter(step) => {
+                if !step.get_bypassed() {
+                    if step.channel >= num_channels {
+                        let msg = format!("Use of non existing channel {}", step.channel);
                         return Err(ConfigError::new(&msg).into());
                     }
-                    for name in names {
+                    for name in &step.names {
                         if !conf.filters.contains_key(name) {
                             let msg = format!("Use of missing filter '{}'", name);
                             return Err(ConfigError::new(&msg).into());
@@ -1695,20 +1719,20 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                     }
                 }
             }
-            PipelineStep::Processor { name, bypassed } => {
-                if !*bypassed {
-                    if !conf.processors.contains_key(name) {
-                        let msg = format!("Use of missing processor '{}'", name);
+            PipelineStep::Processor(step) => {
+                if !step.get_bypassed() {
+                    if !conf.processors.contains_key(&step.name) {
+                        let msg = format!("Use of missing processor '{}'", step.name);
                         return Err(ConfigError::new(&msg).into());
                     } else {
-                        let procconf = conf.processors.get(name).unwrap();
+                        let procconf = conf.processors.get(&step.name).unwrap();
                         match procconf {
                             Processor::Compressor { parameters } => {
                                 let channels = parameters.channels;
                                 if channels != num_channels {
                                     let msg = format!(
                                         "Compressor '{}' has wrong number of channels. Expected {}, found {}.",
-                                        name, num_channels, channels
+                                        step.name, num_channels, channels
                                     );
                                     return Err(ConfigError::new(&msg).into());
                                 }
@@ -1717,7 +1741,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                     Err(err) => {
                                         let msg = format!(
                                             "Invalid processor '{}'. Reason: {}",
-                                            name, err
+                                            step.name, err
                                         );
                                         return Err(ConfigError::new(&msg).into());
                                     }
@@ -1743,9 +1767,9 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
 /// Get a vector telling which channels are actually used in the pipeline
 pub fn get_used_capture_channels(conf: &Configuration) -> Vec<bool> {
     for step in conf.pipeline.iter() {
-        if let PipelineStep::Mixer { name, bypassed } = step {
-            if !*bypassed {
-                let mixerconf = conf.mixers.get(name).unwrap();
+        if let PipelineStep::Mixer(mix) = step {
+            if !mix.get_bypassed() {
+                let mixerconf = conf.mixers.get(&mix.name).unwrap();
                 return mixer::get_used_input_channels(mixerconf);
             }
         }
