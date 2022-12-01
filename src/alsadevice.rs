@@ -902,7 +902,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let bytes_per_sample = self.sample_format.bytes_per_sample();
-        let sample_format = self.sample_format.clone();
+        let sample_format = self.sample_format;
         let mut buf_manager =
             PlaybackBufferManager::new(chunksize as Frames, target_level as Frames);
         let handle = thread::Builder::new()
@@ -975,8 +975,8 @@ impl CaptureDevice for AlsaCaptureDevice {
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
-        let sample_format = self.sample_format.clone();
-        let resampler_config = self.resampler_config.clone();
+        let sample_format = self.sample_format;
+        let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
