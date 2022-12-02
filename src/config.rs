@@ -1722,12 +1722,12 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                 match filters::validate_filter(fs, filters.get(name).unwrap()) {
                                     Ok(_) => {}
                                     Err(err) => {
-                                        let msg = format!("Invalid filter '{}'. Reason: {}", name, err);
+                                        let msg =
+                                            format!("Invalid filter '{}'. Reason: {}", name, err);
                                         return Err(ConfigError::new(&msg).into());
                                     }
                                 }
-                            }
-                            else {
+                            } else {
                                 let msg = format!("Use of missing filter '{}'", name);
                                 return Err(ConfigError::new(&msg).into());
                             }
