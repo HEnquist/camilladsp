@@ -464,7 +464,7 @@ impl Pipeline {
     ) -> Self {
         debug!("Build new pipeline");
         let mut steps = Vec::<PipelineStep>::new();
-        for step in conf.pipeline {
+        for step in conf.pipeline.unwrap_or_default() {
             match step {
                 config::PipelineStep::Mixer(step) => {
                     if !step.get_bypassed() {
