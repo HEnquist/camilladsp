@@ -1158,12 +1158,12 @@ impl PipelineStepProcessor {
 pub struct Configuration {
     pub devices: Devices,
     #[serde(default)]
-    pub mixers: Option<HashMap<String, Mixer>>, //TODO
+    pub mixers: Option<HashMap<String, Mixer>>,
     #[serde(default)]
     #[serde(deserialize_with = "serde_with::rust::maps_duplicate_key_is_error::deserialize")]
     pub filters: HashMap<String, Filter>, //TODO
     #[serde(default)]
-    pub processors: HashMap<String, Processor>, //TODO
+    pub processors: Option<HashMap<String, Processor>>,
     #[serde(default)]
     pub pipeline: Vec<PipelineStep>, //TODO
 }
@@ -1523,11 +1523,13 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
             }
         }
     }
-    for (proc, params) in &newconf.processors {
-        // The pipeline didn't change, any added compressor isn't included and can be skipped
-        if let Some(current_proc) = currentconf.processors.get(proc) {
-            if params != current_proc {
-                processors.push(proc.to_string());
+    if let (Some(newprocs), Some(oldprocs)) = (&newconf.processors, &currentconf.processors) {
+        for (proc, params) in newprocs {
+            // The pipeline didn't change, any added compressor isn't included and can be skipped
+            if let Some(current_proc) = oldprocs.get(proc) {
+                if params != current_proc {
+                    processors.push(proc.to_string());
+                }
             }
         }
     }
@@ -1718,33 +1720,38 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             }
             PipelineStep::Processor(step) => {
                 if !step.get_bypassed() {
-                    if !conf.processors.contains_key(&step.name) {
-                        let msg = format!("Use of missing processor '{}'", step.name);
-                        return Err(ConfigError::new(&msg).into());
-                    } else {
-                        let procconf = conf.processors.get(&step.name).unwrap();
-                        match procconf {
-                            Processor::Compressor { parameters } => {
-                                let channels = parameters.channels;
-                                if channels != num_channels {
-                                    let msg = format!(
-                                        "Compressor '{}' has wrong number of channels. Expected {}, found {}.",
-                                        step.name, num_channels, channels
-                                    );
-                                    return Err(ConfigError::new(&msg).into());
-                                }
-                                match compressor::validate_compressor(parameters) {
-                                    Ok(_) => {}
-                                    Err(err) => {
+                    if let Some(processors) = &conf.processors {
+                        if !processors.contains_key(&step.name) {
+                            let msg = format!("Use of missing processor '{}'", step.name);
+                            return Err(ConfigError::new(&msg).into());
+                        } else {
+                            let procconf = processors.get(&step.name).unwrap();
+                            match procconf {
+                                Processor::Compressor { parameters } => {
+                                    let channels = parameters.channels;
+                                    if channels != num_channels {
                                         let msg = format!(
-                                            "Invalid processor '{}'. Reason: {}",
-                                            step.name, err
+                                            "Compressor '{}' has wrong number of channels. Expected {}, found {}.",
+                                            step.name, num_channels, channels
                                         );
                                         return Err(ConfigError::new(&msg).into());
+                                    }
+                                    match compressor::validate_compressor(parameters) {
+                                        Ok(_) => {}
+                                        Err(err) => {
+                                            let msg = format!(
+                                                "Invalid processor '{}'. Reason: {}",
+                                                step.name, err
+                                            );
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
                                     }
                                 }
                             }
                         }
+                    } else {
+                        let msg = format!("Use of missing processor '{}'", step.name);
+                        return Err(ConfigError::new(&msg).into());
                     }
                 }
             }

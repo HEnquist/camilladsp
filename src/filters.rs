@@ -488,7 +488,7 @@ impl Pipeline {
                 }
                 config::PipelineStep::Processor(step) => {
                     if !step.get_bypassed() {
-                        let procconf = conf.processors[&step.name].clone();
+                        let procconf = conf.processors.as_ref().unwrap()[&step.name].clone();
                         let proc = match procconf {
                             config::Processor::Compressor { parameters } => {
                                 let comp = compressor::Compressor::from_config(
@@ -528,7 +528,9 @@ impl Pipeline {
                 }
                 PipelineStep::ProcessorStep(proc) => {
                     if processors.iter().any(|n| n == &proc.name()) {
-                        proc.update_parameters(conf.processors[&proc.name()].clone());
+                        proc.update_parameters(
+                            conf.processors.as_ref().unwrap()[&proc.name()].clone(),
+                        );
                     }
                 }
             }
