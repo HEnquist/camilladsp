@@ -1158,7 +1158,7 @@ impl PipelineStepProcessor {
 pub struct Configuration {
     pub devices: Devices,
     #[serde(default)]
-    pub mixers: HashMap<String, Mixer>, //TODO
+    pub mixers: Option<HashMap<String, Mixer>>, //TODO
     #[serde(default)]
     #[serde(deserialize_with = "serde_with::rust::maps_duplicate_key_is_error::deserialize")]
     pub filters: HashMap<String, Filter>, //TODO
@@ -1513,11 +1513,13 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
             }
         }
     }
-    for (mixer, params) in &newconf.mixers {
-        // The pipeline didn't change, any added mixer isn't included and can be skipped
-        if let Some(current_mixer) = currentconf.mixers.get(mixer) {
-            if params != current_mixer {
-                mixers.push(mixer.to_string());
+    if let (Some(newmixers), Some(oldmixers)) = (&newconf.mixers, &currentconf.mixers) {
+        for (mixer, params) in newmixers {
+            // The pipeline didn't change, any added mixer isn't included and can be skipped
+            if let Some(current_mixer) = oldmixers.get(mixer) {
+                if params != current_mixer {
+                    mixers.push(mixer.to_string());
+                }
             }
         }
     }
@@ -1664,27 +1666,32 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         match step {
             PipelineStep::Mixer(step) => {
                 if !step.get_bypassed() {
-                    if !conf.mixers.contains_key(&step.name) {
-                        let msg = format!("Use of missing mixer '{}'", &step.name);
-                        return Err(ConfigError::new(&msg).into());
-                    } else {
-                        let chan_in = conf.mixers.get(&step.name).unwrap().channels.r#in;
-                        if chan_in != num_channels {
-                            let msg = format!(
-                                "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
-                                &step.name, num_channels, chan_in
-                            );
+                    if let Some(mixers) = &conf.mixers {
+                        if !mixers.contains_key(&step.name) {
+                            let msg = format!("Use of missing mixer '{}'", &step.name);
                             return Err(ConfigError::new(&msg).into());
-                        }
-                        num_channels = conf.mixers.get(&step.name).unwrap().channels.out;
-                        match mixer::validate_mixer(conf.mixers.get(&step.name).unwrap()) {
-                            Ok(_) => {}
-                            Err(err) => {
-                                let msg =
-                                    format!("Invalid mixer '{}'. Reason: {}", &step.name, err);
+                        } else {
+                            let chan_in = mixers.get(&step.name).unwrap().channels.r#in;
+                            if chan_in != num_channels {
+                                let msg = format!(
+                                    "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
+                                    &step.name, num_channels, chan_in
+                                );
                                 return Err(ConfigError::new(&msg).into());
                             }
+                            num_channels = mixers.get(&step.name).unwrap().channels.out;
+                            match mixer::validate_mixer(mixers.get(&step.name).unwrap()) {
+                                Ok(_) => {}
+                                Err(err) => {
+                                    let msg =
+                                        format!("Invalid mixer '{}'. Reason: {}", &step.name, err);
+                                    return Err(ConfigError::new(&msg).into());
+                                }
+                            }
                         }
+                    } else {
+                        let msg = format!("Use of missing mixer '{}'", &step.name);
+                        return Err(ConfigError::new(&msg).into());
                     }
                 }
             }
@@ -1759,7 +1766,8 @@ pub fn get_used_capture_channels(conf: &Configuration) -> Vec<bool> {
     for step in conf.pipeline.iter() {
         if let PipelineStep::Mixer(mix) = step {
             if !mix.get_bypassed() {
-                let mixerconf = conf.mixers.get(&mix.name).unwrap();
+                // Safe to unwrap here since we have already verified that the mixer exists
+                let mixerconf = conf.mixers.as_ref().unwrap().get(&mix.name).unwrap();
                 return mixer::get_used_input_channels(mixerconf);
             }
         }

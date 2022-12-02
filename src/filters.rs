@@ -468,7 +468,7 @@ impl Pipeline {
             match step {
                 config::PipelineStep::Mixer(step) => {
                     if !step.get_bypassed() {
-                        let mixconf = conf.mixers[&step.name].clone();
+                        let mixconf = conf.mixers.as_ref().unwrap()[&step.name].clone();
                         let mixer = mixer::Mixer::from_config(step.name, mixconf);
                         steps.push(PipelineStep::MixerStep(mixer));
                     }
@@ -520,7 +520,7 @@ impl Pipeline {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {
                     if mixers.iter().any(|n| n == &mix.name) {
-                        mix.update_parameters(conf.mixers[&mix.name].clone());
+                        mix.update_parameters(conf.mixers.as_ref().unwrap()[&mix.name].clone());
                     }
                 }
                 PipelineStep::FilterStep(flt) => {
