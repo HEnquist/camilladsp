@@ -478,7 +478,7 @@ impl Pipeline {
                         let fltgrp = FilterGroup::from_config(
                             step.channel,
                             step.names,
-                            conf.filters.clone(),
+                            conf.filters.as_ref().unwrap().clone(),
                             conf.devices.chunksize,
                             conf.devices.samplerate,
                             processing_status.clone(),
@@ -524,7 +524,7 @@ impl Pipeline {
                     }
                 }
                 PipelineStep::FilterStep(flt) => {
-                    flt.update_parameters(conf.filters.clone(), filters.clone());
+                    flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters.clone());
                 }
                 PipelineStep::ProcessorStep(proc) => {
                     if processors.iter().any(|n| n == &proc.name()) {

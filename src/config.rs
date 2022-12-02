@@ -2,7 +2,7 @@ use crate::compressor;
 use crate::filters;
 use crate::mixer;
 use serde::{de, Deserialize, Serialize};
-use serde_with;
+//use serde_with;
 use std::collections::HashMap;
 use std::error;
 use std::fmt;
@@ -1160,8 +1160,7 @@ pub struct Configuration {
     #[serde(default)]
     pub mixers: Option<HashMap<String, Mixer>>,
     #[serde(default)]
-    #[serde(deserialize_with = "serde_with::rust::maps_duplicate_key_is_error::deserialize")]
-    pub filters: HashMap<String, Filter>, //TODO
+    pub filters: Option<HashMap<String, Filter>>,
     #[serde(default)]
     pub processors: Option<HashMap<String, Processor>>,
     #[serde(default)]
@@ -1376,19 +1375,21 @@ fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
 fn replace_tokens_in_config(config: &mut Configuration) {
     let samplerate = config.devices.samplerate;
     let num_channels = config.devices.capture.channels();
-    for (_name, filter) in config.filters.iter_mut() {
-        match filter {
-            Filter::Conv {
-                parameters: ConvParameters::Raw(params),
-            } => {
-                params.filename = replace_tokens(&params.filename, samplerate, num_channels);
+    if let Some(filters) = &mut config.filters {
+        for (_name, filter) in filters.iter_mut() {
+            match filter {
+                Filter::Conv {
+                    parameters: ConvParameters::Raw(params),
+                } => {
+                    params.filename = replace_tokens(&params.filename, samplerate, num_channels);
+                }
+                Filter::Conv {
+                    parameters: ConvParameters::Wav(params),
+                } => {
+                    params.filename = replace_tokens(&params.filename, samplerate, num_channels);
+                }
+                _ => {}
             }
-            Filter::Conv {
-                parameters: ConvParameters::Wav(params),
-            } => {
-                params.filename = replace_tokens(&params.filename, samplerate, num_channels);
-            }
-            _ => {}
         }
     }
     if let Some(pipeline) = &mut config.pipeline {
@@ -1414,17 +1415,19 @@ fn replace_tokens_in_config(config: &mut Configuration) {
 fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str) {
     if let Ok(config_file) = PathBuf::from(configname.to_owned()).canonicalize() {
         if let Some(config_dir) = config_file.parent() {
-            for (_name, filter) in config.filters.iter_mut() {
-                if let Filter::Conv {
-                    parameters: ConvParameters::Raw(params),
-                } = filter
-                {
-                    check_and_replace_relative_path(&mut params.filename, config_dir);
-                } else if let Filter::Conv {
-                    parameters: ConvParameters::Wav(params),
-                } = filter
-                {
-                    check_and_replace_relative_path(&mut params.filename, config_dir);
+            if let Some(filters) = &mut config.filters {
+                for (_name, filter) in filters.iter_mut() {
+                    if let Filter::Conv {
+                        parameters: ConvParameters::Raw(params),
+                    } = filter
+                    {
+                        check_and_replace_relative_path(&mut params.filename, config_dir);
+                    } else if let Filter::Conv {
+                        parameters: ConvParameters::Wav(params),
+                    } = filter
+                    {
+                        check_and_replace_relative_path(&mut params.filename, config_dir);
+                    }
                 }
             }
         } else {
@@ -1490,28 +1493,30 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     let mut filters = Vec::<String>::new();
     let mut mixers = Vec::<String>::new();
     let mut processors = Vec::<String>::new();
-    for (filter, params) in &newconf.filters {
-        // The pipeline didn't change, any added filter isn't included and can be skipped
-        if let Some(current_filter) = currentconf.filters.get(filter) {
-            // Did the filter change type?
-            match (params, current_filter) {
-                (Filter::Biquad { .. }, Filter::Biquad { .. })
-                | (Filter::BiquadCombo { .. }, Filter::BiquadCombo { .. })
-                | (Filter::Conv { .. }, Filter::Conv { .. })
-                | (Filter::Delay { .. }, Filter::Delay { .. })
-                | (Filter::Gain { .. }, Filter::Gain { .. })
-                | (Filter::Dither { .. }, Filter::Dither { .. })
-                | (Filter::DiffEq { .. }, Filter::DiffEq { .. })
-                | (Filter::Volume { .. }, Filter::Volume { .. })
-                | (Filter::Loudness { .. }, Filter::Loudness { .. }) => {}
-                _ => {
-                    // A filter changed type, need to rebuild the pipeline
-                    return ConfigChange::Pipeline;
+    if let (Some(newfilters), Some(oldfilters)) = (&newconf.filters, &currentconf.filters) {
+        for (filter, params) in newfilters {
+            // The pipeline didn't change, any added filter isn't included and can be skipped
+            if let Some(current_filter) = oldfilters.get(filter) {
+                // Did the filter change type?
+                match (params, current_filter) {
+                    (Filter::Biquad { .. }, Filter::Biquad { .. })
+                    | (Filter::BiquadCombo { .. }, Filter::BiquadCombo { .. })
+                    | (Filter::Conv { .. }, Filter::Conv { .. })
+                    | (Filter::Delay { .. }, Filter::Delay { .. })
+                    | (Filter::Gain { .. }, Filter::Gain { .. })
+                    | (Filter::Dither { .. }, Filter::Dither { .. })
+                    | (Filter::DiffEq { .. }, Filter::DiffEq { .. })
+                    | (Filter::Volume { .. }, Filter::Volume { .. })
+                    | (Filter::Loudness { .. }, Filter::Loudness { .. }) => {}
+                    _ => {
+                        // A filter changed type, need to rebuild the pipeline
+                        return ConfigChange::Pipeline;
+                    }
+                };
+                // Only parameters changed, ok to update
+                if params != current_filter {
+                    filters.push(filter.to_string());
                 }
-            };
-            // Only parameters changed, ok to update
-            if params != current_filter {
-                filters.push(filter.to_string());
             }
         }
     }
@@ -1709,16 +1714,22 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                             return Err(ConfigError::new(&msg).into());
                         }
                         for name in &step.names {
-                            if !conf.filters.contains_key(name) {
-                                let msg = format!("Use of missing filter '{}'", name);
-                                return Err(ConfigError::new(&msg).into());
-                            }
-                            match filters::validate_filter(fs, conf.filters.get(name).unwrap()) {
-                                Ok(_) => {}
-                                Err(err) => {
-                                    let msg = format!("Invalid filter '{}'. Reason: {}", name, err);
+                            if let Some(filters) = &conf.filters {
+                                if !filters.contains_key(name) {
+                                    let msg = format!("Use of missing filter '{}'", name);
                                     return Err(ConfigError::new(&msg).into());
                                 }
+                                match filters::validate_filter(fs, filters.get(name).unwrap()) {
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        let msg = format!("Invalid filter '{}'. Reason: {}", name, err);
+                                        return Err(ConfigError::new(&msg).into());
+                                    }
+                                }
+                            }
+                            else {
+                                let msg = format!("Use of missing filter '{}'", name);
+                                return Err(ConfigError::new(&msg).into());
                             }
                         }
                     }
