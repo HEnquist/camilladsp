@@ -621,41 +621,20 @@ pub enum Resampler {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum Filter {
-    Conv {
-        #[serde(default)]
-        parameters: ConvParameters,
-    },
-    Biquad {
-        parameters: BiquadParameters,
-    },
-    BiquadCombo {
-        parameters: BiquadComboParameters,
-    },
-    Delay {
-        parameters: DelayParameters,
-    },
-    Gain {
-        parameters: GainParameters,
-    },
-    Volume {
-        parameters: VolumeParameters,
-    },
-    Loudness {
-        parameters: LoudnessParameters,
-    },
-    Dither {
-        parameters: DitherParameters,
-    },
-    DiffEq {
-        parameters: DiffEqParameters,
-    },
-    Limiter {
-        parameters: LimiterParameters,
-    },
+    Conv { parameters: ConvParameters },
+    Biquad { parameters: BiquadParameters },
+    BiquadCombo { parameters: BiquadComboParameters },
+    Delay { parameters: DelayParameters },
+    Gain { parameters: GainParameters },
+    Volume { parameters: VolumeParameters },
+    Loudness { parameters: LoudnessParameters },
+    Dither { parameters: DitherParameters },
+    DiffEq { parameters: DiffEqParameters },
+    Limiter { parameters: LimiterParameters },
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum FileFormat {
     TEXT,
@@ -697,40 +676,49 @@ impl FileFormat {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum ConvParameters {
-    #[serde(alias = "File")]
-    Raw {
-        filename: String,
-        #[serde(default)]
-        format: FileFormat,
-        #[serde(default)]
-        skip_bytes_lines: usize,
-        #[serde(default)]
-        read_bytes_lines: usize,
-    },
-    Wav {
-        filename: String,
-        #[serde(default)]
-        channel: usize,
-    },
-    Values {
-        values: Vec<PrcFmt>,
-        #[serde(default)]
-        length: usize,
-    },
+    Raw(ConvParametersRaw),
+    Wav(ConvParametersWav),
+    Values { values: Vec<PrcFmt> },
+    Dummy { length: usize },
 }
 
-impl Default for FileFormat {
-    fn default() -> Self {
-        FileFormat::TEXT
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ConvParametersRaw {
+    pub filename: String,
+    #[serde(default)]
+    format: Option<FileFormat>,
+    #[serde(default)]
+    skip_bytes_lines: Option<usize>,
+    #[serde(default)]
+    read_bytes_lines: Option<usize>,
+}
+
+impl ConvParametersRaw {
+    pub fn get_format(&self) -> FileFormat {
+        self.format.unwrap_or(FileFormat::TEXT)
+    }
+
+    pub fn get_skip_bytes_lines(&self) -> usize {
+        self.skip_bytes_lines.unwrap_or_default()
+    }
+
+    pub fn get_read_bytes_lines(&self) -> usize {
+        self.read_bytes_lines.unwrap_or_default()
     }
 }
 
-impl Default for ConvParameters {
-    fn default() -> Self {
-        ConvParameters::Values {
-            values: vec![1.0],
-            length: 0,
-        }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ConvParametersWav {
+    pub filename: String,
+    #[serde(default)]
+    channel: Option<usize>,
+}
+
+impl ConvParametersWav {
+    pub fn get_channel(&self) -> usize {
+        self.channel.unwrap_or_default()
     }
 }
 
@@ -1170,14 +1158,14 @@ impl PipelineStepProcessor {
 pub struct Configuration {
     pub devices: Devices,
     #[serde(default)]
-    pub mixers: HashMap<String, Mixer>,
+    pub mixers: HashMap<String, Mixer>, //TODO
     #[serde(default)]
     #[serde(deserialize_with = "serde_with::rust::maps_duplicate_key_is_error::deserialize")]
-    pub filters: HashMap<String, Filter>,
+    pub filters: HashMap<String, Filter>, //TODO
     #[serde(default)]
-    pub processors: HashMap<String, Processor>,
+    pub processors: HashMap<String, Processor>, //TODO
     #[serde(default)]
-    pub pipeline: Vec<PipelineStep>,
+    pub pipeline: Vec<PipelineStep>, //TODO
 }
 
 fn validate_nonzero_usize<'de, D>(d: D) -> Result<usize, D::Error>
@@ -1391,12 +1379,14 @@ fn replace_tokens_in_config(config: &mut Configuration) {
     for (_name, filter) in config.filters.iter_mut() {
         match filter {
             Filter::Conv {
-                parameters: ConvParameters::Raw { filename, .. },
-            }
-            | Filter::Conv {
-                parameters: ConvParameters::Wav { filename, .. },
+                parameters: ConvParameters::Raw(params),
             } => {
-                *filename = replace_tokens(filename, samplerate, num_channels);
+                params.filename = replace_tokens(&params.filename, samplerate, num_channels);
+            }
+            Filter::Conv {
+                parameters: ConvParameters::Wav(params),
+            } => {
+                params.filename = replace_tokens(&params.filename, samplerate, num_channels);
             }
             _ => {}
         }
@@ -1424,15 +1414,15 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
         if let Some(config_dir) = config_file.parent() {
             for (_name, filter) in config.filters.iter_mut() {
                 if let Filter::Conv {
-                    parameters: ConvParameters::Raw { filename, .. },
+                    parameters: ConvParameters::Raw(params),
                 } = filter
                 {
-                    check_and_replace_relative_path(filename, config_dir);
+                    check_and_replace_relative_path(&mut params.filename, config_dir);
                 } else if let Filter::Conv {
-                    parameters: ConvParameters::Wav { filename, .. },
+                    parameters: ConvParameters::Wav(params),
                 } = filter
                 {
-                    check_and_replace_relative_path(filename, config_dir);
+                    check_and_replace_relative_path(&mut params.filename, config_dir);
                 }
             }
         } else {
