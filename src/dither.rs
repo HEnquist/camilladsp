@@ -1,6 +1,8 @@
 use crate::config;
 use crate::filters::Filter;
-use rand::thread_rng;
+
+use rand::rngs::SmallRng;
+use rand::SeedableRng;
 use rand_distr::{Distribution, Triangular};
 
 use crate::NewValue;
@@ -16,14 +18,24 @@ pub struct Dither {
     filter: Vec<PrcFmt>,
     idx: usize,
     filterlen: usize,
+    cached_rng: SmallRng,
+    distribution: Triangular<PrcFmt>,
 }
 
 impl Dither {
     pub fn new(name: String, bits: usize, filter: Vec<PrcFmt>, amplitude: PrcFmt) -> Self {
         let scalefact = PrcFmt::new(2.0).powi((bits - 1) as i32);
-        let buffer = vec![0.0; filter.len()];
-        let idx = 0;
         let filterlen = filter.len();
+        let buffer = vec![0.0; filterlen];
+        let idx = 0;
+        let cached_rng = SmallRng::from_entropy();
+        
+        let distribution = if filterlen > 0 {
+            Triangular::new(-1.0, 1.0, 0.0)
+        } else {
+            Triangular::new(-amplitude, amplitude, 0.0)
+        }.unwrap();
+
         Dither {
             name,
             scalefact,
@@ -32,6 +44,8 @@ impl Dither {
             filter,
             idx,
             filterlen,
+            cached_rng,
+            distribution,
         }
     }
 
@@ -166,11 +180,10 @@ impl Filter for Dither {
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         //rand_nbrs = np.random.triangular(-1, 0, 1, len(wave_in))
+        // let mut rng = &self.cached_rng;
 
         if self.filterlen > 0 {
-            let rng = thread_rng();
-            let dith_rng = Triangular::new(-1.0, 1.0, 0.0).unwrap();
-            let dith_iter = dith_rng.sample_iter(rng);
+            let dith_iter = self.distribution.sample_iter(&mut self.cached_rng);
             for (item, dith) in waveform.iter_mut().zip(dith_iter) {
                 let scaled = *item * self.scalefact;
                 let mut filt_buf = 0.0;
@@ -192,9 +205,7 @@ impl Filter for Dither {
                 *item = result_r / self.scalefact;
             }
         } else if self.amplitude > 0.0 {
-            let rng = thread_rng();
-            let dith_rng = Triangular::new(-self.amplitude, self.amplitude, 0.0).unwrap();
-            let dith_iter = dith_rng.sample_iter(rng);
+            let dith_iter = self.distribution.sample_iter(&mut self.cached_rng);
             for (item, dith) in waveform.iter_mut().zip(dith_iter) {
                 let scaled = *item * self.scalefact + dith;
                 *item = scaled.round() / self.scalefact;

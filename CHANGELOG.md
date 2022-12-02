@@ -18,6 +18,9 @@ New features:
 - Add several volume control channels (TODO websocket commands for these).
 - Change Loudness filter to only perform loudness compensation.
 
+Changes:
+- Optimize dithering cpu load.
+
 ## 1.0.3
 Bugfixes:
  - Volume and Loudness filters keep mute state on config reload.
