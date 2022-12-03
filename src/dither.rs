@@ -3,49 +3,49 @@ use crate::filters::Filter;
 
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
-use rand_distr::{Distribution, Triangular};
+use rand_distr::{Distribution, Triangular, Uniform};
 
 use crate::NewValue;
 use crate::PrcFmt;
 use crate::Res;
 
-#[derive(Clone, Debug)]
-pub struct Dither {
+// lifetime `'a` guarantees that `ditherer` will live as long as this `Dither`.
+pub struct Dither<'a> {
     pub name: String,
     pub scalefact: PrcFmt,
-    pub amplitude: PrcFmt,
     buffer: Vec<PrcFmt>,
     filter: Vec<PrcFmt>,
     idx: usize,
     filterlen: usize,
-    cached_rng: SmallRng,
-    distribution: Triangular<PrcFmt>,
+    ditherer: Box<dyn Ditherer + 'a>,
 }
 
-impl Dither {
-    pub fn new(name: String, bits: usize, filter: Vec<PrcFmt>, amplitude: PrcFmt) -> Self {
+pub type Coefficients = Vec<PrcFmt>;
+
+impl<'a> Dither<'a> {
+    pub fn new<D: Ditherer + 'a>(
+        name: String,
+        bits: usize,
+        ditherer: D,
+        filter: Option<Coefficients>,
+    ) -> Self {
         let scalefact = PrcFmt::new(2.0).powi((bits - 1) as i32);
+        let ditherer = Box::new(ditherer);
+
+        // noise shaping
+        let filter = filter.unwrap_or_default();
         let filterlen = filter.len();
         let buffer = vec![0.0; filterlen];
         let idx = 0;
-        let cached_rng = SmallRng::from_entropy();
-        
-        let distribution = if filterlen > 0 {
-            Triangular::new(-1.0, 1.0, 0.0)
-        } else {
-            Triangular::new(-amplitude, amplitude, 0.0)
-        }.unwrap();
 
-        Dither {
+        Self {
             name,
             scalefact,
-            amplitude,
             buffer,
             filter,
             idx,
             filterlen,
-            cached_rng,
-            distribution,
+            ditherer,
         }
     }
 
@@ -53,27 +53,27 @@ impl Dither {
     pub fn from_config(name: String, conf: config::DitherParameters) -> Self {
         match conf {
             config::DitherParameters::Simple { bits } => {
-                let filter = vec![0.8];
-                let amplitude = 1.0;
-                Dither::new(name, bits, filter, amplitude)
+                let hp_tpdf = HighPassDitherer::default();
+                Dither::new(name, bits, hp_tpdf, None)
             }
             config::DitherParameters::Uniform { bits, amplitude } => {
-                let filter = Vec::new();
-                Dither::new(name, bits, filter, amplitude)
+                let uniform = <UniformDitherer as Ditherer>::new(amplitude);
+                Dither::new(name, bits, uniform, None)
             }
             config::DitherParameters::Lipshitz441 { bits } => {
+                let tpdf = TriangularDitherer::default();
                 let filter = vec![2.033, -2.165, 1.959, -1.590, 0.6149];
-                let amplitude = 1.0;
-                Dither::new(name, bits, filter, amplitude)
+                Dither::new(name, bits, tpdf, Some(filter))
             }
             config::DitherParameters::Fweighted441 { bits } => {
+                let tpdf = TriangularDitherer::default();
                 let filter = vec![
                     2.412, -3.370, 3.937, -4.174, 3.353, -2.205, 1.281, -0.569, 0.0847,
                 ];
-                let amplitude = 1.0;
-                Dither::new(name, bits, filter, amplitude)
+                Dither::new(name, bits, tpdf, Some(filter))
             }
             config::DitherParameters::Shibata441 { bits } => {
+                let tpdf = TriangularDitherer::default();
                 let filter = vec![
                     2.677_319_765_091,
                     -4.830_892_562_866,
@@ -96,10 +96,10 @@ impl Dither {
                     0.174_968_391_657,
                     -0.060_908_168_554,
                 ];
-                let amplitude = 1.0;
-                Dither::new(name, bits, filter, amplitude)
+                Dither::new(name, bits, tpdf, Some(filter))
             }
             config::DitherParameters::Shibata48 { bits } => {
+                let tpdf = TriangularDitherer::default();
                 let filter = vec![
                     2.872_072_935_104,
                     -5.041_323_184_967,
@@ -118,10 +118,10 @@ impl Dither {
                     0.097_676_105_797,
                     -0.023_473_845_795,
                 ];
-                let amplitude = 1.0;
-                Dither::new(name, bits, filter, amplitude)
+                Dither::new(name, bits, tpdf, Some(filter))
             }
             config::DitherParameters::ShibataLow441 { bits } => {
+                let tpdf = TriangularDitherer::default();
                 let filter = vec![
                     2.083_391_666_412_353_5,
                     -3.041_845_083_236_694_3,
@@ -139,10 +139,10 @@ impl Dither {
                     -0.067_442_022_264_003_75,
                     -0.004_951_973_445_713_52,
                 ];
-                let amplitude = 1.0;
-                Dither::new(name, bits, filter, amplitude)
+                Dither::new(name, bits, tpdf, Some(filter))
             }
             config::DitherParameters::ShibataLow48 { bits } => {
+                let tpdf = TriangularDitherer::default();
                 let filter = vec![
                     2.392_577_409_744_262_7,
                     -3.435_029_745_101_928_7,
@@ -161,30 +161,29 @@ impl Dither {
                     -0.239_642_769_098_281_86,
                     0.068_674_825_131_893_16,
                 ];
-                let amplitude = 1.0;
-                Dither::new(name, bits, filter, amplitude)
+                Dither::new(name, bits, tpdf, Some(filter))
             }
             config::DitherParameters::None { bits } => {
-                let filter = Vec::new();
-                let amplitude = 0.0;
-                Dither::new(name, bits, filter, amplitude)
+                // This is not as fast as a no-op, but it's faster than
+                // wrapping `ditherer` in an `Option` and checking it is set
+                // all the time. It also saves creating something like a
+                // `NoOpDitherer` for what seems to be an edge case
+                // (configuring a `Dither` filter as "None").
+                let none = <UniformDitherer as Ditherer>::new(0.0);
+                Dither::new(name, bits, none, None)
             }
         }
     }
 }
 
-impl Filter for Dither {
+impl<'a> Filter for Dither<'a> {
     fn name(&self) -> String {
         self.name.clone()
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        //rand_nbrs = np.random.triangular(-1, 0, 1, len(wave_in))
-        // let mut rng = &self.cached_rng;
-
         if self.filterlen > 0 {
-            let dith_iter = self.distribution.sample_iter(&mut self.cached_rng);
-            for (item, dith) in waveform.iter_mut().zip(dith_iter) {
+            for item in waveform.iter_mut() {
                 let scaled = *item * self.scalefact;
                 let mut filt_buf = 0.0;
                 for (n, coeff) in self.filter.iter().enumerate() {
@@ -196,26 +195,19 @@ impl Filter for Dither {
                     self.idx = self.filterlen - 1;
                 }
                 let scaled_plus_err = scaled + filt_buf;
-                let result = scaled_plus_err + dith;
-                //xe = scaled + (buf0 * fir[0] + buf1 * fir[1] + buf2 * fir[2] + buf3 * fir[3] + buf4 * fir[4])*2.0
-                //result = xe + d
+                let result = scaled_plus_err + self.ditherer.sample();
 
                 let result_r = result.round();
                 self.buffer[self.idx] = scaled_plus_err - result_r;
                 *item = result_r / self.scalefact;
             }
-        } else if self.amplitude > 0.0 {
-            let dith_iter = self.distribution.sample_iter(&mut self.cached_rng);
-            for (item, dith) in waveform.iter_mut().zip(dith_iter) {
-                let scaled = *item * self.scalefact + dith;
-                *item = scaled.round() / self.scalefact;
-            }
         } else {
             for item in waveform.iter_mut() {
-                let scaled = *item * self.scalefact;
+                let scaled = *item * self.scalefact + self.ditherer.sample();
                 *item = scaled.round() / self.scalefact;
             }
         }
+
         Ok(())
     }
 
@@ -260,10 +252,117 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
     Ok(())
 }
 
+// Adopted from librespot, with permission:
+// Ditherer, TriangularDitherer, HighPassDitherer.
+pub trait Ditherer {
+    // `amplitude` in bits
+    fn new(amplitude: PrcFmt) -> Self
+    where
+        Self: Sized;
+
+    fn sample(&mut self) -> PrcFmt;
+}
+
+fn create_rng() -> SmallRng {
+    SmallRng::from_entropy()
+}
+
+// Simple rectangular-pdf (RPDF; uniform) dither.
+// Suboptimal to TPDF, because the residual noise level varies audibly.
+#[derive(Clone, Debug)]
+pub struct UniformDitherer {
+    cached_rng: SmallRng,
+    distribution: Uniform<PrcFmt>,
+}
+
+impl Ditherer for UniformDitherer {
+    fn new(amplitude: PrcFmt) -> Self {
+        let amplitude = amplitude / 2.0;
+        Self {
+            cached_rng: create_rng(),
+            distribution: Uniform::new_inclusive(-amplitude, amplitude),
+        }
+    }
+
+    fn sample(&mut self) -> PrcFmt {
+        self.distribution.sample(&mut self.cached_rng)
+    }
+}
+
+impl Default for UniformDitherer {
+    fn default() -> Self {
+        <Self as Ditherer>::new(1.0)
+    }
+}
+
+// Spectrally-white triangular-pdf (TPDF) dither.
+// The high-pass ditherer should be preferred for most audio applications.
+#[derive(Clone, Debug)]
+pub struct TriangularDitherer {
+    cached_rng: SmallRng,
+    distribution: Triangular<PrcFmt>,
+}
+
+impl Ditherer for TriangularDitherer {
+    fn new(amplitude: PrcFmt) -> Self {
+        let amplitude = amplitude / 2.0;
+        Self {
+            cached_rng: create_rng(),
+            distribution: Triangular::new(-amplitude, amplitude, 0.0).unwrap(),
+        }
+    }
+
+    fn sample(&mut self) -> PrcFmt {
+        self.distribution.sample(&mut self.cached_rng)
+    }
+}
+
+impl Default for TriangularDitherer {
+    fn default() -> Self {
+        // 2 LSB peak-to-peak needed to linearize the response
+        <Self as Ditherer>::new(2.0)
+    }
+}
+
+// A very simple discrete-time noise generator capable of producing dither with
+// a high-pass spectrum, and all the beneficial effects of the TPDF dither.
+// Preferable in audio since it is less audible than spectrally-white TPDF
+// dither. Furthermore, it is more computationally efficient since it requires
+// the calculation of only one new RPDF random number per sampling period.
+#[derive(Clone, Debug)]
+pub struct HighPassDitherer {
+    ditherer: UniformDitherer,
+    previous_noise: PrcFmt,
+}
+
+impl Ditherer for HighPassDitherer {
+    fn new(amplitude: PrcFmt) -> Self {
+        Self {
+            // 2x RDPF sample (current - previous) makes 1x TDPF
+            ditherer: <UniformDitherer as Ditherer>::new(amplitude / 2.0),
+            previous_noise: 0.0,
+        }
+    }
+
+    fn sample(&mut self) -> PrcFmt {
+        let new_noise = self.ditherer.sample();
+        let high_passed_noise = new_noise - self.previous_noise;
+        self.previous_noise = new_noise;
+        high_passed_noise
+    }
+}
+
+impl Default for HighPassDitherer {
+    fn default() -> Self {
+        // 1 LSB +/- 1 LSB (previous) = 2 LSB
+        <Self as Ditherer>::new(2.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::config::DitherParameters;
-    use crate::dither::Dither;
+    use crate::dither::{Dither, Ditherer, UniformDitherer};
     use crate::filters::Filter;
     use crate::PrcFmt;
 
@@ -285,7 +384,12 @@ mod tests {
     fn test_quantize() {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
-        let mut dith = Dither::new("test".to_string(), 8, Vec::new(), 0.0);
+        let mut dith = Dither::new(
+            "test".to_string(),
+            8,
+            <UniformDitherer as Ditherer>::new(0.0),
+            None,
+        );
         dith.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(
             waveform.clone(),
@@ -303,7 +407,7 @@ mod tests {
     fn test_uniform() {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
-        let mut dith = Dither::new("test".to_string(), 8, Vec::new(), 1.0);
+        let mut dith = Dither::new("test".to_string(), 8, UniformDitherer::default(), None);
         dith.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(
             waveform.clone(),

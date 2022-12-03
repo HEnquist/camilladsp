@@ -20,6 +20,10 @@ New features:
 
 Changes:
 - Optimize dithering cpu load.
+- Simple dithering now implements a Wannamaker high passed TPDF dither.
+
+Bugfixes:
+- Make Uniform dithering actually uniform instead of triangular.
 
 ## 1.0.3
 Bugfixes:
