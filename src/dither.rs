@@ -3,7 +3,7 @@ use crate::filters::Filter;
 
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
-use rand_distr::{Distribution, Triangular, Uniform};
+use rand_distr::{Distribution, Normal, Triangular, Uniform};
 
 use crate::NewValue;
 use crate::PrcFmt;
@@ -56,16 +56,20 @@ impl<'a> Dither<'a> {
                 let hp_tpdf = HighPassDitherer::default();
                 Dither::new(name, bits, hp_tpdf, None)
             }
-            config::DitherParameters::Lipshitz441 { bits } => {
-                let tpdf = TriangularDitherer::default();
-                let filter = vec![2.033, -2.165, 1.959, -1.590, 0.6149];
-                Dither::new(name, bits, tpdf, Some(filter))
-            }
             config::DitherParameters::Fweighted441 { bits } => {
                 let tpdf = TriangularDitherer::default();
                 let filter = vec![
                     2.412, -3.370, 3.937, -4.174, 3.353, -2.205, 1.281, -0.569, 0.0847,
                 ];
+                Dither::new(name, bits, tpdf, Some(filter))
+            }
+            config::DitherParameters::Gaussian { bits, amplitude } => {
+                let gpdf = <GaussianDitherer as Ditherer>::new(amplitude);
+                Dither::new(name, bits, gpdf, None)
+            }
+            config::DitherParameters::Lipshitz441 { bits } => {
+                let tpdf = TriangularDitherer::default();
+                let filter = vec![2.033, -2.165, 1.959, -1.590, 0.6149];
                 Dither::new(name, bits, tpdf, Some(filter))
             }
             config::DitherParameters::Shibata441 { bits } => {
@@ -233,8 +237,9 @@ impl<'a> Filter for Dither<'a> {
 pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
     let bits = match conf {
         config::DitherParameters::Simple { bits } => bits,
-        config::DitherParameters::Lipshitz441 { bits } => bits,
         config::DitherParameters::Fweighted441 { bits } => bits,
+        config::DitherParameters::Gaussian { bits, .. } => bits,
+        config::DitherParameters::Lipshitz441 { bits } => bits,
         config::DitherParameters::Shibata441 { bits } => bits,
         config::DitherParameters::Shibata48 { bits } => bits,
         config::DitherParameters::ShibataLow441 { bits } => bits,
@@ -247,7 +252,8 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
         return Err(config::ConfigError::new("Dither bit depth must be at least 2").into());
     }
 
-    if let config::DitherParameters::Triangular { amplitude, .. }
+    if let config::DitherParameters::Gaussian { amplitude, .. }
+    | config::DitherParameters::Triangular { amplitude, .. }
     | config::DitherParameters::Uniform { amplitude, .. } = conf
     {
         if *amplitude < 0.0 {
@@ -365,6 +371,34 @@ impl Default for HighPassDitherer {
     fn default() -> Self {
         // 1 LSB +/- 1 LSB (previous) = 2 LSB
         <Self as Ditherer>::new(2.0)
+    }
+}
+
+// Spectrally-white Gaussian-pdf (GPDF) dither.
+// TPDF is better objectively, but some may find this sounds more "analog".
+#[derive(Clone, Debug)]
+pub struct GaussianDitherer {
+    cached_rng: SmallRng,
+    distribution: Normal<PrcFmt>,
+}
+
+impl Ditherer for GaussianDitherer {
+    fn new(amplitude: PrcFmt) -> Self {
+        Self {
+            cached_rng: create_rng(),
+            distribution: Normal::new(0.0, amplitude).unwrap(),
+        }
+    }
+
+    fn sample(&mut self) -> PrcFmt {
+        self.distribution.sample(&mut self.cached_rng)
+    }
+}
+
+impl Default for GaussianDitherer {
+    fn default() -> Self {
+        // 1/2 LSB RMS needed to linearize the response
+        <Self as Ditherer>::new(0.5)
     }
 }
 

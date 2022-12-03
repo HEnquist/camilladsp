@@ -1016,8 +1016,9 @@ pub enum TimeUnit {
 #[serde(deny_unknown_fields)]
 pub enum DitherParameters {
     Simple { bits: usize },
-    Lipshitz441 { bits: usize },
     Fweighted441 { bits: usize },
+    Gaussian { bits: usize, amplitude: PrcFmt },
+    Lipshitz441 { bits: usize },
     Shibata441 { bits: usize },
     Shibata48 { bits: usize },
     ShibataLow441 { bits: usize },

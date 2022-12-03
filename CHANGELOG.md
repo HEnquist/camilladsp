@@ -17,7 +17,7 @@ New features:
 - Add an always enabled default volume control.
 - Add several volume control channels (TODO websocket commands for these).
 - Change Loudness filter to only perform loudness compensation.
-- Add Triangular dither.
+- Add Triangular and Gaussian dithers.
 
 Changes:
 - Optimize dithering cpu load.
