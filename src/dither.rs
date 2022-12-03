@@ -56,10 +56,6 @@ impl<'a> Dither<'a> {
                 let hp_tpdf = HighPassDitherer::default();
                 Dither::new(name, bits, hp_tpdf, None)
             }
-            config::DitherParameters::Uniform { bits, amplitude } => {
-                let uniform = <UniformDitherer as Ditherer>::new(amplitude);
-                Dither::new(name, bits, uniform, None)
-            }
             config::DitherParameters::Lipshitz441 { bits } => {
                 let tpdf = TriangularDitherer::default();
                 let filter = vec![2.033, -2.165, 1.959, -1.590, 0.6149];
@@ -163,6 +159,14 @@ impl<'a> Dither<'a> {
                 ];
                 Dither::new(name, bits, tpdf, Some(filter))
             }
+            config::DitherParameters::Triangular { bits, amplitude } => {
+                let tpdf = <TriangularDitherer as Ditherer>::new(amplitude);
+                Dither::new(name, bits, tpdf, None)
+            }
+            config::DitherParameters::Uniform { bits, amplitude } => {
+                let rpdf = <UniformDitherer as Ditherer>::new(amplitude);
+                Dither::new(name, bits, rpdf, None)
+            }
             config::DitherParameters::None { bits } => {
                 // This is not as fast as a no-op, but it's faster than
                 // wrapping `ditherer` in an `Option` and checking it is set
@@ -235,13 +239,17 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
         config::DitherParameters::Shibata48 { bits } => bits,
         config::DitherParameters::ShibataLow441 { bits } => bits,
         config::DitherParameters::ShibataLow48 { bits } => bits,
+        config::DitherParameters::Triangular { bits, .. } => bits,
         config::DitherParameters::Uniform { bits, .. } => bits,
         config::DitherParameters::None { bits } => bits,
     };
     if *bits <= 1 {
         return Err(config::ConfigError::new("Dither bit depth must be at least 2").into());
     }
-    if let config::DitherParameters::Uniform { amplitude, .. } = conf {
+
+    if let config::DitherParameters::Triangular { amplitude, .. }
+    | config::DitherParameters::Uniform { amplitude, .. } = conf
+    {
         if *amplitude < 0.0 {
             return Err(config::ConfigError::new("Dither amplitude cannot be negative").into());
         }
@@ -249,6 +257,7 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
             return Err(config::ConfigError::new("Dither amplitude must be less than 100").into());
         }
     }
+
     Ok(())
 }
 

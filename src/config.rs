@@ -1022,6 +1022,7 @@ pub enum DitherParameters {
     Shibata48 { bits: usize },
     ShibataLow441 { bits: usize },
     ShibataLow48 { bits: usize },
+    Triangular { bits: usize, amplitude: PrcFmt },
     Uniform { bits: usize, amplitude: PrcFmt },
     None { bits: usize },
 }

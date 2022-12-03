@@ -17,10 +17,11 @@ New features:
 - Add an always enabled default volume control.
 - Add several volume control channels (TODO websocket commands for these).
 - Change Loudness filter to only perform loudness compensation.
+- Add Triangular dither.
 
 Changes:
 - Optimize dithering cpu load.
-- Simple dithering now implements a Wannamaker high passed TPDF dither.
+- Simple dithering now implements a Wannamaker high passed triangular dither.
 
 Bugfixes:
 - Make Uniform dithering actually uniform instead of triangular.
