@@ -5,15 +5,15 @@ devices:
   silence_threshold: -61
   silence_timeout: 3.0
   capture:
-    type: Pulse
+    type: File
+    filename: "dummy"
     channels: 2
-    device: "MySink.monitor"
     format: S16LE
   playback:
-    type: Pulse
+    type: File
+    filename: "dummy"
     channels: 2
-    device: "alsa_output.pci-0000_03_00.6.analog-stereo"
-    format: S32LE
+    format: S16LE
 
 filters:
   atten:
