@@ -164,6 +164,10 @@ Commands for reading and changing the active configuration.
   * Returns the config in yaml as a string.
 - `GetConfigJson` : Read the current configuration as json.
   * Returns the config in json as a string.
+- `GetConfigTitle` : Read the title from the current configuration.
+  * Returns the title as a string.
+- `GetConfigDescription` : Read the description from the current configuration.
+  * Returns the description as a string.
 - `GetConfigName` : Get name and path of current config file.
   * Returns the path as a string.
 - `GetPreviousConfig` : Read the previous configuration as yaml.
