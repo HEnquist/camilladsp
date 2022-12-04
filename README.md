@@ -968,13 +968,13 @@ for a desciption of the other parameters.
 
 For reference, the profiles are defined according to this table:
 
-|                   | VeryFast     | Fast             | Balanced           | Accurate           |
-|-------------------|:------------:|:----------------:|:------------------:|:------------------:|
-|sinc_len           | 64           | 128              | 192                | 256                | 
-|oversampling_ratio | 1024         | 1024             | 512                | 256                |
-|interpolation      | Linear       | Linear           | Quadratic          | Cubic              |
-|window             | Hann2        | Blackman2        | BlackmanHarris2    | BlackmanHarris2    |
-|f_cutoff           | 0.91 (#)     | 0.92 (#)         | 0.93 (#)           | 0.95 (#)           |
+|                    | VeryFast     | Fast             | Balanced           | Accurate           |
+|--------------------|:------------:|:----------------:|:------------------:|:------------------:|
+|sinc_len            | 64           | 128              | 192                | 256                | 
+|oversampling_factor | 1024         | 1024             | 512                | 256                |
+|interpolation       | Linear       | Linear           | Quadratic          | Cubic              |
+|window              | Hann2        | Blackman2        | BlackmanHarris2    | BlackmanHarris2    |
+|f_cutoff            | 0.91 (#)     | 0.92 (#)         | 0.93 (#)           | 0.95 (#)           |
 
 (#) These cutoff values are approximate. The actual values used are calculated automatically
 at runtime for the combination of sinc length and window. 
