@@ -68,7 +68,10 @@ impl Filter for Limiter {
     }
 
     fn update_parameters(&mut self, config: config::Filter) {
-        if let config::Filter::Limiter { parameters: config } = config {
+        if let config::Filter::Limiter {
+            parameters: config, ..
+        } = config
+        {
             let clip_limit = (10.0 as PrcFmt).powf(config.get_clip_limit() / 20.0);
 
             self.soft_clip = config.get_soft_clip();

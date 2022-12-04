@@ -160,7 +160,10 @@ impl Filter for FftConv {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Conv { parameters: conf } = conf {
+        if let config::Filter::Conv {
+            parameters: conf, ..
+        } = conf
+        {
             let coeffs = match conf {
                 config::ConvParameters::Values { values } => values,
                 config::ConvParameters::Raw(params) => filters::read_coeff_file(

@@ -182,7 +182,10 @@ impl Filter for Volume {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Volume { parameters: conf } = conf {
+        if let config::Filter::Volume {
+            parameters: conf, ..
+        } = conf
+        {
             self.ramptime_in_chunks = (conf.get_ramp_time()
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
@@ -228,7 +231,10 @@ impl Filter for Gain {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Gain { parameters: conf } = conf {
+        if let config::Filter::Gain {
+            parameters: conf, ..
+        } = conf
+        {
             let gain_db = conf.gain;
             let inverted = conf.get_inverted();
             let mut gain: PrcFmt = 10.0;
@@ -306,7 +312,10 @@ impl Filter for Delay {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Delay { parameters: conf } = conf {
+        if let config::Filter::Delay {
+            parameters: conf, ..
+        } = conf
+        {
             let delay_samples = match conf.get_unit() {
                 config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (self.samplerate as PrcFmt),
                 config::TimeUnit::Millimetres => {

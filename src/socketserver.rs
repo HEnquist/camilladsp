@@ -64,6 +64,8 @@ enum WsCommand {
     SetConfigJson(String),
     Reload,
     GetConfig,
+    GetConfigTitle,
+    GetConfigDescription,
     GetPreviousConfig,
     ReadConfig(String),
     ReadConfigFile(String),
@@ -144,6 +146,14 @@ enum WsReply {
         result: WsResult,
     },
     GetConfig {
+        result: WsResult,
+        value: String,
+    },
+    GetConfigTitle {
+        result: WsResult,
+        value: String,
+    },
+    GetConfigDescription {
         result: WsResult,
         value: String,
     },
@@ -763,6 +773,30 @@ fn handle_command(
             result: WsResult::Ok,
             value: serde_yaml::to_string(&*shared_data_inst.active_config.lock().unwrap()).unwrap(),
         }),
+        WsCommand::GetConfigTitle => {
+            let optional_config = shared_data_inst.active_config.lock().unwrap();
+            let value = if let Some(config) = &*optional_config {
+                config.title.clone().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            Some(WsReply::GetConfigTitle {
+                result: WsResult::Ok,
+                value,
+            })
+        }
+        WsCommand::GetConfigDescription => {
+            let optional_config = shared_data_inst.active_config.lock().unwrap();
+            let value = if let Some(config) = &*optional_config {
+                config.description.clone().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            Some(WsReply::GetConfigDescription {
+                result: WsResult::Ok,
+                value,
+            })
+        }
         WsCommand::GetPreviousConfig => Some(WsReply::GetPreviousConfig {
             result: WsResult::Ok,
             value: serde_yaml::to_string(&*shared_data_inst.previous_config.lock().unwrap())

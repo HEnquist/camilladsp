@@ -209,7 +209,10 @@ impl Filter for Dither {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Dither { parameters: conf } = conf {
+        if let config::Filter::Dither {
+            parameters: conf, ..
+        } = conf
+        {
             let name = self.name.clone();
             *self = Dither::from_config(name, conf);
         } else {

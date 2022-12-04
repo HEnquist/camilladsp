@@ -11,6 +11,7 @@ New features:
 - More flexible configuration of resampler type and quality.
 - Allow setting optional config parameters to `null` to use default value.
 - Add "Dummy" convolution filter type for easier CPU load testing.
+- Add title and description fields to various parts of the config.
 
 ## 1.0.3
 Bugfixes:

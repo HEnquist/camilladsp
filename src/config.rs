@@ -621,16 +621,56 @@ pub enum Resampler {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum Filter {
-    Conv { parameters: ConvParameters },
-    Biquad { parameters: BiquadParameters },
-    BiquadCombo { parameters: BiquadComboParameters },
-    Delay { parameters: DelayParameters },
-    Gain { parameters: GainParameters },
-    Volume { parameters: VolumeParameters },
-    Loudness { parameters: LoudnessParameters },
-    Dither { parameters: DitherParameters },
-    DiffEq { parameters: DiffEqParameters },
-    Limiter { parameters: LimiterParameters },
+    Conv {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: ConvParameters,
+    },
+    Biquad {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: BiquadParameters,
+    },
+    BiquadCombo {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: BiquadComboParameters,
+    },
+    Delay {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: DelayParameters,
+    },
+    Gain {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: GainParameters,
+    },
+    Volume {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: VolumeParameters,
+    },
+    Loudness {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: LoudnessParameters,
+    },
+    Dither {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: DitherParameters,
+    },
+    DiffEq {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: DiffEqParameters,
+    },
+    Limiter {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: LimiterParameters,
+    },
 }
 
 #[allow(clippy::upper_case_acronyms)]
@@ -678,10 +718,12 @@ impl FileFormat {
 pub enum ConvParameters {
     Raw(ConvParametersRaw),
     Wav(ConvParametersWav),
-    Values { values: Vec<PrcFmt> },
+    Values {
+        values: Vec<PrcFmt>,
+    },
     Dummy {
         #[serde(deserialize_with = "validate_nonzero_usize")]
-        length: usize
+        length: usize,
     },
 }
 
@@ -1029,6 +1071,8 @@ impl MixerMapping {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Mixer {
+    #[serde(default)]
+    pub description: Option<String>,
     pub channels: MixerChannels,
     pub mapping: Vec<MixerMapping>,
 }
@@ -1037,7 +1081,11 @@ pub struct Mixer {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum Processor {
-    Compressor { parameters: CompressorParameters },
+    Compressor {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: CompressorParameters,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1120,6 +1168,8 @@ pub enum PipelineStep {
 pub struct PipelineStepMixer {
     pub name: String,
     #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
     bypassed: Option<bool>,
 }
 
@@ -1134,6 +1184,8 @@ pub struct PipelineStepFilter {
     pub channel: usize,
     pub names: Vec<String>,
     #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
     bypassed: Option<bool>,
 }
 
@@ -1147,6 +1199,8 @@ impl PipelineStepFilter {
 pub struct PipelineStepProcessor {
     pub name: String,
     #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
     bypassed: Option<bool>,
 }
 
@@ -1159,6 +1213,10 @@ impl PipelineStepProcessor {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Configuration {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
     pub devices: Devices,
     #[serde(default)]
     pub mixers: Option<HashMap<String, Mixer>>,
@@ -1383,11 +1441,13 @@ fn replace_tokens_in_config(config: &mut Configuration) {
             match filter {
                 Filter::Conv {
                     parameters: ConvParameters::Raw(params),
+                    ..
                 } => {
                     params.filename = replace_tokens(&params.filename, samplerate, num_channels);
                 }
                 Filter::Conv {
                     parameters: ConvParameters::Wav(params),
+                    ..
                 } => {
                     params.filename = replace_tokens(&params.filename, samplerate, num_channels);
                 }
@@ -1422,11 +1482,13 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
                 for (_name, filter) in filters.iter_mut() {
                     if let Filter::Conv {
                         parameters: ConvParameters::Raw(params),
+                        ..
                     } = filter
                     {
                         check_and_replace_relative_path(&mut params.filename, config_dir);
                     } else if let Filter::Conv {
                         parameters: ConvParameters::Wav(params),
+                        ..
                     } = filter
                     {
                         check_and_replace_relative_path(&mut params.filename, config_dir);
@@ -1746,7 +1808,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                             } else {
                                 let procconf = processors.get(&step.name).unwrap();
                                 match procconf {
-                                    Processor::Compressor { parameters } => {
+                                    Processor::Compressor { parameters, .. } => {
                                         let channels = parameters.channels;
                                         if channels != num_channels {
                                             let msg = format!(

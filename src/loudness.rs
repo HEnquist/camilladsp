@@ -193,9 +193,11 @@ impl Filter for Loudness {
             });
             self.high_biquad.update_parameters(config::Filter::Biquad {
                 parameters: highshelf_conf,
+                description: None,
             });
             self.low_biquad.update_parameters(config::Filter::Biquad {
                 parameters: lowshelf_conf,
+                description: None,
             });
         }
         if get_rel_boost(self.current_volume as f32, self.reference_level) > 0.0 {
@@ -207,7 +209,10 @@ impl Filter for Loudness {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Loudness { parameters: conf } = conf {
+        if let config::Filter::Loudness {
+            parameters: conf, ..
+        } = conf
+        {
             self.ramptime_in_chunks = (conf.get_ramp_time()
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
@@ -226,9 +231,11 @@ impl Filter for Loudness {
             });
             self.high_biquad.update_parameters(config::Filter::Biquad {
                 parameters: highshelf_conf,
+                description: None,
             });
             self.low_biquad.update_parameters(config::Filter::Biquad {
                 parameters: lowshelf_conf,
+                description: None,
             });
             self.reference_level = conf.reference_level;
             self.high_boost = conf.get_high_boost();

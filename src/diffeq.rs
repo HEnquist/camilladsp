@@ -106,7 +106,10 @@ impl Filter for DiffEq {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::DiffEq { parameters: conf } = conf {
+        if let config::Filter::DiffEq {
+            parameters: conf, ..
+        } = conf
+        {
             let name = self.name.clone();
             *self = DiffEq::from_config(name, conf);
         } else {

@@ -46,6 +46,7 @@ The full configuration is given in a yaml file.
 
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
+- **[Title and description](#title-and-description)**
 - **[Devices](#devices)**
 - **[Resampling](#resampling)**
 - **[Mixers](#mixers)**
@@ -618,6 +619,17 @@ On the root level it contains `filters` and `mixers`. The `mixers` section could
 Looking at `filters`, the second filter swaps the order of `parameters` and `type`. Both variants are valid.
 The mixer example shows that the `gain` and `channel` properties can be ordered freely.
 
+## Title and description
+
+There are two properties that are used to name and describe the configuration file. They are both optional.
+
+```
+title: "Example"
+description: "Example description of a configuration"
+```
+
+Both these properties are optional and can be set to `null` or left out. 
+The `title` property is intended for a short title, while `description` can be longer and more descriptive.
 
 ## Devices
 Example config:
@@ -1045,6 +1057,7 @@ Example for a mixer that copies two channels into four:
 ```
 mixers:
   ExampleMixer:
+    description: "Example mixer to convert two channels to four" (*)
     channels:
       in: 2
       out: 4
@@ -1076,6 +1089,7 @@ Parameters marked with (*) are optional. Set to `null` or leave out to use the d
 
 The "channels" group define the number of input and output channels for the mixer. The mapping section then decides how to route the audio.
 This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value in dB, and if it should be `inverted` (true/false). A channel that has no sources will be filled with silence. The `mute` option determines if an output channel of the mixer should be muted. The `mute`, `gain` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 dB, and not inverted.
+The optional `description` property is intended for the user and is not used by CamillaDSP itself.
 
 Another example, a simple stereo to mono mixer:
 ```
@@ -1102,6 +1116,8 @@ Let's say we have an interface with one analog input, and one SPDIF. These are p
 ## Filters
 The filters section defines the filter configurations to use in the pipeline. It's enough to define each filter once even if it should be applied on several channels.
 The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
+
+All filters take an optional `description` property. This is intended for the user and is not used by CamillaDSP itself.
 
 ### Gain
 The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in dB, and a positive value means the signal will be amplified while a negative values attenuates. The gain value must be in the range -150 to +150 dB. The `mute` parameter determines if the the signal should be muted. This is optional and defaults to not mute.
@@ -1476,6 +1492,8 @@ This example implements a Biquad lowpass, but for a Biquad the Free Biquad type 
 ## Processors
 The `processors` section contains the definitions for the Processors. These are special "filters" that work on several channels at the same time. At present only one type of processor, "Compressor", has been implemented.
 
+Processors take an optional `description` property. This is intended for the user and is not used by CamillaDSP itself.
+
 ### Compressor
 The "Compressor" processor implements a standard dynamic range compressor. It is configured using the most common parameters. 
 
@@ -1530,35 +1548,43 @@ For filter steps, the channel number must exist at that point of the pipeline.
 Channels are numbered starting from zero.
 Apart from this, there are no rules for ordering of the steps or how many are added.
 
+Each step take an optional `description` property. This is intended for the user and is not used by CamillaDSP itself.
+
 Example:
 ```
 pipeline:
   - type: Mixer
+    description: "Expand to 4 channels"
     name: to4channels
     bypassed: false (*)
   - type: Filter
+    description: "Left channel woofer"
     channel: 0
     bypassed: false (*)
     names:
       - lowpass_fir
       - peak1
   - type: Filter
+    description: "Right channel woofer"
     channel: 1
     bypassed: false (*)
     names:
       - lowpass_fir
       - peak1
   - type: Filter
+    description: "Left channel tweeter"
     channel: 2
     bypassed: false (*)
     names:
       - highpass_fir
   - type: Filter
+    description: "Right channel tweeter"
     channel: 3
     bypassed: false (*)
     names:
       - highpass_fir
   - type: Processor
+    description: "Compressor for protecting the drivers"
     name: my_compressor
     bypassed: false (*)
 ```

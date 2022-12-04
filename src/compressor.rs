@@ -150,7 +150,10 @@ impl Processor for Compressor {
     fn update_parameters(&mut self, config: config::Processor) {
         // TODO remove when there is more than one type of Processor.
         #[allow(irrefutable_let_patterns)]
-        if let config::Processor::Compressor { parameters: config } = config {
+        if let config::Processor::Compressor {
+            parameters: config, ..
+        } = config
+        {
             let channels = config.channels;
             let srate = self.samplerate as PrcFmt;
             let mut monitor_channels = config.get_monitor_channels();

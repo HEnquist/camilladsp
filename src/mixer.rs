@@ -191,6 +191,7 @@ mod tests {
             mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
@@ -246,6 +247,7 @@ mod tests {
             mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
@@ -301,6 +303,7 @@ mod tests {
             mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
@@ -356,6 +359,7 @@ mod tests {
             mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
@@ -411,6 +415,7 @@ mod tests {
             mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
@@ -493,6 +498,7 @@ mod tests {
             mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
