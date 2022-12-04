@@ -9,6 +9,8 @@ New features:
 - Bluetooth capture support on Linux via Bluez.
 - Updated resampler with faster lower quality options.
 - More flexible configuration of resampler type and quality.
+- Allow setting optional config parameters to `null` to use default value.
+- Add "Dummy" convolution filter type for easier CPU load testing.
 
 ## 1.0.3
 Bugfixes:

@@ -1,4 +1,4 @@
-# CamillaDSP v1.0
+# CamillaDSP v2.0
 ![CI test and lint](https://github.com/HEnquist/camilladsp/workflows/CI%20test%20and%20lint/badge.svg)
 
 A tool to create audio processing pipelines for applications such as active crossovers or room correction. It is written in Rust to benefit from the safety and elegant handling of threading that this language provides. 
@@ -646,7 +646,7 @@ devices:
     device: "hw:Generic_1"
     format: S32LE
 ```
-Any parameter marked (*) in all examples in this section are optional. If they are left out from the configuration, their default values will be used.
+A parameter marked (*) in any example is optional. If they are left out from the configuration, or set to `null`, their default values will be used.
 
 * `samplerate`
 
@@ -948,6 +948,8 @@ Example:
     window: Hann2
     f_cutoff: null
 ```
+Note that these two ways of defining the resampler cannot be mixed.
+When using `profile` the other parameters must not be present and vice versa.
 The `f_cutoff` parameter is the relative cutoff frequency of the anti-aliasing filter.
 A value of 1.0 means the Nyquist limit. Useful values are in the range 0.9 - 0.99.
 It can also be calculated automatically by setting `f_cutoff` to `null`. 
@@ -972,9 +974,9 @@ For reference, the profiles are defined according to this table:
 |oversampling_ratio | 1024         | 1024             | 512                | 256                |
 |interpolation      | Linear       | Linear           | Quadratic          | Cubic              |
 |window             | Hann2        | Blackman2        | BlackmanHarris2    | BlackmanHarris2    |
-|f_cutoff           | 0.91 (*)     | 0.92 (*)         | 0.93 (*)           | 0.95 (*)           |
+|f_cutoff           | 0.91 (#)     | 0.92 (#)         | 0.93 (#)           | 0.95 (#)           |
 
-(*) These cutoff values are approximate. The actual values used are calculated automatically
+(#) These cutoff values are approximate. The actual values used are calculated automatically
 at runtime for the combination of sinc length and window. 
 
 ### `AsyncPoly`: Asynchronous resampling without anti-aliasing
@@ -1070,7 +1072,8 @@ mixers:
             gain: 0 (*)
             inverted: false (*)
 ```
-Parameters marked with (*) are optional. 
+Parameters marked with (*) are optional. Set to `null` or leave out to use the default value.
+
 The "channels" group define the number of input and output channels for the mixer. The mapping section then decides how to route the audio.
 This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value in dB, and if it should be `inverted` (true/false). A channel that has no sources will be filled with silence. The `mute` option determines if an output channel of the mixer should be muted. The `mute`, `gain` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 dB, and not inverted.
 
@@ -1213,11 +1216,21 @@ filters:
     parameters:
       type: Values
       values: [0.0, 0.1, 0.2, 0.3]
+```
+
+#### Dummy impulse response for testing
+
+Setting the type to `Dummy` creates a dummy impuse response:
+```
+filters:
+  lowpass_fir:
+    type: Conv
+    parameters:
+      type: Dummy
       length: 12345
 ```
-The `length` setting is optional. It is used to extend the number of coefficients past the ones given in `values`. The added coefficients are all zeroes. This is intended to provide an easy way to evaluating the CPU load for different filter lengths.
-
-For testing purposes the entire "parameters" block can be left out (or commented out with a # at the start of each line). This then becomes a dummy filter that does not affect the signal.
+This creates a dummy filter of length `length`, that consists of a single value `1.0` followed by zeroes.
+This is intended to provide an easy way to evaluating the CPU load for different filter lengths.
 
 #### Coefficients from Wav-file
 
