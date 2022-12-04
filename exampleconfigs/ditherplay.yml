@@ -2,8 +2,6 @@
 devices:
   samplerate: 44100
   chunksize: 4096
-  silence_threshold: -61
-  silence_timeout: 3.0
   capture:
     type: File
     filename: "dummy"

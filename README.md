@@ -1220,17 +1220,17 @@ filters:
 
 #### Dummy impulse response for testing
 
-Setting the type to `Dummy` creates a dummy impuse response:
+Setting the type to `Dummy` creates a dummy impulse response:
 ```
 filters:
   lowpass_fir:
     type: Conv
     parameters:
       type: Dummy
-      length: 12345
+      length: 65536
 ```
-This creates a dummy filter of length `length`, that consists of a single value `1.0` followed by zeroes.
-This is intended to provide an easy way to evaluating the CPU load for different filter lengths.
+This creates a dummy minumum-phase allpass filter of length `length` (that must be at least 1). The first point has a value of one, and all the rest are zero: `[1.0, 0.0, 0.0, ..., 0.0]`.
+This is intended to provide an easy way to evaluate the CPU load for different filter lengths.
 
 #### Coefficients from Wav-file
 

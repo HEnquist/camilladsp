@@ -679,7 +679,10 @@ pub enum ConvParameters {
     Raw(ConvParametersRaw),
     Wav(ConvParametersWav),
     Values { values: Vec<PrcFmt> },
-    Dummy { length: usize },
+    Dummy {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
+        length: usize
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
