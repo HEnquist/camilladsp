@@ -249,8 +249,8 @@ impl Filter for Loudness {
 
 /// Validate a Loudness config.
 pub fn validate_config(conf: &config::LoudnessParameters) -> Res<()> {
-    if conf.reference_level > 0.0 {
-        return Err(config::ConfigError::new("Reference level must be less than 0").into());
+    if conf.reference_level > 20.0 {
+        return Err(config::ConfigError::new("Reference level must be less than 20").into());
     } else if conf.reference_level < -100.0 {
         return Err(config::ConfigError::new("Reference level must be higher than -100").into());
     } else if conf.get_high_boost() < 0.0 {
