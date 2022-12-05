@@ -172,12 +172,7 @@ impl<'a> Dither<'a> {
                 Dither::new(name, bits, rpdf, None)
             }
             config::DitherParameters::None { bits } => {
-                // This is not as fast as a no-op, but it's faster than
-                // wrapping `ditherer` in an `Option` and checking it is set
-                // all the time. It also saves creating something like a
-                // `NoOpDitherer` for what seems to be an edge case
-                // (configuring a `Dither` filter as "None").
-                let none = <UniformDitherer as Ditherer>::new(0.0);
+                let none = <NoopDitherer as Ditherer>::new(0.0);
                 Dither::new(name, bits, none, None)
             }
         }
@@ -402,10 +397,25 @@ impl Default for GaussianDitherer {
     }
 }
 
+// No-op ditherer.
+// Cheaper than checking for an `Option` in `process_waveform()`.
+#[derive(Clone, Debug)]
+pub struct NoopDitherer;
+
+impl Ditherer for NoopDitherer {
+    fn new(_amplitude: PrcFmt) -> Self {
+        Self {}
+    }
+
+    fn sample(&mut self) -> PrcFmt {
+        0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::config::DitherParameters;
-    use crate::dither::{Dither, Ditherer, UniformDitherer};
+    use crate::dither::{Dither, Ditherer, NoopDitherer, UniformDitherer};
     use crate::filters::Filter;
     use crate::PrcFmt;
 
@@ -430,7 +440,7 @@ mod tests {
         let mut dith = Dither::new(
             "test".to_string(),
             8,
-            <UniformDitherer as Ditherer>::new(0.0),
+            <NoopDitherer as Ditherer>::new(0.0),
             None,
         );
         dith.process_waveform(&mut waveform).unwrap();
