@@ -104,6 +104,7 @@ enum WsCommand {
     GetStopReason,
     GetRateAdjust,
     GetClippedSamples,
+    ResetClippedSamples,
     GetBufferLevel,
     GetSupportedDeviceTypes,
     Exit,
@@ -308,6 +309,9 @@ enum WsReply {
     GetClippedSamples {
         result: WsResult,
         value: usize,
+    },
+    ResetClippedSamples {
+        result: WsResult,
     },
     GetSupportedDeviceTypes {
         result: WsResult,
@@ -677,6 +681,13 @@ fn handle_command(
             Some(WsReply::GetClippedSamples {
                 result: WsResult::Ok,
                 value: pbstat.clipped_samples,
+            })
+        }
+        WsCommand::ResetClippedSamples => {
+            let mut pbstat = shared_data_inst.playback_status.write().unwrap();
+            pbstat.clipped_samples = 0;
+            Some(WsReply::ResetClippedSamples {
+                result: WsResult::Ok,
             })
         }
         WsCommand::GetBufferLevel => {
