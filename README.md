@@ -1068,27 +1068,31 @@ mixers:
           - channel: 0
             gain: 0 (*)
             inverted: false (*)
+            scale: dB (*)
       - dest: 1
         mute: false (*)
         sources:
           - channel: 1
             gain: 0 (*)
             inverted: false (*)
+            scale: dB (*)
       - dest: 2
         sources:
           - channel: 0
             gain: 0 (*)
             inverted: false (*)
+            scale: dB (*)
       - dest: 3
         sources:
           - channel: 1
             gain: 0 (*)
             inverted: false (*)
+            scale: dB (*)
 ```
 Parameters marked with (*) are optional. Set to `null` or leave out to use the default value.
 
 The "channels" group define the number of input and output channels for the mixer. The mapping section then decides how to route the audio.
-This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value in dB, and if it should be `inverted` (true/false). A channel that has no sources will be filled with silence. The `mute` option determines if an output channel of the mixer should be muted. The `mute`, `gain` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 dB, and not inverted.
+This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value, a `scale` for the gain (`dB` or `linear`) and if it should be `inverted` (`true`/`false`). A channel that has no sources will be filled with silence. The `mute` option determines if an output channel of the mixer should be muted. The `mute`, `gain`, `scale` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 in dB, and not inverted.
 The optional `description` property is intended for the user and is not used by CamillaDSP itself.
 
 Another example, a simple stereo to mono mixer:
@@ -1120,17 +1124,32 @@ The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv f
 All filters take an optional `description` property. This is intended for the user and is not used by CamillaDSP itself.
 
 ### Gain
-The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in dB, and a positive value means the signal will be amplified while a negative values attenuates. The gain value must be in the range -150 to +150 dB. The `mute` parameter determines if the the signal should be muted. This is optional and defaults to not mute.
+The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in either dB or as a linear factor, depending on the `scale` parameter. This can be set to `dB` or `linear`. If set to `null` or left out it defaults to dB.
+
+When the dB scale is used (`scale: dB`), a positive gain value means the signal will be amplified while a negative values attenuates. The gain value must be in the range -150 to +150 dB.
+
+If linear gain is used (`scale: linear`), the gain value is treated as a simple multiplication factor. A factor 0.5 attenuates by a factor two (equivalent to a gain of -6.02 dB). A negative value inverts the signal. Note that the `invert` setting also inverts, so a gain of -0.5 with invert set to true becomes inverted twice and the result is non-inverted.
+The linear gain is limited to a range of -10.0 to +10.0.
+
+The `mute` parameter determines if the the signal should be muted. This is optional and defaults to not mute.
 
 Example Gain filter:
 ```
 filters:
-  gainexample:
+  gainexample_dB:
     type: Gain
     parameters:
-      gain: -6.0 
-      inverted: false
+      gain: -6.0
+      inverted: false (*)
       mute: false (*)
+      scale: dB (*)
+  gainexample_linear:
+    type: Gain
+    parameters:
+      gain: 0.5
+      inverted: false (*)
+      mute: false (*)
+      scale: linear (*)
 ```
 
 ### Volume
@@ -1168,7 +1187,7 @@ filters:
       low_boost: 7.0
 ```
 Allowed ranges:
-- reference_level: -100 to 0
+- reference_level: -100 to +20
 - high_boost: 0 to 20
 - low_boost: 0 to 20
 

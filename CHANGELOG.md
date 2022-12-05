@@ -12,6 +12,8 @@ New features:
 - Allow setting optional config parameters to `null` to use default value.
 - Add "Dummy" convolution filter type for easier CPU load testing.
 - Add title and description fields to various parts of the config.
+- Gain can be specified in dB or linear scale.
+- Websocket command to reset clipped samples counter.
 
 ## 1.0.3
 Bugfixes:

@@ -489,8 +489,6 @@ impl PlaybackDeviceCA {
 #[serde(deny_unknown_fields)]
 pub struct Devices {
     pub samplerate: usize,
-    // alias to allow old name buffersize
-    #[serde(alias = "buffersize")]
     pub chunksize: usize,
     #[serde(default)]
     pub queuelimit: Option<usize>,
@@ -941,6 +939,16 @@ pub struct GainParameters {
     pub inverted: Option<bool>,
     #[serde(default)]
     pub mute: Option<bool>,
+    #[serde(default)]
+    pub scale: Option<GainScale>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum GainScale {
+    #[serde(rename = "linear")]
+    Linear,
+    #[serde(rename = "dB")]
+    Decibel,
 }
 
 impl GainParameters {
@@ -950,6 +958,10 @@ impl GainParameters {
 
     pub fn get_mute(&self) -> bool {
         self.mute.unwrap_or_default()
+    }
+
+    pub fn get_scale(&self) -> GainScale {
+        self.scale.unwrap_or(GainScale::Decibel)
     }
 }
 
@@ -1037,6 +1049,8 @@ pub struct MixerSource {
     pub inverted: Option<bool>,
     #[serde(default)]
     pub mute: Option<bool>,
+    #[serde(default)]
+    pub scale: Option<GainScale>,
 }
 
 impl MixerSource {
@@ -1050,6 +1064,10 @@ impl MixerSource {
 
     pub fn get_mute(&self) -> bool {
         self.mute.unwrap_or_default()
+    }
+
+    pub fn get_scale(&self) -> GainScale {
+        self.scale.unwrap_or(GainScale::Decibel)
     }
 }
 

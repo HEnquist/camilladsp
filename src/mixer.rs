@@ -17,6 +17,18 @@ pub struct MixerSource {
     pub gain: PrcFmt,
 }
 
+fn calculate_gain(gain_value: PrcFmt, inverted: bool, linear: bool) -> PrcFmt {
+    let mut gain = if linear {
+        gain_value
+    } else {
+        (10.0 as PrcFmt).powf(gain_value / 20.0)
+    };
+    if inverted {
+        gain = -gain;
+    }
+    gain
+}
+
 impl Mixer {
     /// Creates a Mixer from a config struct
     pub fn from_config(name: String, config: config::Mixer) -> Self {
@@ -28,11 +40,10 @@ impl Mixer {
                 let dest = cfg_mapping.dest;
                 for cfg_src in cfg_mapping.sources {
                     if !cfg_src.get_mute() {
-                        let mut gain: PrcFmt = 10.0;
-                        gain = gain.powf(cfg_src.get_gain() / 20.0);
-                        if cfg_src.get_inverted() {
-                            gain = -gain;
-                        }
+                        let gain_value = cfg_src.get_gain();
+                        let inverted = cfg_src.get_inverted();
+                        let linear = cfg_src.get_scale() == config::GainScale::Linear;
+                        let gain = calculate_gain(gain_value, inverted, linear);
                         let src = MixerSource {
                             channel: cfg_src.channel,
                             gain,
@@ -57,11 +68,10 @@ impl Mixer {
         for cfg_mapping in config.mapping {
             let dest = cfg_mapping.dest;
             for cfg_src in cfg_mapping.sources {
-                let mut gain: PrcFmt = 10.0;
-                gain = gain.powf(cfg_src.get_gain() / 20.0);
-                if cfg_src.get_inverted() {
-                    gain = -gain;
-                }
+                let gain_value = cfg_src.get_gain();
+                let inverted = cfg_src.get_inverted();
+                let linear = cfg_src.get_scale() == config::GainScale::Linear;
+                let gain = calculate_gain(gain_value, inverted, linear);
                 let src = MixerSource {
                     channel: cfg_src.channel,
                     gain,
@@ -151,24 +161,28 @@ mod tests {
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,
@@ -207,24 +221,28 @@ mod tests {
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 1,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,
@@ -263,24 +281,28 @@ mod tests {
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(true),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(true),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,
@@ -319,24 +341,28 @@ mod tests {
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
             gain: Some(-3.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,
@@ -375,24 +401,28 @@ mod tests {
             gain: Some(0.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
             gain: Some(0.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
             gain: Some(0.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
             gain: Some(0.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,
@@ -458,24 +488,28 @@ mod tests {
             gain: Some(0.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
             gain: Some(0.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
             gain: Some(0.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
             gain: Some(0.0),
             inverted: Some(false),
             mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,

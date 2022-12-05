@@ -196,17 +196,25 @@ impl Filter for Volume {
     }
 }
 
+fn calculate_gain(gain_value: PrcFmt, inverted: bool, mute: bool, linear: bool) -> PrcFmt {
+    let mut gain = if linear {
+        gain_value
+    } else {
+        (10.0 as PrcFmt).powf(gain_value / 20.0)
+    };
+    if inverted {
+        gain = -gain;
+    }
+    if mute {
+        gain = 0.0;
+    }
+    gain
+}
+
 impl Gain {
     /// A simple filter providing gain in dB, and can also invert the signal.
-    pub fn new(name: String, gain_db: PrcFmt, inverted: bool, mute: bool) -> Self {
-        let mut gain: PrcFmt = 10.0;
-        gain = gain.powf(gain_db / 20.0);
-        if inverted {
-            gain = -gain;
-        }
-        if mute {
-            gain = 0.0;
-        }
+    pub fn new(name: String, gain_value: PrcFmt, inverted: bool, mute: bool, linear: bool) -> Self {
+        let gain = calculate_gain(gain_value, inverted, mute, linear);
         Gain { name, gain }
     }
 
@@ -214,7 +222,8 @@ impl Gain {
         let gain = conf.gain;
         let inverted = conf.get_inverted();
         let mute = conf.get_mute();
-        Gain::new(name, gain, inverted, mute)
+        let linear = conf.get_scale() == config::GainScale::Linear;
+        Gain::new(name, gain, inverted, mute, linear)
     }
 }
 
@@ -235,16 +244,11 @@ impl Filter for Gain {
             parameters: conf, ..
         } = conf
         {
-            let gain_db = conf.gain;
+            let gain_value = conf.gain;
             let inverted = conf.get_inverted();
-            let mut gain: PrcFmt = 10.0;
-            gain = gain.powf(gain_db / 20.0);
-            if inverted {
-                gain = -gain;
-            }
-            if conf.get_mute() {
-                gain = 0.0;
-            }
+            let mute = conf.get_mute();
+            let linear = conf.get_scale() == config::GainScale::Linear;
+            let gain = calculate_gain(gain_value, inverted, mute, linear);
             self.gain = gain;
         } else {
             // This should never happen unless there is a bug somewhere else
@@ -371,10 +375,16 @@ pub fn validate_volume_config(conf: &config::VolumeParameters) -> Res<()> {
 
 /// Validate a Gain config.
 pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
-    if conf.gain < -150.0 {
-        return Err(config::ConfigError::new("Gain must be larger than -150 dB").into());
-    } else if conf.gain > 150.0 {
-        return Err(config::ConfigError::new("Gain must be less than +150 dB").into());
+    if conf.get_scale() == config::GainScale::Decibel {
+        if conf.gain < -150.0 {
+            return Err(config::ConfigError::new("Gain must be larger than -150 dB").into());
+        } else if conf.gain > 150.0 {
+            return Err(config::ConfigError::new("Gain must be less than +150 dB").into());
+        }
+    } else if conf.gain < -10.0 {
+        return Err(config::ConfigError::new("Linear gain must be larger than -10.0").into());
+    } else if conf.gain > 10.0 {
+        return Err(config::ConfigError::new("Linear gain must be less than +10.0").into());
     }
     Ok(())
 }
@@ -402,7 +412,7 @@ mod tests {
     fn gain_invert() {
         let mut waveform = vec![-0.5, 0.0, 0.5];
         let waveform_inv = vec![0.5, 0.0, -0.5];
-        let mut gain = Gain::new("test".to_string(), 0.0, true, false);
+        let mut gain = Gain::new("test".to_string(), 0.0, true, false, false);
         gain.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_inv);
     }
@@ -411,7 +421,7 @@ mod tests {
     fn gain_ampl() {
         let mut waveform = vec![-0.5, 0.0, 0.5];
         let waveform_ampl = vec![-5.0, 0.0, 5.0];
-        let mut gain = Gain::new("test".to_string(), 20.0, false, false);
+        let mut gain = Gain::new("test".to_string(), 20.0, false, false, false);
         gain.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_ampl);
     }
