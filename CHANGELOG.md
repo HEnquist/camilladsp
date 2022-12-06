@@ -24,6 +24,7 @@ New features:
 Changes:
 - Optimize dithering cpu load.
 - Simple dithering now implements a Wannamaker high passed triangular dither.
+- Higher Shibata dither precision.
 
 Bugfixes:
 - Make Uniform dithering actually uniform instead of triangular.
