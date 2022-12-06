@@ -1,5 +1,6 @@
 use std::sync::{Arc, RwLock};
 
+use crate::audiodevice::AudioChunk;
 use crate::biquad::{Biquad, BiquadCoefficients};
 use crate::config;
 use crate::fifoqueue::FifoQueue;
@@ -112,14 +113,8 @@ impl Volume {
             })
             .collect()
     }
-}
 
-impl Filter for Volume {
-    fn name(&self) -> String {
-        self.name.clone()
-    }
-
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn prepare_processing(&mut self) {
         let shared_vol = self.processing_status.read().unwrap().volume;
         let shared_mute = self.processing_status.read().unwrap().mute;
 
@@ -157,6 +152,45 @@ impl Filter for Volume {
             };
             self.mute = shared_mute;
         }
+    }
+
+    pub fn process_chunk(&mut self, chunk: &mut AudioChunk) {
+        self.prepare_processing();
+
+        // Not in a ramp
+        if self.ramp_step == 0 {
+            for waveform in chunk.waveforms.iter_mut() {
+                for item in waveform.iter_mut() {
+                    *item *= self.target_linear_gain;
+                }
+            }
+        }
+        // Ramping
+        else if self.ramp_step <= self.ramptime_in_chunks {
+            trace!("ramp step {}", self.ramp_step);
+            let ramp = self.make_ramp();
+            self.ramp_step += 1;
+            if self.ramp_step > self.ramptime_in_chunks {
+                // Last step of ramp
+                self.ramp_step = 0;
+            }
+            for waveform in chunk.waveforms.iter_mut() {
+                for (item, stepgain) in waveform.iter_mut().zip(ramp.iter()) {
+                    *item *= *stepgain;
+                }
+            }
+            self.current_volume = 20.0 * ramp.last().unwrap().log10();
+        }
+    }
+}
+
+impl Filter for Volume {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+        self.prepare_processing();
 
         // Not in a ramp
         if self.ramp_step == 0 {

@@ -452,6 +452,7 @@ pub enum PipelineStep {
 
 pub struct Pipeline {
     steps: Vec<PipelineStep>,
+    volume: basicfilters::Volume,
 }
 
 impl Pipeline {
@@ -503,7 +504,18 @@ impl Pipeline {
                 }
             }
         }
-        Pipeline { steps }
+        let current_volume = processing_status.read().unwrap().volume;
+        let mute = processing_status.read().unwrap().mute;
+        let volume = basicfilters::Volume::new(
+            "default".to_string(),
+            400.0,
+            current_volume,
+            mute,
+            conf.devices.chunksize,
+            conf.devices.samplerate,
+            processing_status,
+        );
+        Pipeline { steps, volume }
     }
 
     pub fn update_parameters(
@@ -537,6 +549,7 @@ impl Pipeline {
 
     /// Process an AudioChunk by calling either a MixerStep or a FilterStep
     pub fn process_chunk(&mut self, mut chunk: AudioChunk) -> AudioChunk {
+        self.volume.process_chunk(&mut chunk);
         for mut step in &mut self.steps {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {
