@@ -56,10 +56,31 @@ impl<'a> Dither<'a> {
                 let hp_tpdf = HighPassDitherer::default();
                 Dither::new(name, bits, hp_tpdf, None)
             }
+            config::DitherParameters::FweightedShort441 { bits } => {
+                // F-weighted noise power: -10.47 dB
+                // unweighted noise power:   6.64 dB
+                let tpdf = TriangularDitherer::default();
+                let filter = vec![1.623, -0.982, 0.109];
+                Dither::new(name, bits, tpdf, Some(filter))
+            }
             config::DitherParameters::Fweighted441 { bits } => {
+                // F-weighted noise power: -16.80 dB
+                // unweighted noise power:  18.40 dB
                 let tpdf = TriangularDitherer::default();
                 let filter = vec![
                     2.412, -3.370, 3.937, -4.174, 3.353, -2.205, 1.281, -0.569, 0.0847,
+                ];
+                Dither::new(name, bits, tpdf, Some(filter))
+            }
+            config::DitherParameters::FweightedLong441 { bits } => {
+                // F-weighted noise power: -16.7 dB
+                // unweighted noise power:  17.3 dB
+                let tpdf = TriangularDitherer::default();
+                let filter = vec![
+                    2.391510, -3.284444, 3.679506, -3.635044, 2.524185, -1.146701, 0.115354,
+                    0.513745, -0.749277, 0.512386, -0.749277, 0.512386, -0.188997, -0.043705,
+                    0.149843, -0.151186, 0.076302, -0.012070, -0.021127, 0.025232, -0.016121,
+                    0.004453, 0.000876, -0.001799, 0.000774, -0.000128,
                 ];
                 Dither::new(name, bits, tpdf, Some(filter))
             }
@@ -68,8 +89,19 @@ impl<'a> Dither<'a> {
                 Dither::new(name, bits, gpdf, None)
             }
             config::DitherParameters::Lipshitz441 { bits } => {
+                // E-weighted noise power: -14.34 dB
+                // unweighted noise power:  12.19 dB
                 let tpdf = TriangularDitherer::default();
                 let filter = vec![2.033, -2.165, 1.959, -1.590, 0.6149];
+                Dither::new(name, bits, tpdf, Some(filter))
+            }
+            config::DitherParameters::LipshitzLong441 { bits } => {
+                // E-weighted noise power: -18.32 dB
+                // unweighted noise power:  23.10 dB
+                let tpdf = TriangularDitherer::default();
+                let filter = vec![
+                    2.847, -4.685, 6.214, -7.184, 6.639, -5.032, 3.263, -1.632, 0.4191,
+                ];
                 Dither::new(name, bits, tpdf, Some(filter))
             }
             config::DitherParameters::Shibata441 { bits } => {
@@ -231,17 +263,20 @@ impl<'a> Filter for Dither<'a> {
 /// Validate a Dither config.
 pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
     let bits = match conf {
-        config::DitherParameters::Simple { bits } => bits,
-        config::DitherParameters::Fweighted441 { bits } => bits,
-        config::DitherParameters::Gaussian { bits, .. } => bits,
-        config::DitherParameters::Lipshitz441 { bits } => bits,
-        config::DitherParameters::Shibata441 { bits } => bits,
-        config::DitherParameters::Shibata48 { bits } => bits,
-        config::DitherParameters::ShibataLow441 { bits } => bits,
-        config::DitherParameters::ShibataLow48 { bits } => bits,
-        config::DitherParameters::Triangular { bits, .. } => bits,
-        config::DitherParameters::Uniform { bits, .. } => bits,
-        config::DitherParameters::None { bits } => bits,
+        config::DitherParameters::Simple { bits }
+        | config::DitherParameters::FweightedShort441 { bits }
+        | config::DitherParameters::Fweighted441 { bits }
+        | config::DitherParameters::FweightedLong441 { bits }
+        | config::DitherParameters::Lipshitz441 { bits }
+        | config::DitherParameters::LipshitzLong441 { bits }
+        | config::DitherParameters::Shibata441 { bits }
+        | config::DitherParameters::Shibata48 { bits }
+        | config::DitherParameters::ShibataLow441 { bits }
+        | config::DitherParameters::ShibataLow48 { bits }
+        | config::DitherParameters::Gaussian { bits, .. }
+        | config::DitherParameters::Triangular { bits, .. }
+        | config::DitherParameters::Uniform { bits, .. }
+        | config::DitherParameters::None { bits } => bits,
     };
     if *bits <= 1 {
         return Err(config::ConfigError::new("Dither bit depth must be at least 2").into());
@@ -342,7 +377,7 @@ impl Default for TriangularDitherer {
 #[derive(Clone, Debug)]
 pub struct HighPassDitherer {
     ditherer: UniformDitherer,
-    previous_noise: PrcFmt,
+    previous_sample: PrcFmt,
 }
 
 impl Ditherer for HighPassDitherer {
@@ -350,15 +385,15 @@ impl Ditherer for HighPassDitherer {
         Self {
             // 2x RDPF sample (current - previous) makes 1x TDPF
             ditherer: <UniformDitherer as Ditherer>::new(amplitude / 2.0),
-            previous_noise: 0.0,
+            previous_sample: 0.0,
         }
     }
 
     fn sample(&mut self) -> PrcFmt {
-        let new_noise = self.ditherer.sample();
-        let high_passed_noise = new_noise - self.previous_noise;
-        self.previous_noise = new_noise;
-        high_passed_noise
+        let new_sample = self.ditherer.sample();
+        let high_passed_sample = new_sample - self.previous_sample;
+        self.previous_sample = new_sample;
+        high_passed_sample
     }
 }
 
