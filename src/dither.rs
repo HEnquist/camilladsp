@@ -32,7 +32,7 @@ impl<'a> Dither<'a> {
         let scalefact = PrcFmt::new(2.0).powi((bits - 1) as i32);
         let ditherer = Box::new(ditherer);
 
-        // noise shaping
+        // coefficients and buffer for noise shaping filter
         let filter = filter.unwrap_or_default();
         let filterlen = filter.len();
         let buffer = vec![0.0; filterlen];
@@ -49,7 +49,7 @@ impl<'a> Dither<'a> {
         }
     }
 
-    // Some filters borrowed from SOX: http://sox.sourceforge.net/SoX/NoiseShaping
+    // Some filters borrowed from SoX: http://sox.sourceforge.net/SoX/NoiseShaping
     pub fn from_config(name: String, conf: config::DitherParameters) -> Self {
         match conf {
             config::DitherParameters::Simple { bits } => {
@@ -341,8 +341,8 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
     Ok(())
 }
 
-// Adopted from librespot, with permission:
-// Ditherer, TriangularDitherer, HighPassDitherer.
+// Ditherer, GaussianDitherer, TriangularDitherer, HighPassDitherer adopted
+// from librespot, which is licensed under MIT. Used with permission.
 pub trait Ditherer {
     // `amplitude` in bits
     fn new(amplitude: PrcFmt) -> Self
@@ -352,6 +352,8 @@ pub trait Ditherer {
     fn sample(&mut self) -> PrcFmt;
 }
 
+// Deterministic and not cryptographically secure,
+// but fast and with excellent randomness.
 fn create_rng() -> SmallRng {
     SmallRng::from_entropy()
 }
@@ -418,6 +420,7 @@ impl Default for TriangularDitherer {
 // Preferable in audio since it is less audible than spectrally-white TPDF
 // dither. Furthermore, it is more computationally efficient since it requires
 // the calculation of only one new RPDF random number per sampling period.
+// This produces violet noise.
 #[derive(Clone, Debug)]
 pub struct HighPassDitherer {
     ditherer: UniformDitherer,
