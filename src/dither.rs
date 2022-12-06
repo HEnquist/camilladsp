@@ -257,9 +257,11 @@ impl<'a> Filter for Dither<'a> {
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        if self.filterlen > 0 {
-            for item in waveform.iter_mut() {
-                let scaled = *item * self.scalefact;
+        for item in waveform.iter_mut() {
+            let scaled = *item * self.scalefact;
+            let dither = self.ditherer.sample();
+
+            let result_r = if self.filterlen > 0 {
                 let mut filt_buf = 0.0;
                 for (n, coeff) in self.filter.iter().enumerate() {
                     filt_buf += coeff * self.buffer[(n + self.idx) % self.filterlen];
@@ -270,17 +272,16 @@ impl<'a> Filter for Dither<'a> {
                     self.idx = self.filterlen - 1;
                 }
                 let scaled_plus_err = scaled + filt_buf;
-                let result = scaled_plus_err + self.ditherer.sample();
-
+                let result = scaled_plus_err + dither;
                 let result_r = result.round();
                 self.buffer[self.idx] = scaled_plus_err - result_r;
-                *item = result_r / self.scalefact;
-            }
-        } else {
-            for item in waveform.iter_mut() {
-                let scaled = *item * self.scalefact + self.ditherer.sample();
-                *item = scaled.round() / self.scalefact;
-            }
+                result_r
+            } else {
+                let result = scaled + dither;
+                result.round()
+            };
+
+            *item = result_r / self.scalefact;
         }
 
         Ok(())
