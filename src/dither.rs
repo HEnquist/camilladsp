@@ -84,9 +84,19 @@ impl<'a> Dither<'a> {
                 ];
                 Dither::new(name, bits, tpdf, Some(filter))
             }
-            config::DitherParameters::Gaussian { bits, amplitude } => {
-                let gpdf = <GaussianDitherer as Ditherer>::new(amplitude);
-                Dither::new(name, bits, gpdf, None)
+            config::DitherParameters::Gesemann441 { bits } => {
+                let tpdf = TriangularDitherer::default();
+                let filter = vec![
+                    2.2061, -0.4706, -0.2534, -0.6214, 1.0587, 0.0676, -0.6054, -0.2738,
+                ];
+                Dither::new(name, bits, tpdf, Some(filter))
+            }
+            config::DitherParameters::Gesemann48 { bits } => {
+                let tpdf = TriangularDitherer::default();
+                let filter = vec![
+                    2.2374, -0.7339, -0.1251, -0.6033, 0.903, 0.0116, -0.5853, -0.2571,
+                ];
+                Dither::new(name, bits, tpdf, Some(filter))
             }
             config::DitherParameters::Lipshitz441 { bits } => {
                 // E-weighted noise power: -14.34 dB
@@ -195,6 +205,10 @@ impl<'a> Dither<'a> {
                 ];
                 Dither::new(name, bits, tpdf, Some(filter))
             }
+            config::DitherParameters::Gaussian { bits, amplitude } => {
+                let gpdf = <GaussianDitherer as Ditherer>::new(amplitude);
+                Dither::new(name, bits, gpdf, None)
+            }
             config::DitherParameters::Triangular { bits, amplitude } => {
                 let tpdf = <TriangularDitherer as Ditherer>::new(amplitude);
                 Dither::new(name, bits, tpdf, None)
@@ -267,6 +281,8 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
         | config::DitherParameters::FweightedShort441 { bits }
         | config::DitherParameters::Fweighted441 { bits }
         | config::DitherParameters::FweightedLong441 { bits }
+        | config::DitherParameters::Gesemann441 { bits }
+        | config::DitherParameters::Gesemann48 { bits }
         | config::DitherParameters::Lipshitz441 { bits }
         | config::DitherParameters::LipshitzLong441 { bits }
         | config::DitherParameters::Shibata441 { bits }

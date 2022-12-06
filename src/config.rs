@@ -1022,6 +1022,8 @@ pub enum DitherParameters {
     FweightedShort441 { bits: usize },
     Fweighted441 { bits: usize },
     FweightedLong441 { bits: usize },
+    Gesemann441 { bits: usize },
+    Gesemann48 { bits: usize },
     Lipshitz441 { bits: usize },
     LipshitzLong441 { bits: usize },
     Shibata441 { bits: usize },
