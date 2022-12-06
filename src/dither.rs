@@ -162,6 +162,32 @@ impl<'a> Dither<'a> {
                 ];
                 Dither::new(name, bits, tpdf, Some(filter))
             }
+            config::DitherParameters::ShibataHigh441 { bits } => {
+                let tpdf = TriangularDitherer::default();
+                let filter = vec![
+                    3.025_918_960_571_289,
+                    -6.026_871_681_213_379,
+                    9.195_003_509_521_484,
+                    -11.824_929_237_365_723,
+                    12.767_142_295_837_402,
+                    -11.917_946_815_490_723,
+                    9.173_916_816_711_426,
+                    -5.371_232_032_775_879,
+                    1.139_362_454_414_367_7,
+                    2.448_477_983_474_731_4,
+                    -4.971_983_909_606_934,
+                    6.039_200_305_938_721,
+                    -5.935_952_186_584_473,
+                    4.903_278_350_830_078,
+                    -3.552_744_388_580_322_3,
+                    2.190_969_705_581_665,
+                    -1.167_238_950_729_370_1,
+                    0.490_391_433_238_983_15,
+                    -0.165_197_908_878_326_42,
+                    0.023_217_858_746_647_835,
+                ];
+                Dither::new(name, bits, tpdf, Some(filter))
+            }
             config::DitherParameters::ShibataLow441 { bits } => {
                 let tpdf = TriangularDitherer::default();
                 let filter = vec![
@@ -287,6 +313,7 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
         | config::DitherParameters::LipshitzLong441 { bits }
         | config::DitherParameters::Shibata441 { bits }
         | config::DitherParameters::Shibata48 { bits }
+        | config::DitherParameters::ShibataHigh441 { bits }
         | config::DitherParameters::ShibataLow441 { bits }
         | config::DitherParameters::ShibataLow48 { bits }
         | config::DitherParameters::Gaussian { bits, .. }

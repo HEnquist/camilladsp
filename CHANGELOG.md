@@ -20,6 +20,7 @@ New features:
 - Add Triangular, Gaussian and Gesemann dithers.
 - Add Short and Long variants of Fweighted441 dithers.
 - Add Long variant of Lipshitz441 dither.
+- Add High variant of Shibata441 dither.
 
 Changes:
 - Optimize dithering cpu load.

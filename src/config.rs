@@ -1028,6 +1028,7 @@ pub enum DitherParameters {
     LipshitzLong441 { bits: usize },
     Shibata441 { bits: usize },
     Shibata48 { bits: usize },
+    ShibataHigh441 { bits: usize },
     ShibataLow441 { bits: usize },
     ShibataLow48 { bits: usize },
 
