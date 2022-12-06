@@ -1019,18 +1019,25 @@ pub enum DitherParameters {
     Simple { bits: usize },
 
     // noise shaping dithers; use triangular internally
-    FweightedShort441 { bits: usize },
     Fweighted441 { bits: usize },
     FweightedLong441 { bits: usize },
+    FweightedShort441 { bits: usize },
     Gesemann441 { bits: usize },
     Gesemann48 { bits: usize },
     Lipshitz441 { bits: usize },
     LipshitzLong441 { bits: usize },
     Shibata441 { bits: usize },
-    Shibata48 { bits: usize },
     ShibataHigh441 { bits: usize },
     ShibataLow441 { bits: usize },
+    Shibata48 { bits: usize },
+    ShibataHigh48 { bits: usize },
     ShibataLow48 { bits: usize },
+    Shibata882 { bits: usize },
+    ShibataLow882 { bits: usize },
+    Shibata96 { bits: usize },
+    ShibataLow96 { bits: usize },
+    Shibata192 { bits: usize },
+    ShibataLow192 { bits: usize },
 
     // PDF dithers
     Gaussian { bits: usize, amplitude: PrcFmt },
