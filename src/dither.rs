@@ -273,11 +273,7 @@ mod tests {
         let waveform2 = waveform.clone();
         let mut dith = Dither::new("test".to_string(), 8, Vec::new(), 0.0);
         dith.process_waveform(&mut waveform).unwrap();
-        assert!(compare_waveforms(
-            waveform.clone(),
-            waveform2.clone(),
-            1.0 / 128.0
-        ));
+        assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 128.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
             128.0 * waveform[2],
@@ -291,11 +287,7 @@ mod tests {
         let waveform2 = waveform.clone();
         let mut dith = Dither::new("test".to_string(), 8, Vec::new(), 1.0);
         dith.process_waveform(&mut waveform).unwrap();
-        assert!(compare_waveforms(
-            waveform.clone(),
-            waveform2.clone(),
-            1.0 / 64.0
-        ));
+        assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 64.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
             128.0 * waveform[2],
@@ -310,11 +302,7 @@ mod tests {
         let conf = DitherParameters::Simple { bits: 8 };
         let mut dith = Dither::from_config("test".to_string(), conf);
         dith.process_waveform(&mut waveform).unwrap();
-        assert!(compare_waveforms(
-            waveform.clone(),
-            waveform2.clone(),
-            1.0 / 32.0
-        ));
+        assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 32.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
             128.0 * waveform[2],
@@ -329,11 +317,7 @@ mod tests {
         let conf = DitherParameters::Lipshitz441 { bits: 8 };
         let mut dith = Dither::from_config("test".to_string(), conf);
         dith.process_waveform(&mut waveform).unwrap();
-        assert!(compare_waveforms(
-            waveform.clone(),
-            waveform2.clone(),
-            1.0 / 16.0
-        ));
+        assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 16.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
             128.0 * waveform[2],

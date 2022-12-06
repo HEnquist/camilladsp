@@ -385,13 +385,13 @@ mod tests {
     #[test]
     fn stopwatch_as_timer() {
         let mut t = Stopwatch::new();
-        assert_eq!(t.larger_than_millis(8), false);
+        assert!(!t.larger_than_millis(8));
         spinsleep(5);
-        assert_eq!(t.larger_than_millis(8), false);
+        assert!(!t.larger_than_millis(8));
         spinsleep(5);
-        assert_eq!(t.larger_than_millis(8), true);
+        assert!(t.larger_than_millis(8));
         t.restart();
-        assert_eq!(t.larger_than_millis(8), false);
+        assert!(!t.larger_than_millis(8));
     }
 
     #[test]
@@ -493,22 +493,22 @@ mod tests {
         let mut watcher = ValueWatcher::new(48000.0, 0.05, limit_nbr);
         for n in 0..10 {
             let val = 48000.0 * (1.0 + 0.004 * n as f32);
-            assert_eq!(watcher.check_value(val), false);
+            assert!(!watcher.check_value(val));
             let val = 48000.0 * (1.0 - 0.004 * n as f32);
-            assert_eq!(watcher.check_value(val), false);
+            assert!(!watcher.check_value(val));
         }
         for _ in 0..limit_nbr {
-            assert_eq!(watcher.check_value(44100.0), false);
+            assert!(!watcher.check_value(44100.0));
         }
         for _ in 0..5 {
-            assert_eq!(watcher.check_value(44100.0), true);
+            assert!(watcher.check_value(44100.0));
         }
-        assert_eq!(watcher.check_value(48000.0), false);
+        assert!(!watcher.check_value(48000.0));
         for _ in 0..limit_nbr {
-            assert_eq!(watcher.check_value(88200.0), false);
+            assert!(!watcher.check_value(88200.0));
         }
         for _ in 0..5 {
-            assert_eq!(watcher.check_value(88200.0), true);
+            assert!(watcher.check_value(88200.0));
         }
     }
 

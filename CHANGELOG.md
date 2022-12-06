@@ -9,6 +9,7 @@ New features:
 - Bluetooth capture support on Linux via Bluez.
 - Updated resampler with faster lower quality options.
 - Separate config options for resampler type and quality.
+- Higher precision of biquad filters.
 
 ## 1.0.3
 Bugfixes:
