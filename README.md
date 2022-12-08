@@ -1522,6 +1522,8 @@ Some comparisons between the noise shapers are available from [SoX](http://sox.s
 
 For sample rates above 48 kHz there is no need for anything more advanced than the "HighPass" subtype. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20 kHz up to 48 or 96 kHz where the noise can be placed without issues. The HighPass ditherer will place almost all of it there. Of course, the high-resolution Shibata filters provide some icing on the cake.
 
+Selecting a noise shaping ditherer for a different sample rate than it was designed for, will cause the frequency response curve of the noise shaper to be fitted to the playback rate. This means that the curve no longer matches its design points to be minimally audible. You may experiment which shaper still sounds good, or use the Flat or HighPass subtypes which work well at any sample rate.
+
 Example:
 ```
   dither_fancy:
