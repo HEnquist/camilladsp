@@ -504,8 +504,8 @@ impl Pipeline {
                 }
             }
         }
-        let current_volume = processing_status.read().unwrap().volume;
-        let mute = processing_status.read().unwrap().mute;
+        let current_volume = processing_status.read().unwrap().target_volume[0];
+        let mute = processing_status.read().unwrap().mute[0];
         let volume = basicfilters::Volume::new(
             "default".to_string(),
             400.0,
@@ -514,6 +514,7 @@ impl Pipeline {
             conf.devices.chunksize,
             conf.devices.samplerate,
             processing_status,
+            0,
         );
         Pipeline { steps, volume }
     }

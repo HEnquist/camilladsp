@@ -25,6 +25,7 @@ pub struct Loudness {
     low_boost: f32,
     high_biquad: biquad::Biquad,
     low_biquad: biquad::Biquad,
+    control: usize,
 }
 
 fn get_rel_boost(level: f32, reference: f32) -> f32 {
@@ -40,8 +41,9 @@ impl Loudness {
         samplerate: usize,
         processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
-        let current_volume = processing_status.read().unwrap().volume;
-        let mute = processing_status.read().unwrap().mute;
+        let control = conf.get_control();
+        let current_volume = processing_status.read().unwrap().target_volume[control];
+        let mute = processing_status.read().unwrap().mute[control];
         let current_volume_with_mute = if mute { -100.0 } else { current_volume };
         let target_linear_gain = if mute {
             0.0
@@ -86,6 +88,7 @@ impl Loudness {
             samplerate,
             chunksize,
             processing_status,
+            control,
         }
     }
 
@@ -118,8 +121,8 @@ impl Filter for Loudness {
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        let shared_vol = self.processing_status.read().unwrap().volume;
-        let shared_mute = self.processing_status.read().unwrap().mute;
+        let shared_vol = self.processing_status.read().unwrap().target_volume[self.control];
+        let shared_mute = self.processing_status.read().unwrap().mute[self.control];
 
         // Volume setting changed
         if (shared_vol - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
@@ -213,10 +216,11 @@ impl Filter for Loudness {
             parameters: conf, ..
         } = conf
         {
+            self.control = conf.get_control();
             self.ramptime_in_chunks = (conf.get_ramp_time()
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
-            let current_volume = self.processing_status.read().unwrap().volume;
+            let current_volume = self.processing_status.read().unwrap().target_volume[self.control];
             let relboost = get_rel_boost(current_volume, conf.reference_level);
             let highshelf_conf =
                 config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {

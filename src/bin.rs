@@ -806,8 +806,9 @@ fn main_process() -> i32 {
         signal_peak: countertimer::ValueHistory::new(1024, 2),
     }));
     let processing_status = Arc::new(RwLock::new(ProcessingParameters {
-        volume: initial_volume,
-        mute: initial_mute,
+        target_volume: [initial_volume, 0.0, 0.0, 0.0, 0.0],
+        current_volume: [initial_volume, 0.0, 0.0, 0.0, 0.0],
+        mute: [initial_mute, false, false, false, false],
     }));
     let status = Arc::new(RwLock::new(ProcessingStatus {
         stop_reason: StopReason::None,

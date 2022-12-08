@@ -36,6 +36,7 @@ pub struct Volume {
     samplerate: usize,
     chunksize: usize,
     processing_status: Arc<RwLock<ProcessingParameters>>,
+    control: usize,
 }
 
 impl Volume {
@@ -47,6 +48,7 @@ impl Volume {
         chunksize: usize,
         samplerate: usize,
         processing_status: Arc<RwLock<ProcessingParameters>>,
+        control: usize,
     ) -> Self {
         let ramptime_in_chunks =
             (ramp_time_ms / (1000.0 * chunksize as f32 / samplerate as f32)).round() as usize;
@@ -69,6 +71,7 @@ impl Volume {
             samplerate,
             chunksize,
             processing_status,
+            control
         }
     }
 
@@ -79,8 +82,9 @@ impl Volume {
         samplerate: usize,
         processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
-        let current_volume = processing_status.read().unwrap().volume;
-        let mute = processing_status.read().unwrap().mute;
+        let control = conf.get_control();
+        let current_volume = processing_status.read().unwrap().target_volume[control];
+        let mute = processing_status.read().unwrap().mute[control];
         Volume::new(
             name,
             conf.get_ramp_time(),
@@ -89,6 +93,7 @@ impl Volume {
             chunksize,
             samplerate,
             processing_status,
+            control,
         )
     }
 
@@ -115,8 +120,8 @@ impl Volume {
     }
 
     fn prepare_processing(&mut self) {
-        let shared_vol = self.processing_status.read().unwrap().volume;
-        let shared_mute = self.processing_status.read().unwrap().mute;
+        let shared_vol = self.processing_status.read().unwrap().target_volume[self.control];
+        let shared_mute = self.processing_status.read().unwrap().mute[self.control];
 
         // Volume setting changed
         if (shared_vol - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
@@ -223,6 +228,7 @@ impl Filter for Volume {
             self.ramptime_in_chunks = (conf.get_ramp_time()
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
+            self.control = conf.get_control();
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
