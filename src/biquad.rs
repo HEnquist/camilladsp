@@ -429,7 +429,10 @@ impl Filter for Biquad {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Biquad { parameters: conf } = conf {
+        if let config::Filter::Biquad {
+            parameters: conf, ..
+        } = conf
+        {
             let coeffs = BiquadCoefficients::from_config(self.samplerate, conf);
             self.coeffs = coeffs;
         } else {

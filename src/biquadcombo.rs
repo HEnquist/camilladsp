@@ -202,7 +202,10 @@ impl Filter for BiquadCombo {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::BiquadCombo { parameters: conf } = conf {
+        if let config::Filter::BiquadCombo {
+            parameters: conf, ..
+        } = conf
+        {
             let name = self.name.clone();
             *self = BiquadCombo::from_config(name, self.samplerate, conf);
         } else {

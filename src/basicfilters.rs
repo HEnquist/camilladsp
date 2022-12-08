@@ -82,7 +82,7 @@ impl Volume {
         let mute = processing_status.read().unwrap().mute;
         Volume::new(
             name,
-            conf.ramp_time,
+            conf.get_ramp_time(),
             current_volume,
             mute,
             chunksize,
@@ -182,8 +182,11 @@ impl Filter for Volume {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Volume { parameters: conf } = conf {
-            self.ramptime_in_chunks = (conf.ramp_time
+        if let config::Filter::Volume {
+            parameters: conf, ..
+        } = conf
+        {
+            self.ramptime_in_chunks = (conf.get_ramp_time()
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
         } else {
@@ -193,25 +196,34 @@ impl Filter for Volume {
     }
 }
 
+fn calculate_gain(gain_value: PrcFmt, inverted: bool, mute: bool, linear: bool) -> PrcFmt {
+    let mut gain = if linear {
+        gain_value
+    } else {
+        (10.0 as PrcFmt).powf(gain_value / 20.0)
+    };
+    if inverted {
+        gain = -gain;
+    }
+    if mute {
+        gain = 0.0;
+    }
+    gain
+}
+
 impl Gain {
     /// A simple filter providing gain in dB, and can also invert the signal.
-    pub fn new(name: String, gain_db: PrcFmt, inverted: bool, mute: bool) -> Self {
-        let mut gain: PrcFmt = 10.0;
-        gain = gain.powf(gain_db / 20.0);
-        if inverted {
-            gain = -gain;
-        }
-        if mute {
-            gain = 0.0;
-        }
+    pub fn new(name: String, gain_value: PrcFmt, inverted: bool, mute: bool, linear: bool) -> Self {
+        let gain = calculate_gain(gain_value, inverted, mute, linear);
         Gain { name, gain }
     }
 
     pub fn from_config(name: String, conf: config::GainParameters) -> Self {
         let gain = conf.gain;
-        let inverted = conf.inverted;
-        let mute = conf.mute;
-        Gain::new(name, gain, inverted, mute)
+        let inverted = conf.get_inverted();
+        let mute = conf.get_mute();
+        let linear = conf.get_scale() == config::GainScale::Linear;
+        Gain::new(name, gain, inverted, mute, linear)
     }
 }
 
@@ -228,17 +240,15 @@ impl Filter for Gain {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Gain { parameters: conf } = conf {
-            let gain_db = conf.gain;
-            let inverted = conf.inverted;
-            let mut gain: PrcFmt = 10.0;
-            gain = gain.powf(gain_db / 20.0);
-            if inverted {
-                gain = -gain;
-            }
-            if conf.mute {
-                gain = 0.0;
-            }
+        if let config::Filter::Gain {
+            parameters: conf, ..
+        } = conf
+        {
+            let gain_value = conf.gain;
+            let inverted = conf.get_inverted();
+            let mute = conf.get_mute();
+            let linear = conf.get_scale() == config::GainScale::Linear;
+            let gain = calculate_gain(gain_value, inverted, mute, linear);
             self.gain = gain;
         } else {
             // This should never happen unless there is a bug somewhere else
@@ -280,12 +290,12 @@ impl Delay {
     }
 
     pub fn from_config(name: String, samplerate: usize, conf: config::DelayParameters) -> Self {
-        let delay_samples = match conf.unit {
+        let delay_samples = match conf.get_unit() {
             config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (samplerate as PrcFmt),
             config::TimeUnit::Millimetres => conf.delay / 1000.0 * (samplerate as PrcFmt) / 343.0,
             config::TimeUnit::Samples => conf.delay,
         };
-        Delay::new(name, samplerate, delay_samples, conf.subsample)
+        Delay::new(name, samplerate, delay_samples, conf.get_subsample())
     }
 }
 
@@ -306,15 +316,18 @@ impl Filter for Delay {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Delay { parameters: conf } = conf {
-            let delay_samples = match conf.unit {
+        if let config::Filter::Delay {
+            parameters: conf, ..
+        } = conf
+        {
+            let delay_samples = match conf.get_unit() {
                 config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (self.samplerate as PrcFmt),
                 config::TimeUnit::Millimetres => {
                     conf.delay / 1000.0 * (self.samplerate as PrcFmt) / 343.0
                 }
                 config::TimeUnit::Samples => conf.delay,
             };
-            let (integerdelay, biquad) = if conf.subsample {
+            let (integerdelay, biquad) = if conf.get_subsample() {
                 let full_samples = delay_samples.floor();
                 let fraction = delay_samples - full_samples;
                 let bqcoeffs =
@@ -354,7 +367,7 @@ pub fn validate_delay_config(conf: &config::DelayParameters) -> Res<()> {
 
 /// Validate a Volume config.
 pub fn validate_volume_config(conf: &config::VolumeParameters) -> Res<()> {
-    if conf.ramp_time < 0.0 {
+    if conf.get_ramp_time() < 0.0 {
         return Err(config::ConfigError::new("Ramp time cannot be negative").into());
     }
     Ok(())
@@ -362,10 +375,16 @@ pub fn validate_volume_config(conf: &config::VolumeParameters) -> Res<()> {
 
 /// Validate a Gain config.
 pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
-    if conf.gain < -150.0 {
-        return Err(config::ConfigError::new("Gain must be larger than -150 dB").into());
-    } else if conf.gain > 150.0 {
-        return Err(config::ConfigError::new("Gain must be less than +150 dB").into());
+    if conf.get_scale() == config::GainScale::Decibel {
+        if conf.gain < -150.0 {
+            return Err(config::ConfigError::new("Gain must be larger than -150 dB").into());
+        } else if conf.gain > 150.0 {
+            return Err(config::ConfigError::new("Gain must be less than +150 dB").into());
+        }
+    } else if conf.gain < -10.0 {
+        return Err(config::ConfigError::new("Linear gain must be larger than -10.0").into());
+    } else if conf.gain > 10.0 {
+        return Err(config::ConfigError::new("Linear gain must be less than +10.0").into());
     }
     Ok(())
 }
@@ -393,7 +412,7 @@ mod tests {
     fn gain_invert() {
         let mut waveform = vec![-0.5, 0.0, 0.5];
         let waveform_inv = vec![0.5, 0.0, -0.5];
-        let mut gain = Gain::new("test".to_string(), 0.0, true, false);
+        let mut gain = Gain::new("test".to_string(), 0.0, true, false, false);
         gain.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_inv);
     }
@@ -402,7 +421,7 @@ mod tests {
     fn gain_ampl() {
         let mut waveform = vec![-0.5, 0.0, 0.5];
         let waveform_ampl = vec![-5.0, 0.0, 5.0];
-        let mut gain = Gain::new("test".to_string(), 20.0, false, false);
+        let mut gain = Gain::new("test".to_string(), 20.0, false, false, false);
         gain.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_ampl);
     }

@@ -3,7 +3,7 @@ devices:
   samplerate: 44100
   chunksize: 1024
   target_level: 512
-  adjust_period: 10
+  enable_rate_adjust: true
   capture:
     type: Alsa
     channels: 2
@@ -23,7 +23,7 @@ filters:
       filename: filter.txt
 
 mixers:
-  mono:
+  monomix:
     channels:
       in: 2
       out: 2
@@ -47,7 +47,7 @@ mixers:
 
 pipeline:
   - type: Mixer
-    name: mono
+    name: monomix
   - type: Filter
     channel: 0
     names:

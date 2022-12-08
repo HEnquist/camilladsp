@@ -1,4 +1,4 @@
-# CamillaDSP v1.0
+# CamillaDSP v2.0
 ![CI test and lint](https://github.com/HEnquist/camilladsp/workflows/CI%20test%20and%20lint/badge.svg)
 
 A tool to create audio processing pipelines for applications such as active crossovers or room correction. It is written in Rust to benefit from the safety and elegant handling of threading that this language provides. 
@@ -46,6 +46,7 @@ The full configuration is given in a yaml file.
 
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
+- **[Title and description](#title-and-description)**
 - **[Devices](#devices)**
 - **[Resampling](#resampling)**
 - **[Mixers](#mixers)**
@@ -537,7 +538,10 @@ devices:
   chunksize: 4096
   target_level: 8000
   adjust_period: 3
-  enable_resampling: true
+  resampler:
+    type: AsyncSinc
+    parameters:
+      type: Balanced
   enable_rate_adjust: true
   capture:
     type: Bluez
@@ -615,6 +619,17 @@ On the root level it contains `filters` and `mixers`. The `mixers` section could
 Looking at `filters`, the second filter swaps the order of `parameters` and `type`. Both variants are valid.
 The mixer example shows that the `gain` and `channel` properties can be ordered freely.
 
+## Title and description
+
+There are two properties that are used to name and describe the configuration file. They are both optional.
+
+```
+title: "Example"
+description: "Example description of a configuration"
+```
+
+Both these properties are optional and can be set to `null` or left out. 
+The `title` property is intended for a short title, while `description` can be longer and more descriptive.
 
 ## Devices
 Example config:
@@ -628,9 +643,7 @@ devices:
   target_level: 500 (*)
   adjust_period: 10 (*)
   enable_rate_adjust: true (*)
-  enable_resampling: true (*)
-  resampler_type: AsyncSinc (*)
-  resampler_profile: Balanced (*)
+  resampler: null (*)
   capture_samplerate: 44100 (*)
   stop_on_rate_change: false (*)
   rate_measure_interval: 1.0 (*)
@@ -645,7 +658,7 @@ devices:
     device: "hw:Generic_1"
     format: S32LE
 ```
-Any parameter marked (*) in all examples in this section are optional. If they are left out from the configuration, their default values will be used.
+A parameter marked (*) in any example is optional. If they are left out from the configuration, or set to `null`, their default values will be used.
 
 * `samplerate`
 
@@ -684,7 +697,7 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   in order to avoid buffer underruns or a slowly increasing latency. This is currently supported when using an Alsa, Wasapi or CoreAudio playback device (and any capture device).
   Setting the rate can be done in two ways.
   * If the capture device is an Alsa Loopback device or a USB Audio gadget device, the adjustment is done by tuning the virtual sample clock of the Loopback or Gadget device. This avoids any need for resampling.
-  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. The `resampler_type` must then be one of the "Async" types. This is supported for all capture devices.
+  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. Then `resampler` must be set to one of the "Async" types. This is supported for all capture devices.
   
 * `target_level` (optional, defaults to the `chunksize` value)
 
@@ -712,26 +725,18 @@ Any parameter marked (*) in all examples in this section are optional. If they a
   The `silence_timeout` (in seconds) is for how long the signal should be silent before pausing processing.
   Set this to zero, or leave it out, to never pause.
 
-* `enable_resampling` (optional, defaults to false)
+* `resampler` (optional, defaults to `null`)
 
-  Set this to `true` to enable resampling of the input signal.
+  Use this to configure a resampler. Setting it to `null` or leaving it out disables resampling .
+  Configure a resampler to enable resampling of the input signal.
   In addition to resampling the input to a different sample rate,
   this can be useful for rate-matching capture and playback devices with independent clocks.
+  See the [Resampling section](#resampling) for more details.
 
-* `resampler_type` (optional, defaults to "AsyncSinc")
+* `capture_samplerate` (optional, defaults to `null`)
 
-  The resampler type to use. Valid choices are "AsyncSinc", "AsyncPoly" and "Synchronous".
-
-  If used for rate matching with `enable_rate_adjust: true` the one of the "Async" types must be used.
-  See also the [Resampling section.](#resampling)
-
-* `resampler_profile` (optional, defaults to "Balanced")
-
-  The quality profile for the resampler. Valid choices are "VeryFast", "Fast", "Balanced" and "Accurate".
-
-* `capture_samplerate` (optional, defaults to value of `samplerate`)
-
-  The capture samplerate. If the resampler is only used for rate-matching then the capture samplerate
+  The capture samplerate. Setting it to `null` sets the capture samplerate to the same value as `samplerate`.
+  If the resampler is only used for rate-matching, then the capture samplerate
   is the same as the overall samplerate, and this setting can be left out.
 
 * `stop_on_rate_change` and `rate_measure_interval` (both optional)
@@ -772,7 +777,7 @@ Any parameter marked (*) in all examples in this section are optional. If they a
     ### Supported formats
 
     |            | Alsa | Pulse | Wasapi | CoreAudio | Jack | File/Stdin/Stdout |
-    |------------|------|-------|--------|-----------|------|-------------------|
+    |------------|:----:|:-----:|:------:|:---------:|:----:|:-----------------:|
     | S16LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
     | S24LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
     | S24LE3     | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
@@ -900,82 +905,141 @@ Resampling is provided by the [Rubato library.](https://github.com/HEnquist/ruba
 This library does asynchronous and synchronous resampling with adjustable parameters.
 Asynchronous resampling can be done with or without anti-aliasing.
 
-For asynchronous resampling with anti-aliasing, the overall strategy is to use a sinc interpolation filter with a fixed oversampling ratio,
+### Resampler configuration
+
+The `resampler` section under `devices` is used to specify the resampler.
+
+Example:
+```
+  resampler:
+    type: AsyncSinc
+    profile: Balanced
+```
+
+The resampler type is given by `type`, and the available options are:
+* AsyncSinc
+* AsyncPoly
+* Synchronous
+
+The types `AsyncPoly` and `AsyncSinc` need additional parameters, see each type below for details.
+
+### `AsyncSinc`: Asynchronous resampling with anti-aliasing
+
+For asynchronous resampling with anti-aliasing, the overall strategy is to use a sinc interpolation filter
+with a fixed oversampling factor,
 and then use polynomial interpolation to get values for arbitrary times between those fixed points.
+
+The AsyncSinc resampler takes an additional parameter `profile`.
+This is used to select a pre-defined profile.
+The `Balanced` profile is the best choice in most cases.
+It provides good resampling quality with a noise threshold in the range 
+of -170 dB along with reasonable CPU usage.
+As -170 dB is way beyond the resolution limit of even the best commercial DACs, 
+this preset is thus sufficient for all audio use.
+The `Fast` and `VeryFast` profiles are faster but have a little more high-frequency roll-off 
+and give a bit higher resampling artefacts.
+The `Accurate` profile provides the highest quality result, 
+with all resampling artefacts below -200dB, at the expense of higher CPU usage.
+
+Example:
+```
+  resampler:
+    type: AsyncSinc
+    profile: VeryFast
+```
+
+It is also possible to specify all parameters of the resampler instead of using the pre-defined profiles.
+
+Example: 
+```
+  resampler:
+    type: AsyncSinc
+    sinc_len: 128
+    oversampling_factor: 256
+    interpolation: Cubic
+    window: Hann2
+    f_cutoff: null
+```
+Note that these two ways of defining the resampler cannot be mixed.
+When using `profile` the other parameters must not be present and vice versa.
+The `f_cutoff` parameter is the relative cutoff frequency of the anti-aliasing filter.
+A value of 1.0 means the Nyquist limit. Useful values are in the range 0.9 - 0.99.
+It can also be calculated automatically by setting `f_cutoff` to `null`. 
+
+Available interpolation types:
+
+| Interpolation  | Polynomial degree | Samples fitted |
+|----------------|:-----------------:|:--------------:|
+| Nearest        | 0                 | 1              |
+| Linear         | 1                 | 2              |
+| Quadratic      | 2                 | 3              |
+| Cubic          | 3                 | 4              |
+
+See the [Rubato documentation](https://docs.rs/rubato/latest/rubato/index.html)
+for a desciption of the other parameters.
+
+For reference, the profiles are defined according to this table:
+
+|                    | VeryFast     | Fast             | Balanced           | Accurate           |
+|--------------------|:------------:|:----------------:|:------------------:|:------------------:|
+|sinc_len            | 64           | 128              | 192                | 256                | 
+|oversampling_factor | 1024         | 1024             | 512                | 256                |
+|interpolation       | Linear       | Linear           | Quadratic          | Cubic              |
+|window              | Hann2        | Blackman2        | BlackmanHarris2    | BlackmanHarris2    |
+|f_cutoff            | 0.91 (#)     | 0.92 (#)         | 0.93 (#)           | 0.95 (#)           |
+
+(#) These cutoff values are approximate. The actual values used are calculated automatically
+at runtime for the combination of sinc length and window. 
+
+### `AsyncPoly`: Asynchronous resampling without anti-aliasing
 
 Asynchronous resampling without anti-aliasing works by performing polynomial interpolation between the sample points.
 This skips the computationally expensive sinc interpolation filter and is therefore considerably faster.
 This method produces a result that isn't as clean as with anti-aliasing, but the difference is small and often inaudible.
 
-For synchronous resampling it instead works by transforming the waveform with FFT, modifying the spectrum, and then 
-getting the resampled waveform by inverse FFT.
+The polynomial interpolation uses the _N_ nearest samples,
+where the number of samples depends on the selected `interpolation`.
 
-### Resampler configuration
+Example:
+```
+  resampler:
+    type: AsyncPoly
+    interpolation: Cubic
+```
 
-Two parameters in the config file are used to specify the resampler. 
+Available interpolation types:
 
-The resampler type is given by `resampler_type`, and the available options are:
-
-The three resampler types mentioned above are named:
-* AsyncSinc
-* AsyncPoly
-* Synchronous
-
-There is also a choice of profiles via `resampler_profile`. The options are:
-* VeryFast
-* Fast
-* Balanced
-* Accurate
-
-
-### `AsyncSinc`: Asynchronous resampling with anti-aliasing
-The "Balanced" profile is the best choice in most cases, if an asynchronous resampler is needed.
-It provides good resampling quality with a noise threshold in the range 
-of -150 dB along with reasonable CPU usage.
-As -150 dB is way beyond the resolution limit of even the best commercial DACs, 
-this preset is thus sufficient for all audio use.
-The "Fast and "VeryFast" profiles are faster but have a little more high-frequency roll-off 
-and give a bit higher resampling artefacts.
-The "Accurate" profile provides the highest quality result, 
-with all resampling artefacts below -200dB, at the expense of higher CPU usage.
-
-For reference, the asynchronous presets are defined according to this table:
-
-|                   | VeryFast     | Fast             | Balanced               | Accurate               |
-|-------------------|--------------|------------------|------------------------|------------------------|
-|sinc_len           | 64           | 128              | 256                    | 256                    |
-|oversampling_ratio | 1024         | 1024             | 1024                   | 256                    |
-|interpolation      | Linear       | Linear           | Linear                 | Cubic                  |
-|window             | squared Hann | squared Blackman | squared BlackmanHarris | squared BlackmanHarris |
-|f_cutoff           | 0.915 (*)    | 0.925 (*)        | 0.947 (*)              | 0.947 (*)              |
-
-(*) These cutoff values are approximate. The actual values used are calculated automatically
-at runtime for the combination of sinc length and window.
-
-### `AsyncPoly`: Asynchronous resampling without anti-aliasing
-The `AsyncPoly` resampler type performs polynomial interpolation on the _N_ nearest samples.
-The polynomial degree depends on the selected profile.
-
-| Profile      | Polynomial degree | Samples fitted |
-|--------------|-------------------|----------------|
-| VeryFast     | 1                 | 2              |
-| Fast         | 3                 | 4              |
-| Balanced     | 5                 | 6              |
-| Accurate     | 7                 | 8              |
+| Interpolation  | Polynomial degree | Samples fitted |
+|----------------|:-----------------:|:--------------:|
+| Linear         | 1                 | 2              |
+| Cubic          | 3                 | 4              |
+| Quintic        | 5                 | 6              |
+| Septic         | 7                 | 8              |
 
 Higher polynomial degrees produce higher quality results but use more processing power.
-All are however considerably faster than the "AsyncSinc" types.
-In theory these produce inferior quality compared to the "AsyncSinc" type with anti-aliasing,
+All are however considerably faster than the `AsyncSinc` type.
+In theory these produce inferior quality compared to the `AsyncSinc` type with anti-aliasing,
 however in practice the difference is small.
 Use the `AsyncPoly` type to save processing power, with little or no perceived quality loss.
 
 ### `Synchronous`: Synchronous resampling with anti-aliasing
+
 For performing fixed ratio resampling, like resampling 
 from 44.1kHz to 96kHz (which corresponds to a precise ratio of 147/320)
-choose the "Synchronous" type.
+choose the `Synchronous` type.
+
+This works by transforming the waveform with FFT, modifying the spectrum, and then 
+getting the resampled waveform by inverse FFT.
+
 This is considerably faster than the asynchronous variants, but does not support rate adjust.
-There is only one quality setting, and the profile setting is ignored.
-The quality is similar to the "AsyncSinc" type with the "Accurate" profile.
+
+The resampling quality is similar to the `AsyncSinc` type with the `Accurate` profile.
+
+The `Synchronous` type takes no additional parameters:
+```
+  resampler:
+    type: Synchronous
+```
 
 ### Rate adjust via resampling
 When using the rate adjust feature to match capture and playback devices, 
@@ -986,8 +1050,6 @@ for drifts and mismatches between the input and output sample clocks.
 Using the "Synchronous" type with rate adjust enabled will print warnings, 
 and any rate adjust request will be ignored.
 
-See the library documentation for more details. [Rubato on docs.rs](https://docs.rs/rubato/0.1.0/rubato/)
-
 
 ## Mixers
 A mixer is used to route audio between channels, and to increase or decrease the number of channels in the pipeline.
@@ -995,6 +1057,7 @@ Example for a mixer that copies two channels into four:
 ```
 mixers:
   ExampleMixer:
+    description: "Example mixer to convert two channels to four" (*)
     channels:
       in: 2
       out: 4
@@ -1005,26 +1068,32 @@ mixers:
           - channel: 0
             gain: 0 (*)
             inverted: false (*)
+            scale: dB (*)
       - dest: 1
         mute: false (*)
         sources:
           - channel: 1
             gain: 0 (*)
             inverted: false (*)
+            scale: dB (*)
       - dest: 2
         sources:
           - channel: 0
             gain: 0 (*)
             inverted: false (*)
+            scale: dB (*)
       - dest: 3
         sources:
           - channel: 1
             gain: 0 (*)
             inverted: false (*)
+            scale: dB (*)
 ```
-Parameters marked with (*) are optional. 
+Parameters marked with (*) are optional. Set to `null` or leave out to use the default value.
+
 The "channels" group define the number of input and output channels for the mixer. The mapping section then decides how to route the audio.
-This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value in dB, and if it should be `inverted` (true/false). A channel that has no sources will be filled with silence. The `mute` option determines if an output channel of the mixer should be muted. The `mute`, `gain` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 dB, and not inverted.
+This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value, a `scale` for the gain (`dB` or `linear`) and if it should be `inverted` (`true`/`false`). A channel that has no sources will be filled with silence. The `mute` option determines if an output channel of the mixer should be muted. The `mute`, `gain`, `scale` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 in dB, and not inverted.
+The optional `description` property is intended for the user and is not used by CamillaDSP itself.
 
 Another example, a simple stereo to mono mixer:
 ```
@@ -1052,18 +1121,35 @@ Let's say we have an interface with one analog input, and one SPDIF. These are p
 The filters section defines the filter configurations to use in the pipeline. It's enough to define each filter once even if it should be applied on several channels.
 The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
 
+All filters take an optional `description` property. This is intended for the user and is not used by CamillaDSP itself.
+
 ### Gain
-The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in dB, and a positive value means the signal will be amplified while a negative values attenuates. The gain value must be in the range -150 to +150 dB. The `mute` parameter determines if the the signal should be muted. This is optional and defaults to not mute.
+The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in either dB or as a linear factor, depending on the `scale` parameter. This can be set to `dB` or `linear`. If set to `null` or left out it defaults to dB.
+
+When the dB scale is used (`scale: dB`), a positive gain value means the signal will be amplified while a negative values attenuates. The gain value must be in the range -150 to +150 dB.
+
+If linear gain is used (`scale: linear`), the gain value is treated as a simple multiplication factor. A factor 0.5 attenuates by a factor two (equivalent to a gain of -6.02 dB). A negative value inverts the signal. Note that the `invert` setting also inverts, so a gain of -0.5 with invert set to true becomes inverted twice and the result is non-inverted.
+The linear gain is limited to a range of -10.0 to +10.0.
+
+The `mute` parameter determines if the the signal should be muted. This is optional and defaults to not mute.
 
 Example Gain filter:
 ```
 filters:
-  gainexample:
+  gainexample_dB:
     type: Gain
     parameters:
-      gain: -6.0 
-      inverted: false
+      gain: -6.0
+      inverted: false (*)
       mute: false (*)
+      scale: dB (*)
+  gainexample_linear:
+    type: Gain
+    parameters:
+      gain: 0.5
+      inverted: false (*)
+      mute: false (*)
+      scale: linear (*)
 ```
 
 ### Volume
@@ -1101,7 +1187,7 @@ filters:
       low_boost: 7.0
 ```
 Allowed ranges:
-- reference_level: -100 to 0
+- reference_level: -100 to +20
 - high_boost: 0 to 20
 - low_boost: 0 to 20
 
@@ -1165,11 +1251,21 @@ filters:
     parameters:
       type: Values
       values: [0.0, 0.1, 0.2, 0.3]
-      length: 12345
 ```
-The `length` setting is optional. It is used to extend the number of coefficients past the ones given in `values`. The added coefficients are all zeroes. This is intended to provide an easy way to evaluating the CPU load for different filter lengths.
 
-For testing purposes the entire "parameters" block can be left out (or commented out with a # at the start of each line). This then becomes a dummy filter that does not affect the signal.
+#### Dummy impulse response for testing
+
+Setting the type to `Dummy` creates a dummy impulse response:
+```
+filters:
+  lowpass_fir:
+    type: Conv
+    parameters:
+      type: Dummy
+      length: 65536
+```
+This creates a dummy minumum-phase allpass filter of length `length` (that must be at least 1). The first point has a value of one, and all the rest are zero: `[1.0, 0.0, 0.0, ..., 0.0]`.
+This is intended to provide an easy way to evaluate the CPU load for different filter lengths.
 
 #### Coefficients from Wav-file
 
@@ -1415,6 +1511,8 @@ This example implements a Biquad lowpass, but for a Biquad the Free Biquad type 
 ## Processors
 The `processors` section contains the definitions for the Processors. These are special "filters" that work on several channels at the same time. At present only one type of processor, "Compressor", has been implemented.
 
+Processors take an optional `description` property. This is intended for the user and is not used by CamillaDSP itself.
+
 ### Compressor
 The "Compressor" processor implements a standard dynamic range compressor. It is configured using the most common parameters. 
 
@@ -1469,35 +1567,43 @@ For filter steps, the channel number must exist at that point of the pipeline.
 Channels are numbered starting from zero.
 Apart from this, there are no rules for ordering of the steps or how many are added.
 
+Each step take an optional `description` property. This is intended for the user and is not used by CamillaDSP itself.
+
 Example:
 ```
 pipeline:
   - type: Mixer
+    description: "Expand to 4 channels"
     name: to4channels
     bypassed: false (*)
   - type: Filter
+    description: "Left channel woofer"
     channel: 0
     bypassed: false (*)
     names:
       - lowpass_fir
       - peak1
   - type: Filter
+    description: "Right channel woofer"
     channel: 1
     bypassed: false (*)
     names:
       - lowpass_fir
       - peak1
   - type: Filter
+    description: "Left channel tweeter"
     channel: 2
     bypassed: false (*)
     names:
       - highpass_fir
   - type: Filter
+    description: "Right channel tweeter"
     channel: 3
     bypassed: false (*)
     names:
       - highpass_fir
   - type: Processor
+    description: "Compressor for protecting the drivers"
     name: my_compressor
     bypassed: false (*)
 ```

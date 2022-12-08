@@ -17,6 +17,18 @@ pub struct MixerSource {
     pub gain: PrcFmt,
 }
 
+fn calculate_gain(gain_value: PrcFmt, inverted: bool, linear: bool) -> PrcFmt {
+    let mut gain = if linear {
+        gain_value
+    } else {
+        (10.0 as PrcFmt).powf(gain_value / 20.0)
+    };
+    if inverted {
+        gain = -gain;
+    }
+    gain
+}
+
 impl Mixer {
     /// Creates a Mixer from a config struct
     pub fn from_config(name: String, config: config::Mixer) -> Self {
@@ -24,15 +36,14 @@ impl Mixer {
         let ch_out = config.channels.out;
         let mut mapping = vec![Vec::<MixerSource>::new(); ch_out];
         for cfg_mapping in config.mapping {
-            if !cfg_mapping.mute {
+            if !cfg_mapping.get_mute() {
                 let dest = cfg_mapping.dest;
                 for cfg_src in cfg_mapping.sources {
-                    if !cfg_src.mute {
-                        let mut gain: PrcFmt = 10.0;
-                        gain = gain.powf(cfg_src.gain / 20.0);
-                        if cfg_src.inverted {
-                            gain = -gain;
-                        }
+                    if !cfg_src.get_mute() {
+                        let gain_value = cfg_src.get_gain();
+                        let inverted = cfg_src.get_inverted();
+                        let linear = cfg_src.get_scale() == config::GainScale::Linear;
+                        let gain = calculate_gain(gain_value, inverted, linear);
                         let src = MixerSource {
                             channel: cfg_src.channel,
                             gain,
@@ -57,11 +68,10 @@ impl Mixer {
         for cfg_mapping in config.mapping {
             let dest = cfg_mapping.dest;
             for cfg_src in cfg_mapping.sources {
-                let mut gain: PrcFmt = 10.0;
-                gain = gain.powf(cfg_src.gain / 20.0);
-                if cfg_src.inverted {
-                    gain = -gain;
-                }
+                let gain_value = cfg_src.get_gain();
+                let inverted = cfg_src.get_inverted();
+                let linear = cfg_src.get_scale() == config::GainScale::Linear;
+                let gain = calculate_gain(gain_value, inverted, linear);
                 let src = MixerSource {
                     channel: cfg_src.channel,
                     gain,
@@ -126,9 +136,9 @@ pub fn get_used_input_channels(mixer_config: &config::Mixer) -> Vec<bool> {
     let chan_in = mixer_config.channels.r#in;
     let mut used_channels = vec![false; chan_in];
     for mapping in mixer_config.mapping.iter() {
-        if !mapping.mute {
+        if !mapping.get_mute() {
             for source in mapping.sources.iter() {
-                if !source.mute {
+                if !source.get_mute() {
                     used_channels[source.channel] = true;
                 }
             }
@@ -148,49 +158,54 @@ mod tests {
         let chans = MixerChannels { r#in: 2, out: 4 };
         let src0 = MixerSource {
             channel: 0,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,
             sources: vec![src0],
-            mute: false,
+            mute: Some(false),
         };
         let map1 = MixerMapping {
             dest: 1,
             sources: vec![src1],
-            mute: false,
+            mute: Some(false),
         };
         let map2 = MixerMapping {
             dest: 2,
             sources: vec![src2],
-            mute: false,
+            mute: Some(false),
         };
         let map3 = MixerMapping {
             dest: 3,
             sources: vec![src3],
-            mute: false,
+            mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
@@ -203,49 +218,54 @@ mod tests {
         let chans = MixerChannels { r#in: 2, out: 4 };
         let src0 = MixerSource {
             channel: 1,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 1,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,
             sources: vec![src0],
-            mute: false,
+            mute: Some(false),
         };
         let map1 = MixerMapping {
             dest: 1,
             sources: vec![src1],
-            mute: false,
+            mute: Some(false),
         };
         let map2 = MixerMapping {
             dest: 2,
             sources: vec![src2],
-            mute: false,
+            mute: Some(false),
         };
         let map3 = MixerMapping {
             dest: 3,
             sources: vec![src3],
-            mute: false,
+            mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
@@ -258,49 +278,54 @@ mod tests {
         let chans = MixerChannels { r#in: 2, out: 4 };
         let src0 = MixerSource {
             channel: 0,
-            gain: -3.0,
-            inverted: false,
-            mute: true,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(true),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
-            gain: -3.0,
-            inverted: false,
-            mute: true,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(true),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,
             sources: vec![src0],
-            mute: false,
+            mute: Some(false),
         };
         let map1 = MixerMapping {
             dest: 1,
             sources: vec![src1],
-            mute: false,
+            mute: Some(false),
         };
         let map2 = MixerMapping {
             dest: 2,
             sources: vec![src2],
-            mute: false,
+            mute: Some(false),
         };
         let map3 = MixerMapping {
             dest: 3,
             sources: vec![src3],
-            mute: false,
+            mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
@@ -313,49 +338,54 @@ mod tests {
         let chans = MixerChannels { r#in: 2, out: 4 };
         let src0 = MixerSource {
             channel: 0,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: -3.0,
-            inverted: false,
-            mute: false,
+            gain: Some(-3.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,
             sources: vec![src0],
-            mute: true,
+            mute: Some(true),
         };
         let map1 = MixerMapping {
             dest: 1,
             sources: vec![src1],
-            mute: false,
+            mute: Some(false),
         };
         let map2 = MixerMapping {
             dest: 2,
             sources: vec![src2],
-            mute: true,
+            mute: Some(true),
         };
         let map3 = MixerMapping {
             dest: 3,
             sources: vec![src3],
-            mute: false,
+            mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
@@ -368,49 +398,54 @@ mod tests {
         let chans = MixerChannels { r#in: 2, out: 4 };
         let src0 = MixerSource {
             channel: 0,
-            gain: 0.0,
-            inverted: false,
-            mute: false,
+            gain: Some(0.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: 0.0,
-            inverted: false,
-            mute: false,
+            gain: Some(0.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
-            gain: 0.0,
-            inverted: false,
-            mute: false,
+            gain: Some(0.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: 0.0,
-            inverted: false,
-            mute: false,
+            gain: Some(0.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,
             sources: vec![src0],
-            mute: false,
+            mute: Some(false),
         };
         let map1 = MixerMapping {
             dest: 1,
             sources: vec![src1],
-            mute: false,
+            mute: Some(false),
         };
         let map2 = MixerMapping {
             dest: 2,
             sources: vec![src2],
-            mute: false,
+            mute: Some(false),
         };
         let map3 = MixerMapping {
             dest: 3,
             sources: vec![src3],
-            mute: false,
+            mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
@@ -450,49 +485,54 @@ mod tests {
         let chans = MixerChannels { r#in: 2, out: 4 };
         let src0 = MixerSource {
             channel: 0,
-            gain: 0.0,
-            inverted: false,
-            mute: false,
+            gain: Some(0.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: 0.0,
-            inverted: false,
-            mute: false,
+            gain: Some(0.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
-            gain: 0.0,
-            inverted: false,
-            mute: false,
+            gain: Some(0.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: 0.0,
-            inverted: false,
-            mute: false,
+            gain: Some(0.0),
+            inverted: Some(false),
+            mute: Some(false),
+            scale: None,
         };
         let map0 = MixerMapping {
             dest: 0,
             sources: vec![src0],
-            mute: true,
+            mute: Some(true),
         };
         let map1 = MixerMapping {
             dest: 1,
             sources: vec![src1],
-            mute: false,
+            mute: Some(false),
         };
         let map2 = MixerMapping {
             dest: 2,
             sources: vec![src2],
-            mute: true,
+            mute: Some(true),
         };
         let map3 = MixerMapping {
             dest: 3,
             sources: vec![src3],
-            mute: false,
+            mute: Some(false),
         };
         let conf = Mixer {
+            description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };

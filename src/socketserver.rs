@@ -64,6 +64,8 @@ enum WsCommand {
     SetConfigJson(String),
     Reload,
     GetConfig,
+    GetConfigTitle,
+    GetConfigDescription,
     GetPreviousConfig,
     ReadConfig(String),
     ReadConfigFile(String),
@@ -102,6 +104,7 @@ enum WsCommand {
     GetStopReason,
     GetRateAdjust,
     GetClippedSamples,
+    ResetClippedSamples,
     GetBufferLevel,
     GetSupportedDeviceTypes,
     Exit,
@@ -144,6 +147,14 @@ enum WsReply {
         result: WsResult,
     },
     GetConfig {
+        result: WsResult,
+        value: String,
+    },
+    GetConfigTitle {
+        result: WsResult,
+        value: String,
+    },
+    GetConfigDescription {
         result: WsResult,
         value: String,
     },
@@ -299,6 +310,9 @@ enum WsReply {
         result: WsResult,
         value: usize,
     },
+    ResetClippedSamples {
+        result: WsResult,
+    },
     GetSupportedDeviceTypes {
         result: WsResult,
         value: (Vec<String>, Vec<String>),
@@ -337,7 +351,7 @@ fn make_acceptor_with_cert(cert: &str, key: &str) -> Res<Arc<TlsAcceptor>> {
 #[cfg(feature = "secure-websocket")]
 fn make_acceptor(cert_file: &Option<&str>, cert_key: &Option<&str>) -> Option<Arc<TlsAcceptor>> {
     if let (Some(cert), Some(key)) = (cert_file, cert_key) {
-        let acceptor = make_acceptor_with_cert(&cert, &key);
+        let acceptor = make_acceptor_with_cert(cert, key);
         match acceptor {
             Ok(acc) => {
                 debug!("Created TLS acceptor");
@@ -669,6 +683,13 @@ fn handle_command(
                 value: pbstat.clipped_samples,
             })
         }
+        WsCommand::ResetClippedSamples => {
+            let mut pbstat = shared_data_inst.playback_status.write().unwrap();
+            pbstat.clipped_samples = 0;
+            Some(WsReply::ResetClippedSamples {
+                result: WsResult::Ok,
+            })
+        }
         WsCommand::GetBufferLevel => {
             let pbstat = shared_data_inst.playback_status.read().unwrap();
             Some(WsReply::GetBufferLevel {
@@ -763,6 +784,30 @@ fn handle_command(
             result: WsResult::Ok,
             value: serde_yaml::to_string(&*shared_data_inst.active_config.lock().unwrap()).unwrap(),
         }),
+        WsCommand::GetConfigTitle => {
+            let optional_config = shared_data_inst.active_config.lock().unwrap();
+            let value = if let Some(config) = &*optional_config {
+                config.title.clone().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            Some(WsReply::GetConfigTitle {
+                result: WsResult::Ok,
+                value,
+            })
+        }
+        WsCommand::GetConfigDescription => {
+            let optional_config = shared_data_inst.active_config.lock().unwrap();
+            let value = if let Some(config) = &*optional_config {
+                config.description.clone().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            Some(WsReply::GetConfigDescription {
+                result: WsResult::Ok,
+                value,
+            })
+        }
         WsCommand::GetPreviousConfig => Some(WsReply::GetPreviousConfig {
             result: WsResult::Ok,
             value: serde_yaml::to_string(&*shared_data_inst.previous_config.lock().unwrap())

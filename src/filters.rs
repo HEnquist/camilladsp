@@ -369,26 +369,24 @@ impl FilterGroup {
             let filter_cfg = filter_configs[&name].clone();
             let filter: Box<dyn Filter> =
                 match filter_cfg {
-                    config::Filter::Conv { parameters } => Box::new(fftconv::FftConv::from_config(
-                        name,
-                        waveform_length,
-                        parameters,
-                    )),
-                    config::Filter::Biquad { parameters } => Box::new(biquad::Biquad::new(
+                    config::Filter::Conv { parameters, .. } => Box::new(
+                        fftconv::FftConv::from_config(name, waveform_length, parameters),
+                    ),
+                    config::Filter::Biquad { parameters, .. } => Box::new(biquad::Biquad::new(
                         name,
                         sample_freq,
                         biquad::BiquadCoefficients::from_config(sample_freq, parameters),
                     )),
-                    config::Filter::BiquadCombo { parameters } => Box::new(
+                    config::Filter::BiquadCombo { parameters, .. } => Box::new(
                         biquadcombo::BiquadCombo::from_config(name, sample_freq, parameters),
                     ),
-                    config::Filter::Delay { parameters } => Box::new(
+                    config::Filter::Delay { parameters, .. } => Box::new(
                         basicfilters::Delay::from_config(name, sample_freq, parameters),
                     ),
-                    config::Filter::Gain { parameters } => {
+                    config::Filter::Gain { parameters, .. } => {
                         Box::new(basicfilters::Gain::from_config(name, parameters))
                     }
-                    config::Filter::Volume { parameters } => {
+                    config::Filter::Volume { parameters, .. } => {
                         Box::new(basicfilters::Volume::from_config(
                             name,
                             parameters,
@@ -397,7 +395,7 @@ impl FilterGroup {
                             processing_status.clone(),
                         ))
                     }
-                    config::Filter::Loudness { parameters } => {
+                    config::Filter::Loudness { parameters, .. } => {
                         Box::new(loudness::Loudness::from_config(
                             name,
                             parameters,
@@ -406,13 +404,13 @@ impl FilterGroup {
                             processing_status.clone(),
                         ))
                     }
-                    config::Filter::Dither { parameters } => {
+                    config::Filter::Dither { parameters, .. } => {
                         Box::new(dither::Dither::from_config(name, parameters))
                     }
-                    config::Filter::DiffEq { parameters } => {
+                    config::Filter::DiffEq { parameters, .. } => {
                         Box::new(diffeq::DiffEq::from_config(name, parameters))
                     }
-                    config::Filter::Limiter { parameters } => {
+                    config::Filter::Limiter { parameters, .. } => {
                         Box::new(limiter::Limiter::from_config(name, parameters))
                     }
                 };
@@ -464,25 +462,21 @@ impl Pipeline {
     ) -> Self {
         debug!("Build new pipeline");
         let mut steps = Vec::<PipelineStep>::new();
-        for step in conf.pipeline {
+        for step in conf.pipeline.unwrap_or_default() {
             match step {
-                config::PipelineStep::Mixer { name, bypassed } => {
-                    if !bypassed {
-                        let mixconf = conf.mixers[&name].clone();
-                        let mixer = mixer::Mixer::from_config(name, mixconf);
+                config::PipelineStep::Mixer(step) => {
+                    if !step.get_bypassed() {
+                        let mixconf = conf.mixers.as_ref().unwrap()[&step.name].clone();
+                        let mixer = mixer::Mixer::from_config(step.name, mixconf);
                         steps.push(PipelineStep::MixerStep(mixer));
                     }
                 }
-                config::PipelineStep::Filter {
-                    channel,
-                    names,
-                    bypassed,
-                } => {
-                    if !bypassed {
+                config::PipelineStep::Filter(step) => {
+                    if step.get_bypassed() {
                         let fltgrp = FilterGroup::from_config(
-                            channel,
-                            names,
-                            conf.filters.clone(),
+                            step.channel,
+                            step.names,
+                            conf.filters.as_ref().unwrap().clone(),
                             conf.devices.chunksize,
                             conf.devices.samplerate,
                             processing_status.clone(),
@@ -490,13 +484,13 @@ impl Pipeline {
                         steps.push(PipelineStep::FilterStep(fltgrp));
                     }
                 }
-                config::PipelineStep::Processor { name, bypassed } => {
-                    if !bypassed {
-                        let procconf = conf.processors[&name].clone();
+                config::PipelineStep::Processor(step) => {
+                    if !step.get_bypassed() {
+                        let procconf = conf.processors.as_ref().unwrap()[&step.name].clone();
                         let proc = match procconf {
-                            config::Processor::Compressor { parameters } => {
+                            config::Processor::Compressor { parameters, .. } => {
                                 let comp = compressor::Compressor::from_config(
-                                    name,
+                                    step.name,
                                     parameters,
                                     conf.devices.samplerate,
                                     conf.devices.chunksize,
@@ -524,15 +518,17 @@ impl Pipeline {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {
                     if mixers.iter().any(|n| n == &mix.name) {
-                        mix.update_parameters(conf.mixers[&mix.name].clone());
+                        mix.update_parameters(conf.mixers.as_ref().unwrap()[&mix.name].clone());
                     }
                 }
                 PipelineStep::FilterStep(flt) => {
-                    flt.update_parameters(conf.filters.clone(), filters.clone());
+                    flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters.clone());
                 }
                 PipelineStep::ProcessorStep(proc) => {
                     if processors.iter().any(|n| n == &proc.name()) {
-                        proc.update_parameters(conf.processors[&proc.name()].clone());
+                        proc.update_parameters(
+                            conf.processors.as_ref().unwrap()[&proc.name()].clone(),
+                        );
                     }
                 }
             }
@@ -561,16 +557,20 @@ impl Pipeline {
 /// Validate the filter config, to give a helpful message intead of a panic.
 pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
     match filter_config {
-        config::Filter::Conv { parameters } => fftconv::validate_config(parameters),
-        config::Filter::Biquad { parameters } => biquad::validate_config(fs, parameters),
-        config::Filter::Delay { parameters } => basicfilters::validate_delay_config(parameters),
-        config::Filter::Gain { parameters } => basicfilters::validate_gain_config(parameters),
-        config::Filter::Dither { parameters } => dither::validate_config(parameters),
-        config::Filter::DiffEq { parameters } => diffeq::validate_config(parameters),
-        config::Filter::Volume { parameters } => basicfilters::validate_volume_config(parameters),
-        config::Filter::Loudness { parameters } => loudness::validate_config(parameters),
-        config::Filter::BiquadCombo { parameters } => biquadcombo::validate_config(fs, parameters),
-        config::Filter::Limiter { parameters } => limiter::validate_config(parameters),
+        config::Filter::Conv { parameters, .. } => fftconv::validate_config(parameters),
+        config::Filter::Biquad { parameters, .. } => biquad::validate_config(fs, parameters),
+        config::Filter::Delay { parameters, .. } => basicfilters::validate_delay_config(parameters),
+        config::Filter::Gain { parameters, .. } => basicfilters::validate_gain_config(parameters),
+        config::Filter::Dither { parameters, .. } => dither::validate_config(parameters),
+        config::Filter::DiffEq { parameters, .. } => diffeq::validate_config(parameters),
+        config::Filter::Volume { parameters, .. } => {
+            basicfilters::validate_volume_config(parameters)
+        }
+        config::Filter::Loudness { parameters, .. } => loudness::validate_config(parameters),
+        config::Filter::BiquadCombo { parameters, .. } => {
+            biquadcombo::validate_config(fs, parameters)
+        }
+        config::Filter::Limiter { parameters, .. } => limiter::validate_config(parameters),
     }
 }
 

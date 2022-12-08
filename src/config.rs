@@ -2,7 +2,7 @@ use crate::compressor;
 use crate::filters;
 use crate::mixer;
 use serde::{de, Deserialize, Serialize};
-use serde_with;
+//use serde_with;
 use std::collections::HashMap;
 use std::error;
 use std::fmt;
@@ -58,7 +58,7 @@ impl ConfigError {
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum SampleFormat {
     S16LE,
@@ -119,11 +119,6 @@ impl fmt::Display for SampleFormat {
     }
 }
 
-#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-fn bluez_default_srv() -> String {
-    "org.bluealsa".to_string()
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
@@ -138,16 +133,7 @@ pub enum CaptureDevice {
     },
     #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
     #[serde(alias = "BLUEZ", alias = "bluez")]
-    Bluez {
-        #[serde(default = "bluez_default_srv")]
-        service: String,
-        // TODO: Allow the user to specify mac address rather than D-Bus path
-        dbus_path: String,
-        // TODO: sample format, sample rate and channel count should be determined
-        // from D-Bus properties
-        format: SampleFormat,
-        channels: usize,
-    },
+    Bluez(CaptureDeviceBluez),
     #[cfg(feature = "pulse-backend")]
     #[serde(alias = "PULSE", alias = "pulse")]
     Pulse {
@@ -157,54 +143,25 @@ pub enum CaptureDevice {
         format: SampleFormat,
     },
     #[serde(alias = "FILE", alias = "file")]
-    File {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        filename: String,
-        format: SampleFormat,
-        #[serde(default)]
-        extra_samples: usize,
-        #[serde(default)]
-        skip_bytes: usize,
-        #[serde(default)]
-        read_bytes: usize,
-    },
+    File(CaptureDeviceFile),
     #[serde(alias = "STDIN", alias = "stdin")]
-    Stdin {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        format: SampleFormat,
-        #[serde(default)]
-        extra_samples: usize,
-        #[serde(default)]
-        skip_bytes: usize,
-        #[serde(default)]
-        read_bytes: usize,
-    },
+    Stdin(CaptureDeviceStdin),
     #[cfg(target_os = "macos")]
     #[serde(alias = "COREAUDIO", alias = "coreaudio")]
-    CoreAudio {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-        #[serde(default = "default_ca_format")]
-        format: SampleFormat,
-        #[serde(default)]
-        change_format: bool,
-    },
+    CoreAudio(CaptureDeviceCA),
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
-    Wasapi {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-        format: SampleFormat,
-        #[serde(default)]
-        exclusive: bool,
-        #[serde(default)]
-        loopback: bool,
-    },
-    #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+    Wasapi(CaptureDeviceWasapi),
+    #[cfg(all(
+        feature = "cpal-backend",
+        feature = "jack-backend",
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd"
+        )
+    ))]
     #[serde(alias = "JACK", alias = "jack")]
     Jack {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -219,16 +176,25 @@ impl CaptureDevice {
             #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { channels, .. } => *channels,
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez { channels, .. } => *channels,
+            CaptureDevice::Bluez(dev) => dev.channels,
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { channels, .. } => *channels,
-            CaptureDevice::File { channels, .. } => *channels,
-            CaptureDevice::Stdin { channels, .. } => *channels,
+            CaptureDevice::File(dev) => dev.channels,
+            CaptureDevice::Stdin(dev) => dev.channels,
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio { channels, .. } => *channels,
+            CaptureDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi { channels, .. } => *channels,
-            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            CaptureDevice::Wasapi(dev) => dev.channels,
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "jack-backend",
+                any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd"
+                )
+            ))]
             CaptureDevice::Jack { channels, .. } => *channels,
         }
     }
@@ -236,20 +202,152 @@ impl CaptureDevice {
     pub fn sampleformat(&self) -> SampleFormat {
         match self {
             #[cfg(target_os = "linux")]
-            CaptureDevice::Alsa { format, .. } => format.clone(),
+            CaptureDevice::Alsa { format, .. } => *format,
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez { format, .. } => format.clone(),
+            CaptureDevice::Bluez(dev) => dev.format,
             #[cfg(feature = "pulse-backend")]
-            CaptureDevice::Pulse { format, .. } => format.clone(),
-            CaptureDevice::File { format, .. } => format.clone(),
-            CaptureDevice::Stdin { format, .. } => format.clone(),
+            CaptureDevice::Pulse { format, .. } => *format,
+            CaptureDevice::File(dev) => dev.format,
+            CaptureDevice::Stdin(dev) => dev.format,
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio { format, .. } => format.clone(),
+            CaptureDevice::CoreAudio(dev) => dev.get_format(),
             #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi { format, .. } => format.clone(),
-            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            CaptureDevice::Wasapi(dev) => dev.format,
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "jack-backend",
+                any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd"
+                )
+            ))]
             CaptureDevice::Jack { .. } => SampleFormat::FLOAT32LE,
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceFile {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub filename: String,
+    pub format: SampleFormat,
+    #[serde(default)]
+    pub extra_samples: Option<usize>,
+    #[serde(default)]
+    pub skip_bytes: Option<usize>,
+    #[serde(default)]
+    pub read_bytes: Option<usize>,
+}
+
+impl CaptureDeviceFile {
+    pub fn get_extra_samples(&self) -> usize {
+        self.extra_samples.unwrap_or_default()
+    }
+    pub fn get_skip_bytes(&self) -> usize {
+        self.skip_bytes.unwrap_or_default()
+    }
+    pub fn get_read_bytes(&self) -> usize {
+        self.read_bytes.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceStdin {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub format: SampleFormat,
+    #[serde(default)]
+    pub extra_samples: Option<usize>,
+    #[serde(default)]
+    pub skip_bytes: Option<usize>,
+    #[serde(default)]
+    pub read_bytes: Option<usize>,
+}
+
+impl CaptureDeviceStdin {
+    pub fn get_extra_samples(&self) -> usize {
+        self.extra_samples.unwrap_or_default()
+    }
+    pub fn get_skip_bytes(&self) -> usize {
+        self.skip_bytes.unwrap_or_default()
+    }
+    pub fn get_read_bytes(&self) -> usize {
+        self.read_bytes.unwrap_or_default()
+    }
+}
+
+#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceBluez {
+    #[serde(default)]
+    service: Option<String>,
+    // TODO: Allow the user to specify mac address rather than D-Bus path
+    pub dbus_path: String,
+    // TODO: sample format, sample rate and channel count should be determined
+    // from D-Bus properties
+    pub format: SampleFormat,
+    pub channels: usize,
+}
+
+#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
+impl CaptureDeviceBluez {
+    pub fn get_service(&self) -> String {
+        self.service.clone().unwrap_or("org.bluealsa".to_string())
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceWasapi {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub device: Option<String>,
+    pub format: SampleFormat,
+    #[serde(default)]
+    exclusive: Option<bool>,
+    #[serde(default)]
+    loopback: Option<bool>,
+}
+
+#[cfg(target_os = "windows")]
+impl CaptureDeviceWasapi {
+    pub fn get_exclusive(&self) -> bool {
+        self.exclusive.unwrap_or_default()
+    }
+
+    pub fn get_loopback(&self) -> bool {
+        self.loopback.unwrap_or_default()
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceCA {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub device: Option<String>,
+    #[serde(default)]
+    format: Option<SampleFormat>,
+    #[serde(default)]
+    change_format: Option<bool>,
+}
+
+#[cfg(target_os = "macos")]
+impl CaptureDeviceCA {
+    pub fn get_format(&self) -> SampleFormat {
+        self.format.unwrap_or(SampleFormat::S32LE)
+    }
+
+    pub fn get_change_format(&self) -> bool {
+        self.change_format.unwrap_or_default()
     }
 }
 
@@ -288,28 +386,20 @@ pub enum PlaybackDevice {
     },
     #[cfg(target_os = "macos")]
     #[serde(alias = "COREAUDIO", alias = "coreaudio")]
-    CoreAudio {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-        #[serde(default = "default_ca_format")]
-        format: SampleFormat,
-        #[serde(default)]
-        change_format: bool,
-        #[serde(default)]
-        exclusive: bool,
-    },
+    CoreAudio(PlaybackDeviceCA),
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
-    Wasapi {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-        format: SampleFormat,
-        #[serde(default)]
-        exclusive: bool,
-    },
-    #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+    Wasapi(PlaybackDeviceWasapi),
+    #[cfg(all(
+        feature = "cpal-backend",
+        feature = "jack-backend",
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd"
+        )
+    ))]
     #[serde(alias = "JACK", alias = "jack")]
     Jack {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -328,12 +418,70 @@ impl PlaybackDevice {
             PlaybackDevice::File { channels, .. } => *channels,
             PlaybackDevice::Stdout { channels, .. } => *channels,
             #[cfg(target_os = "macos")]
-            PlaybackDevice::CoreAudio { channels, .. } => *channels,
+            PlaybackDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
-            PlaybackDevice::Wasapi { channels, .. } => *channels,
-            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            PlaybackDevice::Wasapi(dev) => dev.channels,
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "jack-backend",
+                any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd"
+                )
+            ))]
             PlaybackDevice::Jack { channels, .. } => *channels,
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PlaybackDeviceWasapi {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub device: Option<String>,
+    pub format: SampleFormat,
+    #[serde(default)]
+    exclusive: Option<bool>,
+}
+
+#[cfg(target_os = "windows")]
+impl PlaybackDeviceWasapi {
+    pub fn get_exclusive(&self) -> bool {
+        self.exclusive.unwrap_or_default()
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PlaybackDeviceCA {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub device: Option<String>,
+    #[serde(default)]
+    format: Option<SampleFormat>,
+    #[serde(default)]
+    change_format: Option<bool>,
+    #[serde(default)]
+    exclusive: Option<bool>,
+}
+
+#[cfg(target_os = "macos")]
+impl PlaybackDeviceCA {
+    pub fn get_format(&self) -> SampleFormat {
+        self.format.unwrap_or(SampleFormat::S32LE)
+    }
+
+    pub fn get_change_format(&self) -> bool {
+        self.change_format.unwrap_or_default()
+    }
+
+    pub fn get_exclusive(&self) -> bool {
+        self.exclusive.unwrap_or_default()
     }
 }
 
@@ -341,79 +489,130 @@ impl PlaybackDevice {
 #[serde(deny_unknown_fields)]
 pub struct Devices {
     pub samplerate: usize,
-    // alias to allow old name buffersize
-    #[serde(alias = "buffersize")]
     pub chunksize: usize,
-    #[serde(default = "default_queuelimit")]
-    pub queuelimit: usize,
     #[serde(default)]
-    pub silence_threshold: PrcFmt,
+    pub queuelimit: Option<usize>,
     #[serde(default)]
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: Option<PrcFmt>,
+    #[serde(default)]
+    pub silence_timeout: Option<PrcFmt>,
     pub capture: CaptureDevice,
     pub playback: PlaybackDevice,
     #[serde(default)]
-    pub enable_rate_adjust: bool,
+    pub enable_rate_adjust: Option<bool>,
     #[serde(default)]
-    pub target_level: usize,
-    #[serde(default = "default_period")]
-    pub adjust_period: f32,
+    pub target_level: Option<usize>,
     #[serde(default)]
-    pub enable_resampling: bool,
+    pub adjust_period: Option<f32>,
     #[serde(default)]
-    pub resampler_type: Resampler,
+    pub resampler: Option<Resampler>,
     #[serde(default)]
-    pub resampler_profile: ResamplerProfile,
+    pub capture_samplerate: Option<usize>,
     #[serde(default)]
-    pub capture_samplerate: usize,
+    pub stop_on_rate_change: Option<bool>,
     #[serde(default)]
-    pub stop_on_rate_change: bool,
-    #[serde(default = "default_measure_interval")]
-    pub rate_measure_interval: f32,
+    pub rate_measure_interval: Option<f32>,
 }
 
-fn default_period() -> f32 {
-    10.0
-}
+// Getters for all the defaults
+impl Devices {
+    pub fn get_queuelimit(&self) -> usize {
+        self.queuelimit.unwrap_or(4)
+    }
 
-fn default_queuelimit() -> usize {
-    4
-}
+    pub fn get_adjust_period(&self) -> f32 {
+        self.adjust_period.unwrap_or(10.0)
+    }
 
-fn default_measure_interval() -> f32 {
-    1.0
-}
+    pub fn get_rate_measure_interval(&self) -> f32 {
+        self.rate_measure_interval.unwrap_or(1.0)
+    }
 
-#[cfg(target_os = "macos")]
-fn default_ca_format() -> SampleFormat {
-    SampleFormat::S32LE
-}
+    pub fn get_silence_threshold(&self) -> PrcFmt {
+        self.silence_threshold.unwrap_or(0.0)
+    }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub enum Resampler {
-    AsyncPoly,
-    AsyncSinc,
-    Synchronous,
-}
+    pub fn get_silence_timeout(&self) -> PrcFmt {
+        self.silence_timeout.unwrap_or(0.0)
+    }
 
-impl Default for Resampler {
-    fn default() -> Self {
-        Resampler::AsyncSinc
+    pub fn get_capture_samplerate(&self) -> usize {
+        self.capture_samplerate.unwrap_or(self.samplerate)
+    }
+
+    pub fn get_target_level(&self) -> usize {
+        self.target_level.unwrap_or(self.chunksize)
+    }
+
+    pub fn get_stop_on_rate_change(&self) -> bool {
+        self.stop_on_rate_change.unwrap_or(false)
+    }
+
+    pub fn get_enable_rate_adjust(&self) -> bool {
+        self.enable_rate_adjust.unwrap_or(false)
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub enum ResamplerProfile {
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum AsyncSincInterpolation {
+    Nearest,
+    Linear,
+    Quadratic,
+    Cubic,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum AsyncSincProfile {
     VeryFast,
     Fast,
     Balanced,
     Accurate,
 }
 
-impl Default for ResamplerProfile {
-    fn default() -> Self {
-        ResamplerProfile::Balanced
-    }
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+#[serde(deny_unknown_fields)]
+pub enum AsyncSincParameters {
+    Profile {
+        profile: AsyncSincProfile,
+    },
+    Free {
+        sinc_len: usize,
+        interpolation: AsyncSincInterpolation,
+        window: AsyncSincWindow,
+        f_cutoff: Option<f32>,
+        oversampling_factor: usize,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub enum AsyncSincWindow {
+    Hann,
+    Hann2,
+    Blackman,
+    Blackman2,
+    BlackmanHarris,
+    BlackmanHarris2,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum AsyncPolyInterpolation {
+    Linear,
+    Cubic,
+    Quintic,
+    Septic,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
+pub enum Resampler {
+    AsyncPoly {
+        interpolation: AsyncPolyInterpolation,
+    },
+    AsyncSinc(AsyncSincParameters),
+    Synchronous,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -422,39 +621,58 @@ impl Default for ResamplerProfile {
 pub enum Filter {
     Conv {
         #[serde(default)]
+        description: Option<String>,
         parameters: ConvParameters,
     },
     Biquad {
+        #[serde(default)]
+        description: Option<String>,
         parameters: BiquadParameters,
     },
     BiquadCombo {
+        #[serde(default)]
+        description: Option<String>,
         parameters: BiquadComboParameters,
     },
     Delay {
+        #[serde(default)]
+        description: Option<String>,
         parameters: DelayParameters,
     },
     Gain {
+        #[serde(default)]
+        description: Option<String>,
         parameters: GainParameters,
     },
     Volume {
+        #[serde(default)]
+        description: Option<String>,
         parameters: VolumeParameters,
     },
     Loudness {
+        #[serde(default)]
+        description: Option<String>,
         parameters: LoudnessParameters,
     },
     Dither {
+        #[serde(default)]
+        description: Option<String>,
         parameters: DitherParameters,
     },
     DiffEq {
+        #[serde(default)]
+        description: Option<String>,
         parameters: DiffEqParameters,
     },
     Limiter {
+        #[serde(default)]
+        description: Option<String>,
         parameters: LimiterParameters,
     },
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum FileFormat {
     TEXT,
@@ -496,40 +714,54 @@ impl FileFormat {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum ConvParameters {
-    #[serde(alias = "File")]
-    Raw {
-        filename: String,
-        #[serde(default)]
-        format: FileFormat,
-        #[serde(default)]
-        skip_bytes_lines: usize,
-        #[serde(default)]
-        read_bytes_lines: usize,
-    },
-    Wav {
-        filename: String,
-        #[serde(default)]
-        channel: usize,
-    },
+    Raw(ConvParametersRaw),
+    Wav(ConvParametersWav),
     Values {
         values: Vec<PrcFmt>,
-        #[serde(default)]
+    },
+    Dummy {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
         length: usize,
     },
 }
 
-impl Default for FileFormat {
-    fn default() -> Self {
-        FileFormat::TEXT
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ConvParametersRaw {
+    pub filename: String,
+    #[serde(default)]
+    format: Option<FileFormat>,
+    #[serde(default)]
+    skip_bytes_lines: Option<usize>,
+    #[serde(default)]
+    read_bytes_lines: Option<usize>,
+}
+
+impl ConvParametersRaw {
+    pub fn get_format(&self) -> FileFormat {
+        self.format.unwrap_or(FileFormat::TEXT)
+    }
+
+    pub fn get_skip_bytes_lines(&self) -> usize {
+        self.skip_bytes_lines.unwrap_or_default()
+    }
+
+    pub fn get_read_bytes_lines(&self) -> usize {
+        self.read_bytes_lines.unwrap_or_default()
     }
 }
 
-impl Default for ConvParameters {
-    fn default() -> Self {
-        ConvParameters::Values {
-            values: vec![1.0],
-            length: 0,
-        }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ConvParametersWav {
+    pub filename: String,
+    #[serde(default)]
+    channel: Option<usize>,
+}
+
+impl ConvParametersWav {
+    pub fn get_channel(&self) -> usize {
+        self.channel.unwrap_or_default()
     }
 }
 
@@ -663,27 +895,40 @@ pub enum BiquadComboParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VolumeParameters {
-    #[serde(default = "default_ramp_time")]
-    pub ramp_time: f32,
+    #[serde(default)]
+    pub ramp_time: Option<f32>,
 }
+
+impl VolumeParameters {
+    pub fn get_ramp_time(&self) -> f32 {
+        self.ramp_time.unwrap_or(200.0)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LoudnessParameters {
-    #[serde(default = "default_ramp_time")]
-    pub ramp_time: f32,
+    #[serde(default)]
+    pub ramp_time: Option<f32>,
     pub reference_level: f32,
-    #[serde(default = "default_loudness_boost")]
-    pub high_boost: f32,
-    #[serde(default = "default_loudness_boost")]
-    pub low_boost: f32,
+    #[serde(default)]
+    pub high_boost: Option<f32>,
+    #[serde(default)]
+    pub low_boost: Option<f32>,
 }
 
-fn default_loudness_boost() -> f32 {
-    10.0
-}
+impl LoudnessParameters {
+    pub fn get_ramp_time(&self) -> f32 {
+        self.ramp_time.unwrap_or(200.0)
+    }
 
-fn default_ramp_time() -> f32 {
-    200.0
+    pub fn get_high_boost(&self) -> f32 {
+        self.high_boost.unwrap_or(10.0)
+    }
+
+    pub fn get_low_boost(&self) -> f32 {
+        self.low_boost.unwrap_or(10.0)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -691,9 +936,33 @@ fn default_ramp_time() -> f32 {
 pub struct GainParameters {
     pub gain: PrcFmt,
     #[serde(default)]
-    pub inverted: bool,
+    pub inverted: Option<bool>,
     #[serde(default)]
-    pub mute: bool,
+    pub mute: Option<bool>,
+    #[serde(default)]
+    pub scale: Option<GainScale>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum GainScale {
+    #[serde(rename = "linear")]
+    Linear,
+    #[serde(rename = "dB")]
+    Decibel,
+}
+
+impl GainParameters {
+    pub fn get_inverted(&self) -> bool {
+        self.inverted.unwrap_or_default()
+    }
+
+    pub fn get_mute(&self) -> bool {
+        self.mute.unwrap_or_default()
+    }
+
+    pub fn get_scale(&self) -> GainScale {
+        self.scale.unwrap_or(GainScale::Decibel)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -701,12 +970,22 @@ pub struct GainParameters {
 pub struct DelayParameters {
     pub delay: PrcFmt,
     #[serde(default)]
-    pub unit: TimeUnit,
+    pub unit: Option<TimeUnit>,
     #[serde(default)]
-    pub subsample: bool,
+    pub subsample: Option<bool>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+impl DelayParameters {
+    pub fn get_unit(&self) -> TimeUnit {
+        self.unit.unwrap_or(TimeUnit::Milliseconds)
+    }
+
+    pub fn get_subsample(&self) -> bool {
+        self.subsample.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum TimeUnit {
     #[serde(rename = "ms")]
@@ -715,11 +994,6 @@ pub enum TimeUnit {
     Millimetres,
     #[serde(rename = "samples")]
     Samples,
-}
-impl Default for TimeUnit {
-    fn default() -> Self {
-        TimeUnit::Milliseconds
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -741,9 +1015,19 @@ pub enum DitherParameters {
 #[serde(deny_unknown_fields)]
 pub struct DiffEqParameters {
     #[serde(default)]
-    pub a: Vec<PrcFmt>,
+    pub a: Option<Vec<PrcFmt>>,
     #[serde(default)]
-    pub b: Vec<PrcFmt>,
+    pub b: Option<Vec<PrcFmt>>,
+}
+
+impl DiffEqParameters {
+    pub fn get_a(&self) -> Vec<PrcFmt> {
+        self.a.clone().unwrap_or_default()
+    }
+
+    pub fn get_b(&self) -> Vec<PrcFmt> {
+        self.b.clone().unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -760,11 +1044,31 @@ pub struct MixerChannels {
 pub struct MixerSource {
     pub channel: usize,
     #[serde(default)]
-    pub gain: PrcFmt,
+    pub gain: Option<PrcFmt>,
     #[serde(default)]
-    pub inverted: bool,
+    pub inverted: Option<bool>,
     #[serde(default)]
-    pub mute: bool,
+    pub mute: Option<bool>,
+    #[serde(default)]
+    pub scale: Option<GainScale>,
+}
+
+impl MixerSource {
+    pub fn get_gain(&self) -> PrcFmt {
+        self.gain.unwrap_or_default()
+    }
+
+    pub fn get_inverted(&self) -> bool {
+        self.inverted.unwrap_or_default()
+    }
+
+    pub fn get_mute(&self) -> bool {
+        self.mute.unwrap_or_default()
+    }
+
+    pub fn get_scale(&self) -> GainScale {
+        self.scale.unwrap_or(GainScale::Decibel)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -773,12 +1077,20 @@ pub struct MixerMapping {
     pub dest: usize,
     pub sources: Vec<MixerSource>,
     #[serde(default)]
-    pub mute: bool,
+    pub mute: Option<bool>,
+}
+
+impl MixerMapping {
+    pub fn get_mute(&self) -> bool {
+        self.mute.unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Mixer {
+    #[serde(default)]
+    pub description: Option<String>,
     pub channels: MixerChannels,
     pub mapping: Vec<MixerMapping>,
 }
@@ -787,7 +1099,11 @@ pub struct Mixer {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum Processor {
-    Compressor { parameters: CompressorParameters },
+    Compressor {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: CompressorParameters,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -795,67 +1111,139 @@ pub enum Processor {
 pub struct CompressorParameters {
     pub channels: usize,
     #[serde(default)]
-    pub monitor_channels: Vec<usize>,
+    pub monitor_channels: Option<Vec<usize>>,
     #[serde(default)]
-    pub process_channels: Vec<usize>,
+    pub process_channels: Option<Vec<usize>>,
     pub attack: PrcFmt,
     pub release: PrcFmt,
     pub threshold: PrcFmt,
     pub factor: PrcFmt,
     #[serde(default)]
-    pub makeup_gain: PrcFmt,
+    pub makeup_gain: Option<PrcFmt>,
     #[serde(default)]
-    pub soft_clip: bool,
+    pub soft_clip: Option<bool>,
     #[serde(default)]
-    pub enable_clip: bool,
+    pub enable_clip: Option<bool>,
     #[serde(default)]
-    pub clip_limit: PrcFmt,
+    pub clip_limit: Option<PrcFmt>,
+}
+
+impl CompressorParameters {
+    pub fn get_monitor_channels(&self) -> Vec<usize> {
+        self.monitor_channels.clone().unwrap_or_default()
+    }
+
+    pub fn get_process_channels(&self) -> Vec<usize> {
+        self.process_channels.clone().unwrap_or_default()
+    }
+
+    pub fn get_makeup_gain(&self) -> PrcFmt {
+        self.makeup_gain.unwrap_or_default()
+    }
+
+    pub fn get_soft_clip(&self) -> bool {
+        self.soft_clip.unwrap_or_default()
+    }
+
+    pub fn get_enable_clip(&self) -> bool {
+        self.enable_clip.unwrap_or_default()
+    }
+
+    pub fn get_clip_limit(&self) -> PrcFmt {
+        self.clip_limit.unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LimiterParameters {
     #[serde(default)]
-    pub soft_clip: bool,
+    pub soft_clip: Option<bool>,
     #[serde(default)]
-    pub clip_limit: PrcFmt,
+    pub clip_limit: Option<PrcFmt>,
+}
+
+impl LimiterParameters {
+    pub fn get_soft_clip(&self) -> bool {
+        self.soft_clip.unwrap_or_default()
+    }
+
+    pub fn get_clip_limit(&self) -> PrcFmt {
+        self.clip_limit.unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum PipelineStep {
-    Mixer {
-        name: String,
-        #[serde(default)]
-        bypassed: bool,
-    },
-    Filter {
-        channel: usize,
-        names: Vec<String>,
-        #[serde(default)]
-        bypassed: bool,
-    },
-    Processor {
-        name: String,
-        #[serde(default)]
-        bypassed: bool,
-    },
+    Mixer(PipelineStepMixer),
+    Filter(PipelineStepFilter),
+    Processor(PipelineStepProcessor),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct PipelineStepMixer {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    bypassed: Option<bool>,
+}
+
+impl PipelineStepMixer {
+    pub fn get_bypassed(&self) -> bool {
+        self.bypassed.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct PipelineStepFilter {
+    pub channel: usize,
+    pub names: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    bypassed: Option<bool>,
+}
+
+impl PipelineStepFilter {
+    pub fn get_bypassed(&self) -> bool {
+        self.bypassed.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct PipelineStepProcessor {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    bypassed: Option<bool>,
+}
+
+impl PipelineStepProcessor {
+    pub fn get_bypassed(&self) -> bool {
+        self.bypassed.unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Configuration {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
     pub devices: Devices,
     #[serde(default)]
-    pub mixers: HashMap<String, Mixer>,
+    pub mixers: Option<HashMap<String, Mixer>>,
     #[serde(default)]
-    #[serde(deserialize_with = "serde_with::rust::maps_duplicate_key_is_error::deserialize")]
-    pub filters: HashMap<String, Filter>,
+    pub filters: Option<HashMap<String, Filter>>,
     #[serde(default)]
-    pub processors: HashMap<String, Processor>,
+    pub processors: Option<HashMap<String, Processor>>,
     #[serde(default)]
-    pub pipeline: Vec<PipelineStep>,
+    pub pipeline: Option<Vec<PipelineStep>>,
 }
 
 fn validate_nonzero_usize<'de, D>(d: D) -> Result<usize, D::Error>
@@ -908,7 +1296,7 @@ fn apply_overrides(configuration: &mut Configuration) {
         let cfg_rate = configuration.devices.samplerate;
         let cfg_chunksize = configuration.devices.chunksize;
 
-        if !configuration.devices.enable_resampling {
+        if configuration.devices.resampler.is_none() {
             debug!("Apply override for samplerate: {}", rate);
             configuration.devices.samplerate = rate;
             let scaled_chunksize = if rate > cfg_rate {
@@ -923,24 +1311,32 @@ fn apply_overrides(configuration: &mut Configuration) {
             configuration.devices.chunksize = scaled_chunksize;
             #[allow(unreachable_patterns)]
             match &mut configuration.devices.capture {
-                CaptureDevice::File { extra_samples, .. } => {
-                    let new_extra = *extra_samples * rate / cfg_rate;
-                    debug!("Scale extra samples: {} -> {}", *extra_samples, new_extra);
-                    *extra_samples = new_extra;
+                CaptureDevice::File(dev) => {
+                    let new_extra = dev.get_extra_samples() * rate / cfg_rate;
+                    debug!(
+                        "Scale extra samples: {} -> {}",
+                        dev.get_extra_samples(),
+                        new_extra
+                    );
+                    dev.extra_samples = Some(new_extra);
                 }
-                CaptureDevice::Stdin { extra_samples, .. } => {
-                    let new_extra = *extra_samples * rate / cfg_rate;
-                    debug!("Scale extra samples: {} -> {}", *extra_samples, new_extra);
-                    *extra_samples = new_extra;
+                CaptureDevice::Stdin(dev) => {
+                    let new_extra = dev.get_extra_samples() * rate / cfg_rate;
+                    debug!(
+                        "Scale extra samples: {} -> {}",
+                        dev.get_extra_samples(),
+                        new_extra
+                    );
+                    dev.extra_samples = Some(new_extra);
                 }
                 _ => {}
             }
         } else {
             debug!("Apply override for capture_samplerate: {}", rate);
-            configuration.devices.capture_samplerate = rate;
-            if rate == cfg_rate && !configuration.devices.enable_rate_adjust {
+            configuration.devices.capture_samplerate = Some(rate);
+            if rate == cfg_rate && !configuration.devices.get_enable_rate_adjust() {
                 debug!("Disabling unneccesary 1:1 resampling");
-                configuration.devices.enable_resampling = false;
+                configuration.devices.resampler = None;
             }
         }
     }
@@ -948,11 +1344,11 @@ fn apply_overrides(configuration: &mut Configuration) {
         debug!("Apply override for extra_samples: {}", extra);
         #[allow(unreachable_patterns)]
         match &mut configuration.devices.capture {
-            CaptureDevice::File { extra_samples, .. } => {
-                *extra_samples = extra;
+            CaptureDevice::File(dev) => {
+                dev.extra_samples = Some(extra);
             }
-            CaptureDevice::Stdin { extra_samples, .. } => {
-                *extra_samples = extra;
+            CaptureDevice::Stdin(dev) => {
+                dev.extra_samples = Some(extra);
             }
             _ => {}
         }
@@ -960,68 +1356,86 @@ fn apply_overrides(configuration: &mut Configuration) {
     if let Some(chans) = OVERRIDES.read().unwrap().channels {
         debug!("Apply override for capture channels: {}", chans);
         match &mut configuration.devices.capture {
-            CaptureDevice::File { channels, .. } => {
-                *channels = chans;
+            CaptureDevice::File(dev) => {
+                dev.channels = chans;
             }
-            CaptureDevice::Stdin { channels, .. } => {
-                *channels = chans;
+            CaptureDevice::Stdin(dev) => {
+                dev.channels = chans;
             }
             #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { channels, .. } => {
                 *channels = chans;
             }
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez { channels, .. } => {
-                *channels = chans;
+            CaptureDevice::Bluez(dev) => {
+                dev.channels = chans;
             }
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { channels, .. } => {
                 *channels = chans;
             }
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio { channels, .. } => {
-                *channels = chans;
+            CaptureDevice::CoreAudio(dev) => {
+                dev.channels = chans;
             }
             #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi { channels, .. } => {
-                *channels = chans;
+            CaptureDevice::Wasapi(dev) => {
+                dev.channels = chans;
             }
-            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "jack-backend",
+                any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd"
+                )
+            ))]
             CaptureDevice::Jack { channels, .. } => {
                 *channels = chans;
             }
         }
     }
-    if let Some(fmt) = OVERRIDES.read().unwrap().sample_format.clone() {
+    if let Some(fmt) = OVERRIDES.read().unwrap().sample_format {
         debug!("Apply override for capture sample format: {}", fmt);
         match &mut configuration.devices.capture {
-            CaptureDevice::File { format, .. } => {
-                *format = fmt;
+            CaptureDevice::File(dev) => {
+                dev.format = fmt;
             }
-            CaptureDevice::Stdin { format, .. } => {
-                *format = fmt;
+            CaptureDevice::Stdin(dev) => {
+                dev.format = fmt;
             }
             #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { format, .. } => {
                 *format = fmt;
             }
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez { format, .. } => {
-                *format = fmt;
+            CaptureDevice::Bluez(dev) => {
+                dev.format = fmt;
             }
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { format, .. } => {
                 *format = fmt;
             }
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio { format, .. } => {
-                *format = fmt;
+            CaptureDevice::CoreAudio(dev) => {
+                dev.format = Some(fmt);
             }
             #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi { format, .. } => {
-                *format = fmt;
+            CaptureDevice::Wasapi(dev) => {
+                dev.format = fmt;
             }
-            #[cfg(all(feature = "cpal-backend", feature = "jack-backend"))]
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "jack-backend",
+                any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd"
+                )
+            ))]
             CaptureDevice::Jack { .. } => {
                 error!("Not possible to override capture format for Jack, ignoring");
             }
@@ -1040,31 +1454,39 @@ fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
 fn replace_tokens_in_config(config: &mut Configuration) {
     let samplerate = config.devices.samplerate;
     let num_channels = config.devices.capture.channels();
-    for (_name, filter) in config.filters.iter_mut() {
-        match filter {
-            Filter::Conv {
-                parameters: ConvParameters::Raw { filename, .. },
+    if let Some(filters) = &mut config.filters {
+        for (_name, filter) in filters.iter_mut() {
+            match filter {
+                Filter::Conv {
+                    parameters: ConvParameters::Raw(params),
+                    ..
+                } => {
+                    params.filename = replace_tokens(&params.filename, samplerate, num_channels);
+                }
+                Filter::Conv {
+                    parameters: ConvParameters::Wav(params),
+                    ..
+                } => {
+                    params.filename = replace_tokens(&params.filename, samplerate, num_channels);
+                }
+                _ => {}
             }
-            | Filter::Conv {
-                parameters: ConvParameters::Wav { filename, .. },
-            } => {
-                *filename = replace_tokens(filename, samplerate, num_channels);
-            }
-            _ => {}
         }
     }
-    for mut step in config.pipeline.iter_mut() {
-        match &mut step {
-            PipelineStep::Filter { names, .. } => {
-                for name in names.iter_mut() {
-                    *name = replace_tokens(name, samplerate, num_channels);
+    if let Some(pipeline) = &mut config.pipeline {
+        for mut step in pipeline.iter_mut() {
+            match &mut step {
+                PipelineStep::Filter(step) => {
+                    for name in step.names.iter_mut() {
+                        *name = replace_tokens(name, samplerate, num_channels);
+                    }
                 }
-            }
-            PipelineStep::Mixer { name, .. } => {
-                *name = replace_tokens(name, samplerate, num_channels);
-            }
-            PipelineStep::Processor { name, .. } => {
-                *name = replace_tokens(name, samplerate, num_channels);
+                PipelineStep::Mixer(step) => {
+                    step.name = replace_tokens(&step.name, samplerate, num_channels);
+                }
+                PipelineStep::Processor(step) => {
+                    step.name = replace_tokens(&step.name, samplerate, num_channels);
+                }
             }
         }
     }
@@ -1074,17 +1496,21 @@ fn replace_tokens_in_config(config: &mut Configuration) {
 fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str) {
     if let Ok(config_file) = PathBuf::from(configname.to_owned()).canonicalize() {
         if let Some(config_dir) = config_file.parent() {
-            for (_name, filter) in config.filters.iter_mut() {
-                if let Filter::Conv {
-                    parameters: ConvParameters::Raw { filename, .. },
-                } = filter
-                {
-                    check_and_replace_relative_path(filename, config_dir);
-                } else if let Filter::Conv {
-                    parameters: ConvParameters::Wav { filename, .. },
-                } = filter
-                {
-                    check_and_replace_relative_path(filename, config_dir);
+            if let Some(filters) = &mut config.filters {
+                for (_name, filter) in filters.iter_mut() {
+                    if let Filter::Conv {
+                        parameters: ConvParameters::Raw(params),
+                        ..
+                    } = filter
+                    {
+                        check_and_replace_relative_path(&mut params.filename, config_dir);
+                    } else if let Filter::Conv {
+                        parameters: ConvParameters::Wav(params),
+                        ..
+                    } = filter
+                    {
+                        check_and_replace_relative_path(&mut params.filename, config_dir);
+                    }
                 }
             }
         } else {
@@ -1150,44 +1576,50 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     let mut filters = Vec::<String>::new();
     let mut mixers = Vec::<String>::new();
     let mut processors = Vec::<String>::new();
-    for (filter, params) in &newconf.filters {
-        // The pipeline didn't change, any added filter isn't included and can be skipped
-        if let Some(current_filter) = currentconf.filters.get(filter) {
-            // Did the filter change type?
-            match (params, current_filter) {
-                (Filter::Biquad { .. }, Filter::Biquad { .. })
-                | (Filter::BiquadCombo { .. }, Filter::BiquadCombo { .. })
-                | (Filter::Conv { .. }, Filter::Conv { .. })
-                | (Filter::Delay { .. }, Filter::Delay { .. })
-                | (Filter::Gain { .. }, Filter::Gain { .. })
-                | (Filter::Dither { .. }, Filter::Dither { .. })
-                | (Filter::DiffEq { .. }, Filter::DiffEq { .. })
-                | (Filter::Volume { .. }, Filter::Volume { .. })
-                | (Filter::Loudness { .. }, Filter::Loudness { .. }) => {}
-                _ => {
-                    // A filter changed type, need to rebuild the pipeline
-                    return ConfigChange::Pipeline;
+    if let (Some(newfilters), Some(oldfilters)) = (&newconf.filters, &currentconf.filters) {
+        for (filter, params) in newfilters {
+            // The pipeline didn't change, any added filter isn't included and can be skipped
+            if let Some(current_filter) = oldfilters.get(filter) {
+                // Did the filter change type?
+                match (params, current_filter) {
+                    (Filter::Biquad { .. }, Filter::Biquad { .. })
+                    | (Filter::BiquadCombo { .. }, Filter::BiquadCombo { .. })
+                    | (Filter::Conv { .. }, Filter::Conv { .. })
+                    | (Filter::Delay { .. }, Filter::Delay { .. })
+                    | (Filter::Gain { .. }, Filter::Gain { .. })
+                    | (Filter::Dither { .. }, Filter::Dither { .. })
+                    | (Filter::DiffEq { .. }, Filter::DiffEq { .. })
+                    | (Filter::Volume { .. }, Filter::Volume { .. })
+                    | (Filter::Loudness { .. }, Filter::Loudness { .. }) => {}
+                    _ => {
+                        // A filter changed type, need to rebuild the pipeline
+                        return ConfigChange::Pipeline;
+                    }
+                };
+                // Only parameters changed, ok to update
+                if params != current_filter {
+                    filters.push(filter.to_string());
                 }
-            };
-            // Only parameters changed, ok to update
-            if params != current_filter {
-                filters.push(filter.to_string());
             }
         }
     }
-    for (mixer, params) in &newconf.mixers {
-        // The pipeline didn't change, any added mixer isn't included and can be skipped
-        if let Some(current_mixer) = currentconf.mixers.get(mixer) {
-            if params != current_mixer {
-                mixers.push(mixer.to_string());
+    if let (Some(newmixers), Some(oldmixers)) = (&newconf.mixers, &currentconf.mixers) {
+        for (mixer, params) in newmixers {
+            // The pipeline didn't change, any added mixer isn't included and can be skipped
+            if let Some(current_mixer) = oldmixers.get(mixer) {
+                if params != current_mixer {
+                    mixers.push(mixer.to_string());
+                }
             }
         }
     }
-    for (proc, params) in &newconf.processors {
-        // The pipeline didn't change, any added compressor isn't included and can be skipped
-        if let Some(current_proc) = currentconf.processors.get(proc) {
-            if params != current_proc {
-                processors.push(proc.to_string());
+    if let (Some(newprocs), Some(oldprocs)) = (&newconf.processors, &currentconf.processors) {
+        for (proc, params) in newprocs {
+            // The pipeline didn't change, any added compressor isn't included and can be skipped
+            if let Some(current_proc) = oldprocs.get(proc) {
+                if params != current_proc {
+                    processors.push(proc.to_string());
+                }
             }
         }
     }
@@ -1207,25 +1639,41 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         replace_relative_paths_in_config(conf, fname);
     }
 
-    if conf.devices.target_level >= 2 * conf.devices.chunksize {
+    if conf.devices.get_target_level() >= 2 * conf.devices.chunksize {
         let msg = format!(
             "target_level can't be larger than {}",
             2 * conf.devices.chunksize
         );
         return Err(ConfigError::new(&msg).into());
     }
-    if conf.devices.adjust_period <= 0.0 {
-        return Err(ConfigError::new("adjust_period must be positive and > 0").into());
+    if let Some(period) = conf.devices.adjust_period {
+        if period <= 0.0 {
+            return Err(ConfigError::new("adjust_period must be positive and > 0").into());
+        }
     }
-    if conf.devices.silence_threshold > 0.0 {
-        return Err(ConfigError::new("silence_threshold must be less than or equal to 0").into());
+    if let Some(threshold) = conf.devices.silence_threshold {
+        if threshold > 0.0 {
+            return Err(
+                ConfigError::new("silence_threshold must be less than or equal to 0").into(),
+            );
+        }
     }
-    if conf.devices.silence_timeout < 0.0 {
-        return Err(ConfigError::new("silence_timeout cannot be negative").into());
+    if let Some(timeout) = conf.devices.silence_timeout {
+        if timeout < 0.0 {
+            return Err(ConfigError::new("silence_timeout cannot be negative").into());
+        }
+    }
+    if let Some(rate) = conf.devices.capture_samplerate {
+        if rate != conf.devices.samplerate && conf.devices.resampler.is_none() {
+            return Err(ConfigError::new(
+                "capture_samplerate must match samplerate when resampling is disabled",
+            )
+            .into());
+        }
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi { format, .. } = &conf.devices.capture {
-        if *format == SampleFormat::FLOAT64LE {
+    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
+        if dev.format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The Wasapi capture backend does not support FLOAT64LE sample format",
             )
@@ -1233,11 +1681,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi {
-        format, exclusive, ..
-    } = &conf.devices.capture
-    {
-        if *format != SampleFormat::FLOAT32LE && !*exclusive {
+    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
+        if dev.format != SampleFormat::FLOAT32LE && !dev.get_exclusive() {
             return Err(ConfigError::new(
                 "Wasapi shared mode capture must use FLOAT32LE sample format",
             )
@@ -1245,13 +1690,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi {
-        loopback,
-        exclusive,
-        ..
-    } = &conf.devices.capture
-    {
-        if *loopback && *exclusive {
+    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
+        if dev.get_loopback() && dev.get_exclusive() {
             return Err(ConfigError::new(
                 "Wasapi loopback capture is only supported in shared mode",
             )
@@ -1259,8 +1699,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "windows")]
-    if let PlaybackDevice::Wasapi { format, .. } = &conf.devices.playback {
-        if *format == SampleFormat::FLOAT64LE {
+    if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {
+        if dev.format == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The Wasapi playback backend does not support FLOAT64LE sample format",
             )
@@ -1268,11 +1708,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "windows")]
-    if let PlaybackDevice::Wasapi {
-        format, exclusive, ..
-    } = &conf.devices.playback
-    {
-        if *format != SampleFormat::FLOAT32LE && !*exclusive {
+    if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {
+        if dev.format != SampleFormat::FLOAT32LE && !dev.get_exclusive() {
             return Err(ConfigError::new(
                 "Wasapi shared mode playback must use FLOAT32LE sample format",
             )
@@ -1298,8 +1735,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "macos")]
-    if let CaptureDevice::CoreAudio { format, .. } = &conf.devices.capture {
-        if *format == SampleFormat::FLOAT64LE {
+    if let CaptureDevice::CoreAudio(dev) = &conf.devices.capture {
+        if dev.get_format() == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The CoreAudio capture backend does not support FLOAT64LE sample format",
             )
@@ -1307,8 +1744,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         }
     }
     #[cfg(target_os = "macos")]
-    if let PlaybackDevice::CoreAudio { format, .. } = &conf.devices.playback {
-        if *format == SampleFormat::FLOAT64LE {
+    if let PlaybackDevice::CoreAudio(dev) = &conf.devices.playback {
+        if dev.get_format() == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The CoreAudio playback backend does not support FLOAT64LE sample format",
             )
@@ -1317,86 +1754,103 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     let mut num_channels = conf.devices.capture.channels();
     let fs = conf.devices.samplerate;
-    for step in &conf.pipeline {
-        match step {
-            PipelineStep::Mixer { name, bypassed } => {
-                if !*bypassed {
-                    if !conf.mixers.contains_key(name) {
-                        let msg = format!("Use of missing mixer '{}'", name);
-                        return Err(ConfigError::new(&msg).into());
-                    } else {
-                        let chan_in = conf.mixers.get(name).unwrap().channels.r#in;
-                        if chan_in != num_channels {
-                            let msg = format!(
-                                "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
-                                name, num_channels, chan_in
-                            );
-                            return Err(ConfigError::new(&msg).into());
-                        }
-                        num_channels = conf.mixers.get(name).unwrap().channels.out;
-                        match mixer::validate_mixer(conf.mixers.get(name).unwrap()) {
-                            Ok(_) => {}
-                            Err(err) => {
-                                let msg = format!("Invalid mixer '{}'. Reason: {}", name, err);
+    if let Some(pipeline) = &conf.pipeline {
+        for step in pipeline {
+            match step {
+                PipelineStep::Mixer(step) => {
+                    if !step.get_bypassed() {
+                        if let Some(mixers) = &conf.mixers {
+                            if !mixers.contains_key(&step.name) {
+                                let msg = format!("Use of missing mixer '{}'", &step.name);
                                 return Err(ConfigError::new(&msg).into());
-                            }
-                        }
-                    }
-                }
-            }
-            PipelineStep::Filter {
-                channel,
-                names,
-                bypassed,
-            } => {
-                if !*bypassed {
-                    if *channel >= num_channels {
-                        let msg = format!("Use of non existing channel {}", channel);
-                        return Err(ConfigError::new(&msg).into());
-                    }
-                    for name in names {
-                        if !conf.filters.contains_key(name) {
-                            let msg = format!("Use of missing filter '{}'", name);
-                            return Err(ConfigError::new(&msg).into());
-                        }
-                        match filters::validate_filter(fs, conf.filters.get(name).unwrap()) {
-                            Ok(_) => {}
-                            Err(err) => {
-                                let msg = format!("Invalid filter '{}'. Reason: {}", name, err);
-                                return Err(ConfigError::new(&msg).into());
-                            }
-                        }
-                    }
-                }
-            }
-            PipelineStep::Processor { name, bypassed } => {
-                if !*bypassed {
-                    if !conf.processors.contains_key(name) {
-                        let msg = format!("Use of missing processor '{}'", name);
-                        return Err(ConfigError::new(&msg).into());
-                    } else {
-                        let procconf = conf.processors.get(name).unwrap();
-                        match procconf {
-                            Processor::Compressor { parameters } => {
-                                let channels = parameters.channels;
-                                if channels != num_channels {
+                            } else {
+                                let chan_in = mixers.get(&step.name).unwrap().channels.r#in;
+                                if chan_in != num_channels {
                                     let msg = format!(
-                                        "Compressor '{}' has wrong number of channels. Expected {}, found {}.",
-                                        name, num_channels, channels
+                                        "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
+                                        &step.name, num_channels, chan_in
                                     );
                                     return Err(ConfigError::new(&msg).into());
                                 }
-                                match compressor::validate_compressor(parameters) {
+                                num_channels = mixers.get(&step.name).unwrap().channels.out;
+                                match mixer::validate_mixer(mixers.get(&step.name).unwrap()) {
                                     Ok(_) => {}
                                     Err(err) => {
                                         let msg = format!(
-                                            "Invalid processor '{}'. Reason: {}",
-                                            name, err
+                                            "Invalid mixer '{}'. Reason: {}",
+                                            &step.name, err
                                         );
                                         return Err(ConfigError::new(&msg).into());
                                     }
                                 }
                             }
+                        } else {
+                            let msg = format!("Use of missing mixer '{}'", &step.name);
+                            return Err(ConfigError::new(&msg).into());
+                        }
+                    }
+                }
+                PipelineStep::Filter(step) => {
+                    if !step.get_bypassed() {
+                        if step.channel >= num_channels {
+                            let msg = format!("Use of non existing channel {}", step.channel);
+                            return Err(ConfigError::new(&msg).into());
+                        }
+                        for name in &step.names {
+                            if let Some(filters) = &conf.filters {
+                                if !filters.contains_key(name) {
+                                    let msg = format!("Use of missing filter '{}'", name);
+                                    return Err(ConfigError::new(&msg).into());
+                                }
+                                match filters::validate_filter(fs, filters.get(name).unwrap()) {
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        let msg =
+                                            format!("Invalid filter '{}'. Reason: {}", name, err);
+                                        return Err(ConfigError::new(&msg).into());
+                                    }
+                                }
+                            } else {
+                                let msg = format!("Use of missing filter '{}'", name);
+                                return Err(ConfigError::new(&msg).into());
+                            }
+                        }
+                    }
+                }
+                PipelineStep::Processor(step) => {
+                    if !step.get_bypassed() {
+                        if let Some(processors) = &conf.processors {
+                            if !processors.contains_key(&step.name) {
+                                let msg = format!("Use of missing processor '{}'", step.name);
+                                return Err(ConfigError::new(&msg).into());
+                            } else {
+                                let procconf = processors.get(&step.name).unwrap();
+                                match procconf {
+                                    Processor::Compressor { parameters, .. } => {
+                                        let channels = parameters.channels;
+                                        if channels != num_channels {
+                                            let msg = format!(
+                                                "Compressor '{}' has wrong number of channels. Expected {}, found {}.",
+                                                step.name, num_channels, channels
+                                            );
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
+                                        match compressor::validate_compressor(parameters) {
+                                            Ok(_) => {}
+                                            Err(err) => {
+                                                let msg = format!(
+                                                    "Invalid processor '{}'. Reason: {}",
+                                                    step.name, err
+                                                );
+                                                return Err(ConfigError::new(&msg).into());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            let msg = format!("Use of missing processor '{}'", step.name);
+                            return Err(ConfigError::new(&msg).into());
                         }
                     }
                 }
@@ -1416,11 +1870,14 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
 
 /// Get a vector telling which channels are actually used in the pipeline
 pub fn get_used_capture_channels(conf: &Configuration) -> Vec<bool> {
-    for step in conf.pipeline.iter() {
-        if let PipelineStep::Mixer { name, bypassed } = step {
-            if !*bypassed {
-                let mixerconf = conf.mixers.get(name).unwrap();
-                return mixer::get_used_input_channels(mixerconf);
+    if let Some(pipeline) = &conf.pipeline {
+        for step in pipeline.iter() {
+            if let PipelineStep::Mixer(mix) = step {
+                if !mix.get_bypassed() {
+                    // Safe to unwrap here since we have already verified that the mixer exists
+                    let mixerconf = conf.mixers.as_ref().unwrap().get(&mix.name).unwrap();
+                    return mixer::get_used_input_channels(mixerconf);
+                }
             }
         }
     }

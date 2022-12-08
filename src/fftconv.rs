@@ -77,18 +77,21 @@ impl FftConv {
 
     pub fn from_config(name: String, data_length: usize, conf: config::ConvParameters) -> Self {
         let values = match conf {
-            config::ConvParameters::Values { values, length } => {
-                filters::pad_vector(&values, length)
+            config::ConvParameters::Values { values } => values,
+            config::ConvParameters::Raw(params) => filters::read_coeff_file(
+                &params.filename,
+                &params.get_format(),
+                params.get_read_bytes_lines(),
+                params.get_skip_bytes_lines(),
+            )
+            .unwrap(),
+            config::ConvParameters::Wav(params) => {
+                filters::read_wav(&params.filename, params.get_channel()).unwrap()
             }
-            config::ConvParameters::Raw {
-                filename,
-                format,
-                read_bytes_lines,
-                skip_bytes_lines,
-            } => filters::read_coeff_file(&filename, &format, read_bytes_lines, skip_bytes_lines)
-                .unwrap(),
-            config::ConvParameters::Wav { filename, channel } => {
-                filters::read_wav(&filename, channel).unwrap()
+            config::ConvParameters::Dummy { length } => {
+                let mut values = vec![0.0; length];
+                values[0] = 1.0;
+                values
             }
         };
         FftConv::new(name, data_length, &values)
@@ -157,22 +160,26 @@ impl Filter for FftConv {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Conv { parameters: conf } = conf {
+        if let config::Filter::Conv {
+            parameters: conf, ..
+        } = conf
+        {
             let coeffs = match conf {
-                config::ConvParameters::Values { values, length } => {
-                    filters::pad_vector(&values, length)
+                config::ConvParameters::Values { values } => values,
+                config::ConvParameters::Raw(params) => filters::read_coeff_file(
+                    &params.filename,
+                    &params.get_format(),
+                    params.get_read_bytes_lines(),
+                    params.get_skip_bytes_lines(),
+                )
+                .unwrap(),
+                config::ConvParameters::Wav(params) => {
+                    filters::read_wav(&params.filename, params.get_channel()).unwrap()
                 }
-                config::ConvParameters::Raw {
-                    filename,
-                    format,
-                    read_bytes_lines,
-                    skip_bytes_lines,
-                } => {
-                    filters::read_coeff_file(&filename, &format, read_bytes_lines, skip_bytes_lines)
-                        .unwrap()
-                }
-                config::ConvParameters::Wav { filename, channel } => {
-                    filters::read_wav(&filename, channel).unwrap()
+                config::ConvParameters::Dummy { length } => {
+                    let mut values = vec![0.0; length];
+                    values[0] = 1.0;
+                    values
                 }
             };
 
@@ -213,22 +220,21 @@ impl Filter for FftConv {
 /// Validate a FFT convolution config.
 pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {
-        config::ConvParameters::Values { .. } => Ok(()),
-        config::ConvParameters::Raw {
-            filename,
-            format,
-            read_bytes_lines,
-            skip_bytes_lines,
-        } => {
-            let coeffs =
-                filters::read_coeff_file(filename, format, *read_bytes_lines, *skip_bytes_lines)?;
+        config::ConvParameters::Values { .. } | config::ConvParameters::Dummy { .. } => Ok(()),
+        config::ConvParameters::Raw(params) => {
+            let coeffs = filters::read_coeff_file(
+                &params.filename,
+                &params.get_format(),
+                params.get_read_bytes_lines(),
+                params.get_skip_bytes_lines(),
+            )?;
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }
             Ok(())
         }
-        config::ConvParameters::Wav { filename, channel } => {
-            let coeffs = filters::read_wav(filename, *channel)?;
+        config::ConvParameters::Wav(params) => {
+            let coeffs = filters::read_wav(&params.filename, params.get_channel())?;
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }
@@ -261,10 +267,7 @@ mod tests {
     #[test]
     fn check_result() {
         let coeffs = vec![0.5, 0.5];
-        let conf = ConvParameters::Values {
-            values: coeffs,
-            length: 0,
-        };
+        let conf = ConvParameters::Values { values: coeffs };
         let mut filter = FftConv::from_config("test".to_string(), 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];

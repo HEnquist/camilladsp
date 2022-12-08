@@ -44,8 +44,8 @@ impl DiffEq {
     }
 
     pub fn from_config(name: String, conf: config::DiffEqParameters) -> Self {
-        let a = conf.a;
-        let b = conf.b;
+        let a = conf.get_a();
+        let b = conf.get_b();
         DiffEq::new(name, a, b)
     }
 
@@ -106,7 +106,10 @@ impl Filter for DiffEq {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::DiffEq { parameters: conf } = conf {
+        if let config::Filter::DiffEq {
+            parameters: conf, ..
+        } = conf
+        {
             let name = self.name.clone();
             *self = DiffEq::from_config(name, conf);
         } else {

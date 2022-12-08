@@ -78,7 +78,7 @@ fn release_ownership(device_id: AudioDeviceID) -> Res<()> {
 
 #[derive(Clone, Debug)]
 pub struct CoreaudioPlaybackDevice {
-    pub devname: String,
+    pub devname: Option<String>,
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
@@ -92,11 +92,9 @@ pub struct CoreaudioPlaybackDevice {
 
 #[derive(Clone, Debug)]
 pub struct CoreaudioCaptureDevice {
-    pub devname: String,
+    pub devname: Option<String>,
     pub samplerate: usize,
-    pub resampler_type: config::Resampler,
-    pub resampler_profile: config::ResamplerProfile,
-    pub enable_resampling: bool,
+    pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
@@ -109,26 +107,26 @@ pub struct CoreaudioCaptureDevice {
 }
 
 fn open_coreaudio_playback(
-    devname: &str,
+    devname: &Option<String>,
     samplerate: usize,
     channels: usize,
     sample_format: &SampleFormat,
     change_format: bool,
     exclusive: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
-    let device_id = if devname == "default" {
-        match get_default_device_id(false) {
+    let device_id = if let Some(name) = devname {
+        match get_device_id_from_name(name) {
             Some(dev) => dev,
             None => {
-                let msg = "Could not get default playback device".to_string();
+                let msg = format!("Could not find playback device '{}'", name);
                 return Err(ConfigError::new(&msg).into());
             }
         }
     } else {
-        match get_device_id_from_name(devname) {
+        match get_default_device_id(false) {
             Some(dev) => dev,
             None => {
-                let msg = format!("Could not find playback device '{}'", devname);
+                let msg = "Could not get default playback device".to_string();
                 return Err(ConfigError::new(&msg).into());
             }
         }
@@ -189,30 +187,30 @@ fn open_coreaudio_playback(
         .set_property(id, Scope::Input, Element::Output, Some(&asbd))
         .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
-    debug!("Opened CoreAudio playback device {}", devname);
+    debug!("Opened CoreAudio playback device {:?}", devname);
     Ok((audio_unit, device_id))
 }
 
 fn open_coreaudio_capture(
-    devname: &str,
+    devname: &Option<String>,
     samplerate: usize,
     channels: usize,
     sample_format: &SampleFormat,
     change_format: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
-    let device_id = if devname == "default" {
-        match get_default_device_id(true) {
+    let device_id = if let Some(name) = devname {
+        match get_device_id_from_name(name) {
             Some(dev) => dev,
             None => {
-                let msg = "Could not get default capture device".to_string();
+                let msg = format!("Could not find capture device '{}'", name);
                 return Err(ConfigError::new(&msg).into());
             }
         }
     } else {
-        match get_device_id_from_name(devname) {
+        match get_default_device_id(true) {
             Some(dev) => dev,
             None => {
-                let msg = format!("Could not find capture device '{}'", devname);
+                let msg = "Could not get default capture device".to_string();
                 return Err(ConfigError::new(&msg).into());
             }
         }
@@ -267,7 +265,7 @@ fn open_coreaudio_capture(
         .set_property(id, Scope::Output, Element::Input, Some(&asbd))
         .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
-    debug!("Opened CoreAudio capture device {}", devname);
+    debug!("Opened CoreAudio capture device {:?}", devname);
     Ok((audio_unit, device_id))
 }
 
@@ -288,7 +286,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let sample_format = self.sample_format.clone();
+        let sample_format = self.sample_format;
         let change_format = self.change_format;
         let exclusive = self.exclusive;
         let target_level = if self.target_level > 0 {
@@ -557,12 +555,10 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let sample_format = self.sample_format.clone();
+        let sample_format = self.sample_format;
         let change_format = self.change_format;
-        let enable_resampling = self.enable_resampling;
-        let resampler_type = self.resampler_type.clone();
-        let resampler_profile = self.resampler_profile.clone();
-        let async_src = resampler_is_async(&resampler_type);
+        let resampler_config = self.resampler_config;
+        let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let stop_on_rate_change = self.stop_on_rate_change;
@@ -572,19 +568,13 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let handle = thread::Builder::new()
             .name("CoreaudioCapture".to_string())
             .spawn(move || {
-                let mut resampler = if enable_resampling {
-                    debug!("Creating resampler");
-                    get_resampler(
-                        &resampler_type,
-                        &resampler_profile,
+                let mut resampler = get_resampler(
+                        &resampler_config,
                         channels,
                         samplerate,
                         capture_samplerate,
                         chunksize,
-                    )
-                } else {
-                    None
-                };
+                    );
                 // Rough guess of the number of frames per callback. 
                 //let callback_frames = samplerate / 85;
                 let callback_frames = 512;
@@ -827,7 +817,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         averager.restart();
                         let measured_rate_f = samples_per_sec;
                         debug!(
-                            "Measured sample rate is {} Hz",
+                            "Measured sample rate is {:.1} Hz",
                             measured_rate_f
                         );
                         let mut capture_status = capture_status.write().unwrap();
@@ -843,7 +833,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         watcher_averager.restart();
                         let measured_rate_f = samples_per_sec;
                         debug!(
-                            "Rate watcher, measured sample rate is {} Hz",
+                            "Rate watcher, measured sample rate is {:.1} Hz",
                             measured_rate_f
                         );
                         let changed = valuewatcher.check_value(measured_rate_f as f32);
