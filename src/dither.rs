@@ -56,11 +56,11 @@ impl<'a> Dither<'a> {
                 let none = <NoopDitherer as Ditherer>::new(0.0);
                 Dither::new(name, bits, none, None)
             }
-            config::DitherParameters::Triangular { bits, amplitude } => {
+            config::DitherParameters::Flat { bits, amplitude } => {
                 let tpdf = <TriangularDitherer as Ditherer>::new(amplitude);
                 Dither::new(name, bits, tpdf, None)
             }
-            config::DitherParameters::Simple { bits } => {
+            config::DitherParameters::HighPass { bits } => {
                 let hp_tpdf = HighPassDitherer::default();
                 Dither::new(name, bits, hp_tpdf, None)
             }
@@ -552,8 +552,8 @@ impl<'a> Filter for Dither<'a> {
 pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
     let bits = match conf {
         config::DitherParameters::None { bits }
-        | config::DitherParameters::Triangular { bits, .. }
-        | config::DitherParameters::Simple { bits }
+        | config::DitherParameters::Flat { bits, .. }
+        | config::DitherParameters::HighPass { bits }
         | config::DitherParameters::Fweighted441 { bits }
         | config::DitherParameters::FweightedLong441 { bits }
         | config::DitherParameters::FweightedShort441 { bits }
@@ -578,7 +578,7 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
         return Err(config::ConfigError::new("Dither bit depth must be at least 2").into());
     }
 
-    if let config::DitherParameters::Triangular { amplitude, .. } = conf {
+    if let config::DitherParameters::Flat { amplitude, .. } = conf {
         if *amplitude < 0.0 {
             return Err(config::ConfigError::new("Dither amplitude cannot be negative").into());
         }
@@ -693,7 +693,7 @@ impl Ditherer for NoopDitherer {
 #[cfg(test)]
 mod tests {
     use crate::config::DitherParameters;
-    use crate::dither::{Dither, Ditherer, NoopDitherer, TriangularDitherer};
+    use crate::dither::{Dither, Ditherer};
     use crate::filters::Filter;
     use crate::PrcFmt;
 
@@ -715,12 +715,8 @@ mod tests {
     fn test_quantize() {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
-        let mut dith = Dither::new(
-            "test".to_string(),
-            8,
-            <NoopDitherer as Ditherer>::new(0.0),
-            None,
-        );
+        let conf = DitherParameters::None { bits: 8 };
+        let mut dith = Dither::from_config("test".to_string(), conf);
         dith.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 128.0));
         assert!(is_close(
@@ -731,10 +727,14 @@ mod tests {
     }
 
     #[test]
-    fn test_triangular() {
+    fn test_flat() {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
-        let mut dith = Dither::new("test".to_string(), 8, TriangularDitherer::default(), None);
+        let conf = DitherParameters::Flat {
+            bits: 8,
+            amplitude: 2.0,
+        };
+        let mut dith = Dither::from_config("test".to_string(), conf);
         dith.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 64.0));
         assert!(is_close(
@@ -745,10 +745,10 @@ mod tests {
     }
 
     #[test]
-    fn test_simple() {
+    fn test_high_pass() {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
-        let conf = DitherParameters::Simple { bits: 8 };
+        let conf = DitherParameters::HighPass { bits: 8 };
         let mut dith = Dither::from_config("test".to_string(), conf);
         dith.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 32.0));

@@ -1016,8 +1016,8 @@ pub enum TimeUnit {
 #[serde(deny_unknown_fields)]
 pub enum DitherParameters {
     None { bits: usize },
-    Triangular { bits: usize, amplitude: PrcFmt },
-    Simple { bits: usize },
+    Flat { bits: usize, amplitude: PrcFmt },
+    HighPass { bits: usize },
     Fweighted441 { bits: usize },
     FweightedLong441 { bits: usize },
     FweightedShort441 { bits: usize },

@@ -1489,7 +1489,9 @@ The "Dither" filter should only be added at the very end of the pipeline for eac
 
 | Subtype             | kHz  | Noise shaping | Comments                                                       |
 | ------------------- | ---- | ------------- | -------------------------------------------------------------- |
-| Simple              | Any  | 2 taps        | Wannamaker high passed, violet noise                           |
+| None                | Any  | -             | Can reduce bit depth for testing purposes                      |
+| Flat                | Any  | -             | Triangular: objectively optimal non-shaped dither              |
+| HighPass            | Any  | 2 taps        | Wannamaker high passed, violet noise                           |
 | Fweighted441        | 44.1 | 9 taps        | Wannamaker, modeled after early ISO curve                      |
 | - FweightedShort441 | 44.1 | 3 taps        | - Lower cpu load, less noise but also less noise reduction     |
 | - FweightedLong441  | 44.1 | 24 taps       | - Higher cpu load, less noise and nearly equal noise reduction |
@@ -1509,21 +1511,16 @@ The "Dither" filter should only be added at the very end of the pipeline for eac
 | - ShibataLow96      | 96   | 32 taps       | - Low intensity (louder noise)                                 |
 | Shibata192          | 192  | 54 taps       | Modeled after LAME ATH type 1                                  |
 | - ShibataLow192     | 192  | 20 taps       | - Low intensity (louder noise)                                 |
-| Triangular          | Any  | -             | Objectively optimal non-shaped dither                          |
-| Uniform             | Any  | -             | Suboptimal to Triangular, lower but same cpu load as Simple    |
-| Gaussian            | Any  | -             | Suboptimal to Triangular, more akin to analog noise            |
 
-Notes:
-- The noise shaping dithers use a triangular pdf.
-- The Shibata filters are the new filters from [SSRC 1.32](https://shibatch.sourceforge.net/ssrc/).
+The Shibata filters are the new filters from [SSRC 1.32](https://shibatch.sourceforge.net/ssrc/).
 
 The parameter "bits" sets the target bit depth. For most oversampling delta-sigma DACs, this should match the bit depth of the playback device for best results. For true non-oversampling DACs, this should match the number of bits over which the DAC is linear. Setting it to a higher value is not useful since then the applied dither will be lost.
 
-For subtypes without noise shaping, the parameter "amplitude" sets the number of LSB to be dithered. The required LSB to linearize the samples depends on the type of ditherer: 2 for Triangular, 1 for Uniform and 0.5 for Gaussian. Lower amplitudes produce less noise but also linearize less; higher numbers produce more noise but do not necessarily linearize more.
+For the "Flat" subtype, the parameter "amplitude" sets the number of LSB to be dithered. To linearize the samples, this should be 2. Lower amplitudes produce less noise but also linearize less; higher numbers produce more noise but do not linearize more.
 
-Some comparisons between the noise shapers are available from [SoX](http://sox.sourceforge.net/SoX/NoiseShaping), [SSRC](https://shibatch.sourceforge.net/ssrc/) and [ReSampler](https://github.com/jniemann66/ReSampler/blob/master/ditherProfiles.md). To test the different types, set the target bit depth to something very small like 5 or 6 bits (the minimum allowed value is 2) and try them all.
+Some comparisons between the noise shapers are available from [SoX](http://sox.sourceforge.net/SoX/NoiseShaping), [SSRC](https://shibatch.sourceforge.net/ssrc/) and [ReSampler](https://github.com/jniemann66/ReSampler/blob/master/ditherProfiles.md). To test the different types, set the target bit depth to something very small like 5 or 6 bits (the minimum allowed value is 2) and try them all. Note that on "None" this may well mean there is no or unintelligible audio -- this is to experiment with and show what the other ditherers actually do.
 
-For sample rates above 48 kHz there is no need for anything more advanced than the "Simple" subtype. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20 kHz up to 48 or 96 kHz where the noise can be placed without issues. The Simple type will place almost all of it there. Of course, the high-resolution Shibata filters provide some icing on the cake.
+For sample rates above 48 kHz there is no need for anything more advanced than the "HighPass" subtype. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20 kHz up to 48 or 96 kHz where the noise can be placed without issues. The HighPass ditherer will place almost all of it there. Of course, the high-resolution Shibata filters provide some icing on the cake.
 
 Example:
 ```
