@@ -1015,10 +1015,9 @@ pub enum TimeUnit {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum DitherParameters {
-    // high-passed triangular
+    None { bits: usize },
+    Triangular { bits: usize, amplitude: PrcFmt },
     Simple { bits: usize },
-
-    // noise shaping dithers; use triangular internally
     Fweighted441 { bits: usize },
     FweightedLong441 { bits: usize },
     FweightedShort441 { bits: usize },
@@ -1038,13 +1037,6 @@ pub enum DitherParameters {
     ShibataLow96 { bits: usize },
     Shibata192 { bits: usize },
     ShibataLow192 { bits: usize },
-
-    // PDF dithers
-    Gaussian { bits: usize, amplitude: PrcFmt },
-    Triangular { bits: usize, amplitude: PrcFmt },
-    Uniform { bits: usize, amplitude: PrcFmt },
-
-    None { bits: usize },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

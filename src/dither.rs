@@ -3,7 +3,7 @@ use crate::filters::Filter;
 
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
-use rand_distr::{Distribution, Normal, Triangular, Uniform};
+use rand_distr::{Distribution, Triangular, Uniform};
 
 use crate::NewValue;
 use crate::PrcFmt;
@@ -52,6 +52,14 @@ impl<'a> Dither<'a> {
     // Some filters borrowed from SSRC: https://github.com/shibatch/SSRC/
     pub fn from_config(name: String, conf: config::DitherParameters) -> Self {
         match conf {
+            config::DitherParameters::None { bits } => {
+                let none = <NoopDitherer as Ditherer>::new(0.0);
+                Dither::new(name, bits, none, None)
+            }
+            config::DitherParameters::Triangular { bits, amplitude } => {
+                let tpdf = <TriangularDitherer as Ditherer>::new(amplitude);
+                Dither::new(name, bits, tpdf, None)
+            }
             config::DitherParameters::Simple { bits } => {
                 let hp_tpdf = HighPassDitherer::default();
                 Dither::new(name, bits, hp_tpdf, None)
@@ -486,22 +494,6 @@ impl<'a> Dither<'a> {
                 ];
                 Dither::new(name, bits, tpdf, Some(filter))
             }
-            config::DitherParameters::Gaussian { bits, amplitude } => {
-                let gpdf = <GaussianDitherer as Ditherer>::new(amplitude);
-                Dither::new(name, bits, gpdf, None)
-            }
-            config::DitherParameters::Triangular { bits, amplitude } => {
-                let tpdf = <TriangularDitherer as Ditherer>::new(amplitude);
-                Dither::new(name, bits, tpdf, None)
-            }
-            config::DitherParameters::Uniform { bits, amplitude } => {
-                let rpdf = <UniformDitherer as Ditherer>::new(amplitude);
-                Dither::new(name, bits, rpdf, None)
-            }
-            config::DitherParameters::None { bits } => {
-                let none = <NoopDitherer as Ditherer>::new(0.0);
-                Dither::new(name, bits, none, None)
-            }
         }
     }
 }
@@ -559,7 +551,9 @@ impl<'a> Filter for Dither<'a> {
 /// Validate a Dither config.
 pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
     let bits = match conf {
-        config::DitherParameters::Simple { bits }
+        config::DitherParameters::None { bits }
+        | config::DitherParameters::Triangular { bits, .. }
+        | config::DitherParameters::Simple { bits }
         | config::DitherParameters::Fweighted441 { bits }
         | config::DitherParameters::FweightedLong441 { bits }
         | config::DitherParameters::FweightedShort441 { bits }
@@ -578,20 +572,13 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
         | config::DitherParameters::Shibata96 { bits }
         | config::DitherParameters::ShibataLow96 { bits }
         | config::DitherParameters::Shibata192 { bits }
-        | config::DitherParameters::ShibataLow192 { bits }
-        | config::DitherParameters::Gaussian { bits, .. }
-        | config::DitherParameters::Triangular { bits, .. }
-        | config::DitherParameters::Uniform { bits, .. }
-        | config::DitherParameters::None { bits } => bits,
+        | config::DitherParameters::ShibataLow192 { bits } => bits,
     };
     if *bits <= 1 {
         return Err(config::ConfigError::new("Dither bit depth must be at least 2").into());
     }
 
-    if let config::DitherParameters::Gaussian { amplitude, .. }
-    | config::DitherParameters::Triangular { amplitude, .. }
-    | config::DitherParameters::Uniform { amplitude, .. } = conf
-    {
+    if let config::DitherParameters::Triangular { amplitude, .. } = conf {
         if *amplitude < 0.0 {
             return Err(config::ConfigError::new("Dither amplitude cannot be negative").into());
         }
@@ -603,8 +590,8 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
     Ok(())
 }
 
-// Ditherer, GaussianDitherer, TriangularDitherer, HighPassDitherer adopted
-// from librespot, which is licensed under MIT. Used with permission.
+// Ditherer, TriangularDitherer, HighPassDitherer adopted from librespot,
+// which is licensed under MIT. Used with permission.
 pub trait Ditherer {
     // `amplitude` in bits
     fn new(amplitude: PrcFmt) -> Self
@@ -618,34 +605,6 @@ pub trait Ditherer {
 // but fast and with excellent randomness.
 fn create_rng() -> SmallRng {
     SmallRng::from_entropy()
-}
-
-// Simple rectangular-pdf (RPDF; uniform) dither.
-// Suboptimal to TPDF, because the residual noise level varies audibly.
-#[derive(Clone, Debug)]
-pub struct UniformDitherer {
-    cached_rng: SmallRng,
-    distribution: Uniform<PrcFmt>,
-}
-
-impl Ditherer for UniformDitherer {
-    fn new(amplitude: PrcFmt) -> Self {
-        let amplitude = amplitude / 2.0;
-        Self {
-            cached_rng: create_rng(),
-            distribution: Uniform::new_inclusive(-amplitude, amplitude),
-        }
-    }
-
-    fn sample(&mut self) -> PrcFmt {
-        self.distribution.sample(&mut self.cached_rng)
-    }
-}
-
-impl Default for UniformDitherer {
-    fn default() -> Self {
-        <Self as Ditherer>::new(1.0)
-    }
 }
 
 // Spectrally-white triangular-pdf (TPDF) dither.
@@ -685,21 +644,24 @@ impl Default for TriangularDitherer {
 // This produces violet noise.
 #[derive(Clone, Debug)]
 pub struct HighPassDitherer {
-    ditherer: UniformDitherer,
+    cached_rng: SmallRng,
+    distribution: Uniform<PrcFmt>,
     previous_sample: PrcFmt,
 }
 
 impl Ditherer for HighPassDitherer {
     fn new(amplitude: PrcFmt) -> Self {
+        // 2x RDPF sample (current - previous) makes 1x TDPF
+        let amplitude = amplitude / 2.0;
         Self {
-            // 2x RDPF sample (current - previous) makes 1x TDPF
-            ditherer: <UniformDitherer as Ditherer>::new(amplitude / 2.0),
+            cached_rng: create_rng(),
+            distribution: Uniform::new_inclusive(-amplitude, amplitude),
             previous_sample: 0.0,
         }
     }
 
     fn sample(&mut self) -> PrcFmt {
-        let new_sample = self.ditherer.sample();
+        let new_sample = self.distribution.sample(&mut self.cached_rng);
         let high_passed_sample = new_sample - self.previous_sample;
         self.previous_sample = new_sample;
         high_passed_sample
@@ -710,34 +672,6 @@ impl Default for HighPassDitherer {
     fn default() -> Self {
         // 1 LSB +/- 1 LSB (previous) = 2 LSB
         <Self as Ditherer>::new(2.0)
-    }
-}
-
-// Spectrally-white Gaussian-pdf (GPDF) dither.
-// TPDF is better objectively, but some may find this sounds more "analog".
-#[derive(Clone, Debug)]
-pub struct GaussianDitherer {
-    cached_rng: SmallRng,
-    distribution: Normal<PrcFmt>,
-}
-
-impl Ditherer for GaussianDitherer {
-    fn new(amplitude: PrcFmt) -> Self {
-        Self {
-            cached_rng: create_rng(),
-            distribution: Normal::new(0.0, amplitude).unwrap(),
-        }
-    }
-
-    fn sample(&mut self) -> PrcFmt {
-        self.distribution.sample(&mut self.cached_rng)
-    }
-}
-
-impl Default for GaussianDitherer {
-    fn default() -> Self {
-        // 1/2 LSB RMS needed to linearize the response
-        <Self as Ditherer>::new(0.5)
     }
 }
 
@@ -759,7 +693,7 @@ impl Ditherer for NoopDitherer {
 #[cfg(test)]
 mod tests {
     use crate::config::DitherParameters;
-    use crate::dither::{Dither, Ditherer, NoopDitherer, UniformDitherer};
+    use crate::dither::{Dither, Ditherer, NoopDitherer, TriangularDitherer};
     use crate::filters::Filter;
     use crate::PrcFmt;
 
@@ -788,11 +722,7 @@ mod tests {
             None,
         );
         dith.process_waveform(&mut waveform).unwrap();
-        assert!(compare_waveforms(
-            waveform.clone(),
-            waveform2,
-            1.0 / 128.0
-        ));
+        assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 128.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
             128.0 * waveform[2],
@@ -801,16 +731,12 @@ mod tests {
     }
 
     #[test]
-    fn test_uniform() {
+    fn test_triangular() {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
-        let mut dith = Dither::new("test".to_string(), 8, UniformDitherer::default(), None);
+        let mut dith = Dither::new("test".to_string(), 8, TriangularDitherer::default(), None);
         dith.process_waveform(&mut waveform).unwrap();
-        assert!(compare_waveforms(
-            waveform.clone(),
-            waveform2,
-            1.0 / 64.0
-        ));
+        assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 64.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
             128.0 * waveform[2],
@@ -825,11 +751,7 @@ mod tests {
         let conf = DitherParameters::Simple { bits: 8 };
         let mut dith = Dither::from_config("test".to_string(), conf);
         dith.process_waveform(&mut waveform).unwrap();
-        assert!(compare_waveforms(
-            waveform.clone(),
-            waveform2,
-            1.0 / 32.0
-        ));
+        assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 32.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
             128.0 * waveform[2],
@@ -844,11 +766,7 @@ mod tests {
         let conf = DitherParameters::Lipshitz441 { bits: 8 };
         let mut dith = Dither::from_config("test".to_string(), conf);
         dith.process_waveform(&mut waveform).unwrap();
-        assert!(compare_waveforms(
-            waveform.clone(),
-            waveform2,
-            1.0 / 16.0
-        ));
+        assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 16.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
             128.0 * waveform[2],
