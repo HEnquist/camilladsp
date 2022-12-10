@@ -146,7 +146,7 @@ Get the peak since start.
 
 ### Volume control
 
-Commands for setting and getting the volume setting. These are only relevant if the pipeline includes "Volume" or "Loudness" filters.
+Commands for setting and getting the volume and mute of the default volume control on control `Main`.
 - `GetVolume` : Get the current volume setting in dB.
   * Returns the value as a float.
 - `SetVolume` : Set the volume control to the given value in dB. Clamped to the range -150 to +50 dB.
@@ -156,6 +156,21 @@ Commands for setting and getting the volume setting. These are only relevant if 
   * Returns the muting status as a boolean.
 - `SetMute` : Set muting to the given value.
 - `ToggleMute` : Toggle muting.
+  * Returns the new muting status as a boolean.
+
+Commands for setting and getting the volume and mute setting of a given control channel.
+The channels are given by an integer, 0 for `Main` and 1 to 4 for `Aux1` to `Aux4`.
+All commands take the control as the first parameter.
+The response includes which control was referenced.
+- `GetVolumeControl` : Get the current volume setting in dB.
+  * Returns the value as a float.
+- `SetVolumeControl` : Set the volume control to the given value in dB. Clamped to the range -150 to +50 dB.
+- `AdjustVolumeControl` : Change the volume setting by the given number of dB, positive or negative. The resulting volume is clamped to the range -150 to +50 dB.
+  * Returns the new value as a float.
+- `GetMuteControl` : Get the current mute setting.
+  * Returns the muting status as a boolean.
+- `SetMuteControl` : Set muting to the given value.
+- `ToggleMuteControl` : Toggle muting.
   * Returns the new muting status as a boolean.
 
 ### Config management

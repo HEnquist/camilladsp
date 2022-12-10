@@ -99,6 +99,12 @@ enum WsCommand {
     GetMute,
     SetMute(bool),
     ToggleMute,
+    GetVolumeControl(usize),
+    SetVolumeControl(usize, f32),
+    AdjustVolumeControl(usize, f32),
+    GetMuteControl(usize),
+    SetMuteControl(usize, bool),
+    ToggleMuteControl(usize),
     GetVersion,
     GetState,
     GetStopReason,
@@ -285,6 +291,34 @@ enum WsReply {
     ToggleMute {
         result: WsResult,
         value: bool,
+    },
+    SetVolumeControl {
+        result: WsResult,
+        control: usize
+    },
+    GetVolumeControl {
+        result: WsResult,
+        value: f32,
+        control: usize
+    },
+    AdjustVolumeControl {
+        result: WsResult,
+        value: f32,
+        control: usize
+    },
+    SetMuteControl {
+        result: WsResult,
+        control: usize
+    },
+    GetMuteControl {
+        result: WsResult,
+        value: bool,
+        control: usize
+    },
+    ToggleMuteControl {
+        result: WsResult,
+        value: bool,
+        control: usize
     },
     GetVersion {
         result: WsResult,
@@ -780,6 +814,93 @@ fn handle_command(
             Some(WsReply::ToggleMute {
                 result: WsResult::Ok,
                 value: procstat.mute[0],
+            })
+        }
+        WsCommand::GetVolumeControl(ctrl) => {
+            if ctrl > 4 {
+                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+            }
+            let procstat = shared_data_inst.processing_status.read().unwrap();
+            Some(WsReply::GetVolumeControl {
+                result: WsResult::Ok,
+                value: procstat.target_volume[ctrl],
+                control: ctrl
+            })
+        }
+        WsCommand::SetVolumeControl(ctrl, nbr) => {
+            let mut new_vol = nbr;
+            if ctrl > 4 {
+                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+            }
+            // Clamp to -150 .. 50 dB, probably larger than needed..
+            if new_vol < -150.0 {
+                new_vol = -150.0;
+                warn!("Clamped volume at -150 dB")
+            } else if new_vol > 50.0 {
+                new_vol = 50.0;
+                warn!("Clamped volume at +50 dB")
+            }
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.target_volume[ctrl] = new_vol;
+            Some(WsReply::SetVolumeControl {
+                result: WsResult::Ok,
+                control: ctrl
+            })
+        }
+        WsCommand::AdjustVolumeControl(ctrl, nbr) => {
+            if ctrl > 4 {
+                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+            }
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            let mut tempvol = procstat.target_volume[ctrl];
+            tempvol += nbr;
+            // Clamp to -150 .. 50 dB, probably larger than needed..
+            if tempvol < -150.0 {
+                tempvol = -150.0;
+                warn!("Clamped volume at -150 dB")
+            } else if tempvol > 50.0 {
+                tempvol = 50.0;
+                warn!("Clamped volume at +50 dB")
+            }
+            procstat.target_volume[ctrl] = tempvol;
+            Some(WsReply::AdjustVolumeControl {
+                result: WsResult::Ok,
+                value: tempvol,
+                control: ctrl
+            })
+        }
+        WsCommand::GetMuteControl(ctrl) => {
+            if ctrl > 4 {
+                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+            }
+            let procstat = shared_data_inst.processing_status.read().unwrap();
+            Some(WsReply::GetMuteControl {
+                result: WsResult::Ok,
+                value: procstat.mute[ctrl],
+                control: ctrl
+            })
+        }
+        WsCommand::SetMuteControl(ctrl, mute) => {
+            if ctrl > 4 {
+                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+            }
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.mute[ctrl] = mute;
+            Some(WsReply::SetMuteControl {
+                result: WsResult::Ok,
+                control: ctrl
+            })
+        }
+        WsCommand::ToggleMuteControl(ctrl) => {
+            if ctrl > 4 {
+                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+            }
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.mute[ctrl] = !procstat.mute[ctrl];
+            Some(WsReply::ToggleMuteControl {
+                result: WsResult::Ok,
+                value: procstat.mute[ctrl],
+                control: ctrl
             })
         }
         WsCommand::GetConfig => Some(WsReply::GetConfig {
