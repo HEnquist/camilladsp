@@ -472,7 +472,7 @@ impl Pipeline {
                     }
                 }
                 config::PipelineStep::Filter(step) => {
-                    if step.get_bypassed() {
+                    if !step.get_bypassed() {
                         let fltgrp = FilterGroup::from_config(
                             step.channel,
                             step.names,
