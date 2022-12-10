@@ -363,10 +363,11 @@ impl FilterGroup {
         sample_freq: usize,
         processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
-        debug!("Build from config");
+        debug!("Build filter group from config");
         let mut filters = Vec::<Box<dyn Filter>>::new();
         for name in names {
             let filter_cfg = filter_configs[&name].clone();
+            trace!("Create filter {} with config {:?}", name, filter_cfg);
             let filter: Box<dyn Filter> =
                 match filter_cfg {
                     config::Filter::Conv { parameters, .. } => Box::new(
@@ -399,7 +400,6 @@ impl FilterGroup {
                         Box::new(loudness::Loudness::from_config(
                             name,
                             parameters,
-                            waveform_length,
                             sample_freq,
                             processing_status.clone(),
                         ))
@@ -452,6 +452,7 @@ pub enum PipelineStep {
 
 pub struct Pipeline {
     steps: Vec<PipelineStep>,
+    volume: basicfilters::Volume,
 }
 
 impl Pipeline {
@@ -461,6 +462,7 @@ impl Pipeline {
         processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
         debug!("Build new pipeline");
+        trace!("Pipeline config {:?}", conf.pipeline);
         let mut steps = Vec::<PipelineStep>::new();
         for step in conf.pipeline.unwrap_or_default() {
             match step {
@@ -472,7 +474,7 @@ impl Pipeline {
                     }
                 }
                 config::PipelineStep::Filter(step) => {
-                    if step.get_bypassed() {
+                    if !step.get_bypassed() {
                         let fltgrp = FilterGroup::from_config(
                             step.channel,
                             step.names,
@@ -503,7 +505,19 @@ impl Pipeline {
                 }
             }
         }
-        Pipeline { steps }
+        let current_volume = processing_status.read().unwrap().target_volume[0];
+        let mute = processing_status.read().unwrap().mute[0];
+        let volume = basicfilters::Volume::new(
+            "default".to_string(),
+            400.0,
+            current_volume,
+            mute,
+            conf.devices.chunksize,
+            conf.devices.samplerate,
+            processing_status,
+            0,
+        );
+        Pipeline { steps, volume }
     }
 
     pub fn update_parameters(
@@ -537,6 +551,7 @@ impl Pipeline {
 
     /// Process an AudioChunk by calling either a MixerStep or a FilterStep
     pub fn process_chunk(&mut self, mut chunk: AudioChunk) -> AudioChunk {
+        self.volume.process_chunk(&mut chunk);
         for mut step in &mut self.steps {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {

@@ -892,42 +892,57 @@ pub enum BiquadComboParameters {
     },
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum VolumeControl {
+    Main = 0,
+    Aux1 = 1,
+    Aux2 = 2,
+    Aux3 = 3,
+    Aux4 = 4,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VolumeParameters {
     #[serde(default)]
     pub ramp_time: Option<f32>,
+    #[serde(default)]
+    pub control: Option<VolumeControl>,
 }
 
 impl VolumeParameters {
     pub fn get_ramp_time(&self) -> f32 {
         self.ramp_time.unwrap_or(200.0)
     }
+
+    pub fn get_control(&self) -> usize {
+        self.control.unwrap_or(VolumeControl::Main) as usize
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LoudnessParameters {
-    #[serde(default)]
-    pub ramp_time: Option<f32>,
     pub reference_level: f32,
     #[serde(default)]
     pub high_boost: Option<f32>,
     #[serde(default)]
     pub low_boost: Option<f32>,
+    #[serde(default)]
+    pub control: Option<VolumeControl>,
 }
 
 impl LoudnessParameters {
-    pub fn get_ramp_time(&self) -> f32 {
-        self.ramp_time.unwrap_or(200.0)
-    }
-
     pub fn get_high_boost(&self) -> f32 {
         self.high_boost.unwrap_or(10.0)
     }
 
     pub fn get_low_boost(&self) -> f32 {
         self.low_boost.unwrap_or(10.0)
+    }
+
+    pub fn get_control(&self) -> usize {
+        self.control.unwrap_or(VolumeControl::Main) as usize
     }
 }
 

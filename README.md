@@ -47,6 +47,7 @@ The full configuration is given in a yaml file.
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
 - **[Title and description](#title-and-description)**
+- **[Volume control](#volume-control)**
 - **[Devices](#devices)**
 - **[Resampling](#resampling)**
 - **[Mixers](#mixers)**
@@ -336,7 +337,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp.exe --help
-CamillaDSP 0.6.1
+CamillaDSP 2.0.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
@@ -350,7 +351,7 @@ USAGE:
     camilladsp.exe [FLAGS] [OPTIONS] <configfile>
 
 FLAGS:
-    -m, --mute       Start with Volume and Loudness filters muted
+    -m, --mute       Start with the volume control muted
     -c, --check      Check config file and exit
     -h, --help       Prints help information
     -V, --version    Prints version information
@@ -361,7 +362,7 @@ OPTIONS:
     -o, --logfile <logfile>                Write logs to file
     -l, --loglevel <loglevel>              Set log level [possible values: trace, debug, info, warn, error, off]
     -a, --address <address>                IP address to bind websocket server to
-    -g, --gain <gain>                      Set initial gain in dB for Volume and Loudness filters
+    -g, --gain <gain>                      Set initial gain in dB for the volume control
     -p, --port <port>                      Port for websocket server
     -n, --channels <channels>              Override number of channels of capture device in config
     -e, --extra_samples <extra_samples>    Override number of extra samples in config
@@ -397,7 +398,7 @@ If the "wait" flag, `--wait` is given, CamillaDSP will start the websocket serve
 There are a few options to override values in the loaded config file. Giving these options means the provided values will be used instead of the values in any loaded configuration. To change the values, CamillaDSP has to be restarted. If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` parameter. But if resampling is enabled, it will instead change the `capture_samplerate` parameter. If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled. When overriding the samplerate, two other parameters are scaled as well. Firstly, the `chunksize` is multiplied or divided by integer factors to try to keep the pipeline running at a constant number of chunks per second. Secondly, the value of `extra_samples` is scaled to give the extra samples the same duration at the new samplerate. But if the `extra_samples` override is used, the given value is used without scaling it. 
 
 
-### Volume control
+### Initial volume
 
 The `--gain` option can accept negative values, but this requires a little care since the minus sign can be misinterpreted as another option. 
 It works as long as there is no space in front of the minus sign.
@@ -630,6 +631,16 @@ description: "Example description of a configuration"
 
 Both these properties are optional and can be set to `null` or left out. 
 The `title` property is intended for a short title, while `description` can be longer and more descriptive.
+
+## Volume control
+There is a volume control that is enabled regardless of what configuration file is loaded.
+
+CamillaDSP defines a total of file control "channels" for volume.
+The default volume control reacts to the `Main` control channel.
+
+In addition to this, there are four additional control channels, named `Aux1` to `Aux4`.
+These can be used to implement for example a separate volume control for a headphone output,
+or crossfading between different input channels.
 
 ## Devices
 Example config:
@@ -1153,7 +1164,21 @@ filters:
 ```
 
 ### Volume
-The Volume filter is intended to be used as a volume control. The initial volume and muting state can be set with the `gain` and `mute` command line parameters. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume or mute state is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). The value must not be negative. If left out, it defaults to 200 ms. The value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
+The Volume filter is intended to be used as an additional volume control.
+
+Note that the pipeline includes a volume control for channel `Main` per default.
+
+There are a total of five volume control channels, named `Main`, `Aux1`, `Aux2`,`Aux3` and `Aux4`.
+TODO don't allow volume filters on Main!
+
+A Volume filter is configured to react to one of these controls. 
+The volume can then be changed via the websocket, by changing the corresponding volume control.
+A request to set the volume will be applied to all Volume filters listening to the corresponding `control`.
+
+When the volume or mute state is changed, the gain is ramped smoothly to the new value.
+The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds).
+The value must not be negative. If left out, it defaults to 200 ms.
+The value will be rounded to the nearest number of chunks.
 
 Example Volume filter:
 ```
@@ -1162,11 +1187,20 @@ filters:
     type: Volume
     parameters:
       ramp_time: 200
+      control: Aux1
 ```
 
 ### Loudness
-The Loudness filter is intended to be used as a volume control, similarly to the Volume filter. See the Volume filter for a description of how it is used.
-The difference is that the Loudness filter applies loudness correction when the volume is lowered. The method is the same as the one implemented by the [RME ADI-2 DAC FS](https://www.rme-audio.de/adi-2-dac.html). The loudness correction is done as shelving filters that boost the high (above 3500 Hz) and low (below 70 Hz) frequencies. The amount of boost is adjustable with the `high_boost` and `low_boost` parameters. If left out, they default to 10 dB.
+The Loudness filter performs loudness compensation and is intended to be used in combination with a volume control.
+Similar to a Volume filter, it reacts to the configured `control`.
+It can be combined with a Volume filter or the default `Main` volume control.
+It can also be used with a volume control external to CamillaDSP.
+The control should then be set to one of the Aux controls, and the external volume control should update
+this control when the volume setting changes.
+
+The method is the same as the one implemented by the [RME ADI-2 DAC FS](https://www.rme-audio.de/adi-2-dac.html).
+The loudness correction is done as shelving filters that boost the high (above 3500 Hz) and low (below 70 Hz) frequencies.
+The amount of boost is adjustable with the `high_boost` and `low_boost` parameters. If left out, they default to 10 dB.
 - When the volume is above the `reference_level`, only gain is applied.
 - When the volume is below `reference_level` - 20, the full correction is applied.
 - In the range between `reference_level` and `reference_level`-20, the boost value is scaled linearly.
@@ -1175,13 +1209,13 @@ The difference is that the Loudness filter applies loudness correction when the 
 
 In this figure, the `reference_level` was set to -5 dB, and `high_boost` = `low_boost` = 10 dB. At a gain of 0 and -5, the curve is flat. Below that the boost increases. At -15 dB half of the boost, and at -25 the full boost is applied. Below -25 dB, the boost value stays constant.
 
-Example Loudness filter:
+Example Loudness filter, configured to work together with the default volume control:
 ```
 filters:
-  loudnessvol:
+  loudness:
     type: Loudness
     parameters:
-      ramp_time: 200.0
+      control: Main
       reference_level: -25.0 
       high_boost: 7.0
       low_boost: 7.0
