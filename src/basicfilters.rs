@@ -71,7 +71,7 @@ impl Volume {
             samplerate,
             chunksize,
             processing_status,
-            control
+            control,
         }
     }
 
@@ -186,6 +186,10 @@ impl Volume {
             }
             self.current_volume = 20.0 * ramp.last().unwrap().log10();
         }
+
+        // Update shared current volume
+        self.processing_status.write().unwrap().current_volume[self.control] =
+            self.current_volume as f32;
     }
 }
 
@@ -217,6 +221,10 @@ impl Filter for Volume {
             }
             self.current_volume = 20.0 * ramp.last().unwrap().log10();
         }
+
+        // Update shared current volume
+        self.processing_status.write().unwrap().current_volume[self.control] =
+            self.current_volume as f32;
         Ok(())
     }
 

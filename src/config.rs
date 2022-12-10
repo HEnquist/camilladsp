@@ -923,8 +923,6 @@ impl VolumeParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LoudnessParameters {
-    #[serde(default)]
-    pub ramp_time: Option<f32>,
     pub reference_level: f32,
     #[serde(default)]
     pub high_boost: Option<f32>,
@@ -935,10 +933,6 @@ pub struct LoudnessParameters {
 }
 
 impl LoudnessParameters {
-    pub fn get_ramp_time(&self) -> f32 {
-        self.ramp_time.unwrap_or(200.0)
-    }
-
     pub fn get_high_boost(&self) -> f32 {
         self.high_boost.unwrap_or(10.0)
     }

@@ -363,10 +363,11 @@ impl FilterGroup {
         sample_freq: usize,
         processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
-        debug!("Build from config");
+        debug!("Build filter group from config");
         let mut filters = Vec::<Box<dyn Filter>>::new();
         for name in names {
             let filter_cfg = filter_configs[&name].clone();
+            trace!("Create filter {} with config {:?}", name, filter_cfg);
             let filter: Box<dyn Filter> =
                 match filter_cfg {
                     config::Filter::Conv { parameters, .. } => Box::new(
@@ -399,7 +400,6 @@ impl FilterGroup {
                         Box::new(loudness::Loudness::from_config(
                             name,
                             parameters,
-                            waveform_length,
                             sample_freq,
                             processing_status.clone(),
                         ))
@@ -462,6 +462,7 @@ impl Pipeline {
         processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
         debug!("Build new pipeline");
+        trace!("Pipeline config {:?}", conf.pipeline);
         let mut steps = Vec::<PipelineStep>::new();
         for step in conf.pipeline.unwrap_or_default() {
             match step {
@@ -473,7 +474,7 @@ impl Pipeline {
                     }
                 }
                 config::PipelineStep::Filter(step) => {
-                    if step.get_bypassed() {
+                    if !step.get_bypassed() {
                         let fltgrp = FilterGroup::from_config(
                             step.channel,
                             step.names,
