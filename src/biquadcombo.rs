@@ -44,7 +44,7 @@ impl BiquadCombo {
                 config::BiquadParameters::HighpassFO { freq }
             };
             let coeffs = biquad::BiquadCoefficients::from_config(fs, filtconf);
-            let filt = biquad::Biquad::new("".to_string(), fs, coeffs);
+            let filt = biquad::Biquad::new("", fs, coeffs);
             filters.push(filt);
         }
         filters
@@ -59,7 +59,7 @@ impl BiquadCombo {
                 config::BiquadParameters::LowpassFO { freq }
             };
             let coeffs = biquad::BiquadCoefficients::from_config(fs, filtconf);
-            let filt = biquad::Biquad::new("".to_string(), fs, coeffs);
+            let filt = biquad::Biquad::new("", fs, coeffs);
             filters.push(filt);
         }
         filters
@@ -107,7 +107,7 @@ impl BiquadCombo {
                     }),
                 };
                 let coeffs = biquad::BiquadCoefficients::from_config(samplerate, filtconf);
-                let filt = biquad::Biquad::new("".to_string(), samplerate, coeffs);
+                let filt = biquad::Biquad::new("", samplerate, coeffs);
                 filters.push(filt);
             }
         }
@@ -115,10 +115,11 @@ impl BiquadCombo {
     }
 
     pub fn from_config(
-        name: String,
+        name: &str,
         samplerate: usize,
         parameters: config::BiquadComboParameters,
     ) -> Self {
+        let name = name.to_string();
         match parameters {
             config::BiquadComboParameters::LinkwitzRileyHighpass { order, freq } => {
                 let qvalues = BiquadCombo::linkwitzriley_q(order);
@@ -190,8 +191,8 @@ impl BiquadCombo {
 }
 
 impl Filter for BiquadCombo {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
@@ -207,7 +208,7 @@ impl Filter for BiquadCombo {
         } = conf
         {
             let name = self.name.clone();
-            *self = BiquadCombo::from_config(name, self.samplerate, conf);
+            *self = BiquadCombo::from_config(&name, self.samplerate, conf);
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");

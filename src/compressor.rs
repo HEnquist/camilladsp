@@ -25,11 +25,12 @@ pub struct Compressor {
 impl Compressor {
     /// Creates a Compressor from a config struct
     pub fn from_config(
-        name: String,
+        name: &str,
         config: config::CompressorParameters,
         samplerate: usize,
         chunksize: usize,
     ) -> Self {
+        let name = name.to_string();
         let channels = config.channels;
         let srate = samplerate as PrcFmt;
         let mut monitor_channels = config.get_monitor_channels();
@@ -57,7 +58,7 @@ impl Compressor {
                 clip_limit: config.clip_limit,
                 soft_clip: config.soft_clip,
             };
-            Some(Limiter::from_config("Limiter".to_owned(), limitconf))
+            Some(Limiter::from_config("Limiter", limitconf))
         } else {
             None
         };
@@ -131,8 +132,8 @@ impl Compressor {
 }
 
 impl Processor for Compressor {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     /// Apply a Compressor to an AudioChunk, modifying it in-place.
@@ -177,7 +178,7 @@ impl Processor for Compressor {
                     clip_limit: config.clip_limit,
                     soft_clip: config.soft_clip,
                 };
-                Some(Limiter::from_config("Limiter".to_owned(), limitconf))
+                Some(Limiter::from_config("Limiter", limitconf))
             } else {
                 None
             };

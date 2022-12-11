@@ -384,13 +384,13 @@ pub struct Biquad {
 
 impl Biquad {
     /// Creates a Direct Form 2 Transposed biquad filter from a set of coefficients
-    pub fn new(name: String, samplerate: usize, coefficients: BiquadCoefficients) -> Self {
+    pub fn new(name: &str, samplerate: usize, coefficients: BiquadCoefficients) -> Self {
         Biquad {
             samplerate,
             s1: 0.0,
             s2: 0.0,
             coeffs: coefficients,
-            name,
+            name: name.to_string(),
         }
     }
 
@@ -416,8 +416,8 @@ impl Biquad {
 }
 
 impl Filter for Biquad {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
@@ -586,7 +586,7 @@ mod tests {
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         let mut wave = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let expected = vec![0.215, 0.461, 0.281, 0.039, 0.004, 0.0, 0.0, 0.0];
-        let mut filter = Biquad::new("test".to_string(), 44100, coeffs);
+        let mut filter = Biquad::new("test", 44100, coeffs);
         filter.process_waveform(&mut wave).unwrap();
         assert!(compare_waveforms(wave, expected, 1e-3));
     }

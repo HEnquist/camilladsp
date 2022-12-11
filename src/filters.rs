@@ -82,7 +82,7 @@ pub trait Filter {
 
     fn update_parameters(&mut self, config: config::Filter);
 
-    fn name(&self) -> String;
+    fn name(&self) -> &str;
 }
 
 pub trait Processor {
@@ -91,7 +91,7 @@ pub trait Processor {
 
     fn update_parameters(&mut self, config: config::Processor);
 
-    fn name(&self) -> String;
+    fn name(&self) -> &str;
 }
 
 pub fn pad_vector(values: &[PrcFmt], length: usize) -> Vec<PrcFmt> {
@@ -357,7 +357,7 @@ impl FilterGroup {
     /// Creates a group of filters to process a chunk.
     pub fn from_config(
         channel: usize,
-        names: Vec<String>,
+        names: &[String],
         filter_configs: HashMap<String, config::Filter>,
         waveform_length: usize,
         sample_freq: usize,
@@ -366,7 +366,7 @@ impl FilterGroup {
         debug!("Build filter group from config");
         let mut filters = Vec::<Box<dyn Filter>>::new();
         for name in names {
-            let filter_cfg = filter_configs[&name].clone();
+            let filter_cfg = filter_configs[name].clone();
             trace!("Create filter {} with config {:?}", name, filter_cfg);
             let filter: Box<dyn Filter> =
                 match filter_cfg {
@@ -422,11 +422,11 @@ impl FilterGroup {
     pub fn update_parameters(
         &mut self,
         filterconfigs: HashMap<String, config::Filter>,
-        changed: Vec<String>,
+        changed: &[String],
     ) {
         for filter in &mut self.filters {
-            if changed.iter().any(|n| n == &filter.name()) {
-                filter.update_parameters(filterconfigs[&filter.name()].clone());
+            if changed.iter().any(|n| n == filter.name()) {
+                filter.update_parameters(filterconfigs[filter.name()].clone());
             }
         }
     }
@@ -477,7 +477,7 @@ impl Pipeline {
                     if !step.get_bypassed() {
                         let fltgrp = FilterGroup::from_config(
                             step.channel,
-                            step.names,
+                            &step.names,
                             conf.filters.as_ref().unwrap().clone(),
                             conf.devices.chunksize,
                             conf.devices.samplerate,
@@ -492,7 +492,7 @@ impl Pipeline {
                         let proc = match procconf {
                             config::Processor::Compressor { parameters, .. } => {
                                 let comp = compressor::Compressor::from_config(
-                                    step.name,
+                                    &step.name,
                                     parameters,
                                     conf.devices.samplerate,
                                     conf.devices.chunksize,
@@ -508,7 +508,7 @@ impl Pipeline {
         let current_volume = processing_status.read().unwrap().target_volume[0];
         let mute = processing_status.read().unwrap().mute[0];
         let volume = basicfilters::Volume::new(
-            "default".to_string(),
+            "default",
             conf.devices.get_ramp_time(),
             current_volume,
             mute,
@@ -523,9 +523,9 @@ impl Pipeline {
     pub fn update_parameters(
         &mut self,
         conf: config::Configuration,
-        filters: Vec<String>,
-        mixers: Vec<String>,
-        processors: Vec<String>,
+        filters: &[String],
+        mixers: &[String],
+        processors: &[String],
     ) {
         debug!("Updating parameters");
         for mut step in &mut self.steps {
@@ -536,12 +536,12 @@ impl Pipeline {
                     }
                 }
                 PipelineStep::FilterStep(flt) => {
-                    flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters.clone());
+                    flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters);
                 }
                 PipelineStep::ProcessorStep(proc) => {
-                    if processors.iter().any(|n| n == &proc.name()) {
+                    if processors.iter().any(|n| n == proc.name()) {
                         proc.update_parameters(
-                            conf.processors.as_ref().unwrap()[&proc.name()].clone(),
+                            conf.processors.as_ref().unwrap()[proc.name()].clone(),
                         );
                     }
                 }

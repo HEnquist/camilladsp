@@ -27,7 +27,7 @@ fn get_rel_boost(level: f32, reference: f32) -> f32 {
 
 impl Loudness {
     pub fn from_config(
-        name: String,
+        name: &str,
         conf: config::LoudnessParameters,
         samplerate: usize,
         processing_status: Arc<RwLock<ProcessingParameters>>,
@@ -50,11 +50,10 @@ impl Loudness {
         let high_biquad_coeffs =
             biquad::BiquadCoefficients::from_config(samplerate, highshelf_conf);
         let low_biquad_coeffs = biquad::BiquadCoefficients::from_config(samplerate, lowshelf_conf);
-        let high_biquad =
-            biquad::Biquad::new("highshelf".to_string(), samplerate, high_biquad_coeffs);
-        let low_biquad = biquad::Biquad::new("lowshelf".to_string(), samplerate, low_biquad_coeffs);
+        let high_biquad = biquad::Biquad::new("highshelf", samplerate, high_biquad_coeffs);
+        let low_biquad = biquad::Biquad::new("lowshelf", samplerate, low_biquad_coeffs);
         Loudness {
-            name,
+            name: name.to_string(),
             current_volume: current_volume as PrcFmt,
             reference_level: conf.reference_level,
             high_boost: conf.get_high_boost(),
@@ -69,8 +68,8 @@ impl Loudness {
 }
 
 impl Filter for Loudness {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {

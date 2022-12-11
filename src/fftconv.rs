@@ -30,7 +30,8 @@ pub struct FftConv {
 
 impl FftConv {
     /// Create a new FFT colvolution filter.
-    pub fn new(name: String, data_length: usize, coeffs: &[PrcFmt]) -> Self {
+    pub fn new(name: &str, data_length: usize, coeffs: &[PrcFmt]) -> Self {
+        let name = name.to_string();
         let input_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
         let temp_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); data_length + 1];
         let output_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
@@ -75,7 +76,7 @@ impl FftConv {
         }
     }
 
-    pub fn from_config(name: String, data_length: usize, conf: config::ConvParameters) -> Self {
+    pub fn from_config(name: &str, data_length: usize, conf: config::ConvParameters) -> Self {
         let values = match conf {
             config::ConvParameters::Values { values } => values,
             config::ConvParameters::Raw(params) => filters::read_coeff_file(
@@ -99,8 +100,8 @@ impl FftConv {
 }
 
 impl Filter for FftConv {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
@@ -268,7 +269,7 @@ mod tests {
     fn check_result() {
         let coeffs = vec![0.5, 0.5];
         let conf = ConvParameters::Values { values: coeffs };
-        let mut filter = FftConv::from_config("test".to_string(), 8, conf);
+        let mut filter = FftConv::from_config("test", 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
         filter.process_waveform(&mut wave1).unwrap();
@@ -281,7 +282,7 @@ mod tests {
         for m in 0..32 {
             coeffs.push(m as PrcFmt);
         }
-        let mut filter = FftConv::new("test".to_owned(), 8, &coeffs);
+        let mut filter = FftConv::new("test", 8, &coeffs);
         let mut wave1 = vec![0.0 as PrcFmt; 8];
         let mut wave2 = vec![0.0 as PrcFmt; 8];
         let mut wave3 = vec![0.0 as PrcFmt; 8];
