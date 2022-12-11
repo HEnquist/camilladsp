@@ -1502,32 +1502,55 @@ Other types such as Bessel filters can be built by combining several Biquads. [S
 
 
 ### Dither
-The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several types, and the parameter "bits" sets the target bit depth. For the best result this should match the bit depth of the playback device. Setting it to a higher value is not useful since then the applied dither will be rounded off. On the other hand, setting it to a much lower value, for example 5 or 6 bits (minimum allowed value is 2), makes the noise very audible and can be useful for comparing the different types.
+The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several subtypes: 
+
+| Subtype             | kHz  | Noise shaping | Comments                                                       |
+| ------------------- | ---- | ------------- | -------------------------------------------------------------- |
+| None                | Any  | -             | Can reduce bit depth for testing purposes                      |
+| Flat                | Any  | -             | Triangular: objectively optimal non-shaped dither              |
+| HighPass            | Any  | 2 taps        | Wannamaker high passed, violet noise                           |
+| Fweighted441        | 44.1 | 9 taps        | Wannamaker, modeled after early ISO curve                      |
+| - FweightedShort441 | 44.1 | 3 taps        | - Lower cpu load, less noise but also less noise reduction     |
+| - FweightedLong441  | 44.1 | 24 taps       | - Higher cpu load, less noise and nearly equal noise reduction |
+| Gesemann441         | 44.1 | 8 taps        | Modeled after LAME ATH curves with flattening                  |
+| Gesemann48          | 48   | 8 taps        | Modeled after LAME ATH curves with flattening                  |
+| Lipshitz441         | 44.1 | 5 taps        | Superseded by Fweighted441                                     |
+| - LipshitzLong441   | 44.1 | 9 taps        | - Superseded by FweightedLong441                               |
+| Shibata441          | 44.1 | 24 taps       | Modeled after LAME ATH type 1                                  |
+| - ShibataHigh441    | 44.1 | 20 taps       | - High intensity (quieter noise)                               |
+| - ShibataLow441     | 44.1 | 12 taps       | - Low intensity (louder noise)                                 |
+| Shibata48           | 48   | 16 taps       | Modeled after LAME ATH type 1                                  |
+| - ShibataHigh48     | 48   | 28 taps       | - High intensity (quieter noise)                               |
+| - ShibataLow48      | 48   | 16 taps       | - Low intensity (louder noise)                                 |
+| Shibata882          | 88.2 | 20 taps       | Modeled after LAME ATH type 1                                  |
+| - ShibataLow882     | 88.2 | 24 taps       | - Low intensity (louder noise)                                 |
+| Shibata96           | 96   | 31 taps       | Modeled after LAME ATH type 1                                  |
+| - ShibataLow96      | 96   | 32 taps       | - Low intensity (louder noise)                                 |
+| Shibata192          | 192  | 54 taps       | Modeled after LAME ATH type 1                                  |
+| - ShibataLow192     | 192  | 20 taps       | - Low intensity (louder noise)                                 |
+
+The Shibata filters are the new filters from [SSRC 1.32](https://shibatch.sourceforge.net/ssrc/).
+
+Filters with more taps are typically more precise, always at the expense of higher cpu load. HighPass is an exception, which is about as fast as Flat.
+
+The parameter "bits" sets the target bit depth. For most oversampling delta-sigma DACs, this should match the bit depth of the playback device for best results. For true non-oversampling DACs, this should match the number of bits over which the DAC is linear (or the playback bit depth, whichever is lower). Setting it to a higher value is not useful since then the applied dither will be lost.
+
+For the "Flat" subtype, the parameter "amplitude" sets the number of LSB to be dithered. To linearize the samples, this should be 2. Lower amplitudes produce less noise but also linearize less; higher numbers produce more noise but do not linearize more.
+
+Some comparisons between the noise shapers are available from [SoX](http://sox.sourceforge.net/SoX/NoiseShaping), [SSRC](https://shibatch.sourceforge.net/ssrc/) and [ReSampler](https://github.com/jniemann66/ReSampler/blob/master/ditherProfiles.md). To test the different types, set the target bit depth to something very small like 5 or 6 bits (the minimum allowed value is 2) and try them all. Note that on "None" this may well mean there is no or unintelligible audio -- this is to experiment with and show what the other ditherers actually do.
+
+For sample rates above 48 kHz there is no need for anything more advanced than the "HighPass" subtype. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20 kHz up to 48 or 96 kHz where the noise can be placed without issues. The HighPass ditherer will place almost all of it there. Of course, the high-resolution Shibata filters provide some icing on the cake.
+
+Selecting a noise shaping ditherer for a different sample rate than it was designed for, will cause the frequency response curve of the noise shaper to be fitted to the playback rate. This means that the curve no longer matches its design points to be minimally audible. You may experiment which shaper still sounds good, or use the Flat or HighPass subtypes which work well at any sample rate.
 
 Example:
 ```
   dither_fancy:
     type: Dither
     parameters:
-      type: Lipshitz441
+      type: Shibata441
       bits: 16
 ```
-The available types are 
-- Simple, simple noise shaping with increasing noise towards higher frequencies
-- Uniform, just dither, no shaping. Requires also the parameter "amplitude" to set the dither amplitude in units of LSB (least significant bit). The allowed amplitude range is 0 to 100.
-- Lipshitz441, for 44.1 kHz
-- Fweighted441, for 44.1 kHz
-- Shibata441, for 44.1 kHz
-- Shibata48, for 48 kHz
-- ShibataLow441, for 44.1 kHz
-- ShibataLow48, for 48 kHz
-- None, just quantize without dither. Only useful with small target bit depth for demonstration.
-
-Lipshitz, Fweighted and Shibata give the least amount of audible noise. [See the SOX documentation for more details.](http://sox.sourceforge.net/SoX/NoiseShaping)
-To test the different types, set the target bit depth to something very small like 5 bits and try them all.
-
-For sample rates above 48 kHz there is no need for anything more advanced than the "Simple" type. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20kHz up to 48 or 96kHz where the noise can be placed without issues. The Simple type will place almost all of it there.
-
 
 ### Limiter
 The "Limiter" filter is used to limit the signal to a given level. It can use hard or soft clipping. 
