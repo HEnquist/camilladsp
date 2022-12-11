@@ -472,7 +472,7 @@ fn playback_loop_bytes(
                             // writing zeros to be able to check for un-stalling in pcmdevice.wait
                             let zero_buf = vec![
                                 0u8;
-                                buf_manager.get_frames_to_stall() as usize
+                                buf_manager.frames_to_stall() as usize
                                     * params.bytes_per_frame
                             ];
                             match io.writei(&zero_buf) {
@@ -517,7 +517,7 @@ fn playback_loop_bytes(
                         }
                     }
                     if timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
-                        if let Some(avg_delay) = buffer_avg.get_average() {
+                        if let Some(avg_delay) = buffer_avg.average() {
                             timer.restart();
                             buffer_avg.restart();
                             if adjust {
@@ -551,7 +551,7 @@ fn playback_loop_bytes(
                             debug!(
                                 "PB: buffer level: {:.1}, signal rms: {:?}",
                                 avg_delay,
-                                pb_stat.signal_rms.get_last()
+                                pb_stat.signal_rms.last()
                             );
                         }
                     }
@@ -625,7 +625,7 @@ fn capture_loop_bytes(
         }
     }
 
-    let buffer_frames = buf_manager.get_data().get_buffersize() as usize;
+    let buffer_frames = buf_manager.data().buffersize() as usize;
     debug!("Capture loop uses a buffer of {} frames", buffer_frames);
     let mut buffer = vec![0u8; buffer_frames * params.bytes_per_frame];
 
@@ -691,7 +691,7 @@ fn capture_loop_bytes(
                 break;
             }
         };
-        let (new_capture_bytes, new_capture_frames) = get_nbr_capture_bytes_and_frames(
+        let (new_capture_bytes, new_capture_frames) = nbr_capture_bytes_and_frames(
             capture_bytes,
             capture_frames,
             &resampler,
@@ -727,7 +727,7 @@ fn capture_loop_bytes(
                 if averager.larger_than_millis(
                     params.capture_status.read().unwrap().update_interval as u64,
                 ) {
-                    let bytes_per_sec = averager.get_average();
+                    let bytes_per_sec = averager.average();
                     averager.restart();
                     let measured_rate_f =
                         bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
@@ -741,7 +741,7 @@ fn capture_loop_bytes(
                 }
                 watcher_averager.add_value(capture_bytes);
                 if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
-                    let bytes_per_sec = watcher_averager.get_average();
+                    let bytes_per_sec = watcher_averager.average();
                     watcher_averager.restart();
                     let measured_rate_f =
                         bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
@@ -857,7 +857,7 @@ fn update_avail_min(
     Ok(())
 }
 
-fn get_nbr_capture_bytes_and_frames(
+fn nbr_capture_bytes_and_frames(
     capture_bytes: usize,
     capture_frames: Frames,
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
@@ -988,7 +988,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
             .spawn(move || {
-                let resampler = get_resampler(
+                let resampler = new_resampler(
                     &resampler_config,
                     channels,
                     samplerate,

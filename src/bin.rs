@@ -104,7 +104,7 @@ pub fn custom_logger_format(
     )
 }
 
-fn get_new_config(
+fn new_config(
     config_path: &Arc<Mutex<Option<String>>>,
     new_config_shared: &Arc<Mutex<Option<config::Configuration>>>,
 ) -> Res<config::Configuration> {
@@ -169,8 +169,8 @@ fn run(
             return Ok(ExitState::Exit);
         }
     };
-    let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.get_queuelimit());
-    let (tx_cap, rx_cap) = mpsc::sync_channel(conf.devices.get_queuelimit());
+    let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.queuelimit());
+    let (tx_cap, rx_cap) = mpsc::sync_channel(conf.devices.queuelimit());
 
     let (tx_status, rx_status) = mpsc::channel();
     let tx_status_pb = tx_status.clone();
@@ -206,17 +206,17 @@ fn run(
     );
 
     // Playback thread
-    let mut playback_dev = audiodevice::get_playback_device(conf_pb.devices);
+    let mut playback_dev = audiodevice::new_playback_device(conf_pb.devices);
     let pb_handle = playback_dev
         .start(rx_pb, barrier_pb, tx_status_pb, status_structs.playback)
         .unwrap();
 
-    let used_channels = config::get_used_capture_channels(&active_config);
+    let used_channels = config::used_capture_channels(&active_config);
     debug!("Using channels {:?}", used_channels);
     status_structs.capture.write().unwrap().used_channels = used_channels;
 
     // Capture thread
-    let mut capture_dev = audiodevice::get_capture_device(conf_cap.devices);
+    let mut capture_dev = audiodevice::new_capture_device(conf_cap.devices);
     let cap_handle = capture_dev
         .start(
             tx_cap,
@@ -243,7 +243,7 @@ fn run(
         if signal_reload.load(Ordering::Relaxed) {
             debug!("Reloading configuration...");
             signal_reload.store(false, Ordering::Relaxed);
-            let new_config = get_new_config(&config_path, &new_config_shared);
+            let new_config = new_config(&config_path, &new_config_shared);
 
             match new_config {
                 Ok(conf) => {
@@ -256,7 +256,7 @@ fn run(
                             active_config = conf;
                             *active_config_shared.lock().unwrap() = Some(active_config.clone());
                             *new_config_shared.lock().unwrap() = None;
-                            let used_channels = config::get_used_capture_channels(&active_config);
+                            let used_channels = config::used_capture_channels(&active_config);
                             debug!("Using channels {:?}", used_channels);
                             status_structs.capture.write().unwrap().used_channels = used_channels;
                             debug!("Sent changes to pipeline");
@@ -821,7 +821,7 @@ fn main_process() -> i32 {
         status: status.clone(),
     };
     let active_config = Arc::new(Mutex::new(None));
-    let new_config = Arc::new(Mutex::new(configuration));
+    let next_config = Arc::new(Mutex::new(configuration));
     let previous_config = Arc::new(Mutex::new(None));
 
     let active_config_path = Arc::new(Mutex::new(configname));
@@ -836,7 +836,7 @@ fn main_process() -> i32 {
                 signal_exit: signal_exit.clone(),
                 active_config: active_config.clone(),
                 active_config_path: active_config_path.clone(),
-                new_config: new_config.clone(),
+                new_config: next_config.clone(),
                 previous_config: previous_config.clone(),
                 capture_status,
                 playback_status,
@@ -858,7 +858,7 @@ fn main_process() -> i32 {
     let delay = std::time::Duration::from_millis(100);
     loop {
         debug!("Wait for config");
-        while new_config.lock().unwrap().is_none() {
+        while next_config.lock().unwrap().is_none() {
             if !wait {
                 debug!("No config and not in wait mode, exiting!");
                 return EXIT_OK;
@@ -870,14 +870,14 @@ fn main_process() -> i32 {
             } else if signal_reload.load(Ordering::Relaxed) {
                 debug!("Reloading configuration...");
                 signal_reload.store(false, Ordering::Relaxed);
-                let conf_loaded = get_new_config(&active_config_path, &new_config);
+                let conf_loaded = new_config(&active_config_path, &next_config);
                 match conf_loaded {
                     Ok(conf) => {
                         debug!(
                             "Loaded config file: {:?}",
                             active_config_path.lock().unwrap()
                         );
-                        *new_config.lock().unwrap() = Some(conf);
+                        *next_config.lock().unwrap() = Some(conf);
                     }
                     Err(err) => {
                         error!(
@@ -896,7 +896,7 @@ fn main_process() -> i32 {
             signal_exit.clone(),
             active_config.clone(),
             active_config_path.clone(),
-            new_config.clone(),
+            next_config.clone(),
             previous_config.clone(),
             status_structs.clone(),
         );

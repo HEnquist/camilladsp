@@ -467,14 +467,14 @@ impl Pipeline {
         for step in conf.pipeline.unwrap_or_default() {
             match step {
                 config::PipelineStep::Mixer(step) => {
-                    if !step.get_bypassed() {
+                    if !step.is_bypassed() {
                         let mixconf = conf.mixers.as_ref().unwrap()[&step.name].clone();
                         let mixer = mixer::Mixer::from_config(step.name, mixconf);
                         steps.push(PipelineStep::MixerStep(mixer));
                     }
                 }
                 config::PipelineStep::Filter(step) => {
-                    if !step.get_bypassed() {
+                    if !step.is_bypassed() {
                         let fltgrp = FilterGroup::from_config(
                             step.channel,
                             &step.names,
@@ -487,7 +487,7 @@ impl Pipeline {
                     }
                 }
                 config::PipelineStep::Processor(step) => {
-                    if !step.get_bypassed() {
+                    if !step.is_bypassed() {
                         let procconf = conf.processors.as_ref().unwrap()[&step.name].clone();
                         let proc = match procconf {
                             config::Processor::Compressor { parameters, .. } => {
@@ -509,7 +509,7 @@ impl Pipeline {
         let mute = processing_status.read().unwrap().mute[0];
         let volume = basicfilters::Volume::new(
             "default",
-            conf.devices.get_ramp_time(),
+            conf.devices.ramp_time(),
             current_volume,
             mute,
             conf.devices.chunksize,

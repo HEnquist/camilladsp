@@ -89,7 +89,7 @@ impl Volume {
         let mute = processing_status.read().unwrap().mute[fader];
         Volume::new(
             name,
-            conf.get_ramp_time(),
+            conf.ramp_time(),
             current_volume,
             mute,
             chunksize,
@@ -235,7 +235,7 @@ impl Filter for Volume {
             parameters: conf, ..
         } = conf
         {
-            self.ramptime_in_chunks = (conf.get_ramp_time()
+            self.ramptime_in_chunks = (conf.ramp_time()
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
             self.fader = conf.fader as usize;
@@ -271,9 +271,9 @@ impl Gain {
 
     pub fn from_config(name: &str, conf: config::GainParameters) -> Self {
         let gain = conf.gain;
-        let inverted = conf.get_inverted();
-        let mute = conf.get_mute();
-        let linear = conf.get_scale() == config::GainScale::Linear;
+        let inverted = conf.is_inverted();
+        let mute = conf.is_mute();
+        let linear = conf.scale() == config::GainScale::Linear;
         Gain::new(name, gain, inverted, mute, linear)
     }
 }
@@ -296,9 +296,9 @@ impl Filter for Gain {
         } = conf
         {
             let gain_value = conf.gain;
-            let inverted = conf.get_inverted();
-            let mute = conf.get_mute();
-            let linear = conf.get_scale() == config::GainScale::Linear;
+            let inverted = conf.is_inverted();
+            let mute = conf.is_mute();
+            let linear = conf.scale() == config::GainScale::Linear;
             let gain = calculate_gain(gain_value, inverted, mute, linear);
             self.gain = gain;
         } else {
@@ -342,12 +342,12 @@ impl Delay {
     }
 
     pub fn from_config(name: &str, samplerate: usize, conf: config::DelayParameters) -> Self {
-        let delay_samples = match conf.get_unit() {
+        let delay_samples = match conf.unit() {
             config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (samplerate as PrcFmt),
             config::TimeUnit::Millimetres => conf.delay / 1000.0 * (samplerate as PrcFmt) / 343.0,
             config::TimeUnit::Samples => conf.delay,
         };
-        Delay::new(name, samplerate, delay_samples, conf.get_subsample())
+        Delay::new(name, samplerate, delay_samples, conf.subsample())
     }
 }
 
@@ -372,14 +372,14 @@ impl Filter for Delay {
             parameters: conf, ..
         } = conf
         {
-            let delay_samples = match conf.get_unit() {
+            let delay_samples = match conf.unit() {
                 config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (self.samplerate as PrcFmt),
                 config::TimeUnit::Millimetres => {
                     conf.delay / 1000.0 * (self.samplerate as PrcFmt) / 343.0
                 }
                 config::TimeUnit::Samples => conf.delay,
             };
-            let (integerdelay, biquad) = if conf.get_subsample() {
+            let (integerdelay, biquad) = if conf.subsample() {
                 let full_samples = delay_samples.floor();
                 let fraction = delay_samples - full_samples;
                 let bqcoeffs =
@@ -419,7 +419,7 @@ pub fn validate_delay_config(conf: &config::DelayParameters) -> Res<()> {
 
 /// Validate a Volume config.
 pub fn validate_volume_config(conf: &config::VolumeParameters) -> Res<()> {
-    if conf.get_ramp_time() < 0.0 {
+    if conf.ramp_time() < 0.0 {
         return Err(config::ConfigError::new("Ramp time cannot be negative").into());
     }
     Ok(())
@@ -427,7 +427,7 @@ pub fn validate_volume_config(conf: &config::VolumeParameters) -> Res<()> {
 
 /// Validate a Gain config.
 pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
-    if conf.get_scale() == config::GainScale::Decibel {
+    if conf.scale() == config::GainScale::Decibel {
         if conf.gain < -150.0 {
             return Err(config::ConfigError::new("Gain must be larger than -150 dB").into());
         } else if conf.gain > 150.0 {

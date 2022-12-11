@@ -48,13 +48,14 @@ pub fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {
         // If min_rate + 1 is sipported, then this must be a range.
         return Ok(SupportedValues::Range(min_rate, max_rate));
     }
-    let mut rates = Vec::new();
+    let mut rates = Vec::with_capacity(STANDARD_RATES.len());
     // Loop through and test all the standard rates.
     for rate in STANDARD_RATES.iter() {
         if hwp.test_rate(*rate).is_ok() {
             rates.push(*rate);
         }
     }
+    rates.shrink_to_fit();
     Ok(SupportedValues::Discrete(rates))
 }
 
@@ -73,17 +74,19 @@ pub fn list_nbr_channels(hwp: &HwParams) -> Res<(u32, u32, Vec<u32>)> {
     if min_channels == max_channels {
         return Ok((min_channels, max_channels, vec![min_channels]));
     }
-    let mut channels = Vec::new();
 
     let mut check_max = max_channels;
     if check_max > 32 {
         check_max = 32;
     }
-    for chan in min_channels..(check_max + 1) {
+
+    let mut channels = Vec::with_capacity(check_max as usize);
+    for chan in min_channels..=check_max {
         if hwp.test_channels(chan).is_ok() {
             channels.push(chan);
         }
     }
+    channels.shrink_to_fit();
     Ok((min_channels, max_channels, channels))
 }
 
@@ -100,7 +103,7 @@ pub fn list_channels_as_text(hwp: &HwParams) -> String {
 }
 
 pub fn list_formats(hwp: &HwParams) -> Res<Vec<SampleFormat>> {
-    let mut formats = Vec::new();
+    let mut formats = Vec::with_capacity(6);
     // Let's just check the formats supported by CamillaDSP
     if hwp.test_format(Format::s16()).is_ok() {
         formats.push(SampleFormat::S16LE);
@@ -120,6 +123,7 @@ pub fn list_formats(hwp: &HwParams) -> Res<Vec<SampleFormat>> {
     if hwp.test_format(Format::float64()).is_ok() {
         formats.push(SampleFormat::FLOAT64LE);
     }
+    formats.shrink_to_fit();
     Ok(formats)
 }
 

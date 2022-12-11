@@ -379,7 +379,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                     if adjust
                                         && timer.larger_than_millis((1000.0 * adjust_period) as u64)
                                     {
-                                        if let Some(av_delay) = buffer_avg.get_average() {
+                                        if let Some(av_delay) = buffer_avg.average() {
                                             let speed = calculate_speed(
                                                 av_delay,
                                                 target_level,
@@ -434,7 +434,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
     }
 }
 
-fn get_nbr_capture_samples(
+fn nbr_capture_samples(
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_samples: usize,
     channels: usize,
@@ -489,7 +489,7 @@ impl CaptureDevice for CpalCaptureDevice {
         let handle = thread::Builder::new()
             .name("CpalCapture".to_string())
             .spawn(move || {
-                let mut resampler = get_resampler(
+                let mut resampler = new_resampler(
                         &resampler_config,
                         channels,
                         samplerate,
@@ -513,8 +513,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                     move |buffer: &[i16], _: &cpal::InputCallbackInfo| {
                                         #[cfg(feature = "debug")]
                                         trace!("Capture device provides {} samples", buffer.len());
-                                        let mut buffer_copy = Vec::new();
-                                        buffer_copy.extend_from_slice(buffer);
+                                        let buffer_copy = Vec::from(buffer);
                                         tx_dev_i.send(buffer_copy).unwrap();
                                     },
                                     move |err| error!("an error occurred on stream: {}", err)
@@ -529,8 +528,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                     move |buffer: &[f32], _: &cpal::InputCallbackInfo| {
                                         #[cfg(feature = "debug")]
                                         trace!("Capture device provides {} samples", buffer.len());
-                                        let mut buffer_copy = Vec::new();
-                                        buffer_copy.extend_from_slice(buffer);
+                                        let buffer_copy = Vec::from(buffer);
                                         tx_dev_f.send(buffer_copy).unwrap();
                                     },
                                     move |err| error!("an error occurred on stream: {}", err)
@@ -598,7 +596,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                     break;
                                 }
                             };
-                            capture_samples = get_nbr_capture_samples(
+                            capture_samples = nbr_capture_samples(
                                 &resampler,
                                 capture_samples,
                                 channels,
@@ -651,7 +649,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             averager.add_value(capture_samples);
                             if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                             {
-                                let samples_per_sec = averager.get_average();
+                                let samples_per_sec = averager.average();
                                 averager.restart();
                                 let measured_rate_f = samples_per_sec / channels as f64;
                                 trace!(
@@ -666,7 +664,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             }
                             watcher_averager.add_value(capture_samples);
                             if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
-                                let samples_per_sec = watcher_averager.get_average();
+                                let samples_per_sec = watcher_averager.average();
                                 watcher_averager.restart();
                                 let measured_rate_f = samples_per_sec / channels as f64;
                                 let changed = valuewatcher.check_value(measured_rate_f as f32);

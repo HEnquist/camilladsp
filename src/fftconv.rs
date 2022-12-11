@@ -81,13 +81,13 @@ impl FftConv {
             config::ConvParameters::Values { values } => values,
             config::ConvParameters::Raw(params) => filters::read_coeff_file(
                 &params.filename,
-                &params.get_format(),
-                params.get_read_bytes_lines(),
-                params.get_skip_bytes_lines(),
+                &params.format(),
+                params.read_bytes_lines(),
+                params.skip_bytes_lines(),
             )
             .unwrap(),
             config::ConvParameters::Wav(params) => {
-                filters::read_wav(&params.filename, params.get_channel()).unwrap()
+                filters::read_wav(&params.filename, params.channel()).unwrap()
             }
             config::ConvParameters::Dummy { length } => {
                 let mut values = vec![0.0; length];
@@ -169,13 +169,13 @@ impl Filter for FftConv {
                 config::ConvParameters::Values { values } => values,
                 config::ConvParameters::Raw(params) => filters::read_coeff_file(
                     &params.filename,
-                    &params.get_format(),
-                    params.get_read_bytes_lines(),
-                    params.get_skip_bytes_lines(),
+                    &params.format(),
+                    params.read_bytes_lines(),
+                    params.skip_bytes_lines(),
                 )
                 .unwrap(),
                 config::ConvParameters::Wav(params) => {
-                    filters::read_wav(&params.filename, params.get_channel()).unwrap()
+                    filters::read_wav(&params.filename, params.channel()).unwrap()
                 }
                 config::ConvParameters::Dummy { length } => {
                     let mut values = vec![0.0; length];
@@ -225,9 +225,9 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
         config::ConvParameters::Raw(params) => {
             let coeffs = filters::read_coeff_file(
                 &params.filename,
-                &params.get_format(),
-                params.get_read_bytes_lines(),
-                params.get_skip_bytes_lines(),
+                &params.format(),
+                params.read_bytes_lines(),
+                params.skip_bytes_lines(),
             )?;
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
@@ -235,7 +235,7 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
             Ok(())
         }
         config::ConvParameters::Wav(params) => {
-            let coeffs = filters::read_wav(&params.filename, params.get_channel())?;
+            let coeffs = filters::read_wav(&params.filename, params.channel())?;
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }

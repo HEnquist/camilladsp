@@ -245,7 +245,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
     }
 }
 
-fn get_nbr_capture_bytes(
+fn nbr_capture_bytes(
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_bytes: usize,
     channels: usize,
@@ -297,7 +297,7 @@ impl CaptureDevice for PulseCaptureDevice {
         let handle = thread::Builder::new()
             .name("PulseCapture".to_string())
             .spawn(move || {
-                let mut resampler = get_resampler(
+                let mut resampler = new_resampler(
                         &resampler_config,
                         channels,
                         samplerate,
@@ -358,7 +358,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                     break;
                                 }
                             };
-                            capture_bytes = get_nbr_capture_bytes(
+                            capture_bytes = nbr_capture_bytes(
                                 &resampler,
                                 capture_bytes,
                                 channels,
@@ -375,13 +375,13 @@ impl CaptureDevice for PulseCaptureDevice {
                                 Ok(()) => {
                                     averager.add_value(capture_bytes);
                                     if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64) {
-                                        let bytes_per_sec = averager.get_average();
+                                        let bytes_per_sec = averager.average();
                                         averager.restart();
                                         let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
                                         trace!(
                                             "Measured sample rate is {:.1} Hz, signal RMS is {:?}",
                                             measured_rate_f,
-                                            capture_status.read().unwrap().signal_rms.get_last(),
+                                            capture_status.read().unwrap().signal_rms.last(),
                                         );
                                         let mut capt_stat = capture_status.write().unwrap();
                                         capt_stat.measured_samplerate = measured_rate_f as usize;
