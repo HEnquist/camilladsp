@@ -179,8 +179,9 @@ pub struct PlaybackStatus {
 
 #[derive(Clone, Debug)]
 pub struct ProcessingParameters {
-    pub volume: f32,
-    pub mute: bool,
+    pub target_volume: [f32; 5],
+    pub current_volume: [f32; 5],
+    pub mute: [bool; 5],
 }
 
 #[derive(Clone, Debug)]

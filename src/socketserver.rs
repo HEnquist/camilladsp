@@ -99,6 +99,13 @@ enum WsCommand {
     GetMute,
     SetMute(bool),
     ToggleMute,
+    GetFaderVolume(usize),
+    SetFaderVolume(usize, f32),
+    SetFaderExternalVolume(usize, f32),
+    AdjustFaderVolume(usize, f32),
+    GetFaderMute(usize),
+    SetFaderMute(usize, bool),
+    ToggleFaderMute(usize),
     GetVersion,
     GetState,
     GetStopReason,
@@ -285,6 +292,38 @@ enum WsReply {
     ToggleMute {
         result: WsResult,
         value: bool,
+    },
+    SetFaderVolume {
+        result: WsResult,
+        control: usize,
+    },
+    SetFaderExternalVolume {
+        result: WsResult,
+        control: usize,
+    },
+    GetFaderVolume {
+        result: WsResult,
+        value: f32,
+        control: usize,
+    },
+    AdjustFaderVolume {
+        result: WsResult,
+        value: f32,
+        control: usize,
+    },
+    SetFaderMute {
+        result: WsResult,
+        control: usize,
+    },
+    GetFaderMute {
+        result: WsResult,
+        value: bool,
+        control: usize,
+    },
+    ToggleFaderMute {
+        result: WsResult,
+        value: bool,
+        control: usize,
     },
     GetVersion {
         result: WsResult,
@@ -723,61 +762,158 @@ fn handle_command(
             let procstat = shared_data_inst.processing_status.read().unwrap();
             Some(WsReply::GetVolume {
                 result: WsResult::Ok,
-                value: procstat.volume,
+                value: procstat.target_volume[0],
             })
         }
         WsCommand::SetVolume(nbr) => {
-            let mut new_vol = nbr;
-            // Clamp to -150 .. 50 dB, probably larger than needed..
-            if new_vol < -150.0 {
-                new_vol = -150.0;
-                warn!("Clamped volume at -150 dB")
-            } else if new_vol > 50.0 {
-                new_vol = 50.0;
-                warn!("Clamped volume at +50 dB")
-            }
+            let new_vol = get_clamped_volume(nbr);
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
-            procstat.volume = new_vol;
+            procstat.target_volume[0] = new_vol;
             Some(WsReply::SetVolume {
                 result: WsResult::Ok,
             })
         }
         WsCommand::AdjustVolume(nbr) => {
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
-            procstat.volume += nbr;
-            // Clamp to -150 .. 50 dB, probably larger than needed..
-            if procstat.volume < -150.0 {
-                procstat.volume = -150.0;
-                warn!("Clamped volume at -150 dB")
-            } else if procstat.volume > 50.0 {
-                procstat.volume = 50.0;
-                warn!("Clamped volume at +50 dB")
-            }
+            let mut tempvol = procstat.target_volume[0];
+            tempvol += nbr;
+            tempvol = get_clamped_volume(tempvol);
+            procstat.target_volume[0] = tempvol;
             Some(WsReply::AdjustVolume {
                 result: WsResult::Ok,
-                value: procstat.volume,
+                value: tempvol,
             })
         }
         WsCommand::GetMute => {
             let procstat = shared_data_inst.processing_status.read().unwrap();
             Some(WsReply::GetMute {
                 result: WsResult::Ok,
-                value: procstat.mute,
+                value: procstat.mute[0],
             })
         }
         WsCommand::SetMute(mute) => {
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
-            procstat.mute = mute;
+            procstat.mute[0] = mute;
             Some(WsReply::SetMute {
                 result: WsResult::Ok,
             })
         }
         WsCommand::ToggleMute => {
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
-            procstat.mute = !procstat.mute;
+            procstat.mute[0] = !procstat.mute[0];
             Some(WsReply::ToggleMute {
                 result: WsResult::Ok,
-                value: procstat.mute,
+                value: procstat.mute[0],
+            })
+        }
+        WsCommand::GetFaderVolume(ctrl) => {
+            if ctrl > 4 {
+                return Some(WsReply::GetFaderVolume {
+                    result: WsResult::Error,
+                    value: 0.0,
+                    control: ctrl,
+                });
+            }
+            let procstat = shared_data_inst.processing_status.read().unwrap();
+            Some(WsReply::GetFaderVolume {
+                result: WsResult::Ok,
+                value: procstat.target_volume[ctrl],
+                control: ctrl,
+            })
+        }
+        WsCommand::SetFaderVolume(ctrl, nbr) => {
+            if ctrl > 4 {
+                return Some(WsReply::SetFaderVolume {
+                    result: WsResult::Error,
+                    control: ctrl,
+                });
+            }
+            let new_vol = get_clamped_volume(nbr);
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.target_volume[ctrl] = new_vol;
+            Some(WsReply::SetFaderVolume {
+                result: WsResult::Ok,
+                control: ctrl,
+            })
+        }
+        WsCommand::SetFaderExternalVolume(ctrl, nbr) => {
+            if ctrl > 4 {
+                return Some(WsReply::SetFaderExternalVolume {
+                    result: WsResult::Error,
+                    control: ctrl,
+                });
+            }
+            let new_vol = get_clamped_volume(nbr);
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.target_volume[ctrl] = new_vol;
+            procstat.current_volume[ctrl] = new_vol;
+            Some(WsReply::SetFaderExternalVolume {
+                result: WsResult::Ok,
+                control: ctrl,
+            })
+        }
+        WsCommand::AdjustFaderVolume(ctrl, nbr) => {
+            if ctrl > 4 {
+                return Some(WsReply::AdjustFaderVolume {
+                    result: WsResult::Error,
+                    value: nbr,
+                    control: ctrl,
+                });
+            }
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            let mut tempvol = procstat.target_volume[ctrl];
+            tempvol += nbr;
+            tempvol = get_clamped_volume(tempvol);
+            procstat.target_volume[ctrl] = tempvol;
+            Some(WsReply::AdjustFaderVolume {
+                result: WsResult::Ok,
+                value: tempvol,
+                control: ctrl,
+            })
+        }
+        WsCommand::GetFaderMute(ctrl) => {
+            if ctrl > 4 {
+                return Some(WsReply::GetFaderMute {
+                    result: WsResult::Error,
+                    value: false,
+                    control: ctrl,
+                });
+            }
+            let procstat = shared_data_inst.processing_status.read().unwrap();
+            Some(WsReply::GetFaderMute {
+                result: WsResult::Ok,
+                value: procstat.mute[ctrl],
+                control: ctrl,
+            })
+        }
+        WsCommand::SetFaderMute(ctrl, mute) => {
+            if ctrl > 4 {
+                return Some(WsReply::SetFaderMute {
+                    result: WsResult::Error,
+                    control: ctrl,
+                });
+            }
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.mute[ctrl] = mute;
+            Some(WsReply::SetFaderMute {
+                result: WsResult::Ok,
+                control: ctrl,
+            })
+        }
+        WsCommand::ToggleFaderMute(ctrl) => {
+            if ctrl > 4 {
+                return Some(WsReply::ToggleFaderMute {
+                    result: WsResult::Error,
+                    value: false,
+                    control: ctrl,
+                });
+            }
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.mute[ctrl] = !procstat.mute[ctrl];
+            Some(WsReply::ToggleFaderMute {
+                result: WsResult::Ok,
+                value: procstat.mute[ctrl],
+                control: ctrl,
             })
         }
         WsCommand::GetConfig => Some(WsReply::GetConfig {
@@ -973,6 +1109,19 @@ fn handle_command(
         }
         WsCommand::None => None,
     }
+}
+
+fn get_clamped_volume(vol: f32) -> f32 {
+    let mut new_vol = vol;
+    // Clamp to -150 .. 50 dB, probably larger than needed..
+    if new_vol < -150.0 {
+        new_vol = -150.0;
+        warn!("Clamped volume at -150 dB")
+    } else if new_vol > 50.0 {
+        new_vol = 50.0;
+        warn!("Clamped volume at +50 dB")
+    }
+    new_vol
 }
 
 fn get_playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {

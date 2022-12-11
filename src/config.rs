@@ -512,6 +512,8 @@ pub struct Devices {
     pub stop_on_rate_change: Option<bool>,
     #[serde(default)]
     pub rate_measure_interval: Option<f32>,
+    #[serde(default)]
+    pub volume_ramp_time: Option<f32>,
 }
 
 // Getters for all the defaults
@@ -550,6 +552,10 @@ impl Devices {
 
     pub fn get_enable_rate_adjust(&self) -> bool {
         self.enable_rate_adjust.unwrap_or(false)
+    }
+
+    pub fn get_ramp_time(&self) -> f32 {
+        self.volume_ramp_time.unwrap_or(400.0)
     }
 }
 
@@ -892,42 +898,60 @@ pub enum BiquadComboParameters {
     },
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum VolumeFader {
+    Aux1 = 1,
+    Aux2 = 2,
+    Aux3 = 3,
+    Aux4 = 4,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VolumeParameters {
     #[serde(default)]
     pub ramp_time: Option<f32>,
+    pub fader: VolumeFader,
 }
 
 impl VolumeParameters {
     pub fn get_ramp_time(&self) -> f32 {
-        self.ramp_time.unwrap_or(200.0)
+        self.ramp_time.unwrap_or(400.0)
     }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum LoudnessFader {
+    Main = 0,
+    Aux1 = 1,
+    Aux2 = 2,
+    Aux3 = 3,
+    Aux4 = 4,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LoudnessParameters {
-    #[serde(default)]
-    pub ramp_time: Option<f32>,
     pub reference_level: f32,
     #[serde(default)]
     pub high_boost: Option<f32>,
     #[serde(default)]
     pub low_boost: Option<f32>,
+    #[serde(default)]
+    pub fader: Option<LoudnessFader>,
 }
 
 impl LoudnessParameters {
-    pub fn get_ramp_time(&self) -> f32 {
-        self.ramp_time.unwrap_or(200.0)
-    }
-
     pub fn get_high_boost(&self) -> f32 {
         self.high_boost.unwrap_or(10.0)
     }
 
     pub fn get_low_boost(&self) -> f32 {
         self.low_boost.unwrap_or(10.0)
+    }
+
+    pub fn get_fader(&self) -> usize {
+        self.fader.unwrap_or(LoudnessFader::Main) as usize
     }
 }
 
@@ -1000,15 +1024,28 @@ pub enum TimeUnit {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum DitherParameters {
-    Simple { bits: usize },
-    Lipshitz441 { bits: usize },
-    Fweighted441 { bits: usize },
-    Shibata441 { bits: usize },
-    Shibata48 { bits: usize },
-    ShibataLow441 { bits: usize },
-    ShibataLow48 { bits: usize },
-    Uniform { bits: usize, amplitude: PrcFmt },
     None { bits: usize },
+    Flat { bits: usize, amplitude: PrcFmt },
+    HighPass { bits: usize },
+    Fweighted441 { bits: usize },
+    FweightedLong441 { bits: usize },
+    FweightedShort441 { bits: usize },
+    Gesemann441 { bits: usize },
+    Gesemann48 { bits: usize },
+    Lipshitz441 { bits: usize },
+    LipshitzLong441 { bits: usize },
+    Shibata441 { bits: usize },
+    ShibataHigh441 { bits: usize },
+    ShibataLow441 { bits: usize },
+    Shibata48 { bits: usize },
+    ShibataHigh48 { bits: usize },
+    ShibataLow48 { bits: usize },
+    Shibata882 { bits: usize },
+    ShibataLow882 { bits: usize },
+    Shibata96 { bits: usize },
+    ShibataLow96 { bits: usize },
+    Shibata192 { bits: usize },
+    ShibataLow192 { bits: usize },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1670,6 +1707,9 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             )
             .into());
         }
+    }
+    if conf.devices.get_ramp_time() < 0.0 {
+        return Err(ConfigError::new("Volume ramp time cannot be negative").into());
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {

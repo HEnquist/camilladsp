@@ -47,6 +47,7 @@ The full configuration is given in a yaml file.
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
 - **[Title and description](#title-and-description)**
+- **[Volume control](#volume-control)**
 - **[Devices](#devices)**
 - **[Resampling](#resampling)**
 - **[Mixers](#mixers)**
@@ -336,7 +337,7 @@ This starts the processing defined in the specified config file. The config is f
 Starting with the --help flag prints a short help message:
 ```
 > camilladsp.exe --help
-CamillaDSP 0.6.1
+CamillaDSP 2.0.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
@@ -350,7 +351,7 @@ USAGE:
     camilladsp.exe [FLAGS] [OPTIONS] <configfile>
 
 FLAGS:
-    -m, --mute       Start with Volume and Loudness filters muted
+    -m, --mute       Start with the volume control muted
     -c, --check      Check config file and exit
     -h, --help       Prints help information
     -V, --version    Prints version information
@@ -361,7 +362,7 @@ OPTIONS:
     -o, --logfile <logfile>                Write logs to file
     -l, --loglevel <loglevel>              Set log level [possible values: trace, debug, info, warn, error, off]
     -a, --address <address>                IP address to bind websocket server to
-    -g, --gain <gain>                      Set initial gain in dB for Volume and Loudness filters
+    -g, --gain <gain>                      Set initial gain in dB for the volume control
     -p, --port <port>                      Port for websocket server
     -n, --channels <channels>              Override number of channels of capture device in config
     -e, --extra_samples <extra_samples>    Override number of extra samples in config
@@ -397,7 +398,7 @@ If the "wait" flag, `--wait` is given, CamillaDSP will start the websocket serve
 There are a few options to override values in the loaded config file. Giving these options means the provided values will be used instead of the values in any loaded configuration. To change the values, CamillaDSP has to be restarted. If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` parameter. But if resampling is enabled, it will instead change the `capture_samplerate` parameter. If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled. When overriding the samplerate, two other parameters are scaled as well. Firstly, the `chunksize` is multiplied or divided by integer factors to try to keep the pipeline running at a constant number of chunks per second. Secondly, the value of `extra_samples` is scaled to give the extra samples the same duration at the new samplerate. But if the `extra_samples` override is used, the given value is used without scaling it. 
 
 
-### Volume control
+### Initial volume
 
 The `--gain` option can accept negative values, but this requires a little care since the minus sign can be misinterpreted as another option. 
 It works as long as there is no space in front of the minus sign.
@@ -631,6 +632,21 @@ description: "Example description of a configuration"
 Both these properties are optional and can be set to `null` or left out. 
 The `title` property is intended for a short title, while `description` can be longer and more descriptive.
 
+## Volume control
+There is a volume control that is enabled regardless of what configuration file is loaded.
+
+CamillaDSP defines a total of file control "channels" for volume.
+The default volume control reacts to the `Main` control channel.
+When the volume or mute setting is changed, the gain is smoothly ramped to the new setting.
+The duration of this ramp can be customized via the `volume_ramp_time` parameter
+in the `devices` section.
+The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
+
+
+In addition to this, there are four additional control channels, named `Aux1` to `Aux4`.
+These can be used to implement for example a separate volume control for a headphone output,
+or crossfading between different input channels.
+
 ## Devices
 Example config:
 ```
@@ -647,6 +663,7 @@ devices:
   capture_samplerate: 44100 (*)
   stop_on_rate_change: false (*)
   rate_measure_interval: 1.0 (*)
+  volume_ramp_time: 400.0 (*)
   capture:
     type: Pulse
     channels: 2
@@ -744,6 +761,10 @@ A parameter marked (*) in any example is optional. If they are left out from the
   Setting `stop_on_rate_change` to `true` makes CamillaDSP stop the processing if the measured capture sample rate changes. Default is `false`.
   The `rate_measure_interval` setting is used for adjusting the measurement period. A longer period gives a more accurate measurement of the rate, at the cost of slower response when the rate changes.
   The default is 1.0 seconds. Processing will stop after 3 measurements in a row are more than 4% off from the configured rate. The value of 4% is chosen to allow some variation, while still catching changes between for example 44.1 to 48 kHz.
+
+* `volume_ramp_time` (optional, defaults to 400 ms)
+  This setting controls the duration of this ramp when changing volume of the default volume control.
+  The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
  
 * `capture` and `playback`
   Input and output devices are defined in the same way. 
@@ -1153,7 +1174,21 @@ filters:
 ```
 
 ### Volume
-The Volume filter is intended to be used as a volume control. The initial volume and muting state can be set with the `gain` and `mute` command line parameters. The volume can then be changed via the websocket. A request to set the volume will be applied to all Volume filters. When the volume or mute state is changed, the gain is ramped smoothly to the new value. The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds). The value must not be negative. If left out, it defaults to 200 ms. The value will be rounded to the nearest number of chunks. To use this filter, insert a Volume filter somewhere in the pipeline for each channel. It's possible to use this to make a dithered volume control by placing the Volume filter somewhere in the pipeline, and having a Dither filter as the last step.
+The Volume filter is intended to be used as an additional volume control.
+
+Note that the pipeline includes a volume control for the `Main` fader per default,
+and it's not possible to select this fader for Volume filters.
+
+Volume filters may use the four additional faders, named `Aux1`, `Aux2`,`Aux3` and `Aux4`.
+
+A Volume filter is configured to react to one of these faders. 
+The volume can then be changed via the websocket, by changing the corresponding fader.
+A request to set the volume will be applied to all Volume filters listening to the affected `fader`.
+
+When the volume or mute state is changed, the gain is ramped smoothly to the new value.
+The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds).
+The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
+The value will be rounded to the nearest number of chunks.
 
 Example Volume filter:
 ```
@@ -1161,12 +1196,28 @@ filters:
   volumeexample:
     type: Volume
     parameters:
-      ramp_time: 200
+      ramp_time: 200 (*)
+      fader: Aux1
 ```
 
 ### Loudness
-The Loudness filter is intended to be used as a volume control, similarly to the Volume filter. See the Volume filter for a description of how it is used.
-The difference is that the Loudness filter applies loudness correction when the volume is lowered. The method is the same as the one implemented by the [RME ADI-2 DAC FS](https://www.rme-audio.de/adi-2-dac.html). The loudness correction is done as shelving filters that boost the high (above 3500 Hz) and low (below 70 Hz) frequencies. The amount of boost is adjustable with the `high_boost` and `low_boost` parameters. If left out, they default to 10 dB.
+The Loudness filter performs loudness compensation and is intended to be used in combination with a volume control.
+Similar to a Volume filter, it reacts to the configured `fader`.
+The available choices for `fader` are `Main`, `Aux1`, `Aux2`,`Aux3` and `Aux4`.
+Setting fader to `Main` adds loudness compensation to the default volume control.
+
+By setting `fader` to one of the Aux faders it can instead work with a Volume filter
+reacting to the same fader.
+When used like this, there should only be a single Volume filter assigned to the chosed fader.
+
+It can also be used with a volume control external to CamillaDSP.
+The fader should then be set to one of the Aux faders, and the external volume control should update
+this fader when the volume setting changes.
+A special websocket command is provided for this, see the [websocket command documentation](websocket.md).
+
+The method is the same as the one implemented by the [RME ADI-2 DAC FS](https://www.rme-audio.de/adi-2-dac.html).
+The loudness correction is done as shelving filters that boost the high (above 3500 Hz) and low (below 70 Hz) frequencies.
+The amount of boost is adjustable with the `high_boost` and `low_boost` parameters. If left out, they default to 10 dB.
 - When the volume is above the `reference_level`, only gain is applied.
 - When the volume is below `reference_level` - 20, the full correction is applied.
 - In the range between `reference_level` and `reference_level`-20, the boost value is scaled linearly.
@@ -1175,16 +1226,16 @@ The difference is that the Loudness filter applies loudness correction when the 
 
 In this figure, the `reference_level` was set to -5 dB, and `high_boost` = `low_boost` = 10 dB. At a gain of 0 and -5, the curve is flat. Below that the boost increases. At -15 dB half of the boost, and at -25 the full boost is applied. Below -25 dB, the boost value stays constant.
 
-Example Loudness filter:
+Example Loudness filter, configured to work together with the default volume control:
 ```
 filters:
-  loudnessvol:
+  loudness:
     type: Loudness
     parameters:
-      ramp_time: 200.0
+      fader: Main (*)
       reference_level: -25.0 
-      high_boost: 7.0
-      low_boost: 7.0
+      high_boost: 7.0 (*)
+      low_boost: 7.0 (*)
 ```
 Allowed ranges:
 - reference_level: -100 to +20
@@ -1451,32 +1502,55 @@ Other types such as Bessel filters can be built by combining several Biquads. [S
 
 
 ### Dither
-The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several types, and the parameter "bits" sets the target bit depth. For the best result this should match the bit depth of the playback device. Setting it to a higher value is not useful since then the applied dither will be rounded off. On the other hand, setting it to a much lower value, for example 5 or 6 bits (minimum allowed value is 2), makes the noise very audible and can be useful for comparing the different types.
+The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several subtypes: 
+
+| Subtype             | kHz  | Noise shaping | Comments                                                       |
+| ------------------- | ---- | ------------- | -------------------------------------------------------------- |
+| None                | Any  | -             | Can reduce bit depth for testing purposes                      |
+| Flat                | Any  | -             | Triangular: objectively optimal non-shaped dither              |
+| HighPass            | Any  | 2 taps        | Wannamaker high passed, violet noise                           |
+| Fweighted441        | 44.1 | 9 taps        | Wannamaker, modeled after early ISO curve                      |
+| - FweightedShort441 | 44.1 | 3 taps        | - Lower cpu load, less noise but also less noise reduction     |
+| - FweightedLong441  | 44.1 | 24 taps       | - Higher cpu load, less noise and nearly equal noise reduction |
+| Gesemann441         | 44.1 | 8 taps        | Modeled after LAME ATH curves with flattening                  |
+| Gesemann48          | 48   | 8 taps        | Modeled after LAME ATH curves with flattening                  |
+| Lipshitz441         | 44.1 | 5 taps        | Superseded by Fweighted441                                     |
+| - LipshitzLong441   | 44.1 | 9 taps        | - Superseded by FweightedLong441                               |
+| Shibata441          | 44.1 | 24 taps       | Modeled after LAME ATH type 1                                  |
+| - ShibataHigh441    | 44.1 | 20 taps       | - High intensity (quieter noise)                               |
+| - ShibataLow441     | 44.1 | 12 taps       | - Low intensity (louder noise)                                 |
+| Shibata48           | 48   | 16 taps       | Modeled after LAME ATH type 1                                  |
+| - ShibataHigh48     | 48   | 28 taps       | - High intensity (quieter noise)                               |
+| - ShibataLow48      | 48   | 16 taps       | - Low intensity (louder noise)                                 |
+| Shibata882          | 88.2 | 20 taps       | Modeled after LAME ATH type 1                                  |
+| - ShibataLow882     | 88.2 | 24 taps       | - Low intensity (louder noise)                                 |
+| Shibata96           | 96   | 31 taps       | Modeled after LAME ATH type 1                                  |
+| - ShibataLow96      | 96   | 32 taps       | - Low intensity (louder noise)                                 |
+| Shibata192          | 192  | 54 taps       | Modeled after LAME ATH type 1                                  |
+| - ShibataLow192     | 192  | 20 taps       | - Low intensity (louder noise)                                 |
+
+The Shibata filters are the new filters from [SSRC 1.32](https://shibatch.sourceforge.net/ssrc/).
+
+Filters with more taps are typically more precise, always at the expense of higher cpu load. HighPass is an exception, which is about as fast as Flat.
+
+The parameter "bits" sets the target bit depth. For most oversampling delta-sigma DACs, this should match the bit depth of the playback device for best results. For true non-oversampling DACs, this should match the number of bits over which the DAC is linear (or the playback bit depth, whichever is lower). Setting it to a higher value is not useful since then the applied dither will be lost.
+
+For the "Flat" subtype, the parameter "amplitude" sets the number of LSB to be dithered. To linearize the samples, this should be 2. Lower amplitudes produce less noise but also linearize less; higher numbers produce more noise but do not linearize more.
+
+Some comparisons between the noise shapers are available from [SoX](http://sox.sourceforge.net/SoX/NoiseShaping), [SSRC](https://shibatch.sourceforge.net/ssrc/) and [ReSampler](https://github.com/jniemann66/ReSampler/blob/master/ditherProfiles.md). To test the different types, set the target bit depth to something very small like 5 or 6 bits (the minimum allowed value is 2) and try them all. Note that on "None" this may well mean there is no or unintelligible audio -- this is to experiment with and show what the other ditherers actually do.
+
+For sample rates above 48 kHz there is no need for anything more advanced than the "HighPass" subtype. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20 kHz up to 48 or 96 kHz where the noise can be placed without issues. The HighPass ditherer will place almost all of it there. Of course, the high-resolution Shibata filters provide some icing on the cake.
+
+Selecting a noise shaping ditherer for a different sample rate than it was designed for, will cause the frequency response curve of the noise shaper to be fitted to the playback rate. This means that the curve no longer matches its design points to be minimally audible. You may experiment which shaper still sounds good, or use the Flat or HighPass subtypes which work well at any sample rate.
 
 Example:
 ```
   dither_fancy:
     type: Dither
     parameters:
-      type: Lipshitz441
+      type: Shibata441
       bits: 16
 ```
-The available types are 
-- Simple, simple noise shaping with increasing noise towards higher frequencies
-- Uniform, just dither, no shaping. Requires also the parameter "amplitude" to set the dither amplitude in units of LSB (least significant bit). The allowed amplitude range is 0 to 100.
-- Lipshitz441, for 44.1 kHz
-- Fweighted441, for 44.1 kHz
-- Shibata441, for 44.1 kHz
-- Shibata48, for 48 kHz
-- ShibataLow441, for 44.1 kHz
-- ShibataLow48, for 48 kHz
-- None, just quantize without dither. Only useful with small target bit depth for demonstration.
-
-Lipshitz, Fweighted and Shibata give the least amount of audible noise. [See the SOX documentation for more details.](http://sox.sourceforge.net/SoX/NoiseShaping)
-To test the different types, set the target bit depth to something very small like 5 bits and try them all.
-
-For sample rates above 48 kHz there is no need for anything more advanced than the "Simple" type. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20kHz up to 48 or 96kHz where the noise can be placed without issues. The Simple type will place almost all of it there.
-
 
 ### Limiter
 The "Limiter" filter is used to limit the signal to a given level. It can use hard or soft clipping. 

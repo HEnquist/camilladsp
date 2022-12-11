@@ -15,6 +15,21 @@ New features:
 - Add title and description fields to various parts of the config.
 - Gain can be specified in dB or linear scale.
 - Websocket command to reset clipped samples counter.
+- Add an always enabled default volume control.
+- Add several volume control channels (faders).
+- Change Loudness filter to only perform loudness compensation.
+- Add ditherers:
+  - FweightedLong441 and FweightedShort441 variants.
+  - Gesemann441 and Gesemann48.
+  - LipshitzLong441 variant.
+  - ShibataHigh441 variant.
+  - Shibata and ShibataLow 88.2, 96 and 192.
+
+Changes:
+- Optimize dithering cpu load.
+- Uniform dithering renamed to Flat.
+- Simple dithering renamed to HighPass, implements a Wannamaker high passed triangular dither.
+- Shibata441 and Shibata48 dither higher precision and smoother curve.
 
 ## 1.0.3
 Bugfixes:
