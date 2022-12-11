@@ -1,9 +1,10 @@
 use rand::{rngs::SmallRng, SeedableRng};
 use rand_distr::{Distribution, Triangular, Uniform};
+use ringbuffer::{AllocRingBuffer, RingBufferExt, RingBufferWrite};
 
 use crate::{config, filters::Filter, NewValue, PrcFmt, Res};
 
-// lifetime `'a` to guarantee that `ditherer` and `shaper.filter`
+// lifetime `'a` to guarantee that `ditherer` and `shaper`
 // will live as long as this `Dither`.
 pub struct Dither<'a> {
     pub name: String,
@@ -18,22 +19,14 @@ pub struct NoiseShaper<'a> {
     // optimization: lifetime allows taking coefficients
     // from an array instead of allocating a `Vec`.
     filter: &'a [PrcFmt],
-    buffer: Vec<PrcFmt>,
-    idx: usize,
+    buffer: AllocRingBuffer<PrcFmt>,
 }
 
 impl<'a> NoiseShaper<'a> {
     pub fn new(filter: &'a [PrcFmt]) -> Self {
-        // not necessary to store `filter.len()` in the struct,
-        // at least not for performance, because the length is stored
-        // in the array as a field, not computed every time.
-        let buffer = vec![0.0; filter.len()];
-        let idx = 0;
-        Self {
-            filter,
-            buffer,
-            idx,
-        }
+        let mut buffer = AllocRingBuffer::with_capacity(filter.len().next_power_of_two());
+        buffer.fill(0.0);
+        Self { filter, buffer }
     }
 
     // Source: Wannamaker, R.A. (1992). Psychoacoustically Optimal Noise Shaping.
@@ -445,20 +438,19 @@ impl<'a> NoiseShaper<'a> {
     }
 
     pub fn process(&mut self, scaled: PrcFmt, dither: PrcFmt) -> PrcFmt {
-        let filterlen = self.filter.len();
         let mut filt_buf = 0.0;
-        for (n, coeff) in self.filter.iter().enumerate() {
-            filt_buf += coeff * self.buffer[(n + self.idx) % filterlen];
+
+        // reverse the iterator to make it last in, first out
+        for (item, coeff) in self.buffer.iter().rev().zip(self.filter) {
+            filt_buf += coeff * item;
         }
-        if self.idx > 0 {
-            self.idx -= 1;
-        } else {
-            self.idx = filterlen - 1;
-        }
+
         let scaled_plus_err = scaled + filt_buf;
         let result = scaled_plus_err + dither;
         let result_r = result.round(); // away from zero
-        self.buffer[self.idx] = scaled_plus_err - result_r;
+
+        self.buffer.push(scaled_plus_err - result_r);
+
         result_r
     }
 }
@@ -649,7 +641,8 @@ pub trait Ditherer {
 }
 
 // Deterministic and not cryptographically secure, but fast and with excellent
-// randomness. Cache it to increase performance.
+// randomness. Must be cached not only to increase performance, but more
+// importantly: keep state and not repeat the same sequences.
 fn create_rng() -> SmallRng {
     SmallRng::from_entropy()
 }
