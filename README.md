@@ -1514,7 +1514,9 @@ The "Dither" filter should only be added at the very end of the pipeline for eac
 
 The Shibata filters are the new filters from [SSRC 1.32](https://shibatch.sourceforge.net/ssrc/).
 
-The parameter "bits" sets the target bit depth. For most oversampling delta-sigma DACs, this should match the bit depth of the playback device for best results. For true non-oversampling DACs, this should match the number of bits over which the DAC is linear. Setting it to a higher value is not useful since then the applied dither will be lost.
+Filters with more taps are typically more precise, always at the expense of higher cpu load. HighPass is an exception, which is about as fast as Flat.
+
+The parameter "bits" sets the target bit depth. For most oversampling delta-sigma DACs, this should match the bit depth of the playback device for best results. For true non-oversampling DACs, this should match the number of bits over which the DAC is linear (or the playback bit depth, whichever is lower). Setting it to a higher value is not useful since then the applied dither will be lost.
 
 For the "Flat" subtype, the parameter "amplitude" sets the number of LSB to be dithered. To linearize the samples, this should be 2. Lower amplitudes produce less noise but also linearize less; higher numbers produce more noise but do not linearize more.
 
