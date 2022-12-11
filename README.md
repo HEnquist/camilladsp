@@ -637,6 +637,11 @@ There is a volume control that is enabled regardless of what configuration file 
 
 CamillaDSP defines a total of file control "channels" for volume.
 The default volume control reacts to the `Main` control channel.
+When the volume or mute setting is changed, the gain is smoothly ramped to the new setting.
+The duration of this ramp can be customized via the `volume_ramp_time` parameter
+in the `devices` section.
+The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
+
 
 In addition to this, there are four additional control channels, named `Aux1` to `Aux4`.
 These can be used to implement for example a separate volume control for a headphone output,
@@ -658,6 +663,7 @@ devices:
   capture_samplerate: 44100 (*)
   stop_on_rate_change: false (*)
   rate_measure_interval: 1.0 (*)
+  volume_ramp_time: 400.0 (*)
   capture:
     type: Pulse
     channels: 2
@@ -755,6 +761,10 @@ A parameter marked (*) in any example is optional. If they are left out from the
   Setting `stop_on_rate_change` to `true` makes CamillaDSP stop the processing if the measured capture sample rate changes. Default is `false`.
   The `rate_measure_interval` setting is used for adjusting the measurement period. A longer period gives a more accurate measurement of the rate, at the cost of slower response when the rate changes.
   The default is 1.0 seconds. Processing will stop after 3 measurements in a row are more than 4% off from the configured rate. The value of 4% is chosen to allow some variation, while still catching changes between for example 44.1 to 48 kHz.
+
+* `volume_ramp_time` (optional, defaults to 400 ms)
+  This setting controls the duration of this ramp when changing volume of the default volume control.
+  The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
  
 * `capture` and `playback`
   Input and output devices are defined in the same way. 
@@ -1166,18 +1176,18 @@ filters:
 ### Volume
 The Volume filter is intended to be used as an additional volume control.
 
-Note that the pipeline includes a volume control for channel `Main` per default.
+Note that the pipeline includes a volume control for the `Main` fader per default,
+and it's not possible to select this fader for Volume filters.
 
-There are a total of five volume control channels, named `Main`, `Aux1`, `Aux2`,`Aux3` and `Aux4`.
-TODO don't allow volume filters on Main!
+Volume filters may use the four additional faders, named `Aux1`, `Aux2`,`Aux3` and `Aux4`.
 
-A Volume filter is configured to react to one of these controls. 
-The volume can then be changed via the websocket, by changing the corresponding volume control.
-A request to set the volume will be applied to all Volume filters listening to the corresponding `control`.
+A Volume filter is configured to react to one of these faders. 
+The volume can then be changed via the websocket, by changing the corresponding fader.
+A request to set the volume will be applied to all Volume filters listening to the affected `fader`.
 
 When the volume or mute state is changed, the gain is ramped smoothly to the new value.
 The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds).
-The value must not be negative. If left out, it defaults to 200 ms.
+The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
 The value will be rounded to the nearest number of chunks.
 
 Example Volume filter:
@@ -1186,17 +1196,24 @@ filters:
   volumeexample:
     type: Volume
     parameters:
-      ramp_time: 200
-      control: Aux1
+      ramp_time: 200 (*)
+      fader: Aux1
 ```
 
 ### Loudness
 The Loudness filter performs loudness compensation and is intended to be used in combination with a volume control.
-Similar to a Volume filter, it reacts to the configured `control`.
-It can be combined with a Volume filter or the default `Main` volume control.
+Similar to a Volume filter, it reacts to the configured `fader`.
+The available choices for `fader` are `Main`, `Aux1`, `Aux2`,`Aux3` and `Aux4`.
+Setting fader to `Main` adds loudness compensation to the default volume control.
+
+By setting `fader` to one of the Aux faders it can instead work with a Volume filter
+reacting to the same fader.
+When used like this, there should only be a single Volume filter assigned to the chosed fader.
+
 It can also be used with a volume control external to CamillaDSP.
-The control should then be set to one of the Aux controls, and the external volume control should update
-this control when the volume setting changes.
+The fader should then be set to one of the Aux faders, and the external volume control should update
+this fader when the volume setting changes.
+A special websocket command is provided for this, see the [websocket command documentation](websocket.md).
 
 The method is the same as the one implemented by the [RME ADI-2 DAC FS](https://www.rme-audio.de/adi-2-dac.html).
 The loudness correction is done as shelving filters that boost the high (above 3500 Hz) and low (below 70 Hz) frequencies.
@@ -1215,10 +1232,10 @@ filters:
   loudness:
     type: Loudness
     parameters:
-      control: Main
+      fader: Main (*)
       reference_level: -25.0 
-      high_boost: 7.0
-      low_boost: 7.0
+      high_boost: 7.0 (*)
+      low_boost: 7.0 (*)
 ```
 Allowed ranges:
 - reference_level: -100 to +20

@@ -158,19 +158,20 @@ Commands for setting and getting the volume and mute of the default volume contr
 - `ToggleMute` : Toggle muting.
   * Returns the new muting status as a boolean.
 
-Commands for setting and getting the volume and mute setting of a given control channel.
-The channels are given by an integer, 0 for `Main` and 1 to 4 for `Aux1` to `Aux4`.
-All commands take the control as the first parameter.
-The response includes which control was referenced.
-- `GetVolumeControl` : Get the current volume setting in dB.
+Commands for setting and getting the volume and mute setting of a given fader.
+The faders are selected using an integer, 0 for `Main` and 1 to 4 for `Aux1` to `Aux4`.
+All commands take the fader number as the first parameter.
+The response includes which fader was referenced.
+- `GetFaderVolume` : Get the current volume setting in dB.
   * Returns the value as a float.
-- `SetVolumeControl` : Set the volume control to the given value in dB. Clamped to the range -150 to +50 dB.
-- `AdjustVolumeControl` : Change the volume setting by the given number of dB, positive or negative. The resulting volume is clamped to the range -150 to +50 dB.
+- `SetFaderVolume` : Set the volume control to the given value in dB. Clamped to the range -150 to +50 dB.
+- `SetFaderExternalVolume` : Special command for setting the volume when a Loudness filter is being combined with an external volume control (without a Volume filter). Clamped to the range -150 to +50 dB.
+- `AdjustFaderVolume` : Change the volume setting by the given number of dB, positive or negative. The resulting volume is clamped to the range -150 to +50 dB.
   * Returns the new value as a float.
-- `GetMuteControl` : Get the current mute setting.
+- `GetFaderMute` : Get the current mute setting.
   * Returns the muting status as a boolean.
-- `SetMuteControl` : Set muting to the given value.
-- `ToggleMuteControl` : Toggle muting.
+- `SetFaderMute` : Set muting to the given value.
+- `ToggleFaderMute` : Toggle muting.
   * Returns the new muting status as a boolean.
 
 ### Config management

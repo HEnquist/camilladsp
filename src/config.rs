@@ -512,6 +512,8 @@ pub struct Devices {
     pub stop_on_rate_change: Option<bool>,
     #[serde(default)]
     pub rate_measure_interval: Option<f32>,
+    #[serde(default)]
+    pub volume_ramp_time: Option<f32>,
 }
 
 // Getters for all the defaults
@@ -550,6 +552,10 @@ impl Devices {
 
     pub fn get_enable_rate_adjust(&self) -> bool {
         self.enable_rate_adjust.unwrap_or(false)
+    }
+
+    pub fn get_ramp_time(&self) -> f32 {
+        self.volume_ramp_time.unwrap_or(400.0)
     }
 }
 
@@ -893,8 +899,7 @@ pub enum BiquadComboParameters {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub enum VolumeControl {
-    Main = 0,
+pub enum VolumeFader {
     Aux1 = 1,
     Aux2 = 2,
     Aux3 = 3,
@@ -906,18 +911,22 @@ pub enum VolumeControl {
 pub struct VolumeParameters {
     #[serde(default)]
     pub ramp_time: Option<f32>,
-    #[serde(default)]
-    pub control: Option<VolumeControl>,
+    pub fader: VolumeFader,
 }
 
 impl VolumeParameters {
     pub fn get_ramp_time(&self) -> f32 {
-        self.ramp_time.unwrap_or(200.0)
+        self.ramp_time.unwrap_or(400.0)
     }
+}
 
-    pub fn get_control(&self) -> usize {
-        self.control.unwrap_or(VolumeControl::Main) as usize
-    }
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum LoudnessFader {
+    Main = 0,
+    Aux1 = 1,
+    Aux2 = 2,
+    Aux3 = 3,
+    Aux4 = 4,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -929,7 +938,7 @@ pub struct LoudnessParameters {
     #[serde(default)]
     pub low_boost: Option<f32>,
     #[serde(default)]
-    pub control: Option<VolumeControl>,
+    pub fader: Option<LoudnessFader>,
 }
 
 impl LoudnessParameters {
@@ -941,8 +950,8 @@ impl LoudnessParameters {
         self.low_boost.unwrap_or(10.0)
     }
 
-    pub fn get_control(&self) -> usize {
-        self.control.unwrap_or(VolumeControl::Main) as usize
+    pub fn get_fader(&self) -> usize {
+        self.fader.unwrap_or(LoudnessFader::Main) as usize
     }
 }
 
@@ -1685,6 +1694,9 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             )
             .into());
         }
+    }
+    if conf.devices.get_ramp_time() < 0.0 {
+        return Err(ConfigError::new("Volume ramp time cannot be negative").into());
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {

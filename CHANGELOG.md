@@ -15,7 +15,7 @@ New features:
 - Gain can be specified in dB or linear scale.
 - Websocket command to reset clipped samples counter.
 - Add an always enabled default volume control.
-- Add several volume control channels (TODO websocket commands for these).
+- Add several volume control channels (faders).
 - Change Loudness filter to only perform loudness compensation.
 
 ## 1.0.3

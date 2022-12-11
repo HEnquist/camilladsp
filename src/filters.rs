@@ -509,7 +509,7 @@ impl Pipeline {
         let mute = processing_status.read().unwrap().mute[0];
         let volume = basicfilters::Volume::new(
             "default".to_string(),
-            400.0,
+            conf.devices.get_ramp_time(),
             current_volume,
             mute,
             conf.devices.chunksize,

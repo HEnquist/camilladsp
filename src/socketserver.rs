@@ -99,12 +99,13 @@ enum WsCommand {
     GetMute,
     SetMute(bool),
     ToggleMute,
-    GetVolumeControl(usize),
-    SetVolumeControl(usize, f32),
-    AdjustVolumeControl(usize, f32),
-    GetMuteControl(usize),
-    SetMuteControl(usize, bool),
-    ToggleMuteControl(usize),
+    GetFaderVolume(usize),
+    SetFaderVolume(usize, f32),
+    SetFaderExternalVolume(usize, f32),
+    AdjustFaderVolume(usize, f32),
+    GetFaderMute(usize),
+    SetFaderMute(usize, bool),
+    ToggleFaderMute(usize),
     GetVersion,
     GetState,
     GetStopReason,
@@ -292,33 +293,37 @@ enum WsReply {
         result: WsResult,
         value: bool,
     },
-    SetVolumeControl {
+    SetFaderVolume {
         result: WsResult,
-        control: usize
+        control: usize,
     },
-    GetVolumeControl {
+    SetFaderExternalVolume {
+        result: WsResult,
+        control: usize,
+    },
+    GetFaderVolume {
         result: WsResult,
         value: f32,
-        control: usize
+        control: usize,
     },
-    AdjustVolumeControl {
+    AdjustFaderVolume {
         result: WsResult,
         value: f32,
-        control: usize
+        control: usize,
     },
-    SetMuteControl {
+    SetFaderMute {
         result: WsResult,
-        control: usize
+        control: usize,
     },
-    GetMuteControl {
-        result: WsResult,
-        value: bool,
-        control: usize
-    },
-    ToggleMuteControl {
+    GetFaderMute {
         result: WsResult,
         value: bool,
-        control: usize
+        control: usize,
+    },
+    ToggleFaderMute {
+        result: WsResult,
+        value: bool,
+        control: usize,
     },
     GetVersion {
         result: WsResult,
@@ -761,15 +766,7 @@ fn handle_command(
             })
         }
         WsCommand::SetVolume(nbr) => {
-            let mut new_vol = nbr;
-            // Clamp to -150 .. 50 dB, probably larger than needed..
-            if new_vol < -150.0 {
-                new_vol = -150.0;
-                warn!("Clamped volume at -150 dB")
-            } else if new_vol > 50.0 {
-                new_vol = 50.0;
-                warn!("Clamped volume at +50 dB")
-            }
+            let new_vol = get_clamped_volume(nbr);
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
             procstat.target_volume[0] = new_vol;
             Some(WsReply::SetVolume {
@@ -780,14 +777,7 @@ fn handle_command(
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
             let mut tempvol = procstat.target_volume[0];
             tempvol += nbr;
-            // Clamp to -150 .. 50 dB, probably larger than needed..
-            if tempvol < -150.0 {
-                tempvol = -150.0;
-                warn!("Clamped volume at -150 dB")
-            } else if tempvol > 50.0 {
-                tempvol = 50.0;
-                warn!("Clamped volume at +50 dB")
-            }
+            tempvol = get_clamped_volume(tempvol);
             procstat.target_volume[0] = tempvol;
             Some(WsReply::AdjustVolume {
                 result: WsResult::Ok,
@@ -816,91 +806,114 @@ fn handle_command(
                 value: procstat.mute[0],
             })
         }
-        WsCommand::GetVolumeControl(ctrl) => {
+        WsCommand::GetFaderVolume(ctrl) => {
             if ctrl > 4 {
-                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+                return Some(WsReply::GetFaderVolume {
+                    result: WsResult::Error,
+                    value: 0.0,
+                    control: ctrl,
+                });
             }
             let procstat = shared_data_inst.processing_status.read().unwrap();
-            Some(WsReply::GetVolumeControl {
+            Some(WsReply::GetFaderVolume {
                 result: WsResult::Ok,
                 value: procstat.target_volume[ctrl],
-                control: ctrl
+                control: ctrl,
             })
         }
-        WsCommand::SetVolumeControl(ctrl, nbr) => {
-            let mut new_vol = nbr;
+        WsCommand::SetFaderVolume(ctrl, nbr) => {
             if ctrl > 4 {
-                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+                return Some(WsReply::SetFaderVolume {
+                    result: WsResult::Error,
+                    control: ctrl,
+                });
             }
-            // Clamp to -150 .. 50 dB, probably larger than needed..
-            if new_vol < -150.0 {
-                new_vol = -150.0;
-                warn!("Clamped volume at -150 dB")
-            } else if new_vol > 50.0 {
-                new_vol = 50.0;
-                warn!("Clamped volume at +50 dB")
-            }
+            let new_vol = get_clamped_volume(nbr);
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
             procstat.target_volume[ctrl] = new_vol;
-            Some(WsReply::SetVolumeControl {
+            Some(WsReply::SetFaderVolume {
                 result: WsResult::Ok,
-                control: ctrl
+                control: ctrl,
             })
         }
-        WsCommand::AdjustVolumeControl(ctrl, nbr) => {
+        WsCommand::SetFaderExternalVolume(ctrl, nbr) => {
             if ctrl > 4 {
-                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+                return Some(WsReply::SetFaderExternalVolume {
+                    result: WsResult::Error,
+                    control: ctrl,
+                });
+            }
+            let new_vol = get_clamped_volume(nbr);
+            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            procstat.target_volume[ctrl] = new_vol;
+            procstat.current_volume[ctrl] = new_vol;
+            Some(WsReply::SetFaderExternalVolume {
+                result: WsResult::Ok,
+                control: ctrl,
+            })
+        }
+        WsCommand::AdjustFaderVolume(ctrl, nbr) => {
+            if ctrl > 4 {
+                return Some(WsReply::AdjustFaderVolume {
+                    result: WsResult::Error,
+                    value: nbr,
+                    control: ctrl,
+                });
             }
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
             let mut tempvol = procstat.target_volume[ctrl];
             tempvol += nbr;
-            // Clamp to -150 .. 50 dB, probably larger than needed..
-            if tempvol < -150.0 {
-                tempvol = -150.0;
-                warn!("Clamped volume at -150 dB")
-            } else if tempvol > 50.0 {
-                tempvol = 50.0;
-                warn!("Clamped volume at +50 dB")
-            }
+            tempvol = get_clamped_volume(tempvol);
             procstat.target_volume[ctrl] = tempvol;
-            Some(WsReply::AdjustVolumeControl {
+            Some(WsReply::AdjustFaderVolume {
                 result: WsResult::Ok,
                 value: tempvol,
-                control: ctrl
+                control: ctrl,
             })
         }
-        WsCommand::GetMuteControl(ctrl) => {
+        WsCommand::GetFaderMute(ctrl) => {
             if ctrl > 4 {
-                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+                return Some(WsReply::GetFaderMute {
+                    result: WsResult::Error,
+                    value: false,
+                    control: ctrl,
+                });
             }
             let procstat = shared_data_inst.processing_status.read().unwrap();
-            Some(WsReply::GetMuteControl {
+            Some(WsReply::GetFaderMute {
                 result: WsResult::Ok,
                 value: procstat.mute[ctrl],
-                control: ctrl
+                control: ctrl,
             })
         }
-        WsCommand::SetMuteControl(ctrl, mute) => {
+        WsCommand::SetFaderMute(ctrl, mute) => {
             if ctrl > 4 {
-                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+                return Some(WsReply::SetFaderMute {
+                    result: WsResult::Error,
+                    control: ctrl,
+                });
             }
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
             procstat.mute[ctrl] = mute;
-            Some(WsReply::SetMuteControl {
+            Some(WsReply::SetFaderMute {
                 result: WsResult::Ok,
-                control: ctrl
+                control: ctrl,
             })
         }
-        WsCommand::ToggleMuteControl(ctrl) => {
+        WsCommand::ToggleFaderMute(ctrl) => {
             if ctrl > 4 {
-                return Some(WsReply::SetVolumeControl { result: WsResult::Error, control: ctrl })
+                return Some(WsReply::ToggleFaderMute {
+                    result: WsResult::Error,
+                    value: false,
+                    control: ctrl,
+                });
             }
             let mut procstat = shared_data_inst.processing_status.write().unwrap();
             procstat.mute[ctrl] = !procstat.mute[ctrl];
-            Some(WsReply::ToggleMuteControl {
+            Some(WsReply::ToggleFaderMute {
                 result: WsResult::Ok,
                 value: procstat.mute[ctrl],
-                control: ctrl
+                control: ctrl,
             })
         }
         WsCommand::GetConfig => Some(WsReply::GetConfig {
@@ -1096,6 +1109,19 @@ fn handle_command(
         }
         WsCommand::None => None,
     }
+}
+
+fn get_clamped_volume(vol: f32) -> f32 {
+    let mut new_vol = vol;
+    // Clamp to -150 .. 50 dB, probably larger than needed..
+    if new_vol < -150.0 {
+        new_vol = -150.0;
+        warn!("Clamped volume at -150 dB")
+    } else if new_vol > 50.0 {
+        new_vol = 50.0;
+        warn!("Clamped volume at +50 dB")
+    }
+    new_vol
 }
 
 fn get_playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {

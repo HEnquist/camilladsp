@@ -16,7 +16,7 @@ pub struct Loudness {
     low_boost: f32,
     high_biquad: biquad::Biquad,
     low_biquad: biquad::Biquad,
-    control: usize,
+    fader: usize,
     active: bool,
 }
 
@@ -33,8 +33,8 @@ impl Loudness {
         processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
         info!("Create loudness filter");
-        let control = conf.get_control();
-        let current_volume = processing_status.read().unwrap().target_volume[control];
+        let fader = conf.get_fader();
+        let current_volume = processing_status.read().unwrap().target_volume[fader];
         let relboost = get_rel_boost(current_volume, conf.reference_level);
         let active = relboost > 0.01;
         let highshelf_conf = config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
@@ -62,7 +62,7 @@ impl Loudness {
             high_biquad,
             low_biquad,
             processing_status,
-            control,
+            fader,
             active,
         }
     }
@@ -74,7 +74,7 @@ impl Filter for Loudness {
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        let shared_vol = self.processing_status.read().unwrap().current_volume[self.control];
+        let shared_vol = self.processing_status.read().unwrap().current_volume[self.fader];
 
         // Volume setting changed
         if (shared_vol - self.current_volume as f32).abs() > 0.01 {
@@ -118,9 +118,8 @@ impl Filter for Loudness {
             parameters: conf, ..
         } = conf
         {
-            self.control = conf.get_control();
-            let current_volume =
-                self.processing_status.read().unwrap().current_volume[self.control];
+            self.fader = conf.get_fader();
+            let current_volume = self.processing_status.read().unwrap().current_volume[self.fader];
             let relboost = get_rel_boost(current_volume, conf.reference_level);
             self.active = relboost > 0.001;
             let highshelf_conf =

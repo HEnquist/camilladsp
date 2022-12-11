@@ -36,10 +36,11 @@ pub struct Volume {
     samplerate: usize,
     chunksize: usize,
     processing_status: Arc<RwLock<ProcessingParameters>>,
-    control: usize,
+    fader: usize,
 }
 
 impl Volume {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         ramp_time_ms: f32,
@@ -48,7 +49,7 @@ impl Volume {
         chunksize: usize,
         samplerate: usize,
         processing_status: Arc<RwLock<ProcessingParameters>>,
-        control: usize,
+        fader: usize,
     ) -> Self {
         let ramptime_in_chunks =
             (ramp_time_ms / (1000.0 * chunksize as f32 / samplerate as f32)).round() as usize;
@@ -71,7 +72,7 @@ impl Volume {
             samplerate,
             chunksize,
             processing_status,
-            control,
+            fader,
         }
     }
 
@@ -82,9 +83,9 @@ impl Volume {
         samplerate: usize,
         processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
-        let control = conf.get_control();
-        let current_volume = processing_status.read().unwrap().target_volume[control];
-        let mute = processing_status.read().unwrap().mute[control];
+        let fader = conf.fader as usize;
+        let current_volume = processing_status.read().unwrap().target_volume[fader];
+        let mute = processing_status.read().unwrap().mute[fader];
         Volume::new(
             name,
             conf.get_ramp_time(),
@@ -93,7 +94,7 @@ impl Volume {
             chunksize,
             samplerate,
             processing_status,
-            control,
+            fader,
         )
     }
 
@@ -120,8 +121,8 @@ impl Volume {
     }
 
     fn prepare_processing(&mut self) {
-        let shared_vol = self.processing_status.read().unwrap().target_volume[self.control];
-        let shared_mute = self.processing_status.read().unwrap().mute[self.control];
+        let shared_vol = self.processing_status.read().unwrap().target_volume[self.fader];
+        let shared_mute = self.processing_status.read().unwrap().mute[self.fader];
 
         // Volume setting changed
         if (shared_vol - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
@@ -188,7 +189,7 @@ impl Volume {
         }
 
         // Update shared current volume
-        self.processing_status.write().unwrap().current_volume[self.control] =
+        self.processing_status.write().unwrap().current_volume[self.fader] =
             self.current_volume as f32;
     }
 }
@@ -223,7 +224,7 @@ impl Filter for Volume {
         }
 
         // Update shared current volume
-        self.processing_status.write().unwrap().current_volume[self.control] =
+        self.processing_status.write().unwrap().current_volume[self.fader] =
             self.current_volume as f32;
         Ok(())
     }
@@ -236,7 +237,7 @@ impl Filter for Volume {
             self.ramptime_in_chunks = (conf.get_ramp_time()
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
-            self.control = conf.get_control();
+            self.fader = conf.fader as usize;
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
