@@ -8,6 +8,7 @@ New features:
 - Add option to bypass pipeline steps.
 - Bluetooth capture support on Linux via Bluez.
 - Updated resampler with faster lower quality options.
+- Higher precision of biquad filters.
 - More flexible configuration of resampler type and quality.
 - Allow setting optional config parameters to `null` to use default value.
 - Add "Dummy" convolution filter type for easier CPU load testing.
