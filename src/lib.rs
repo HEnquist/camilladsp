@@ -91,7 +91,6 @@ pub mod dither;
 pub mod fftconv;
 #[cfg(feature = "FFTW")]
 pub mod fftconv_fftw;
-pub mod fifoqueue;
 pub mod filedevice;
 #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
 pub mod filedevice_bluez;

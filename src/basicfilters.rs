@@ -1,9 +1,10 @@
 use std::sync::{Arc, RwLock};
 
+use circular_queue::CircularQueue;
+
 use crate::audiodevice::AudioChunk;
 use crate::biquad::{Biquad, BiquadCoefficients};
 use crate::config;
-use crate::fifoqueue::FifoQueue;
 use crate::filters::Filter;
 
 use crate::NewValue;
@@ -20,7 +21,7 @@ pub struct Gain {
 pub struct Delay {
     pub name: String,
     samplerate: usize,
-    pub queue: FifoQueue<PrcFmt>,
+    pub queue: CircularQueue<PrcFmt>,
     biquad: Option<Biquad>,
 }
 
@@ -317,7 +318,7 @@ impl Delay {
             let samples = delay.floor();
             let fraction = delay - samples;
             let bqcoeffs = BiquadCoefficients::new(1.0 - fraction, 0.0, 1.0 - fraction, 1.0, 0.0);
-            let bq = Biquad::new("subsample", 12345, bqcoeffs);
+            let bq = Biquad::new("subsample", samplerate, bqcoeffs);
             debug!(
                 "Building delay filter '{}' with delay {} + {} samples",
                 name, samples, fraction
@@ -331,8 +332,10 @@ impl Delay {
             );
             (samples, None)
         };
-        let mut queue = FifoQueue::filled_with(integerdelay + 1, 0.0);
-        let _elem = queue.pop();
+        let mut queue = CircularQueue::with_capacity(integerdelay);
+        for _ in 0..integerdelay {
+            queue.push(0.0);
+        }
         Delay {
             name,
             samplerate,
@@ -358,8 +361,8 @@ impl Filter for Delay {
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         for item in waveform.iter_mut() {
-            self.queue.push(*item)?;
-            *item = self.queue.pop().unwrap();
+            // this returns the item that was popped while pushing
+            *item = self.queue.push(*item).unwrap();
         }
         if let Some(bq) = &mut self.biquad {
             bq.process_waveform(waveform)?;
@@ -384,7 +387,7 @@ impl Filter for Delay {
                 let fraction = delay_samples - full_samples;
                 let bqcoeffs =
                     BiquadCoefficients::new(1.0 - fraction, 0.0, 1.0 - fraction, 1.0, 0.0);
-                let bq = Biquad::new("subsample", 12345, bqcoeffs);
+                let bq = Biquad::new("subsample", self.samplerate, bqcoeffs);
                 debug!(
                     "Updating delay filter '{}' with delay {} + {} samples",
                     self.name, full_samples, fraction
@@ -398,8 +401,10 @@ impl Filter for Delay {
                 );
                 (full_samples, None)
             };
-            let mut queue = FifoQueue::filled_with(integerdelay + 1, 0.0);
-            let _elem = queue.pop();
+            let mut queue = CircularQueue::with_capacity(integerdelay);
+            for _ in 0..integerdelay {
+                queue.push(0.0);
+            }
             self.queue = queue;
             self.biquad = biquad;
         } else {
