@@ -10,7 +10,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::Mutex;
 
 //type SmpFmt = i16;
 use crate::PrcFmt;
@@ -24,7 +24,7 @@ pub struct Overrides {
 }
 
 lazy_static! {
-    pub static ref OVERRIDES: RwLock<Overrides> = RwLock::new(Overrides {
+    pub static ref OVERRIDES: Mutex<Overrides> = Mutex::new(Overrides {
         samplerate: None,
         sample_format: None,
         extra_samples: None,
@@ -1329,7 +1329,7 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
 }
 
 fn apply_overrides(configuration: &mut Configuration) {
-    if let Some(rate) = OVERRIDES.read().unwrap().samplerate {
+    if let Some(rate) = OVERRIDES.lock().unwrap().samplerate {
         let cfg_rate = configuration.devices.samplerate;
         let cfg_chunksize = configuration.devices.chunksize;
 
@@ -1377,7 +1377,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             }
         }
     }
-    if let Some(extra) = OVERRIDES.read().unwrap().extra_samples {
+    if let Some(extra) = OVERRIDES.lock().unwrap().extra_samples {
         debug!("Apply override for extra_samples: {}", extra);
         #[allow(unreachable_patterns)]
         match &mut configuration.devices.capture {
@@ -1390,7 +1390,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             _ => {}
         }
     }
-    if let Some(chans) = OVERRIDES.read().unwrap().channels {
+    if let Some(chans) = OVERRIDES.lock().unwrap().channels {
         debug!("Apply override for capture channels: {}", chans);
         match &mut configuration.devices.capture {
             CaptureDevice::File(dev) => {
@@ -1434,7 +1434,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             }
         }
     }
-    if let Some(fmt) = OVERRIDES.read().unwrap().sample_format {
+    if let Some(fmt) = OVERRIDES.lock().unwrap().sample_format {
         debug!("Apply override for capture sample format: {}", fmt);
         match &mut configuration.devices.capture {
             CaptureDevice::File(dev) => {

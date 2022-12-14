@@ -27,7 +27,7 @@ use rubato::{
 use std::error;
 use std::fmt;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Instant;
 
@@ -218,7 +218,7 @@ pub trait PlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
-        playback_status: Arc<RwLock<PlaybackStatus>>,
+        playback_status: Arc<Mutex<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
@@ -230,7 +230,7 @@ pub trait CaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        capture_status: Arc<RwLock<CaptureStatus>>,
+        capture_status: Arc<Mutex<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
 }
 

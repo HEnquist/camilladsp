@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 
 use circular_queue::CircularQueue;
 
@@ -36,7 +36,7 @@ pub struct Volume {
     ramp_step: usize,
     samplerate: usize,
     chunksize: usize,
-    processing_status: Arc<RwLock<ProcessingParameters>>,
+    processing_status: Arc<Mutex<ProcessingParameters>>,
     fader: usize,
 }
 
@@ -49,7 +49,7 @@ impl Volume {
         mute: bool,
         chunksize: usize,
         samplerate: usize,
-        processing_status: Arc<RwLock<ProcessingParameters>>,
+        processing_status: Arc<Mutex<ProcessingParameters>>,
         fader: usize,
     ) -> Self {
         let name = name.to_string();
@@ -83,11 +83,11 @@ impl Volume {
         conf: config::VolumeParameters,
         chunksize: usize,
         samplerate: usize,
-        processing_status: Arc<RwLock<ProcessingParameters>>,
+        processing_status: Arc<Mutex<ProcessingParameters>>,
     ) -> Self {
         let fader = conf.fader as usize;
-        let current_volume = processing_status.read().unwrap().target_volume[fader];
-        let mute = processing_status.read().unwrap().mute[fader];
+        let current_volume = processing_status.lock().unwrap().target_volume[fader];
+        let mute = processing_status.lock().unwrap().mute[fader];
         Volume::new(
             name,
             conf.ramp_time(),
@@ -123,8 +123,8 @@ impl Volume {
     }
 
     fn prepare_processing(&mut self) {
-        let shared_vol = self.processing_status.read().unwrap().target_volume[self.fader];
-        let shared_mute = self.processing_status.read().unwrap().mute[self.fader];
+        let shared_vol = self.processing_status.lock().unwrap().target_volume[self.fader];
+        let shared_mute = self.processing_status.lock().unwrap().mute[self.fader];
 
         // Volume setting changed
         if (shared_vol - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
@@ -191,7 +191,7 @@ impl Volume {
         }
 
         // Update shared current volume
-        self.processing_status.write().unwrap().current_volume[self.fader] =
+        self.processing_status.lock().unwrap().current_volume[self.fader] =
             self.current_volume as f32;
     }
 }
@@ -226,7 +226,7 @@ impl Filter for Volume {
         }
 
         // Update shared current volume
-        self.processing_status.write().unwrap().current_volume[self.fader] =
+        self.processing_status.lock().unwrap().current_volume[self.fader] =
             self.current_volume as f32;
         Ok(())
     }

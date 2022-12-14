@@ -47,7 +47,7 @@ extern crate log;
 use serde::Serialize;
 use std::error;
 use std::fmt;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 
 // Sample format
 #[cfg(feature = "32bit")]
@@ -201,10 +201,10 @@ pub enum StopReason {
 
 #[derive(Clone)]
 pub struct StatusStructs {
-    pub capture: Arc<RwLock<CaptureStatus>>,
-    pub playback: Arc<RwLock<PlaybackStatus>>,
-    pub processing: Arc<RwLock<ProcessingParameters>>,
-    pub status: Arc<RwLock<ProcessingStatus>>,
+    pub capture: Arc<Mutex<CaptureStatus>>,
+    pub playback: Arc<Mutex<PlaybackStatus>>,
+    pub processing: Arc<Mutex<ProcessingParameters>>,
+    pub status: Arc<Mutex<ProcessingStatus>>,
 }
 
 impl fmt::Display for ProcessingState {

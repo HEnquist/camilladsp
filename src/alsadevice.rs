@@ -16,7 +16,7 @@ use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Instant;
 
@@ -84,7 +84,7 @@ struct CaptureParams {
     samplerate: usize,
     capture_samplerate: usize,
     async_src: bool,
-    capture_status: Arc<RwLock<CaptureStatus>>,
+    capture_status: Arc<Mutex<CaptureStatus>>,
     stop_on_rate_change: bool,
     rate_measure_interval: f32,
 }
@@ -95,7 +95,7 @@ struct PlaybackParams {
     adjust_period: f32,
     adjust_enabled: bool,
     sample_format: SampleFormat,
-    playback_status: Arc<RwLock<PlaybackStatus>>,
+    playback_status: Arc<Mutex<PlaybackStatus>>,
     bytes_per_frame: usize,
     samplerate: usize,
     chunksize: usize,
@@ -437,7 +437,7 @@ fn playback_loop_bytes(
                 conversion_result =
                     chunk_to_buffer_rawbytes(&chunk, &mut buffer, &params.sample_format);
                 if conversion_result.1 > 0 {
-                    params.playback_status.write().unwrap().clipped_samples += conversion_result.1;
+                    params.playback_status.lock().unwrap().clipped_samples += conversion_result.1;
                 }
 
                 trace!("PB: {:?}", buf_manager);
@@ -500,13 +500,13 @@ fn playback_loop_bytes(
                     chunk.update_stats(&mut chunk_stats);
                     params
                         .playback_status
-                        .write()
+                        .lock()
                         .unwrap()
                         .signal_rms
                         .add_record_squared(chunk_stats.rms_linear());
                     params
                         .playback_status
-                        .write()
+                        .lock()
                         .unwrap()
                         .signal_peak
                         .add_record(chunk_stats.peak_linear());
@@ -546,7 +546,7 @@ fn playback_loop_bytes(
                                 }
                                 prev_delay_diff = Some(new_delay_diff);
                             }
-                            let mut pb_stat = params.playback_status.write().unwrap();
+                            let mut pb_stat = params.playback_status.lock().unwrap();
                             pb_stat.buffer_level = avg_delay as usize;
                             debug!(
                                 "PB: buffer level: {:.1}, signal rms: {:?}",
@@ -725,14 +725,14 @@ fn capture_loop_bytes(
                 //trace!("Captured {} bytes", capture_bytes);
                 averager.add_value(capture_bytes);
                 if averager.larger_than_millis(
-                    params.capture_status.read().unwrap().update_interval as u64,
+                    params.capture_status.lock().unwrap().update_interval as u64,
                 ) {
                     let bytes_per_sec = averager.average();
                     averager.restart();
                     let measured_rate_f =
                         bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
                     trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
-                    let mut capt_stat = params.capture_status.write().unwrap();
+                    let mut capt_stat = params.capture_status.lock().unwrap();
                     capt_stat.measured_samplerate = measured_rate_f as usize;
                     capt_stat.signal_range = value_range as f32;
                     capt_stat.rate_adjust = rate_adjust as f32;
@@ -776,7 +776,7 @@ fn capture_loop_bytes(
                     pcmdevice
                         .prepare()
                         .unwrap_or_else(|err| warn!("Capture error {:?}", err));
-                    params.capture_status.write().unwrap().state = ProcessingState::Stalled;
+                    params.capture_status.lock().unwrap().state = ProcessingState::Stalled;
                 }
             }
             Err(msg) => {
@@ -794,18 +794,18 @@ fn capture_loop_bytes(
             params.channels,
             &params.sample_format,
             capture_bytes,
-            &params.capture_status.read().unwrap().used_channels,
+            &params.capture_status.lock().unwrap().used_channels,
         );
         chunk.update_stats(&mut chunk_stats);
         params
             .capture_status
-            .write()
+            .lock()
             .unwrap()
             .signal_rms
             .add_record_squared(chunk_stats.rms_linear());
         params
             .capture_status
-            .write()
+            .lock()
             .unwrap()
             .signal_peak
             .add_record(chunk_stats.peak_linear());
@@ -842,7 +842,7 @@ fn capture_loop_bytes(
             }
         }
     }
-    let mut capt_stat = params.capture_status.write().unwrap();
+    let mut capt_stat = params.capture_status.lock().unwrap();
     capt_stat.state = ProcessingState::Inactive;
 }
 
@@ -888,7 +888,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
-        playback_status: Arc<RwLock<PlaybackStatus>>,
+        playback_status: Arc<Mutex<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let target_level = if self.target_level > 0 {
@@ -964,7 +964,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        capture_status: Arc<RwLock<CaptureStatus>>,
+        capture_status: Arc<Mutex<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;

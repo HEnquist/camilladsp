@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tungstenite::accept;
@@ -33,10 +33,10 @@ pub struct SharedData {
     pub active_config_path: Arc<Mutex<Option<String>>>,
     pub new_config: Arc<Mutex<Option<config::Configuration>>>,
     pub previous_config: Arc<Mutex<Option<config::Configuration>>>,
-    pub capture_status: Arc<RwLock<CaptureStatus>>,
-    pub playback_status: Arc<RwLock<PlaybackStatus>>,
-    pub processing_status: Arc<RwLock<ProcessingParameters>>,
-    pub status: Arc<RwLock<ProcessingStatus>>,
+    pub capture_status: Arc<Mutex<CaptureStatus>>,
+    pub playback_status: Arc<Mutex<PlaybackStatus>>,
+    pub processing_status: Arc<Mutex<ProcessingParameters>>,
+    pub status: Arc<Mutex<ProcessingStatus>>,
 }
 
 #[derive(Debug, Clone)]
@@ -534,14 +534,14 @@ fn handle_command(
             })
         }
         WsCommand::GetCaptureRate => {
-            let capstat = shared_data_inst.capture_status.read().unwrap();
+            let capstat = shared_data_inst.capture_status.lock().unwrap();
             Some(WsReply::GetCaptureRate {
                 result: WsResult::Ok,
                 value: capstat.measured_samplerate,
             })
         }
         WsCommand::GetSignalRange => {
-            let capstat = shared_data_inst.capture_status.read().unwrap();
+            let capstat = shared_data_inst.capture_status.lock().unwrap();
             Some(WsReply::GetSignalRange {
                 result: WsResult::Ok,
                 value: capstat.signal_range,
@@ -694,14 +694,14 @@ fn handle_command(
             value: crate_version!().to_string(),
         }),
         WsCommand::GetState => {
-            let capstat = shared_data_inst.capture_status.read().unwrap();
+            let capstat = shared_data_inst.capture_status.lock().unwrap();
             Some(WsReply::GetState {
                 result: WsResult::Ok,
                 value: capstat.state,
             })
         }
         WsCommand::GetStopReason => {
-            let stat = shared_data_inst.status.read().unwrap();
+            let stat = shared_data_inst.status.lock().unwrap();
             let value = stat.stop_reason.clone();
             Some(WsReply::GetStopReason {
                 result: WsResult::Ok,
@@ -709,35 +709,35 @@ fn handle_command(
             })
         }
         WsCommand::GetRateAdjust => {
-            let capstat = shared_data_inst.capture_status.read().unwrap();
+            let capstat = shared_data_inst.capture_status.lock().unwrap();
             Some(WsReply::GetRateAdjust {
                 result: WsResult::Ok,
                 value: capstat.rate_adjust,
             })
         }
         WsCommand::GetClippedSamples => {
-            let pbstat = shared_data_inst.playback_status.read().unwrap();
+            let pbstat = shared_data_inst.playback_status.lock().unwrap();
             Some(WsReply::GetClippedSamples {
                 result: WsResult::Ok,
                 value: pbstat.clipped_samples,
             })
         }
         WsCommand::ResetClippedSamples => {
-            let mut pbstat = shared_data_inst.playback_status.write().unwrap();
+            let mut pbstat = shared_data_inst.playback_status.lock().unwrap();
             pbstat.clipped_samples = 0;
             Some(WsReply::ResetClippedSamples {
                 result: WsResult::Ok,
             })
         }
         WsCommand::GetBufferLevel => {
-            let pbstat = shared_data_inst.playback_status.read().unwrap();
+            let pbstat = shared_data_inst.playback_status.lock().unwrap();
             Some(WsReply::GetBufferLevel {
                 result: WsResult::Ok,
                 value: pbstat.buffer_level,
             })
         }
         WsCommand::GetUpdateInterval => {
-            let capstat = shared_data_inst.capture_status.read().unwrap();
+            let capstat = shared_data_inst.capture_status.lock().unwrap();
             Some(WsReply::GetUpdateInterval {
                 result: WsResult::Ok,
                 value: capstat.update_interval,
@@ -746,12 +746,12 @@ fn handle_command(
         WsCommand::SetUpdateInterval(nbr) => {
             shared_data_inst
                 .capture_status
-                .write()
+                .lock()
                 .unwrap()
                 .update_interval = nbr;
             shared_data_inst
                 .playback_status
-                .write()
+                .lock()
                 .unwrap()
                 .update_interval = nbr;
             Some(WsReply::SetUpdateInterval {
@@ -759,7 +759,7 @@ fn handle_command(
             })
         }
         WsCommand::GetVolume => {
-            let procstat = shared_data_inst.processing_status.read().unwrap();
+            let procstat = shared_data_inst.processing_status.lock().unwrap();
             Some(WsReply::GetVolume {
                 result: WsResult::Ok,
                 value: procstat.target_volume[0],
@@ -767,14 +767,14 @@ fn handle_command(
         }
         WsCommand::SetVolume(nbr) => {
             let new_vol = clamped_volume(nbr);
-            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            let mut procstat = shared_data_inst.processing_status.lock().unwrap();
             procstat.target_volume[0] = new_vol;
             Some(WsReply::SetVolume {
                 result: WsResult::Ok,
             })
         }
         WsCommand::AdjustVolume(nbr) => {
-            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            let mut procstat = shared_data_inst.processing_status.lock().unwrap();
             let mut tempvol = procstat.target_volume[0];
             tempvol += nbr;
             tempvol = clamped_volume(tempvol);
@@ -785,21 +785,21 @@ fn handle_command(
             })
         }
         WsCommand::GetMute => {
-            let procstat = shared_data_inst.processing_status.read().unwrap();
+            let procstat = shared_data_inst.processing_status.lock().unwrap();
             Some(WsReply::GetMute {
                 result: WsResult::Ok,
                 value: procstat.mute[0],
             })
         }
         WsCommand::SetMute(mute) => {
-            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            let mut procstat = shared_data_inst.processing_status.lock().unwrap();
             procstat.mute[0] = mute;
             Some(WsReply::SetMute {
                 result: WsResult::Ok,
             })
         }
         WsCommand::ToggleMute => {
-            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            let mut procstat = shared_data_inst.processing_status.lock().unwrap();
             procstat.mute[0] = !procstat.mute[0];
             Some(WsReply::ToggleMute {
                 result: WsResult::Ok,
@@ -814,7 +814,7 @@ fn handle_command(
                     control: ctrl,
                 });
             }
-            let procstat = shared_data_inst.processing_status.read().unwrap();
+            let procstat = shared_data_inst.processing_status.lock().unwrap();
             Some(WsReply::GetFaderVolume {
                 result: WsResult::Ok,
                 value: procstat.target_volume[ctrl],
@@ -829,7 +829,7 @@ fn handle_command(
                 });
             }
             let new_vol = clamped_volume(nbr);
-            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            let mut procstat = shared_data_inst.processing_status.lock().unwrap();
             procstat.target_volume[ctrl] = new_vol;
             Some(WsReply::SetFaderVolume {
                 result: WsResult::Ok,
@@ -844,7 +844,7 @@ fn handle_command(
                 });
             }
             let new_vol = clamped_volume(nbr);
-            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            let mut procstat = shared_data_inst.processing_status.lock().unwrap();
             procstat.target_volume[ctrl] = new_vol;
             procstat.current_volume[ctrl] = new_vol;
             Some(WsReply::SetFaderExternalVolume {
@@ -860,7 +860,7 @@ fn handle_command(
                     control: ctrl,
                 });
             }
-            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            let mut procstat = shared_data_inst.processing_status.lock().unwrap();
             let mut tempvol = procstat.target_volume[ctrl];
             tempvol += nbr;
             tempvol = clamped_volume(tempvol);
@@ -879,7 +879,7 @@ fn handle_command(
                     control: ctrl,
                 });
             }
-            let procstat = shared_data_inst.processing_status.read().unwrap();
+            let procstat = shared_data_inst.processing_status.lock().unwrap();
             Some(WsReply::GetFaderMute {
                 result: WsResult::Ok,
                 value: procstat.mute[ctrl],
@@ -893,7 +893,7 @@ fn handle_command(
                     control: ctrl,
                 });
             }
-            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            let mut procstat = shared_data_inst.processing_status.lock().unwrap();
             procstat.mute[ctrl] = mute;
             Some(WsReply::SetFaderMute {
                 result: WsResult::Ok,
@@ -908,7 +908,7 @@ fn handle_command(
                     control: ctrl,
                 });
             }
-            let mut procstat = shared_data_inst.processing_status.write().unwrap();
+            let mut procstat = shared_data_inst.processing_status.lock().unwrap();
             procstat.mute[ctrl] = !procstat.mute[ctrl];
             Some(WsReply::ToggleFaderMute {
                 result: WsResult::Ok,
@@ -1128,7 +1128,7 @@ fn playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
     let time_instant = Instant::now() - Duration::from_secs_f32(time);
     let res = shared_data
         .playback_status
-        .read()
+        .lock()
         .unwrap()
         .signal_peak
         .max_since(time_instant);
@@ -1145,7 +1145,7 @@ fn playback_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
     let time_instant = Instant::now() - Duration::from_secs_f32(time);
     let res = shared_data
         .playback_status
-        .read()
+        .lock()
         .unwrap()
         .signal_rms
         .average_sqrt_since(time_instant);
@@ -1162,7 +1162,7 @@ fn capture_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
     let time_instant = Instant::now() - Duration::from_secs_f32(time);
     let res = shared_data
         .capture_status
-        .read()
+        .lock()
         .unwrap()
         .signal_peak
         .max_since(time_instant);
@@ -1179,7 +1179,7 @@ fn capture_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
     let time_instant = Instant::now() - Duration::from_secs_f32(time);
     let res = shared_data
         .capture_status
-        .read()
+        .lock()
         .unwrap()
         .signal_rms
         .average_sqrt_since(time_instant);
@@ -1198,7 +1198,7 @@ fn playback_signal_peak_since_last(
 ) -> Vec<f32> {
     let res = shared_data
         .playback_status
-        .read()
+        .lock()
         .unwrap()
         .signal_peak
         .max_since(local_data.last_pb_peak_time);
@@ -1218,7 +1218,7 @@ fn playback_signal_rms_since_last(
 ) -> Vec<f32> {
     let res = shared_data
         .playback_status
-        .read()
+        .lock()
         .unwrap()
         .signal_rms
         .average_sqrt_since(local_data.last_pb_rms_time);
@@ -1238,7 +1238,7 @@ fn capture_signal_peak_since_last(
 ) -> Vec<f32> {
     let res = shared_data
         .capture_status
-        .read()
+        .lock()
         .unwrap()
         .signal_peak
         .max_since(local_data.last_cap_peak_time);
@@ -1255,7 +1255,7 @@ fn capture_signal_peak_since_last(
 fn capture_signal_rms_since_last(shared_data: &SharedData, local_data: &mut LocalData) -> Vec<f32> {
     let res = shared_data
         .capture_status
-        .read()
+        .lock()
         .unwrap()
         .signal_rms
         .average_sqrt_since(local_data.last_cap_rms_time);
@@ -1272,7 +1272,7 @@ fn capture_signal_rms_since_last(shared_data: &SharedData, local_data: &mut Loca
 fn playback_signal_peak(shared_data: &SharedData) -> Vec<f32> {
     let res = shared_data
         .playback_status
-        .read()
+        .lock()
         .unwrap()
         .signal_peak
         .last();
@@ -1288,7 +1288,7 @@ fn playback_signal_peak(shared_data: &SharedData) -> Vec<f32> {
 fn playback_signal_global_peak(shared_data: &SharedData) -> Vec<f32> {
     shared_data
         .playback_status
-        .read()
+        .lock()
         .unwrap()
         .signal_peak
         .global_max()
@@ -1297,7 +1297,7 @@ fn playback_signal_global_peak(shared_data: &SharedData) -> Vec<f32> {
 fn reset_playback_signal_global_peak(shared_data: &SharedData) {
     shared_data
         .playback_status
-        .write()
+        .lock()
         .unwrap()
         .signal_peak
         .reset_global_max();
@@ -1306,7 +1306,7 @@ fn reset_playback_signal_global_peak(shared_data: &SharedData) {
 fn playback_signal_rms(shared_data: &SharedData) -> Vec<f32> {
     let res = shared_data
         .playback_status
-        .read()
+        .lock()
         .unwrap()
         .signal_rms
         .last_sqrt();
@@ -1322,7 +1322,7 @@ fn playback_signal_rms(shared_data: &SharedData) -> Vec<f32> {
 fn capture_signal_peak(shared_data: &SharedData) -> Vec<f32> {
     let res = shared_data
         .capture_status
-        .read()
+        .lock()
         .unwrap()
         .signal_peak
         .last();
@@ -1338,7 +1338,7 @@ fn capture_signal_peak(shared_data: &SharedData) -> Vec<f32> {
 fn capture_signal_global_peak(shared_data: &SharedData) -> Vec<f32> {
     shared_data
         .capture_status
-        .read()
+        .lock()
         .unwrap()
         .signal_peak
         .global_max()
@@ -1347,7 +1347,7 @@ fn capture_signal_global_peak(shared_data: &SharedData) -> Vec<f32> {
 fn reset_capture_signal_global_peak(shared_data: &SharedData) {
     shared_data
         .capture_status
-        .write()
+        .lock()
         .unwrap()
         .signal_peak
         .reset_global_max();
@@ -1356,7 +1356,7 @@ fn reset_capture_signal_global_peak(shared_data: &SharedData) {
 fn capture_signal_rms(shared_data: &SharedData) -> Vec<f32> {
     let res = shared_data
         .capture_status
-        .read()
+        .lock()
         .unwrap()
         .signal_rms
         .last_sqrt();

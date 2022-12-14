@@ -13,7 +13,7 @@ use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time;
 
@@ -201,7 +201,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
-        playback_status: Arc<RwLock<PlaybackStatus>>,
+        playback_status: Arc<Mutex<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let host_cfg = self.host.clone();
@@ -287,7 +287,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             .store(sample_queue.len(), Ordering::Relaxed);
                                         if clipped > 0 {
                                             playback_status_clone
-                                                .write()
+                                                .lock()
                                                 .unwrap()
                                                 .clipped_samples += clipped;
                                         }
@@ -343,7 +343,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             .store(sample_queue.len(), Ordering::Relaxed);
                                         if clipped > 0 {
                                             playback_status_clone
-                                                .write()
+                                                .lock()
                                                 .unwrap()
                                                 .clipped_samples += clipped;
                                         }
@@ -396,13 +396,13 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             status_channel
                                                 .send(StatusMessage::SetSpeed(speed))
                                                 .unwrap();
-                                            playback_status.write().unwrap().buffer_level =
+                                            playback_status.lock().unwrap().buffer_level =
                                                 av_delay as usize;
                                         }
                                     }
                                     chunk.update_stats(&mut chunk_stats);
-                                    playback_status.write().unwrap().signal_rms.add_record_squared(chunk_stats.rms_linear());
-                                    playback_status.write().unwrap().signal_peak.add_record(chunk_stats.peak_linear());
+                                    playback_status.lock().unwrap().signal_rms.add_record_squared(chunk_stats.rms_linear());
+                                    playback_status.lock().unwrap().signal_peak.add_record(chunk_stats.peak_linear());
                                     tx_dev.send(chunk).unwrap();
                                 }
                                 Ok(AudioMessage::Pause) => {
@@ -470,7 +470,7 @@ impl CaptureDevice for CpalCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        capture_status: Arc<RwLock<CaptureStatus>>,
+        capture_status: Arc<Mutex<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let host_cfg = self.host.clone();
         let devname = self.devname.clone();
@@ -647,7 +647,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 _ => panic!("Unsupported sample format"),
                             };
                             averager.add_value(capture_samples);
-                            if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
+                            if averager.larger_than_millis(capture_status.lock().unwrap().update_interval as u64)
                             {
                                 let samples_per_sec = averager.average();
                                 averager.restart();
@@ -656,7 +656,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                     "Measured sample rate is {:.1} Hz",
                                     measured_rate_f
                                 );
-                                let mut capt_stat = capture_status.write().unwrap();
+                                let mut capt_stat = capture_status.lock().unwrap();
                                 capt_stat.measured_samplerate = measured_rate_f as usize;
                                 capt_stat.signal_range = value_range as f32;
                                 capt_stat.rate_adjust = rate_adjust as f32;
@@ -686,8 +686,8 @@ impl CaptureDevice for CpalCaptureDevice {
                             }
                             chunk.update_stats(&mut chunk_stats);
                             //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
-                            capture_status.write().unwrap().signal_rms.add_record_squared(chunk_stats.rms_linear());
-                            capture_status.write().unwrap().signal_peak.add_record(chunk_stats.peak_linear());
+                            capture_status.lock().unwrap().signal_rms.add_record_squared(chunk_stats.rms_linear());
+                            capture_status.lock().unwrap().signal_peak.add_record(chunk_stats.peak_linear());
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
@@ -716,7 +716,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 }
                             }
                         }
-                        let mut capt_stat = capture_status.write().unwrap();
+                        let mut capt_stat = capture_status.lock().unwrap();
                         capt_stat.state = ProcessingState::Inactive;
                     }
                     Err(err) => {

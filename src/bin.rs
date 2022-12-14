@@ -30,7 +30,7 @@ use std::env;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 
 use flexi_logger::DeferredNow;
@@ -159,7 +159,7 @@ fn run(
     prev_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     status_structs: StatusStructs,
 ) -> Res<ExitState> {
-    status_structs.capture.write().unwrap().state = ProcessingState::Starting;
+    status_structs.capture.lock().unwrap().state = ProcessingState::Starting;
     let mut is_starting = true;
     let conf_option = new_config_shared.lock().unwrap().clone();
     let conf = match conf_option {
@@ -213,7 +213,7 @@ fn run(
 
     let used_channels = config::used_capture_channels(&active_config);
     debug!("Using channels {:?}", used_channels);
-    status_structs.capture.write().unwrap().used_channels = used_channels;
+    status_structs.capture.lock().unwrap().used_channels = used_channels;
 
     // Capture thread
     let mut capture_dev = audiodevice::new_capture_device(conf_cap.devices);
@@ -258,7 +258,7 @@ fn run(
                             *new_config_shared.lock().unwrap() = None;
                             let used_channels = config::used_capture_channels(&active_config);
                             debug!("Using channels {:?}", used_channels);
-                            status_structs.capture.write().unwrap().used_channels = used_channels;
+                            status_structs.capture.lock().unwrap().used_channels = used_channels;
                             debug!("Sent changes to pipeline");
                         }
                         config::ConfigChange::Devices => {
@@ -339,7 +339,7 @@ fn run(
                         barrier.wait();
                         debug!("Supervisor loop starts now!");
                         is_starting = false;
-                        status_structs.status.write().unwrap().stop_reason = StopReason::None;
+                        status_structs.status.lock().unwrap().stop_reason = StopReason::None;
                     }
                 }
                 StatusMessage::PlaybackError(message) => {
@@ -352,7 +352,7 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for capture thread to exit..");
-                    status_structs.status.write().unwrap().stop_reason =
+                    status_structs.status.lock().unwrap().stop_reason =
                         StopReason::PlaybackError(message);
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
@@ -367,7 +367,7 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for playback thread to exit..");
-                    status_structs.status.write().unwrap().stop_reason =
+                    status_structs.status.lock().unwrap().stop_reason =
                         StopReason::CaptureError(message);
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
@@ -385,7 +385,7 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for capture thread to exit..");
-                    status_structs.status.write().unwrap().stop_reason =
+                    status_structs.status.lock().unwrap().stop_reason =
                         StopReason::PlaybackFormatChange(rate);
                     cap_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
@@ -400,7 +400,7 @@ fn run(
                         barrier.wait();
                     }
                     debug!("Wait for playback thread to exit..");
-                    status_structs.status.write().unwrap().stop_reason =
+                    status_structs.status.lock().unwrap().stop_reason =
                         StopReason::CaptureFormatChange(rate);
                     pb_handle.join().unwrap();
                     *new_config_shared.lock().unwrap() = None;
@@ -410,7 +410,7 @@ fn run(
                 }
                 StatusMessage::PlaybackDone => {
                     info!("Playback finished");
-                    let mut stat = status_structs.status.write().unwrap();
+                    let mut stat = status_structs.status.lock().unwrap();
                     if stat.stop_reason == StopReason::None {
                         stat.stop_reason = StopReason::Done;
                     }
@@ -434,7 +434,7 @@ fn run(
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 warn!("Capture, Playback and Processing threads have exited");
-                status_structs.status.write().unwrap().stop_reason = StopReason::UnknownError(
+                status_structs.status.lock().unwrap().stop_reason = StopReason::UnknownError(
                     "Capture, Playback and Processing threads have exited".to_string(),
                 );
                 return Ok(ExitState::Restart);
@@ -740,16 +740,16 @@ fn main_process() -> i32 {
 
     let initial_mute = matches.is_present("mute");
 
-    config::OVERRIDES.write().unwrap().samplerate = matches
+    config::OVERRIDES.lock().unwrap().samplerate = matches
         .value_of("samplerate")
         .map(|s| s.parse::<usize>().unwrap());
-    config::OVERRIDES.write().unwrap().extra_samples = matches
+    config::OVERRIDES.lock().unwrap().extra_samples = matches
         .value_of("extra_samples")
         .map(|s| s.parse::<usize>().unwrap());
-    config::OVERRIDES.write().unwrap().channels = matches
+    config::OVERRIDES.lock().unwrap().channels = matches
         .value_of("channels")
         .map(|s| s.parse::<usize>().unwrap());
-    config::OVERRIDES.write().unwrap().sample_format = matches
+    config::OVERRIDES.lock().unwrap().sample_format = matches
         .value_of("format")
         .map(|s| config::SampleFormat::from_name(s).unwrap());
 
@@ -788,7 +788,7 @@ fn main_process() -> i32 {
 
     let signal_reload = Arc::new(AtomicBool::new(false));
     let signal_exit = Arc::new(AtomicUsize::new(0));
-    let capture_status = Arc::new(RwLock::new(CaptureStatus {
+    let capture_status = Arc::new(Mutex::new(CaptureStatus {
         measured_samplerate: 0,
         update_interval: 1000,
         signal_range: 0.0,
@@ -798,19 +798,19 @@ fn main_process() -> i32 {
         signal_peak: countertimer::ValueHistory::new(1024, 2),
         used_channels: Vec::new(),
     }));
-    let playback_status = Arc::new(RwLock::new(PlaybackStatus {
+    let playback_status = Arc::new(Mutex::new(PlaybackStatus {
         buffer_level: 0,
         clipped_samples: 0,
         update_interval: 1000,
         signal_rms: countertimer::ValueHistory::new(1024, 2),
         signal_peak: countertimer::ValueHistory::new(1024, 2),
     }));
-    let processing_status = Arc::new(RwLock::new(ProcessingParameters {
+    let processing_status = Arc::new(Mutex::new(ProcessingParameters {
         target_volume: [initial_volume, 0.0, 0.0, 0.0, 0.0],
         current_volume: [initial_volume, 0.0, 0.0, 0.0, 0.0],
         mute: [initial_mute, false, false, false, false],
     }));
-    let status = Arc::new(RwLock::new(ProcessingStatus {
+    let status = Arc::new(Mutex::new(ProcessingStatus {
         stop_reason: StopReason::None,
     }));
 

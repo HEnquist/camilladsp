@@ -1,7 +1,7 @@
 use crate::biquad;
 use crate::config;
 use crate::filters::Filter;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 
 use crate::PrcFmt;
 use crate::ProcessingParameters;
@@ -10,7 +10,7 @@ use crate::Res;
 pub struct Loudness {
     pub name: String,
     current_volume: PrcFmt,
-    processing_status: Arc<RwLock<ProcessingParameters>>,
+    processing_status: Arc<Mutex<ProcessingParameters>>,
     reference_level: f32,
     high_boost: f32,
     low_boost: f32,
@@ -30,11 +30,11 @@ impl Loudness {
         name: &str,
         conf: config::LoudnessParameters,
         samplerate: usize,
-        processing_status: Arc<RwLock<ProcessingParameters>>,
+        processing_status: Arc<Mutex<ProcessingParameters>>,
     ) -> Self {
         info!("Create loudness filter");
         let fader = conf.fader();
-        let current_volume = processing_status.read().unwrap().target_volume[fader];
+        let current_volume = processing_status.lock().unwrap().target_volume[fader];
         let relboost = rel_boost(current_volume, conf.reference_level);
         let active = relboost > 0.01;
         let highshelf_conf = config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
@@ -73,7 +73,7 @@ impl Filter for Loudness {
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        let shared_vol = self.processing_status.read().unwrap().current_volume[self.fader];
+        let shared_vol = self.processing_status.lock().unwrap().current_volume[self.fader];
 
         // Volume setting changed
         if (shared_vol - self.current_volume as f32).abs() > 0.01 {
@@ -118,7 +118,7 @@ impl Filter for Loudness {
         } = conf
         {
             self.fader = conf.fader();
-            let current_volume = self.processing_status.read().unwrap().current_volume[self.fader];
+            let current_volume = self.processing_status.lock().unwrap().current_volume[self.fader];
             let relboost = rel_boost(current_volume, conf.reference_level);
             self.active = relboost > 0.001;
             let highshelf_conf =

@@ -12,7 +12,7 @@ use std::io::{stdin, stdout, Write};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -89,7 +89,7 @@ struct CaptureParams {
     resampling_ratio: f32,
     read_bytes: usize,
     async_src: bool,
-    capture_status: Arc<RwLock<CaptureStatus>>,
+    capture_status: Arc<Mutex<CaptureStatus>>,
     stop_on_rate_change: bool,
     rate_measure_interval: f32,
 }
@@ -111,7 +111,7 @@ impl PlaybackDevice for FilePlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
-        playback_status: Arc<RwLock<PlaybackStatus>>,
+        playback_status: Arc<Mutex<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let destination = self.destination.clone();
         let chunksize = self.chunksize;
@@ -158,17 +158,17 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         }
                                     };
                                     if nbr_clipped > 0 {
-                                        playback_status.write().unwrap().clipped_samples +=
+                                        playback_status.lock().unwrap().clipped_samples +=
                                             nbr_clipped;
                                     }
                                     chunk.update_stats(&mut chunk_stats);
                                     playback_status
-                                        .write()
+                                        .lock()
                                         .unwrap()
                                         .signal_rms
                                         .add_record_squared(chunk_stats.rms_linear());
                                     playback_status
-                                        .write()
+                                        .lock()
                                         .unwrap()
                                         .signal_peak
                                         .add_record(chunk_stats.peak_linear());
@@ -238,7 +238,7 @@ fn build_chunk(buf: &[u8], params: &CaptureParams, bytes_read: usize) -> AudioCh
         params.channels,
         &params.sample_format,
         bytes_read,
-        &params.capture_status.read().unwrap().used_channels,
+        &params.capture_status.lock().unwrap().used_channels,
     )
 }
 
@@ -418,7 +418,7 @@ fn capture_loop(
                         stalled = true;
                         prev_state = state;
                         state = ProcessingState::Stalled;
-                        let mut capt_stat = params.capture_status.write().unwrap();
+                        let mut capt_stat = params.capture_status.lock().unwrap();
                         capt_stat.state = ProcessingState::Stalled;
                     }
                     continue;
@@ -429,21 +429,21 @@ fn capture_loop(
                     debug!("Leaving stalled state, resuming processing");
                     stalled = false;
                     state = prev_state;
-                    let mut capt_stat = params.capture_status.write().unwrap();
+                    let mut capt_stat = params.capture_status.lock().unwrap();
                     capt_stat.state = state;
                 }
                 bytes_read = bytes;
                 nbr_bytes_read += bytes;
                 averager.add_value(bytes);
                 if averager.larger_than_millis(
-                    params.capture_status.read().unwrap().update_interval as u64,
+                    params.capture_status.lock().unwrap().update_interval as u64,
                 ) {
                     let bytes_per_sec = averager.average();
                     averager.restart();
                     let measured_rate_f =
                         bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
                     trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
-                    let mut capt_stat = params.capture_status.write().unwrap();
+                    let mut capt_stat = params.capture_status.lock().unwrap();
                     capt_stat.measured_samplerate = measured_rate_f as usize;
                     capt_stat.signal_range = value_range as f32;
                     capt_stat.rate_adjust = rate_adjust as f32;
@@ -493,13 +493,13 @@ fn capture_loop(
         //);
         params
             .capture_status
-            .write()
+            .lock()
             .unwrap()
             .signal_rms
             .add_record_squared(chunk_stats.rms_linear());
         params
             .capture_status
-            .write()
+            .lock()
             .unwrap()
             .signal_peak
             .add_record(chunk_stats.peak_linear());
@@ -535,7 +535,7 @@ fn capture_loop(
             sleep_until_next(bytes_per_frame, params.capture_samplerate, bytes_to_capture);
         }
     }
-    let mut capt_stat = params.capture_status.write().unwrap();
+    let mut capt_stat = params.capture_status.lock().unwrap();
     capt_stat.state = ProcessingState::Inactive;
 }
 
@@ -547,7 +547,7 @@ impl CaptureDevice for FileCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        capture_status: Arc<RwLock<CaptureStatus>>,
+        capture_status: Arc<Mutex<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let source = self.source.clone();
         let samplerate = self.samplerate;

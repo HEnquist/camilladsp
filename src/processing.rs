@@ -3,7 +3,7 @@ use crate::config;
 use crate::filters;
 use crate::ProcessingParameters;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 
 pub fn run_processing(
@@ -12,7 +12,7 @@ pub fn run_processing(
     tx_pb: mpsc::SyncSender<AudioMessage>,
     rx_cap: mpsc::Receiver<AudioMessage>,
     rx_pipeconf: mpsc::Receiver<(config::ConfigChange, config::Configuration)>,
-    processing_status: Arc<RwLock<ProcessingParameters>>,
+    processing_status: Arc<Mutex<ProcessingParameters>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_status.clone());

@@ -10,7 +10,7 @@ use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use rubato::VecResampler;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -133,7 +133,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
-        playback_status: Arc<RwLock<PlaybackStatus>>,
+        playback_status: Arc<Mutex<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -195,17 +195,17 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         }
                                     };
                                     if conversion_result.1 > 0 {
-                                        playback_status.write().unwrap().clipped_samples +=
+                                        playback_status.lock().unwrap().clipped_samples +=
                                             conversion_result.1;
                                     }
                                     chunk.update_stats(&mut chunk_stats);
                                     playback_status
-                                        .write()
+                                        .lock()
                                         .unwrap()
                                         .signal_rms
                                         .add_record_squared(chunk_stats.rms_linear());
                                     playback_status
-                                        .write()
+                                        .lock()
                                         .unwrap()
                                         .signal_peak
                                         .add_record(chunk_stats.peak_linear());
@@ -273,7 +273,7 @@ impl CaptureDevice for PulseCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        capture_status: Arc<RwLock<CaptureStatus>>,
+        capture_status: Arc<Mutex<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -374,16 +374,16 @@ impl CaptureDevice for PulseCaptureDevice {
                             match read_res {
                                 Ok(()) => {
                                     averager.add_value(capture_bytes);
-                                    if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64) {
+                                    if averager.larger_than_millis(capture_status.lock().unwrap().update_interval as u64) {
                                         let bytes_per_sec = averager.average();
                                         averager.restart();
                                         let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
                                         trace!(
                                             "Measured sample rate is {:.1} Hz, signal RMS is {:?}",
                                             measured_rate_f,
-                                            capture_status.read().unwrap().signal_rms.last(),
+                                            capture_status.lock().unwrap().signal_rms.last(),
                                         );
-                                        let mut capt_stat = capture_status.write().unwrap();
+                                        let mut capt_stat = capture_status.lock().unwrap();
                                         capt_stat.measured_samplerate = measured_rate_f as usize;
                                         capt_stat.signal_range = value_range as f32;
                                         capt_stat.rate_adjust = rate_adjust as f32;
@@ -396,7 +396,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                         .unwrap();
                                 }
                             };
-                            let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &sample_format, capture_bytes, &capture_status.read().unwrap().used_channels);
+                            let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &sample_format, capture_bytes, &capture_status.lock().unwrap().used_channels);
                             chunk.update_stats(&mut chunk_stats);
                             //trace!("Capture signal rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             value_range = chunk.maxval - chunk.minval;
@@ -426,10 +426,10 @@ impl CaptureDevice for PulseCaptureDevice {
                                     break;
                                 }
                             }
-                            capture_status.write().unwrap().signal_rms.add_record_squared(chunk_stats.rms_linear());
-                            capture_status.write().unwrap().signal_peak.add_record(chunk_stats.peak_linear());
+                            capture_status.lock().unwrap().signal_rms.add_record_squared(chunk_stats.rms_linear());
+                            capture_status.lock().unwrap().signal_peak.add_record(chunk_stats.peak_linear());
                         }
-                        capture_status.write().unwrap().state = ProcessingState::Inactive;
+                        capture_status.lock().unwrap().state = ProcessingState::Inactive;
                     }
                     Err(err) => {
                         let send_result = status_channel
