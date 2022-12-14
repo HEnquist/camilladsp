@@ -333,6 +333,8 @@ impl Delay {
             (samples, None)
         };
 
+        // for super-small delays, store at least a single sample
+        let integerdelay = integerdelay.max(1);
         let mut queue = CircularQueue::with_capacity(integerdelay);
         for _ in 0..integerdelay {
             queue.push(0.0);
@@ -457,6 +459,15 @@ mod tests {
         let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let waveform_delayed = vec![0.0, 0.0, 0.0, 0.0, -0.5, 1.0, 0.0, 0.0];
         let mut delay = Delay::new("test", 44100, 3.0, false);
+        delay.process_waveform(&mut waveform).unwrap();
+        assert_eq!(waveform, waveform_delayed);
+    }
+
+    #[test]
+    fn delay_supersmall() {
+        let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let waveform_delayed = vec![0.0, 0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0];
+        let mut delay = Delay::new("test", 44100, 0.1, false);
         delay.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_delayed);
     }
