@@ -21,7 +21,7 @@ pub struct Gain {
 pub struct Delay {
     pub name: String,
     samplerate: usize,
-    pub queue: CircularQueue<PrcFmt>,
+    queue: CircularQueue<PrcFmt>,
     biquad: Option<Biquad>,
 }
 
@@ -311,11 +311,11 @@ impl Filter for Gain {
 
 impl Delay {
     /// Creates a delay filter with delay in samples
-    /// Will be improved as it gets slow for long delays
     pub fn new(name: &str, samplerate: usize, delay: PrcFmt, subsample: bool) -> Self {
         let name = name.to_string();
+
         let (integerdelay, biquad) = if subsample {
-            let samples = delay.floor();
+            let samples = delay.trunc();
             let fraction = delay - samples;
             let bqcoeffs = BiquadCoefficients::new(1.0 - fraction, 0.0, 1.0 - fraction, 1.0, 0.0);
             let bq = Biquad::new("subsample", samplerate, bqcoeffs);
@@ -332,11 +332,13 @@ impl Delay {
             );
             (samples, None)
         };
+
         let mut queue = CircularQueue::with_capacity(integerdelay);
         for _ in 0..integerdelay {
             queue.push(0.0);
         }
-        Delay {
+
+        Self {
             name,
             samplerate,
             queue,
@@ -350,7 +352,8 @@ impl Delay {
             config::TimeUnit::Millimetres => conf.delay / 1000.0 * (samplerate as PrcFmt) / 343.0,
             config::TimeUnit::Samples => conf.delay,
         };
-        Delay::new(name, samplerate, delay_samples, conf.subsample())
+
+        Self::new(name, samplerate, delay_samples, conf.subsample())
     }
 }
 
@@ -371,42 +374,8 @@ impl Filter for Delay {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Delay {
-            parameters: conf, ..
-        } = conf
-        {
-            let delay_samples = match conf.unit() {
-                config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (self.samplerate as PrcFmt),
-                config::TimeUnit::Millimetres => {
-                    conf.delay / 1000.0 * (self.samplerate as PrcFmt) / 343.0
-                }
-                config::TimeUnit::Samples => conf.delay,
-            };
-            let (integerdelay, biquad) = if conf.subsample() {
-                let full_samples = delay_samples.floor();
-                let fraction = delay_samples - full_samples;
-                let bqcoeffs =
-                    BiquadCoefficients::new(1.0 - fraction, 0.0, 1.0 - fraction, 1.0, 0.0);
-                let bq = Biquad::new("subsample", self.samplerate, bqcoeffs);
-                debug!(
-                    "Updating delay filter '{}' with delay {} + {} samples",
-                    self.name, full_samples, fraction
-                );
-                (full_samples as usize, Some(bq))
-            } else {
-                let full_samples = delay_samples.round() as usize;
-                debug!(
-                    "Updating delay filter '{}' with delay {} samples",
-                    self.name, full_samples
-                );
-                (full_samples, None)
-            };
-            let mut queue = CircularQueue::with_capacity(integerdelay);
-            for _ in 0..integerdelay {
-                queue.push(0.0);
-            }
-            self.queue = queue;
-            self.biquad = biquad;
+        if let config::Filter::Delay { parameters, .. } = conf {
+            *self = Self::from_config(&self.name, self.samplerate, parameters);
         } else {
             // This should never happen unless there is a bug somewhere else
             unreachable!("Invalid config change!");
