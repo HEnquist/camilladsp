@@ -1,6 +1,6 @@
+use circular_queue::CircularQueue;
 use rand::{rngs::SmallRng, SeedableRng};
 use rand_distr::{Distribution, Triangular, Uniform};
-use ringbuffer::{AllocRingBuffer, RingBufferExt, RingBufferWrite};
 
 use crate::{config, filters::Filter, NewValue, PrcFmt, Res};
 
@@ -19,13 +19,12 @@ pub struct NoiseShaper<'a> {
     // optimization: lifetime allows taking coefficients
     // from an array instead of allocating a `Vec`.
     filter: &'a [PrcFmt],
-    buffer: AllocRingBuffer<PrcFmt>,
+    buffer: CircularQueue<PrcFmt>,
 }
 
 impl<'a> NoiseShaper<'a> {
     pub fn new(filter: &'a [PrcFmt]) -> Self {
-        let mut buffer = AllocRingBuffer::with_capacity(filter.len().next_power_of_two());
-        buffer.fill(0.0);
+        let buffer = CircularQueue::with_capacity(filter.len());
         Self { filter, buffer }
     }
 
@@ -439,9 +438,7 @@ impl<'a> NoiseShaper<'a> {
 
     pub fn process(&mut self, scaled: PrcFmt, dither: PrcFmt) -> PrcFmt {
         let mut filt_buf = 0.0;
-
-        // reverse the iterator to make it last in, first out
-        for (item, coeff) in self.buffer.iter().rev().zip(self.filter) {
+        for (item, coeff) in self.buffer.iter().zip(self.filter) {
             filt_buf += coeff * item;
         }
 
