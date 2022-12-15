@@ -315,7 +315,7 @@ impl Delay {
         let name = name.to_string();
 
         let (integerdelay, biquad) = if subsample {
-            let samples = delay.trunc();
+            let samples = delay.floor();
             let fraction = delay - samples;
             let bqcoeffs = BiquadCoefficients::new(1.0 - fraction, 0.0, 1.0 - fraction, 1.0, 0.0);
             let bq = Biquad::new("subsample", samplerate, bqcoeffs);
