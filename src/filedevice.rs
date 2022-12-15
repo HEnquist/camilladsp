@@ -212,7 +212,7 @@ impl PlaybackDevice for FilePlaybackDevice {
     }
 }
 
-fn get_nbr_capture_bytes(
+fn nbr_capture_bytes(
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_bytes: usize,
     channels: usize,
@@ -242,7 +242,7 @@ fn build_chunk(buf: &[u8], params: &CaptureParams, bytes_read: usize) -> AudioCh
     )
 }
 
-fn get_capture_bytes(
+fn capture_bytes(
     bytes_to_read: usize,
     nbr_bytes_read: usize,
     capture_bytes: usize,
@@ -274,8 +274,8 @@ fn capture_loop(
     let bytes_per_frame = params.channels * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];
     let mut bytes_read = 0;
-    let mut capture_bytes = chunksize_bytes;
-    let mut capture_bytes_temp;
+    let mut bytes_to_capture = chunksize_bytes;
+    let mut bytes_to_capture_tmp;
     let mut extra_bytes_left = params.extra_bytes;
     let mut nbr_bytes_read = 0;
     let rate_measure_interval_ms = (1000.0 * params.rate_measure_interval) as u64;
@@ -333,32 +333,36 @@ fn capture_loop(
                 break;
             }
         };
-        capture_bytes = get_nbr_capture_bytes(
+        bytes_to_capture = nbr_capture_bytes(
             &resampler,
-            capture_bytes,
+            bytes_to_capture,
             params.channels,
             params.store_bytes_per_sample,
         );
-        capture_bytes_temp =
-            get_capture_bytes(params.read_bytes, nbr_bytes_read, capture_bytes, &mut buf);
+        bytes_to_capture_tmp = capture_bytes(
+            params.read_bytes,
+            nbr_bytes_read,
+            bytes_to_capture,
+            &mut buf,
+        );
         //let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
-        let read_res = file.read(&mut buf[0..capture_bytes_temp]);
+        let read_res = file.read(&mut buf[0..bytes_to_capture_tmp]);
         match read_res {
             Ok(ReadResult::EndOfFile(bytes)) => {
                 bytes_read = bytes;
                 nbr_bytes_read += bytes;
                 if bytes > 0 {
-                    for item in buf.iter_mut().take(capture_bytes).skip(bytes) {
+                    for item in buf.iter_mut().take(bytes_to_capture).skip(bytes) {
                         *item = 0;
                     }
                     debug!(
                         "End of file, read only {} of {} bytes",
-                        bytes, capture_bytes
+                        bytes, bytes_to_capture
                     );
                     let missing =
-                        ((capture_bytes - bytes) as f32 * params.resampling_ratio) as usize;
+                        ((bytes_to_capture - bytes) as f32 * params.resampling_ratio) as usize;
                     if extra_bytes_left > missing {
-                        bytes_read = capture_bytes;
+                        bytes_read = bytes_to_capture;
                         extra_bytes_left -= missing;
                     } else {
                         bytes_read += (extra_bytes_left as f32 / params.resampling_ratio) as usize;
@@ -388,17 +392,17 @@ fn capture_loop(
                 bytes_read = bytes;
                 nbr_bytes_read += bytes;
                 if bytes > 0 {
-                    for item in buf.iter_mut().take(capture_bytes).skip(bytes) {
+                    for item in buf.iter_mut().take(bytes_to_capture).skip(bytes) {
                         *item = 0;
                     }
                     debug!(
                         "Timed out after reading {} of {} bytes",
-                        bytes, capture_bytes
+                        bytes, bytes_to_capture
                     );
                     let missing =
-                        ((capture_bytes - bytes) as f32 * params.resampling_ratio) as usize;
+                        ((bytes_to_capture - bytes) as f32 * params.resampling_ratio) as usize;
                     if extra_bytes_left > missing {
-                        bytes_read = capture_bytes;
+                        bytes_read = bytes_to_capture;
                         extra_bytes_left -= missing;
                     } else {
                         bytes_read += (extra_bytes_left as f32 / params.resampling_ratio) as usize;
@@ -434,7 +438,7 @@ fn capture_loop(
                 if averager.larger_than_millis(
                     params.capture_status.read().unwrap().update_interval as u64,
                 ) {
-                    let bytes_per_sec = averager.get_average();
+                    let bytes_per_sec = averager.average();
                     averager.restart();
                     let measured_rate_f =
                         bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
@@ -447,7 +451,7 @@ fn capture_loop(
                 }
                 watcher_averager.add_value(bytes);
                 if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
-                    let bytes_per_sec = watcher_averager.get_average();
+                    let bytes_per_sec = watcher_averager.average();
                     watcher_averager.restart();
                     let measured_rate_f =
                         bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
@@ -478,7 +482,7 @@ fn capture_loop(
                     .unwrap_or(());
             }
         };
-        let mut chunk = build_chunk(&buf[0..capture_bytes], &params, bytes_read);
+        let mut chunk = build_chunk(&buf[0..bytes_to_capture], &params, bytes_read);
 
         value_range = chunk.maxval - chunk.minval;
         chunk.update_stats(&mut chunk_stats);
@@ -512,7 +516,7 @@ fn capture_loop(
                 }
                 chunk.frames = chunk_frames;
                 chunk.valid_frames =
-                    (chunk.frames as f32 * (bytes_read as f32 / capture_bytes as f32)) as usize;
+                    (chunk.frames as f32 * (bytes_read as f32 / bytes_to_capture as f32)) as usize;
                 chunk.waveforms = new_waves;
             }
             let msg = AudioMessage::Audio(chunk);
@@ -526,9 +530,9 @@ fn capture_loop(
                 info!("Processing thread has already stopped.");
                 break;
             }
-            sleep_until_next(bytes_per_frame, params.capture_samplerate, capture_bytes);
+            sleep_until_next(bytes_per_frame, params.capture_samplerate, bytes_to_capture);
         } else {
-            sleep_until_next(bytes_per_frame, params.capture_samplerate, capture_bytes);
+            sleep_until_next(bytes_per_frame, params.capture_samplerate, bytes_to_capture);
         }
     }
     let mut capt_stat = params.capture_status.write().unwrap();
@@ -572,7 +576,7 @@ impl CaptureDevice for FileCaptureDevice {
         let handle = thread::Builder::new()
             .name("FileCapture".to_string())
             .spawn(move || {
-                let resampler = get_resampler(
+                let resampler = new_resampler(
                     &resampler_config,
                     channels,
                     samplerate,

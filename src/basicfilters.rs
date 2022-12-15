@@ -42,7 +42,7 @@ pub struct Volume {
 impl Volume {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        name: String,
+        name: &str,
         ramp_time_ms: f32,
         current_volume: f32,
         mute: bool,
@@ -51,6 +51,7 @@ impl Volume {
         processing_status: Arc<RwLock<ProcessingParameters>>,
         fader: usize,
     ) -> Self {
+        let name = name.to_string();
         let ramptime_in_chunks =
             (ramp_time_ms / (1000.0 * chunksize as f32 / samplerate as f32)).round() as usize;
         let current_volume_with_mute = if mute { -100.0 } else { current_volume };
@@ -77,7 +78,7 @@ impl Volume {
     }
 
     pub fn from_config(
-        name: String,
+        name: &str,
         conf: config::VolumeParameters,
         chunksize: usize,
         samplerate: usize,
@@ -88,7 +89,7 @@ impl Volume {
         let mute = processing_status.read().unwrap().mute[fader];
         Volume::new(
             name,
-            conf.get_ramp_time(),
+            conf.ramp_time(),
             current_volume,
             mute,
             chunksize,
@@ -195,8 +196,8 @@ impl Volume {
 }
 
 impl Filter for Volume {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
@@ -234,7 +235,7 @@ impl Filter for Volume {
             parameters: conf, ..
         } = conf
         {
-            self.ramptime_in_chunks = (conf.get_ramp_time()
+            self.ramptime_in_chunks = (conf.ramp_time()
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
             self.fader = conf.fader as usize;
@@ -262,23 +263,24 @@ fn calculate_gain(gain_value: PrcFmt, inverted: bool, mute: bool, linear: bool) 
 
 impl Gain {
     /// A simple filter providing gain in dB, and can also invert the signal.
-    pub fn new(name: String, gain_value: PrcFmt, inverted: bool, mute: bool, linear: bool) -> Self {
+    pub fn new(name: &str, gain_value: PrcFmt, inverted: bool, mute: bool, linear: bool) -> Self {
+        let name = name.to_string();
         let gain = calculate_gain(gain_value, inverted, mute, linear);
         Gain { name, gain }
     }
 
-    pub fn from_config(name: String, conf: config::GainParameters) -> Self {
+    pub fn from_config(name: &str, conf: config::GainParameters) -> Self {
         let gain = conf.gain;
-        let inverted = conf.get_inverted();
-        let mute = conf.get_mute();
-        let linear = conf.get_scale() == config::GainScale::Linear;
+        let inverted = conf.is_inverted();
+        let mute = conf.is_mute();
+        let linear = conf.scale() == config::GainScale::Linear;
         Gain::new(name, gain, inverted, mute, linear)
     }
 }
 
 impl Filter for Gain {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
@@ -294,9 +296,9 @@ impl Filter for Gain {
         } = conf
         {
             let gain_value = conf.gain;
-            let inverted = conf.get_inverted();
-            let mute = conf.get_mute();
-            let linear = conf.get_scale() == config::GainScale::Linear;
+            let inverted = conf.is_inverted();
+            let mute = conf.is_mute();
+            let linear = conf.scale() == config::GainScale::Linear;
             let gain = calculate_gain(gain_value, inverted, mute, linear);
             self.gain = gain;
         } else {
@@ -309,12 +311,13 @@ impl Filter for Gain {
 impl Delay {
     /// Creates a delay filter with delay in samples
     /// Will be improved as it gets slow for long delays
-    pub fn new(name: String, samplerate: usize, delay: PrcFmt, subsample: bool) -> Self {
+    pub fn new(name: &str, samplerate: usize, delay: PrcFmt, subsample: bool) -> Self {
+        let name = name.to_string();
         let (integerdelay, biquad) = if subsample {
             let samples = delay.floor();
             let fraction = delay - samples;
             let bqcoeffs = BiquadCoefficients::new(1.0 - fraction, 0.0, 1.0 - fraction, 1.0, 0.0);
-            let bq = Biquad::new("subsample".to_string(), 12345, bqcoeffs);
+            let bq = Biquad::new("subsample", 12345, bqcoeffs);
             debug!(
                 "Building delay filter '{}' with delay {} + {} samples",
                 name, samples, fraction
@@ -338,19 +341,19 @@ impl Delay {
         }
     }
 
-    pub fn from_config(name: String, samplerate: usize, conf: config::DelayParameters) -> Self {
-        let delay_samples = match conf.get_unit() {
+    pub fn from_config(name: &str, samplerate: usize, conf: config::DelayParameters) -> Self {
+        let delay_samples = match conf.unit() {
             config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (samplerate as PrcFmt),
             config::TimeUnit::Millimetres => conf.delay / 1000.0 * (samplerate as PrcFmt) / 343.0,
             config::TimeUnit::Samples => conf.delay,
         };
-        Delay::new(name, samplerate, delay_samples, conf.get_subsample())
+        Delay::new(name, samplerate, delay_samples, conf.subsample())
     }
 }
 
 impl Filter for Delay {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
@@ -369,19 +372,19 @@ impl Filter for Delay {
             parameters: conf, ..
         } = conf
         {
-            let delay_samples = match conf.get_unit() {
+            let delay_samples = match conf.unit() {
                 config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (self.samplerate as PrcFmt),
                 config::TimeUnit::Millimetres => {
                     conf.delay / 1000.0 * (self.samplerate as PrcFmt) / 343.0
                 }
                 config::TimeUnit::Samples => conf.delay,
             };
-            let (integerdelay, biquad) = if conf.get_subsample() {
+            let (integerdelay, biquad) = if conf.subsample() {
                 let full_samples = delay_samples.floor();
                 let fraction = delay_samples - full_samples;
                 let bqcoeffs =
                     BiquadCoefficients::new(1.0 - fraction, 0.0, 1.0 - fraction, 1.0, 0.0);
-                let bq = Biquad::new("subsample".to_string(), 12345, bqcoeffs);
+                let bq = Biquad::new("subsample", 12345, bqcoeffs);
                 debug!(
                     "Updating delay filter '{}' with delay {} + {} samples",
                     self.name, full_samples, fraction
@@ -401,7 +404,7 @@ impl Filter for Delay {
             self.biquad = biquad;
         } else {
             // This should never happen unless there is a bug somewhere else
-            panic!("Invalid config change!");
+            unreachable!("Invalid config change!");
         }
     }
 }
@@ -416,7 +419,7 @@ pub fn validate_delay_config(conf: &config::DelayParameters) -> Res<()> {
 
 /// Validate a Volume config.
 pub fn validate_volume_config(conf: &config::VolumeParameters) -> Res<()> {
-    if conf.get_ramp_time() < 0.0 {
+    if conf.ramp_time() < 0.0 {
         return Err(config::ConfigError::new("Ramp time cannot be negative").into());
     }
     Ok(())
@@ -424,7 +427,7 @@ pub fn validate_volume_config(conf: &config::VolumeParameters) -> Res<()> {
 
 /// Validate a Gain config.
 pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
-    if conf.get_scale() == config::GainScale::Decibel {
+    if conf.scale() == config::GainScale::Decibel {
         if conf.gain < -150.0 {
             return Err(config::ConfigError::new("Gain must be larger than -150 dB").into());
         } else if conf.gain > 150.0 {
@@ -461,7 +464,7 @@ mod tests {
     fn gain_invert() {
         let mut waveform = vec![-0.5, 0.0, 0.5];
         let waveform_inv = vec![0.5, 0.0, -0.5];
-        let mut gain = Gain::new("test".to_string(), 0.0, true, false, false);
+        let mut gain = Gain::new("test", 0.0, true, false, false);
         gain.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_inv);
     }
@@ -470,7 +473,7 @@ mod tests {
     fn gain_ampl() {
         let mut waveform = vec![-0.5, 0.0, 0.5];
         let waveform_ampl = vec![-5.0, 0.0, 5.0];
-        let mut gain = Gain::new("test".to_string(), 20.0, false, false, false);
+        let mut gain = Gain::new("test", 20.0, false, false, false);
         gain.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_ampl);
     }
@@ -479,7 +482,7 @@ mod tests {
     fn delay_small() {
         let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let waveform_delayed = vec![0.0, 0.0, 0.0, 0.0, -0.5, 1.0, 0.0, 0.0];
-        let mut delay = Delay::new("test".to_string(), 44100, 3.0, false);
+        let mut delay = Delay::new("test", 44100, 3.0, false);
         delay.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_delayed);
     }
@@ -489,7 +492,7 @@ mod tests {
         let mut waveform1 = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let mut waveform2 = vec![0.0; 8];
         let waveform_delayed = vec![0.0, 0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0];
-        let mut delay = Delay::new("test".to_string(), 44100, 9.0, false);
+        let mut delay = Delay::new("test", 44100, 9.0, false);
         delay.process_waveform(&mut waveform1).unwrap();
         delay.process_waveform(&mut waveform2).unwrap();
         assert_eq!(waveform1, vec![0.0; 8]);
@@ -511,7 +514,7 @@ mod tests {
             0.008476649999999999,
             -0.0025429949999999997,
         ];
-        let mut delay = Delay::new("test".to_string(), 44100, 1.7, true);
+        let mut delay = Delay::new("test", 44100, 1.7, true);
         delay.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(waveform, waveform_delayed, 1.0e-6));
     }

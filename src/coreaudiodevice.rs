@@ -445,7 +445,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         Ok(AudioMessage::Audio(chunk)) => {
                             buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
                             if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
-                                if let Some(av_delay) = buffer_avg.get_average() {
+                                if let Some(av_delay) = buffer_avg.average() {
                                     let speed = calculate_speed(
                                         av_delay,
                                         target_level,
@@ -527,7 +527,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
     }
 }
 
-fn get_nbr_capture_frames(
+fn nbr_capture_frames(
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_frames: usize,
 ) -> usize {
@@ -568,7 +568,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let handle = thread::Builder::new()
             .name("CoreaudioCapture".to_string())
             .spawn(move || {
-                let mut resampler = get_resampler(
+                let mut resampler = new_resampler(
                         &resampler_config,
                         channels,
                         samplerate,
@@ -665,7 +665,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
 
                 let chunksize_samples = channels * chunksize;
                 let mut capture_frames = chunksize;
-                capture_frames = get_nbr_capture_frames(
+                capture_frames = nbr_capture_frames(
                     &resampler,
                     capture_frames,
                 );
@@ -751,7 +751,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         status_channel.send(StatusMessage::CaptureError("Capture device is no longer alive".to_string())).unwrap_or(());
                         break 'deviceloop;
                     }
-                    capture_frames = get_nbr_capture_frames(
+                    capture_frames = nbr_capture_frames(
                         &resampler,
                         capture_frames,
                     );
@@ -813,7 +813,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
                     if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                     {
-                        let samples_per_sec = averager.get_average();
+                        let samples_per_sec = averager.average();
                         averager.restart();
                         let measured_rate_f = samples_per_sec;
                         debug!(
@@ -829,7 +829,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     watcher_averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
                     if watcher_averager.larger_than_millis(rate_measure_interval)
                     {
-                        let samples_per_sec = watcher_averager.get_average();
+                        let samples_per_sec = watcher_averager.average();
                         watcher_averager.restart();
                         let measured_rate_f = samples_per_sec;
                         debug!(

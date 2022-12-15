@@ -76,11 +76,11 @@ impl Stopwatch {
         self.start_time = now;
     }
 
-    pub fn get_stored_millis(&self) -> u64 {
+    pub fn stored_millis(&self) -> u64 {
         self.value.as_millis() as u64
     }
 
-    pub fn get_current_duration(&self) -> Duration {
+    pub fn current_duration(&self) -> Duration {
         Instant::now().duration_since(self.start_time)
     }
 
@@ -122,7 +122,7 @@ impl Averager {
         trace!("Averager: added value {}, nb. {}", value, self.nbr_values);
     }
 
-    pub fn get_average(&self) -> Option<f64> {
+    pub fn average(&self) -> Option<f64> {
         if self.nbr_values > 0 {
             Some(self.sum / (self.nbr_values as f64))
         } else {
@@ -160,8 +160,8 @@ impl TimeAverage {
         self.sum += value;
     }
 
-    pub fn get_average(&self) -> f64 {
-        let seconds = self.timer.get_current_duration().as_secs_f64();
+    pub fn average(&self) -> f64 {
+        let seconds = self.timer.current_duration().as_secs_f64();
         self.sum as f64 / seconds
     }
 
@@ -269,7 +269,7 @@ impl ValueHistory {
     }
 
     // Get the average since the given Instance
-    pub fn get_average_since(&self, time: Instant) -> Option<HistoryRecord> {
+    pub fn average_since(&self, time: Instant) -> Option<HistoryRecord> {
         let mut scratch = vec![0.0; self.nbr_values];
         let mut nbr_summed = 0;
         for record in self.buffer.iter() {
@@ -286,7 +286,7 @@ impl ValueHistory {
         if nbr_summed == 0 {
             return None;
         }
-        let last = self.get_last().unwrap();
+        let last = self.last().unwrap();
         scratch.iter_mut().for_each(|val| *val /= nbr_summed as f32);
         Some(HistoryRecord {
             values: scratch,
@@ -295,7 +295,7 @@ impl ValueHistory {
     }
 
     // Get the max since the given Instance
-    pub fn get_max_since(&self, time: Instant) -> Option<HistoryRecord> {
+    pub fn max_since(&self, time: Instant) -> Option<HistoryRecord> {
         let mut scratch = vec![0.0; self.nbr_values];
         let mut valid = false;
         for record in self.buffer.iter() {
@@ -314,7 +314,7 @@ impl ValueHistory {
             valid = true;
         }
         if valid {
-            let last = self.get_last().unwrap();
+            let last = self.last().unwrap();
             return Some(HistoryRecord {
                 values: scratch,
                 time: last.time,
@@ -324,7 +324,7 @@ impl ValueHistory {
     }
 
     // Get the max since the start
-    pub fn get_global_max(&self) -> Vec<f32> {
+    pub fn global_max(&self) -> Vec<f32> {
         self.peak.clone()
     }
 
@@ -342,19 +342,19 @@ impl ValueHistory {
     // Get the square root of the average since the given Instance.
     // Used for RMS history.
     // Assumes that every record is the (squared) RMS value for an equally long interval.
-    pub fn get_average_sqrt_since(&self, time: Instant) -> Option<HistoryRecord> {
-        let mut result = self.get_average_since(time);
+    pub fn average_sqrt_since(&self, time: Instant) -> Option<HistoryRecord> {
+        let mut result = self.average_since(time);
         if let Some(ref mut record) = result {
             record.values.iter_mut().for_each(|val| *val = val.sqrt());
         };
         result
     }
 
-    pub fn get_last(&self) -> Option<HistoryRecord> {
+    pub fn last(&self) -> Option<HistoryRecord> {
         self.buffer.get(0).cloned()
     }
 
-    pub fn get_last_sqrt(&self) -> Option<HistoryRecord> {
+    pub fn last_sqrt(&self) -> Option<HistoryRecord> {
         let mut result = self.buffer.get(0).cloned();
         if let Some(ref mut record) = result {
             record.values.iter_mut().for_each(|val| *val = val.sqrt())
@@ -397,33 +397,33 @@ mod tests {
     #[test]
     fn stopwatch() {
         let mut t = Stopwatch::new();
-        assert_eq!(t.get_stored_millis(), 0);
+        assert_eq!(t.stored_millis(), 0);
         spinsleep(100);
-        assert_eq!(t.get_stored_millis(), 0);
+        assert_eq!(t.stored_millis(), 0);
         t.store_and_restart();
-        assert!(t.get_stored_millis() > 80);
-        assert!(t.get_stored_millis() < 120);
+        assert!(t.stored_millis() > 80);
+        assert!(t.stored_millis() < 120);
         t.store_and_restart();
-        assert_eq!(t.get_stored_millis(), 0);
+        assert_eq!(t.stored_millis(), 0);
     }
 
     #[test]
     fn averager() {
         let mut a = Averager::new();
-        assert_eq!(a.get_average(), None);
+        assert_eq!(a.average(), None);
         a.add_value(1.0);
         a.add_value(2.0);
         a.add_value(6.0);
-        assert_eq!(a.get_average(), Some(3.0));
+        assert_eq!(a.average(), Some(3.0));
         a.restart();
-        assert_eq!(a.get_average(), None);
+        assert_eq!(a.average(), None);
     }
 
     #[test]
     fn timeaverage() {
         let mut a = TimeAverage::new();
         spinsleep(10);
-        assert_eq!(a.get_average(), 0.0);
+        assert_eq!(a.average(), 0.0);
         a.add_value(125);
         spinsleep(10);
         a.add_value(125);
@@ -432,11 +432,11 @@ mod tests {
         spinsleep(10);
         a.add_value(125);
         spinsleep(10);
-        assert!(a.get_average() > 7000.0);
-        assert!(a.get_average() < 13000.0);
+        assert!(a.average() > 7000.0);
+        assert!(a.average() < 13000.0);
         a.restart();
         spinsleep(10);
-        assert_eq!(a.get_average(), 0.0);
+        assert_eq!(a.average(), 0.0);
     }
 
     #[test]
@@ -528,12 +528,12 @@ mod tests {
         // This must include all values.
         assert_eq!(
             format!("{:?}", vec![4.0, 6.0]),
-            format!("{:?}", hist.get_average_since(start1).unwrap().values)
+            format!("{:?}", hist.average_since(start1).unwrap().values)
         );
         // This must only include the last three.
         assert_eq!(
             format!("{:?}", vec![6.0, 9.0]),
-            format!("{:?}", hist.get_average_since(start2).unwrap().values)
+            format!("{:?}", hist.average_since(start2).unwrap().values)
         );
         hist.add_record(vec![5.0, 8.0]);
         hist.add_record(vec![6.0, 9.0]);
@@ -541,12 +541,12 @@ mod tests {
         // This must include the last 6 since the history length is set to 6.
         assert_eq!(
             format!("{:?}", vec![6.0, 9.0]),
-            format!("{:?}", hist.get_average_since(start1).unwrap().values)
+            format!("{:?}", hist.average_since(start1).unwrap().values)
         );
 
-        let last = hist.get_last().unwrap().time;
+        let last = hist.last().unwrap().time;
         // No new data, should be empty
-        assert!(hist.get_average_since(last).is_none());
+        assert!(hist.average_since(last).is_none());
     }
 
     #[test]
@@ -558,7 +558,7 @@ mod tests {
         hist.add_record_squared(vec![1.0]);
         assert_eq!(
             format!("{:?}", vec![5.0]),
-            format!("{:?}", hist.get_average_sqrt_since(start1).unwrap().values)
+            format!("{:?}", hist.average_sqrt_since(start1).unwrap().values)
         );
     }
 
@@ -578,22 +578,22 @@ mod tests {
         // This must include only values added after start1.
         assert_eq!(
             format!("{:?}", vec![6.0]),
-            format!("{:?}", hist.get_max_since(start1).unwrap().values)
+            format!("{:?}", hist.max_since(start1).unwrap().values)
         );
         // This must include only values added after start2.
         assert_eq!(
             format!("{:?}", vec![2.0]),
-            format!("{:?}", hist.get_max_since(start2).unwrap().values)
+            format!("{:?}", hist.max_since(start2).unwrap().values)
         );
         // This must include all values.
         assert_eq!(
             format!("{:?}", vec![9.0]),
-            format!("{:?}", hist.get_global_max())
+            format!("{:?}", hist.global_max())
         );
 
-        let last = hist.get_last().unwrap().time;
+        let last = hist.last().unwrap().time;
         // No new data, should be empty
-        assert!(hist.get_max_since(last).is_none());
+        assert!(hist.max_since(last).is_none());
     }
 
     #[test]
@@ -605,11 +605,11 @@ mod tests {
         hist.add_record(vec![4.0]);
         assert_eq!(
             format!("{:?}", vec![4.0]),
-            format!("{:?}", hist.get_last().unwrap().values)
+            format!("{:?}", hist.last().unwrap().values)
         );
         assert_eq!(
             format!("{:?}", vec![2.0]),
-            format!("{:?}", hist.get_last_sqrt().unwrap().values)
+            format!("{:?}", hist.last_sqrt().unwrap().values)
         );
     }
 
@@ -620,12 +620,12 @@ mod tests {
         hist.add_record(vec![2.0, 2.0]);
         assert_eq!(
             format!("{:?}", vec![2.0, 2.0]),
-            format!("{:?}", hist.get_last().unwrap().values)
+            format!("{:?}", hist.last().unwrap().values)
         );
         hist.add_record(vec![3.0]);
         assert_eq!(
             format!("{:?}", vec![3.0]),
-            format!("{:?}", hist.get_last().unwrap().values)
+            format!("{:?}", hist.last().unwrap().values)
         );
     }
 }

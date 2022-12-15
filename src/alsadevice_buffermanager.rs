@@ -10,14 +10,14 @@ use crate::Res;
 
 pub trait DeviceBufferManager {
     // intended for internal use
-    fn get_data(&self) -> &DeviceBufferData;
-    fn get_data_mut(&mut self) -> &mut DeviceBufferData;
+    fn data(&self) -> &DeviceBufferData;
+    fn data_mut(&mut self) -> &mut DeviceBufferData;
 
     fn apply_start_threshold(&mut self, swp: &SwParams) -> Res<()>;
 
     // Calculate a power-of-two buffer size that is large enough to accommodate any changes due to resampling.
     fn calculate_buffer_size(&self) -> Frames {
-        let data = self.get_data();
+        let data = self.data();
         2.0f32.powf(
             (1.2 * data.chunksize as f32 / data.resampling_ratio)
                 .log2()
@@ -28,7 +28,7 @@ pub trait DeviceBufferManager {
     // Calculate a buffer size and apply it to a hwp container. Only for use when opening a device.
     fn apply_buffer_size(&mut self, hwp: &HwParams) -> Res<()> {
         let buffer_frames = self.calculate_buffer_size();
-        let data = self.get_data_mut();
+        let data = self.data_mut();
         data.bufsize = hwp.set_buffer_size_near(buffer_frames)?;
         if data.bufsize < buffer_frames {
             warn!(
@@ -41,14 +41,14 @@ pub trait DeviceBufferManager {
 
     // Calculate a period size and apply it to a hwp container. Only for use when opening a device, after setting buffer size.
     fn apply_period_size(&mut self, hwp: &HwParams) -> Res<()> {
-        let data = self.get_data_mut();
+        let data = self.data_mut();
         data.period = hwp.set_period_size_near(data.bufsize / 8, alsa::ValueOr::Nearest)?;
         Ok(())
     }
 
     // Update avail_min so set target for snd_pcm_wait.
     fn apply_avail_min(&mut self, swp: &SwParams) -> Res<()> {
-        let data = self.get_data_mut();
+        let data = self.data_mut();
         // maximum timing safety - headroom for one io_size only
         if data.io_size < data.period {
             warn!(
@@ -67,7 +67,7 @@ pub trait DeviceBufferManager {
     }
 
     fn update_io_size(&mut self, swp: &SwParams, io_size: Frames) -> Res<()> {
-        let data = self.get_data_mut();
+        let data = self.data_mut();
         data.io_size = io_size;
         // must update avail_min
         self.apply_avail_min(swp)?;
@@ -76,8 +76,8 @@ pub trait DeviceBufferManager {
         Ok(())
     }
 
-    fn get_frames_to_stall(&mut self) -> Frames {
-        let data = self.get_data_mut();
+    fn frames_to_stall(&mut self) -> Frames {
+        let data = self.data_mut();
         // +1 to make sure the device really stalls
         data.bufsize - data.avail_min + 1
     }
@@ -95,7 +95,7 @@ pub struct DeviceBufferData {
 }
 
 impl DeviceBufferData {
-    pub fn get_buffersize(&self) -> Frames {
+    pub fn buffersize(&self) -> Frames {
         self.bufsize
     }
 }
@@ -123,11 +123,11 @@ impl CaptureBufferManager {
 }
 
 impl DeviceBufferManager for CaptureBufferManager {
-    fn get_data(&self) -> &DeviceBufferData {
+    fn data(&self) -> &DeviceBufferData {
         &self.data
     }
 
-    fn get_data_mut(&mut self) -> &mut DeviceBufferData {
+    fn data_mut(&mut self) -> &mut DeviceBufferData {
         &mut self.data
     }
 
@@ -174,11 +174,11 @@ impl PlaybackBufferManager {
 }
 
 impl DeviceBufferManager for PlaybackBufferManager {
-    fn get_data(&self) -> &DeviceBufferData {
+    fn data(&self) -> &DeviceBufferData {
         &self.data
     }
 
-    fn get_data_mut(&mut self) -> &mut DeviceBufferData {
+    fn data_mut(&mut self) -> &mut DeviceBufferData {
         &mut self.data
     }
 

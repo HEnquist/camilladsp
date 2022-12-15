@@ -36,13 +36,13 @@ impl Mixer {
         let ch_out = config.channels.out;
         let mut mapping = vec![Vec::<MixerSource>::new(); ch_out];
         for cfg_mapping in config.mapping {
-            if !cfg_mapping.get_mute() {
+            if !cfg_mapping.is_mute() {
                 let dest = cfg_mapping.dest;
                 for cfg_src in cfg_mapping.sources {
-                    if !cfg_src.get_mute() {
-                        let gain_value = cfg_src.get_gain();
-                        let inverted = cfg_src.get_inverted();
-                        let linear = cfg_src.get_scale() == config::GainScale::Linear;
+                    if !cfg_src.is_mute() {
+                        let gain_value = cfg_src.gain();
+                        let inverted = cfg_src.is_inverted();
+                        let linear = cfg_src.scale() == config::GainScale::Linear;
                         let gain = calculate_gain(gain_value, inverted, linear);
                         let src = MixerSource {
                             channel: cfg_src.channel,
@@ -68,9 +68,9 @@ impl Mixer {
         for cfg_mapping in config.mapping {
             let dest = cfg_mapping.dest;
             for cfg_src in cfg_mapping.sources {
-                let gain_value = cfg_src.get_gain();
-                let inverted = cfg_src.get_inverted();
-                let linear = cfg_src.get_scale() == config::GainScale::Linear;
+                let gain_value = cfg_src.gain();
+                let inverted = cfg_src.is_inverted();
+                let linear = cfg_src.scale() == config::GainScale::Linear;
                 let gain = calculate_gain(gain_value, inverted, linear);
                 let src = MixerSource {
                     channel: cfg_src.channel,
@@ -132,13 +132,13 @@ pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
 }
 
 /// Get a vector showing which input channels are used
-pub fn get_used_input_channels(mixer_config: &config::Mixer) -> Vec<bool> {
+pub fn used_input_channels(mixer_config: &config::Mixer) -> Vec<bool> {
     let chan_in = mixer_config.channels.r#in;
     let mut used_channels = vec![false; chan_in];
     for mapping in mixer_config.mapping.iter() {
-        if !mapping.get_mute() {
+        if !mapping.is_mute() {
             for source in mapping.sources.iter() {
-                if !source.get_mute() {
+                if !source.is_mute() {
                     used_channels[source.channel] = true;
                 }
             }
@@ -151,7 +151,7 @@ pub fn get_used_input_channels(mixer_config: &config::Mixer) -> Vec<bool> {
 mod tests {
     use crate::config::{Mixer, MixerChannels, MixerMapping, MixerSource};
     use crate::mixer;
-    use crate::mixer::get_used_input_channels;
+    use crate::mixer::used_input_channels;
 
     #[test]
     fn check_all_used() {
@@ -209,7 +209,7 @@ mod tests {
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
-        let used = get_used_input_channels(&conf);
+        let used = used_input_channels(&conf);
         assert_eq!(used, vec![true, true]);
     }
 
@@ -269,7 +269,7 @@ mod tests {
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
-        let used = get_used_input_channels(&conf);
+        let used = used_input_channels(&conf);
         assert_eq!(used, vec![false, true]);
     }
 
@@ -329,7 +329,7 @@ mod tests {
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
-        let used = get_used_input_channels(&conf);
+        let used = used_input_channels(&conf);
         assert_eq!(used, vec![false, true]);
     }
 
@@ -389,7 +389,7 @@ mod tests {
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
         };
-        let used = get_used_input_channels(&conf);
+        let used = used_input_channels(&conf);
         assert_eq!(used, vec![false, true]);
     }
 

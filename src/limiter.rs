@@ -14,20 +14,20 @@ pub struct Limiter {
 
 impl Limiter {
     /// Creates a Compressor from a config struct
-    pub fn from_config(name: String, config: config::LimiterParameters) -> Self {
-        let clip_limit = (10.0 as PrcFmt).powf(config.get_clip_limit() / 20.0);
+    pub fn from_config(name: &str, config: config::LimiterParameters) -> Self {
+        let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit() / 20.0);
 
         debug!(
             "Creating limiter '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
             name,
-            config.get_soft_clip(),
-            config.get_clip_limit(),
+            config.soft_clip(),
+            config.clip_limit(),
             clip_limit
         );
 
         Limiter {
-            name,
-            soft_clip: config.get_soft_clip(),
+            name: name.to_string(),
+            soft_clip: config.soft_clip(),
             clip_limit,
         }
     }
@@ -57,8 +57,8 @@ impl Limiter {
 }
 
 impl Filter for Limiter {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     /// Apply a Compressor to an AudioChunk, modifying it in-place.
@@ -72,15 +72,15 @@ impl Filter for Limiter {
             parameters: config, ..
         } = config
         {
-            let clip_limit = (10.0 as PrcFmt).powf(config.get_clip_limit() / 20.0);
+            let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit() / 20.0);
 
-            self.soft_clip = config.get_soft_clip();
+            self.soft_clip = config.soft_clip();
             self.clip_limit = clip_limit;
             debug!(
                 "Updated limiter '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
                 self.name,
-                config.get_soft_clip(),
-                config.get_clip_limit(),
+                config.soft_clip(),
+                config.clip_limit(),
                 clip_limit
             );
         } else {

@@ -24,7 +24,7 @@ impl BiquadCombo {
         let odd = order % 2 > 0;
         let pi = std::f64::consts::PI as PrcFmt;
         let n_so = order / 2;
-        let mut qvalues = Vec::new();
+        let mut qvalues = Vec::with_capacity(n_so + usize::from(odd));
         for n in 0..n_so {
             let q = 1.0 / (2.0 * (pi / (order as PrcFmt) * (n as PrcFmt + 0.5)).sin());
             qvalues.push(q);
@@ -36,7 +36,7 @@ impl BiquadCombo {
     }
 
     fn make_highpass(fs: usize, freq: PrcFmt, qvalues: Vec<PrcFmt>) -> Vec<biquad::Biquad> {
-        let mut filters = Vec::new();
+        let mut filters = Vec::with_capacity(qvalues.len());
         for q in qvalues.iter() {
             let filtconf = if q >= &0.0 {
                 config::BiquadParameters::Highpass { freq, q: *q }
@@ -44,14 +44,14 @@ impl BiquadCombo {
                 config::BiquadParameters::HighpassFO { freq }
             };
             let coeffs = biquad::BiquadCoefficients::from_config(fs, filtconf);
-            let filt = biquad::Biquad::new("".to_string(), fs, coeffs);
+            let filt = biquad::Biquad::new("", fs, coeffs);
             filters.push(filt);
         }
         filters
     }
 
     fn make_lowpass(fs: usize, freq: PrcFmt, qvalues: Vec<PrcFmt>) -> Vec<biquad::Biquad> {
-        let mut filters = Vec::new();
+        let mut filters = Vec::with_capacity(qvalues.len());
         for q in qvalues.iter() {
             let filtconf = if q >= &0.0 {
                 config::BiquadParameters::Lowpass { freq, q: *q }
@@ -59,7 +59,7 @@ impl BiquadCombo {
                 config::BiquadParameters::LowpassFO { freq }
             };
             let coeffs = biquad::BiquadCoefficients::from_config(fs, filtconf);
-            let filt = biquad::Biquad::new("".to_string(), fs, coeffs);
+            let filt = biquad::Biquad::new("", fs, coeffs);
             filters.push(filt);
         }
         filters
@@ -86,7 +86,7 @@ impl BiquadCombo {
         q_all: [PrcFmt; 5],
         g_all: [PrcFmt; 5],
     ) -> Vec<biquad::Biquad> {
-        let mut filters = Vec::new();
+        let mut filters = Vec::with_capacity(5);
         for (n, ((f, q), g)) in f_all.iter().zip(q_all).zip(g_all).enumerate() {
             if q.abs() > 0.001 {
                 let filtconf = match n {
@@ -107,7 +107,7 @@ impl BiquadCombo {
                     }),
                 };
                 let coeffs = biquad::BiquadCoefficients::from_config(samplerate, filtconf);
-                let filt = biquad::Biquad::new("".to_string(), samplerate, coeffs);
+                let filt = biquad::Biquad::new("", samplerate, coeffs);
                 filters.push(filt);
             }
         }
@@ -115,10 +115,11 @@ impl BiquadCombo {
     }
 
     pub fn from_config(
-        name: String,
+        name: &str,
         samplerate: usize,
         parameters: config::BiquadComboParameters,
     ) -> Self {
+        let name = name.to_string();
         match parameters {
             config::BiquadComboParameters::LinkwitzRileyHighpass { order, freq } => {
                 let qvalues = BiquadCombo::linkwitzriley_q(order);
@@ -190,8 +191,8 @@ impl BiquadCombo {
 }
 
 impl Filter for BiquadCombo {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
@@ -207,7 +208,7 @@ impl Filter for BiquadCombo {
         } = conf
         {
             let name = self.name.clone();
-            *self = BiquadCombo::from_config(name, self.samplerate, conf);
+            *self = BiquadCombo::from_config(&name, self.samplerate, conf);
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");

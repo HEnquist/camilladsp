@@ -64,7 +64,7 @@ enum DisconnectReason {
     Error,
 }
 
-fn get_wave_format(
+fn wave_format(
     sample_format: &SampleFormat,
     samplerate: usize,
     channels: usize,
@@ -120,7 +120,7 @@ fn open_playback(
     trace!("Found playback device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got playback iaudioclient");
-    let wave_format = get_wave_format(sample_format, samplerate, channels);
+    let wave_format = wave_format(sample_format, samplerate, channels);
     match audio_client.is_supported(&wave_format, &sharemode) {
         Ok(None) => {
             debug!("Playback device supports format {:?}", wave_format)
@@ -194,7 +194,7 @@ fn open_capture(
     trace!("Found capture device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got capture iaudioclient");
-    let wave_format = get_wave_format(sample_format, samplerate, channels);
+    let wave_format = wave_format(sample_format, samplerate, channels);
     match audio_client.is_supported(&wave_format, &sharemode) {
         Ok(None) => {
             debug!("Capture device supports format {:?}", wave_format)
@@ -688,7 +688,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                         Ok(AudioMessage::Audio(chunk)) => {
                             buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
                             if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
-                                if let Some(av_delay) = buffer_avg.get_average() {
+                                if let Some(av_delay) = buffer_avg.average() {
                                     let speed = calculate_speed(
                                         av_delay,
                                         target_level,
@@ -824,7 +824,7 @@ fn send_error_or_captureformatchange(
     }
 }
 
-fn get_nbr_capture_frames(
+fn nbr_capture_frames(
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_frames: usize,
 ) -> usize {
@@ -866,7 +866,7 @@ impl CaptureDevice for WasapiCaptureDevice {
         let handle = thread::Builder::new()
             .name("WasapiCapture".to_string())
             .spawn(move || {
-                let mut resampler = get_resampler(
+                let mut resampler = new_resampler(
                         &resampler_conf,
                         channels,
                         samplerate,
@@ -1000,7 +1000,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             break;
                         }
                     }
-                    capture_frames = get_nbr_capture_frames(
+                    capture_frames = nbr_capture_frames(
                         &resampler,
                         capture_frames,
                     );
@@ -1055,7 +1055,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         averager.add_value(capture_frames);
                         if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                         {
-                            let samples_per_sec = averager.get_average();
+                            let samples_per_sec = averager.average();
                             averager.restart();
                             let measured_rate_f = samples_per_sec;
                             debug!(
@@ -1071,7 +1071,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         watcher_averager.add_value(capture_frames);
                         if watcher_averager.larger_than_millis(rate_measure_interval)
                         {
-                            let samples_per_sec = watcher_averager.get_average();
+                            let samples_per_sec = watcher_averager.average();
                             watcher_averager.restart();
                             let measured_rate_f = samples_per_sec;
                             debug!(

@@ -457,11 +457,12 @@ impl<'a> NoiseShaper<'a> {
 
 impl<'a> Dither<'a> {
     pub fn new<D: Ditherer + 'a>(
-        name: String,
+        name: &str,
         bits: usize,
         ditherer: D,
         shaper: Option<NoiseShaper<'a>>,
     ) -> Self {
+        let name = name.to_string();
         let scalefact = PrcFmt::new(2.0).powi((bits - 1) as i32);
         let ditherer = Box::new(ditherer);
         Self {
@@ -472,7 +473,7 @@ impl<'a> Dither<'a> {
         }
     }
 
-    pub fn from_config(name: String, conf: config::DitherParameters) -> Self {
+    pub fn from_config(name: &str, conf: config::DitherParameters) -> Self {
         let (bits, shaper) = match conf {
             config::DitherParameters::None { bits } => (bits, None),
             config::DitherParameters::Flat { bits, .. } => (bits, None),
@@ -554,8 +555,8 @@ impl<'a> Dither<'a> {
 }
 
 impl<'a> Filter for Dither<'a> {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
@@ -578,8 +579,7 @@ impl<'a> Filter for Dither<'a> {
 
     fn update_parameters(&mut self, conf: config::Filter) {
         if let config::Filter::Dither { parameters, .. } = conf {
-            let name = self.name.clone();
-            *self = Self::from_config(name, parameters);
+            *self = Self::from_config(&self.name, parameters);
         } else {
             // This should never happen unless there is a bug somewhere else
             unreachable!("Invalid config change!");
@@ -769,7 +769,7 @@ mod tests {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
         let conf = DitherParameters::None { bits: 8 };
-        let mut dith = Dither::from_config("test".to_string(), conf);
+        let mut dith = Dither::from_config("test", conf);
         dith.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 128.0));
         assert!(is_close(
@@ -787,7 +787,7 @@ mod tests {
             bits: 8,
             amplitude: 2.0,
         };
-        let mut dith = Dither::from_config("test".to_string(), conf);
+        let mut dith = Dither::from_config("test", conf);
         dith.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 64.0));
         assert!(is_close(
@@ -802,7 +802,7 @@ mod tests {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
         let conf = DitherParameters::HighPass { bits: 8 };
-        let mut dith = Dither::from_config("test".to_string(), conf);
+        let mut dith = Dither::from_config("test", conf);
         dith.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 32.0));
         assert!(is_close(
@@ -817,7 +817,7 @@ mod tests {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
         let conf = DitherParameters::Lipshitz441 { bits: 8 };
-        let mut dith = Dither::from_config("test".to_string(), conf);
+        let mut dith = Dither::from_config("test", conf);
         dith.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 16.0));
         assert!(is_close(

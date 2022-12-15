@@ -210,7 +210,7 @@ impl CaptureDevice {
             CaptureDevice::File(dev) => dev.format,
             CaptureDevice::Stdin(dev) => dev.format,
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio(dev) => dev.get_format(),
+            CaptureDevice::CoreAudio(dev) => dev.format(),
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => dev.format,
             #[cfg(all(
@@ -244,13 +244,13 @@ pub struct CaptureDeviceFile {
 }
 
 impl CaptureDeviceFile {
-    pub fn get_extra_samples(&self) -> usize {
+    pub fn extra_samples(&self) -> usize {
         self.extra_samples.unwrap_or_default()
     }
-    pub fn get_skip_bytes(&self) -> usize {
+    pub fn skip_bytes(&self) -> usize {
         self.skip_bytes.unwrap_or_default()
     }
-    pub fn get_read_bytes(&self) -> usize {
+    pub fn read_bytes(&self) -> usize {
         self.read_bytes.unwrap_or_default()
     }
 }
@@ -270,13 +270,13 @@ pub struct CaptureDeviceStdin {
 }
 
 impl CaptureDeviceStdin {
-    pub fn get_extra_samples(&self) -> usize {
+    pub fn extra_samples(&self) -> usize {
         self.extra_samples.unwrap_or_default()
     }
-    pub fn get_skip_bytes(&self) -> usize {
+    pub fn skip_bytes(&self) -> usize {
         self.skip_bytes.unwrap_or_default()
     }
-    pub fn get_read_bytes(&self) -> usize {
+    pub fn read_bytes(&self) -> usize {
         self.read_bytes.unwrap_or_default()
     }
 }
@@ -297,7 +297,7 @@ pub struct CaptureDeviceBluez {
 
 #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
 impl CaptureDeviceBluez {
-    pub fn get_service(&self) -> String {
+    pub fn service(&self) -> String {
         self.service.clone().unwrap_or("org.bluealsa".to_string())
     }
 }
@@ -318,11 +318,11 @@ pub struct CaptureDeviceWasapi {
 
 #[cfg(target_os = "windows")]
 impl CaptureDeviceWasapi {
-    pub fn get_exclusive(&self) -> bool {
+    pub fn is_exclusive(&self) -> bool {
         self.exclusive.unwrap_or_default()
     }
 
-    pub fn get_loopback(&self) -> bool {
+    pub fn is_loopback(&self) -> bool {
         self.loopback.unwrap_or_default()
     }
 }
@@ -342,11 +342,11 @@ pub struct CaptureDeviceCA {
 
 #[cfg(target_os = "macos")]
 impl CaptureDeviceCA {
-    pub fn get_format(&self) -> SampleFormat {
+    pub fn format(&self) -> SampleFormat {
         self.format.unwrap_or(SampleFormat::S32LE)
     }
 
-    pub fn get_change_format(&self) -> bool {
+    pub fn change_format(&self) -> bool {
         self.change_format.unwrap_or_default()
     }
 }
@@ -450,7 +450,7 @@ pub struct PlaybackDeviceWasapi {
 
 #[cfg(target_os = "windows")]
 impl PlaybackDeviceWasapi {
-    pub fn get_exclusive(&self) -> bool {
+    pub fn is_exclusive(&self) -> bool {
         self.exclusive.unwrap_or_default()
     }
 }
@@ -472,15 +472,15 @@ pub struct PlaybackDeviceCA {
 
 #[cfg(target_os = "macos")]
 impl PlaybackDeviceCA {
-    pub fn get_format(&self) -> SampleFormat {
+    pub fn format(&self) -> SampleFormat {
         self.format.unwrap_or(SampleFormat::S32LE)
     }
 
-    pub fn get_change_format(&self) -> bool {
+    pub fn change_format(&self) -> bool {
         self.change_format.unwrap_or_default()
     }
 
-    pub fn get_exclusive(&self) -> bool {
+    pub fn is_exclusive(&self) -> bool {
         self.exclusive.unwrap_or_default()
     }
 }
@@ -518,43 +518,43 @@ pub struct Devices {
 
 // Getters for all the defaults
 impl Devices {
-    pub fn get_queuelimit(&self) -> usize {
+    pub fn queuelimit(&self) -> usize {
         self.queuelimit.unwrap_or(4)
     }
 
-    pub fn get_adjust_period(&self) -> f32 {
+    pub fn adjust_period(&self) -> f32 {
         self.adjust_period.unwrap_or(10.0)
     }
 
-    pub fn get_rate_measure_interval(&self) -> f32 {
+    pub fn rate_measure_interval(&self) -> f32 {
         self.rate_measure_interval.unwrap_or(1.0)
     }
 
-    pub fn get_silence_threshold(&self) -> PrcFmt {
+    pub fn silence_threshold(&self) -> PrcFmt {
         self.silence_threshold.unwrap_or(0.0)
     }
 
-    pub fn get_silence_timeout(&self) -> PrcFmt {
+    pub fn silence_timeout(&self) -> PrcFmt {
         self.silence_timeout.unwrap_or(0.0)
     }
 
-    pub fn get_capture_samplerate(&self) -> usize {
+    pub fn capture_samplerate(&self) -> usize {
         self.capture_samplerate.unwrap_or(self.samplerate)
     }
 
-    pub fn get_target_level(&self) -> usize {
+    pub fn target_level(&self) -> usize {
         self.target_level.unwrap_or(self.chunksize)
     }
 
-    pub fn get_stop_on_rate_change(&self) -> bool {
+    pub fn stop_on_rate_change(&self) -> bool {
         self.stop_on_rate_change.unwrap_or(false)
     }
 
-    pub fn get_enable_rate_adjust(&self) -> bool {
+    pub fn rate_adjust(&self) -> bool {
         self.enable_rate_adjust.unwrap_or(false)
     }
 
-    pub fn get_ramp_time(&self) -> f32 {
+    pub fn ramp_time(&self) -> f32 {
         self.volume_ramp_time.unwrap_or(400.0)
     }
 }
@@ -744,15 +744,15 @@ pub struct ConvParametersRaw {
 }
 
 impl ConvParametersRaw {
-    pub fn get_format(&self) -> FileFormat {
+    pub fn format(&self) -> FileFormat {
         self.format.unwrap_or(FileFormat::TEXT)
     }
 
-    pub fn get_skip_bytes_lines(&self) -> usize {
+    pub fn skip_bytes_lines(&self) -> usize {
         self.skip_bytes_lines.unwrap_or_default()
     }
 
-    pub fn get_read_bytes_lines(&self) -> usize {
+    pub fn read_bytes_lines(&self) -> usize {
         self.read_bytes_lines.unwrap_or_default()
     }
 }
@@ -766,7 +766,7 @@ pub struct ConvParametersWav {
 }
 
 impl ConvParametersWav {
-    pub fn get_channel(&self) -> usize {
+    pub fn channel(&self) -> usize {
         self.channel.unwrap_or_default()
     }
 }
@@ -915,7 +915,7 @@ pub struct VolumeParameters {
 }
 
 impl VolumeParameters {
-    pub fn get_ramp_time(&self) -> f32 {
+    pub fn ramp_time(&self) -> f32 {
         self.ramp_time.unwrap_or(400.0)
     }
 }
@@ -942,15 +942,15 @@ pub struct LoudnessParameters {
 }
 
 impl LoudnessParameters {
-    pub fn get_high_boost(&self) -> f32 {
+    pub fn high_boost(&self) -> f32 {
         self.high_boost.unwrap_or(10.0)
     }
 
-    pub fn get_low_boost(&self) -> f32 {
+    pub fn low_boost(&self) -> f32 {
         self.low_boost.unwrap_or(10.0)
     }
 
-    pub fn get_fader(&self) -> usize {
+    pub fn fader(&self) -> usize {
         self.fader.unwrap_or(LoudnessFader::Main) as usize
     }
 }
@@ -976,15 +976,15 @@ pub enum GainScale {
 }
 
 impl GainParameters {
-    pub fn get_inverted(&self) -> bool {
+    pub fn is_inverted(&self) -> bool {
         self.inverted.unwrap_or_default()
     }
 
-    pub fn get_mute(&self) -> bool {
+    pub fn is_mute(&self) -> bool {
         self.mute.unwrap_or_default()
     }
 
-    pub fn get_scale(&self) -> GainScale {
+    pub fn scale(&self) -> GainScale {
         self.scale.unwrap_or(GainScale::Decibel)
     }
 }
@@ -1000,11 +1000,11 @@ pub struct DelayParameters {
 }
 
 impl DelayParameters {
-    pub fn get_unit(&self) -> TimeUnit {
+    pub fn unit(&self) -> TimeUnit {
         self.unit.unwrap_or(TimeUnit::Milliseconds)
     }
 
-    pub fn get_subsample(&self) -> bool {
+    pub fn subsample(&self) -> bool {
         self.subsample.unwrap_or_default()
     }
 }
@@ -1058,11 +1058,11 @@ pub struct DiffEqParameters {
 }
 
 impl DiffEqParameters {
-    pub fn get_a(&self) -> Vec<PrcFmt> {
+    pub fn a(&self) -> Vec<PrcFmt> {
         self.a.clone().unwrap_or_default()
     }
 
-    pub fn get_b(&self) -> Vec<PrcFmt> {
+    pub fn b(&self) -> Vec<PrcFmt> {
         self.b.clone().unwrap_or_default()
     }
 }
@@ -1091,19 +1091,19 @@ pub struct MixerSource {
 }
 
 impl MixerSource {
-    pub fn get_gain(&self) -> PrcFmt {
+    pub fn gain(&self) -> PrcFmt {
         self.gain.unwrap_or_default()
     }
 
-    pub fn get_inverted(&self) -> bool {
+    pub fn is_inverted(&self) -> bool {
         self.inverted.unwrap_or_default()
     }
 
-    pub fn get_mute(&self) -> bool {
+    pub fn is_mute(&self) -> bool {
         self.mute.unwrap_or_default()
     }
 
-    pub fn get_scale(&self) -> GainScale {
+    pub fn scale(&self) -> GainScale {
         self.scale.unwrap_or(GainScale::Decibel)
     }
 }
@@ -1118,7 +1118,7 @@ pub struct MixerMapping {
 }
 
 impl MixerMapping {
-    pub fn get_mute(&self) -> bool {
+    pub fn is_mute(&self) -> bool {
         self.mute.unwrap_or_default()
     }
 }
@@ -1166,27 +1166,27 @@ pub struct CompressorParameters {
 }
 
 impl CompressorParameters {
-    pub fn get_monitor_channels(&self) -> Vec<usize> {
+    pub fn monitor_channels(&self) -> Vec<usize> {
         self.monitor_channels.clone().unwrap_or_default()
     }
 
-    pub fn get_process_channels(&self) -> Vec<usize> {
+    pub fn process_channels(&self) -> Vec<usize> {
         self.process_channels.clone().unwrap_or_default()
     }
 
-    pub fn get_makeup_gain(&self) -> PrcFmt {
+    pub fn makeup_gain(&self) -> PrcFmt {
         self.makeup_gain.unwrap_or_default()
     }
 
-    pub fn get_soft_clip(&self) -> bool {
+    pub fn soft_clip(&self) -> bool {
         self.soft_clip.unwrap_or_default()
     }
 
-    pub fn get_enable_clip(&self) -> bool {
+    pub fn enable_clip(&self) -> bool {
         self.enable_clip.unwrap_or_default()
     }
 
-    pub fn get_clip_limit(&self) -> PrcFmt {
+    pub fn clip_limit(&self) -> PrcFmt {
         self.clip_limit.unwrap_or_default()
     }
 }
@@ -1201,11 +1201,11 @@ pub struct LimiterParameters {
 }
 
 impl LimiterParameters {
-    pub fn get_soft_clip(&self) -> bool {
+    pub fn soft_clip(&self) -> bool {
         self.soft_clip.unwrap_or_default()
     }
 
-    pub fn get_clip_limit(&self) -> PrcFmt {
+    pub fn clip_limit(&self) -> PrcFmt {
         self.clip_limit.unwrap_or_default()
     }
 }
@@ -1225,11 +1225,11 @@ pub struct PipelineStepMixer {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    bypassed: Option<bool>,
+    pub bypassed: Option<bool>,
 }
 
 impl PipelineStepMixer {
-    pub fn get_bypassed(&self) -> bool {
+    pub fn is_bypassed(&self) -> bool {
         self.bypassed.unwrap_or_default()
     }
 }
@@ -1241,11 +1241,11 @@ pub struct PipelineStepFilter {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    bypassed: Option<bool>,
+    pub bypassed: Option<bool>,
 }
 
 impl PipelineStepFilter {
-    pub fn get_bypassed(&self) -> bool {
+    pub fn is_bypassed(&self) -> bool {
         self.bypassed.unwrap_or_default()
     }
 }
@@ -1256,11 +1256,11 @@ pub struct PipelineStepProcessor {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    bypassed: Option<bool>,
+    pub bypassed: Option<bool>,
 }
 
 impl PipelineStepProcessor {
-    pub fn get_bypassed(&self) -> bool {
+    pub fn is_bypassed(&self) -> bool {
         self.bypassed.unwrap_or_default()
     }
 }
@@ -1349,19 +1349,19 @@ fn apply_overrides(configuration: &mut Configuration) {
             #[allow(unreachable_patterns)]
             match &mut configuration.devices.capture {
                 CaptureDevice::File(dev) => {
-                    let new_extra = dev.get_extra_samples() * rate / cfg_rate;
+                    let new_extra = dev.extra_samples() * rate / cfg_rate;
                     debug!(
                         "Scale extra samples: {} -> {}",
-                        dev.get_extra_samples(),
+                        dev.extra_samples(),
                         new_extra
                     );
                     dev.extra_samples = Some(new_extra);
                 }
                 CaptureDevice::Stdin(dev) => {
-                    let new_extra = dev.get_extra_samples() * rate / cfg_rate;
+                    let new_extra = dev.extra_samples() * rate / cfg_rate;
                     debug!(
                         "Scale extra samples: {} -> {}",
-                        dev.get_extra_samples(),
+                        dev.extra_samples(),
                         new_extra
                     );
                     dev.extra_samples = Some(new_extra);
@@ -1371,7 +1371,7 @@ fn apply_overrides(configuration: &mut Configuration) {
         } else {
             debug!("Apply override for capture_samplerate: {}", rate);
             configuration.devices.capture_samplerate = Some(rate);
-            if rate == cfg_rate && !configuration.devices.get_enable_rate_adjust() {
+            if rate == cfg_rate && !configuration.devices.rate_adjust() {
                 debug!("Disabling unneccesary 1:1 resampling");
                 configuration.devices.resampler = None;
             }
@@ -1676,7 +1676,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         replace_relative_paths_in_config(conf, fname);
     }
 
-    if conf.devices.get_target_level() >= 2 * conf.devices.chunksize {
+    if conf.devices.target_level() >= 2 * conf.devices.chunksize {
         let msg = format!(
             "target_level can't be larger than {}",
             2 * conf.devices.chunksize
@@ -1708,7 +1708,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             .into());
         }
     }
-    if conf.devices.get_ramp_time() < 0.0 {
+    if conf.devices.ramp_time() < 0.0 {
         return Err(ConfigError::new("Volume ramp time cannot be negative").into());
     }
     #[cfg(target_os = "windows")]
@@ -1722,7 +1722,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
-        if dev.format != SampleFormat::FLOAT32LE && !dev.get_exclusive() {
+        if dev.format != SampleFormat::FLOAT32LE && !dev.is_exclusive() {
             return Err(ConfigError::new(
                 "Wasapi shared mode capture must use FLOAT32LE sample format",
             )
@@ -1731,7 +1731,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
-        if dev.get_loopback() && dev.get_exclusive() {
+        if dev.is_loopback() && dev.is_exclusive() {
             return Err(ConfigError::new(
                 "Wasapi loopback capture is only supported in shared mode",
             )
@@ -1749,7 +1749,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {
-        if dev.format != SampleFormat::FLOAT32LE && !dev.get_exclusive() {
+        if dev.format != SampleFormat::FLOAT32LE && !dev.is_exclusive() {
             return Err(ConfigError::new(
                 "Wasapi shared mode playback must use FLOAT32LE sample format",
             )
@@ -1776,7 +1776,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "macos")]
     if let CaptureDevice::CoreAudio(dev) = &conf.devices.capture {
-        if dev.get_format() == SampleFormat::FLOAT64LE {
+        if dev.format() == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The CoreAudio capture backend does not support FLOAT64LE sample format",
             )
@@ -1785,7 +1785,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "macos")]
     if let PlaybackDevice::CoreAudio(dev) = &conf.devices.playback {
-        if dev.get_format() == SampleFormat::FLOAT64LE {
+        if dev.format() == SampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The CoreAudio playback backend does not support FLOAT64LE sample format",
             )
@@ -1798,7 +1798,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         for step in pipeline {
             match step {
                 PipelineStep::Mixer(step) => {
-                    if !step.get_bypassed() {
+                    if !step.is_bypassed() {
                         if let Some(mixers) = &conf.mixers {
                             if !mixers.contains_key(&step.name) {
                                 let msg = format!("Use of missing mixer '{}'", &step.name);
@@ -1831,7 +1831,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                     }
                 }
                 PipelineStep::Filter(step) => {
-                    if !step.get_bypassed() {
+                    if !step.is_bypassed() {
                         if step.channel >= num_channels {
                             let msg = format!("Use of non existing channel {}", step.channel);
                             return Err(ConfigError::new(&msg).into());
@@ -1858,7 +1858,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                     }
                 }
                 PipelineStep::Processor(step) => {
-                    if !step.get_bypassed() {
+                    if !step.is_bypassed() {
                         if let Some(processors) = &conf.processors {
                             if !processors.contains_key(&step.name) {
                                 let msg = format!("Use of missing processor '{}'", step.name);
@@ -1909,14 +1909,14 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
 }
 
 /// Get a vector telling which channels are actually used in the pipeline
-pub fn get_used_capture_channels(conf: &Configuration) -> Vec<bool> {
+pub fn used_capture_channels(conf: &Configuration) -> Vec<bool> {
     if let Some(pipeline) = &conf.pipeline {
         for step in pipeline.iter() {
             if let PipelineStep::Mixer(mix) = step {
-                if !mix.get_bypassed() {
+                if !mix.is_bypassed() {
                     // Safe to unwrap here since we have already verified that the mixer exists
                     let mixerconf = conf.mixers.as_ref().unwrap().get(&mix.name).unwrap();
-                    return mixer::get_used_input_channels(mixerconf);
+                    return mixer::used_input_channels(mixerconf);
                 }
             }
         }
