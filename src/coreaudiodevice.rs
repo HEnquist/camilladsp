@@ -352,7 +352,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         num_frames, data, ..
                     } = args;
                     trace!("playback cb called with {} frames", num_frames);
-                    while sample_queue.len() < (blockalign as usize * num_frames as usize) {
+                    while sample_queue.len() < (blockalign * num_frames) {
                         trace!("playback loop needs more samples, reading from channel");
                         match rx_dev.try_recv() {
                             Ok(PlaybackDeviceMessage::Data(chunk)) => {
