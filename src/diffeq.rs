@@ -46,8 +46,8 @@ impl DiffEq {
     }
 
     pub fn from_config(name: &str, conf: config::DiffEqParameters) -> Self {
-        let a = conf.a.unwrap_or_default();
-        let b = conf.b.unwrap_or_default();
+        let a = conf.a();
+        let b = conf.b();
         DiffEq::new(name, a, b)
     }
 
