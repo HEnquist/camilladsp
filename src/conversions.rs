@@ -289,11 +289,11 @@ mod tests {
     use crate::config::SampleFormat;
     use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
     #[cfg(feature = "cpal-backend")]
-    use crate::PrcFmt;
-    #[cfg(feature = "cpal-backend")]
-    use conversions::{
+    use crate::conversions::{
         chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
     };
+    #[cfg(feature = "cpal-backend")]
+    use crate::PrcFmt;
     #[cfg(feature = "cpal-backend")]
     use std::collections::VecDeque;
 

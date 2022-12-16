@@ -157,19 +157,16 @@ impl PlaybackDevice for FilePlaybackDevice {
                                                 .unwrap_or(());
                                         }
                                     };
-                                    if nbr_clipped > 0 {
-                                        playback_status.lock().unwrap().clipped_samples +=
-                                            nbr_clipped;
-                                    }
                                     chunk.update_stats(&mut chunk_stats);
+
+                                    let mut playback_status = playback_status.lock().unwrap();
+                                    if nbr_clipped > 0 {
+                                        playback_status.clipped_samples += nbr_clipped;
+                                    }
                                     playback_status
-                                        .lock()
-                                        .unwrap()
                                         .signal_rms
                                         .add_record_squared(chunk_stats.rms_linear());
                                     playback_status
-                                        .lock()
-                                        .unwrap()
                                         .signal_peak
                                         .add_record(chunk_stats.peak_linear());
                                     trace!(
@@ -230,16 +227,6 @@ fn nbr_capture_bytes(
     } else {
         capture_bytes
     }
-}
-
-fn build_chunk(buf: &[u8], params: &CaptureParams, bytes_read: usize) -> AudioChunk {
-    buffer_to_chunk_rawbytes(
-        buf,
-        params.channels,
-        &params.sample_format,
-        bytes_read,
-        &params.capture_status.lock().unwrap().used_channels,
-    )
 }
 
 fn capture_bytes(
@@ -347,162 +334,169 @@ fn capture_loop(
         );
         //let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         let read_res = file.read(&mut buf[0..bytes_to_capture_tmp]);
-        match read_res {
-            Ok(ReadResult::EndOfFile(bytes)) => {
-                bytes_read = bytes;
-                nbr_bytes_read += bytes;
-                if bytes > 0 {
-                    for item in buf.iter_mut().take(bytes_to_capture).skip(bytes) {
-                        *item = 0;
-                    }
-                    debug!(
-                        "End of file, read only {} of {} bytes",
-                        bytes, bytes_to_capture
-                    );
-                    let missing =
-                        ((bytes_to_capture - bytes) as f32 * params.resampling_ratio) as usize;
-                    if extra_bytes_left > missing {
-                        bytes_read = bytes_to_capture;
-                        extra_bytes_left -= missing;
-                    } else {
-                        bytes_read += (extra_bytes_left as f32 / params.resampling_ratio) as usize;
-                        extra_bytes_left = 0;
-                    }
-                } else {
-                    debug!("Reached end of file");
-                    let extra_samples =
-                        extra_bytes_left / params.store_bytes_per_sample / params.channels;
-                    send_silence(
-                        extra_samples,
-                        params.channels,
-                        params.chunksize,
-                        &msg_channels.audio,
-                        &mut resampler,
-                    );
-                    let msg = AudioMessage::EndOfStream;
-                    msg_channels.audio.send(msg).unwrap_or(());
-                    msg_channels
-                        .status
-                        .send(StatusMessage::CaptureDone)
-                        .unwrap_or(());
-                    break;
-                }
-            }
-            Ok(ReadResult::Timeout(bytes)) => {
-                bytes_read = bytes;
-                nbr_bytes_read += bytes;
-                if bytes > 0 {
-                    for item in buf.iter_mut().take(bytes_to_capture).skip(bytes) {
-                        *item = 0;
-                    }
-                    debug!(
-                        "Timed out after reading {} of {} bytes",
-                        bytes, bytes_to_capture
-                    );
-                    let missing =
-                        ((bytes_to_capture - bytes) as f32 * params.resampling_ratio) as usize;
-                    if extra_bytes_left > missing {
-                        bytes_read = bytes_to_capture;
-                        extra_bytes_left -= missing;
-                    } else {
-                        bytes_read += (extra_bytes_left as f32 / params.resampling_ratio) as usize;
-                        extra_bytes_left = 0;
-                    }
-                } else {
-                    trace!("Read timed out");
-                    let msg = AudioMessage::Pause;
-                    msg_channels.audio.send(msg).unwrap_or(());
-
-                    if !stalled {
-                        debug!("Entering stalled state");
-                        stalled = true;
-                        prev_state = state;
-                        state = ProcessingState::Stalled;
-                        let mut capt_stat = params.capture_status.lock().unwrap();
-                        capt_stat.state = ProcessingState::Stalled;
-                    }
-                    continue;
-                }
-            }
-            Ok(ReadResult::Complete(bytes)) => {
-                if stalled {
-                    debug!("Leaving stalled state, resuming processing");
-                    stalled = false;
-                    state = prev_state;
-                    let mut capt_stat = params.capture_status.lock().unwrap();
-                    capt_stat.state = state;
-                }
-                bytes_read = bytes;
-                nbr_bytes_read += bytes;
-                averager.add_value(bytes);
-                if averager.larger_than_millis(
-                    params.capture_status.lock().unwrap().update_interval as u64,
-                ) {
-                    let bytes_per_sec = averager.average();
-                    averager.restart();
-                    let measured_rate_f =
-                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
-                    trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
-                    let mut capt_stat = params.capture_status.lock().unwrap();
-                    capt_stat.measured_samplerate = measured_rate_f as usize;
-                    capt_stat.signal_range = value_range as f32;
-                    capt_stat.rate_adjust = rate_adjust as f32;
-                    capt_stat.state = state;
-                }
-                watcher_averager.add_value(bytes);
-                if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
-                    let bytes_per_sec = watcher_averager.average();
-                    watcher_averager.restart();
-                    let measured_rate_f =
-                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
-                    let changed = valuewatcher.check_value(measured_rate_f as f32);
-                    if changed {
-                        warn!(
-                            "sample rate change detected, last rate was {} Hz",
-                            measured_rate_f
+        let mut chunk = {
+            let mut capture_status = params.capture_status.lock().unwrap();
+            match read_res {
+                Ok(ReadResult::EndOfFile(bytes)) => {
+                    bytes_read = bytes;
+                    nbr_bytes_read += bytes;
+                    if bytes > 0 {
+                        for item in buf.iter_mut().take(bytes_to_capture).skip(bytes) {
+                            *item = 0;
+                        }
+                        debug!(
+                            "End of file, read only {} of {} bytes",
+                            bytes, bytes_to_capture
                         );
-                        if params.stop_on_rate_change {
-                            let msg = AudioMessage::EndOfStream;
-                            msg_channels.audio.send(msg).unwrap_or(());
-                            msg_channels
-                                .status
-                                .send(StatusMessage::CaptureFormatChange(measured_rate_f as usize))
-                                .unwrap_or(());
-                            break;
+                        let missing =
+                            ((bytes_to_capture - bytes) as f32 * params.resampling_ratio) as usize;
+                        if extra_bytes_left > missing {
+                            bytes_read = bytes_to_capture;
+                            extra_bytes_left -= missing;
+                        } else {
+                            bytes_read +=
+                                (extra_bytes_left as f32 / params.resampling_ratio) as usize;
+                            extra_bytes_left = 0;
+                        }
+                    } else {
+                        debug!("Reached end of file");
+                        let extra_samples =
+                            extra_bytes_left / params.store_bytes_per_sample / params.channels;
+                        send_silence(
+                            extra_samples,
+                            params.channels,
+                            params.chunksize,
+                            &msg_channels.audio,
+                            &mut resampler,
+                        );
+                        let msg = AudioMessage::EndOfStream;
+                        msg_channels.audio.send(msg).unwrap_or(());
+                        msg_channels
+                            .status
+                            .send(StatusMessage::CaptureDone)
+                            .unwrap_or(());
+                        break;
+                    }
+                }
+                Ok(ReadResult::Timeout(bytes)) => {
+                    bytes_read = bytes;
+                    nbr_bytes_read += bytes;
+                    if bytes > 0 {
+                        for item in buf.iter_mut().take(bytes_to_capture).skip(bytes) {
+                            *item = 0;
+                        }
+                        debug!(
+                            "Timed out after reading {} of {} bytes",
+                            bytes, bytes_to_capture
+                        );
+                        let missing =
+                            ((bytes_to_capture - bytes) as f32 * params.resampling_ratio) as usize;
+                        if extra_bytes_left > missing {
+                            bytes_read = bytes_to_capture;
+                            extra_bytes_left -= missing;
+                        } else {
+                            bytes_read +=
+                                (extra_bytes_left as f32 / params.resampling_ratio) as usize;
+                            extra_bytes_left = 0;
+                        }
+                    } else {
+                        trace!("Read timed out");
+                        let msg = AudioMessage::Pause;
+                        msg_channels.audio.send(msg).unwrap_or(());
+
+                        if !stalled {
+                            debug!("Entering stalled state");
+                            stalled = true;
+                            prev_state = state;
+                            state = ProcessingState::Stalled;
+                            params.capture_status.lock().unwrap().state = ProcessingState::Stalled;
+                        }
+                        continue;
+                    }
+                }
+                Ok(ReadResult::Complete(bytes)) => {
+                    if stalled {
+                        debug!("Leaving stalled state, resuming processing");
+                        stalled = false;
+                        state = prev_state;
+                        params.capture_status.lock().unwrap().state = state;
+                    }
+                    bytes_read = bytes;
+                    nbr_bytes_read += bytes;
+                    averager.add_value(bytes);
+
+                    {
+                        let mut capture_status = params.capture_status.lock().unwrap();
+                        if averager.larger_than_millis(capture_status.update_interval as u64) {
+                            let bytes_per_sec = averager.average();
+                            averager.restart();
+                            let measured_rate_f = bytes_per_sec
+                                / (params.channels * params.store_bytes_per_sample) as f64;
+                            trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
+                            capture_status.measured_samplerate = measured_rate_f as usize;
+                            capture_status.signal_range = value_range as f32;
+                            capture_status.rate_adjust = rate_adjust as f32;
+                            capture_status.state = state;
                         }
                     }
-                    trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
+                    watcher_averager.add_value(bytes);
+                    if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
+                        let bytes_per_sec = watcher_averager.average();
+                        watcher_averager.restart();
+                        let measured_rate_f = bytes_per_sec
+                            / (params.channels * params.store_bytes_per_sample) as f64;
+                        let changed = valuewatcher.check_value(measured_rate_f as f32);
+                        if changed {
+                            warn!(
+                                "sample rate change detected, last rate was {} Hz",
+                                measured_rate_f
+                            );
+                            if params.stop_on_rate_change {
+                                let msg = AudioMessage::EndOfStream;
+                                msg_channels.audio.send(msg).unwrap_or(());
+                                msg_channels
+                                    .status
+                                    .send(StatusMessage::CaptureFormatChange(
+                                        measured_rate_f as usize,
+                                    ))
+                                    .unwrap_or(());
+                                break;
+                            }
+                        }
+                        trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
+                    }
                 }
-            }
-            Err(err) => {
-                debug!("Encountered a read error");
-                msg_channels
-                    .status
-                    .send(StatusMessage::CaptureError(err.to_string()))
-                    .unwrap_or(());
-            }
+                Err(err) => {
+                    debug!("Encountered a read error");
+                    msg_channels
+                        .status
+                        .send(StatusMessage::CaptureError(err.to_string()))
+                        .unwrap_or(());
+                }
+            };
+            let chunk = buffer_to_chunk_rawbytes(
+                &buf[0..bytes_to_capture],
+                params.channels,
+                &params.sample_format,
+                bytes_read,
+                &capture_status.used_channels,
+            );
+            chunk.update_stats(&mut chunk_stats);
+            //trace!(
+            //    "Capture rms {:?}, peak {:?}",
+            //    chunk_stats.rms_db(),
+            //    chunk_stats.peak_db()
+            //);
+            capture_status
+                .signal_rms
+                .add_record_squared(chunk_stats.rms_linear());
+            capture_status
+                .signal_peak
+                .add_record(chunk_stats.peak_linear());
+            chunk
         };
-        let mut chunk = build_chunk(&buf[0..bytes_to_capture], &params, bytes_read);
 
         value_range = chunk.maxval - chunk.minval;
-        chunk.update_stats(&mut chunk_stats);
-        //trace!(
-        //    "Capture rms {:?}, peak {:?}",
-        //    chunk_stats.rms_db(),
-        //    chunk_stats.peak_db()
-        //);
-        params
-            .capture_status
-            .lock()
-            .unwrap()
-            .signal_rms
-            .add_record_squared(chunk_stats.rms_linear());
-        params
-            .capture_status
-            .lock()
-            .unwrap()
-            .signal_peak
-            .add_record(chunk_stats.peak_linear());
         state = silence_counter.update(value_range);
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
@@ -535,8 +529,7 @@ fn capture_loop(
             sleep_until_next(bytes_per_frame, params.capture_samplerate, bytes_to_capture);
         }
     }
-    let mut capt_stat = params.capture_status.lock().unwrap();
-    capt_stat.state = ProcessingState::Inactive;
+    params.capture_status.lock().unwrap().state = ProcessingState::Inactive;
 }
 
 /// Start a capture thread providing AudioMessages via a channel

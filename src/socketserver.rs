@@ -744,16 +744,12 @@ fn handle_command(
             })
         }
         WsCommand::SetUpdateInterval(nbr) => {
-            shared_data_inst
-                .capture_status
-                .lock()
-                .unwrap()
-                .update_interval = nbr;
-            shared_data_inst
-                .playback_status
-                .lock()
-                .unwrap()
-                .update_interval = nbr;
+            {
+                let mut captstat = shared_data_inst.capture_status.lock().unwrap();
+                let mut playstat = shared_data_inst.playback_status.lock().unwrap();
+                captstat.update_interval = nbr;
+                playstat.update_interval = nbr;
+            }
             Some(WsReply::SetUpdateInterval {
                 result: WsResult::Ok,
             })

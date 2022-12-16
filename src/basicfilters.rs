@@ -86,8 +86,13 @@ impl Volume {
         processing_status: Arc<Mutex<ProcessingParameters>>,
     ) -> Self {
         let fader = conf.fader as usize;
-        let current_volume = processing_status.lock().unwrap().target_volume[fader];
-        let mute = processing_status.lock().unwrap().mute[fader];
+        let (current_volume, mute) = {
+            let processing_status = processing_status.lock().unwrap();
+            (
+                processing_status.target_volume[fader],
+                processing_status.mute[fader],
+            )
+        };
         Volume::new(
             name,
             conf.ramp_time(),
@@ -123,8 +128,13 @@ impl Volume {
     }
 
     fn prepare_processing(&mut self) {
-        let shared_vol = self.processing_status.lock().unwrap().target_volume[self.fader];
-        let shared_mute = self.processing_status.lock().unwrap().mute[self.fader];
+        let (shared_vol, shared_mute) = {
+            let processing_status = self.processing_status.lock().unwrap();
+            (
+                processing_status.target_volume[self.fader],
+                processing_status.mute[self.fader],
+            )
+        };
 
         // Volume setting changed
         if (shared_vol - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
@@ -163,6 +173,7 @@ impl Volume {
     }
 
     pub fn process_chunk(&mut self, chunk: &mut AudioChunk) {
+        let old_volume = self.current_volume;
         self.prepare_processing();
 
         // Not in a ramp
@@ -189,10 +200,11 @@ impl Volume {
             }
             self.current_volume = 20.0 * ramp.last().unwrap().log10();
         }
-
         // Update shared current volume
-        self.processing_status.lock().unwrap().current_volume[self.fader] =
-            self.current_volume as f32;
+        if old_volume != self.current_volume {
+            self.processing_status.lock().unwrap().current_volume[self.fader] =
+                self.current_volume as f32;
+        }
     }
 }
 
@@ -202,6 +214,7 @@ impl Filter for Volume {
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+        let old_volume = self.current_volume;
         self.prepare_processing();
 
         // Not in a ramp
@@ -226,8 +239,10 @@ impl Filter for Volume {
         }
 
         // Update shared current volume
-        self.processing_status.lock().unwrap().current_volume[self.fader] =
-            self.current_volume as f32;
+        if old_volume != self.current_volume {
+            self.processing_status.lock().unwrap().current_volume[self.fader] =
+                self.current_volume as f32;
+        }
         Ok(())
     }
 

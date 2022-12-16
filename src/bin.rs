@@ -32,6 +32,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use flexi_logger::DeferredNow;
 use log::Record;
@@ -57,6 +58,8 @@ use camillalib::{
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
 const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
 const EXIT_OK: i32 = 0; // All ok
+
+const DELAY: Duration = Duration::from_millis(100);
 
 // Time format string for logger
 const TS_S: &str = "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:6]";
@@ -108,11 +111,8 @@ fn new_config(
     config_path: &Arc<Mutex<Option<String>>>,
     new_config_shared: &Arc<Mutex<Option<config::Configuration>>>,
 ) -> Res<config::Configuration> {
-    let new_conf = new_config_shared.lock().unwrap().clone();
-    let path = config_path.lock().unwrap().clone();
-
     //new_config is not None, this is the one to use
-    if let Some(mut conf) = new_conf {
+    if let Some(mut conf) = new_config_shared.lock().unwrap().clone() {
         debug!("Reload using config from websocket");
         match config::validate_config(&mut conf, None) {
             Ok(()) => {
@@ -125,7 +125,7 @@ fn new_config(
                 Err(err)
             }
         }
-    } else if let Some(file) = path {
+    } else if let Some(file) = config_path.lock().unwrap().clone() {
         match config::load_config(&file) {
             Ok(mut conf) => match config::validate_config(&mut conf, Some(&file)) {
                 Ok(()) => {
@@ -159,10 +159,8 @@ fn run(
     prev_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     status_structs: StatusStructs,
 ) -> Res<ExitState> {
-    status_structs.capture.lock().unwrap().state = ProcessingState::Starting;
     let mut is_starting = true;
-    let conf_option = new_config_shared.lock().unwrap().clone();
-    let conf = match conf_option {
+    let conf = match new_config_shared.lock().unwrap().take() {
         Some(cfg) => cfg,
         None => {
             error!("Tried to start without config!");
@@ -191,9 +189,6 @@ fn run(
     let mut active_config = conf;
     //let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
     *active_config_shared.lock().unwrap() = Some(active_config.clone());
-    *new_config_shared.lock().unwrap() = None;
-    signal_reload.store(false, Ordering::Relaxed);
-    signal_exit.store(ExitRequest::NONE, Ordering::Relaxed);
 
     // Processing thread
     processing::run_processing(
@@ -213,7 +208,11 @@ fn run(
 
     let used_channels = config::used_capture_channels(&active_config);
     debug!("Using channels {:?}", used_channels);
-    status_structs.capture.lock().unwrap().used_channels = used_channels;
+    {
+        let mut capture_status = status_structs.capture.lock().unwrap();
+        capture_status.state = ProcessingState::Starting;
+        capture_status.used_channels = used_channels;
+    }
 
     // Capture thread
     let mut capture_dev = audiodevice::new_capture_device(conf_cap.devices);
@@ -227,8 +226,6 @@ fn run(
         )
         .unwrap();
 
-    let delay = std::time::Duration::from_millis(100);
-
     let mut pb_ready = false;
     let mut cap_ready = false;
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -240,9 +237,11 @@ fn run(
     )?;
 
     loop {
-        if signal_reload.load(Ordering::Relaxed) {
+        if signal_reload
+            .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
             debug!("Reloading configuration...");
-            signal_reload.store(false, Ordering::Relaxed);
             let new_config = new_config(&config_path, &new_config_shared);
 
             match new_config {
@@ -254,8 +253,13 @@ fn run(
                         | config::ConfigChange::FilterParameters { .. } => {
                             tx_pipeconf.send((comp, conf.clone())).unwrap();
                             active_config = conf;
-                            *active_config_shared.lock().unwrap() = Some(active_config.clone());
-                            *new_config_shared.lock().unwrap() = None;
+                            {
+                                // acquire both locks first to start a "transaction"
+                                let mut act_cfg_shared = active_config_shared.lock().unwrap();
+                                let mut new_cfg_shared = new_config_shared.lock().unwrap();
+                                *act_cfg_shared = Some(active_config.clone());
+                                *new_cfg_shared = None;
+                            }
                             let used_channels = config::used_capture_channels(&active_config);
                             debug!("Using channels {:?}", used_channels);
                             status_structs.capture.lock().unwrap().used_channels = used_channels;
@@ -289,7 +293,7 @@ fn run(
             match signal_exit.load(Ordering::Relaxed) {
                 ExitRequest::EXIT => {
                     debug!("Exit requested...");
-                    signal_exit.store(0, Ordering::Relaxed);
+                    signal_exit.store(ExitRequest::NONE, Ordering::Relaxed);
                     if tx_command_cap.send(CommandMessage::Exit).is_err() {
                         debug!("Capture thread has already exited");
                     }
@@ -303,7 +307,7 @@ fn run(
                 }
                 ExitRequest::STOP => {
                     debug!("Stop requested...");
-                    signal_exit.store(0, Ordering::Relaxed);
+                    signal_exit.store(ExitRequest::NONE, Ordering::Relaxed);
                     if tx_command_cap.send(CommandMessage::Exit).is_err() {
                         debug!("Capture thread has already exited");
                     }
@@ -311,15 +315,19 @@ fn run(
                     pb_handle.join().unwrap();
                     trace!("Wait for cap..");
                     cap_handle.join().unwrap();
-                    *new_config_shared.lock().unwrap() = None;
-                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    {
+                        let mut new_cfg_shared = new_config_shared.lock().unwrap();
+                        let mut prev_cfg_shared = prev_config_shared.lock().unwrap();
+                        *new_cfg_shared = None;
+                        *prev_cfg_shared = Some(active_config);
+                    }
                     trace!("All threads stopped, stopping");
                     return Ok(ExitState::Restart);
                 }
                 _ => {}
             };
         }
-        match rx_status.recv_timeout(delay) {
+        match rx_status.recv_timeout(DELAY) {
             Ok(msg) => match msg {
                 StatusMessage::PlaybackReady => {
                     debug!("Playback thread ready to start");
@@ -355,8 +363,12 @@ fn run(
                     status_structs.status.lock().unwrap().stop_reason =
                         StopReason::PlaybackError(message);
                     cap_handle.join().unwrap();
-                    *new_config_shared.lock().unwrap() = None;
-                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    {
+                        let mut new_cfg_shared = new_config_shared.lock().unwrap();
+                        let mut prev_cfg_shared = prev_config_shared.lock().unwrap();
+                        *new_cfg_shared = None;
+                        *prev_cfg_shared = Some(active_config);
+                    }
                     trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
@@ -370,8 +382,12 @@ fn run(
                     status_structs.status.lock().unwrap().stop_reason =
                         StopReason::CaptureError(message);
                     pb_handle.join().unwrap();
-                    *new_config_shared.lock().unwrap() = None;
-                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    {
+                        let mut new_cfg_shared = new_config_shared.lock().unwrap();
+                        let mut prev_cfg_shared = prev_config_shared.lock().unwrap();
+                        *new_cfg_shared = None;
+                        *prev_cfg_shared = Some(active_config);
+                    }
                     trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
@@ -388,8 +404,12 @@ fn run(
                     status_structs.status.lock().unwrap().stop_reason =
                         StopReason::PlaybackFormatChange(rate);
                     cap_handle.join().unwrap();
-                    *new_config_shared.lock().unwrap() = None;
-                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    {
+                        let mut new_cfg_shared = new_config_shared.lock().unwrap();
+                        let mut prev_cfg_shared = prev_config_shared.lock().unwrap();
+                        *new_cfg_shared = None;
+                        *prev_cfg_shared = Some(active_config);
+                    }
                     trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
@@ -403,16 +423,22 @@ fn run(
                     status_structs.status.lock().unwrap().stop_reason =
                         StopReason::CaptureFormatChange(rate);
                     pb_handle.join().unwrap();
-                    *new_config_shared.lock().unwrap() = None;
-                    *prev_config_shared.lock().unwrap() = Some(active_config);
+                    {
+                        let mut new_cfg_shared = new_config_shared.lock().unwrap();
+                        let mut prev_cfg_shared = prev_config_shared.lock().unwrap();
+                        *new_cfg_shared = None;
+                        *prev_cfg_shared = Some(active_config);
+                    }
                     trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
                 StatusMessage::PlaybackDone => {
                     info!("Playback finished");
-                    let mut stat = status_structs.status.lock().unwrap();
-                    if stat.stop_reason == StopReason::None {
-                        stat.stop_reason = StopReason::Done;
+                    {
+                        let mut stat = status_structs.status.lock().unwrap();
+                        if stat.stop_reason == StopReason::None {
+                            stat.stop_reason = StopReason::Done;
+                        }
                     }
                     *prev_config_shared.lock().unwrap() = Some(active_config);
                     trace!("All threads stopped, returning");
@@ -740,18 +766,21 @@ fn main_process() -> i32 {
 
     let initial_mute = matches.is_present("mute");
 
-    config::OVERRIDES.lock().unwrap().samplerate = matches
-        .value_of("samplerate")
-        .map(|s| s.parse::<usize>().unwrap());
-    config::OVERRIDES.lock().unwrap().extra_samples = matches
-        .value_of("extra_samples")
-        .map(|s| s.parse::<usize>().unwrap());
-    config::OVERRIDES.lock().unwrap().channels = matches
-        .value_of("channels")
-        .map(|s| s.parse::<usize>().unwrap());
-    config::OVERRIDES.lock().unwrap().sample_format = matches
-        .value_of("format")
-        .map(|s| config::SampleFormat::from_name(s).unwrap());
+    {
+        let mut overrides = config::OVERRIDES.lock().unwrap();
+        overrides.samplerate = matches
+            .value_of("samplerate")
+            .map(|s| s.parse::<usize>().unwrap());
+        overrides.extra_samples = matches
+            .value_of("extra_samples")
+            .map(|s| s.parse::<usize>().unwrap());
+        overrides.channels = matches
+            .value_of("channels")
+            .map(|s| s.parse::<usize>().unwrap());
+        overrides.sample_format = matches
+            .value_of("format")
+            .map(|s| config::SampleFormat::from_name(s).unwrap());
+    }
 
     debug!("Read config file {:?}", configname);
 
@@ -787,7 +816,7 @@ fn main_process() -> i32 {
     let wait = matches.is_present("wait");
 
     let signal_reload = Arc::new(AtomicBool::new(false));
-    let signal_exit = Arc::new(AtomicUsize::new(0));
+    let signal_exit = Arc::new(AtomicUsize::new(ExitRequest::NONE));
     let capture_status = Arc::new(Mutex::new(CaptureStatus {
         measured_samplerate: 0,
         update_interval: 1000,
@@ -855,41 +884,39 @@ fn main_process() -> i32 {
         }
     }
 
-    let delay = std::time::Duration::from_millis(100);
     loop {
         debug!("Wait for config");
-        while next_config.lock().unwrap().is_none() {
-            if !wait {
-                debug!("No config and not in wait mode, exiting!");
-                return EXIT_OK;
-            }
-            trace!("waiting...");
-            if signal_exit.load(Ordering::Relaxed) == ExitRequest::EXIT {
-                // exit requested
-                return EXIT_OK;
-            } else if signal_reload.load(Ordering::Relaxed) {
-                debug!("Reloading configuration...");
-                signal_reload.store(false, Ordering::Relaxed);
-                let conf_loaded = new_config(&active_config_path, &next_config);
-                match conf_loaded {
-                    Ok(conf) => {
-                        debug!(
-                            "Loaded config file: {:?}",
-                            active_config_path.lock().unwrap()
-                        );
-                        *next_config.lock().unwrap() = Some(conf);
-                    }
-                    Err(err) => {
-                        error!(
-                            "Could not load config: {:?}, error: {}",
-                            active_config_path.lock().unwrap(),
-                            err
-                        );
+        {
+            let mut next_cfg = next_config.lock().unwrap();
+            while next_cfg.is_none() {
+                if !wait {
+                    debug!("No config and not in wait mode, exiting!");
+                    return EXIT_OK;
+                }
+                if signal_exit.load(Ordering::Relaxed) == ExitRequest::EXIT {
+                    // exit requested
+                    return EXIT_OK;
+                } else if signal_reload
+                    .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    debug!("Reloading configuration...");
+                    let conf_loaded = new_config(&active_config_path, &next_config);
+                    let path = active_config_path.lock().unwrap();
+                    match conf_loaded {
+                        Ok(conf) => {
+                            debug!("Loaded config file: {:?}", path);
+                            *next_cfg = Some(conf);
+                        }
+                        Err(err) => {
+                            error!("Could not load config: {:?}, error: {}", path, err);
+                        }
                     }
                 }
             }
-            thread::sleep(delay);
+            thread::sleep(DELAY);
         }
+
         debug!("Config ready");
         let exitstatus = run(
             signal_reload.clone(),
@@ -900,9 +927,10 @@ fn main_process() -> i32 {
             previous_config.clone(),
             status_structs.clone(),
         );
+
+        *active_config.lock().unwrap() = None;
         match exitstatus {
             Err(e) => {
-                *active_config.lock().unwrap() = None;
                 error!("({}) {}", e.to_string(), e);
                 if !wait {
                     return EXIT_PROCESSING_ERROR;
@@ -910,11 +938,9 @@ fn main_process() -> i32 {
             }
             Ok(ExitState::Exit) => {
                 debug!("Exiting");
-                *active_config.lock().unwrap() = None;
                 return EXIT_OK;
             }
             Ok(ExitState::Restart) => {
-                *active_config.lock().unwrap() = None;
                 debug!("Restarting with new config");
             }
         };
