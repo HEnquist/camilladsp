@@ -808,6 +808,22 @@ pub enum NotchWidth {
     Bandwidth { freq: PrcFmt, bandwidth: PrcFmt },
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GeneralNotchParams {
+    pub freq_p: PrcFmt,
+    pub freq_z: PrcFmt,
+    pub q_p: PrcFmt, 
+    #[serde(default)]
+    normalize_at_dc: Option<bool>,
+}
+
+impl GeneralNotchParams {
+    pub fn normalize_at_dc(&self) -> bool {
+        self.normalize_at_dc.unwrap_or_default()
+    }
+}
+
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
@@ -851,6 +867,7 @@ pub enum BiquadParameters {
     },
     Bandpass(NotchWidth),
     Notch(NotchWidth),
+    GeneralNotch(GeneralNotchParams),
     LinkwitzTransform {
         freq_act: PrcFmt,
         q_act: PrcFmt,
