@@ -1451,6 +1451,23 @@ Single Biquads are defined using the type "Biquad". The available filter types a
   A notch filter to attenuate a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
   The notch filter is similar to a Peaking filter configured with a large negative gain.
 
+* GeneralNotch
+
+The general notch is a notch where the pole and zero can be placed at different frequencies.
+It is defined by pole frequency `freq_p` and Q-value `q_p`, as well as zero frequency `freq_z`.
+
+When `freq_p` and `freq_z` are different, the notch becomes assymemetric with different gain at high and low frequencies.
+With `freq_z > freq_p`, the gain is higher for frequencies below the notch frequency,
+while `freq_p > freq_z` instead gives higher gain for high frequencies.
+
+Setting `freq_p = freq_z` gives a normal symmetric notch.
+
+There is also the optional boolean parameter `normalize_at_dc` that defaults to `false`.
+
+At the default setting, the gain at high frequencies is fixed at 0 dB and the gain at low frequencies (below the notch)
+can be either positive or negative depending on the values of `freq_p` and `freq_z`. 
+Setting `normalize_at_dc` to `true` instead fixes the gain at lower frequencies to 0 dB.
+
 * Bandpass
   
   A second order bandpass filter for a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
@@ -1483,6 +1500,18 @@ To build more complex filters, use the type "BiquadCombo". This automatically ad
   Defined by frequency, `freq` and filter `order`.
 
   Note, the order must be even
+
+* Tilt
+
+The "Tilt" filter applies a tilt across the entire audible spectrum.
+It takes a single parameter `gain`.
+A positive value gives a positive tilt, that boosts the high end of the spectrum and attenuates the low.
+A negative value gives the opposite result.
+
+The `gain` value is the difference in gain between the highest and lowest frequencies.
+It's applied symmetrically, so a value of +10 dB will result in 5 dB of boost at high frequencies,
+and 5 dB of attenuation at low frequencies.
+In between the gain changes linearly, with a midpoint at about 600 Hz.
 
 * FivePointPeq
   

@@ -80,6 +80,29 @@ impl BiquadCombo {
         qvalues
     }
 
+    fn make_tilt(fs: usize, gain: PrcFmt) -> Vec<biquad::Biquad> {
+        let gain_low = -gain / 2.0;
+        let gain_high = gain / 2.0;
+        let lsconf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q {
+            freq: 110.0,
+            q: 0.35,
+            gain: gain_low,
+        });
+        let hsconf = config::BiquadParameters::Highshelf(config::ShelfSteepness::Q {
+            freq: 3500.0,
+            q: 0.35,
+            gain: gain_high,
+        });
+        let mut filters = Vec::with_capacity(2);
+        let lscoeffs = biquad::BiquadCoefficients::from_config(fs, lsconf);
+        let lsfilt = biquad::Biquad::new("", fs, lscoeffs);
+        filters.push(lsfilt);
+        let hscoeffs = biquad::BiquadCoefficients::from_config(fs, hsconf);
+        let hsfilt = biquad::Biquad::new("", fs, hscoeffs);
+        filters.push(hsfilt);
+        filters
+    }
+
     fn make_peq5(
         samplerate: usize,
         f_all: [PrcFmt; 5],
@@ -151,6 +174,14 @@ impl BiquadCombo {
             config::BiquadComboParameters::ButterworthLowpass { order, freq } => {
                 let qvalues = BiquadCombo::butterworth_q(order);
                 let filters = BiquadCombo::make_lowpass(samplerate, freq, qvalues);
+                BiquadCombo {
+                    samplerate,
+                    name,
+                    filters,
+                }
+            }
+            config::BiquadComboParameters::Tilt { gain } => {
+                let filters = BiquadCombo::make_tilt(samplerate, gain);
                 BiquadCombo {
                     samplerate,
                     name,
@@ -245,6 +276,14 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
                 return Err(
                     config::ConfigError::new("Butterworth order must be larger than zero").into(),
                 );
+            }
+            Ok(())
+        }
+        config::BiquadComboParameters::Tilt { gain } => {
+            if *gain <= -20.0 {
+                return Err(config::ConfigError::new("Gain must be > -20").into());
+            } else if *gain >= 20.0 {
+                return Err(config::ConfigError::new("Gain must be < 20").into());
             }
             Ok(())
         }

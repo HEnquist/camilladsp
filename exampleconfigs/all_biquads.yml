@@ -137,6 +137,15 @@ filters:
       freq: 1000
       bandwidth: 2.0
 
+  general_notch:
+    type: Biquad
+    parameters:
+      type: GeneralNotch
+      freq_p: 1000
+      freq_z: 2000
+      q_p: 2.0
+      normalize_at_dc: true
+
   bandpass_using_q:
     type: Biquad
     parameters:
@@ -213,6 +222,12 @@ filters:
       type: LinkwitzRileyLowpass
       freq: 1000
       order: 4
+
+  Tilt:
+    type: BiquadCombo
+    parameters:
+      type: Tilt
+      gain: -5.0
 
   FivePointParametricEqualizer:
     type: BiquadCombo

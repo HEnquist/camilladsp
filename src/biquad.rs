@@ -273,15 +273,16 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::GeneralNotch(params) => {
-                let tn_z = ((std::f64::consts::PI as PrcFmt) * params.freq_z / (fs as PrcFmt) ).tan();
-                let tn_p = ((std::f64::consts::PI as PrcFmt) * params.freq_p / (fs as PrcFmt) ).tan();
+                let tn_z =
+                    ((std::f64::consts::PI as PrcFmt) * params.freq_z / (fs as PrcFmt)).tan();
+                let tn_p =
+                    ((std::f64::consts::PI as PrcFmt) * params.freq_p / (fs as PrcFmt)).tan();
                 let alpha = tn_p / params.q_p;
                 let tn2_p = tn_p.powi(2);
                 let tn2_z = tn_z.powi(2);
                 let gain = if params.normalize_at_dc() {
                     tn2_p / tn2_z
-                }
-                else {
+                } else {
                     1.0
                 };
                 let b0 = gain * (1.0 + tn2_z);
@@ -503,7 +504,7 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
         | config::BiquadParameters::Allpass(config::NotchWidth::Q { q, .. })
         | config::BiquadParameters::Highshelf(config::ShelfSteepness::Q { q, .. })
         | config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { q, .. })
-        | config::BiquadParameters::GeneralNotch(config::GeneralNotchParams {q_p: q, ..}) => {
+        | config::BiquadParameters::GeneralNotch(config::GeneralNotchParams { q_p: q, .. }) => {
             if *q <= 0.0 {
                 return Err(config::ConfigError::new("Q must be > 0").into());
             }
@@ -554,12 +555,14 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
         }
     }
     // Check GeneralNotch frequencies
-    if let config::BiquadParameters::GeneralNotch(params) = parameters
-    {
+    if let config::BiquadParameters::GeneralNotch(params) = parameters {
         if params.freq_p <= 0.0 || params.freq_z <= 0.0 {
             return Err(config::ConfigError::new("Pole and zero frequencies must be > 0").into());
         } else if params.freq_p >= maxfreq || params.freq_z >= maxfreq {
-            return Err(config::ConfigError::new("Pole and zero frequencies must be < samplerate/2").into());
+            return Err(config::ConfigError::new(
+                "Pole and zero frequencies must be < samplerate/2",
+            )
+            .into());
         }
     }
     let coeffs = BiquadCoefficients::from_config(samplerate, parameters.clone());

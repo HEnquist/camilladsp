@@ -813,7 +813,7 @@ pub enum NotchWidth {
 pub struct GeneralNotchParams {
     pub freq_p: PrcFmt,
     pub freq_z: PrcFmt,
-    pub q_p: PrcFmt, 
+    pub q_p: PrcFmt,
     #[serde(default)]
     normalize_at_dc: Option<bool>,
 }
@@ -895,6 +895,9 @@ pub enum BiquadComboParameters {
     ButterworthLowpass {
         freq: PrcFmt,
         order: usize,
+    },
+    Tilt {
+        gain: PrcFmt,
     },
     FivePointPeq {
         fls: PrcFmt,
