@@ -1503,15 +1503,15 @@ To build more complex filters, use the type "BiquadCombo". This automatically ad
 
 * Tilt
 
-The "Tilt" filter applies a tilt across the entire audible spectrum.
-It takes a single parameter `gain`.
-A positive value gives a positive tilt, that boosts the high end of the spectrum and attenuates the low.
-A negative value gives the opposite result.
+  The "Tilt" filter applies a tilt across the entire audible spectrum.
+  It takes a single parameter `gain`.
+  A positive value gives a positive tilt, that boosts the high end of the spectrum and attenuates the low.
+  A negative value gives the opposite result.
 
-The `gain` value is the difference in gain between the highest and lowest frequencies.
-It's applied symmetrically, so a value of +10 dB will result in 5 dB of boost at high frequencies,
-and 5 dB of attenuation at low frequencies.
-In between the gain changes linearly, with a midpoint at about 600 Hz.
+  The `gain` value is the difference in gain between the highest and lowest frequencies.
+  It's applied symmetrically, so a value of +10 dB will result in 5 dB of boost at high frequencies,
+  and 5 dB of attenuation at low frequencies.
+  In between the gain changes linearly, with a midpoint at about 600 Hz.
 
 * FivePointPeq
   
@@ -1528,6 +1528,35 @@ In between the gain changes linearly, with a midpoint at about 600 Hz.
 
 
 Other types such as Bessel filters can be built by combining several Biquads. [See the separate readme for more filter functions.](./filterfunctions.md)
+
+* GraphicEqualizer
+
+  This creates a graphic equalizer with an arbitrary number of bands.
+  It uses one Peaking biquad filter per band.
+
+  The range of the equalizer can be selected with the optional `freq_min` and `freq_max` parameters.
+  If left out, the range defaults to 20 Hz to 20 kHz.
+
+  The number of bands, and the gain for each band is given by the `gains` parameter.
+  This accepts a list of gains in dB. The number of values determines the number of bands.
+
+  The band frequencies are distributed evenly on the logarithmic frequency scale, and each band has the same relative bandwidth.
+
+  For example a 31-band equalizer on the default range gets a 1/3 octave bandwith, with the first three bands centered at 22.4, 27.9, 34.9 Hz, and the last two at 14.3 and 17.9 kHz.
+
+  Example:
+  ```
+  filters:
+    5band_graphic:
+      type: BiquadCombo
+      parameters:
+        type: GraphicEqualizer
+        freq_min: 20 (*)
+        freq_max: 20000 (*)
+        gains: [0.0, 1.0, 2.0, 1.0, 0.0]
+  ```
+  The gain values are limited to the range +- 20 dB.
+  Only the bands that have non-zero gain values are included in the processing, the ones with zero gain are skipped.
 
 
 ### Dither

@@ -916,6 +916,27 @@ pub enum BiquadComboParameters {
         qhs: PrcFmt,
         ghs: PrcFmt,
     },
+    GraphicEqnalizer(GraphicEqualizerParameters),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicEqualizerParameters {
+    #[serde(default)]
+    freq_min: Option<f32>,
+    #[serde(default)]
+    freq_max: Option<f32>,
+    pub gains: Vec<f32>,
+}
+
+impl GraphicEqualizerParameters {
+    pub fn freq_min(&self) -> f32 {
+        self.freq_min.unwrap_or(20.0)
+    }
+
+    pub fn freq_max(&self) -> f32 {
+        self.freq_max.unwrap_or(20000.0)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
