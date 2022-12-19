@@ -575,7 +575,9 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 #[cfg(test)]
 mod tests {
     use crate::biquad::{validate_config, Biquad, BiquadCoefficients};
-    use crate::config::{BiquadParameters, NotchWidth, PeakingWidth, ShelfSteepness};
+    use crate::config::{
+        BiquadParameters, GeneralNotchParams, NotchWidth, PeakingWidth, ShelfSteepness,
+    };
     use crate::filters::Filter;
     use crate::PrcFmt;
     use num_complex::Complex;
@@ -729,6 +731,44 @@ mod tests {
         assert!(gain_f0 < -40.0);
         assert!(is_close(gain_lf, 0.0, 0.1));
         assert!(is_close(gain_hf, 0.0, 0.1));
+    }
+
+    #[test]
+    fn make_generalnotch_hp() {
+        let conf = BiquadParameters::GeneralNotch(GeneralNotchParams {
+            freq_p: 2000.0,
+            freq_z: 1000.0,
+            q_p: 1.0,
+            normalize_at_dc: Some(false),
+        });
+        let coeffs = BiquadCoefficients::from_config(44100, conf);
+        assert!(coeffs.is_stable());
+        let (gain_fp, _) = gain_and_phase(coeffs, 1000.0, 44100);
+        let (gain_hf, _) = gain_and_phase(coeffs, 20000.0, 44100);
+        let (gain_lf, _) = gain_and_phase(coeffs, 1.0, 44100);
+        println!("{} {} {}", gain_fp, gain_hf, gain_lf);
+        assert!(gain_fp < -40.0);
+        assert!(is_close(gain_lf, -12.1, 0.1));
+        assert!(is_close(gain_hf, 0.0, 0.1));
+    }
+
+    #[test]
+    fn make_generalnotch_lp() {
+        let conf = BiquadParameters::GeneralNotch(GeneralNotchParams {
+            freq_p: 500.0,
+            freq_z: 1000.0,
+            q_p: 1.0,
+            normalize_at_dc: Some(true),
+        });
+        let coeffs = BiquadCoefficients::from_config(44100, conf);
+        assert!(coeffs.is_stable());
+        let (gain_fp, _) = gain_and_phase(coeffs, 1000.0, 44100);
+        let (gain_hf, _) = gain_and_phase(coeffs, 20000.0, 44100);
+        let (gain_lf, _) = gain_and_phase(coeffs, 1.0, 44100);
+        println!("{} {} {}", gain_fp, gain_hf, gain_lf);
+        assert!(gain_fp < -40.0);
+        assert!(is_close(gain_lf, 0.0, 0.1));
+        assert!(is_close(gain_hf, -12.1, 0.1));
     }
 
     #[test]

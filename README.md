@@ -1513,6 +1513,8 @@ To build more complex filters, use the type "BiquadCombo". This automatically ad
   and 5 dB of attenuation at low frequencies.
   In between the gain changes linearly, with a midpoint at about 600 Hz.
 
+  The `gain` value is limited to +- 100 dB.
+
 * FivePointPeq
   
   This filter combo is mainly meant to be created by guis. Is defines a 5-point (or band) parametric equalizer by combining a Lowshelf, a Highshelf and three Peaking filters.
@@ -1539,6 +1541,7 @@ Other types such as Bessel filters can be built by combining several Biquads. [S
 
   The number of bands, and the gain for each band is given by the `gains` parameter.
   This accepts a list of gains in dB. The number of values determines the number of bands.
+  The gains are limited to +- 40 dB. 
 
   The band frequencies are distributed evenly on the logarithmic frequency scale, and each band has the same relative bandwidth.
 

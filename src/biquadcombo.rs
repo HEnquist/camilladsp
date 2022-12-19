@@ -322,10 +322,10 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
             Ok(())
         }
         config::BiquadComboParameters::Tilt { gain } => {
-            if *gain <= -20.0 {
-                return Err(config::ConfigError::new("Gain must be > -20").into());
-            } else if *gain >= 20.0 {
-                return Err(config::ConfigError::new("Gain must be < 20").into());
+            if *gain <= -100.0 {
+                return Err(config::ConfigError::new("Gain must be > -100").into());
+            } else if *gain >= 100.0 {
+                return Err(config::ConfigError::new("Gain must be < 100").into());
             }
             Ok(())
         }
@@ -370,9 +370,9 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
                 .into());
             }
             for gain in params.gains.iter() {
-                if *gain > 20.0 || *gain < -20.0 {
+                if *gain > 40.0 || *gain < -40.0 {
                     return Err(config::ConfigError::new(
-                        "Equalizer gains must be withing +- 20 dB",
+                        "Equalizer gains must be withing +- 40 dB",
                     )
                     .into());
                 }

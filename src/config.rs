@@ -815,7 +815,7 @@ pub struct GeneralNotchParams {
     pub freq_z: PrcFmt,
     pub q_p: PrcFmt,
     #[serde(default)]
-    normalize_at_dc: Option<bool>,
+    pub normalize_at_dc: Option<bool>,
 }
 
 impl GeneralNotchParams {
