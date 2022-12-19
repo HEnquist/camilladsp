@@ -434,15 +434,16 @@ pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::PrcFmt;
     use crate::basicfilters::{Delay, Gain};
     use crate::filters::Filter;
 
-    fn is_close(left: f64, right: f64, maxdiff: f64) -> bool {
+    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);
         (left - right).abs() < maxdiff
     }
 
-    fn compare_waveforms(left: Vec<f64>, right: Vec<f64>, maxdiff: f64) -> bool {
+    fn compare_waveforms(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
         for (val_l, val_r) in left.iter().zip(right.iter()) {
             if !is_close(*val_l, *val_r, maxdiff) {
                 return false;
