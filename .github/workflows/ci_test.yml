@@ -28,6 +28,9 @@ jobs:
       - name: Install PulseAudio
         run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
 
+      - name: Install Jack
+        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libjack-dev -y
+
       - name: Install OpenSSL
         run: sudo apt-get install openssl libssl-dev -y
 
@@ -37,16 +40,17 @@ jobs:
       - name: Run cargo check nodefault
         run: cargo check --no-default-features
 
-      - name: Run cargo test with pulse-backend
-        run: cargo test --features pulse-backend
+      - name: Run cargo test with all supported backends
+        run: cargo test --features bluez-backend,cpal-backend,jack-backend,pulse-backend,
+
+      - name: Run cargo test with all optional features
+        run: cargo test --features 32bit,debug,fftw,secure-websocket
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
         run: cargo clippy -- -D warnings
-
-
 
   check_test_arm:
     name: Check and test Linux arm
