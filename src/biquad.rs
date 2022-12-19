@@ -272,6 +272,27 @@ impl BiquadCoefficients {
                 let a2 = 1.0 - alpha;
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
+            config::BiquadParameters::GeneralNotch(params) => {
+                let tn_z =
+                    ((std::f64::consts::PI as PrcFmt) * params.freq_z / (fs as PrcFmt)).tan();
+                let tn_p =
+                    ((std::f64::consts::PI as PrcFmt) * params.freq_p / (fs as PrcFmt)).tan();
+                let alpha = tn_p / params.q_p;
+                let tn2_p = tn_p.powi(2);
+                let tn2_z = tn_z.powi(2);
+                let gain = if params.normalize_at_dc() {
+                    tn2_p / tn2_z
+                } else {
+                    1.0
+                };
+                let b0 = gain * (1.0 + tn2_z);
+                let b1 = -2.0 * gain * (1.0 - tn2_z);
+                let b2 = gain * (1.0 + tn2_z);
+                let a0 = 1.0 + alpha + tn2_p;
+                let a1 = -2.0 + 2.0 * tn2_p;
+                let a2 = 1.0 - alpha + tn2_p;
+                BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
+            }
             config::BiquadParameters::Bandpass(config::NotchWidth::Q { freq, q }) => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
@@ -482,7 +503,8 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
         | config::BiquadParameters::Bandpass(config::NotchWidth::Q { q, .. })
         | config::BiquadParameters::Allpass(config::NotchWidth::Q { q, .. })
         | config::BiquadParameters::Highshelf(config::ShelfSteepness::Q { q, .. })
-        | config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { q, .. }) => {
+        | config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { q, .. })
+        | config::BiquadParameters::GeneralNotch(config::GeneralNotchParams { q_p: q, .. }) => {
             if *q <= 0.0 {
                 return Err(config::ConfigError::new("Q must be > 0").into());
             }
@@ -532,6 +554,17 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
             return Err(config::ConfigError::new("Q must be > 0").into());
         }
     }
+    // Check GeneralNotch frequencies
+    if let config::BiquadParameters::GeneralNotch(params) = parameters {
+        if params.freq_p <= 0.0 || params.freq_z <= 0.0 {
+            return Err(config::ConfigError::new("Pole and zero frequencies must be > 0").into());
+        } else if params.freq_p >= maxfreq || params.freq_z >= maxfreq {
+            return Err(config::ConfigError::new(
+                "Pole and zero frequencies must be < samplerate/2",
+            )
+            .into());
+        }
+    }
     let coeffs = BiquadCoefficients::from_config(samplerate, parameters.clone());
     if !coeffs.is_stable() {
         return Err(config::ConfigError::new("Unstable filter specified").into());
@@ -542,7 +575,9 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 #[cfg(test)]
 mod tests {
     use crate::biquad::{validate_config, Biquad, BiquadCoefficients};
-    use crate::config::{BiquadParameters, NotchWidth, PeakingWidth, ShelfSteepness};
+    use crate::config::{
+        BiquadParameters, GeneralNotchParams, NotchWidth, PeakingWidth, ShelfSteepness,
+    };
     use crate::filters::Filter;
     use crate::PrcFmt;
     use num_complex::Complex;
@@ -696,6 +731,44 @@ mod tests {
         assert!(gain_f0 < -40.0);
         assert!(is_close(gain_lf, 0.0, 0.1));
         assert!(is_close(gain_hf, 0.0, 0.1));
+    }
+
+    #[test]
+    fn make_generalnotch_hp() {
+        let conf = BiquadParameters::GeneralNotch(GeneralNotchParams {
+            freq_p: 2000.0,
+            freq_z: 1000.0,
+            q_p: 1.0,
+            normalize_at_dc: Some(false),
+        });
+        let coeffs = BiquadCoefficients::from_config(44100, conf);
+        assert!(coeffs.is_stable());
+        let (gain_fp, _) = gain_and_phase(coeffs, 1000.0, 44100);
+        let (gain_hf, _) = gain_and_phase(coeffs, 20000.0, 44100);
+        let (gain_lf, _) = gain_and_phase(coeffs, 1.0, 44100);
+        println!("{} {} {}", gain_fp, gain_hf, gain_lf);
+        assert!(gain_fp < -40.0);
+        assert!(is_close(gain_lf, -12.1, 0.1));
+        assert!(is_close(gain_hf, 0.0, 0.1));
+    }
+
+    #[test]
+    fn make_generalnotch_lp() {
+        let conf = BiquadParameters::GeneralNotch(GeneralNotchParams {
+            freq_p: 500.0,
+            freq_z: 1000.0,
+            q_p: 1.0,
+            normalize_at_dc: Some(true),
+        });
+        let coeffs = BiquadCoefficients::from_config(44100, conf);
+        assert!(coeffs.is_stable());
+        let (gain_fp, _) = gain_and_phase(coeffs, 1000.0, 44100);
+        let (gain_hf, _) = gain_and_phase(coeffs, 20000.0, 44100);
+        let (gain_lf, _) = gain_and_phase(coeffs, 1.0, 44100);
+        println!("{} {} {}", gain_fp, gain_hf, gain_lf);
+        assert!(gain_fp < -40.0);
+        assert!(is_close(gain_lf, 0.0, 0.1));
+        assert!(is_close(gain_hf, -12.1, 0.1));
     }
 
     #[test]

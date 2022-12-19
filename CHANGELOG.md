@@ -24,6 +24,9 @@ New features:
   - LipshitzLong441 variant.
   - ShibataHigh441 variant.
   - Shibata and ShibataLow 88.2, 96 and 192.
+- Add GeneralNotch biquad type.
+- Add Tilt equalizer biquad combo.
+- Add GraphicEqualizer biquad combo.
 
 Changes:
 - Optimize cpu load of dithering and delay filters.

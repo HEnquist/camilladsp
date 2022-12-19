@@ -80,6 +80,29 @@ impl BiquadCombo {
         qvalues
     }
 
+    fn make_tilt(fs: usize, gain: PrcFmt) -> Vec<biquad::Biquad> {
+        let gain_low = -gain / 2.0;
+        let gain_high = gain / 2.0;
+        let lsconf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q {
+            freq: 110.0,
+            q: 0.35,
+            gain: gain_low,
+        });
+        let hsconf = config::BiquadParameters::Highshelf(config::ShelfSteepness::Q {
+            freq: 3500.0,
+            q: 0.35,
+            gain: gain_high,
+        });
+        let mut filters = Vec::with_capacity(2);
+        let lscoeffs = biquad::BiquadCoefficients::from_config(fs, lsconf);
+        let lsfilt = biquad::Biquad::new("", fs, lscoeffs);
+        filters.push(lsfilt);
+        let hscoeffs = biquad::BiquadCoefficients::from_config(fs, hsconf);
+        let hsfilt = biquad::Biquad::new("", fs, hscoeffs);
+        filters.push(hsfilt);
+        filters
+    }
+
     fn make_peq5(
         samplerate: usize,
         f_all: [PrcFmt; 5],
@@ -106,6 +129,35 @@ impl BiquadCombo {
                         gain: g,
                     }),
                 };
+                let coeffs = biquad::BiquadCoefficients::from_config(samplerate, filtconf);
+                let filt = biquad::Biquad::new("", samplerate, coeffs);
+                filters.push(filt);
+            }
+        }
+        filters
+    }
+
+    fn make_graphic(
+        samplerate: usize,
+        freq_min: f32,
+        freq_max: f32,
+        gains: &[f32],
+    ) -> Vec<biquad::Biquad> {
+        let bands = gains.len();
+        let mut filters = Vec::with_capacity(bands);
+
+        let f_min_log = freq_min.log2();
+        let f_max_log = freq_max.log2();
+        let bw = (f_max_log - f_min_log) / bands as f32;
+        for (band, gain) in gains.iter().enumerate() {
+            if gain.abs() > 0.001 {
+                let freq_log = f_min_log + (band as f32 + 0.5) * bw;
+                let freq = 2.0_f32.powf(freq_log);
+                let filtconf = config::BiquadParameters::Peaking(config::PeakingWidth::Bandwidth {
+                    freq: freq as PrcFmt,
+                    bandwidth: bw as PrcFmt,
+                    gain: *gain as PrcFmt,
+                });
                 let coeffs = biquad::BiquadCoefficients::from_config(samplerate, filtconf);
                 let filt = biquad::Biquad::new("", samplerate, coeffs);
                 filters.push(filt);
@@ -157,6 +209,14 @@ impl BiquadCombo {
                     filters,
                 }
             }
+            config::BiquadComboParameters::Tilt { gain } => {
+                let filters = BiquadCombo::make_tilt(samplerate, gain);
+                BiquadCombo {
+                    samplerate,
+                    name,
+                    filters,
+                }
+            }
             config::BiquadComboParameters::FivePointPeq {
                 fls,
                 qls,
@@ -179,6 +239,19 @@ impl BiquadCombo {
                     [fls, fp1, fp2, fp3, fhs],
                     [qls, qp1, qp2, qp3, qhs],
                     [gls, gp1, gp2, gp3, ghs],
+                );
+                BiquadCombo {
+                    samplerate,
+                    name,
+                    filters,
+                }
+            }
+            config::BiquadComboParameters::GraphicEqnalizer(params) => {
+                let filters = BiquadCombo::make_graphic(
+                    samplerate,
+                    params.freq_min(),
+                    params.freq_max(),
+                    &params.gains,
                 );
                 BiquadCombo {
                     samplerate,
@@ -248,6 +321,14 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
             }
             Ok(())
         }
+        config::BiquadComboParameters::Tilt { gain } => {
+            if *gain <= -100.0 {
+                return Err(config::ConfigError::new("Gain must be > -100").into());
+            } else if *gain >= 100.0 {
+                return Err(config::ConfigError::new("Gain must be < 100").into());
+            }
+            Ok(())
+        }
         config::BiquadComboParameters::FivePointPeq {
             fls,
             qls,
@@ -270,6 +351,31 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
                 || *fp3 >= maxfreq
             {
                 return Err(config::ConfigError::new("All frequencies must be > 0").into());
+            }
+            Ok(())
+        }
+        config::BiquadComboParameters::GraphicEqnalizer(params) => {
+            if params.freq_min() <= 0.0 || params.freq_max() <= 0.0 {
+                return Err(config::ConfigError::new("Min and max requencies must be > 0").into());
+            } else if params.freq_min() >= maxfreq as f32 || params.freq_max() >= maxfreq as f32 {
+                return Err(config::ConfigError::new(
+                    "Min and max frequencies must be < samplerate/2",
+                )
+                .into());
+            }
+            if params.freq_min() >= params.freq_max() {
+                return Err(config::ConfigError::new(
+                    "Min frequency must be lower than max frequency",
+                )
+                .into());
+            }
+            for gain in params.gains.iter() {
+                if *gain > 40.0 || *gain < -40.0 {
+                    return Err(config::ConfigError::new(
+                        "Equalizer gains must be withing +- 40 dB",
+                    )
+                    .into());
+                }
             }
             Ok(())
         }

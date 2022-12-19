@@ -1451,6 +1451,23 @@ Single Biquads are defined using the type "Biquad". The available filter types a
   A notch filter to attenuate a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
   The notch filter is similar to a Peaking filter configured with a large negative gain.
 
+* GeneralNotch
+
+The general notch is a notch where the pole and zero can be placed at different frequencies.
+It is defined by pole frequency `freq_p` and Q-value `q_p`, as well as zero frequency `freq_z`.
+
+When `freq_p` and `freq_z` are different, the notch becomes assymemetric with different gain at high and low frequencies.
+With `freq_z > freq_p`, the gain is higher for frequencies below the notch frequency,
+while `freq_p > freq_z` instead gives higher gain for high frequencies.
+
+Setting `freq_p = freq_z` gives a normal symmetric notch.
+
+There is also the optional boolean parameter `normalize_at_dc` that defaults to `false`.
+
+At the default setting, the gain at high frequencies is fixed at 0 dB and the gain at low frequencies (below the notch)
+can be either positive or negative depending on the values of `freq_p` and `freq_z`. 
+Setting `normalize_at_dc` to `true` instead fixes the gain at lower frequencies to 0 dB.
+
 * Bandpass
   
   A second order bandpass filter for a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
@@ -1484,6 +1501,20 @@ To build more complex filters, use the type "BiquadCombo". This automatically ad
 
   Note, the order must be even
 
+* Tilt
+
+  The "Tilt" filter applies a tilt across the entire audible spectrum.
+  It takes a single parameter `gain`.
+  A positive value gives a positive tilt, that boosts the high end of the spectrum and attenuates the low.
+  A negative value gives the opposite result.
+
+  The `gain` value is the difference in gain between the highest and lowest frequencies.
+  It's applied symmetrically, so a value of +10 dB will result in 5 dB of boost at high frequencies,
+  and 5 dB of attenuation at low frequencies.
+  In between the gain changes linearly, with a midpoint at about 600 Hz.
+
+  The `gain` value is limited to +- 100 dB.
+
 * FivePointPeq
   
   This filter combo is mainly meant to be created by guis. Is defines a 5-point (or band) parametric equalizer by combining a Lowshelf, a Highshelf and three Peaking filters.
@@ -1499,6 +1530,36 @@ To build more complex filters, use the type "BiquadCombo". This automatically ad
 
 
 Other types such as Bessel filters can be built by combining several Biquads. [See the separate readme for more filter functions.](./filterfunctions.md)
+
+* GraphicEqualizer
+
+  This creates a graphic equalizer with an arbitrary number of bands.
+  It uses one Peaking biquad filter per band.
+
+  The range of the equalizer can be selected with the optional `freq_min` and `freq_max` parameters.
+  If left out, the range defaults to 20 Hz to 20 kHz.
+
+  The number of bands, and the gain for each band is given by the `gains` parameter.
+  This accepts a list of gains in dB. The number of values determines the number of bands.
+  The gains are limited to +- 40 dB. 
+
+  The band frequencies are distributed evenly on the logarithmic frequency scale, and each band has the same relative bandwidth.
+
+  For example a 31-band equalizer on the default range gets a 1/3 octave bandwith, with the first three bands centered at 22.4, 27.9, 34.9 Hz, and the last two at 14.3 and 17.9 kHz.
+
+  Example:
+  ```
+  filters:
+    5band_graphic:
+      type: BiquadCombo
+      parameters:
+        type: GraphicEqualizer
+        freq_min: 20 (*)
+        freq_max: 20000 (*)
+        gains: [0.0, 1.0, 2.0, 1.0, 0.0]
+  ```
+  The gain values are limited to the range +- 20 dB.
+  Only the bands that have non-zero gain values are included in the processing, the ones with zero gain are skipped.
 
 
 ### Dither
