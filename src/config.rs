@@ -1329,7 +1329,8 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
 }
 
 fn apply_overrides(configuration: &mut Configuration) {
-    if let Some(rate) = OVERRIDES.lock().unwrap().samplerate {
+    let overrides = OVERRIDES.lock().unwrap();
+    if let Some(rate) = overrides.samplerate {
         let cfg_rate = configuration.devices.samplerate;
         let cfg_chunksize = configuration.devices.chunksize;
 
@@ -1377,7 +1378,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             }
         }
     }
-    if let Some(extra) = OVERRIDES.lock().unwrap().extra_samples {
+    if let Some(extra) = overrides.extra_samples {
         debug!("Apply override for extra_samples: {}", extra);
         #[allow(unreachable_patterns)]
         match &mut configuration.devices.capture {
@@ -1390,7 +1391,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             _ => {}
         }
     }
-    if let Some(chans) = OVERRIDES.lock().unwrap().channels {
+    if let Some(chans) = overrides.channels {
         debug!("Apply override for capture channels: {}", chans);
         match &mut configuration.devices.capture {
             CaptureDevice::File(dev) => {
@@ -1434,7 +1435,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             }
         }
     }
-    if let Some(fmt) = OVERRIDES.lock().unwrap().sample_format {
+    if let Some(fmt) = overrides.sample_format {
         debug!("Apply override for capture sample format: {}", fmt);
         match &mut configuration.devices.capture {
             CaptureDevice::File(dev) => {
