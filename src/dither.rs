@@ -474,7 +474,7 @@ impl<'a> Dither<'a> {
         let (bits, shaper) = match conf {
             config::DitherParameters::None { bits } => (bits, None),
             config::DitherParameters::Flat { bits, .. } => (bits, None),
-            config::DitherParameters::HighPass { bits } => (bits, None),
+            config::DitherParameters::Highpass { bits } => (bits, None),
             config::DitherParameters::Fweighted441 { bits } => {
                 (bits, Some(NoiseShaper::fweighted_441()))
             }
@@ -539,8 +539,8 @@ impl<'a> Dither<'a> {
                 let tpdf = <TriangularDitherer as Ditherer>::new(amplitude);
                 Self::new(name, bits, tpdf, shaper)
             }
-            config::DitherParameters::HighPass { .. } => {
-                let hp_tpdf = HighPassDitherer::default();
+            config::DitherParameters::Highpass { .. } => {
+                let hp_tpdf = HighpassDitherer::default();
                 Self::new(name, bits, hp_tpdf, shaper)
             }
             _ => {
@@ -589,7 +589,7 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
     let bits = match conf {
         config::DitherParameters::None { bits }
         | config::DitherParameters::Flat { bits, .. }
-        | config::DitherParameters::HighPass { bits }
+        | config::DitherParameters::Highpass { bits }
         | config::DitherParameters::Fweighted441 { bits }
         | config::DitherParameters::FweightedLong441 { bits }
         | config::DitherParameters::FweightedShort441 { bits }
@@ -626,7 +626,7 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
     Ok(())
 }
 
-// Ditherer, TriangularDitherer, HighPassDitherer adopted from librespot,
+// Ditherer, TriangularDitherer, HighpassDitherer adopted from librespot,
 // which is licensed under MIT. Used with permission.
 pub trait Ditherer {
     // `amplitude` in bits
@@ -686,7 +686,7 @@ impl Default for TriangularDitherer {
 // Source: Wannamaker, R.A., Lipshitz, S.P. & Vanderkooy, J. (2000).
 // A Theory of Non-Subtractive Dither. University of Waterloo.
 #[derive(Clone, Debug)]
-pub struct HighPassDitherer {
+pub struct HighpassDitherer {
     cached_rng: SmallRng,
     previous_sample: PrcFmt,
 
@@ -695,7 +695,7 @@ pub struct HighPassDitherer {
     distribution: Uniform<PrcFmt>,
 }
 
-impl Ditherer for HighPassDitherer {
+impl Ditherer for HighpassDitherer {
     fn new(amplitude: PrcFmt) -> Self {
         // 2x RDPF (current - previous) makes 1x TDPF
         let amplitude = amplitude / 2.0;
@@ -714,7 +714,7 @@ impl Ditherer for HighPassDitherer {
     }
 }
 
-impl Default for HighPassDitherer {
+impl Default for HighpassDitherer {
     fn default() -> Self {
         // 1 LSB - 1 LSB (previous) = 2 LSB
         <Self as Ditherer>::new(2.0)
@@ -798,7 +798,7 @@ mod tests {
     fn test_high_pass() {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
-        let conf = DitherParameters::HighPass { bits: 8 };
+        let conf = DitherParameters::Highpass { bits: 8 };
         let mut dith = Dither::from_config("test", conf);
         dith.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 32.0));

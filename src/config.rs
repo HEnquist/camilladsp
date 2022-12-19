@@ -1067,7 +1067,7 @@ pub enum TimeUnit {
 pub enum DitherParameters {
     None { bits: usize },
     Flat { bits: usize, amplitude: PrcFmt },
-    HighPass { bits: usize },
+    Highpass { bits: usize },
     Fweighted441 { bits: usize },
     FweightedLong441 { bits: usize },
     FweightedShort441 { bits: usize },

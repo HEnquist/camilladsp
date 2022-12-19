@@ -1567,9 +1567,9 @@ The "Dither" filter should only be added at the very end of the pipeline for eac
 
 | Subtype             | kHz  | Noise shaping | Comments                                                       |
 | ------------------- | ---- | ------------- | -------------------------------------------------------------- |
-| None                | Any  | -             | Can reduce bit depth for testing purposes                      |
+| None                | Any  | -             | Bit depth reduction without dither, for testing purposes       |
 | Flat                | Any  | -             | Triangular: objectively optimal non-shaped dither              |
-| HighPass            | Any  | 2 taps        | Wannamaker high passed, violet noise                           |
+| Highpass            | Any  | 2 taps        | Wannamaker highpassed, violet noise                            |
 | Fweighted441        | 44.1 | 9 taps        | Wannamaker, modeled after early ISO curve                      |
 | - FweightedShort441 | 44.1 | 3 taps        | - Lower cpu load, less noise but also less noise reduction     |
 | - FweightedLong441  | 44.1 | 24 taps       | - Higher cpu load, less noise and nearly equal noise reduction |
@@ -1592,7 +1592,7 @@ The "Dither" filter should only be added at the very end of the pipeline for eac
 
 The Shibata filters are the new filters from [SSRC 1.32](https://shibatch.sourceforge.net/ssrc/).
 
-Filters with more taps are typically more precise, always at the expense of higher cpu load. HighPass is an exception, which is about as fast as Flat.
+Filters with more taps are typically more precise, always at the expense of higher cpu load. Highpass is an exception, which is about as fast as Flat.
 
 The parameter "bits" sets the target bit depth. For most oversampling delta-sigma DACs, this should match the bit depth of the playback device for best results. For true non-oversampling DACs, this should match the number of bits over which the DAC is linear (or the playback bit depth, whichever is lower). Setting it to a higher value is not useful since then the applied dither will be lost.
 
@@ -1600,9 +1600,9 @@ For the "Flat" subtype, the parameter "amplitude" sets the number of LSB to be d
 
 Some comparisons between the noise shapers are available from [SoX](http://sox.sourceforge.net/SoX/NoiseShaping), [SSRC](https://shibatch.sourceforge.net/ssrc/) and [ReSampler](https://github.com/jniemann66/ReSampler/blob/master/ditherProfiles.md). To test the different types, set the target bit depth to something very small like 5 or 6 bits (the minimum allowed value is 2) and try them all. Note that on "None" this may well mean there is no or unintelligible audio -- this is to experiment with and show what the other ditherers actually do.
 
-For sample rates above 48 kHz there is no need for anything more advanced than the "HighPass" subtype. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20 kHz up to 48 or 96 kHz where the noise can be placed without issues. The HighPass ditherer will place almost all of it there. Of course, the high-resolution Shibata filters provide some icing on the cake.
+For sample rates above 48 kHz there is no need for anything more advanced than the "Highpass" subtype. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20 kHz up to 48 or 96 kHz where the noise can be placed without issues. The Highpass ditherer will place almost all of it there. Of course, the high-resolution Shibata filters provide some icing on the cake.
 
-Selecting a noise shaping ditherer for a different sample rate than it was designed for, will cause the frequency response curve of the noise shaper to be fitted to the playback rate. This means that the curve no longer matches its design points to be minimally audible. You may experiment which shaper still sounds good, or use the Flat or HighPass subtypes which work well at any sample rate.
+Selecting a noise shaping ditherer for a different sample rate than it was designed for, will cause the frequency response curve of the noise shaper to be fitted to the playback rate. This means that the curve no longer matches its design points to be minimally audible. You may experiment which shaper still sounds good, or use the Flat or Highpass subtypes which work well at any sample rate.
 
 Example:
 ```
