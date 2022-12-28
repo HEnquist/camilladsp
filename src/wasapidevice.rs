@@ -4,12 +4,13 @@ use crate::config::{ConfigError, SampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 use wasapi;
@@ -555,7 +556,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
-        playback_status: Arc<Mutex<PlaybackStatus>>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let exclusive = self.exclusive;
@@ -693,7 +694,6 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                 ];
                             buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
                             {
-                                let mut playback_status = playback_status.lock().unwrap();
                                 if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
                                     if let Some(av_delay) = buffer_avg.average() {
                                         let speed = calculate_speed(
@@ -712,23 +712,26 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                         status_channel
                                             .send(StatusMessage::SetSpeed(speed))
                                             .unwrap_or(());
-                                        playback_status.buffer_level =
+                                        playback_status.write().buffer_level =
                                             av_delay as usize;
                                     }
                                 }
                                 conversion_result =
                                     chunk_to_buffer_rawbytes(&chunk, &mut buf, &sample_format);
                                 chunk.update_stats(&mut chunk_stats);
-                                if conversion_result.1 > 0 {
-                                    playback_status.clipped_samples +=
-                                        conversion_result.1;
+                                {
+                                    let mut playback_status = playback_status.write();
+                                    if conversion_result.1 > 0 {
+                                        playback_status.clipped_samples +=
+                                            conversion_result.1;
+                                    }
+                                    playback_status
+                                        .signal_rms
+                                        .add_record_squared(chunk_stats.rms_linear());
+                                    playback_status
+                                        .signal_peak
+                                        .add_record(chunk_stats.peak_linear());
                                 }
-                                playback_status
-                                    .signal_rms
-                                    .add_record_squared(chunk_stats.rms_linear());
-                                playback_status
-                                    .signal_peak
-                                    .add_record(chunk_stats.peak_linear());
                             }
                             match tx_dev.send(PlaybackDeviceMessage::Data(buf)) {
                                 Ok(_) => {}
@@ -844,7 +847,7 @@ impl CaptureDevice for WasapiCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        capture_status: Arc<Mutex<CaptureStatus>>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let exclusive = self.exclusive;
         let loopback = self.loopback;
@@ -1044,9 +1047,9 @@ impl CaptureDevice for WasapiCaptureDevice {
                         for element in data_buffer.iter_mut().take(capture_bytes) {
                             *element = data_queue.pop_front().unwrap();
                         }
-                        let mut chunk = {
-                            let mut capture_status = capture_status.lock().unwrap();
-                            averager.add_value(capture_frames);
+                        averager.add_value(capture_frames);
+                        {
+                            let capture_status = capture_status.upgradable_read();
                             if averager.larger_than_millis(capture_status.update_interval as u64)
                             {
                                 let samples_per_sec = averager.average();
@@ -1056,46 +1059,48 @@ impl CaptureDevice for WasapiCaptureDevice {
                                     "Measured sample rate is {:.1} Hz",
                                     measured_rate_f
                                 );
+                                let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
                                 capture_status.measured_samplerate = measured_rate_f as usize;
                                 capture_status.signal_range = value_range as f32;
                                 capture_status.rate_adjust = rate_adjust as f32;
                                 capture_status.state = state;
                             }
-                            watcher_averager.add_value(capture_frames);
-                            if watcher_averager.larger_than_millis(rate_measure_interval)
-                            {
-                                let samples_per_sec = watcher_averager.average();
-                                watcher_averager.restart();
-                                let measured_rate_f = samples_per_sec;
-                                debug!(
-                                    "Measured sample rate is {:.1} Hz",
-                                    measured_rate_f
-                                );
-                                let changed = valuewatcher.check_value(measured_rate_f as f32);
-                                if changed {
-                                    warn!("sample rate change detected, last rate was {} Hz", measured_rate_f);
-                                    if stop_on_rate_change {
-                                        let msg = AudioMessage::EndOfStream;
-                                        channel.send(msg).unwrap_or(());
-                                        status_channel.send(StatusMessage::CaptureFormatChange(measured_rate_f as usize)).unwrap_or(());
-                                        break;
-                                    }
+                        }
+                        watcher_averager.add_value(capture_frames);
+                        if watcher_averager.larger_than_millis(rate_measure_interval)
+                        {
+                            let samples_per_sec = watcher_averager.average();
+                            watcher_averager.restart();
+                            let measured_rate_f = samples_per_sec;
+                            debug!(
+                                "Measured sample rate is {:.1} Hz",
+                                measured_rate_f
+                            );
+                            let changed = valuewatcher.check_value(measured_rate_f as f32);
+                            if changed {
+                                warn!("sample rate change detected, last rate was {} Hz", measured_rate_f);
+                                if stop_on_rate_change {
+                                    let msg = AudioMessage::EndOfStream;
+                                    channel.send(msg).unwrap_or(());
+                                    status_channel.send(StatusMessage::CaptureFormatChange(measured_rate_f as usize)).unwrap_or(());
+                                    break;
                                 }
                             }
-                            let chunk = buffer_to_chunk_rawbytes(
-                                &data_buffer[0..capture_bytes],
-                                channels,
-                                &sample_format,
-                                capture_bytes,
-                                &capture_status.used_channels,
-                            );
-                            chunk.update_stats(&mut chunk_stats);
-                            //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
+                        }
+                        let mut chunk = buffer_to_chunk_rawbytes(
+                            &data_buffer[0..capture_bytes],
+                            channels,
+                            &sample_format,
+                            capture_bytes,
+                            &capture_status.read().used_channels,
+                        );
+                        chunk.update_stats(&mut chunk_stats);
+                        //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
+                        {
+                            let mut capture_status = capture_status.write();
                             capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                             capture_status.signal_peak.add_record(chunk_stats.peak_linear());
-                            chunk
-                        };
-
+                        }
                         value_range = chunk.maxval - chunk.minval;
                         state = silence_counter.update(value_range);
                         if state == ProcessingState::Running {
@@ -1128,7 +1133,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 stop_signal.store(true, Ordering::Relaxed);
                 debug!("Wait for inner capture thread to exit");
                 innerhandle.join().unwrap_or(());
-                capture_status.lock().unwrap().state = ProcessingState::Inactive;
+                capture_status.write().state = ProcessingState::Inactive;
             })?;
         Ok(Box::new(handle))
     }

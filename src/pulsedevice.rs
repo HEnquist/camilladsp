@@ -8,9 +8,10 @@ use crate::config;
 use crate::config::SampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -133,7 +134,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
-        playback_status: Arc<Mutex<PlaybackStatus>>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -196,7 +197,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                     };
                                     chunk.update_stats(&mut chunk_stats);
                                     {
-                                        let mut playback_status = playback_status.lock().unwrap();
+                                        let mut playback_status = playback_status.write();
                                         if conversion_result.1 > 0 {
                                             playback_status.clipped_samples += conversion_result.1;
                                         }
@@ -271,7 +272,7 @@ impl CaptureDevice for PulseCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        capture_status: Arc<Mutex<CaptureStatus>>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -369,39 +370,39 @@ impl CaptureDevice for PulseCaptureDevice {
                             sleep_until_next(&last_instant, bytes_per_frame, samplerate, capture_bytes);
                             let read_res = pulsedevice.read(&mut buf[0..capture_bytes]);
                             last_instant = Instant::now();
-                            let mut chunk = {
-                                let mut capture_status = capture_status.lock().unwrap();
-                                match read_res {
-                                    Ok(()) => {
-                                        averager.add_value(capture_bytes);
-                                        if averager.larger_than_millis(capture_status.update_interval as u64) {
-                                            let bytes_per_sec = averager.average();
-                                            averager.restart();
-                                            let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
-                                            trace!(
-                                                "Measured sample rate is {:.1} Hz, signal RMS is {:?}",
-                                                measured_rate_f,
-                                                capture_status.signal_rms.last(),
-                                            );
-                                            capture_status.measured_samplerate = measured_rate_f as usize;
-                                            capture_status.signal_range = value_range as f32;
-                                            capture_status.rate_adjust = rate_adjust as f32;
-                                            capture_status.state = state;
-                                        }
+                            match read_res {
+                                Ok(()) => {
+                                    averager.add_value(capture_bytes);
+                                    let capture_status = capture_status.upgradable_read();
+                                    if averager.larger_than_millis(capture_status.update_interval as u64) {
+                                        let bytes_per_sec = averager.average();
+                                        averager.restart();
+                                        let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
+                                        trace!(
+                                            "Measured sample rate is {:.1} Hz, signal RMS is {:?}",
+                                            measured_rate_f,
+                                            capture_status.signal_rms.last(),
+                                        );
+                                        let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
+                                        capture_status.measured_samplerate = measured_rate_f as usize;
+                                        capture_status.signal_range = value_range as f32;
+                                        capture_status.rate_adjust = rate_adjust as f32;
+                                        capture_status.state = state;
                                     }
-                                    Err(err) => {
-                                        status_channel
-                                            .send(StatusMessage::CaptureError(err.to_string().unwrap_or("Unknown capture error".to_string())))
-                                            .unwrap();
-                                    }
-                                };
-                                let chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &sample_format, capture_bytes, &capture_status.used_channels);
-                                chunk.update_stats(&mut chunk_stats);
+                                }
+                                Err(err) => {
+                                    status_channel
+                                        .send(StatusMessage::CaptureError(err.to_string().unwrap_or("Unknown capture error".to_string())))
+                                        .unwrap();
+                                }
+                            };
+                            let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &sample_format, capture_bytes, &capture_status.read().used_channels);
+                            chunk.update_stats(&mut chunk_stats);
+                            {
+                                let mut capture_status = capture_status.write();
                                 capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                                 capture_status.signal_peak.add_record(chunk_stats.peak_linear());
-                                chunk
-                            };
-
+                            }
                             //trace!("Capture signal rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
@@ -431,7 +432,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                 }
                             }
                         }
-                        capture_status.lock().unwrap().state = ProcessingState::Inactive;
+                        capture_status.write().state = ProcessingState::Inactive;
                     }
                     Err(err) => {
                         let send_result = status_channel

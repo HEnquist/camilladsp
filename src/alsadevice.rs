@@ -11,12 +11,13 @@ use alsa::hctl::HCtl;
 use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::{Direction, ValueOr, PCM};
 use alsa_sys;
+use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
@@ -84,7 +85,7 @@ struct CaptureParams {
     samplerate: usize,
     capture_samplerate: usize,
     async_src: bool,
-    capture_status: Arc<Mutex<CaptureStatus>>,
+    capture_status: Arc<RwLock<CaptureStatus>>,
     stop_on_rate_change: bool,
     rate_measure_interval: f32,
 }
@@ -95,7 +96,7 @@ struct PlaybackParams {
     adjust_period: f32,
     adjust_enabled: bool,
     sample_format: SampleFormat,
-    playback_status: Arc<Mutex<PlaybackStatus>>,
+    playback_status: Arc<RwLock<PlaybackStatus>>,
     bytes_per_frame: usize,
     samplerate: usize,
     chunksize: usize,
@@ -314,7 +315,7 @@ fn open_pcm(
     capture: bool,
 ) -> Res<alsa::PCM> {
     // Acquire the lock
-    let _lock = ALSA_MUTEX.lock().unwrap();
+    let _lock = ALSA_MUTEX.lock();
     // Open the device
     let pcmdev = if capture {
         alsa::PCM::new(&devname, Direction::Capture, true)?
@@ -342,7 +343,7 @@ fn open_pcm(
         match sample_format {
             SampleFormat::S16LE => hwp.set_format(Format::s16())?,
             SampleFormat::S24LE => hwp.set_format(Format::s24())?,
-            SampleFormat::S24LE3 => hwp.set_format(Format::S243LE)?,
+            SampleFormat::S24LE3 => hwp.set_format(Format::s24_3())?,
             SampleFormat::S32LE => hwp.set_format(Format::s32())?,
             SampleFormat::FLOAT32LE => hwp.set_format(Format::float())?,
             SampleFormat::FLOAT64LE => hwp.set_format(Format::float64())?,
@@ -494,19 +495,18 @@ fn playback_loop_bytes(
                 if !device_stalled {
                     // updates only for non-stalled device
                     chunk.update_stats(&mut chunk_stats);
-                    let mut playback_status = params.playback_status.lock().unwrap();
-
-                    if conversion_result.1 > 0 {
-                        playback_status.clipped_samples += conversion_result.1;
+                    {
+                        let mut playback_status = params.playback_status.write();
+                        if conversion_result.1 > 0 {
+                            playback_status.clipped_samples += conversion_result.1;
+                        }
+                        playback_status
+                            .signal_rms
+                            .add_record_squared(chunk_stats.rms_linear());
+                        playback_status
+                            .signal_peak
+                            .add_record(chunk_stats.peak_linear());
                     }
-
-                    playback_status
-                        .signal_rms
-                        .add_record_squared(chunk_stats.rms_linear());
-                    playback_status
-                        .signal_peak
-                        .add_record(chunk_stats.peak_linear());
-
                     if let Some(delay) = delay_at_chunk_recvd {
                         if delay != 0 {
                             buffer_avg.add_value(delay as f64);
@@ -542,6 +542,7 @@ fn playback_loop_bytes(
                                 }
                                 prev_delay_diff = Some(new_delay_diff);
                             }
+                            let mut playback_status = params.playback_status.write();
                             playback_status.buffer_level = avg_delay as usize;
                             debug!(
                                 "PB: buffer level: {:.1}, signal rms: {:?}",
@@ -715,93 +716,93 @@ fn capture_loop_bytes(
             capture_frames as usize,
             params.bytes_per_frame,
         );
-        let mut chunk = {
-            let mut capture_status = params.capture_status.lock().unwrap();
-            match capture_res {
-                Ok(CaptureResult::Normal) => {
-                    //trace!("Captured {} bytes", capture_bytes);
-                    averager.add_value(capture_bytes);
+        match capture_res {
+            Ok(CaptureResult::Normal) => {
+                //trace!("Captured {} bytes", capture_bytes);
+                averager.add_value(capture_bytes);
+                {
+                    let capture_status = params.capture_status.upgradable_read();
                     if averager.larger_than_millis(capture_status.update_interval as u64) {
+                        device_stalled = false;
                         let bytes_per_sec = averager.average();
                         averager.restart();
                         let measured_rate_f = bytes_per_sec
                             / (params.channels * params.store_bytes_per_sample) as f64;
                         trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
+                        let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
                         capture_status.measured_samplerate = measured_rate_f as usize;
                         capture_status.signal_range = value_range as f32;
                         capture_status.rate_adjust = rate_adjust as f32;
                         capture_status.state = state;
-                        device_stalled = false;
                     }
-                    watcher_averager.add_value(capture_bytes);
-                    if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
-                        let bytes_per_sec = watcher_averager.average();
-                        watcher_averager.restart();
-                        let measured_rate_f = bytes_per_sec
-                            / (params.channels * params.store_bytes_per_sample) as f64;
-                        let changed = valuewatcher.check_value(measured_rate_f as f32);
-                        if changed {
-                            warn!(
-                                "sample rate change detected, last rate was {} Hz",
-                                measured_rate_f
-                            );
-                            if params.stop_on_rate_change {
-                                let msg = AudioMessage::EndOfStream;
-                                channels.audio.send(msg).unwrap_or(());
-                                channels
-                                    .status
-                                    .send(StatusMessage::CaptureFormatChange(
-                                        measured_rate_f as usize,
-                                    ))
-                                    .unwrap_or(());
-                                break;
-                            }
+                }
+                watcher_averager.add_value(capture_bytes);
+                if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
+                    let bytes_per_sec = watcher_averager.average();
+                    watcher_averager.restart();
+                    let measured_rate_f =
+                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
+                    let changed = valuewatcher.check_value(measured_rate_f as f32);
+                    if changed {
+                        warn!(
+                            "sample rate change detected, last rate was {} Hz",
+                            measured_rate_f
+                        );
+                        if params.stop_on_rate_change {
+                            let msg = AudioMessage::EndOfStream;
+                            channels.audio.send(msg).unwrap_or(());
+                            channels
+                                .status
+                                .send(StatusMessage::CaptureFormatChange(measured_rate_f as usize))
+                                .unwrap_or(());
+                            break;
                         }
-                        trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                     }
+                    trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                 }
-                Ok(CaptureResult::Stalled) => {
-                    // only the first time
-                    if !device_stalled {
-                        info!("Capture device is stalled, processing is stalled");
-                        device_stalled = true;
-                        // restarting the device to drop outdated samples
-                        pcmdevice
-                            .drop()
-                            .unwrap_or_else(|err| warn!("Capture error {:?}", err));
-                        pcmdevice
-                            .prepare()
-                            .unwrap_or_else(|err| warn!("Capture error {:?}", err));
-                        capture_status.state = ProcessingState::Stalled;
-                    }
+            }
+            Ok(CaptureResult::Stalled) => {
+                // only the first time
+                if !device_stalled {
+                    info!("Capture device is stalled, processing is stalled");
+                    device_stalled = true;
+                    // restarting the device to drop outdated samples
+                    pcmdevice
+                        .drop()
+                        .unwrap_or_else(|err| warn!("Capture error {:?}", err));
+                    pcmdevice
+                        .prepare()
+                        .unwrap_or_else(|err| warn!("Capture error {:?}", err));
+                    params.capture_status.write().state = ProcessingState::Stalled;
                 }
-                Err(msg) => {
-                    channels
-                        .status
-                        .send(StatusMessage::CaptureError(msg.to_string()))
-                        .unwrap_or(());
-                    let msg = AudioMessage::EndOfStream;
-                    channels.audio.send(msg).unwrap_or(());
-                    return;
-                }
-            };
-            let chunk = buffer_to_chunk_rawbytes(
-                &buffer[0..capture_bytes],
-                params.channels,
-                &params.sample_format,
-                capture_bytes,
-                &capture_status.used_channels,
-            );
-            chunk.update_stats(&mut chunk_stats);
+            }
+            Err(msg) => {
+                channels
+                    .status
+                    .send(StatusMessage::CaptureError(msg.to_string()))
+                    .unwrap_or(());
+                let msg = AudioMessage::EndOfStream;
+                channels.audio.send(msg).unwrap_or(());
+                return;
+            }
+        };
+        let mut chunk = buffer_to_chunk_rawbytes(
+            &buffer[0..capture_bytes],
+            params.channels,
+            &params.sample_format,
+            capture_bytes,
+            &params.capture_status.read().used_channels,
+        );
+        chunk.update_stats(&mut chunk_stats);
+        {
+            let mut capture_status = params.capture_status.write();
             capture_status
                 .signal_rms
                 .add_record_squared(chunk_stats.rms_linear());
             capture_status
                 .signal_peak
                 .add_record(chunk_stats.peak_linear());
-            chunk
-        };
-
+        }
         value_range = chunk.maxval - chunk.minval;
         if device_stalled {
             state = ProcessingState::Stalled;
@@ -835,7 +836,7 @@ fn capture_loop_bytes(
             }
         }
     }
-    params.capture_status.lock().unwrap().state = ProcessingState::Inactive;
+    params.capture_status.write().state = ProcessingState::Inactive;
 }
 
 fn update_avail_min(
@@ -880,7 +881,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
-        playback_status: Arc<Mutex<PlaybackStatus>>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let target_level = if self.target_level > 0 {
@@ -956,7 +957,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        capture_status: Arc<Mutex<CaptureStatus>>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;

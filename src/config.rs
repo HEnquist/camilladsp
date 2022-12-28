@@ -1,6 +1,7 @@
 use crate::compressor;
 use crate::filters;
 use crate::mixer;
+use parking_lot::RwLock;
 use serde::{de, Deserialize, Serialize};
 //use serde_with;
 use std::collections::HashMap;
@@ -10,7 +11,6 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 //type SmpFmt = i16;
 use crate::PrcFmt;
@@ -24,7 +24,7 @@ pub struct Overrides {
 }
 
 lazy_static! {
-    pub static ref OVERRIDES: Mutex<Overrides> = Mutex::new(Overrides {
+    pub static ref OVERRIDES: RwLock<Overrides> = RwLock::new(Overrides {
         samplerate: None,
         sample_format: None,
         extra_samples: None,
@@ -1329,7 +1329,7 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
 }
 
 fn apply_overrides(configuration: &mut Configuration) {
-    let overrides = OVERRIDES.lock().unwrap();
+    let overrides = OVERRIDES.read();
     if let Some(rate) = overrides.samplerate {
         let cfg_rate = configuration.devices.samplerate;
         let cfg_chunksize = configuration.devices.chunksize;

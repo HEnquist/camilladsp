@@ -44,10 +44,11 @@ extern crate wasapi;
 #[macro_use]
 extern crate log;
 
+use parking_lot::RwLock;
 use serde::Serialize;
 use std::error;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 // Sample format
 #[cfg(feature = "32bit")]
@@ -201,10 +202,10 @@ pub enum StopReason {
 
 #[derive(Clone)]
 pub struct StatusStructs {
-    pub capture: Arc<Mutex<CaptureStatus>>,
-    pub playback: Arc<Mutex<PlaybackStatus>>,
-    pub processing: Arc<Mutex<ProcessingParameters>>,
-    pub status: Arc<Mutex<ProcessingStatus>>,
+    pub capture: Arc<RwLock<CaptureStatus>>,
+    pub playback: Arc<RwLock<PlaybackStatus>>,
+    pub processing: Arc<RwLock<ProcessingParameters>>,
+    pub status: Arc<RwLock<ProcessingStatus>>,
 }
 
 impl fmt::Display for ProcessingState {

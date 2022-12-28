@@ -14,13 +14,14 @@ use crate::fftconv_fftw as fftconv;
 use crate::limiter;
 use crate::loudness;
 use crate::mixer;
+use parking_lot::RwLock;
 use rawsample::SampleReader;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::{BufRead, Read, Seek, SeekFrom};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::PrcFmt;
 use crate::ProcessingParameters;
@@ -361,7 +362,7 @@ impl FilterGroup {
         filter_configs: HashMap<String, config::Filter>,
         waveform_length: usize,
         sample_freq: usize,
-        processing_status: Arc<Mutex<ProcessingParameters>>,
+        processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
         debug!("Build filter group from config");
         let mut filters = Vec::<Box<dyn Filter>>::new();
@@ -459,7 +460,7 @@ impl Pipeline {
     /// Create a new pipeline from a configuration structure.
     pub fn from_config(
         conf: config::Configuration,
-        processing_status: Arc<Mutex<ProcessingParameters>>,
+        processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
         debug!("Build new pipeline");
         trace!("Pipeline config {:?}", conf.pipeline);
@@ -505,8 +506,13 @@ impl Pipeline {
                 }
             }
         }
-        let current_volume = processing_status.lock().unwrap().target_volume[0];
-        let mute = processing_status.lock().unwrap().mute[0];
+        let (current_volume, mute) = {
+            let processing_status = processing_status.read();
+            (
+                processing_status.current_volume[0],
+                processing_status.mute[0],
+            )
+        };
         let volume = basicfilters::Volume::new(
             "default",
             conf.devices.ramp_time(),

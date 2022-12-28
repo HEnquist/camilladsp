@@ -1,6 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use circular_queue::CircularQueue;
+use parking_lot::RwLock;
 
 use crate::audiodevice::AudioChunk;
 use crate::biquad::{Biquad, BiquadCoefficients};
@@ -36,7 +37,7 @@ pub struct Volume {
     ramp_step: usize,
     samplerate: usize,
     chunksize: usize,
-    processing_status: Arc<Mutex<ProcessingParameters>>,
+    processing_status: Arc<RwLock<ProcessingParameters>>,
     fader: usize,
 }
 
@@ -49,7 +50,7 @@ impl Volume {
         mute: bool,
         chunksize: usize,
         samplerate: usize,
-        processing_status: Arc<Mutex<ProcessingParameters>>,
+        processing_status: Arc<RwLock<ProcessingParameters>>,
         fader: usize,
     ) -> Self {
         let name = name.to_string();
@@ -83,11 +84,11 @@ impl Volume {
         conf: config::VolumeParameters,
         chunksize: usize,
         samplerate: usize,
-        processing_status: Arc<Mutex<ProcessingParameters>>,
+        processing_status: Arc<RwLock<ProcessingParameters>>,
     ) -> Self {
         let fader = conf.fader as usize;
         let (current_volume, mute) = {
-            let processing_status = processing_status.lock().unwrap();
+            let processing_status = processing_status.read();
             (
                 processing_status.target_volume[fader],
                 processing_status.mute[fader],
@@ -129,7 +130,7 @@ impl Volume {
 
     fn prepare_processing(&mut self) {
         let (shared_vol, shared_mute) = {
-            let processing_status = self.processing_status.lock().unwrap();
+            let processing_status = self.processing_status.read();
             (
                 processing_status.target_volume[self.fader],
                 processing_status.mute[self.fader],
@@ -202,8 +203,7 @@ impl Volume {
         }
         // Update shared current volume
         if old_volume != self.current_volume {
-            self.processing_status.lock().unwrap().current_volume[self.fader] =
-                self.current_volume as f32;
+            self.processing_status.write().current_volume[self.fader] = self.current_volume as f32;
         }
     }
 }
@@ -240,8 +240,7 @@ impl Filter for Volume {
 
         // Update shared current volume
         if old_volume != self.current_volume {
-            self.processing_status.lock().unwrap().current_volume[self.fader] =
-                self.current_volume as f32;
+            self.processing_status.write().current_volume[self.fader] = self.current_volume as f32;
         }
         Ok(())
     }

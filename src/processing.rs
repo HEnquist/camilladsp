@@ -2,8 +2,9 @@ use crate::audiodevice::*;
 use crate::config;
 use crate::filters;
 use crate::ProcessingParameters;
+use parking_lot::RwLock;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier};
 use std::thread;
 
 pub fn run_processing(
@@ -12,7 +13,7 @@ pub fn run_processing(
     tx_pb: mpsc::SyncSender<AudioMessage>,
     rx_cap: mpsc::Receiver<AudioMessage>,
     rx_pipeconf: mpsc::Receiver<(config::ConfigChange, config::Configuration)>,
-    processing_status: Arc<Mutex<ProcessingParameters>>,
+    processing_status: Arc<RwLock<ProcessingParameters>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_status.clone());

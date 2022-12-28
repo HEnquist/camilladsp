@@ -9,11 +9,12 @@ use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
 use cpal::{BufferSize, ChannelCount, HostId, SampleRate, StreamConfig};
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time;
 
@@ -201,7 +202,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
-        playback_status: Arc<Mutex<PlaybackStatus>>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let host_cfg = self.host.clone();
@@ -287,8 +288,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             .store(sample_queue.len(), Ordering::Relaxed);
                                         if clipped > 0 {
                                             playback_status_clone
-                                                .lock()
-                                                .unwrap()
+                                                .write()
                                                 .clipped_samples += clipped;
                                         }
                                     },
@@ -343,8 +343,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             .store(sample_queue.len(), Ordering::Relaxed);
                                         if clipped > 0 {
                                             playback_status_clone
-                                                .lock()
-                                                .unwrap()
+                                                .write()
                                                 .clipped_samples += clipped;
                                         }
                                     },
@@ -373,39 +372,37 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     chunk.update_stats(&mut chunk_stats);
-
                                     {
-                                        let mut playback_status = playback_status.lock().unwrap();
+                                        let mut playback_status = playback_status.write();
                                         playback_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                                         playback_status.signal_peak.add_record(chunk_stats.peak_linear());
-
-                                        buffer_avg.add_value(
-                                            (buffer_fill.load(Ordering::Relaxed) / channels_clone)
-                                                as f64,
-                                        );
-                                        if adjust
-                                            && timer.larger_than_millis((1000.0 * adjust_period) as u64)
-                                        {
-                                            if let Some(av_delay) = buffer_avg.average() {
-                                                let speed = calculate_speed(
-                                                    av_delay,
-                                                    target_level,
-                                                    adjust_period,
-                                                    samplerate as u32,
-                                                );
-                                                timer.restart();
-                                                buffer_avg.restart();
-                                                debug!(
-                                                    "Current buffer level {:.1}, set capture rate to {:.4}%",
-                                                    av_delay,
-                                                    100.0 * speed
-                                                );
-                                                status_channel
-                                                    .send(StatusMessage::SetSpeed(speed))
-                                                    .unwrap();
-                                                playback_status.buffer_level =
-                                                    av_delay as usize;
-                                            }
+                                    }
+                                    buffer_avg.add_value(
+                                        (buffer_fill.load(Ordering::Relaxed) / channels_clone)
+                                            as f64,
+                                    );
+                                    if adjust
+                                        && timer.larger_than_millis((1000.0 * adjust_period) as u64)
+                                    {
+                                        if let Some(av_delay) = buffer_avg.average() {
+                                            let speed = calculate_speed(
+                                                av_delay,
+                                                target_level,
+                                                adjust_period,
+                                                samplerate as u32,
+                                            );
+                                            timer.restart();
+                                            buffer_avg.restart();
+                                            debug!(
+                                                "Current buffer level {:.1}, set capture rate to {:.4}%",
+                                                av_delay,
+                                                100.0 * speed
+                                            );
+                                            status_channel
+                                                .send(StatusMessage::SetSpeed(speed))
+                                                .unwrap();
+                                            playback_status.write().buffer_level =
+                                                av_delay as usize;
                                         }
                                     }
 
@@ -476,7 +473,7 @@ impl CaptureDevice for CpalCaptureDevice {
         barrier: Arc<Barrier>,
         status_channel: mpsc::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
-        capture_status: Arc<Mutex<CaptureStatus>>,
+        capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let host_cfg = self.host.clone();
         let devname = self.devname.clone();
@@ -608,7 +605,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 channels,
                             );
 
-                            let chunk = match sample_format {
+                            let mut chunk = match sample_format {
                                 SampleFormat::S16LE => {
                                     while sample_queue_i.len() < capture_samples {
                                         //trace!("Read message to fill capture buffer");
@@ -653,9 +650,8 @@ impl CaptureDevice for CpalCaptureDevice {
                                 _ => panic!("Unsupported sample format"),
                             };
                             averager.add_value(capture_samples);
-
-                            let mut chunk = {
-                                let mut capture_status = capture_status.lock().unwrap();
+                            {
+                                let capture_status = capture_status.upgradable_read();
                                 if averager.larger_than_millis(capture_status.update_interval as u64)
                                 {
                                     let samples_per_sec = averager.average();
@@ -665,40 +661,42 @@ impl CaptureDevice for CpalCaptureDevice {
                                         "Measured sample rate is {:.1} Hz",
                                         measured_rate_f
                                     );
+                                    let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
                                     capture_status.measured_samplerate = measured_rate_f as usize;
                                     capture_status.signal_range = value_range as f32;
                                     capture_status.rate_adjust = rate_adjust as f32;
                                     capture_status.state = state;
                                 }
-                                watcher_averager.add_value(capture_samples);
-                                if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
-                                    let samples_per_sec = watcher_averager.average();
-                                    watcher_averager.restart();
-                                    let measured_rate_f = samples_per_sec / channels as f64;
-                                    let changed = valuewatcher.check_value(measured_rate_f as f32);
-                                    if changed {
-                                        warn!(
-                                            "sample rate change detected, last rate was {} Hz",
-                                            measured_rate_f
-                                        );
-                                        if stop_on_rate_change {
-                                            let msg = AudioMessage::EndOfStream;
-                                            channel.send(msg).unwrap_or(());
-                                            status_channel
-                                                .send(StatusMessage::CaptureFormatChange(measured_rate_f as usize))
-                                                .unwrap_or(());
-                                            break;
-                                        }
+                            }
+                            watcher_averager.add_value(capture_samples);
+                            if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
+                                let samples_per_sec = watcher_averager.average();
+                                watcher_averager.restart();
+                                let measured_rate_f = samples_per_sec / channels as f64;
+                                let changed = valuewatcher.check_value(measured_rate_f as f32);
+                                if changed {
+                                    warn!(
+                                        "sample rate change detected, last rate was {} Hz",
+                                        measured_rate_f
+                                    );
+                                    if stop_on_rate_change {
+                                        let msg = AudioMessage::EndOfStream;
+                                        channel.send(msg).unwrap_or(());
+                                        status_channel
+                                            .send(StatusMessage::CaptureFormatChange(measured_rate_f as usize))
+                                            .unwrap_or(());
+                                        break;
                                     }
-                                    trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                                 }
-                                chunk.update_stats(&mut chunk_stats);
-                                //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
+                                trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
+                            }
+                            chunk.update_stats(&mut chunk_stats);
+                            //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
+                            {
+                                let mut capture_status = capture_status.write();
                                 capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                                 capture_status.signal_peak.add_record(chunk_stats.peak_linear());
-                                chunk
-                            };
-
+                            }
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
@@ -727,7 +725,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 }
                             }
                         }
-                        capture_status.lock().unwrap().state = ProcessingState::Inactive;
+                        capture_status.write().state = ProcessingState::Inactive;
                     }
                     Err(err) => {
                         let send_result = status_channel
