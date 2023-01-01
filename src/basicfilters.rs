@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use circular_queue::CircularQueue;
-use parking_lot::RwLock;
 
 use crate::audiodevice::AudioChunk;
 use crate::biquad::{Biquad, BiquadCoefficients};
@@ -37,7 +36,7 @@ pub struct Volume {
     ramp_step: usize,
     samplerate: usize,
     chunksize: usize,
-    processing_status: Arc<RwLock<ProcessingParameters>>,
+    processing_params: Arc<ProcessingParameters>,
     fader: usize,
 }
 
@@ -50,7 +49,7 @@ impl Volume {
         mute: bool,
         chunksize: usize,
         samplerate: usize,
-        processing_status: Arc<RwLock<ProcessingParameters>>,
+        processing_params: Arc<ProcessingParameters>,
         fader: usize,
     ) -> Self {
         let name = name.to_string();
@@ -63,7 +62,7 @@ impl Volume {
             let tempgain: PrcFmt = 10.0;
             tempgain.powf(current_volume as PrcFmt / 20.0)
         };
-        Volume {
+        Self {
             name,
             ramptime_in_chunks,
             current_volume: current_volume_with_mute as PrcFmt,
@@ -74,7 +73,7 @@ impl Volume {
             ramp_step: 0,
             samplerate,
             chunksize,
-            processing_status,
+            processing_params,
             fader,
         }
     }
@@ -84,24 +83,19 @@ impl Volume {
         conf: config::VolumeParameters,
         chunksize: usize,
         samplerate: usize,
-        processing_status: Arc<RwLock<ProcessingParameters>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Self {
         let fader = conf.fader as usize;
-        let (current_volume, mute) = {
-            let processing_status = processing_status.read();
-            (
-                processing_status.target_volume[fader],
-                processing_status.mute[fader],
-            )
-        };
-        Volume::new(
+        let current_volume = processing_params.current_volume(fader);
+        let mute = processing_params.is_mute(fader);
+        Self::new(
             name,
             conf.ramp_time(),
             current_volume,
             mute,
             chunksize,
             samplerate,
-            processing_status,
+            processing_params,
             fader,
         )
     }
@@ -129,13 +123,8 @@ impl Volume {
     }
 
     fn prepare_processing(&mut self) {
-        let (shared_vol, shared_mute) = {
-            let processing_status = self.processing_status.read();
-            (
-                processing_status.target_volume[self.fader],
-                processing_status.mute[self.fader],
-            )
-        };
+        let shared_vol = self.processing_params.target_volume(self.fader);
+        let shared_mute = self.processing_params.is_mute(self.fader);
 
         // Volume setting changed
         if (shared_vol - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
@@ -174,7 +163,6 @@ impl Volume {
     }
 
     pub fn process_chunk(&mut self, chunk: &mut AudioChunk) {
-        let old_volume = self.current_volume;
         self.prepare_processing();
 
         // Not in a ramp
@@ -201,10 +189,10 @@ impl Volume {
             }
             self.current_volume = 20.0 * ramp.last().unwrap().log10();
         }
+
         // Update shared current volume
-        if old_volume != self.current_volume {
-            self.processing_status.write().current_volume[self.fader] = self.current_volume as f32;
-        }
+        self.processing_params
+            .set_current_volume(self.fader, self.current_volume as f32);
     }
 }
 
@@ -214,7 +202,6 @@ impl Filter for Volume {
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        let old_volume = self.current_volume;
         self.prepare_processing();
 
         // Not in a ramp
@@ -239,9 +226,8 @@ impl Filter for Volume {
         }
 
         // Update shared current volume
-        if old_volume != self.current_volume {
-            self.processing_status.write().current_volume[self.fader] = self.current_volume as f32;
-        }
+        self.processing_params
+            .set_current_volume(self.fader, self.current_volume as f32);
         Ok(())
     }
 

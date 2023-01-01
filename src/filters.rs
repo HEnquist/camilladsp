@@ -14,7 +14,6 @@ use crate::fftconv_fftw as fftconv;
 use crate::limiter;
 use crate::loudness;
 use crate::mixer;
-use parking_lot::RwLock;
 use rawsample::SampleReader;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -362,7 +361,7 @@ impl FilterGroup {
         filter_configs: HashMap<String, config::Filter>,
         waveform_length: usize,
         sample_freq: usize,
-        processing_status: Arc<RwLock<ProcessingParameters>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Self {
         debug!("Build filter group from config");
         let mut filters = Vec::<Box<dyn Filter>>::new();
@@ -394,7 +393,7 @@ impl FilterGroup {
                             parameters,
                             waveform_length,
                             sample_freq,
-                            processing_status.clone(),
+                            processing_params.clone(),
                         ))
                     }
                     config::Filter::Loudness { parameters, .. } => {
@@ -402,7 +401,7 @@ impl FilterGroup {
                             name,
                             parameters,
                             sample_freq,
-                            processing_status.clone(),
+                            processing_params.clone(),
                         ))
                     }
                     config::Filter::Dither { parameters, .. } => {
@@ -460,7 +459,7 @@ impl Pipeline {
     /// Create a new pipeline from a configuration structure.
     pub fn from_config(
         conf: config::Configuration,
-        processing_status: Arc<RwLock<ProcessingParameters>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Self {
         debug!("Build new pipeline");
         trace!("Pipeline config {:?}", conf.pipeline);
@@ -482,7 +481,7 @@ impl Pipeline {
                             conf.filters.as_ref().unwrap().clone(),
                             conf.devices.chunksize,
                             conf.devices.samplerate,
-                            processing_status.clone(),
+                            processing_params.clone(),
                         );
                         steps.push(PipelineStep::FilterStep(fltgrp));
                     }
@@ -506,13 +505,8 @@ impl Pipeline {
                 }
             }
         }
-        let (current_volume, mute) = {
-            let processing_status = processing_status.read();
-            (
-                processing_status.current_volume[0],
-                processing_status.mute[0],
-            )
-        };
+        let current_volume = processing_params.current_volume(0);
+        let mute = processing_params.is_mute(0);
         let volume = basicfilters::Volume::new(
             "default",
             conf.devices.ramp_time(),
@@ -520,7 +514,7 @@ impl Pipeline {
             mute,
             conf.devices.chunksize,
             conf.devices.samplerate,
-            processing_status,
+            processing_params,
             0,
         );
         Pipeline { steps, volume }

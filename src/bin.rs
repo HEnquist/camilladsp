@@ -762,7 +762,7 @@ fn main_process() -> i32 {
     let initial_volume = matches
         .value_of("gain")
         .map(|s| s.parse::<f32>().unwrap())
-        .unwrap_or(0.0);
+        .unwrap_or(ProcessingParameters::DEFAULT_VOLUME);
 
     let initial_mute = matches.is_present("mute");
 
@@ -834,20 +834,16 @@ fn main_process() -> i32 {
         signal_rms: countertimer::ValueHistory::new(1024, 2),
         signal_peak: countertimer::ValueHistory::new(1024, 2),
     }));
-    let processing_status = Arc::new(RwLock::new(ProcessingParameters {
-        target_volume: [initial_volume, 0.0, 0.0, 0.0, 0.0],
-        current_volume: [initial_volume, 0.0, 0.0, 0.0, 0.0],
-        mute: [initial_mute, false, false, false, false],
-    }));
-    let status = Arc::new(RwLock::new(ProcessingStatus {
+    let processing_params = Arc::new(ProcessingParameters::new(initial_volume, initial_mute));
+    let processing_status = Arc::new(RwLock::new(ProcessingStatus {
         stop_reason: StopReason::None,
     }));
 
     let status_structs = StatusStructs {
         capture: capture_status.clone(),
         playback: playback_status.clone(),
-        processing: processing_status.clone(),
-        status: status.clone(),
+        processing: processing_params.clone(),
+        status: processing_status.clone(),
     };
     let active_config = Arc::new(Mutex::new(None));
     let next_config = Arc::new(Mutex::new(configuration));
@@ -869,8 +865,8 @@ fn main_process() -> i32 {
                 previous_config: previous_config.clone(),
                 capture_status,
                 playback_status,
+                processing_params,
                 processing_status,
-                status,
             };
             let server_params = socketserver::ServerParameters {
                 port: serverport,
