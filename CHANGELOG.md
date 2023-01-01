@@ -26,7 +26,7 @@ New features:
   - Shibata and ShibataLow 88.2, 96 and 192.
 
 Changes:
-- Optimize cpu load of dithering and delay filters.
+- Optimize cpu load in general, and of dithering and delay filters in particular.
 - Uniform dithering renamed to Flat.
 - Simple dithering renamed to HighPass, implements a Wannamaker high passed triangular dither.
 - Shibata441 and Shibata48 dither higher precision and smoother curve.
