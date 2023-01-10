@@ -383,17 +383,10 @@ fn open_pcm(
         buf_manager.apply_avail_min(&swp)?;
         debug!(
             "Opening {} device \"{}\" with parameters: {:?}, {:?}",
-            direction,
-            devname,
-            hwp,
-            swp
+            direction, devname, hwp, swp
         );
         pcmdev.sw_params(&swp)?;
-        debug!(
-            "{} device \"{}\" successfully opened",
-            direction,
-            devname
-        );
+        debug!("{} device \"{}\" successfully opened", direction, devname);
     }
     Ok(pcmdev)
 }
