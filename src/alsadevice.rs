@@ -180,7 +180,7 @@ fn play_buffer(
             Ok(frames_written) => {
                 let cur_frames_to_write = buffer.len() / bytes_per_frame;
                 trace!(
-                    "PB:  wrote {} frames to playback device as requested",
+                    "PB: wrote {} frames to playback device as requested",
                     frames_written
                 );
                 //trace!("Delay AFTER writing {} is {:?} frames", frames_written, pcmdevice.status().ok().map(|status| status.get_delay()));
@@ -189,7 +189,7 @@ fn play_buffer(
                     break;
                 } else {
                     warn!(
-                        "PB: wrote {} instead of requested {}, writing the rest",
+                        "PB: wrote {} instead of requested {}, trying to write the rest",
                         frames_written, cur_frames_to_write
                     );
                     buffer = &buffer[frames_written * bytes_per_frame..];
@@ -199,14 +199,30 @@ fn play_buffer(
             }
             Err(err) => {
                 warn!("PB: Retrying playback, error: {}", err);
-                if err.nix_error() != alsa::nix::errno::Errno::EAGAIN {
+                if err.nix_error() == alsa::nix::errno::Errno::EAGAIN {
+                    let retries = 0;
+                    while retries < 10 {
+                        trace!("Read returned EAGAIN error, retry {}", retries);
+                        let res = io.writei(buffer);
+                        match res {
+                            Err(err) => {
+                                if err.nix_error() != alsa::nix::errno::Errno::EAGAIN {
+                                    res?;
+                                }
+                            }
+                            Ok(_) => {
+                                break;
+                            }
+                        }
+                    }
+                } else {
                     trace!("snd_pcm_prepare");
                     // Would recover() be better than prepare()?
                     pcmdevice.prepare()?;
+                    buf_manager.sleep_for_target_delay(millis_per_frame);
+                    io.writei(buffer)?;
+                    break;
                 }
-                buf_manager.sleep_for_target_delay(millis_per_frame);
-                io.writei(buffer)?;
-                break;
             }
         };
     }
@@ -245,7 +261,10 @@ fn capture_buffer(
     let millis_per_chunk = 1000 * frames_to_read / samplerate;
 
     loop {
-        let timeout_millis = 2 * millis_per_chunk as u32;
+        let mut timeout_millis = 4 * millis_per_chunk as u32;
+        if timeout_millis < 10 {
+            timeout_millis = 10;
+        }
         let start = if log_enabled!(log::Level::Trace) {
             Some(Instant::now())
         } else {
@@ -321,9 +340,9 @@ fn open_pcm(
     } else {
         alsa::PCM::new(&devname, Direction::Playback, true)?
     };
+    let direction = if capture { "Capture" } else { "Playback" };
     // Set hardware parameters
     {
-        let direction = if capture { "Capture" } else { "Playback" };
         let hwp = HwParams::any(&pcmdev)?;
 
         // Set number of channels
@@ -363,11 +382,18 @@ fn open_pcm(
         buf_manager.apply_start_threshold(&swp)?;
         buf_manager.apply_avail_min(&swp)?;
         debug!(
-            "Opening audio device \"{}\" with parameters: {:?}, {:?}",
-            devname, hwp, swp
+            "Opening {} device \"{}\" with parameters: {:?}, {:?}",
+            direction,
+            devname,
+            hwp,
+            swp
         );
         pcmdev.sw_params(&swp)?;
-        debug!("Audio device \"{}\" successfully opened", devname);
+        debug!(
+            "{} device \"{}\" successfully opened",
+            direction,
+            devname
+        );
     }
     Ok(pcmdev)
 }
