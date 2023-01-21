@@ -44,10 +44,14 @@ extern crate wasapi;
 #[macro_use]
 extern crate log;
 
+use parking_lot::RwLock;
 use serde::Serialize;
 use std::error;
 use std::fmt;
-use std::sync::{Arc, RwLock};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU32, Ordering},
+    Arc,
+};
 
 // Sample format
 #[cfg(feature = "32bit")]
@@ -176,11 +180,82 @@ pub struct PlaybackStatus {
     pub signal_peak: countertimer::ValueHistory,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ProcessingParameters {
-    pub target_volume: [f32; 5],
-    pub current_volume: [f32; 5],
-    pub mute: [bool; 5],
+    // Optimization: volumes are actually `f32`s, but by representing their
+    // bits as a `u32` of equal size we can use atomic operations instead of a
+    // mutex.
+    target_volume: [AtomicU32; Self::NUM_FADERS],
+    current_volume: [AtomicU32; Self::NUM_FADERS],
+    mute: [AtomicBool; Self::NUM_FADERS],
+}
+
+impl ProcessingParameters {
+    pub const NUM_FADERS: usize = 5;
+
+    pub const DEFAULT_VOLUME: f32 = 0.0;
+    pub const DEFAULT_MUTE: bool = false;
+
+    pub fn new(initial_volume: f32, initial_mute: bool) -> Self {
+        let default_volume = Self::DEFAULT_VOLUME.to_bits();
+        Self {
+            target_volume: [
+                AtomicU32::new(initial_volume.to_bits()),
+                AtomicU32::new(default_volume),
+                AtomicU32::new(default_volume),
+                AtomicU32::new(default_volume),
+                AtomicU32::new(default_volume),
+            ],
+            current_volume: [
+                AtomicU32::new(initial_volume.to_bits()),
+                AtomicU32::new(default_volume),
+                AtomicU32::new(default_volume),
+                AtomicU32::new(default_volume),
+                AtomicU32::new(default_volume),
+            ],
+            mute: [
+                AtomicBool::new(initial_mute),
+                AtomicBool::new(Self::DEFAULT_MUTE),
+                AtomicBool::new(Self::DEFAULT_MUTE),
+                AtomicBool::new(Self::DEFAULT_MUTE),
+                AtomicBool::new(Self::DEFAULT_MUTE),
+            ],
+        }
+    }
+
+    pub fn target_volume(&self, fader: usize) -> f32 {
+        f32::from_bits(self.target_volume[fader].load(Ordering::Relaxed))
+    }
+
+    pub fn set_target_volume(&self, fader: usize, target: f32) {
+        self.target_volume[fader].store(target.to_bits(), Ordering::Relaxed)
+    }
+
+    pub fn current_volume(&self, fader: usize) -> f32 {
+        f32::from_bits(self.current_volume[fader].load(Ordering::Relaxed))
+    }
+
+    pub fn set_current_volume(&self, fader: usize, current: f32) {
+        self.current_volume[fader].store(current.to_bits(), Ordering::Relaxed)
+    }
+
+    pub fn is_mute(&self, fader: usize) -> bool {
+        self.mute[fader].load(Ordering::Relaxed)
+    }
+
+    pub fn set_mute(&self, fader: usize, mute: bool) {
+        self.mute[fader].store(mute, Ordering::Relaxed)
+    }
+
+    pub fn toggle_mute(&self, fader: usize) -> bool {
+        self.mute[fader].fetch_xor(true, Ordering::Relaxed)
+    }
+}
+
+impl Default for ProcessingParameters {
+    fn default() -> Self {
+        Self::new(Self::DEFAULT_VOLUME, Self::DEFAULT_MUTE)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -203,7 +278,7 @@ pub enum StopReason {
 pub struct StatusStructs {
     pub capture: Arc<RwLock<CaptureStatus>>,
     pub playback: Arc<RwLock<PlaybackStatus>>,
-    pub processing: Arc<RwLock<ProcessingParameters>>,
+    pub processing: Arc<ProcessingParameters>,
     pub status: Arc<RwLock<ProcessingStatus>>,
 }
 

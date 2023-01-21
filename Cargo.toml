@@ -75,6 +75,7 @@ cpal = { version = "0.13.3", optional = true }
 #rawsample = { git = "https://github.com/HEnquist/rawsample", branch = "main" }
 rawsample = "0.2.0"
 circular-queue = "0.2.6"
+parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
 
 [build-dependencies]
 version_check = "0.9"

@@ -20,6 +20,7 @@ use crate::filedevice;
 use crate::pulsedevice;
 #[cfg(target_os = "windows")]
 use crate::wasapidevice;
+use parking_lot::RwLock;
 use rubato::{
     calculate_cutoff, FastFixedOut, FftFixedOut, PolynomialDegree, SincFixedOut,
     SincInterpolationParameters, SincInterpolationType, VecResampler, WindowFunction,
@@ -27,7 +28,7 @@ use rubato::{
 use std::error;
 use std::fmt;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 

@@ -289,11 +289,11 @@ mod tests {
     use crate::config::SampleFormat;
     use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
     #[cfg(feature = "cpal-backend")]
-    use crate::PrcFmt;
-    #[cfg(feature = "cpal-backend")]
-    use conversions::{
+    use crate::conversions::{
         chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
     };
+    #[cfg(feature = "cpal-backend")]
+    use crate::PrcFmt;
     #[cfg(feature = "cpal-backend")]
     use std::collections::VecDeque;
 
@@ -399,6 +399,9 @@ mod tests {
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 4];
         chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::S32LE);
+        #[cfg(feature = "32bit")]
+        let expected = vec![0xD0, 0xCC, 0xCC, 0x0C];
+        #[cfg(not(feature = "32bit"))]
         let expected = vec![0xCC, 0xCC, 0xCC, 0x0C];
         assert_eq!(buffer, expected);
     }
@@ -419,6 +422,9 @@ mod tests {
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 8];
         chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::FLOAT64LE);
+        #[cfg(feature = "32bit")]
+        let expected = vec![0x00, 0x00, 0x00, 0xA0, 0x99, 0x99, 0xB9, 0x3F];
+        #[cfg(not(feature = "32bit"))]
         let expected = vec![0x9A, 0x99, 0x99, 0x99, 0x99, 0x99, 0xB9, 0x3F];
         assert_eq!(buffer, expected);
     }
@@ -491,9 +497,6 @@ mod tests {
 
     #[test]
     fn clipping_32() {
-        #[cfg(feature = "32bit")]
-        let waveforms = vec![vec![-1.0, 0.0, 2147483520.0 / 2147483648.0]; 1];
-        #[cfg(not(feature = "32bit"))]
         let waveforms = vec![vec![-1.0, 0.0, 2147483647.0 / 2147483648.0]; 1];
         let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];

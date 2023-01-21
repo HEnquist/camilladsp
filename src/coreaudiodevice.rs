@@ -5,11 +5,12 @@ use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crossbeam_channel::{bounded, TryRecvError, TrySendError};
 use dispatch::Semaphore;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 
@@ -352,7 +353,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         num_frames, data, ..
                     } = args;
                     trace!("playback cb called with {} frames", num_frames);
-                    while sample_queue.len() < (blockalign as usize * num_frames as usize) {
+                    while sample_queue.len() < (blockalign * num_frames) {
                         trace!("playback loop needs more samples, reading from channel");
                         match rx_dev.try_recv() {
                             Ok(PlaybackDeviceMessage::Data(chunk)) => {
@@ -366,9 +367,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 }
                             }
                             Err(_) => {
-                                for _ in 0..((blockalign as usize * num_frames as usize)
-                                    - sample_queue.len())
-                                {
+                                for _ in 0..((blockalign * num_frames) - sample_queue.len()) {
                                     sample_queue.push_back(0);
                                 }
                                 if running {
@@ -462,21 +461,10 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                     status_channel
                                         .send(StatusMessage::SetSpeed(speed))
                                         .unwrap_or(());
-                                    playback_status.write().unwrap().buffer_level =
-                                        av_delay as usize;
+                                    playback_status.write().buffer_level = av_delay as usize;
                                 }
                             }
                             chunk.update_stats(&mut chunk_stats);
-                            playback_status
-                                .write()
-                                .unwrap()
-                                .signal_rms
-                                .add_record_squared(chunk_stats.rms_linear());
-                            playback_status
-                                .write()
-                                .unwrap()
-                                .signal_peak
-                                .add_record(chunk_stats.peak_linear());
                             let mut buf = vec![
                                 0u8;
                                 channels
@@ -488,6 +476,18 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 &mut buf,
                                 &SampleFormat::FLOAT32LE,
                             );
+                            {
+                                let mut playback_status = playback_status.write();
+                                if conversion_result.1 > 0 {
+                                    playback_status.clipped_samples += conversion_result.1;
+                                }
+                                playback_status
+                                    .signal_rms
+                                    .add_record_squared(chunk_stats.rms_linear());
+                                playback_status
+                                    .signal_peak
+                                    .add_record(chunk_stats.peak_linear());
+                            }
                             match tx_dev.send(PlaybackDeviceMessage::Data(buf)) {
                                 Ok(_) => {}
                                 Err(err) => {
@@ -497,10 +497,6 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                         .unwrap_or(());
                                     break;
                                 }
-                            }
-                            if conversion_result.1 > 0 {
-                                playback_status.write().unwrap().clipped_samples +=
-                                    conversion_result.1;
                             }
                         }
                         Ok(AudioMessage::Pause) => {
@@ -787,11 +783,13 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         tries += 1;
                     }
                     if data_queue.len() < (blockalign * capture_frames) {
-                        let mut capture_status = capture_status.write().unwrap();
-                        capture_status.measured_samplerate = 0;
-                        capture_status.signal_range = 0.0;
-                        capture_status.rate_adjust = 0.0;
-                        capture_status.state = ProcessingState::Stalled;
+                        {
+                            let mut capture_status = capture_status.write();
+                            capture_status.measured_samplerate = 0;
+                            capture_status.signal_range = 0.0;
+                            capture_status.rate_adjust = 0.0;
+                            capture_status.state = ProcessingState::Stalled;
+                        }
                         let msg = AudioMessage::Pause;
                         if channel.send(msg).is_err() {
                             info!("Processing thread has already stopped.");
@@ -799,7 +797,6 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         }
                         continue;
                     }
-
                     for element in data_buffer.iter_mut().take(capture_bytes) {
                         *element = data_queue.pop_front().unwrap();
                     }
@@ -808,23 +805,26 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         channels,
                         &SampleFormat::FLOAT32LE,
                         capture_bytes,
-                        &capture_status.read().unwrap().used_channels,
+                        &capture_status.read().used_channels,
                     );
                     averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
-                    if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                     {
-                        let samples_per_sec = averager.average();
-                        averager.restart();
-                        let measured_rate_f = samples_per_sec;
-                        debug!(
-                            "Measured sample rate is {:.1} Hz",
-                            measured_rate_f
-                        );
-                        let mut capture_status = capture_status.write().unwrap();
-                        capture_status.measured_samplerate = measured_rate_f as usize;
-                        capture_status.signal_range = value_range as f32;
-                        capture_status.rate_adjust = rate_adjust as f32;
-                        capture_status.state = state;
+                        let capture_status = capture_status.upgradable_read();
+                        if averager.larger_than_millis(capture_status.update_interval as u64)
+                        {
+                            let samples_per_sec = averager.average();
+                            averager.restart();
+                            let measured_rate_f = samples_per_sec;
+                            debug!(
+                                "Measured sample rate is {:.1} Hz",
+                                measured_rate_f
+                            );
+                            let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
+                            capture_status.measured_samplerate = measured_rate_f as usize;
+                            capture_status.signal_range = value_range as f32;
+                            capture_status.rate_adjust = rate_adjust as f32;
+                            capture_status.state = state;
+                        }
                     }
                     watcher_averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
                     if watcher_averager.larger_than_millis(rate_measure_interval)
@@ -850,8 +850,11 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     prev_len = data_queue.len();
                     chunk.update_stats(&mut chunk_stats);
                     //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
-                    capture_status.write().unwrap().signal_rms.add_record_squared(chunk_stats.rms_linear());
-                    capture_status.write().unwrap().signal_peak.add_record(chunk_stats.peak_linear());
+                    {
+                        let mut capture_status = capture_status.write();
+                        capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
+                        capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                    }
                     value_range = chunk.maxval - chunk.minval;
                     state = silence_counter.update(value_range);
                     if state == ProcessingState::Running {
@@ -880,8 +883,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         }
                     }
                 }
-                let mut capt_stat = capture_status.write().unwrap();
-                capt_stat.state = ProcessingState::Inactive;
+                capture_status.write().state = ProcessingState::Inactive;
             })?;
         Ok(Box::new(handle))
     }

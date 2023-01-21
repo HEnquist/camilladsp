@@ -1,6 +1,7 @@
 use crate::compressor;
 use crate::filters;
 use crate::mixer;
+use parking_lot::RwLock;
 use serde::{de, Deserialize, Serialize};
 //use serde_with;
 use std::collections::HashMap;
@@ -10,7 +11,6 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
 
 //type SmpFmt = i16;
 use crate::PrcFmt;
@@ -1370,7 +1370,8 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
 }
 
 fn apply_overrides(configuration: &mut Configuration) {
-    if let Some(rate) = OVERRIDES.read().unwrap().samplerate {
+    let overrides = OVERRIDES.read();
+    if let Some(rate) = overrides.samplerate {
         let cfg_rate = configuration.devices.samplerate;
         let cfg_chunksize = configuration.devices.chunksize;
 
@@ -1418,7 +1419,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             }
         }
     }
-    if let Some(extra) = OVERRIDES.read().unwrap().extra_samples {
+    if let Some(extra) = overrides.extra_samples {
         debug!("Apply override for extra_samples: {}", extra);
         #[allow(unreachable_patterns)]
         match &mut configuration.devices.capture {
@@ -1431,7 +1432,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             _ => {}
         }
     }
-    if let Some(chans) = OVERRIDES.read().unwrap().channels {
+    if let Some(chans) = overrides.channels {
         debug!("Apply override for capture channels: {}", chans);
         match &mut configuration.devices.capture {
             CaptureDevice::File(dev) => {
@@ -1475,7 +1476,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             }
         }
     }
-    if let Some(fmt) = OVERRIDES.read().unwrap().sample_format {
+    if let Some(fmt) = overrides.sample_format {
         debug!("Apply override for capture sample format: {}", fmt);
         match &mut configuration.devices.capture {
             CaptureDevice::File(dev) => {

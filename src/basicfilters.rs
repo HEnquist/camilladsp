@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use circular_queue::CircularQueue;
 
@@ -36,7 +36,7 @@ pub struct Volume {
     ramp_step: usize,
     samplerate: usize,
     chunksize: usize,
-    processing_status: Arc<RwLock<ProcessingParameters>>,
+    processing_params: Arc<ProcessingParameters>,
     fader: usize,
 }
 
@@ -49,7 +49,7 @@ impl Volume {
         mute: bool,
         chunksize: usize,
         samplerate: usize,
-        processing_status: Arc<RwLock<ProcessingParameters>>,
+        processing_params: Arc<ProcessingParameters>,
         fader: usize,
     ) -> Self {
         let name = name.to_string();
@@ -62,7 +62,7 @@ impl Volume {
             let tempgain: PrcFmt = 10.0;
             tempgain.powf(current_volume as PrcFmt / 20.0)
         };
-        Volume {
+        Self {
             name,
             ramptime_in_chunks,
             current_volume: current_volume_with_mute as PrcFmt,
@@ -73,7 +73,7 @@ impl Volume {
             ramp_step: 0,
             samplerate,
             chunksize,
-            processing_status,
+            processing_params,
             fader,
         }
     }
@@ -83,19 +83,19 @@ impl Volume {
         conf: config::VolumeParameters,
         chunksize: usize,
         samplerate: usize,
-        processing_status: Arc<RwLock<ProcessingParameters>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Self {
         let fader = conf.fader as usize;
-        let current_volume = processing_status.read().unwrap().target_volume[fader];
-        let mute = processing_status.read().unwrap().mute[fader];
-        Volume::new(
+        let current_volume = processing_params.current_volume(fader);
+        let mute = processing_params.is_mute(fader);
+        Self::new(
             name,
             conf.ramp_time(),
             current_volume,
             mute,
             chunksize,
             samplerate,
-            processing_status,
+            processing_params,
             fader,
         )
     }
@@ -123,8 +123,8 @@ impl Volume {
     }
 
     fn prepare_processing(&mut self) {
-        let shared_vol = self.processing_status.read().unwrap().target_volume[self.fader];
-        let shared_mute = self.processing_status.read().unwrap().mute[self.fader];
+        let shared_vol = self.processing_params.target_volume(self.fader);
+        let shared_mute = self.processing_params.is_mute(self.fader);
 
         // Volume setting changed
         if (shared_vol - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
@@ -191,8 +191,8 @@ impl Volume {
         }
 
         // Update shared current volume
-        self.processing_status.write().unwrap().current_volume[self.fader] =
-            self.current_volume as f32;
+        self.processing_params
+            .set_current_volume(self.fader, self.current_volume as f32);
     }
 }
 
@@ -226,8 +226,8 @@ impl Filter for Volume {
         }
 
         // Update shared current volume
-        self.processing_status.write().unwrap().current_volume[self.fader] =
-            self.current_volume as f32;
+        self.processing_params
+            .set_current_volume(self.fader, self.current_volume as f32);
         Ok(())
     }
 
@@ -421,13 +421,14 @@ pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
 mod tests {
     use crate::basicfilters::{Delay, Gain};
     use crate::filters::Filter;
+    use crate::PrcFmt;
 
-    fn is_close(left: f64, right: f64, maxdiff: f64) -> bool {
+    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);
         (left - right).abs() < maxdiff
     }
 
-    fn compare_waveforms(left: Vec<f64>, right: Vec<f64>, maxdiff: f64) -> bool {
+    fn compare_waveforms(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
         for (val_l, val_r) in left.iter().zip(right.iter()) {
             if !is_close(*val_l, *val_r, maxdiff) {
                 return false;
