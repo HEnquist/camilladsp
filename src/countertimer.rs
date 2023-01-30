@@ -19,7 +19,7 @@ impl SilenceCounter {
         samplerate: usize,
         chunksize: usize,
     ) -> SilenceCounter {
-        let silence_threshold = PrcFmt::new(10.0).powf(silence_threshold_db / 20.0);
+        let silence_threshold = PrcFmt::coerce(10.0).powf(silence_threshold_db / 20.0);
         let silence_limit_nbr =
             (silence_timeout * samplerate as PrcFmt / chunksize as PrcFmt).round() as usize;
         SilenceCounter {

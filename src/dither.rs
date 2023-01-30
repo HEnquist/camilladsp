@@ -460,7 +460,7 @@ impl<'a> Dither<'a> {
         shaper: Option<NoiseShaper<'a>>,
     ) -> Self {
         let name = name.to_string();
-        let scalefact = PrcFmt::new(2.0).powi((bits - 1) as i32);
+        let scalefact = PrcFmt::coerce(2.0).powi((bits - 1) as i32);
         let ditherer = Box::new(ditherer);
         Self {
             name,

@@ -112,7 +112,7 @@ impl Volume {
         let stepsize = ramprange / self.chunksize as PrcFmt;
         (0..self.chunksize)
             .map(|val| {
-                (PrcFmt::new(10.0)).powf(
+                (PrcFmt::coerce(10.0)).powf(
                     (self.ramp_start
                         + ramprange * (self.ramp_step as PrcFmt - 1.0)
                         + val as PrcFmt * stepsize)

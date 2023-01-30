@@ -99,7 +99,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let alpha = sn / (2.0 * q);
                 let b0 = 1.0 + (alpha * ampl);
                 let b1 = -2.0 * cs;
@@ -117,7 +117,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let alpha =
                     sn * ((std::f64::consts::LN_2 as PrcFmt) / 2.0 * bandwidth * omega / sn).sinh();
                 let b0 = 1.0 + (alpha * ampl);
@@ -133,7 +133,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let beta = sn * ampl.sqrt() / q;
                 let b0 = ampl * ((ampl + 1.0) + (ampl - 1.0) * cs + beta);
                 let b1 = -2.0 * ampl * ((ampl - 1.0) + (ampl + 1.0) * cs);
@@ -151,7 +151,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let alpha =
                     sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope / 12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
@@ -166,7 +166,7 @@ impl BiquadCoefficients {
             config::BiquadParameters::HighshelfFO { freq, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let tn = (omega / 2.0).tan();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let b0 = ampl * tn + ampl.powi(2);
                 let b1 = ampl * tn - ampl.powi(2);
                 let b2 = 0.0;
@@ -179,7 +179,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let beta = sn * ampl.sqrt() / q;
                 let b0 = ampl * ((ampl + 1.0) - (ampl - 1.0) * cs + beta);
                 let b1 = 2.0 * ampl * ((ampl - 1.0) - (ampl + 1.0) * cs);
@@ -197,7 +197,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let alpha =
                     sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope / 12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
@@ -212,7 +212,7 @@ impl BiquadCoefficients {
             config::BiquadParameters::LowshelfFO { freq, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let tn = (omega / 2.0).tan();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let b0 = ampl.powi(2) * tn + ampl;
                 let b1 = ampl.powi(2) * tn - ampl;
                 let b2 = 0.0;

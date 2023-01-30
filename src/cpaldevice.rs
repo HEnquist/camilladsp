@@ -231,7 +231,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
+                        let scalefactor = PrcFmt::coerce(2.0).powi(bits_per_sample - 1);
 
                         let (tx_dev, rx_dev) = mpsc::sync_channel(1);
                         let buffer_fill = Arc::new(AtomicUsize::new(0));
@@ -505,7 +505,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
+                        let scalefactor = PrcFmt::coerce(2.0).powi(bits_per_sample - 1);
                         let (tx_dev_i, rx_dev_i) = mpsc::sync_channel(1);
                         let (tx_dev_f, rx_dev_f) = mpsc::sync_channel(1);
                         let stream = match sample_format {

@@ -60,11 +60,11 @@ pub type PrcFmt = f32;
 pub type PrcFmt = f64;
 
 pub trait NewValue<T> {
-    fn new(val: T) -> Self;
+    fn coerce(val: T) -> Self;
 }
 
 impl<PrcFmt> NewValue<PrcFmt> for PrcFmt {
-    fn new(val: PrcFmt) -> PrcFmt {
+    fn coerce(val: PrcFmt) -> PrcFmt {
         val
     }
 }
