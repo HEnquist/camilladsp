@@ -11,12 +11,13 @@ use alsa::hctl::HCtl;
 use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::{Direction, ValueOr, PCM};
 use alsa_sys;
+use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
@@ -333,7 +334,7 @@ fn open_pcm(
     capture: bool,
 ) -> Res<alsa::PCM> {
     // Acquire the lock
-    let _lock = ALSA_MUTEX.lock().unwrap();
+    let _lock = ALSA_MUTEX.lock();
     // Open the device
     let pcmdev = if capture {
         alsa::PCM::new(&devname, Direction::Capture, true)?
@@ -361,7 +362,7 @@ fn open_pcm(
         match sample_format {
             SampleFormat::S16LE => hwp.set_format(Format::s16())?,
             SampleFormat::S24LE => hwp.set_format(Format::s24())?,
-            SampleFormat::S24LE3 => hwp.set_format(Format::S243LE)?,
+            SampleFormat::S24LE3 => hwp.set_format(Format::s24_3())?,
             SampleFormat::S32LE => hwp.set_format(Format::s32())?,
             SampleFormat::FLOAT32LE => hwp.set_format(Format::float())?,
             SampleFormat::FLOAT64LE => hwp.set_format(Format::float64())?,
@@ -455,9 +456,6 @@ fn playback_loop_bytes(
 
                 conversion_result =
                     chunk_to_buffer_rawbytes(&chunk, &mut buffer, &params.sample_format);
-                if conversion_result.1 > 0 {
-                    params.playback_status.write().unwrap().clipped_samples += conversion_result.1;
-                }
 
                 trace!("PB: {:?}", buf_manager);
                 let playback_res = play_buffer(
@@ -515,21 +513,19 @@ fn playback_loop_bytes(
                 };
                 if !device_stalled {
                     // updates only for non-stalled device
-
                     chunk.update_stats(&mut chunk_stats);
-                    params
-                        .playback_status
-                        .write()
-                        .unwrap()
-                        .signal_rms
-                        .add_record_squared(chunk_stats.rms_linear());
-                    params
-                        .playback_status
-                        .write()
-                        .unwrap()
-                        .signal_peak
-                        .add_record(chunk_stats.peak_linear());
-
+                    {
+                        let mut playback_status = params.playback_status.write();
+                        if conversion_result.1 > 0 {
+                            playback_status.clipped_samples += conversion_result.1;
+                        }
+                        playback_status
+                            .signal_rms
+                            .add_record_squared(chunk_stats.rms_linear());
+                        playback_status
+                            .signal_peak
+                            .add_record(chunk_stats.peak_linear());
+                    }
                     if let Some(delay) = delay_at_chunk_recvd {
                         if delay != 0 {
                             buffer_avg.add_value(delay as f64);
@@ -565,12 +561,12 @@ fn playback_loop_bytes(
                                 }
                                 prev_delay_diff = Some(new_delay_diff);
                             }
-                            let mut pb_stat = params.playback_status.write().unwrap();
-                            pb_stat.buffer_level = avg_delay as usize;
+                            let mut playback_status = params.playback_status.write();
+                            playback_status.buffer_level = avg_delay as usize;
                             debug!(
                                 "PB: buffer level: {:.1}, signal rms: {:?}",
                                 avg_delay,
-                                pb_stat.signal_rms.last()
+                                playback_status.signal_rms.last()
                             );
                         }
                     }
@@ -743,20 +739,21 @@ fn capture_loop_bytes(
             Ok(CaptureResult::Normal) => {
                 //trace!("Captured {} bytes", capture_bytes);
                 averager.add_value(capture_bytes);
-                if averager.larger_than_millis(
-                    params.capture_status.read().unwrap().update_interval as u64,
-                ) {
-                    let bytes_per_sec = averager.average();
-                    averager.restart();
-                    let measured_rate_f =
-                        bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
-                    trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
-                    let mut capt_stat = params.capture_status.write().unwrap();
-                    capt_stat.measured_samplerate = measured_rate_f as usize;
-                    capt_stat.signal_range = value_range as f32;
-                    capt_stat.rate_adjust = rate_adjust as f32;
-                    capt_stat.state = state;
-                    device_stalled = false;
+                {
+                    let capture_status = params.capture_status.upgradable_read();
+                    if averager.larger_than_millis(capture_status.update_interval as u64) {
+                        device_stalled = false;
+                        let bytes_per_sec = averager.average();
+                        averager.restart();
+                        let measured_rate_f = bytes_per_sec
+                            / (params.channels * params.store_bytes_per_sample) as f64;
+                        trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
+                        let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
+                        capture_status.measured_samplerate = measured_rate_f as usize;
+                        capture_status.signal_range = value_range as f32;
+                        capture_status.rate_adjust = rate_adjust as f32;
+                        capture_status.state = state;
+                    }
                 }
                 watcher_averager.add_value(capture_bytes);
                 if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
@@ -795,7 +792,7 @@ fn capture_loop_bytes(
                     pcmdevice
                         .prepare()
                         .unwrap_or_else(|err| warn!("Capture error {:?}", err));
-                    params.capture_status.write().unwrap().state = ProcessingState::Stalled;
+                    params.capture_status.write().state = ProcessingState::Stalled;
                 }
             }
             Err(msg) => {
@@ -813,21 +810,18 @@ fn capture_loop_bytes(
             params.channels,
             &params.sample_format,
             capture_bytes,
-            &params.capture_status.read().unwrap().used_channels,
+            &params.capture_status.read().used_channels,
         );
         chunk.update_stats(&mut chunk_stats);
-        params
-            .capture_status
-            .write()
-            .unwrap()
-            .signal_rms
-            .add_record_squared(chunk_stats.rms_linear());
-        params
-            .capture_status
-            .write()
-            .unwrap()
-            .signal_peak
-            .add_record(chunk_stats.peak_linear());
+        {
+            let mut capture_status = params.capture_status.write();
+            capture_status
+                .signal_rms
+                .add_record_squared(chunk_stats.rms_linear());
+            capture_status
+                .signal_peak
+                .add_record(chunk_stats.peak_linear());
+        }
         value_range = chunk.maxval - chunk.minval;
         if device_stalled {
             state = ProcessingState::Stalled;
@@ -861,8 +855,7 @@ fn capture_loop_bytes(
             }
         }
     }
-    let mut capt_stat = params.capture_status.write().unwrap();
-    capt_stat.state = ProcessingState::Inactive;
+    params.capture_status.write().state = ProcessingState::Inactive;
 }
 
 fn update_avail_min(
