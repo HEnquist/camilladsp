@@ -68,12 +68,14 @@ pub trait DeviceBufferManager {
                 data.period = frames;
             }
             Err(_) => {
-                let alt_period_frames = 3 * 2.0f32.powi((period_frames as f32 / 2.0).log2().ceil() as i32) as Frames;
+                let alt_period_frames =
+                    3 * 2.0f32.powi((period_frames as f32 / 2.0).log2().ceil() as i32) as Frames;
                 debug!(
                     "Device did not accept a period size of {} frames, trying again with {}",
                     period_frames, alt_period_frames
                 );
-                data.period = hwp.set_period_size_near(alt_period_frames, alsa::ValueOr::Nearest)?;
+                data.period =
+                    hwp.set_period_size_near(alt_period_frames, alsa::ValueOr::Nearest)?;
             }
         }
         Ok(())
