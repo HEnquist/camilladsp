@@ -25,17 +25,36 @@ pub trait DeviceBufferManager {
         ) as Frames
     }
 
+    // Calculate an alternative buffer size that is 3 multiplied by a power-of-two.
+    // This is for some devices that cannot wotk with the default setting,
+    // and when set_buffer_size_near() does not return a working alternative near the requested one.
+    // Caused by driver bugs?
+    fn calculate_buffer_size_alt(&self) -> Frames {
+        let data = self.data();
+        let frames_needed = 1.2 * data.chunksize as f32 / data.resampling_ratio;
+        3 * 2.0f32.powf((frames_needed / 3.0).log2().ceil()) as Frames
+    }
+
     // Calculate a buffer size and apply it to a hwp container. Only for use when opening a device.
     fn apply_buffer_size(&mut self, hwp: &HwParams) -> Res<()> {
         let buffer_frames = self.calculate_buffer_size();
+        let alt_buffer_frames = self.calculate_buffer_size_alt();
         let data = self.data_mut();
-        data.bufsize = hwp.set_buffer_size_near(buffer_frames)?;
-        if data.bufsize < buffer_frames {
-            warn!(
-                "Unable to set the desired device buffer size, requested {}, got {}",
-                buffer_frames, data.bufsize
-            );
+        debug!("Setting buffer size to {} frames", buffer_frames);
+        match hwp.set_buffer_size_near(buffer_frames) {
+            Ok(frames) => {
+                data.bufsize = frames;
+            }
+            Err(_) => {
+                debug!(
+                    "Device did not accept a buffer size of {} frames, trying again with {}",
+                    buffer_frames, alt_buffer_frames
+                );
+                data.bufsize = hwp.set_buffer_size_near(alt_buffer_frames)?;
+            }
         }
+        data.bufsize = hwp.set_buffer_size_near(buffer_frames)?;
+        debug!("Device is using a buffer size of {} frames", data.bufsize);
         Ok(())
     }
 

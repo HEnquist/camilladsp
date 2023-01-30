@@ -201,7 +201,7 @@ fn play_buffer(
             Err(err) => {
                 warn!("PB: Retrying playback, error: {}", err);
                 if err.nix_error() == alsa::nix::errno::Errno::EAGAIN {
-                    let retries = 0;
+                    let mut retries = 0;
                     while retries < 10 {
                         trace!("Read returned EAGAIN error, retry {}", retries);
                         let res = io.writei(buffer);
@@ -210,6 +210,7 @@ fn play_buffer(
                                 if err.nix_error() != alsa::nix::errno::Errno::EAGAIN {
                                     res?;
                                 }
+                                retries += 1;
                             }
                             Ok(_) => {
                                 break;
