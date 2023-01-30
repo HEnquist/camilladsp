@@ -93,9 +93,7 @@ pub fn list_nbr_channels(hwp: &HwParams) -> Res<(u32, u32, Vec<u32>)> {
 pub fn list_channels_as_text(hwp: &HwParams) -> String {
     let supported_channels_res = list_nbr_channels(hwp);
     if let Ok((min_ch, max_ch, ch_list)) = supported_channels_res {
-        format!(
-            "supported channels, min: {min_ch}, max: {max_ch}, list: {ch_list:?}"
-        )
+        format!("supported channels, min: {min_ch}, max: {max_ch}, list: {ch_list:?}")
     } else {
         "failed checking supported channels".to_string()
     }

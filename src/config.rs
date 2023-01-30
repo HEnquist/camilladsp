@@ -1887,8 +1887,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                 match filters::validate_filter(fs, filters.get(name).unwrap()) {
                                     Ok(_) => {}
                                     Err(err) => {
-                                        let msg =
-                                            format!("Invalid filter '{name}'. Reason: {err}");
+                                        let msg = format!("Invalid filter '{name}'. Reason: {err}");
                                         return Err(ConfigError::new(&msg).into());
                                     }
                                 }

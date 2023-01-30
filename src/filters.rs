@@ -115,9 +115,7 @@ pub fn read_coeff_file(
     let f = match File::open(filename) {
         Ok(f) => f,
         Err(err) => {
-            let msg = format!(
-                "Could not open coefficient file '{filename}'. Error: {err}"
-            );
+            let msg = format!("Could not open coefficient file '{filename}'. Error: {err}");
             return Err(config::ConfigError::new(&msg).into());
         }
     };
