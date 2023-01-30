@@ -713,8 +713,10 @@ A parameter marked (*) in any example is optional. If they are left out from the
   This enables the playback device to control the rate of the capture device,
   in order to avoid buffer underruns or a slowly increasing latency. This is currently supported when using an Alsa, Wasapi or CoreAudio playback device (and any capture device).
   Setting the rate can be done in two ways.
-  * If the capture device is an Alsa Loopback device or a USB Audio gadget device, the adjustment is done by tuning the virtual sample clock of the Loopback or Gadget device. This avoids any need for resampling.
-  * If resampling is enabled, the adjustment is done by tuning the resampling ratio. Then `resampler` must be set to one of the "Async" types. This is supported for all capture devices.
+  * If the capture device is an Alsa Loopback device or a USB Audio gadget device, the adjustment can be done by tuning the virtual sample clock of the Loopback or Gadget device. This avoids the need for asynchronous resampling.
+  * If asynchronous resampling is enabled, the adjustment can be done by tuning the resampling ratio. Then `resampler` must be set to one of the "Async" types. This is supported for all capture devices.
+
+  With Alsa capture devices, the first option is used whenever it's available. If not, and when not using an Alsa capture device, then the second option is used.
   
 * `target_level` (optional, defaults to the `chunksize` value)
 
