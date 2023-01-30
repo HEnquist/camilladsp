@@ -298,9 +298,9 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use config::ConvParameters;
-    use fftconv_fftw::FftConv;
-    use filters::Filter;
+    use crate::config::ConvParameters;
+    use crate::fftconv_fftw::FftConv;
+    use crate::filters::Filter;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {}", left, right);
@@ -321,9 +321,8 @@ mod tests {
         let coeffs = vec![0.5, 0.5];
         let conf = ConvParameters::Values {
             values: coeffs,
-            length: 0,
         };
-        let mut filter = FftConv::from_config("test".to_string(), 8, conf);
+        let mut filter = FftConv::from_config("test", 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
         filter.process_waveform(&mut wave1).unwrap();
@@ -336,7 +335,7 @@ mod tests {
         for m in 0..32 {
             coeffs.push(m as PrcFmt);
         }
-        let mut filter = FftConv::new("test".to_owned(), 8, &coeffs);
+        let mut filter = FftConv::new("test", 8, &coeffs);
         let mut wave1 = vec![0.0 as PrcFmt; 8];
         let mut wave2 = vec![0.0 as PrcFmt; 8];
         let mut wave3 = vec![0.0 as PrcFmt; 8];

@@ -18,10 +18,10 @@ pub trait DeviceBufferManager {
     // Calculate a power-of-two buffer size that is large enough to accommodate any changes due to resampling.
     fn calculate_buffer_size(&self) -> Frames {
         let data = self.data();
-        2.0f32.powf(
+        2.0f32.powi(
             (1.2 * data.chunksize as f32 / data.resampling_ratio)
                 .log2()
-                .ceil(),
+                .ceil() as i32,
         ) as Frames
     }
 
@@ -32,7 +32,7 @@ pub trait DeviceBufferManager {
     fn calculate_buffer_size_alt(&self) -> Frames {
         let data = self.data();
         let frames_needed = 1.2 * data.chunksize as f32 / data.resampling_ratio;
-        3 * 2.0f32.powf((frames_needed / 3.0).log2().ceil()) as Frames
+        3 * 2.0f32.powi((frames_needed / 3.0).log2().ceil() as i32) as Frames
     }
 
     // Calculate a buffer size and apply it to a hwp container. Only for use when opening a device.
@@ -61,7 +61,21 @@ pub trait DeviceBufferManager {
     // Calculate a period size and apply it to a hwp container. Only for use when opening a device, after setting buffer size.
     fn apply_period_size(&mut self, hwp: &HwParams) -> Res<()> {
         let data = self.data_mut();
-        data.period = hwp.set_period_size_near(data.bufsize / 8, alsa::ValueOr::Nearest)?;
+        let period_frames = data.bufsize / 8;
+        debug!("Setting period size to {} frames", period_frames);
+        match hwp.set_period_size_near(period_frames, alsa::ValueOr::Nearest) {
+            Ok(frames) => {
+                data.period = frames;
+            }
+            Err(_) => {
+                let alt_period_frames = 3 * 2.0f32.powi((period_frames as f32 / 2.0).log2().ceil() as i32) as Frames;
+                debug!(
+                    "Device did not accept a period size of {} frames, trying again with {}",
+                    period_frames, alt_period_frames
+                );
+                data.period = hwp.set_period_size_near(alt_period_frames, alsa::ValueOr::Nearest)?;
+            }
+        }
         Ok(())
     }
 
