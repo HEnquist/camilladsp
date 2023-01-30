@@ -116,8 +116,7 @@ pub fn read_coeff_file(
         Ok(f) => f,
         Err(err) => {
             let msg = format!(
-                "Could not open coefficient file '{}'. Error: {}",
-                filename, err
+                "Could not open coefficient file '{filename}'. Error: {err}"
             );
             return Err(config::ConfigError::new(&msg).into());
         }
@@ -205,7 +204,7 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
         .zip(wave_b)
         .any(|(a, b)| *a != *b);
     if riff_err || wave_err {
-        let msg = format!("Invalid wav header in file '{}'", filename);
+        let msg = format!("Invalid wav header in file '{filename}'");
         return Err(config::ConfigError::new(&msg).into());
     }
     let mut next_chunk_location = 12;
@@ -246,7 +245,7 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
                 (0xFFFE, _, _) => {
                     // waveformatex
                     if chunk_length != 40 {
-                        let msg = format!("Invalid extended header of wav file '{}'", filename);
+                        let msg = format!("Invalid extended header of wav file '{filename}'");
                         return Err(config::ConfigError::new(&msg).into());
                     }
                     let cb_size = u16::from_le_bytes(data[16..18].try_into().unwrap());
@@ -273,13 +272,13 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
                         (SUBTYPE_FLOAT, 64, 8, 64) => config::FileFormat::FLOAT64LE,
                         (_, _, _, _) => {
                             let msg =
-                                format!("Unsupported extended wav format of file '{}'", filename);
+                                format!("Unsupported extended wav format of file '{filename}'");
                             return Err(config::ConfigError::new(&msg).into());
                         }
                     }
                 }
                 (_, _, _) => {
-                    let msg = format!("Unsupported wav format of file '{}'", filename);
+                    let msg = format!("Unsupported wav format of file '{filename}'");
                     return Err(config::ConfigError::new(&msg).into());
                 }
             };
@@ -309,7 +308,7 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
             data_offset: data_offset as usize,
         });
     }
-    let msg = format!("Unable to parse wav file '{}'", filename);
+    let msg = format!("Unable to parse wav file '{filename}'");
     Err(config::ConfigError::new(&msg).into())
 }
 
@@ -599,7 +598,7 @@ mod tests {
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {} = {}", left, right, left - right);
         let res = (left - right).abs() < maxdiff;
-        println!("Ok: {}", res);
+        println!("Ok: {res}");
         res
     }
 
@@ -622,18 +621,14 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded =
             read_coeff_file("testdata/float32.raw", &FileFormat::FLOAT32LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
 
@@ -643,18 +638,14 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded =
             read_coeff_file("testdata/float64.raw", &FileFormat::FLOAT64LE, 24, 8).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
 
@@ -664,17 +655,13 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-4),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded = read_coeff_file("testdata/int16.raw", &FileFormat::S16LE, 6, 2).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-4),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
 
@@ -684,17 +671,13 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded = read_coeff_file("testdata/int24.raw", &FileFormat::S24LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
     #[test]
@@ -703,17 +686,13 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded = read_coeff_file("testdata/int243.raw", &FileFormat::S24LE3, 9, 3).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
     #[test]
@@ -722,17 +701,13 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded = read_coeff_file("testdata/int32.raw", &FileFormat::S32LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
     #[test]
@@ -741,17 +716,13 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded = read_coeff_file("testdata/text_header.txt", &FileFormat::TEXT, 4, 1).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
 
@@ -768,7 +739,7 @@ mod tests {
     #[test]
     pub fn test_analyze_wav() {
         let info = find_data_in_wav("testdata/int32.wav").unwrap();
-        println!("{:?}", info);
+        println!("{info:?}");
         assert_eq!(info.sample_format, FileFormat::S32LE);
         assert_eq!(info.data_offset, 44);
         assert_eq!(info.data_length, 20);
@@ -778,7 +749,7 @@ mod tests {
     #[test]
     pub fn test_read_wav() {
         let values = read_wav("testdata/int32.wav", 0).unwrap();
-        println!("{:?}", values);
+        println!("{values:?}");
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(compare_waveforms(&values, &expected, 1e-9));
         let bad = read_wav("testdata/int32.wav", 1);

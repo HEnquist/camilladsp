@@ -141,7 +141,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
-        let sample_format = self.sample_format.clone();
+        let sample_format = self.sample_format;
         let handle = thread::Builder::new()
             .name("PulsePlayback".to_string())
             .spawn(move || {
@@ -288,8 +288,8 @@ impl CaptureDevice for PulseCaptureDevice {
             * 2
             * channels
             * store_bytes_per_sample;
-        let sample_format = self.sample_format.clone();
-        let resampler_config = self.resampler_config.clone();
+        let sample_format = self.sample_format;
+        let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;

@@ -34,7 +34,7 @@ pub fn state_desc(state: u32) -> String {
         alsa_sys::SND_PCM_STATE_DISCONNECTED => {
             "SND_PCM_STATE_DISCONNECTED, Hardware is disconnected".to_string()
         }
-        _ => format!("Unknown state with number {}", state),
+        _ => format!("Unknown state with number {state}"),
     }
 }
 
@@ -62,7 +62,7 @@ pub fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {
 pub fn list_samplerates_as_text(hwp: &HwParams) -> String {
     let supported_rates_res = list_samplerates(hwp);
     if let Ok(rates) = supported_rates_res {
-        format!("supported samplerates: {:?}", rates)
+        format!("supported samplerates: {rates:?}")
     } else {
         "failed checking supported samplerates".to_string()
     }
@@ -94,8 +94,7 @@ pub fn list_channels_as_text(hwp: &HwParams) -> String {
     let supported_channels_res = list_nbr_channels(hwp);
     if let Ok((min_ch, max_ch, ch_list)) = supported_channels_res {
         format!(
-            "supported channels, min: {}, max: {}, list: {:?}",
-            min_ch, max_ch, ch_list
+            "supported channels, min: {min_ch}, max: {max_ch}, list: {ch_list:?}"
         )
     } else {
         "failed checking supported channels".to_string()
@@ -130,7 +129,7 @@ pub fn list_formats(hwp: &HwParams) -> Res<Vec<SampleFormat>> {
 pub fn list_formats_as_text(hwp: &HwParams) -> String {
     let supported_formats_res = list_formats(hwp);
     if let Ok(formats) = supported_formats_res {
-        format!("supported sample formats: {:?}", formats)
+        format!("supported sample formats: {formats:?}")
     } else {
         "failed checking supported sample formats".to_string()
     }

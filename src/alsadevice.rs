@@ -417,7 +417,7 @@ fn playback_loop_bytes(
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
     let subdevice = pcminfo.get_subdevice();
-    let h = HCtl::new(&format!("hw:{}", card), false).unwrap();
+    let h = HCtl::new(&format!("hw:{card}"), false).unwrap();
     h.load().unwrap();
     let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
     elid_uac2_gadget.set_device(device);
@@ -617,7 +617,7 @@ fn capture_loop_bytes(
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
     let subdevice = pcminfo.get_subdevice();
-    let h = HCtl::new(&format!("hw:{}", card), false).unwrap();
+    let h = HCtl::new(&format!("hw:{card}"), false).unwrap();
     h.load().unwrap();
 
     let mut elid_loopback = ElemId::new(ElemIface::PCM);

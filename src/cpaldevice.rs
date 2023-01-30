@@ -109,7 +109,7 @@ fn open_cpal_playback(
         }) {
             Some(dev) => dev,
             None => {
-                let msg = format!("Could not find playback device '{}'", devname);
+                let msg = format!("Could not find playback device '{devname}'");
                 return Err(ConfigError::new(&msg).into());
             }
         }
@@ -166,7 +166,7 @@ fn open_cpal_capture(
         }) {
             Some(dev) => dev,
             None => {
-                let msg = format!("Could not find capture device '{}'", devname);
+                let msg = format!("Could not find capture device '{devname}'");
                 return Err(ConfigError::new(&msg).into());
             }
         }

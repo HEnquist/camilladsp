@@ -291,7 +291,7 @@ impl fmt::Display for ProcessingState {
             ProcessingState::Starting => "STARTING",
             ProcessingState::Stalled => "STALLED",
         };
-        write!(f, "{}", desc)
+        write!(f, "{desc}")
     }
 }
 

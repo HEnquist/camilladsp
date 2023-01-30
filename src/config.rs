@@ -115,7 +115,7 @@ impl fmt::Display for SampleFormat {
             SampleFormat::S24LE3 => "S24LE3",
             SampleFormat::S32LE => "S32LE",
         };
-        write!(f, "{}", formatstr)
+        write!(f, "{formatstr}")
     }
 }
 
@@ -1342,7 +1342,7 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
     let file = match File::open(filename) {
         Ok(f) => f,
         Err(err) => {
-            let msg = format!("Could not open config file '{}'. Error: {}", filename, err);
+            let msg = format!("Could not open config file '{filename}'. Error: {err}");
             return Err(ConfigError::new(&msg).into());
         }
     };
@@ -1351,14 +1351,14 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
     let _number_of_bytes: usize = match buffered_reader.read_to_string(&mut contents) {
         Ok(number_of_bytes) => number_of_bytes,
         Err(err) => {
-            let msg = format!("Could not read config file '{}'. Error: {}", filename, err);
+            let msg = format!("Could not read config file '{filename}'. Error: {err}");
             return Err(ConfigError::new(&msg).into());
         }
     };
     let configuration: Configuration = match serde_yaml::from_str(&contents) {
         Ok(config) => config,
         Err(err) => {
-            let msg = format!("Invalid config file!\n{}", err);
+            let msg = format!("Invalid config file!\n{err}");
             return Err(ConfigError::new(&msg).into());
         }
     };
@@ -1523,8 +1523,8 @@ fn apply_overrides(configuration: &mut Configuration) {
 }
 
 fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
-    let srate = format!("{}", samplerate);
-    let ch = format!("{}", channels);
+    let srate = format!("{samplerate}");
+    let ch = format!("{channels}");
     string
         .replace("$samplerate$", &srate)
         .replace("$channels$", &ch)
@@ -1881,19 +1881,19 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                         for name in &step.names {
                             if let Some(filters) = &conf.filters {
                                 if !filters.contains_key(name) {
-                                    let msg = format!("Use of missing filter '{}'", name);
+                                    let msg = format!("Use of missing filter '{name}'");
                                     return Err(ConfigError::new(&msg).into());
                                 }
                                 match filters::validate_filter(fs, filters.get(name).unwrap()) {
                                     Ok(_) => {}
                                     Err(err) => {
                                         let msg =
-                                            format!("Invalid filter '{}'. Reason: {}", name, err);
+                                            format!("Invalid filter '{name}'. Reason: {err}");
                                         return Err(ConfigError::new(&msg).into());
                                     }
                                 }
                             } else {
-                                let msg = format!("Use of missing filter '{}'", name);
+                                let msg = format!("Use of missing filter '{name}'");
                                 return Err(ConfigError::new(&msg).into());
                             }
                         }
@@ -1942,8 +1942,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     let num_channels_out = conf.devices.playback.channels();
     if num_channels != num_channels_out {
         let msg = format!(
-            "Pipeline outputs {} channels, playback device has {}.",
-            num_channels, num_channels_out
+            "Pipeline outputs {num_channels} channels, playback device has {num_channels_out}."
         );
         return Err(ConfigError::new(&msg).into());
     }

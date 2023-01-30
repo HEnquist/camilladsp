@@ -414,7 +414,7 @@ pub fn start_server(parameters: ServerParameters, shared_data: SharedData) {
     let acceptor = make_acceptor(&parameters.cert_file, &parameters.cert_pass);
 
     thread::spawn(move || {
-        let ws_result = TcpListener::bind(format!("{}:{}", address, port));
+        let ws_result = TcpListener::bind(format!("{address}:{port}"));
         if let Ok(server) = ws_result {
             for stream in server.incoming() {
                 let shared_data_inst = shared_data.clone();
@@ -1115,7 +1115,7 @@ fn clamped_volume(vol: f32) -> f32 {
 }
 
 fn playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let time_instant = Instant::now() - Duration::from_secs_f32(time);
+    let time_instant = Instant::now().checked_sub(Duration::from_secs_f32(time)).unwrap();
     let res = shared_data
         .playback_status
         .read()
@@ -1131,7 +1131,7 @@ fn playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
 }
 
 fn playback_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let time_instant = Instant::now() - Duration::from_secs_f32(time);
+    let time_instant = Instant::now().checked_sub(Duration::from_secs_f32(time)).unwrap();
     let res = shared_data
         .playback_status
         .read()
@@ -1147,7 +1147,7 @@ fn playback_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
 }
 
 fn capture_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let time_instant = Instant::now() - Duration::from_secs_f32(time);
+    let time_instant = Instant::now().checked_sub(Duration::from_secs_f32(time)).unwrap();
     let res = shared_data
         .capture_status
         .read()
@@ -1163,7 +1163,7 @@ fn capture_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
 }
 
 fn capture_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let time_instant = Instant::now() - Duration::from_secs_f32(time);
+    let time_instant = Instant::now().checked_sub(Duration::from_secs_f32(time)).unwrap();
     let res = shared_data
         .capture_status
         .read()

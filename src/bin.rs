@@ -792,7 +792,7 @@ fn main_process() -> i32 {
             }
             Err(err) => {
                 println!("Config is not valid");
-                println!("{}", err);
+                println!("{err}");
                 return EXIT_BAD_CONFIG;
             }
         }

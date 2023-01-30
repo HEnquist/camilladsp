@@ -424,7 +424,7 @@ mod tests {
     use crate::PrcFmt;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
-        println!("{} - {}", left, right);
+        println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 

@@ -583,12 +583,12 @@ mod tests {
     use num_complex::Complex;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
-        println!("{} - {}", left, right);
+        println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 
     fn is_close_relative(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
-        println!("{} - {}", left, right);
+        println!("{left} - {right}");
         (left / right - 1.0).abs() < maxdiff
     }
 
@@ -746,7 +746,7 @@ mod tests {
         let (gain_fp, _) = gain_and_phase(coeffs, 1000.0, 44100);
         let (gain_hf, _) = gain_and_phase(coeffs, 20000.0, 44100);
         let (gain_lf, _) = gain_and_phase(coeffs, 1.0, 44100);
-        println!("{} {} {}", gain_fp, gain_hf, gain_lf);
+        println!("{gain_fp} {gain_hf} {gain_lf}");
         assert!(gain_fp < -40.0);
         assert!(is_close(gain_lf, -12.1, 0.1));
         assert!(is_close(gain_hf, 0.0, 0.1));
@@ -765,7 +765,7 @@ mod tests {
         let (gain_fp, _) = gain_and_phase(coeffs, 1000.0, 44100);
         let (gain_hf, _) = gain_and_phase(coeffs, 20000.0, 44100);
         let (gain_lf, _) = gain_and_phase(coeffs, 1.0, 44100);
-        println!("{} {} {}", gain_fp, gain_hf, gain_lf);
+        println!("{gain_fp} {gain_hf} {gain_lf}");
         assert!(gain_fp < -40.0);
         assert!(is_close(gain_lf, 0.0, 0.1));
         assert!(is_close(gain_hf, -12.1, 0.1));
