@@ -179,9 +179,9 @@ jobs:
       - name: Build
         run: cross build --release --target aarch64-apple-darwin
         env:
-          SDKROOT: /Applications/Xcode_12.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.1.sdk
-          MACOSX_DEPLOYMENT_TARGET: 11.1
-          DEVELOPER_DIR: /Applications/Xcode_12.4.app
+          SDKROOT: /Applications/Xcode_14.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX13.1.sdk
+          MACOSX_DEPLOYMENT_TARGET: 13.1
+          DEVELOPER_DIR: /Applications/Xcode_14.2.app
 
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/aarch64-apple-darwin/release camilladsp
