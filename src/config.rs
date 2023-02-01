@@ -362,6 +362,8 @@ pub enum PlaybackDevice {
         channels: usize,
         device: String,
         format: SampleFormat,
+        buffersize: Option<usize>,
+        period: Option<usize>,
     },
     #[cfg(feature = "pulse-backend")]
     #[serde(alias = "PULSE", alias = "pulse")]

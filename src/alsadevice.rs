@@ -47,6 +47,8 @@ pub struct AlsaPlaybackDevice {
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
+    pub buffersize: Option<usize>,
+    pub period: Option<usize>,
 }
 
 pub struct AlsaCaptureDevice {
@@ -333,6 +335,8 @@ fn open_pcm(
     sample_format: &SampleFormat,
     buf_manager: &mut dyn DeviceBufferManager,
     capture: bool,
+    optional_buffersize: Option<usize>,
+    optional_period: Option<usize>,
 ) -> Res<alsa::PCM> {
     // Acquire the lock
     let _lock = ALSA_MUTEX.lock();
@@ -371,8 +375,8 @@ fn open_pcm(
 
         // Set access mode, buffersize and periods
         hwp.set_access(Access::RWInterleaved)?;
-        buf_manager.apply_buffer_size(&hwp)?;
-        buf_manager.apply_period_size(&hwp)?;
+        buf_manager.apply_buffer_size(&hwp, optional_buffersize)?;
+        buf_manager.apply_period_size(&hwp, optional_period)?;
 
         // Apply
         pcmdev.hw_params(&hwp)?;
@@ -918,6 +922,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let sample_format = self.sample_format;
         let mut buf_manager =
             PlaybackBufferManager::new(chunksize as Frames, target_level as Frames);
+        let optional_buffersize = self.buffersize;
+        let optional_period = self.period;
         let handle = thread::Builder::new()
             .name("AlsaPlayback".to_string())
             .spawn(move || {
@@ -928,6 +934,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     &sample_format,
                     &mut buf_manager,
                     false,
+                    optional_buffersize,
+                    optional_period,
                 ) {
                     Ok(pcmdevice) => {
                         match status_channel.send(StatusMessage::PlaybackReady) {
@@ -1015,6 +1023,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                     &sample_format,
                     &mut buf_manager,
                     true,
+                    None,
+                    None,
                 ) {
                     Ok(pcmdevice) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
