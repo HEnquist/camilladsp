@@ -250,6 +250,8 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             ref device,
             format,
+            buffersize,
+            period,
         } => Box::new(alsadevice::AlsaPlaybackDevice {
             devname: device.clone(),
             samplerate: conf.samplerate,
@@ -259,6 +261,8 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             target_level: conf.target_level(),
             adjust_period: conf.adjust_period(),
             enable_rate_adjust: conf.rate_adjust(),
+            buffersize,
+            period,
         }),
         #[cfg(feature = "pulse-backend")]
         config::PlaybackDevice::Pulse {

@@ -448,6 +448,8 @@ pub enum PlaybackDevice {
         device: String,
         #[serde(default)]
         format: Option<SampleFormat>,
+        buffersize: Option<usize>,
+        period: Option<usize>,
     },
     #[cfg(feature = "pulse-backend")]
     #[serde(alias = "PULSE", alias = "pulse")]

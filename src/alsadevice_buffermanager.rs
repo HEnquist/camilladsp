@@ -49,37 +49,44 @@ pub trait DeviceBufferManager {
     }
 
     // Calculate a buffer size and apply it to a hwp container. Only for use when opening a device.
-    fn apply_buffer_size(&mut self, hwp: &HwParams) -> Res<()> {
+    fn apply_buffer_size(&mut self, hwp: &HwParams, optional_frames: Option<usize>) -> Res<()> {
         let min_period = hwp.get_period_size_min().unwrap_or(0);
-        let buffer_frames = self.calculate_buffer_size(min_period);
+        let buffer_frames = match optional_frames {
+            None => self.calculate_buffer_size(min_period),
+            Some(frames) => frames as Frames,
+        };
         let alt_buffer_frames = self.calculate_buffer_size_alt(min_period);
         let data = self.data_mut();
         debug!("Setting buffer size to {} frames", buffer_frames);
-        match hwp.set_buffer_size_near(buffer_frames) {
-            Ok(frames) => {
-                data.bufsize = frames;
+        data.bufsize = match hwp.set_buffer_size_near(buffer_frames) {
+            Ok(frames) => frames,
+            Err(err) => {
+                if optional_frames.is_none() { 
+                    debug!(
+                        "Device did not accept a buffer size of {} frames, trying again with {}",
+                        buffer_frames, alt_buffer_frames
+                    );
+                    hwp.set_buffer_size_near(alt_buffer_frames)?
+                }
+                else {
+                    return Err(Box::new(err));
+                }
             }
-            Err(_) => {
-                debug!(
-                    "Device did not accept a buffer size of {} frames, trying again with {}",
-                    buffer_frames, alt_buffer_frames
-                );
-                data.bufsize = hwp.set_buffer_size_near(alt_buffer_frames)?;
-            }
-        }
+        };
         debug!("Device is using a buffer size of {} frames", data.bufsize);
         Ok(())
     }
 
     // Calculate a period size and apply it to a hwp container. Only for use when opening a device, after setting buffer size.
-    fn apply_period_size(&mut self, hwp: &HwParams) -> Res<()> {
+    fn apply_period_size(&mut self, hwp: &HwParams, optional_frames: Option<usize>) -> Res<()> {
         let data = self.data_mut();
-        let period_frames = data.bufsize / 8;
+        let period_frames = match optional_frames {
+            None => data.bufsize / 8,
+            Some(frames) => frames as Frames,
+        };
         debug!("Setting period size to {} frames", period_frames);
-        match hwp.set_period_size_near(period_frames, alsa::ValueOr::Nearest) {
-            Ok(frames) => {
-                data.period = frames;
-            }
+        data.period = match hwp.set_period_size_near(period_frames, alsa::ValueOr::Nearest) {
+            Ok(frames) => frames,
             Err(_) => {
                 let alt_period_frames =
                     3 * 2.0f32.powi((period_frames as f32 / 2.0).log2().ceil() as i32) as Frames;
@@ -87,10 +94,9 @@ pub trait DeviceBufferManager {
                     "Device did not accept a period size of {} frames, trying again with {}",
                     period_frames, alt_period_frames
                 );
-                data.period =
-                    hwp.set_period_size_near(alt_period_frames, alsa::ValueOr::Nearest)?;
+                hwp.set_period_size_near(alt_period_frames, alsa::ValueOr::Nearest)?
             }
-        }
+        };
         debug!("Device is using a period size of {} frames", data.period);
         Ok(())
     }
