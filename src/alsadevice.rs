@@ -7,7 +7,7 @@ use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use alsa::ctl::{ElemId, ElemIface};
 use alsa::ctl::{ElemType, ElemValue};
-use alsa::hctl::HCtl;
+use alsa::hctl::{Elem, HCtl};
 use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::{Direction, ValueOr, PCM};
 use alsa_sys;
@@ -421,13 +421,18 @@ fn playback_loop_bytes(
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
     let subdevice = pcminfo.get_subdevice();
-    let h = HCtl::new(&format!("hw:{card}"), false).unwrap();
-    h.load().unwrap();
-    let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
-    elid_uac2_gadget.set_device(device);
-    elid_uac2_gadget.set_subdevice(subdevice);
-    elid_uac2_gadget.set_name(&CString::new("Playback Pitch 1000000").unwrap());
-    let element_uac2_gadget = h.find_elem(&elid_uac2_gadget);
+    let mut element_uac2_gadget: Option<Elem> = None;
+    // Virtual devices such as pcm plugins don't have a hw card ID
+    // Only try to create the HCtl when the device has an ID
+    let h = (card >= 0).then(|| HCtl::new(&format!("hw:{}", card), false).unwrap());
+    if let Some(h) = &h {
+        h.load().unwrap();
+        let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
+        elid_uac2_gadget.set_device(device);
+        elid_uac2_gadget.set_subdevice(subdevice);
+        elid_uac2_gadget.set_name(&CString::new("Playback Pitch 1000000").unwrap());
+        element_uac2_gadget = h.find_elem(&elid_uac2_gadget);
+    }
     if element_uac2_gadget.is_some() {
         info!("Playback device supports rate adjust");
     }
@@ -621,20 +626,26 @@ fn capture_loop_bytes(
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
     let subdevice = pcminfo.get_subdevice();
-    let h = HCtl::new(&format!("hw:{card}"), false).unwrap();
-    h.load().unwrap();
 
-    let mut elid_loopback = ElemId::new(ElemIface::PCM);
-    elid_loopback.set_device(device);
-    elid_loopback.set_subdevice(subdevice);
-    elid_loopback.set_name(&CString::new("PCM Rate Shift 100000").unwrap());
-    let element_loopback = h.find_elem(&elid_loopback);
+    let mut element_loopback: Option<Elem> = None;
+    let mut element_uac2_gadget: Option<Elem> = None;
+    // Virtual devices such as pcm plugins don't have a hw card ID
+    // Only try to create the HCtl when the device has an ID
+    let h = (card >= 0).then(|| HCtl::new(&format!("hw:{}", card), false).unwrap());
+    if let Some(h) = &h {
+        h.load().unwrap();
+        let mut elid_loopback = ElemId::new(ElemIface::PCM);
+        elid_loopback.set_device(device);
+        elid_loopback.set_subdevice(subdevice);
+        elid_loopback.set_name(&CString::new("PCM Rate Shift 100000").unwrap());
+        element_loopback = h.find_elem(&elid_loopback);
 
-    let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
-    elid_uac2_gadget.set_device(device);
-    elid_uac2_gadget.set_subdevice(subdevice);
-    elid_uac2_gadget.set_name(&CString::new("Capture Pitch 1000000").unwrap());
-    let element_uac2_gadget = h.find_elem(&elid_uac2_gadget);
+        let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
+        elid_uac2_gadget.set_device(device);
+        elid_uac2_gadget.set_subdevice(subdevice);
+        elid_uac2_gadget.set_name(&CString::new("Capture Pitch 1000000").unwrap());
+        element_uac2_gadget = h.find_elem(&elid_uac2_gadget);
+    }
 
     if element_loopback.is_some() || element_uac2_gadget.is_some() {
         info!("Capture device supports rate adjust");
