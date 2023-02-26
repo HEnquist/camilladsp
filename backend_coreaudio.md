@@ -9,12 +9,13 @@ CoreAudio is a large API that offers several ways to accomplish most common task
 ## Capturing audio from other applications
 
 To capture audio from applications a virtual sound card is needed. 
-This has been verified to work well with [Soundflower](https://github.com/mattingalls/Soundflower) 
-and [BlackHole](https://github.com/ExistentialAudio/BlackHole). 
-SoundFlower only supports Intel macs, while BlackHole supports both Intel and Apple Silicon. 
-BlackHole has a 2-channel and a 16-channel version. 
-There is currently a bug in the 2-channel version that in some cases can lead to choppy sound. 
-If this happens, try the 16-channel version instead. 
+It is recommended to use [BlackHole](https://github.com/ExistentialAudio/BlackHole).
+This works on both Intel and Apple Silicon macs.
+The latest (currently unreleased) version of BlachHole supports adjusting the rate of the virtual clock.
+This makes it possible to sync the virtual device with a real device, and avoid the need for asynchronous resampling.
+CamillaDSP supports and will use this functionality when it is available.
+
+An alternative is [Soundflower](https://github.com/mattingalls/Soundflower), which is older and only supports Intel macs.
 
 Some player applications can use hog mode to get exclusive access to the playback device. Using this with a virtual soundcard like BlackHole causes problems, and is therefore not recommended.
 

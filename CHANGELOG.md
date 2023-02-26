@@ -27,6 +27,7 @@ New features:
 - Add GeneralNotch biquad type.
 - Add Tilt equalizer biquad combo.
 - Add GraphicEqualizer biquad combo.
+- Support rate adjust for BlachHole on macOS.
 
 Changes:
 - Optimize cpu load in general, and of dithering and delay filters in particular.

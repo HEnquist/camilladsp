@@ -8,6 +8,10 @@ use dispatch::Semaphore;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::collections::VecDeque;
+use std::ffi::CStr;
+use std::mem;
+use std::os::raw::{c_char, c_void};
+use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
@@ -600,6 +604,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         return;
                     }
                 };
+
                 let mut chunk_counter = 0;
 
                 type Args = render_callback::Args<data::InterleavedBytes<f32>>;
@@ -665,6 +670,16 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     &resampler,
                     capture_frames,
                 );
+
+                let pitch_supported = configure_pitch_control(device_id);
+                if pitch_supported {
+                    if samplerate == capture_samplerate && resampler.is_some() {
+                        warn!("Needless 1:1 sample rate conversion active. Not needed since capture device supports rate adjust");
+                    } else if async_src && resampler.is_some() {
+                        warn!("Async resampler not needed since capture device supports rate adjust. Consider switching to Sync type to save CPU time.");
+                    }
+                }
+
                 let mut averager = countertimer::TimeAverage::new();
                 let mut watcher_averager = countertimer::TimeAverage::new();
                 let mut valuewatcher = countertimer::ValueWatcher::new(capture_samplerate as f32, RATE_CHANGE_THRESHOLD_VALUE, RATE_CHANGE_THRESHOLD_COUNT);
@@ -707,7 +722,10 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         Ok(CommandMessage::SetSpeed { speed }) => {
                             rate_adjust = speed;
                             debug!("Requested to adjust capture speed to {}", speed);
-                            if let Some(resampl) = &mut resampler {
+                            if pitch_supported {
+                                set_pitch(device_id, speed as f32);
+                            }
+                            else if let Some(resampl) = &mut resampler {
                                 debug!("Adjusting resampler rate to {}", speed);
                                 if async_src {
                                     if resampl.set_resample_ratio_relative(speed, true).is_err() {
@@ -886,5 +904,233 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 capture_status.write().state = ProcessingState::Inactive;
             })?;
         Ok(Box::new(handle))
+    }
+}
+
+// Will this ever be needed?
+/*
+fn get_pitch(device_id: AudioDeviceID) -> Option<f32> {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyStereoPan,
+        mScope: kAudioObjectPropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+
+    let pan: f32 = 0.0;
+    let data_size = mem::size_of::<f32>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            &data_size as *const _ as *mut _,
+            &pan as *const _ as *mut _,
+        )
+    };
+    if status != 0 {
+        warn!("Unable to get pitch, error code: {}", status);
+        return None;
+    }
+    let pitch = 1.0 + 0.02 * (pan - 0.5);
+    Some(pitch)
+}
+*/
+
+fn set_pitch(device_id: AudioDeviceID, pitch: f32) {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyStereoPan,
+        mScope: kAudioObjectPropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut pan: f32 = (pitch - 1.0) * 50.0 + 0.5;
+    pan = pan.clamp(0.0, 1.0);
+    debug!(
+        "Setting capture pitch to: {}, corresponding pan value: {}",
+        pitch, pan
+    );
+    let data_size = mem::size_of::<f32>() as u32;
+    let status = unsafe {
+        AudioObjectSetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            data_size,
+            &pan as *const _ as *mut _,
+        )
+    };
+    if status != 0 {
+        warn!("Unable to set pitch, error code: {}", status);
+    }
+}
+
+fn set_clock_source_index(device_id: AudioDeviceID, index: u32) -> bool {
+    debug!(
+        "Changing capture device clock source to item with index {}",
+        index
+    );
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyClockSource,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let data_size = mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        AudioObjectSetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            data_size,
+            &index as *const _ as *mut _,
+        )
+    };
+    if status != 0 {
+        warn!("Unable to set clock source, error code: {}", status);
+        return false;
+    }
+    true
+}
+
+/*
+fn get_clock_source_index(device_id: AudioDeviceID) -> Option<u32> {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyClockSource,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let index: u32 = 0;
+    let data_size = mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            &data_size as *const _ as *mut _,
+            &index as *const _ as *mut _,
+        )
+    };
+    if status != 0 {
+        warn!("Unable to set clock source, error code: {}", status);
+        return None;
+    }
+    Some(index)
+}
+*/
+
+fn get_clock_source_names_and_ids(device_id: AudioDeviceID) -> (Vec<String>, Vec<u32>) {
+    let mut names = Vec::new();
+    let mut ids = Vec::new();
+
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyClockSources,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+
+    let data_size = 0u32;
+    let status = unsafe {
+        AudioObjectGetPropertyDataSize(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            &data_size as *const _ as *mut _,
+        )
+    };
+    if status as u32 == kAudioCodecUnknownPropertyError {
+        info!("The capture device has no clock source control");
+        return (names, ids);
+    }
+    if status != 0 {
+        warn!(
+            "Unable to read number of clock sources, error code: {}",
+            status
+        );
+        return (names, ids);
+    }
+    let nbr_items = data_size / mem::size_of::<u32>() as u32;
+    debug!("Capture device has {} clock sources", nbr_items);
+    if nbr_items > 0 {
+        let mut sources = vec![0u32; nbr_items as usize];
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                device_id,
+                &property_address as *const _,
+                0,
+                null(),
+                &data_size as *const _ as *mut _,
+                sources.as_mut_ptr() as *mut _ as *mut _,
+            )
+        };
+        if status != 0 {
+            warn!("Unable to list clock sources, error code: {}", status);
+            return (names, ids);
+        }
+
+        for id in sources.iter() {
+            let name = get_item_name(device_id, *id);
+            names.push(name);
+            ids.push(*id)
+        }
+    }
+    debug!(
+        "Available capture device clock source ids: {:?}, names: {:?}",
+        ids, names
+    );
+    (names, ids)
+}
+
+/// Get the clock source item for a device id.
+fn get_item_name(device_id: AudioDeviceID, index: u32) -> String {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyClockSourceNameForIDCFString,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut index: u32 = index;
+    let mut device_name: CFStringRef = null_mut();
+    let data_out = AudioValueTranslation {
+        mInputData: &mut index as *mut u32 as *mut c_void,
+        mInputDataSize: mem::size_of::<u32>() as u32,
+        mOutputData: &mut device_name as *mut CFStringRef as *mut c_void,
+        mOutputDataSize: mem::size_of::<CFStringRef>() as u32,
+    };
+    let data_size = mem::size_of::<AudioValueTranslation>() as u32;
+    let c_str = unsafe {
+        let status = AudioObjectGetPropertyData(
+            device_id,
+            &property_address as *const _,
+            4,
+            &index as *const _ as *const c_void,
+            &data_size as *const _ as *mut _,
+            &data_out as *const _ as *mut _,
+        );
+        if status != 0 {
+            return "".to_owned();
+        }
+        let c_string: *const c_char =
+            CFStringGetCStringPtr(device_name as CFStringRef, kCFStringEncodingUTF8);
+        CStr::from_ptr(c_string as *mut _)
+    };
+    c_str.to_string_lossy().into_owned()
+}
+
+fn configure_pitch_control(device_id: AudioDeviceID) -> bool {
+    let (names, ids) = get_clock_source_names_and_ids(device_id);
+    if names.is_empty() {
+        return false;
+    }
+    match names.iter().position(|n| n == "Internal Adjustable") {
+        Some(idx) => {
+            info!("The capture device supports pitch control");
+            set_clock_source_index(device_id, ids[idx])
+        }
+        None => {
+            info!("The capture device does not support pitch control");
+            false
+        }
     }
 }
