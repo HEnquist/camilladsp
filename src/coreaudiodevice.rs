@@ -905,6 +905,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
     }
 }
 
+// Will this ever be needed?
 /*
 fn get_pitch(device_id: AudioDeviceID) -> Option<f32> {
     let property_address = AudioObjectPropertyAddress {
@@ -1085,7 +1086,7 @@ fn get_item_name(device_id: AudioDeviceID, index: u32) -> String {
     let property_address = AudioObjectPropertyAddress {
         mSelector: kAudioDevicePropertyClockSourceNameForIDCFString,
         mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMaster,
+        mElement: kAudioObjectPropertyElementMain,
     };
     let mut index: u32 = index;
     let mut device_name: CFStringRef = null_mut();
