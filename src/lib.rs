@@ -44,7 +44,7 @@ extern crate wasapi;
 #[macro_use]
 extern crate log;
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 use std::error;
 use std::fmt;
@@ -295,6 +295,12 @@ pub struct StatusStructs {
     pub playback: Arc<RwLock<PlaybackStatus>>,
     pub processing: Arc<ProcessingParameters>,
     pub status: Arc<RwLock<ProcessingStatus>>,
+}
+
+pub struct SharedConfigs {
+    pub active: Arc<Mutex<Option<config::Configuration>>>,
+    pub previous: Arc<Mutex<Option<config::Configuration>>>,
+    pub new: Arc<Mutex<Option<config::Configuration>>>,
 }
 
 impl fmt::Display for ProcessingState {
