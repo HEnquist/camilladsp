@@ -635,7 +635,7 @@ The `title` property is intended for a short title, while `description` can be l
 ## Volume control
 There is a volume control that is enabled regardless of what configuration file is loaded.
 
-CamillaDSP defines a total of file control "channels" for volume.
+CamillaDSP defines a total of five control "channels" for volume.
 The default volume control reacts to the `Main` control channel.
 When the volume or mute setting is changed, the gain is smoothly ramped to the new setting.
 The duration of this ramp can be customized via the `volume_ramp_time` parameter
