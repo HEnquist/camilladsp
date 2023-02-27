@@ -48,6 +48,7 @@ use camillalib::countertimer;
 use camillalib::processing;
 #[cfg(feature = "websocket")]
 use camillalib::socketserver;
+use camillalib::statefile;
 #[cfg(feature = "websocket")]
 use std::net::IpAddr;
 
@@ -522,7 +523,15 @@ fn main_process() -> i32 {
                 .help("The configuration file to use")
                 .index(1)
                 //.required(true),
-                .required_unless("wait"),
+                .required_unless_one(&["wait", "statefile"]),
+        )
+        .arg(
+            Arg::with_name("statefile")
+                .help("Use the given file to persist the state")
+                .short("s")
+                .long("statefile")
+                .takes_value(true)
+                .display_order(2),
         )
         .arg(
             Arg::with_name("check")
@@ -757,14 +766,7 @@ fn main_process() -> i32 {
     #[cfg(target_os = "windows")]
     wasapi::initialize_mta().unwrap();
 
-    let configname = matches.value_of("configfile").map(|path| path.to_string());
-
-    let initial_volume = matches
-        .value_of("gain")
-        .map(|s| s.parse::<f32>().unwrap())
-        .unwrap_or(ProcessingParameters::DEFAULT_VOLUME);
-
-    let initial_mute = matches.is_present("mute");
+    let mut configname = matches.value_of("configfile").map(|path| path.to_string());
 
     {
         let mut overrides = config::OVERRIDES.write();
@@ -782,6 +784,45 @@ fn main_process() -> i32 {
             .map(|s| config::SampleFormat::from_name(s).unwrap());
     }
 
+    let statefilename = matches.value_of("statefile").map(|path| path.to_string());
+    let state = if let Some(filename) = statefilename {
+        statefile::load_state(&filename)
+    } else {
+        None
+    };
+    println!("{state:?}");
+
+    let initial_volume = matches
+        .value_of("gain")
+        .map(|s| s.parse::<f32>().unwrap())
+        .unwrap_or(ProcessingParameters::DEFAULT_VOLUME);
+
+    let initial_mute = matches.is_present("mute");
+    let initial_mutes = if let Some(s) = &state {
+        s.mute
+    } else {
+        [
+            initial_mute,
+            initial_mute,
+            initial_mute,
+            initial_mute,
+            initial_mute,
+        ]
+    };
+    let initial_volumes = if let Some(s) = &state {
+        s.volume
+    } else {
+        [
+            initial_volume,
+            initial_volume,
+            initial_volume,
+            initial_volume,
+            initial_volume,
+        ]
+    };
+    println!("{initial_mutes:?}");
+    println!("{initial_volumes:?}");
+
     debug!("Read config file {:?}", configname);
 
     if matches.is_present("check") {
@@ -798,8 +839,14 @@ fn main_process() -> i32 {
         }
     }
 
+    if configname.is_none() {
+        if let Some(s) = &state {
+            configname = s.config_path.clone();
+        }
+    }
+
     let configuration = match &configname {
-        Some(path) => match config::load_validate_config(&path.clone()) {
+        Some(path) => match config::load_validate_config(path) {
             Ok(conf) => {
                 debug!("Config is valid");
                 Some(conf)
@@ -834,7 +881,7 @@ fn main_process() -> i32 {
         signal_rms: countertimer::ValueHistory::new(1024, 2),
         signal_peak: countertimer::ValueHistory::new(1024, 2),
     }));
-    let processing_params = Arc::new(ProcessingParameters::new(initial_volume, initial_mute));
+    let processing_params = Arc::new(ProcessingParameters::new(&initial_volumes, &initial_mutes));
     let processing_status = Arc::new(RwLock::new(ProcessingStatus {
         stop_reason: StopReason::None,
     }));

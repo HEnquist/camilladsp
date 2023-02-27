@@ -112,6 +112,7 @@ pub mod processing;
 pub mod pulsedevice;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
+pub mod statefile;
 #[cfg(target_os = "windows")]
 pub mod wasapidevice;
 
@@ -196,29 +197,28 @@ impl ProcessingParameters {
     pub const DEFAULT_VOLUME: f32 = 0.0;
     pub const DEFAULT_MUTE: bool = false;
 
-    pub fn new(initial_volume: f32, initial_mute: bool) -> Self {
-        let default_volume = Self::DEFAULT_VOLUME.to_bits();
+    pub fn new(initial_volumes: &[f32; 5], initial_mutes: &[bool; 5]) -> Self {
         Self {
             target_volume: [
-                AtomicU32::new(initial_volume.to_bits()),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
+                AtomicU32::new(initial_volumes[0].to_bits()),
+                AtomicU32::new(initial_volumes[1].to_bits()),
+                AtomicU32::new(initial_volumes[2].to_bits()),
+                AtomicU32::new(initial_volumes[3].to_bits()),
+                AtomicU32::new(initial_volumes[4].to_bits()),
             ],
             current_volume: [
-                AtomicU32::new(initial_volume.to_bits()),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
+                AtomicU32::new(initial_volumes[0].to_bits()),
+                AtomicU32::new(initial_volumes[1].to_bits()),
+                AtomicU32::new(initial_volumes[2].to_bits()),
+                AtomicU32::new(initial_volumes[3].to_bits()),
+                AtomicU32::new(initial_volumes[4].to_bits()),
             ],
             mute: [
-                AtomicBool::new(initial_mute),
-                AtomicBool::new(Self::DEFAULT_MUTE),
-                AtomicBool::new(Self::DEFAULT_MUTE),
-                AtomicBool::new(Self::DEFAULT_MUTE),
-                AtomicBool::new(Self::DEFAULT_MUTE),
+                AtomicBool::new(initial_mutes[0]),
+                AtomicBool::new(initial_mutes[1]),
+                AtomicBool::new(initial_mutes[2]),
+                AtomicBool::new(initial_mutes[3]),
+                AtomicBool::new(initial_mutes[4]),
             ],
         }
     }
@@ -254,7 +254,22 @@ impl ProcessingParameters {
 
 impl Default for ProcessingParameters {
     fn default() -> Self {
-        Self::new(Self::DEFAULT_VOLUME, Self::DEFAULT_MUTE)
+        Self::new(
+            &[
+                Self::DEFAULT_VOLUME,
+                Self::DEFAULT_VOLUME,
+                Self::DEFAULT_VOLUME,
+                Self::DEFAULT_VOLUME,
+                Self::DEFAULT_VOLUME,
+            ],
+            &[
+                Self::DEFAULT_MUTE,
+                Self::DEFAULT_MUTE,
+                Self::DEFAULT_MUTE,
+                Self::DEFAULT_MUTE,
+                Self::DEFAULT_MUTE,
+            ],
+        )
     }
 }
 
