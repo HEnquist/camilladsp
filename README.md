@@ -359,6 +359,7 @@ FLAGS:
     -w, --wait       Wait for config from websocket
 
 OPTIONS:
+    -s, --statefile <statefile>            Use the given file to persist the state
     -o, --logfile <logfile>                Write logs to file
     -l, --loglevel <loglevel>              Set log level [possible values: trace, debug, info, warn, error, off]
     -a, --address <address>                IP address to bind websocket server to
@@ -384,6 +385,14 @@ If the `--check` flag is given, the program will exit after checking the configu
 The default logging setting prints messages of levels "error", "warn" and "info". This can be changed with the `loglevel` option. Setting this to for example `warn` will print messages of level `warn` and above, but suppress the lower levels of `info`, `debug` and `trace`. Alternatively, the log level can be changed with the verbosity flag. By passing the verbosity flag once, `-v`, `debug` messages are enabled. If it's given twice, `-vv`, it also prints `trace` messages.
 
 The log messages are normally written to the terminal via stderr, but they can instead be written to a file by giving the `--logfile` option. The argument should be the path to the logfile. If this file is not writable, CamillaDSP will panic and exit. 
+
+### Persistent storage of state
+
+The `--statefile` option is used to give a path to a file where CamillaDSP will save the config file path, and the volume and mute settings.
+On startup, these values will be read from the statefile.
+The values in the file will then be kept updated whenever they change.
+If the `configfile` argument is given, then this will be used instead of the value from the statefile.
+Similarly, the `--gain` and `--mute` options also override the values in the statefile.
 
 ### Websocket
 

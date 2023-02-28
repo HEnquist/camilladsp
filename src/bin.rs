@@ -54,8 +54,8 @@ use std::net::IpAddr;
 
 use camillalib::{
     list_supported_devices, CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus,
-    ProcessingParameters, ProcessingState, ProcessingStatus, StatusMessage, StatusStructs,
-    StopReason, SharedConfigs,
+    ProcessingParameters, ProcessingState, ProcessingStatus, SharedConfigs, StatusMessage,
+    StatusStructs, StopReason,
 };
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
@@ -783,8 +783,8 @@ fn main_process() -> i32 {
     }
 
     let statefilename = matches.value_of("statefile").map(|path| path.to_string());
-    let state = if let Some(filename) = statefilename {
-        statefile::load_state(&filename)
+    let state = if let Some(filename) = &statefilename {
+        statefile::load_state(filename)
     } else {
         None
     };
@@ -898,6 +898,11 @@ fn main_process() -> i32 {
 
     #[cfg(feature = "websocket")]
     {
+        let (tx_state, rx_state) = mpsc::sync_channel(1);
+
+        let processing_params_clone = processing_params.clone();
+        let active_config_path_clone = active_config_path.clone();
+
         if let Some(port_str) = matches.value_of("port") {
             let serveraddress = matches.value_of("address").unwrap_or("127.0.0.1");
             let serverport = port_str.parse::<usize>().unwrap();
@@ -912,6 +917,7 @@ fn main_process() -> i32 {
                 playback_status,
                 processing_params,
                 processing_status,
+                state_change_notify: tx_state,
             };
             let server_params = socketserver::ServerParameters {
                 port: serverport,
@@ -922,6 +928,25 @@ fn main_process() -> i32 {
                 cert_pass: matches.value_of("pass"),
             };
             socketserver::start_server(server_params, shared_data);
+        }
+
+        if let Some(fname) = &statefilename {
+            let fname = fname.clone();
+
+            thread::spawn(move || loop {
+                thread::sleep(Duration::from_millis(1000));
+                match rx_state.recv() {
+                    Ok(()) => {
+                        debug!("saving state to {}", &fname);
+                        statefile::save_state(
+                            &fname,
+                            &active_config_path_clone,
+                            &processing_params_clone,
+                        );
+                    }
+                    Err(_) => break,
+                }
+            });
         }
     }
 

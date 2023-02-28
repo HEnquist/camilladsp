@@ -250,6 +250,26 @@ impl ProcessingParameters {
     pub fn toggle_mute(&self, fader: usize) -> bool {
         self.mute[fader].fetch_xor(true, Ordering::Relaxed)
     }
+
+    pub fn volumes(&self) -> [f32; Self::NUM_FADERS] {
+        [
+            f32::from_bits(self.target_volume[0].load(Ordering::Relaxed)),
+            f32::from_bits(self.target_volume[1].load(Ordering::Relaxed)),
+            f32::from_bits(self.target_volume[2].load(Ordering::Relaxed)),
+            f32::from_bits(self.target_volume[3].load(Ordering::Relaxed)),
+            f32::from_bits(self.target_volume[4].load(Ordering::Relaxed)),
+        ]
+    }
+
+    pub fn mutes(&self) -> [bool; Self::NUM_FADERS] {
+        [
+            self.mute[0].load(Ordering::Relaxed),
+            self.mute[1].load(Ordering::Relaxed),
+            self.mute[2].load(Ordering::Relaxed),
+            self.mute[3].load(Ordering::Relaxed),
+            self.mute[4].load(Ordering::Relaxed),
+        ]
+    }
 }
 
 impl Default for ProcessingParameters {

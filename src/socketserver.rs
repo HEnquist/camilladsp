@@ -9,6 +9,7 @@ use std::fs::File;
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -38,6 +39,7 @@ pub struct SharedData {
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
     pub processing_params: Arc<ProcessingParameters>,
     pub processing_status: Arc<RwLock<ProcessingStatus>>,
+    pub state_change_notify: mpsc::SyncSender<()>,
 }
 
 #[derive(Debug, Clone)]
@@ -764,6 +766,10 @@ fn handle_command(
             shared_data_inst
                 .processing_params
                 .set_target_volume(0, new_vol);
+            shared_data_inst
+                .state_change_notify
+                .try_send(())
+                .unwrap_or(());
             Some(WsReply::SetVolume {
                 result: WsResult::Ok,
             })
@@ -775,6 +781,10 @@ fn handle_command(
             shared_data_inst
                 .processing_params
                 .set_target_volume(0, tempvol);
+            shared_data_inst
+                .state_change_notify
+                .try_send(())
+                .unwrap_or(());
             Some(WsReply::AdjustVolume {
                 result: WsResult::Ok,
                 value: tempvol,
@@ -786,12 +796,20 @@ fn handle_command(
         }),
         WsCommand::SetMute(mute) => {
             shared_data_inst.processing_params.set_mute(0, mute);
+            shared_data_inst
+                .state_change_notify
+                .try_send(())
+                .unwrap_or(());
             Some(WsReply::SetMute {
                 result: WsResult::Ok,
             })
         }
         WsCommand::ToggleMute => {
             let tempmute = shared_data_inst.processing_params.toggle_mute(0);
+            shared_data_inst
+                .state_change_notify
+                .try_send(())
+                .unwrap_or(());
             Some(WsReply::ToggleMute {
                 result: WsResult::Ok,
                 value: !tempmute,
@@ -822,6 +840,10 @@ fn handle_command(
             shared_data_inst
                 .processing_params
                 .set_target_volume(ctrl, new_vol);
+            shared_data_inst
+                .state_change_notify
+                .try_send(())
+                .unwrap_or(());
             Some(WsReply::SetFaderVolume {
                 result: WsResult::Ok,
                 control: ctrl,
@@ -841,6 +863,10 @@ fn handle_command(
             shared_data_inst
                 .processing_params
                 .set_current_volume(ctrl, new_vol);
+            shared_data_inst
+                .state_change_notify
+                .try_send(())
+                .unwrap_or(());
             Some(WsReply::SetFaderExternalVolume {
                 result: WsResult::Ok,
                 control: ctrl,
@@ -860,6 +886,10 @@ fn handle_command(
             shared_data_inst
                 .processing_params
                 .set_target_volume(ctrl, tempvol);
+            shared_data_inst
+                .state_change_notify
+                .try_send(())
+                .unwrap_or(());
             Some(WsReply::AdjustFaderVolume {
                 result: WsResult::Ok,
                 value: tempvol,
@@ -888,6 +918,10 @@ fn handle_command(
                 });
             }
             shared_data_inst.processing_params.set_mute(ctrl, mute);
+            shared_data_inst
+                .state_change_notify
+                .try_send(())
+                .unwrap_or(());
             Some(WsReply::SetFaderMute {
                 result: WsResult::Ok,
                 control: ctrl,
@@ -902,6 +936,10 @@ fn handle_command(
                 });
             }
             let tempmute = shared_data_inst.processing_params.toggle_mute(ctrl);
+            shared_data_inst
+                .state_change_notify
+                .try_send(())
+                .unwrap_or(());
             Some(WsReply::ToggleFaderMute {
                 result: WsResult::Ok,
                 value: !tempmute,
@@ -956,6 +994,10 @@ fn handle_command(
         WsCommand::SetConfigName(path) => match config::load_validate_config(&path) {
             Ok(_) => {
                 *shared_data_inst.active_config_path.lock() = Some(path.clone());
+                shared_data_inst
+                    .state_change_notify
+                    .try_send(())
+                    .unwrap_or(());
                 Some(WsReply::SetConfigName {
                     result: WsResult::Ok,
                 })
