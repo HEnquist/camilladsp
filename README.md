@@ -10,7 +10,39 @@ Audio data is captured from a capture device and sent to a playback device. Alsa
 The processing pipeline consists of any number of filters and mixers. Mixers are used to route audio between channels and to change the number of channels in the stream. Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT. A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples. A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
 The full configuration is given in a yaml file.
 
-### Table of Contents
+# Disclaimer
+
+CamillaDSP is distributed under the [GNU GENERAL PUBLIC LICENSE Version 3](LICENSE.txt).
+
+This includes the following disclaimer: 
+>  15. Disclaimer of Warranty.
+>
+>  THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY
+>APPLICABLE LAW.  EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT
+>HOLDERS AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS" WITHOUT WARRANTY
+>OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
+>THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+>PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
+>IS WITH YOU.  SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF
+>ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
+>
+>  16. Limitation of Liability.
+>
+>  IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
+>WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
+>THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY
+>GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE
+>USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED TO LOSS OF
+>DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD
+>PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER PROGRAMS),
+>EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
+>SUCH DAMAGES.
+
+In short this means that the user is responsible for any damage resulting from using this program.
+It does not matter if the damage is caused by incorrect usage or a bug in the software. 
+
+
+# Table of Contents
 **[Introduction](#introduction)**
 - **[Background](#background)**
 - **[How it works](#how-it-works)**
@@ -393,6 +425,10 @@ On startup, these values will be read from the statefile.
 The values in the file will then be kept updated whenever they change.
 If the `configfile` argument is given, then this will be used instead of the value from the statefile.
 Similarly, the `--gain` and `--mute` options also override the values in the statefile.
+
+**Use this feature with caution! The volume setting given in the statefile will be applied immediately when CamillaDSP starts processing.**
+In systems that have a gain structure such that a too high volume setting can damage equipment or ears,
+it is recommended to always use the `--gain`  option to set the volume to start at a safe value.
 
 ### Websocket
 
