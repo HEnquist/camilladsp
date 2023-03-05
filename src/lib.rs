@@ -44,7 +44,7 @@ extern crate wasapi;
 #[macro_use]
 extern crate log;
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 use std::error;
 use std::fmt;
@@ -112,6 +112,7 @@ pub mod processing;
 pub mod pulsedevice;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
+pub mod statefile;
 #[cfg(target_os = "windows")]
 pub mod wasapidevice;
 
@@ -196,29 +197,28 @@ impl ProcessingParameters {
     pub const DEFAULT_VOLUME: f32 = 0.0;
     pub const DEFAULT_MUTE: bool = false;
 
-    pub fn new(initial_volume: f32, initial_mute: bool) -> Self {
-        let default_volume = Self::DEFAULT_VOLUME.to_bits();
+    pub fn new(initial_volumes: &[f32; 5], initial_mutes: &[bool; 5]) -> Self {
         Self {
             target_volume: [
-                AtomicU32::new(initial_volume.to_bits()),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
+                AtomicU32::new(initial_volumes[0].to_bits()),
+                AtomicU32::new(initial_volumes[1].to_bits()),
+                AtomicU32::new(initial_volumes[2].to_bits()),
+                AtomicU32::new(initial_volumes[3].to_bits()),
+                AtomicU32::new(initial_volumes[4].to_bits()),
             ],
             current_volume: [
-                AtomicU32::new(initial_volume.to_bits()),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
-                AtomicU32::new(default_volume),
+                AtomicU32::new(initial_volumes[0].to_bits()),
+                AtomicU32::new(initial_volumes[1].to_bits()),
+                AtomicU32::new(initial_volumes[2].to_bits()),
+                AtomicU32::new(initial_volumes[3].to_bits()),
+                AtomicU32::new(initial_volumes[4].to_bits()),
             ],
             mute: [
-                AtomicBool::new(initial_mute),
-                AtomicBool::new(Self::DEFAULT_MUTE),
-                AtomicBool::new(Self::DEFAULT_MUTE),
-                AtomicBool::new(Self::DEFAULT_MUTE),
-                AtomicBool::new(Self::DEFAULT_MUTE),
+                AtomicBool::new(initial_mutes[0]),
+                AtomicBool::new(initial_mutes[1]),
+                AtomicBool::new(initial_mutes[2]),
+                AtomicBool::new(initial_mutes[3]),
+                AtomicBool::new(initial_mutes[4]),
             ],
         }
     }
@@ -250,11 +250,46 @@ impl ProcessingParameters {
     pub fn toggle_mute(&self, fader: usize) -> bool {
         self.mute[fader].fetch_xor(true, Ordering::Relaxed)
     }
+
+    pub fn volumes(&self) -> [f32; Self::NUM_FADERS] {
+        [
+            f32::from_bits(self.target_volume[0].load(Ordering::Relaxed)),
+            f32::from_bits(self.target_volume[1].load(Ordering::Relaxed)),
+            f32::from_bits(self.target_volume[2].load(Ordering::Relaxed)),
+            f32::from_bits(self.target_volume[3].load(Ordering::Relaxed)),
+            f32::from_bits(self.target_volume[4].load(Ordering::Relaxed)),
+        ]
+    }
+
+    pub fn mutes(&self) -> [bool; Self::NUM_FADERS] {
+        [
+            self.mute[0].load(Ordering::Relaxed),
+            self.mute[1].load(Ordering::Relaxed),
+            self.mute[2].load(Ordering::Relaxed),
+            self.mute[3].load(Ordering::Relaxed),
+            self.mute[4].load(Ordering::Relaxed),
+        ]
+    }
 }
 
 impl Default for ProcessingParameters {
     fn default() -> Self {
-        Self::new(Self::DEFAULT_VOLUME, Self::DEFAULT_MUTE)
+        Self::new(
+            &[
+                Self::DEFAULT_VOLUME,
+                Self::DEFAULT_VOLUME,
+                Self::DEFAULT_VOLUME,
+                Self::DEFAULT_VOLUME,
+                Self::DEFAULT_VOLUME,
+            ],
+            &[
+                Self::DEFAULT_MUTE,
+                Self::DEFAULT_MUTE,
+                Self::DEFAULT_MUTE,
+                Self::DEFAULT_MUTE,
+                Self::DEFAULT_MUTE,
+            ],
+        )
     }
 }
 
@@ -280,6 +315,12 @@ pub struct StatusStructs {
     pub playback: Arc<RwLock<PlaybackStatus>>,
     pub processing: Arc<ProcessingParameters>,
     pub status: Arc<RwLock<ProcessingStatus>>,
+}
+
+pub struct SharedConfigs {
+    pub active: Arc<Mutex<Option<config::Configuration>>>,
+    pub previous: Arc<Mutex<Option<config::Configuration>>>,
+    pub new: Arc<Mutex<Option<config::Configuration>>>,
 }
 
 impl fmt::Display for ProcessingState {

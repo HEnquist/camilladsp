@@ -48,13 +48,14 @@ use camillalib::countertimer;
 use camillalib::processing;
 #[cfg(feature = "websocket")]
 use camillalib::socketserver;
+use camillalib::statefile;
 #[cfg(feature = "websocket")]
 use std::net::IpAddr;
 
 use camillalib::{
     list_supported_devices, CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus,
-    ProcessingParameters, ProcessingState, ProcessingStatus, StatusMessage, StatusStructs,
-    StopReason,
+    ProcessingParameters, ProcessingState, ProcessingStatus, SharedConfigs, StatusMessage,
+    StatusStructs, StopReason,
 };
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
@@ -155,14 +156,12 @@ fn new_config(
 fn run(
     signal_reload: Arc<AtomicBool>,
     signal_exit: Arc<AtomicUsize>,
-    active_config_shared: Arc<Mutex<Option<config::Configuration>>>,
+    shared_configs: SharedConfigs,
     config_path: Arc<Mutex<Option<String>>>,
-    new_config_shared: Arc<Mutex<Option<config::Configuration>>>,
-    prev_config_shared: Arc<Mutex<Option<config::Configuration>>>,
     status_structs: StatusStructs,
 ) -> Res<ExitState> {
     let mut is_starting = true;
-    let conf = match new_config_shared.lock().take() {
+    let conf = match shared_configs.new.lock().take() {
         Some(cfg) => cfg,
         None => {
             error!("Tried to start without config!");
@@ -190,7 +189,7 @@ fn run(
 
     let mut active_config = conf;
     //let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
-    *active_config_shared.lock() = Some(active_config.clone());
+    *shared_configs.active.lock() = Some(active_config.clone());
 
     // Processing thread
     processing::run_processing(
@@ -244,7 +243,7 @@ fn run(
             .is_ok()
         {
             debug!("Reloading configuration...");
-            let new_config = new_config(&config_path, &new_config_shared);
+            let new_config = new_config(&config_path, &shared_configs.new);
 
             match new_config {
                 Ok(conf) => {
@@ -257,8 +256,8 @@ fn run(
                             active_config = conf;
                             {
                                 // acquire both locks first to start a "transaction"
-                                let mut act_cfg_shared = active_config_shared.lock();
-                                let mut new_cfg_shared = new_config_shared.lock();
+                                let mut act_cfg_shared = shared_configs.active.lock();
+                                let mut new_cfg_shared = shared_configs.new.lock();
                                 *act_cfg_shared = Some(active_config.clone());
                                 *new_cfg_shared = None;
                             }
@@ -276,13 +275,13 @@ fn run(
                             pb_handle.join().unwrap();
                             trace!("Wait for cap..");
                             cap_handle.join().unwrap();
-                            *new_config_shared.lock() = Some(conf);
+                            *shared_configs.new.lock() = Some(conf);
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
                         config::ConfigChange::None => {
                             debug!("No changes in config.");
-                            *new_config_shared.lock() = None;
+                            *shared_configs.new.lock() = None;
                         }
                     };
                 }
@@ -303,7 +302,7 @@ fn run(
                     pb_handle.join().unwrap();
                     trace!("Wait for cap..");
                     cap_handle.join().unwrap();
-                    *prev_config_shared.lock() = Some(active_config);
+                    *shared_configs.previous.lock() = Some(active_config);
                     trace!("All threads stopped, exiting");
                     return Ok(ExitState::Exit);
                 }
@@ -318,8 +317,8 @@ fn run(
                     trace!("Wait for cap..");
                     cap_handle.join().unwrap();
                     {
-                        let mut new_cfg_shared = new_config_shared.lock();
-                        let mut prev_cfg_shared = prev_config_shared.lock();
+                        let mut new_cfg_shared = shared_configs.new.lock();
+                        let mut prev_cfg_shared = shared_configs.previous.lock();
                         *new_cfg_shared = None;
                         *prev_cfg_shared = Some(active_config);
                     }
@@ -365,8 +364,8 @@ fn run(
                     status_structs.status.write().stop_reason = StopReason::PlaybackError(message);
                     cap_handle.join().unwrap();
                     {
-                        let mut new_cfg_shared = new_config_shared.lock();
-                        let mut prev_cfg_shared = prev_config_shared.lock();
+                        let mut new_cfg_shared = shared_configs.new.lock();
+                        let mut prev_cfg_shared = shared_configs.previous.lock();
                         *new_cfg_shared = None;
                         *prev_cfg_shared = Some(active_config);
                     }
@@ -383,8 +382,8 @@ fn run(
                     status_structs.status.write().stop_reason = StopReason::CaptureError(message);
                     pb_handle.join().unwrap();
                     {
-                        let mut new_cfg_shared = new_config_shared.lock();
-                        let mut prev_cfg_shared = prev_config_shared.lock();
+                        let mut new_cfg_shared = shared_configs.new.lock();
+                        let mut prev_cfg_shared = shared_configs.previous.lock();
                         *new_cfg_shared = None;
                         *prev_cfg_shared = Some(active_config);
                     }
@@ -405,8 +404,8 @@ fn run(
                         StopReason::PlaybackFormatChange(rate);
                     cap_handle.join().unwrap();
                     {
-                        let mut new_cfg_shared = new_config_shared.lock();
-                        let mut prev_cfg_shared = prev_config_shared.lock();
+                        let mut new_cfg_shared = shared_configs.new.lock();
+                        let mut prev_cfg_shared = shared_configs.previous.lock();
                         *new_cfg_shared = None;
                         *prev_cfg_shared = Some(active_config);
                     }
@@ -424,8 +423,8 @@ fn run(
                         StopReason::CaptureFormatChange(rate);
                     pb_handle.join().unwrap();
                     {
-                        let mut new_cfg_shared = new_config_shared.lock();
-                        let mut prev_cfg_shared = prev_config_shared.lock();
+                        let mut new_cfg_shared = shared_configs.new.lock();
+                        let mut prev_cfg_shared = shared_configs.previous.lock();
                         *new_cfg_shared = None;
                         *prev_cfg_shared = Some(active_config);
                     }
@@ -440,7 +439,7 @@ fn run(
                             RwLockUpgradableReadGuard::upgrade(stat).stop_reason = StopReason::Done;
                         }
                     }
-                    *prev_config_shared.lock() = Some(active_config);
+                    *shared_configs.previous.lock() = Some(active_config);
                     trace!("All threads stopped, returning");
                     return Ok(ExitState::Restart);
                 }
@@ -522,7 +521,15 @@ fn main_process() -> i32 {
                 .help("The configuration file to use")
                 .index(1)
                 //.required(true),
-                .required_unless("wait"),
+                .required_unless_one(&["wait", "statefile"]),
+        )
+        .arg(
+            Arg::with_name("statefile")
+                .help("Use the given file to persist the state")
+                .short("s")
+                .long("statefile")
+                .takes_value(true)
+                .display_order(2),
         )
         .arg(
             Arg::with_name("check")
@@ -757,14 +764,7 @@ fn main_process() -> i32 {
     #[cfg(target_os = "windows")]
     wasapi::initialize_mta().unwrap();
 
-    let configname = matches.value_of("configfile").map(|path| path.to_string());
-
-    let initial_volume = matches
-        .value_of("gain")
-        .map(|s| s.parse::<f32>().unwrap())
-        .unwrap_or(ProcessingParameters::DEFAULT_VOLUME);
-
-    let initial_mute = matches.is_present("mute");
+    let mut configname = matches.value_of("configfile").map(|path| path.to_string());
 
     {
         let mut overrides = config::OVERRIDES.write();
@@ -782,6 +782,45 @@ fn main_process() -> i32 {
             .map(|s| config::SampleFormat::from_name(s).unwrap());
     }
 
+    let statefilename = matches.value_of("statefile").map(|path| path.to_string());
+    let state = if let Some(filename) = &statefilename {
+        statefile::load_state(filename)
+    } else {
+        None
+    };
+    println!("{state:?}");
+
+    let initial_volume = matches
+        .value_of("gain")
+        .map(|s| s.parse::<f32>().unwrap())
+        .unwrap_or(ProcessingParameters::DEFAULT_VOLUME);
+
+    let initial_mute = matches.is_present("mute");
+    let initial_mutes = if let Some(s) = &state {
+        s.mute
+    } else {
+        [
+            initial_mute,
+            initial_mute,
+            initial_mute,
+            initial_mute,
+            initial_mute,
+        ]
+    };
+    let initial_volumes = if let Some(s) = &state {
+        s.volume
+    } else {
+        [
+            initial_volume,
+            initial_volume,
+            initial_volume,
+            initial_volume,
+            initial_volume,
+        ]
+    };
+    println!("{initial_mutes:?}");
+    println!("{initial_volumes:?}");
+
     debug!("Read config file {:?}", configname);
 
     if matches.is_present("check") {
@@ -798,8 +837,14 @@ fn main_process() -> i32 {
         }
     }
 
+    if configname.is_none() {
+        if let Some(s) = &state {
+            configname = s.config_path.clone();
+        }
+    }
+
     let configuration = match &configname {
-        Some(path) => match config::load_validate_config(&path.clone()) {
+        Some(path) => match config::load_validate_config(path) {
             Ok(conf) => {
                 debug!("Config is valid");
                 Some(conf)
@@ -834,7 +879,7 @@ fn main_process() -> i32 {
         signal_rms: countertimer::ValueHistory::new(1024, 2),
         signal_peak: countertimer::ValueHistory::new(1024, 2),
     }));
-    let processing_params = Arc::new(ProcessingParameters::new(initial_volume, initial_mute));
+    let processing_params = Arc::new(ProcessingParameters::new(&initial_volumes, &initial_mutes));
     let processing_status = Arc::new(RwLock::new(ProcessingStatus {
         stop_reason: StopReason::None,
     }));
@@ -853,6 +898,11 @@ fn main_process() -> i32 {
 
     #[cfg(feature = "websocket")]
     {
+        let (tx_state, rx_state) = mpsc::sync_channel(1);
+
+        let processing_params_clone = processing_params.clone();
+        let active_config_path_clone = active_config_path.clone();
+
         if let Some(port_str) = matches.value_of("port") {
             let serveraddress = matches.value_of("address").unwrap_or("127.0.0.1");
             let serverport = port_str.parse::<usize>().unwrap();
@@ -867,6 +917,7 @@ fn main_process() -> i32 {
                 playback_status,
                 processing_params,
                 processing_status,
+                state_change_notify: tx_state,
             };
             let server_params = socketserver::ServerParameters {
                 port: serverport,
@@ -877,6 +928,25 @@ fn main_process() -> i32 {
                 cert_pass: matches.value_of("pass"),
             };
             socketserver::start_server(server_params, shared_data);
+        }
+
+        if let Some(fname) = &statefilename {
+            let fname = fname.clone();
+
+            thread::spawn(move || loop {
+                thread::sleep(Duration::from_millis(1000));
+                match rx_state.recv() {
+                    Ok(()) => {
+                        debug!("saving state to {}", &fname);
+                        statefile::save_state(
+                            &fname,
+                            &active_config_path_clone,
+                            &processing_params_clone,
+                        );
+                    }
+                    Err(_) => break,
+                }
+            });
         }
     }
 
@@ -911,15 +981,18 @@ fn main_process() -> i32 {
             }
             thread::sleep(DELAY);
         }
+        let shared_configs = SharedConfigs {
+            active: active_config.clone(),
+            new: next_config.clone(),
+            previous: previous_config.clone(),
+        };
 
         debug!("Config ready");
         let exitstatus = run(
             signal_reload.clone(),
             signal_exit.clone(),
-            active_config.clone(),
+            shared_configs,
             active_config_path.clone(),
-            next_config.clone(),
-            previous_config.clone(),
             status_structs.clone(),
         );
 
