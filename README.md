@@ -1,13 +1,19 @@
 # CamillaDSP v2.0
 ![CI test and lint](https://github.com/HEnquist/camilladsp/workflows/CI%20test%20and%20lint/badge.svg)
 
-A tool to create audio processing pipelines for applications such as active crossovers or room correction. It is written in Rust to benefit from the safety and elegant handling of threading that this language provides. 
+A tool to create audio processing pipelines for applications such as active crossovers or room correction.
+It is written in Rust to benefit from the safety and elegant handling of threading that this language provides. 
 
 Supported platforms: Linux, macOS, Windows.
 
-Audio data is captured from a capture device and sent to a playback device. Alsa, PulseAudio, Jack, Wasapi and CoreAudio are currently supported for both capture and playback.
+Audio data is captured from a capture device and sent to a playback device.
+Alsa, PulseAudio, Jack, Wasapi and CoreAudio are currently supported for both capture and playback.
 
-The processing pipeline consists of any number of filters and mixers. Mixers are used to route audio between channels and to change the number of channels in the stream. Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT. A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples. A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
+The processing pipeline consists of any number of filters and mixers.
+Mixers are used to route audio between channels and to change the number of channels in the stream.
+Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT.
+A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples.
+A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
 The full configuration is given in a yaml file.
 
 # Disclaimer
@@ -39,8 +45,7 @@ This includes the following disclaimer:
 >SUCH DAMAGES.
 
 In short this means that the user is responsible for any damage resulting from using this program.
-It does not matter if the damage is caused by incorrect usage or a bug in the software. 
-
+It does not matter if the damage is caused by incorrect usage or a bug in the software.
 
 # Table of Contents
 **[Introduction](#introduction)**
@@ -114,7 +119,9 @@ It does not matter if the damage is caused by incorrect usage or a bug in the so
 # Introduction
 
 ## Background
-The purpose of CamillaDSP is to enable audio processing with combinations of FIR and IIR filters. This functionality is available in EqualizerAPO, but for Windows only. For Linux the best known FIR filter engine is probably BruteFIR, which works very well but doesn't support IIR filters. 
+The purpose of CamillaDSP is to enable audio processing with combinations of FIR and IIR filters.
+This functionality is available in EqualizerAPO, but for Windows only.
+For Linux the best known FIR filter engine is probably BruteFIR, which works very well but doesn't support IIR filters. 
 The goal of CamillaDSP is to provide both FIR and IIR filtering for Linux, Windows and macOS, to be stable, fast and flexible, and be easy to use and configure.  
 
 * BruteFIR: https://torger.se/anders/brutefir.html
@@ -122,29 +129,48 @@ The goal of CamillaDSP is to provide both FIR and IIR filtering for Linux, Windo
 * The IIR filtering is heavily inspired by biquad-rs: https://github.com/korken89/biquad-rs 
 
 ## How it works
-The audio pipeline in CamillaDSP runs in three separate threads. One thread handles capturing audio, one handles the playback, and one does the processing in between.
-The capture thread passes audio to the processing thread via a message queue. Each message consists of a chunk of audio with a configurable size. The processing queue waits for audio messages, processes them in the order they arrive, and passes the processed audio via another message queue to the playback thread. There is also a supervisor thread for control.
+The audio pipeline in CamillaDSP runs in three separate threads.
+One thread handles capturing audio, one handles the playback, and one does the processing in between.
+The capture thread passes audio to the processing thread via a message queue.
+Each message consists of a chunk of audio with a configurable size.
+The processing queue waits for audio messages, processes them in the order they arrive,
+and passes the processed audio via another message queue to the playback thread.
+There is also a supervisor thread for control.
 This chart shows the most important parts:
 
 ![Overview](overview.png)
 
 ### Capture
-The capture thread reads a chunk samples from the audio device in the selected format. It then converts the samples to 64-bit floats (or optionally 32-bit). If resampling is enabled, the audio data is sent to the resampler. At the end, the chunk of samples is packed as a message that is then posted to the input queue of the processing thread. After this the capture thread returns to reading the next chunk of samples from the device.
+The capture thread reads a chunk samples from the audio device in the selected format.
+It then converts the samples to 64-bit floats (or optionally 32-bit).
+If resampling is enabled, the audio data is sent to the resampler.
+At the end, the chunk of samples is packed as a message that is then posted to the input queue of the processing thread.
+After this the capture thread returns to reading the next chunk of samples from the device.
 
 ### Processing
-The processing thread waits for audio chunk messages to arrive in the input queue. Once a message arrives, it's passed through all the defined filters and mixers of the pipeline. Once all processing is done, the audio data is posted to the input queue of the playback device.
+The processing thread waits for audio chunk messages to arrive in the input queue.
+Once a message arrives, it's passed through all the defined filters and mixers of the pipeline.
+Once all processing is done, the audio data is posted to the input queue of the playback device.
 
 ### Playback
-The playback thread simply waits for audio messages to appear in the queue. Once a message arrives, the audio data is converted to the right sample format for the device, and written to the playback device. The Alsa playback device supports monitoring the buffer level of the playback device. This is used to send requests for adjusting the capture speed to the supervisor thread, on a separate message channel.
+The playback thread simply waits for audio messages to appear in the queue.
+Once a message arrives, the audio data is converted to the right sample format for the device, and written to the playback device.
+The Alsa playback device supports monitoring the buffer level of the playback device.
+This is used to send requests for adjusting the capture speed to the supervisor thread, on a separate message channel.
 
 ### Supervisor
-The supervisor monitors all threads by listening to their status messages. The requests for capture rate adjust are passed on to the capture thread. It's also responsible for updating the configuration when requested to do so via the websocket server or a SIGHUP signal.
+The supervisor monitors all threads by listening to their status messages.
+The requests for capture rate adjust are passed on to the capture thread.
+It's also responsible for updating the configuration when requested to do so via the websocket server or a SIGHUP signal.
 
 ### Websocket server
-The websocket server launches a separate thread to handle each connected client. All commands to change the config are sent to the supervisor thread.
+The websocket server launches a separate thread to handle each connected client.
+All commands to change the config are sent to the supervisor thread.
 
 ## System requirements
-CamillaDSP runs on Linux, macOS and Windows. The exact system requirements are determined by the amount of processing the application requires, but even relatively weak CPUs like Intel Atom have much more processing power than most will need.
+CamillaDSP runs on Linux, macOS and Windows.
+The exact system requirements are determined by the amount of processing the application requires,
+but even relatively weak CPUs like Intel Atom have much more processing power than most will need.
 
 In general, a 64-bit CPU and OS will perform better.
 
@@ -176,7 +202,9 @@ Pre-built binaries are provided for both Intel and Apple Silicon
 
 
 ## Usage example: crossover for 2-way speakers
-A crossover must filter all sound being played on the system. This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device. CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
+A crossover must filter all sound being played on the system.
+This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device.
+CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
 
 See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
@@ -205,7 +233,10 @@ These projects are part of the CamillaDSP family:
 
 # Installing
 
-The easiest way to install CamillaDSP is to download a pre-built binary. Binaries for each release are available for the most common systems. See the ["Releases"](https://github.com/HEnquist/camilladsp/releases) page. To see the files click "Assets".
+The easiest way to install CamillaDSP is to download a pre-built binary.
+Binaries for each release are available for the most common systems.
+See the ["Releases"](https://github.com/HEnquist/camilladsp/releases) page.
+To see the files click "Assets".
 
 These are compressed files containing a single executable file that is ready to run. 
 
@@ -233,19 +264,33 @@ tar -xvf camilladsp-linux-amd64.tar.gz
 
 Use recent stable versions of rustc and cargo. The minimum rustc version is 1.61.0.
 
-The recommended way to install rustc and cargo is by using the "rustup" tool. This tool works on all supported platforms (Linux, macOS and Windows). Get it here: https://rustup.rs/
+The recommended way to install rustc and cargo is by using the "rustup" tool.
+This tool works on all supported platforms (Linux, macOS and Windows). Get it here: https://rustup.rs/
 
 For Windows you also need the "Build Tools for Visual Studio". Get them from here: https://aka.ms/buildtools
 
-When building on Linux the Alsa backend is always enabled. Similarly, building on Windows always enables the Wasapi backend. And building on macOS always enables the CoreAudio backend.
+When building on Linux the Alsa backend is always enabled.
+Similarly, building on Windows always enables the Wasapi backend.
+And building on macOS always enables the CoreAudio backend.
 
-By default both the PulseAudio and Jack backends are disabled, but they can be enabled if desired. Leaving them disabled also means that the corresponding system Jack/Pulse packages aren't needed.
+By default both the PulseAudio and Jack backends are disabled, but they can be enabled if desired.
+Leaving them disabled also means that the corresponding system Jack/Pulse packages aren't needed.
 
-By default the internal processing is done using 64-bit floats. There is a possibility to switch this to 32-bit floats. This might be useful for speeding up the processing when running on a 32-bit CPU (or a 64-bit CPU running in 32-bit mode), but the actual speed advantage has not been evaluated. Note that the reduction in precision increases the numerical noise.
+By default the internal processing is done using 64-bit floats.
+There is a possibility to switch this to 32-bit floats.
+This might be useful for speeding up the processing when running on a 32-bit CPU (or a 64-bit CPU running in 32-bit mode),
+but the actual speed advantage has not been evaluated.
+Note that the reduction in precision increases the numerical noise.
 
-CamillaDSP includes a Websocket server that can be used to pass commands to the running process. This feature is enabled by default, but can be left out. The feature name is "websocket". For usage see the section "Controlling via websocket".
+CamillaDSP includes a Websocket server that can be used to pass commands to the running process.
+This feature is enabled by default, but can be left out. The feature name is "websocket".
+For usage see the section "Controlling via websocket".
 
-The default FFT library is RustFFT, but it's also possible to use FFTW. This is enabled by the feature "FFTW". When the chunksize is a power of two, like 1024 or 4096, then FFTW and RustFFT are very similar in speed. But if the chunksize is a "strange" number like a large prime, then FFTW can be faster. FFTW is a much larger and more complicated library, so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT too slow.
+The default FFT library is RustFFT, but it's also possible to use FFTW.
+This is enabled by the feature "FFTW". When the chunksize is a power of two, like 1024 or 4096, then FFTW and RustFFT are very similar in speed.
+But if the chunksize is a "strange" number like a large prime, then FFTW can be faster.
+FFTW is a much larger and more complicated library,
+so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT too slow.
 
 ## Building in Linux with standard features
 - Install pkg-config (very likely already installed):
@@ -363,7 +408,11 @@ The command is simply:
 ```
 camilladsp /path/to/config.yml
 ```
-This starts the processing defined in the specified config file. The config is first parsed and checked for errors. This first checks that the YAML syntax is correct, and then checks that the configuration is complete and valid. When an error is found it displays an error message describing the problem. See more about the configuration file below.
+This starts the processing defined in the specified config file.
+The config is first parsed and checked for errors.
+This first checks that the YAML syntax is correct, and then checks that the configuration is complete and valid.
+When an error is found it displays an error message describing the problem.
+See more about the configuration file below.
 
 ## Command line options
 Starting with the --help flag prints a short help message:
@@ -410,13 +459,20 @@ ARGS:
 
 Most flags have a long and a short form. For example `--port 1234` and `-p1234` are equivalent.
 
-If the `--check` flag is given, the program will exit after checking the configuration file. Use this if you only want to verify that the configuration is ok, and not start any processing.
+If the `--check` flag is given, the program will exit after checking the configuration file.
+Use this if you only want to verify that the configuration is ok, and not start any processing.
 
 ### Logging
 
-The default logging setting prints messages of levels "error", "warn" and "info". This can be changed with the `loglevel` option. Setting this to for example `warn` will print messages of level `warn` and above, but suppress the lower levels of `info`, `debug` and `trace`. Alternatively, the log level can be changed with the verbosity flag. By passing the verbosity flag once, `-v`, `debug` messages are enabled. If it's given twice, `-vv`, it also prints `trace` messages.
+The default logging setting prints messages of levels "error", "warn" and "info".
+This can be changed with the `loglevel` option.
+Setting this to for example `warn` will print messages of level `warn` and above, but suppress the lower levels of `info`, `debug` and `trace`.
+Alternatively, the log level can be changed with the verbosity flag.
+By passing the verbosity flag once, `-v`, `debug` messages are enabled.
+If it's given twice, `-vv`, it also prints `trace` messages.
 
-The log messages are normally written to the terminal via stderr, but they can instead be written to a file by giving the `--logfile` option. The argument should be the path to the logfile. If this file is not writable, CamillaDSP will panic and exit. 
+The log messages are normally written to the terminal via stderr, but they can instead be written to a file by giving the `--logfile` option.
+The argument should be the path to the logfile. If this file is not writable, CamillaDSP will panic and exit. 
 
 ### Persistent storage of state
 
@@ -434,13 +490,28 @@ it is recommended to always use the `--gain`  option to set the volume to start 
 
 To enable the websocket server, provide a port number with the `--port` option. Leave it out, or give 0 to disable. 
 
-By default the websocket server binds to the address 127.0.0.1 which means it's only accessible locally (to clients running on the same machine). If it should be also available to remote machines, give the IP address of the interface where it should be available with the `--address` option. Giving 0.0.0.0 will bind to all interfaces. If CamillaDSP was built with the "secure-websocket" feature, it has two additional options `--cert` and `--pass`. These are used to provide an identity, to enable secure websocket connections. See the [websocket readme for more details.](./websocket.md)
+By default the websocket server binds to the address 127.0.0.1 which means it's only accessible locally (to clients running on the same machine).
+If it should be also available to remote machines, give the IP address of the interface where it should be available with the `--address` option.
+Giving 0.0.0.0 will bind to all interfaces.
+If CamillaDSP was built with the "secure-websocket" feature, it has two additional options `--cert` and `--pass`.
+These are used to provide an identity, to enable secure websocket connections.
+See the [websocket readme for more details.](./websocket.md)
 
-If the "wait" flag, `--wait` is given, CamillaDSP will start the websocket server and wait for a configuration to be uploaded. Then the config file argument must be left out.
+If the "wait" flag, `--wait` is given, CamillaDSP will start the websocket server and wait for a configuration to be uploaded.
+Then the config file argument must be left out.
 
 ### Overriding config values
 
-There are a few options to override values in the loaded config file. Giving these options means the provided values will be used instead of the values in any loaded configuration. To change the values, CamillaDSP has to be restarted. If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` parameter. But if resampling is enabled, it will instead change the `capture_samplerate` parameter. If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled. When overriding the samplerate, two other parameters are scaled as well. Firstly, the `chunksize` is multiplied or divided by integer factors to try to keep the pipeline running at a constant number of chunks per second. Secondly, the value of `extra_samples` is scaled to give the extra samples the same duration at the new samplerate. But if the `extra_samples` override is used, the given value is used without scaling it. 
+There are a few options to override values in the loaded config file.
+Giving these options means the provided values will be used instead of the values in any loaded configuration.
+To change the values, CamillaDSP has to be restarted.
+If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` parameter.
+But if resampling is enabled, it will instead change the `capture_samplerate` parameter.
+If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled.
+When overriding the samplerate, two other parameters are scaled as well.
+Firstly, the `chunksize` is multiplied or divided by integer factors to try to keep the pipeline running at a constant number of chunks per second.
+Secondly, the value of `extra_samples` is scaled to give the extra samples the same duration at the new samplerate.
+But if the `extra_samples` override is used, the given value is used without scaling it. 
 
 
 ### Initial volume
@@ -477,22 +548,28 @@ These are the exit codes CamillaDSP will give:
 
 
 ## Reloading the configuration
-The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process. This will reload the config and if possible apply the new settings without interrupting the processing. Note that for this to update the coefficients for a FIR filter, the filename of the coefficients file needs to change.
+The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process.
+This will reload the config and if possible apply the new settings without interrupting the processing.
+Note that for this to update the coefficients for a FIR filter, the filename of the coefficients file needs to change.
 
 ## Controlling via websocket
 See the [separate readme for the websocket server](./websocket.md)
 
 
 # Processing audio
-The goal is to insert CamillaDSP between applications and the sound card. The details of how this is achieved depends on which operating system and which audio API is being used. It is also possible to use pipes for apps that support reading or writing audio data from/to stdout. 
+The goal is to insert CamillaDSP between applications and the sound card.
+The details of how this is achieved depends on which operating system and which audio API is being used.
+It is also possible to use pipes for apps that support reading or writing audio data from/to stdout. 
 
 ## Cross-platform
 These backends are supported on all platforms.
 
 ### File or pipe
-Audio can be read from a file or a pipe using the `File` device type. This can read raw interleaved samples in most common formats.
+Audio can be read from a file or a pipe using the `File` device type.
+This can read raw interleaved samples in most common formats.
 
-To instead read from stdin, use the `Stdin` type. This makes it possible to pipe raw samples from some applications directly to CamillaDSP, without going via a virtual soundcard.
+To instead read from stdin, use the `Stdin` type.
+This makes it possible to pipe raw samples from some applications directly to CamillaDSP, without going via a virtual soundcard.
 
 ### Jack
 Jack is most commonly used with Linux, but can also be used with both Windows and MacOS.
@@ -501,7 +578,8 @@ The Jack support of the current CamillaDSP version (v0.6.0 at the time of writin
 
 The jack server must be running. 
 
-Set `device` to "default" for both capture and playback. The sample format is fixed at 32-bit float (FLOAT32LE).
+Set `device` to "default" for both capture and playback.
+The sample format is fixed at 32-bit float (FLOAT32LE).
 
 The samplerate must match the samplerate configured for the Jack server. 
 
@@ -524,7 +602,8 @@ PulseAudio provides a null-sink that can be used to capture audio from applicati
 ```
 pacmd load-module module-null-sink sink_name=MySink
 ```
-This device can be set as the default output, meaning any application using PulseAudio will use it. The audio sent to this device can then be captured from the monitor output named "MySink.monitor".
+This device can be set as the default output, meaning any application using PulseAudio will use it.
+The audio sent to this device can then be captured from the monitor output named "MySink.monitor".
 
 All available sinks and sources can be listed with the commands:
 ```
@@ -533,7 +612,8 @@ pacmd list-sources
 ```
 
 ### Pipewire
-Pipewire implements both the PulseAudio and Jack APIs. It is therefore supported both via the Pulse and the Jack backends, and there is no need for a specific Pipewire backend.
+Pipewire implements both the PulseAudio and Jack APIs.
+It is therefore supported both via the Pulse and the Jack backends, and there is no need for a specific Pipewire backend.
 
 Pipewire supports creating null-sink like PulseAudio. Create it with:
 ```
@@ -629,9 +709,14 @@ Rate adjust should also be enabled.
 # Configuration
 
 ## The YAML format
-CamillaDSP is using the YAML format for the configuration file. This is a standard format that was chosen because of its nice readable syntax. The Serde library is used for reading the configuration. 
-There are a few things to keep in mind with YAML. The configuration is a tree, and the level is determined by the indentation level. For YAML the indentation is as important as opening and closing brackets in other formats. If it's wrong, Serde might not be able to give a good description of what the error is, only that the file is invalid.
-If you get strange errors, first check that the indentation is correct. Also check that you only use spaces and no tabs. Many text editors can help by highlighting syntax errors in the file.
+CamillaDSP is using the YAML format for the configuration file. This is a standard format that was chosen because of its nice readable syntax.
+The Serde library is used for reading the configuration. 
+There are a few things to keep in mind with YAML. The configuration is a tree, and the level is determined by the indentation level.
+For YAML the indentation is as important as opening and closing brackets in other formats.
+If it's wrong, Serde might not be able to give a good description of what the error is, only that the file is invalid.
+If you get strange errors, first check that the indentation is correct.
+Also check that you only use spaces and no tabs.
+Many text editors can help by highlighting syntax errors in the file.
 
 The items at each level of the tree can be placed in any order. Consider the following example:
 ```
@@ -736,7 +821,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
   - 88.2 or 96 kHz: 2048
   - 176.4 or 192 kHz: 4096
 
-  The duration in seconds of a chunk is `chunksize/samplerate`, so the suggested values corresponds to about 22 ms per chunk. This is a reasonable value, and making it shorter can increase the cpu usage and make buffer underruns more likely.
+  The duration in seconds of a chunk is `chunksize/samplerate`, so the suggested values corresponds to about 22 ms per chunk.
+  This is a reasonable value, and making it shorter can increase the cpu usage and make buffer underruns more likely.
 
   If you have long FIR filters you can reduce CPU usage by making the chunksize larger.
   When increasing, try increasing in factors of two, like 1024 -> 2048 or 4096 -> 8192.
@@ -756,12 +842,17 @@ A parameter marked (*) in any example is optional. If they are left out from the
 * `enable_rate_adjust` (optional, defaults to false)
 
   This enables the playback device to control the rate of the capture device,
-  in order to avoid buffer underruns or a slowly increasing latency. This is currently supported when using an Alsa, Wasapi or CoreAudio playback device (and any capture device).
+  in order to avoid buffer underruns or a slowly increasing latency.
+  This is currently supported when using an Alsa, Wasapi or CoreAudio playback device (and any capture device).
   Setting the rate can be done in two ways.
-  * If the capture device is an Alsa Loopback device or a USB Audio gadget device, the adjustment can be done by tuning the virtual sample clock of the Loopback or Gadget device. This avoids the need for asynchronous resampling.
-  * If asynchronous resampling is enabled, the adjustment can be done by tuning the resampling ratio. Then `resampler` must be set to one of the "Async" types. This is supported for all capture devices.
+  * If the capture device is an Alsa Loopback device or a USB Audio gadget device,
+    the adjustment can be done by tuning the virtual sample clock of the Loopback or Gadget device.
+    This avoids the need for asynchronous resampling.
+  * If asynchronous resampling is enabled, the adjustment can be done by tuning the resampling ratio.
+    Then `resampler` must be set to one of the "Async" types. This is supported for all capture devices.
 
-  With Alsa capture devices, the first option is used whenever it's available. If not, and when not using an Alsa capture device, then the second option is used.
+  With Alsa capture devices, the first option is used whenever it's available.
+  If not, and when not using an Alsa capture device, then the second option is used.
   
 * `target_level` (optional, defaults to the `chunksize` value)
 
@@ -806,8 +897,10 @@ A parameter marked (*) in any example is optional. If they are left out from the
 * `stop_on_rate_change` and `rate_measure_interval` (both optional)
 
   Setting `stop_on_rate_change` to `true` makes CamillaDSP stop the processing if the measured capture sample rate changes. Default is `false`.
-  The `rate_measure_interval` setting is used for adjusting the measurement period. A longer period gives a more accurate measurement of the rate, at the cost of slower response when the rate changes.
-  The default is 1.0 seconds. Processing will stop after 3 measurements in a row are more than 4% off from the configured rate. The value of 4% is chosen to allow some variation, while still catching changes between for example 44.1 to 48 kHz.
+  The `rate_measure_interval` setting is used for adjusting the measurement period.
+  A longer period gives a more accurate measurement of the rate, at the cost of slower response when the rate changes.
+  The default is 1.0 seconds. Processing will stop after 3 measurements in a row are more than 4% off from the configured rate.
+  The value of 4% is chosen to allow some variation, while still catching changes between for example 44.1 to 48 kHz.
 
 * `volume_ramp_time` (optional, defaults to 400 ms)
   This setting controls the duration of this ramp when changing volume of the default volume control.
@@ -881,7 +974,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
   ```
   Note: On Unix-like systems it's also possible to use the File device and set the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback. 
 
-  Please note the `File` capture device isn't able to read wav-files directly. If you want to let CamillaDSP play wav-files, please see the [separate guide for converting wav to raw files](coefficients_from_wav.md).
+  Please note the `File` capture device isn't able to read wav-files directly.
+  If you want to let CamillaDSP play wav-files, please see the [separate guide for converting wav to raw files](coefficients_from_wav.md).
 
   Example config for File:
   ```
@@ -916,8 +1010,11 @@ A parameter marked (*) in any example is optional. If they are left out from the
   ```
 
   The `File` and `Stdin` capture devices support two additional optional parameters, for advanced handling of raw files and testing:
-  * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream. This can be used to skip over the header of some formats like .wav (which typically has a fixed size 44-byte header). Leaving it out or setting to zero means no bytes are skipped. 
-  * `read_bytes`: Read only up until the specified number of bytes. Leave it out or set it to zero to read until the end of the file or stream.
+  * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream.
+    This can be used to skip over the header of some formats like .wav (which typically has a fixed size 44-byte header).
+    Leaving it out or setting to zero means no bytes are skipped. 
+  * `read_bytes`: Read only up until the specified number of bytes.
+    Leave it out or set it to zero to read until the end of the file or stream.
 
   * Example, this will skip the first 50 bytes of the file (index 0-49) and then read the following 200 bytes (index 50-249).
     ```
@@ -952,7 +1049,9 @@ A parameter marked (*) in any example is optional. If they are left out from the
   ```
 
   ### Jack
-  The `Jack` capture and playback devices do not have a `format` parameter, since they always uses the FLOAT32LE format. It seems that the `device` property should always be set to "default". This parameter may be removed in a future version.
+  The `Jack` capture and playback devices do not have a `format` parameter, since they always uses the FLOAT32LE format.
+  It seems that the `device` property should always be set to "default".
+  This parameter may be removed in a future version.
 
   Example config for Jack:
   ```
@@ -1160,7 +1259,11 @@ mixers:
 Parameters marked with (*) are optional. Set to `null` or leave out to use the default value.
 
 The "channels" group define the number of input and output channels for the mixer. The mapping section then decides how to route the audio.
-This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel. Each source has a `channel` number, a `gain` value, a `scale` for the gain (`dB` or `linear`) and if it should be `inverted` (`true`/`false`). A channel that has no sources will be filled with silence. The `mute` option determines if an output channel of the mixer should be muted. The `mute`, `gain`, `scale` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 in dB, and not inverted.
+This is a list of the output channels, and for each channel there is a "sources" list that gives the sources for this particular channel.
+Each source has a `channel` number, a `gain` value, a `scale` for the gain (`dB` or `linear`) and if it should be `inverted` (`true`/`false`).
+A channel that has no sources will be filled with silence.
+The `mute` option determines if an output channel of the mixer should be muted.
+The `mute`, `gain`, `scale` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 in dB, and not inverted.
 The optional `description` property is intended for the user and is not used by CamillaDSP itself.
 
 Another example, a simple stereo to mono mixer:
@@ -1183,23 +1286,43 @@ mixers:
 Some audio interfaces bundle all their inputs together, meaning that it might be necessary to capture a large number of channels to get access to a particular input.
 To reduce the CPU load, CamillaDSP will try to avoid processing of any channel that is captured but not used in the pipeline.
 
-Let's say we have an interface with one analog input, and one SPDIF. These are presented as a single 4-channel input where channels 0 and 1 are analog, 2 and 3 SPDIF. Then, setting the number of capture channels to 4 will enable both inputs. In this case we are only interested in the SPDIF input. This is then done by adding a mixer that reduces the number of channels to 2. In this mixer, input channels 0 and 1 are not mapped to anything. This is then detected, and no format conversion, resampling or processing will be done on these two channels.  
+Let's say we have an interface with one analog input, and one SPDIF.
+These are presented as a single 4-channel input where channels 0 and 1 are analog, 2 and 3 SPDIF.
+Then, setting the number of capture channels to 4 will enable both inputs.
+In this case we are only interested in the SPDIF input.
+This is then done by adding a mixer that reduces the number of channels to 2.
+In this mixer, input channels 0 and 1 are not mapped to anything.
+This is then detected, and no format conversion, resampling or processing will be done on these two channels.  
 
 ## Filters
-The filters section defines the filter configurations to use in the pipeline. It's enough to define each filter once even if it should be applied on several channels.
-The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv for FIR. There are also filters just providing gain and delay. The last filter type is Dither, which is used to add dither when quantizing the output.
+The filters section defines the filter configurations to use in the pipeline.
+It's enough to define each filter once even if it should be applied on several channels.
+The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv for FIR.
+There are also filters just providing gain and delay.
+The last filter type is Dither, which is used to add dither when quantizing the output.
 
-All filters take an optional `description` property. This is intended for the user and is not used by CamillaDSP itself.
+All filters take an optional `description` property.
+This is intended for the user and is not used by CamillaDSP itself.
 
 ### Gain
-The gain filter simply changes the amplitude of the signal. The `inverted` parameter simply inverts the signal. This parameter is optional and the default is to not invert. The `gain` value is given in either dB or as a linear factor, depending on the `scale` parameter. This can be set to `dB` or `linear`. If set to `null` or left out it defaults to dB.
+The gain filter simply changes the amplitude of the signal.
+The `inverted` parameter simply inverts the signal.
+This parameter is optional and the default is to not invert.
+The `gain` value is given in either dB or as a linear factor, depending on the `scale` parameter.
+This can be set to `dB` or `linear`.
+If set to `null` or left out it defaults to dB.
 
-When the dB scale is used (`scale: dB`), a positive gain value means the signal will be amplified while a negative values attenuates. The gain value must be in the range -150 to +150 dB.
+When the dB scale is used (`scale: dB`), a positive gain value means the signal will be amplified while a negative values attenuates.
+The gain value must be in the range -150 to +150 dB.
 
-If linear gain is used (`scale: linear`), the gain value is treated as a simple multiplication factor. A factor 0.5 attenuates by a factor two (equivalent to a gain of -6.02 dB). A negative value inverts the signal. Note that the `invert` setting also inverts, so a gain of -0.5 with invert set to true becomes inverted twice and the result is non-inverted.
+If linear gain is used (`scale: linear`), the gain value is treated as a simple multiplication factor.
+A factor 0.5 attenuates by a factor two (equivalent to a gain of -6.02 dB).
+A negative value inverts the signal.
+Note that the `invert` setting also inverts, so a gain of -0.5 with invert set to true becomes inverted twice and the result is non-inverted.
 The linear gain is limited to a range of -10.0 to +10.0.
 
-The `mute` parameter determines if the the signal should be muted. This is optional and defaults to not mute.
+The `mute` parameter determines if the the signal should be muted.
+This is optional and defaults to not mute.
 
 Example Gain filter:
 ```
@@ -1271,7 +1394,10 @@ The amount of boost is adjustable with the `high_boost` and `low_boost` paramete
 
 ![Loudness](loudness.png)
 
-In this figure, the `reference_level` was set to -5 dB, and `high_boost` = `low_boost` = 10 dB. At a gain of 0 and -5, the curve is flat. Below that the boost increases. At -15 dB half of the boost, and at -25 the full boost is applied. Below -25 dB, the boost value stays constant.
+In this figure, the `reference_level` was set to -5 dB, and `high_boost` = `low_boost` = 10 dB.
+At a gain of 0 and -5, the curve is flat. Below that the boost increases.
+At -15 dB half of the boost, and at -25 the full boost is applied.
+Below -25 dB, the boost value stays constant.
 
 Example Loudness filter, configured to work together with the default volume control:
 ```
@@ -1313,7 +1439,10 @@ filters:
 ```
 
 ### FIR
-A FIR filter is given by an impulse response provided as a list of coefficients. The coefficients are preferably given in a separate file, but can be included directly in the config file. If the number of coefficients (or taps) is larger than the chunksize setting it will use segmented convolution. The number of segments is the filter length divided by the chunksize, rounded up.
+A FIR filter is given by an impulse response provided as a list of coefficients.
+The coefficients are preferably given in a separate file, but can be included directly in the config file.
+If the number of coefficients (or taps) is larger than the chunksize setting it will use segmented convolution.
+The number of segments is the filter length divided by the chunksize, rounded up.
 
 Example FIR filters:
 ```
@@ -1333,11 +1462,19 @@ filters:
       filename: path/to/filter.wav
       channel: 0 (*)
 ```
-The `type` can be `Raw`, `Wav` or `Values`. Use `Wav` to load a standard .wav file, `Raw` to load a raw file (see list of allowed raw formats below), and `Values` for giving the coefficients directly in the configuration file. The `filename` field should hold the path to the coefficient file. Using the absolute path is recommended in most cases.
+The `type` can be `Raw`, `Wav` or `Values`.
+Use `Wav` to load a standard .wav file, `Raw` to load a raw file (see list of allowed raw formats below),
+and `Values` for giving the coefficients directly in the configuration file.
+The `filename` field should hold the path to the coefficient file.
+Using the absolute path is recommended in most cases.
 
-If a relative path is given it will first try to find the file relative to the config file path. If it's not found there, the path is assumed to be relative to the current working directory. Note that this only applies when the config is loaded from a file. When a config is supplied via the websocket server only the current working dir of the CamillaDSP process will be searched.
+If a relative path is given it will first try to find the file relative to the config file path.
+If it's not found there, the path is assumed to be relative to the current working directory.
+Note that this only applies when the config is loaded from a file.
+When a config is supplied via the websocket server only the current working dir of the CamillaDSP process will be searched.
 
-If the filename includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config. For example, if samplerate is 44100, the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`. 
+If the filename includes the tokens `$samplerate$` or `$channels$`, these will be replaced by the corresponding values from the config.
+For example, if samplerate is 44100, the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`. 
 
 #### Values directly in config file
 
@@ -1362,22 +1499,30 @@ filters:
       type: Dummy
       length: 65536
 ```
-This creates a dummy minumum-phase allpass filter of length `length` (that must be at least 1). The first point has a value of one, and all the rest are zero: `[1.0, 0.0, 0.0, ..., 0.0]`.
+This creates a dummy minumum-phase allpass filter of length `length` (that must be at least 1).
+The first point has a value of one, and all the rest are zero: `[1.0, 0.0, 0.0, ..., 0.0]`.
 This is intended to provide an easy way to evaluate the CPU load for different filter lengths.
 
 #### Coefficients from Wav-file
 
 Supplying the coefficients as `.wav` file is the most convenient method.
-The `Wav` type takes only one parameter `channel`. This is used to select which channel of a multi-channel file to load. For a standard stereo file, the left track is channel 0, and the right is channel 1. This parameter is optional and defaults to 0 if left out.
+The `Wav` type takes only one parameter `channel`.
+This is used to select which channel of a multi-channel file to load.
+For a standard stereo file, the left track is channel 0, and the right is channel 1.
+This parameter is optional and defaults to 0 if left out.
 The sample rate of the file is ignored.
 
 #### Coefficient Raw (headerless) data file
 
 To load coefficients from a raw file, use the `Raw` type. This is also used to load coefficients from text files.
-Raw files are often saved with a `.dbl`, `.raw`, or `.pcm` ending. The lack of a header means that the files doesn't contain any information about data format etc. CamillaDSP supports loading coefficients from such files that contain a single channel only (stereo files are not supported), in all the most common sample formats.
+Raw files are often saved with a `.dbl`, `.raw`, or `.pcm` ending.
+The lack of a header means that the files doesn't contain any information about data format etc.
+CamillaDSP supports loading coefficients from such files that contain a single channel only (stereo files are not supported), in all the most common sample formats.
 The `Raw` type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
-* `skip_bytes_lines`: Number of bytes (for raw files) or lines (for text) to skip at the beginning of the file. This can be used to skip over a header. Leaving it out or setting to zero means no bytes or lines are skipped. 
-* `read_bytes_lines`: Read only up until the specified number of bytes (for raw files) or lines (for text). Leave it out or set it to zero to read until the end of the file.
+* `skip_bytes_lines`: Number of bytes (for raw files) or lines (for text) to skip at the beginning of the file.
+  This can be used to skip over a header. Leaving it out or setting to zero means no bytes or lines are skipped. 
+* `read_bytes_lines`: Read only up until the specified number of bytes (for raw files) or lines (for text).
+  Leave it out or set it to zero to read until the end of the file.
 
 The filter coefficients can be provided either as text, or as raw samples. Each file can only hold one channel.
 The "format" parameter can be omitted, in which case it's assumed that the format is TEXT. This format is a simple text file with one value per row:
@@ -1398,7 +1543,8 @@ The other possible formats are raw data:
 
 
 ### IIR
-IIR filters are implemented as Biquad filters. CamillaDSP can calculate the coefficients for a number of standard filters, or you can provide the coefficients directly.
+IIR filters are implemented as Biquad filters.
+CamillaDSP can calculate the coefficients for a number of standard filters, or you can provide the coefficients directly.
 
 Examples:
 ```
@@ -1491,7 +1637,9 @@ Single Biquads are defined using the type "Biquad". The available filter types a
 
 * Peaking
   
-  A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`. Note that bandwidth and Q-value are inversely related, a small bandwidth corresponds to a large Q-value etc. Use positive gain values to boost, and negative values to attenuate.
+  A parametric peaking filter with selectable gain `gain` at a given frequency `freq` with a bandwidth given either by the Q-value `q` or bandwidth in octaves `bandwidth`.
+  Note that bandwidth and Q-value are inversely related, a small bandwidth corresponds to a large Q-value etc.
+  Use positive gain values to boost, and negative values to attenuate.
 
 * Notch
   
@@ -1529,7 +1677,9 @@ Setting `normalize_at_dc` to `true` instead fixes the gain at lower frequencies 
 
 * LinkwitzTransform
   
-  A normal sealed-box speaker has a second order high-pass frequency response given by a resonance frequency and a Q-value. A [Linkwitz transform](https://linkwitzlab.com/filters.htm#9) can be used to apply a tailored filter that modifies the actual frequency response to a new target response. The target is also a second order high-pass function, given by the target resonance frequency and Q-value.
+  A normal sealed-box speaker has a second order high-pass frequency response given by a resonance frequency and a Q-value.
+  A [Linkwitz transform](https://linkwitzlab.com/filters.htm#9) can be used to apply a tailored filter that modifies the actual frequency response to a new target response.
+  The target is also a second order high-pass function, given by the target resonance frequency and Q-value.
 
   Parameters:
   * `freq_act`: actual resonance frequency of the speaker.
@@ -1537,7 +1687,9 @@ Setting `normalize_at_dc` to `true` instead fixes the gain at lower frequencies 
   * `freq_target`: target resonance frequency. 
   * `q_target`: target Q-value.
 
-To build more complex filters, use the type "BiquadCombo". This automatically adds several Biquads to build other filter types. The available types are:
+To build more complex filters, use the type "BiquadCombo".
+This automatically adds several Biquads to build other filter types.
+The available types are:
 * ButterworthHighpass & ButterworthLowpass
 
   Defined by frequency, `freq` and filter `order`.
@@ -1610,7 +1762,8 @@ Other types such as Bessel filters can be built by combining several Biquads. [S
 
 
 ### Dither
-The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output. This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several subtypes: 
+The "Dither" filter should only be added at the very end of the pipeline for each channel, and adds noise shaped dither to the output.
+This is intended for 16-bit output, but can be used also for higher bit depth if desired. There are several subtypes: 
 
 | Subtype             | kHz  | Noise shaping | Comments                                                       |
 | ------------------- | ---- | ------------- | -------------------------------------------------------------- |
@@ -1639,17 +1792,32 @@ The "Dither" filter should only be added at the very end of the pipeline for eac
 
 The Shibata filters are the new filters from [SSRC 1.32](https://shibatch.sourceforge.net/ssrc/).
 
-Filters with more taps are typically more precise, always at the expense of higher cpu load. Highpass is an exception, which is about as fast as Flat.
+Filters with more taps are typically more precise, always at the expense of higher cpu load.
+Highpass is an exception, which is about as fast as Flat.
 
-The parameter "bits" sets the target bit depth. For most oversampling delta-sigma DACs, this should match the bit depth of the playback device for best results. For true non-oversampling DACs, this should match the number of bits over which the DAC is linear (or the playback bit depth, whichever is lower). Setting it to a higher value is not useful since then the applied dither will be lost.
+The parameter "bits" sets the target bit depth.
+For most oversampling delta-sigma DACs, this should match the bit depth of the playback device for best results.
+For true non-oversampling DACs, this should match the number of bits over which the DAC is linear (or the playback bit depth, whichever is lower).
+Setting it to a higher value is not useful since then the applied dither will be lost.
 
-For the "Flat" subtype, the parameter "amplitude" sets the number of LSB to be dithered. To linearize the samples, this should be 2. Lower amplitudes produce less noise but also linearize less; higher numbers produce more noise but do not linearize more.
+For the "Flat" subtype, the parameter "amplitude" sets the number of LSB to be dithered.
+To linearize the samples, this should be 2.
+Lower amplitudes produce less noise but also linearize less; higher numbers produce more noise but do not linearize more.
 
-Some comparisons between the noise shapers are available from [SoX](http://sox.sourceforge.net/SoX/NoiseShaping), [SSRC](https://shibatch.sourceforge.net/ssrc/) and [ReSampler](https://github.com/jniemann66/ReSampler/blob/master/ditherProfiles.md). To test the different types, set the target bit depth to something very small like 5 or 6 bits (the minimum allowed value is 2) and try them all. Note that on "None" this may well mean there is no or unintelligible audio -- this is to experiment with and show what the other ditherers actually do.
+Some comparisons between the noise shapers are available from [SoX](http://sox.sourceforge.net/SoX/NoiseShaping), [SSRC](https://shibatch.sourceforge.net/ssrc/) and [ReSampler](https://github.com/jniemann66/ReSampler/blob/master/ditherProfiles.md).
+To test the different types, set the target bit depth to something very small like 5 or 6 bits (the minimum allowed value is 2) and try them all.
+Note that on "None" this may well mean there is no or unintelligible audio -- this is to experiment with and show what the other ditherers actually do.
 
-For sample rates above 48 kHz there is no need for anything more advanced than the "Highpass" subtype. For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible. But at 96 or 192 kHz there is all the bandwidth from 20 kHz up to 48 or 96 kHz where the noise can be placed without issues. The Highpass ditherer will place almost all of it there. Of course, the high-resolution Shibata filters provide some icing on the cake.
+For sample rates above 48 kHz there is no need for anything more advanced than the "Highpass" subtype.
+For the low sample rates there is no spare bandwidth and the dither noise must use the audible range, with shaping to makes it less audible.
+But at 96 or 192 kHz there is all the bandwidth from 20 kHz up to 48 or 96 kHz where the noise can be placed without issues.
+The Highpass ditherer will place almost all of it there.
+Of course, the high-resolution Shibata filters provide some icing on the cake.
 
-Selecting a noise shaping ditherer for a different sample rate than it was designed for, will cause the frequency response curve of the noise shaper to be fitted to the playback rate. This means that the curve no longer matches its design points to be minimally audible. You may experiment which shaper still sounds good, or use the Flat or Highpass subtypes which work well at any sample rate.
+Selecting a noise shaping ditherer for a different sample rate than it was designed for,
+will cause the frequency response curve of the noise shaper to be fitted to the playback rate.
+This means that the curve no longer matches its design points to be minimally audible.
+You may experiment which shaper still sounds good, or use the Flat or Highpass subtypes which work well at any sample rate.
 
 Example:
 ```
@@ -1679,7 +1847,8 @@ Parameters:
 
 ### Difference equation
 The "DiffEq" filter implements a generic difference equation filter with transfer function:
-H(z) = (b0 + b1*z^-1 + .. + bn*z^-n)/(a0 + a1*z^-1 + .. + an*z^-n). The coefficients are given as a list a0..an in that order. Example:
+H(z) = (b0 + b1*z^-1 + .. + bn*z^-n)/(a0 + a1*z^-1 + .. + an*z^-n).
+The coefficients are given as a list a0..an in that order. Example:
 ```
   example_diffeq:
     type: DiffEq
@@ -1687,16 +1856,21 @@ H(z) = (b0 + b1*z^-1 + .. + bn*z^-n)/(a0 + a1*z^-1 + .. + an*z^-n). The coeffici
       a: [1.0, -0.1462978543780541, 0.005350765548905586]
       b: [0.21476322779271284, 0.4295264555854257, 0.21476322779271284]
 ```
-This example implements a Biquad lowpass, but for a Biquad the Free Biquad type is faster and should be preferred. Both a and b are optional. If left out, they default to [1.0].
+This example implements a Biquad lowpass, but for a Biquad the Free Biquad type is faster and should be preferred.
+Both a and b are optional. If left out, they default to [1.0].
 
 
 ## Processors
-The `processors` section contains the definitions for the Processors. These are special "filters" that work on several channels at the same time. At present only one type of processor, "Compressor", has been implemented.
+The `processors` section contains the definitions for the Processors.
+These are special "filters" that work on several channels at the same time.
+At present only one type of processor, "Compressor", has been implemented.
 
-Processors take an optional `description` property. This is intended for the user and is not used by CamillaDSP itself.
+Processors take an optional `description` property.
+This is intended for the user and is not used by CamillaDSP itself.
 
 ### Compressor
-The "Compressor" processor implements a standard dynamic range compressor. It is configured using the most common parameters. 
+The "Compressor" processor implements a standard dynamic range compressor.
+It is configured using the most common parameters. 
 
 Example:
 ```
@@ -1726,10 +1900,13 @@ pipeline:
   * `attack`: time constant in seconds for attack, how fast the compressor reacts to an increase of the loudness.
   * `release`: time constant in seconds for release, how fast the compressor scales back the compression when the loudness decreases.
   * `threshold`: the loudness threshold in dB where compression sets in.
-  * `factor`: the compression factor, giving the amount of compression over the threshold. A factor of 4 means a sound that is 4 dB over the threshold will be attenuated to 1 dB over the threshold.
+  * `factor`: the compression factor, giving the amount of compression over the threshold.
+    A factor of 4 means a sound that is 4 dB over the threshold will be attenuated to 1 dB over the threshold.
   * `makeup_gain`: amount of fixed gain in dB to apply after compression. Optional, defaults to 0 dB.
   * `enable_clip`: apply clipping to the signal after compression. Optional, defaults to `false`.
-  * `soft_clip`: enable soft clipping. Set to `false` to use hard clipping. Note that soft clipping introduces some harmonic distortion to the signal. This setting is ignored if `enable_clip = false`. Optional, defaults to `false`.
+  * `soft_clip`: enable soft clipping. Set to `false` to use hard clipping.
+    Note that soft clipping introduces some harmonic distortion to the signal.
+    This setting is ignored if `enable_clip = false`. Optional, defaults to `false`.
   * `clip_limit`: the level in dB to clip at. This setting is ignored if `enable_clip = false`. Optional, defaults to 0 dB.
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels that should be compressed. Optional, defaults to all channels.
@@ -1826,9 +2003,11 @@ This script currently supports only `Peaking` filters.
 
 ## Visualizing the config
 Please note that the `show_config.py` script mentioned here is deprecated, and has been replaced by the `plotcamillaconf` tool from the pycamilladsp-plot library.
-The new tool provides the same functionality as well as many improvements. The `show_config.py` does not support any of the newer config options, and the script will be removed in a future version.
+The new tool provides the same functionality as well as many improvements.
+The `show_config.py` does not support any of the newer config options, and the script will be removed in a future version.
 
-A Python script is included to view the configuration. This plots the transfer functions of all included filters, as well as plots a flowchart of the entire processing pipeline. Run it with:
+A Python script is included to view the configuration.
+This plots the transfer functions of all included filters, as well as plots a flowchart of the entire processing pipeline. Run it with:
 ```
 python show_config.py /path/to/config.yml
 ```
@@ -1837,7 +2016,8 @@ Example flowchart:
 
 ![Example](pipeline.png)
 
-Note that the script assumes a valid configuration file and will not give any helpful error messages if it's not, so it's a good idea to first use CamillaDSP to validate the file.
+Note that the script assumes a valid configuration file and will not give any helpful error messages if it's not,
+so it's a good idea to first use CamillaDSP to validate the file.
 The script requires the following:
 * Python 3
 * Numpy
