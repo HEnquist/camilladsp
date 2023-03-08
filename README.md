@@ -105,7 +105,7 @@ It does not matter if the damage is caused by incorrect usage or a bug in the so
    - **[Mixer and Processor step](#mixer-and-processor-step)**
    - **[Tokens in names](#tokens-in-names)**
    - **[Bypassing steps](#bypassing-steps)**
-- **[Translating filters exported by REW](#translating-filters-exported-by-rew)**
+- **[Export filters from REW](#export-filters-from-rew)**
 - **[Visualizing the config](#visualizing-the-config)**
 
 **[Related projects](#related-projects)**
@@ -845,8 +845,10 @@ A parameter marked (*) in any example is optional. If they are left out from the
   in order to avoid buffer underruns or a slowly increasing latency.
   This is currently supported when using an Alsa, Wasapi or CoreAudio playback device (and any capture device).
   Setting the rate can be done in two ways.
-  * If the capture device is an Alsa Loopback device or a USB Audio gadget device,
-    the adjustment can be done by tuning the virtual sample clock of the Loopback or Gadget device.
+  * Some capture devices provide a way to adjust the speed of their virtual sample clock (also called pitch adjust).
+    This is available with the Alsa Loopback and USB Audio gadget devices on Linux,
+    as well as the latest (currently unreleased) version or BlackHole on macOS.
+    When capturing from any of these devices, the adjustment can be done by tuning the virtual sample clock of the device.
     This avoids the need for asynchronous resampling.
   * If asynchronous resampling is enabled, the adjustment can be done by tuning the resampling ratio.
     Then `resampler` must be set to one of the "Async" types. This is supported for all capture devices.
@@ -1648,20 +1650,23 @@ Single Biquads are defined using the type "Biquad". The available filter types a
 
 * GeneralNotch
 
-The general notch is a notch where the pole and zero can be placed at different frequencies.
-It is defined by pole frequency `freq_p` and Q-value `q_p`, as well as zero frequency `freq_z`.
+  The general notch is a notch where the pole and zero can be placed at different frequencies.
+  It is defined by its zero frequency `freq_z`, pole frequency `freq_p`, pole Q `q_p`, and an optional parameter `normalize_at_dc`.
 
-When `freq_p` and `freq_z` are different, the notch becomes assymemetric with different gain at high and low frequencies.
-With `freq_z > freq_p`, the gain is higher for frequencies below the notch frequency,
-while `freq_p > freq_z` instead gives higher gain for high frequencies.
+  When pole and zero frequencies are different, the low-frequency gain is changed and the shape (peakiness) at the `freq_p` side of the notch can be controlled by `q_p`.
+  The response is similar to an adjustable Q 2nd order shelf between `freq_p` and `freq_z` plus a notch at `freq_z`.
 
-Setting `freq_p = freq_z` gives a normal symmetric notch.
+  The highpass-notch form is obtained when `freq_p` > `freq_z`.
+  In this form the LF (stopband) gain decreases to -X dB while the HF (passband) gain remains unchanged at 0 dB.
 
-There is also the optional boolean parameter `normalize_at_dc` that defaults to `false`.
+  The lowpass-notch form is obtained when `freq_p` < `freq_z`.
+  In this form, the LF (e.g. DC or passband) gain increases to X dB while the HF (e.g. stopband) gain remains at 0dB.
 
-At the default setting, the gain at high frequencies is fixed at 0 dB and the gain at low frequencies (below the notch)
-can be either positive or negative depending on the values of `freq_p` and `freq_z`. 
-Setting `normalize_at_dc` to `true` instead fixes the gain at lower frequencies to 0 dB.
+  The larger the difference between `freq_p` and `freq_z` the larger is X.
+
+  To automatically swap these levels, so that the LF gain remains at 0dB while the HF gain takes on the value of ±X dB,
+  set the parameter `normalize_at_dc` to `true` (the default for this parameter is `false`).
+  Note that when the pole and zero frequencies are set to the same value the common (symmetrical) notch is obtained.
 
 * Bandpass
   
@@ -1994,12 +1999,18 @@ Take care when bypassing mixers. If a mixer is used to change the number of chan
 then bypassing it will make the pipeline output the wrong number of channels.
 In this case, the bypass may be used to switch between mixers with different settings.
 
-## Translating filters exported by REW
-REW can automatically generate a set of filters for correcting the response. These can then be exported as an `.xml`-file.
-This file can then be translated to CamillaDSP filters using the `translate_rew_xml.py` Python script.
-This will generate filters and pipeline steps that can be pasted into a CamillaDSP config file.
-This script currently supports only `Peaking` filters.
+## Export filters from REW
+REW can automatically generate a set of filters for correcting the frequency response of a system.
+REW V5.20.14 and later is able to export the filters in the CamillaDSP yaml format.
 
+- Go to the "EQ Filters" screen. Expand the "Equalizer" section in the list on the right side.
+- Select "CamillaDSP" as Manufacturer and "Filters" as Model.
+- Expand the "Filter Task" section and click "Save filter settings to YAML file".
+  - This opens a popup with the the text "Enter the label to use for each filter, the filter number will be appended to the label".
+    This allows identification of the filter set.
+
+Note that the generated YAML file is not a complete CamillaDSP configuration.
+It contains only filter definitions and pipeline steps, that can be pasted into a CamillaDSP config file.
 
 ## Visualizing the config
 Please note that the `show_config.py` script mentioned here is deprecated, and has been replaced by the `plotcamillaconf` tool from the pycamilladsp-plot library.
