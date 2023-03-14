@@ -1,6 +1,7 @@
 use crate::filters;
 use crate::mixer;
 use serde::{de, Deserialize, Serialize};
+use serde_json::{Value};
 use serde_with;
 use std::collections::HashMap;
 use std::error;
@@ -789,6 +790,8 @@ pub struct Configuration {
     pub filters: HashMap<String, Filter>,
     #[serde(default)]
     pub pipeline: Vec<PipelineStep>,
+    #[serde(default)]
+    pub metadata: Value,
 }
 
 fn validate_nonzero_usize<'de, D>(d: D) -> Result<usize, D::Error>
