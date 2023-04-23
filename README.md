@@ -293,6 +293,15 @@ FFTW is a much larger and more complicated library,
 so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT too slow.
 
 ## Building in Linux with standard features
+These instructions assume that the linux distribution used is one of Fedora, Debian, Ubunty or Arch.
+They should also work also work on distributions closely related to one of these, such as Manjaro (Arch),
+or Raspberry Pi OS (Debian).
+
+There are many others, including some specialized distributions for example targeting audio playback.
+These often come with a slimmed down set of preinstalled packages.
+Compiling CamillaDSP on one of these may require installing several more packages than the ones listed here.
+If possible, it's recommended to use a pre-built binary on these systems.
+
 - Install pkg-config (very likely already installed):
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
