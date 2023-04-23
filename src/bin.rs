@@ -788,7 +788,7 @@ fn main_process() -> i32 {
     } else {
         None
     };
-    println!("{state:?}");
+    debug!("Loaded state: {state:?}");
 
     let initial_volume = matches
         .value_of("gain")

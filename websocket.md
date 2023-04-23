@@ -110,6 +110,7 @@ Commands for reading and changing settings for the websocket server.
 - `GetClippedSamples` : get the number of clipped samples since the config was loaded.
   * returns the value as an integer
 - `ResetClippedSamples` : reset the clipped samples counter to zero.
+- `GetProcessingLoad` : get the current pipeline processing capacity utilization in percent.
 
 #### Commands for reading signal RMS and peak. 
 These commands all return a vector of floats, with one value per channel. The values are the channel levels in dB, where 0 dB means full level.

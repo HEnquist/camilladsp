@@ -189,6 +189,7 @@ pub struct ProcessingParameters {
     target_volume: [AtomicU32; Self::NUM_FADERS],
     current_volume: [AtomicU32; Self::NUM_FADERS],
     mute: [AtomicBool; Self::NUM_FADERS],
+    processing_load: AtomicU32,
 }
 
 impl ProcessingParameters {
@@ -220,6 +221,7 @@ impl ProcessingParameters {
                 AtomicBool::new(initial_mutes[3]),
                 AtomicBool::new(initial_mutes[4]),
             ],
+            processing_load: AtomicU32::new(0.0f32.to_bits()),
         }
     }
 
@@ -269,6 +271,15 @@ impl ProcessingParameters {
             self.mute[3].load(Ordering::Relaxed),
             self.mute[4].load(Ordering::Relaxed),
         ]
+    }
+
+    pub fn set_processing_load(&self, load: f32) {
+        self.processing_load
+            .store(load.to_bits(), Ordering::Relaxed)
+    }
+
+    pub fn processing_load(&self) -> f32 {
+        f32::from_bits(self.processing_load.load(Ordering::Relaxed))
     }
 }
 

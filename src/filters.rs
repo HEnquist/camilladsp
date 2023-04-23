@@ -21,6 +21,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::PrcFmt;
 use crate::ProcessingParameters;
@@ -450,6 +451,8 @@ pub enum PipelineStep {
 pub struct Pipeline {
     steps: Vec<PipelineStep>,
     volume: basicfilters::Volume,
+    secs_per_chunk: f32,
+    processing_params: Arc<ProcessingParameters>,
 }
 
 impl Pipeline {
@@ -511,10 +514,16 @@ impl Pipeline {
             mute,
             conf.devices.chunksize,
             conf.devices.samplerate,
-            processing_params,
+            processing_params.clone(),
             0,
         );
-        Pipeline { steps, volume }
+        let secs_per_chunk = conf.devices.chunksize as f32 / conf.devices.samplerate as f32;
+        Pipeline {
+            steps,
+            volume,
+            secs_per_chunk,
+            processing_params,
+        }
     }
 
     pub fn update_parameters(
@@ -548,6 +557,7 @@ impl Pipeline {
 
     /// Process an AudioChunk by calling either a MixerStep or a FilterStep
     pub fn process_chunk(&mut self, mut chunk: AudioChunk) -> AudioChunk {
+        let start = Instant::now();
         self.volume.process_chunk(&mut chunk);
         for mut step in &mut self.steps {
             match &mut step {
@@ -562,6 +572,10 @@ impl Pipeline {
                 }
             }
         }
+        let secs_elapsed = start.elapsed().as_secs_f32();
+        let load = 100.0 * secs_elapsed / self.secs_per_chunk;
+        self.processing_params.set_processing_load(load);
+        trace!("Processing load: {load}%");
         chunk
     }
 }

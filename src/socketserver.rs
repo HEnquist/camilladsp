@@ -117,6 +117,7 @@ enum WsCommand {
     ResetClippedSamples,
     GetBufferLevel,
     GetSupportedDeviceTypes,
+    GetProcessingLoad,
     Exit,
     Stop,
     None,
@@ -358,6 +359,10 @@ enum WsReply {
     GetSupportedDeviceTypes {
         result: WsResult,
         value: (Vec<String>, Vec<String>),
+    },
+    GetProcessingLoad {
+        result: WsResult,
+        value: f32,
     },
     Exit {
         result: WsResult,
@@ -1137,6 +1142,13 @@ fn handle_command(
             Some(WsReply::GetSupportedDeviceTypes {
                 result: WsResult::Ok,
                 value: devs,
+            })
+        }
+        WsCommand::GetProcessingLoad => {
+            let load = shared_data_inst.processing_params.processing_load();
+            Some(WsReply::GetProcessingLoad {
+                result: WsResult::Ok,
+                value: load,
             })
         }
         WsCommand::None => None,

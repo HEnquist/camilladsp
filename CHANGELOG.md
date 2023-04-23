@@ -29,6 +29,7 @@ New features:
 - Add GraphicEqualizer biquad combo.
 - Support rate adjust for BlachHole on macOS.
 - Add statefile for persisting runtime parameters to file.
+- Websocket command to get pipeline processing capacity utilization.
 
 Changes:
 - Optimize cpu load in general, and of dithering and delay filters in particular.
