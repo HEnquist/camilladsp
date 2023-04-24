@@ -84,5 +84,6 @@ pub fn run_processing(
                 };
             };
         }
+        processing_params.set_processing_load(0.0);
     })
 }

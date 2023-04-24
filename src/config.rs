@@ -916,7 +916,7 @@ pub enum BiquadComboParameters {
         qhs: PrcFmt,
         ghs: PrcFmt,
     },
-    GraphicEqnalizer(GraphicEqualizerParameters),
+    GraphicEqualizer(GraphicEqualizerParameters),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

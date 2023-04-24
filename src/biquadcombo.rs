@@ -246,7 +246,7 @@ impl BiquadCombo {
                     filters,
                 }
             }
-            config::BiquadComboParameters::GraphicEqnalizer(params) => {
+            config::BiquadComboParameters::GraphicEqualizer(params) => {
                 let filters = BiquadCombo::make_graphic(
                     samplerate,
                     params.freq_min(),
@@ -354,7 +354,7 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
             }
             Ok(())
         }
-        config::BiquadComboParameters::GraphicEqnalizer(params) => {
+        config::BiquadComboParameters::GraphicEqualizer(params) => {
             if params.freq_min() <= 0.0 || params.freq_max() <= 0.0 {
                 return Err(config::ConfigError::new("Min and max requencies must be > 0").into());
             } else if params.freq_min() >= maxfreq as f32 || params.freq_max() >= maxfreq as f32 {
