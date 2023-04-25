@@ -1852,12 +1852,12 @@ Example:
     type: Limiter
     parameters:
       soft_clip: false (*)
-      clip_limit: -10.0 (*)
+      clip_limit: -10.0
 ```
 
 Parameters:
   * `soft_clip`: enable soft clipping. Set to `false` to use hard clipping. Optional, defaults to `false`.
-  * `clip_limit`: the level in dB to clip at. Optional, defaults to 0 dB.
+  * `clip_limit`: the level in dB to clip at.
 
 ### Difference equation
 The "DiffEq" filter implements a generic difference equation filter with transfer function:
@@ -1898,9 +1898,8 @@ processors:
       threshold: -25
       factor: 5.0
       makeup_gain: 15 (*)
-      enable_clip: true (*)
-      soft_clip: true (*)
       clip_limit: 0.0 (*)
+      soft_clip: true (*)
       monitor_channels: [0, 1] (*)
       process_channels: [0, 1] (*)
 
@@ -1917,11 +1916,10 @@ pipeline:
   * `factor`: the compression factor, giving the amount of compression over the threshold.
     A factor of 4 means a sound that is 4 dB over the threshold will be attenuated to 1 dB over the threshold.
   * `makeup_gain`: amount of fixed gain in dB to apply after compression. Optional, defaults to 0 dB.
-  * `enable_clip`: apply clipping to the signal after compression. Optional, defaults to `false`.
-  * `soft_clip`: enable soft clipping. Set to `false` to use hard clipping.
+  * `clip_limit`: the level in dB to clip at. Providing a value enables clipping of the signal after compression. Leave out or set to `null` to disable clipping.
+  * `soft_clip`: enable soft clipping. Set to `false` to use hard clipping. This setting is ignored when clipping is disabled.
     Note that soft clipping introduces some harmonic distortion to the signal.
     This setting is ignored if `enable_clip = false`. Optional, defaults to `false`.
-  * `clip_limit`: the level in dB to clip at. This setting is ignored if `enable_clip = false`. Optional, defaults to 0 dB.
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels that should be compressed. Optional, defaults to all channels.
 

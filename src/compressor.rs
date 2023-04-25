@@ -47,15 +47,17 @@ impl Compressor {
         }
         let attack = (-1.0 / srate / config.attack).exp();
         let release = (-1.0 / srate / config.release).exp();
-        let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit() / 20.0);
+        let clip_limit = config
+            .clip_limit
+            .map(|lim| (10.0 as PrcFmt).powf(lim / 20.0));
 
         let scratch = vec![0.0; chunksize];
 
-        debug!("Creating compressor '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {}", 
+        debug!("Creating compressor '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}", 
                 name, channels, process_channels, monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain(), config.soft_clip(), clip_limit);
-        let limiter = if config.enable_clip() {
+        let limiter = if let Some(limit) = clip_limit {
             let limitconf = config::LimiterParameters {
-                clip_limit: config.clip_limit,
+                clip_limit: limit,
                 soft_clip: config.soft_clip,
             };
             Some(Limiter::from_config("Limiter", limitconf))
@@ -171,11 +173,13 @@ impl Processor for Compressor {
             }
             let attack = (-1.0 / srate / config.attack).exp();
             let release = (-1.0 / srate / config.release).exp();
-            let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit() / 20.0);
+            let clip_limit = config
+                .clip_limit
+                .map(|lim| (10.0 as PrcFmt).powf(lim / 20.0));
 
-            let limiter = if config.enable_clip() {
+            let limiter = if let Some(limit) = clip_limit {
                 let limitconf = config::LimiterParameters {
-                    clip_limit: config.clip_limit,
+                    clip_limit: limit,
                     soft_clip: config.soft_clip,
                 };
                 Some(Limiter::from_config("Limiter", limitconf))
@@ -192,7 +196,7 @@ impl Processor for Compressor {
             self.makeup_gain = config.makeup_gain();
             self.limiter = limiter;
 
-            debug!("Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {}", 
+            debug!("Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}", 
                 self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain(), config.soft_clip(), clip_limit);
         } else {
             // This should never happen unless there is a bug somewhere else

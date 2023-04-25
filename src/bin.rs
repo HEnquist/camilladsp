@@ -818,8 +818,8 @@ fn main_process() -> i32 {
             initial_volume,
         ]
     };
-    println!("{initial_mutes:?}");
-    println!("{initial_volumes:?}");
+    debug!("Initial mute: {initial_mutes:?}");
+    debug!("Initial volume: {initial_volumes:?}");
 
     debug!("Read config file {:?}", configname);
 

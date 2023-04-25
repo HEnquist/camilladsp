@@ -15,13 +15,13 @@ pub struct Limiter {
 impl Limiter {
     /// Creates a Compressor from a config struct
     pub fn from_config(name: &str, config: config::LimiterParameters) -> Self {
-        let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit() / 20.0);
+        let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit / 20.0);
 
         debug!(
             "Creating limiter '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
             name,
             config.soft_clip(),
-            config.clip_limit(),
+            config.clip_limit,
             clip_limit
         );
 
@@ -72,7 +72,7 @@ impl Filter for Limiter {
             parameters: config, ..
         } = config
         {
-            let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit() / 20.0);
+            let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit / 20.0);
 
             self.soft_clip = config.soft_clip();
             self.clip_limit = clip_limit;
@@ -80,7 +80,7 @@ impl Filter for Limiter {
                 "Updated limiter '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
                 self.name,
                 config.soft_clip(),
-                config.clip_limit(),
+                config.clip_limit,
                 clip_limit
             );
         } else {
