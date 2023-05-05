@@ -73,7 +73,7 @@ The available commands are listed below. All commands return the result, and for
   * returns the version as a string, like `1.2.3`.
 - `GetSupportedDeviceTypes` : read which playback and capture device types are supported. 
   * return a list containing two lists of strings (for playback and capture), like `[['File', 'Stdout', 'Alsa'], ['File', 'Stdin', 'Alsa']]`.
-- `Stop` : stop processing and wait for a new config to be uploaded either with `SetConfig` or with `SetConfigName`+`Reload`.
+- `Stop` : stop processing and wait for a new config to be uploaded either with `SetConfig` or with `SetConfigFilePath`+`Reload`.
 - `Exit` : stop processing and exit.
 
 ### Websocket server settings
@@ -186,11 +186,11 @@ Commands for reading and changing the active configuration.
   * Returns the title as a string.
 - `GetConfigDescription` : Read the description from the current configuration.
   * Returns the description as a string.
-- `GetConfigName` : Get name and path of current config file.
+- `GetConfigFilePath` : Get name and path of current config file.
   * Returns the path as a string.
 - `GetPreviousConfig` : Read the previous configuration as yaml.
   * Returns the previously active config in yaml as a string.
-- `SetConfigName` : Change config file name given as a string, not applied until `Reload` is called.
+- `SetConfigFilePath` : Change config file name given as a string, not applied until `Reload` is called.
 - `SetConfig:` : Provide a new config as a yaml string. Applied directly.
 - `SetConfigJson` : Provide a new config as a JSON string. Applied directly.
 - `Reload` : Reload current config file (same as SIGHUP).
@@ -231,21 +231,21 @@ In [3]: ws = create_connection("ws://127.0.0.1:1234")
 
 ### Get the name of the current config file
 ```ipython
-In [4]: ws.send(json.dumps("GetConfigName"))
+In [4]: ws.send(json.dumps("GetConfigFilePath"))
 Out[4]: 19
 
 In [5]: print(ws.recv())
-{"GetConfigName":{"result":"Ok","value":"/path/to/someconfig.yml"}}
+{"GetConfigFilePath":{"result":"Ok","value":"/path/to/someconfig.yml"}}
 ```
 
 ### Switch to a different config file
 The new config is applied when the "reload" command is sent.
 ```ipython
-In [6]: ws.send(json.dumps({"SetConfigName": "/path/to/otherconfig.yml"}))
+In [6]: ws.send(json.dumps({"SetConfigFilePath": "/path/to/otherconfig.yml"}))
 Out[6]: 52
 
 In [7]: print(ws.recv())
-{"GetConfigName":{"result":"Ok","value":"/path/to/someconfig.yml"}}
+{"GetConfigFilePath":{"result":"Ok","value":"/path/to/someconfig.yml"}}
 
 In [8]: ws.send(json.dumps("Reload"))
 Out[8]: 12

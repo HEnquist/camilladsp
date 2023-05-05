@@ -62,7 +62,7 @@ pub struct ServerParameters<'a> {
 
 #[derive(Debug, PartialEq, Deserialize)]
 enum WsCommand {
-    SetConfigName(String),
+    SetConfigFilePath(String),
     SetConfig(String),
     SetConfigJson(String),
     Reload,
@@ -74,7 +74,7 @@ enum WsCommand {
     ReadConfigFile(String),
     ValidateConfig(String),
     GetConfigJson,
-    GetConfigName,
+    GetConfigFilePath,
     GetSignalRange,
     GetCaptureSignalRms,
     GetCaptureSignalRmsSince(f32),
@@ -145,7 +145,7 @@ struct PbCapLevels {
 
 #[derive(Debug, PartialEq, Serialize)]
 enum WsReply {
-    SetConfigName {
+    SetConfigFilePath {
         result: WsResult,
     },
     SetConfig {
@@ -189,7 +189,7 @@ enum WsReply {
         result: WsResult,
         value: String,
     },
-    GetConfigName {
+    GetConfigFilePath {
         result: WsResult,
         value: String,
     },
@@ -987,7 +987,7 @@ fn handle_command(
             result: WsResult::Ok,
             value: serde_json::to_string(&*shared_data_inst.active_config.lock()).unwrap(),
         }),
-        WsCommand::GetConfigName => Some(WsReply::GetConfigName {
+        WsCommand::GetConfigFilePath => Some(WsReply::GetConfigFilePath {
             result: WsResult::Ok,
             value: shared_data_inst
                 .active_config_path
@@ -996,20 +996,20 @@ fn handle_command(
                 .unwrap_or(&"NONE".to_string())
                 .to_string(),
         }),
-        WsCommand::SetConfigName(path) => match config::load_validate_config(&path) {
+        WsCommand::SetConfigFilePath(path) => match config::load_validate_config(&path) {
             Ok(_) => {
                 *shared_data_inst.active_config_path.lock() = Some(path.clone());
                 shared_data_inst
                     .state_change_notify
                     .try_send(())
                     .unwrap_or(());
-                Some(WsReply::SetConfigName {
+                Some(WsReply::SetConfigFilePath {
                     result: WsResult::Ok,
                 })
             }
             Err(error) => {
                 error!("Error setting config name: {}", error);
-                Some(WsReply::SetConfigName {
+                Some(WsReply::SetConfigFilePath {
                     result: WsResult::Error,
                 })
             }
@@ -1397,8 +1397,8 @@ mod tests {
         let cmd = Message::text("");
         let res = parse_command(cmd);
         assert!(res.is_err());
-        let cmd = Message::text("{\"SetConfigName\": \"somefile\"}");
+        let cmd = Message::text("{\"SetConfigFilePath\": \"somefile\"}");
         let res = parse_command(cmd).unwrap();
-        assert_eq!(res, WsCommand::SetConfigName("somefile".to_string()));
+        assert_eq!(res, WsCommand::SetConfigFilePath("somefile".to_string()));
     }
 }

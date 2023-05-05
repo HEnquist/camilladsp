@@ -30,6 +30,7 @@ New features:
 - Support rate adjust for BlachHole on macOS.
 - Add statefile for persisting runtime parameters to file.
 - Websocket command to get pipeline processing capacity utilization.
+- Rename `Set/GetConfigName` websocket coomands to `Set/GetConfigFilePath`.
 
 Changes:
 - Optimize cpu load in general, and of dithering and delay filters in particular.
