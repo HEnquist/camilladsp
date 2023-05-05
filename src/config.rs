@@ -198,34 +198,6 @@ impl CaptureDevice {
             CaptureDevice::Jack { channels, .. } => *channels,
         }
     }
-
-    pub fn sampleformat(&self) -> SampleFormat {
-        match self {
-            #[cfg(target_os = "linux")]
-            CaptureDevice::Alsa { format, .. } => *format,
-            #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez(dev) => dev.format,
-            #[cfg(feature = "pulse-backend")]
-            CaptureDevice::Pulse { format, .. } => *format,
-            CaptureDevice::File(dev) => dev.format,
-            CaptureDevice::Stdin(dev) => dev.format,
-            #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio(dev) => dev.format(),
-            #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi(dev) => dev.format,
-            #[cfg(all(
-                feature = "cpal-backend",
-                feature = "jack-backend",
-                any(
-                    target_os = "linux",
-                    target_os = "dragonfly",
-                    target_os = "freebsd",
-                    target_os = "netbsd"
-                )
-            ))]
-            CaptureDevice::Jack { .. } => SampleFormat::FLOAT32LE,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -335,20 +307,7 @@ pub struct CaptureDeviceCA {
     pub channels: usize,
     pub device: Option<String>,
     #[serde(default)]
-    format: Option<SampleFormat>,
-    #[serde(default)]
-    change_format: Option<bool>,
-}
-
-#[cfg(target_os = "macos")]
-impl CaptureDeviceCA {
-    pub fn format(&self) -> SampleFormat {
-        self.format.unwrap_or(SampleFormat::S32LE)
-    }
-
-    pub fn change_format(&self) -> bool {
-        self.change_format.unwrap_or_default()
-    }
+    pub format: Option<SampleFormat>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -463,23 +422,13 @@ pub struct PlaybackDeviceCA {
     pub channels: usize,
     pub device: Option<String>,
     #[serde(default)]
-    format: Option<SampleFormat>,
-    #[serde(default)]
-    change_format: Option<bool>,
+    pub format: Option<SampleFormat>,
     #[serde(default)]
     exclusive: Option<bool>,
 }
 
 #[cfg(target_os = "macos")]
 impl PlaybackDeviceCA {
-    pub fn format(&self) -> SampleFormat {
-        self.format.unwrap_or(SampleFormat::S32LE)
-    }
-
-    pub fn change_format(&self) -> bool {
-        self.change_format.unwrap_or_default()
-    }
-
     pub fn is_exclusive(&self) -> bool {
         self.exclusive.unwrap_or_default()
     }
@@ -1804,7 +1753,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "macos")]
     if let CaptureDevice::CoreAudio(dev) = &conf.devices.capture {
-        if dev.format() == SampleFormat::FLOAT64LE {
+        if dev.format == Some(SampleFormat::FLOAT64LE) {
             return Err(ConfigError::new(
                 "The CoreAudio capture backend does not support FLOAT64LE sample format",
             )
@@ -1813,7 +1762,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "macos")]
     if let PlaybackDevice::CoreAudio(dev) = &conf.devices.playback {
-        if dev.format() == SampleFormat::FLOAT64LE {
+        if dev.format == Some(SampleFormat::FLOAT64LE) {
             return Err(ConfigError::new(
                 "The CoreAudio playback backend does not support FLOAT64LE sample format",
             )

@@ -87,8 +87,7 @@ pub struct CoreaudioPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
-    pub change_format: bool,
+    pub sample_format: Option<SampleFormat>,
     pub exclusive: bool,
     pub target_level: usize,
     pub adjust_period: f32,
@@ -103,8 +102,7 @@ pub struct CoreaudioCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
-    pub change_format: bool,
+    pub sample_format: Option<SampleFormat>,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
@@ -115,8 +113,7 @@ fn open_coreaudio_playback(
     devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &SampleFormat,
-    change_format: bool,
+    sample_format: &Option<SampleFormat>,
     exclusive: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if let Some(name) = devname {
@@ -146,14 +143,14 @@ fn open_coreaudio_playback(
         release_ownership(device_id)?;
     }
 
-    if change_format {
-        let phys_format = match *sample_format {
+    if let Some(sfmt) = sample_format {
+        let phys_format = match *sfmt {
             SampleFormat::S16LE => coreaudio::audio_unit::SampleFormat::I16,
             SampleFormat::S24LE | SampleFormat::S24LE3 => coreaudio::audio_unit::SampleFormat::I24,
             SampleFormat::S32LE => coreaudio::audio_unit::SampleFormat::I32,
             SampleFormat::FLOAT32LE => coreaudio::audio_unit::SampleFormat::F32,
             _ => {
-                let msg = format!("Sample format '{}' not supported!", sample_format);
+                let msg = format!("Sample format '{}' not supported!", sfmt);
                 return Err(ConfigError::new(&msg).into());
             }
         };
@@ -200,8 +197,7 @@ fn open_coreaudio_capture(
     devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &SampleFormat,
-    change_format: bool,
+    sample_format: &Option<SampleFormat>,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if let Some(name) = devname {
         match get_device_id_from_name(name) {
@@ -224,14 +220,14 @@ fn open_coreaudio_capture(
     let mut audio_unit = audio_unit_from_device_id(device_id, true)
         .map_err(|e| ConfigError::new(&format!("{}", e)))?;
 
-    if change_format {
-        let phys_format = match *sample_format {
+    if let Some(sfmt) = sample_format {
+        let phys_format = match *sfmt {
             SampleFormat::S16LE => coreaudio::audio_unit::SampleFormat::I16,
             SampleFormat::S24LE | SampleFormat::S24LE3 => coreaudio::audio_unit::SampleFormat::I24,
             SampleFormat::S32LE => coreaudio::audio_unit::SampleFormat::I32,
             SampleFormat::FLOAT32LE => coreaudio::audio_unit::SampleFormat::F32,
             _ => {
-                let msg = format!("Sample format '{}' not supported!", sample_format);
+                let msg = format!("Sample format '{}' not supported!", sfmt);
                 return Err(ConfigError::new(&msg).into());
             }
         };
@@ -292,7 +288,6 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let sample_format = self.sample_format;
-        let change_format = self.change_format;
         let exclusive = self.exclusive;
         let target_level = if self.target_level > 0 {
             self.target_level
@@ -335,7 +330,6 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     samplerate,
                     channels,
                     &sample_format,
-                    change_format,
                     exclusive,
                 ) {
                     Ok(audio_unit) => audio_unit,
@@ -556,7 +550,6 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let sample_format = self.sample_format;
-        let change_format = self.change_format;
         let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
@@ -594,7 +587,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let device_sph = semaphore.clone();
 
                 trace!("Build input stream");
-                let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels, &sample_format, change_format) {
+                let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels, &sample_format) {
                     Ok(audio_unit) => audio_unit,
                     Err(err) => {
                         status_channel
