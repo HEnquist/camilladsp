@@ -40,6 +40,8 @@ pub struct SharedData {
     pub processing_params: Arc<ProcessingParameters>,
     pub processing_status: Arc<RwLock<ProcessingStatus>>,
     pub state_change_notify: mpsc::SyncSender<()>,
+    pub state_file_path: Option<String>,
+    pub unsaved_state_change: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +77,8 @@ enum WsCommand {
     ValidateConfig(String),
     GetConfigJson,
     GetConfigFilePath,
+    GetStateFilePath,
+    GetStateFileUpdated,
     GetSignalRange,
     GetCaptureSignalRms,
     GetCaptureSignalRmsSince(f32),
@@ -191,7 +195,15 @@ enum WsReply {
     },
     GetConfigFilePath {
         result: WsResult,
-        value: String,
+        value: Option<String>,
+    },
+    GetStateFilePath {
+        result: WsResult,
+        value: Option<String>,
+    },
+    GetStateFileUpdated {
+        result: WsResult,
+        value: bool,
     },
     GetSignalRange {
         result: WsResult,
@@ -772,6 +784,9 @@ fn handle_command(
                 .processing_params
                 .set_target_volume(0, new_vol);
             shared_data_inst
+                .unsaved_state_change
+                .store(true, Ordering::Relaxed);
+            shared_data_inst
                 .state_change_notify
                 .try_send(())
                 .unwrap_or(());
@@ -786,6 +801,9 @@ fn handle_command(
             shared_data_inst
                 .processing_params
                 .set_target_volume(0, tempvol);
+            shared_data_inst
+                .unsaved_state_change
+                .store(true, Ordering::Relaxed);
             shared_data_inst
                 .state_change_notify
                 .try_send(())
@@ -802,6 +820,9 @@ fn handle_command(
         WsCommand::SetMute(mute) => {
             shared_data_inst.processing_params.set_mute(0, mute);
             shared_data_inst
+                .unsaved_state_change
+                .store(true, Ordering::Relaxed);
+            shared_data_inst
                 .state_change_notify
                 .try_send(())
                 .unwrap_or(());
@@ -811,6 +832,9 @@ fn handle_command(
         }
         WsCommand::ToggleMute => {
             let tempmute = shared_data_inst.processing_params.toggle_mute(0);
+            shared_data_inst
+                .unsaved_state_change
+                .store(true, Ordering::Relaxed);
             shared_data_inst
                 .state_change_notify
                 .try_send(())
@@ -846,6 +870,9 @@ fn handle_command(
                 .processing_params
                 .set_target_volume(ctrl, new_vol);
             shared_data_inst
+                .unsaved_state_change
+                .store(true, Ordering::Relaxed);
+            shared_data_inst
                 .state_change_notify
                 .try_send(())
                 .unwrap_or(());
@@ -869,6 +896,9 @@ fn handle_command(
                 .processing_params
                 .set_current_volume(ctrl, new_vol);
             shared_data_inst
+                .unsaved_state_change
+                .store(true, Ordering::Relaxed);
+            shared_data_inst
                 .state_change_notify
                 .try_send(())
                 .unwrap_or(());
@@ -891,6 +921,9 @@ fn handle_command(
             shared_data_inst
                 .processing_params
                 .set_target_volume(ctrl, tempvol);
+            shared_data_inst
+                .unsaved_state_change
+                .store(true, Ordering::Relaxed);
             shared_data_inst
                 .state_change_notify
                 .try_send(())
@@ -924,6 +957,9 @@ fn handle_command(
             }
             shared_data_inst.processing_params.set_mute(ctrl, mute);
             shared_data_inst
+                .unsaved_state_change
+                .store(true, Ordering::Relaxed);
+            shared_data_inst
                 .state_change_notify
                 .try_send(())
                 .unwrap_or(());
@@ -941,6 +977,9 @@ fn handle_command(
                 });
             }
             let tempmute = shared_data_inst.processing_params.toggle_mute(ctrl);
+            shared_data_inst
+                .unsaved_state_change
+                .store(true, Ordering::Relaxed);
             shared_data_inst
                 .state_change_notify
                 .try_send(())
@@ -993,12 +1032,24 @@ fn handle_command(
                 .active_config_path
                 .lock()
                 .as_ref()
-                .unwrap_or(&"NONE".to_string())
-                .to_string(),
+                .map(|s| s.to_string()),
+        }),
+        WsCommand::GetStateFilePath => Some(WsReply::GetStateFilePath {
+            result: WsResult::Ok,
+            value: shared_data_inst.state_file_path.clone(),
+        }),
+        WsCommand::GetStateFileUpdated => Some(WsReply::GetStateFileUpdated {
+            result: WsResult::Ok,
+            value: !shared_data_inst
+                .unsaved_state_change
+                .load(Ordering::Relaxed),
         }),
         WsCommand::SetConfigFilePath(path) => match config::load_validate_config(&path) {
             Ok(_) => {
                 *shared_data_inst.active_config_path.lock() = Some(path.clone());
+                shared_data_inst
+                    .unsaved_state_change
+                    .store(true, Ordering::Relaxed);
                 shared_data_inst
                     .state_change_notify
                     .try_send(())

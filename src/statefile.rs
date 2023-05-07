@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::ProcessingParameters;
@@ -52,6 +53,7 @@ pub fn save_state(
     filename: &str,
     config_path: &Arc<Mutex<Option<String>>>,
     params: &ProcessingParameters,
+    unsaved_changes: &Arc<AtomicBool>,
 ) {
     let state = State {
         config_path: config_path.lock().as_ref().map(|s| s.to_string()),
@@ -69,6 +71,8 @@ pub fn save_state(
                     "Unable to write to statefile {}, error: {}",
                     filename, writeerr
                 );
+            } else {
+                unsaved_changes.store(false, Ordering::Relaxed);
             }
         }
         Err(openerr) => error!("Unable to open statefile {}, error: {}", filename, openerr),

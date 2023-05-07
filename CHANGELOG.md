@@ -30,13 +30,14 @@ New features:
 - Support rate adjust for BlachHole on macOS.
 - Add statefile for persisting runtime parameters to file.
 - Websocket command to get pipeline processing capacity utilization.
-- Rename `Set/GetConfigName` websocket coomands to `Set/GetConfigFilePath`.
+- Add commands to read statefile path and updating status.
 
 Changes:
 - Optimize cpu load in general, and of dithering and delay filters in particular.
 - Uniform dithering renamed to Flat.
 - Simple dithering renamed to Highpass, implements a Wannamaker high passed triangular dither.
 - Shibata441 and Shibata48 dither higher precision and smoother curve.
+- Rename `Set/GetConfigName` websocket commands to `Set/GetConfigFilePath`.
 
 ## 1.0.3
 Bugfixes:

@@ -902,6 +902,7 @@ fn main_process() -> i32 {
 
         let processing_params_clone = processing_params.clone();
         let active_config_path_clone = active_config_path.clone();
+        let unsaved_state_changes = Arc::new(AtomicBool::new(false));
 
         if let Some(port_str) = matches.value_of("port") {
             let serveraddress = matches.value_of("address").unwrap_or("127.0.0.1");
@@ -918,6 +919,8 @@ fn main_process() -> i32 {
                 processing_params,
                 processing_status,
                 state_change_notify: tx_state,
+                state_file_path: statefilename.clone(),
+                unsaved_state_change: unsaved_state_changes.clone(),
             };
             let server_params = socketserver::ServerParameters {
                 port: serverport,
@@ -942,6 +945,7 @@ fn main_process() -> i32 {
                             &fname,
                             &active_config_path_clone,
                             &processing_params_clone,
+                            &unsaved_state_changes,
                         );
                     }
                     Err(_) => break,
