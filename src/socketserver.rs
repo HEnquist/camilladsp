@@ -311,35 +311,28 @@ enum WsReply {
     },
     SetFaderVolume {
         result: WsResult,
-        control: usize,
     },
     SetFaderExternalVolume {
         result: WsResult,
-        control: usize,
     },
     GetFaderVolume {
         result: WsResult,
-        value: f32,
-        control: usize,
+        value: (usize, f32),
     },
     AdjustFaderVolume {
         result: WsResult,
-        value: f32,
-        control: usize,
+        value: (usize, f32),
     },
     SetFaderMute {
         result: WsResult,
-        control: usize,
     },
     GetFaderMute {
         result: WsResult,
-        value: bool,
-        control: usize,
+        value: (usize, bool),
     },
     ToggleFaderMute {
         result: WsResult,
-        value: bool,
-        control: usize,
+        value: (usize, bool),
     },
     GetVersion {
         result: WsResult,
@@ -848,21 +841,18 @@ fn handle_command(
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::GetFaderVolume {
                     result: WsResult::Error,
-                    value: ProcessingParameters::DEFAULT_VOLUME,
-                    control: ctrl,
+                    value: (ctrl, ProcessingParameters::DEFAULT_VOLUME),
                 });
             }
             Some(WsReply::GetFaderVolume {
                 result: WsResult::Ok,
-                value: shared_data_inst.processing_params.target_volume(ctrl),
-                control: ctrl,
+                value: (ctrl, shared_data_inst.processing_params.target_volume(ctrl)),
             })
         }
         WsCommand::SetFaderVolume(ctrl, nbr) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::SetFaderVolume {
                     result: WsResult::Error,
-                    control: ctrl,
                 });
             }
             let new_vol = clamped_volume(nbr);
@@ -878,14 +868,12 @@ fn handle_command(
                 .unwrap_or(());
             Some(WsReply::SetFaderVolume {
                 result: WsResult::Ok,
-                control: ctrl,
             })
         }
         WsCommand::SetFaderExternalVolume(ctrl, nbr) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::SetFaderExternalVolume {
                     result: WsResult::Error,
-                    control: ctrl,
                 });
             }
             let new_vol = clamped_volume(nbr);
@@ -904,15 +892,13 @@ fn handle_command(
                 .unwrap_or(());
             Some(WsReply::SetFaderExternalVolume {
                 result: WsResult::Ok,
-                control: ctrl,
             })
         }
         WsCommand::AdjustFaderVolume(ctrl, nbr) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::AdjustFaderVolume {
                     result: WsResult::Error,
-                    value: nbr,
-                    control: ctrl,
+                    value: (ctrl, nbr),
                 });
             }
             let mut tempvol = shared_data_inst.processing_params.target_volume(ctrl);
@@ -930,29 +916,25 @@ fn handle_command(
                 .unwrap_or(());
             Some(WsReply::AdjustFaderVolume {
                 result: WsResult::Ok,
-                value: tempvol,
-                control: ctrl,
+                value: (ctrl, tempvol),
             })
         }
         WsCommand::GetFaderMute(ctrl) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::GetFaderMute {
                     result: WsResult::Error,
-                    value: ProcessingParameters::DEFAULT_MUTE,
-                    control: ctrl,
+                    value: (ctrl, ProcessingParameters::DEFAULT_MUTE),
                 });
             }
             Some(WsReply::GetFaderMute {
                 result: WsResult::Ok,
-                value: shared_data_inst.processing_params.is_mute(ctrl),
-                control: ctrl,
+                value: (ctrl, shared_data_inst.processing_params.is_mute(ctrl)),
             })
         }
         WsCommand::SetFaderMute(ctrl, mute) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::SetFaderMute {
                     result: WsResult::Error,
-                    control: ctrl,
                 });
             }
             shared_data_inst.processing_params.set_mute(ctrl, mute);
@@ -965,15 +947,13 @@ fn handle_command(
                 .unwrap_or(());
             Some(WsReply::SetFaderMute {
                 result: WsResult::Ok,
-                control: ctrl,
             })
         }
         WsCommand::ToggleFaderMute(ctrl) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::ToggleFaderMute {
                     result: WsResult::Error,
-                    value: ProcessingParameters::DEFAULT_MUTE,
-                    control: ctrl,
+                    value: (ctrl, ProcessingParameters::DEFAULT_MUTE),
                 });
             }
             let tempmute = shared_data_inst.processing_params.toggle_mute(ctrl);
@@ -986,8 +966,7 @@ fn handle_command(
                 .unwrap_or(());
             Some(WsReply::ToggleFaderMute {
                 result: WsResult::Ok,
-                value: !tempmute,
-                control: ctrl,
+                value: (ctrl, !tempmute),
             })
         }
         WsCommand::GetConfig => Some(WsReply::GetConfig {

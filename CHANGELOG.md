@@ -38,6 +38,7 @@ Changes:
 - Simple dithering renamed to Highpass, implements a Wannamaker high passed triangular dither.
 - Shibata441 and Shibata48 dither higher precision and smoother curve.
 - Rename `Set/GetConfigName` websocket commands to `Set/GetConfigFilePath`.
+- Removed redundant`change_format` parameter to simplify CoreAudio device config.
 
 ## 1.0.3
 Bugfixes:
