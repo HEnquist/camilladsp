@@ -907,6 +907,10 @@ fn main_process() -> i32 {
         if let Some(port_str) = matches.value_of("port") {
             let serveraddress = matches.value_of("address").unwrap_or("127.0.0.1");
             let serverport = port_str.parse::<usize>().unwrap();
+
+            // Send one state change to trigger an initial save
+            tx_state.try_send(()).unwrap_or(());
+
             let shared_data = socketserver::SharedData {
                 signal_reload: signal_reload.clone(),
                 signal_exit: signal_exit.clone(),
