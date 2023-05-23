@@ -989,6 +989,7 @@ fn main_process() -> i32 {
             }
             thread::sleep(DELAY);
         }
+        signal_reload.store(false, Ordering::Relaxed);
         let shared_configs = SharedConfigs {
             active: active_config.clone(),
             new: next_config.clone(),
@@ -1003,6 +1004,7 @@ fn main_process() -> i32 {
             active_config_path.clone(),
             status_structs.clone(),
         );
+        debug!("Processing ended with status {:?}", exitstatus);
 
         *active_config.lock() = None;
         match exitstatus {

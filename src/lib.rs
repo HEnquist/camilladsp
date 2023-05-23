@@ -133,6 +133,7 @@ pub enum CommandMessage {
     Exit,
 }
 
+#[derive(Debug)]
 pub enum ExitState {
     Restart,
     Exit,
