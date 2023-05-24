@@ -238,9 +238,10 @@ fn run(
     )?;
 
     loop {
-        if signal_reload
-            .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
-            .is_ok()
+        if !is_starting
+            && signal_reload
+                .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
         {
             debug!("Reloading configuration...");
             let new_config = new_config(&config_path, &shared_configs.new);
