@@ -1395,6 +1395,11 @@ It can also be used with a volume control external to CamillaDSP.
 The fader should then be set to one of the Aux faders, and the external volume control should update
 this fader when the volume setting changes.
 A special websocket command is provided for this, see the [websocket command documentation](websocket.md).
+If the external volume control is placed after CamillaDSP in the audio chain,
+then the boost applied at high and low frequencies may cause clipping.
+To avoid this, set `attenuate_mid` to `true`.
+That makes the loudness filter attenuate the midband instead of boosting the extremes.
+
 
 The method is the same as the one implemented by the [RME ADI-2 DAC FS](https://www.rme-audio.de/adi-2-dac.html).
 The loudness correction is done as shelving filters that boost the high (above 3500 Hz) and low (below 70 Hz) frequencies.
@@ -1420,6 +1425,7 @@ filters:
       reference_level: -25.0 
       high_boost: 7.0 (*)
       low_boost: 7.0 (*)
+      attenuate_mid: false (*)
 ```
 Allowed ranges:
 - reference_level: -100 to +20

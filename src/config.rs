@@ -929,6 +929,8 @@ pub struct LoudnessParameters {
     pub low_boost: Option<f32>,
     #[serde(default)]
     pub fader: Option<LoudnessFader>,
+    #[serde(default)]
+    pub attenuate_mid: Option<bool>,
 }
 
 impl LoudnessParameters {
@@ -942,6 +944,10 @@ impl LoudnessParameters {
 
     pub fn fader(&self) -> usize {
         self.fader.unwrap_or(LoudnessFader::Main) as usize
+    }
+
+    pub fn attenuate_mid(&self) -> bool {
+        self.attenuate_mid.unwrap_or_default()
     }
 }
 

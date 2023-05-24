@@ -1,3 +1,4 @@
+use crate::basicfilters::Gain;
 use crate::biquad;
 use crate::config;
 use crate::filters::Filter;
@@ -18,6 +19,7 @@ pub struct Loudness {
     low_biquad: biquad::Biquad,
     fader: usize,
     active: bool,
+    gain: Option<Gain>,
 }
 
 fn rel_boost(level: f32, reference: f32) -> f32 {
@@ -37,16 +39,31 @@ impl Loudness {
         let current_volume = processing_params.target_volume(fader);
         let relboost = rel_boost(current_volume, conf.reference_level);
         let active = relboost > 0.01;
+        let high_boost = (relboost * conf.high_boost()) as PrcFmt;
+        let low_boost = (relboost * conf.low_boost()) as PrcFmt;
         let highshelf_conf = config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
             freq: 3500.0,
             slope: 12.0,
-            gain: (relboost * conf.high_boost()) as PrcFmt,
+            gain: high_boost,
         });
         let lowshelf_conf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Slope {
             freq: 70.0,
             slope: 12.0,
-            gain: (relboost * conf.low_boost()) as PrcFmt,
+            gain: low_boost,
         });
+        let gain = if conf.attenuate_mid() {
+            let max_gain = low_boost.max(high_boost);
+            let gain_params = config::GainParameters {
+                gain: -max_gain,
+                inverted: None,
+                mute: None,
+                scale: None,
+            };
+            Some(Gain::from_config("midgain", gain_params))
+        } else {
+            None
+        };
+
         let high_biquad_coeffs =
             biquad::BiquadCoefficients::from_config(samplerate, highshelf_conf);
         let low_biquad_coeffs = biquad::BiquadCoefficients::from_config(samplerate, lowshelf_conf);
@@ -63,6 +80,7 @@ impl Loudness {
             processing_params,
             fader,
             active,
+            gain,
         }
     }
 }
@@ -79,6 +97,8 @@ impl Filter for Loudness {
         if (shared_vol - self.current_volume as f32).abs() > 0.01 {
             self.current_volume = shared_vol as PrcFmt;
             let relboost = rel_boost(self.current_volume as f32, self.reference_level);
+            let high_boost = (relboost * self.high_boost) as PrcFmt;
+            let low_boost = (relboost * self.low_boost) as PrcFmt;
             self.active = relboost > 0.001;
             info!(
                 "Updating loudness biquads, relative boost {}%",
@@ -88,12 +108,12 @@ impl Filter for Loudness {
                 config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
                     freq: 3500.0,
                     slope: 12.0,
-                    gain: (relboost * self.high_boost) as PrcFmt,
+                    gain: high_boost,
                 });
             let lowshelf_conf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Slope {
                 freq: 70.0,
                 slope: 12.0,
-                gain: (relboost * self.low_boost) as PrcFmt,
+                gain: low_boost,
             });
             self.high_biquad.update_parameters(config::Filter::Biquad {
                 parameters: highshelf_conf,
@@ -103,11 +123,27 @@ impl Filter for Loudness {
                 parameters: lowshelf_conf,
                 description: None,
             });
+            if let Some(gain) = &mut self.gain {
+                let max_gain = low_boost.max(high_boost);
+                let gain_params = config::GainParameters {
+                    gain: -max_gain,
+                    inverted: None,
+                    mute: None,
+                    scale: None,
+                };
+                gain.update_parameters(config::Filter::Gain {
+                    description: None,
+                    parameters: gain_params,
+                });
+            }
         }
         if self.active {
             trace!("Applying loudness biquads");
             self.high_biquad.process_waveform(waveform).unwrap();
             self.low_biquad.process_waveform(waveform).unwrap();
+            if let Some(gain) = &mut self.gain {
+                gain.process_waveform(waveform).unwrap();
+            }
         }
         Ok(())
     }
@@ -120,17 +156,19 @@ impl Filter for Loudness {
             self.fader = conf.fader();
             let current_volume = self.processing_params.current_volume(self.fader);
             let relboost = rel_boost(current_volume, conf.reference_level);
+            let high_boost = (relboost * conf.high_boost()) as PrcFmt;
+            let low_boost = (relboost * conf.low_boost()) as PrcFmt;
             self.active = relboost > 0.001;
             let highshelf_conf =
                 config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
                     freq: 3500.0,
                     slope: 12.0,
-                    gain: (relboost * conf.high_boost()) as PrcFmt,
+                    gain: high_boost,
                 });
             let lowshelf_conf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Slope {
                 freq: 70.0,
                 slope: 12.0,
-                gain: (relboost * conf.low_boost()) as PrcFmt,
+                gain: low_boost,
             });
             self.high_biquad.update_parameters(config::Filter::Biquad {
                 parameters: highshelf_conf,
@@ -140,6 +178,26 @@ impl Filter for Loudness {
                 parameters: lowshelf_conf,
                 description: None,
             });
+            if conf.attenuate_mid() {
+                let max_gain = low_boost.max(high_boost);
+                let gain_params = config::GainParameters {
+                    gain: -max_gain,
+                    inverted: None,
+                    mute: None,
+                    scale: None,
+                };
+                if let Some(gain) = &mut self.gain {
+                    gain.update_parameters(config::Filter::Gain {
+                        description: None,
+                        parameters: gain_params,
+                    });
+                } else {
+                    self.gain = Some(Gain::from_config("midgain", gain_params))
+                }
+            } else {
+                self.gain = None
+            }
+
             self.reference_level = conf.reference_level;
             self.high_boost = conf.high_boost();
             self.low_boost = conf.low_boost();
