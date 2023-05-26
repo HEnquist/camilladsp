@@ -21,8 +21,9 @@ use std::time::Duration;
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
     audio_unit_from_device_id, find_matching_physical_format, get_default_device_id,
-    get_device_id_from_name, get_hogging_pid, set_device_physical_stream_format,
-    set_device_sample_rate, toggle_hog_mode, AliveListener, RateListener,
+    get_device_id_from_name, get_hogging_pid, get_supported_physical_stream_formats,
+    set_device_physical_stream_format, set_device_sample_rate, toggle_hog_mode, AliveListener,
+    RateListener,
 };
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{AudioUnit, Element, Scope, StreamFormat};
@@ -157,6 +158,10 @@ fn open_coreaudio_playback(
             channels: channels as u32,
         };
 
+        trace!(
+            "Available formats: {:?}",
+            get_supported_physical_stream_formats(device_id)
+        );
         if let Some(phys_asbd) = find_matching_physical_format(device_id, physical_stream_format) {
             debug!("Set phys playback stream format");
             set_device_physical_stream_format(device_id, phys_asbd).map_err(|_| {
@@ -234,6 +239,10 @@ fn open_coreaudio_capture(
             channels: channels as u32,
         };
 
+        trace!(
+            "Available formats: {:?}",
+            get_supported_physical_stream_formats(device_id)
+        );
         if let Some(phys_asbd) = find_matching_physical_format(device_id, physical_stream_format) {
             debug!("Set phys capture stream format");
             set_device_physical_stream_format(device_id, phys_asbd)
