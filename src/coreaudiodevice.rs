@@ -20,10 +20,10 @@ use std::time::Duration;
 
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
-    audio_unit_from_device_id, find_matching_physical_format, get_default_device_id,
-    get_device_id_from_name, get_hogging_pid, get_supported_physical_stream_formats,
-    set_device_physical_stream_format, set_device_sample_rate, toggle_hog_mode, AliveListener,
-    RateListener,
+    audio_unit_from_device_id, find_matching_physical_format, get_audio_device_ids,
+    get_default_device_id, get_device_id_from_name, get_device_name, get_hogging_pid,
+    get_supported_physical_stream_formats, set_device_physical_stream_format,
+    set_device_sample_rate, toggle_hog_mode, AliveListener, RateListener,
 };
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{AudioUnit, Element, Scope, StreamFormat};
@@ -105,6 +105,52 @@ pub struct CoreaudioCaptureDevice {
     pub rate_measure_interval: f32,
 }
 
+pub fn list_device_names(input: bool) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(all_ids) = get_audio_device_ids() {
+        for device_id in all_ids.iter() {
+            if let Ok(name) = get_device_name(*device_id) {
+                if device_supports_scope(*device_id, input) {
+                    names.push(name.to_string());
+                }
+            }
+        }
+    }
+    names
+}
+
+fn device_supports_scope(device_id: u32, input: bool) -> bool {
+    let scope = if input {
+        kAudioObjectPropertyScopeInput
+    } else {
+        kAudioObjectPropertyScopeOutput
+    };
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyStreamConfiguration,
+        mScope: scope,
+        mElement: kAudioObjectPropertyElementWildcard,
+    };
+
+    let maybe_bufferlist: mem::MaybeUninit<AudioBufferList> = mem::MaybeUninit::zeroed();
+    let data_size = mem::size_of::<AudioBufferList>() as u32;
+
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            &data_size as *const _ as *mut _,
+            &maybe_bufferlist as *const _ as *mut _,
+        )
+    };
+    if status != kAudioHardwareNoError as i32 {
+        return false;
+    }
+    let bufferlist = unsafe { maybe_bufferlist.assume_init() };
+    bufferlist.mNumberBuffers > 0
+}
+
 fn open_coreaudio_playback(
     devname: &Option<String>,
     samplerate: usize,
@@ -113,6 +159,7 @@ fn open_coreaudio_playback(
     exclusive: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if let Some(name) = devname {
+        trace!("Available playback devices: {:?}", list_device_names(false));
         match get_device_id_from_name(name) {
             Some(dev) => dev,
             None => {
@@ -200,6 +247,7 @@ fn open_coreaudio_capture(
     sample_format: &Option<SampleFormat>,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if let Some(name) = devname {
+        debug!("Available capture devices: {:?}", list_device_names(true));
         match get_device_id_from_name(name) {
             Some(dev) => dev,
             None => {
