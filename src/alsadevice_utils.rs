@@ -35,18 +35,34 @@ fn get_card_name(card: &Card, device: &mut i32, input: bool) -> Res<(String, Str
     let cardinfo = ctl.card_info()?;
     let card_id = cardinfo.get_id()?;
     let card_name = cardinfo.get_name()?;
-    let ctl_hack = unsafe { std::mem::transmute(ctl) };
-    unsafe { alsa_sys::snd_ctl_pcm_next_device(ctl_hack, device as *mut _) };
+    *device = ctl.pcm_next_device(*device)?;
 
     // Build the full device id
     let device_id = format!("hw:{},{}", card_id, device).to_string();
 
-    // Get a PCM for the device
-    let pcm = alsa::PCM::new(&device_id, dir, true)?;
-
     // Read the PCM name
-    let pcm_info = pcm.info()?;
-    let pcm_name = pcm_info.get_name()?;
+    //let mut pcm_info = pcm.info()?;
+    //let pcm_name = pcm_info.get_name()?.to_string();
+
+    // Create info container
+    let mut pcm_info = Info::new()?;
+    pcm_info.set_device(*device as u32);
+    pcm_info.set_subdevice(0);
+    pcm_info.set_stream(dir);
+
+    // Read info from Ctl
+    ctl.info(&mut pcm_info)?;
+
+    // Read PCM name
+    let pcm_name = pcm_info.get_name()?.to_string();
+
+    // Loop through subdevices and get their names
+    let subdevs = pcm_info.get_subdevices_count();
+    for subdev in 1..subdevs {
+        pcm_info.set_subdevice(subdev);
+        ctl.info(&mut pcm_info)?;
+        println!("{}", pcm_info.get_subdevice_name()?);
+    }
 
     // Build full name from card and pcm names
     let name = format!("{}, {}", card_name, pcm_name).to_string();
