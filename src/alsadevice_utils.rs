@@ -1,6 +1,11 @@
 use crate::config::SampleFormat;
 use crate::Res;
-use alsa::pcm::{Format, HwParams};
+use alsa::Card;
+use alsa::card::Iter;
+use alsa::device_name::{HintIter, Hint};
+use alsa::Direction;
+use alsa::pcm::{Info, Format, HwParams};
+use alsa::ctl::Ctl;
 use alsa_sys;
 
 const STANDARD_RATES: [u32; 17] = [
@@ -13,6 +18,121 @@ pub enum SupportedValues {
     Range(u32, u32),
     Discrete(Vec<u32>),
 }
+
+
+fn get_card_name(card: &Card, device: &mut i32, input: bool) -> Res<(String, String)> {
+    let dir = if input {
+        Direction::Capture
+    } else {
+        Direction::Playback
+    };
+
+    // Get a Ctl for the card
+    let ctl_id = format!("hw:{}", card.get_index());
+    let ctl = Ctl::new(&ctl_id, false)?;
+
+    // Read card id and name
+    let cardinfo = ctl.card_info()?;
+    let card_id = cardinfo.get_id()?;
+    let card_name = cardinfo.get_name()?;
+    let ctl_hack = unsafe { std::mem::transmute(ctl) };
+    unsafe { alsa_sys::snd_ctl_pcm_next_device(ctl_hack, device as *mut _) };
+
+    // Build the full device id
+    let device_id = format!("hw:{},{}", card_id, device).to_string();
+
+    // Get a PCM for the device
+    let pcm = alsa::PCM::new(&device_id, dir, true)?;
+
+    // Read the PCM name
+    let pcm_info = pcm.info()?;
+    let pcm_name = pcm_info.get_name()?;
+
+    // Build full name from card and pcm names
+    let name = format!("{}, {}", card_name, pcm_name).to_string();
+
+    Ok((device_id, name))
+}
+
+pub fn list_hw_devices(input: bool) -> Vec<(String, String)> {
+    let mut names = Vec::new();
+    let cards = Iter::new();
+    for maybe_card in cards {
+        
+        if let Ok(card) = maybe_card {
+            let mut device = -1;
+            while let Ok(name) = get_card_name(&card, &mut device, input) {
+                names.push(name);
+                device += 1;
+            }
+        }
+    }
+    names
+}
+
+pub fn list_pcm_devices(input: bool) -> Vec<(String, String)> {
+    let mut names = Vec::new();
+    let hints = HintIter::new_str(None, "pcm").unwrap();
+    let direction = if input {
+        Direction::Capture
+    } else {
+        Direction::Playback
+    };
+    for hint in hints {
+        if hint.name.is_some() && hint.desc.is_some() && (hint.direction.is_none() || hint.direction.map(|dir| dir == direction).unwrap_or_default()) {
+            names.push((hint.name.unwrap(), hint.desc.unwrap()))
+        }
+    }
+
+    names
+}
+
+pub fn list_device_names(input: bool) -> Vec<String> {
+    let names = Vec::new();
+    names
+}
+
+/*
+static void pcm_list(void)
+{
+	void **hints, **n;
+	char *name, *descr, *descr1, *io;
+	const char *filter;
+
+	if (snd_device_name_hint(-1, "pcm", &hints) < 0)
+		return;
+	n = hints;
+	filter = stream == SND_PCM_STREAM_CAPTURE ? "Input" : "Output";
+	while (*n != NULL) {
+		name = snd_device_name_get_hint(*n, "NAME");
+		descr = snd_device_name_get_hint(*n, "DESC");
+		io = snd_device_name_get_hint(*n, "IOID");
+		if (io != NULL && strcmp(io, filter) != 0)
+			goto __end;
+		printf("%s\n", name);
+		if ((descr1 = descr) != NULL) {
+			printf("    ");
+			while (*descr1) {
+				if (*descr1 == '\n')
+					printf("\n    ");
+				else
+					putchar(*descr1);
+				descr1++;
+			}
+			putchar('\n');
+		}
+	      __end:
+	      	if (name != NULL)
+	      		free(name);
+		if (descr != NULL)
+			free(descr);
+		if (io != NULL)
+			free(io);
+		n++;
+	}
+	snd_device_name_free_hint(hints);
+}
+*/
 
 pub fn state_desc(state: u32) -> String {
     match state {
