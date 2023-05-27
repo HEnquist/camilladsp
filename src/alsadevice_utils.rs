@@ -2,7 +2,7 @@ use crate::config::SampleFormat;
 use crate::Res;
 use alsa::Card;
 use alsa::card::Iter;
-use alsa::device_name::{HintIter, Hint};
+use alsa::device_name::HintIter;
 use alsa::Direction;
 use alsa::pcm::{Info, Format, HwParams};
 use alsa::ctl::Ctl;
@@ -20,7 +20,7 @@ pub enum SupportedValues {
 }
 
 
-fn get_card_name(card: &Card, device: &mut i32, input: bool) -> Res<(String, String)> {
+fn get_card_names(card: &Card, device: &mut i32, input: bool, names: &mut Vec<(String, String)>) -> Res<()> {
     let dir = if input {
         Direction::Capture
     } else {
@@ -37,13 +37,6 @@ fn get_card_name(card: &Card, device: &mut i32, input: bool) -> Res<(String, Str
     let card_name = cardinfo.get_name()?;
     *device = ctl.pcm_next_device(*device)?;
 
-    // Build the full device id
-    let device_id = format!("hw:{},{}", card_id, device).to_string();
-
-    // Read the PCM name
-    //let mut pcm_info = pcm.info()?;
-    //let pcm_name = pcm_info.get_name()?.to_string();
-
     // Create info container
     let mut pcm_info = Info::new()?;
     pcm_info.set_device(*device as u32);
@@ -58,16 +51,22 @@ fn get_card_name(card: &Card, device: &mut i32, input: bool) -> Res<(String, Str
 
     // Loop through subdevices and get their names
     let subdevs = pcm_info.get_subdevices_count();
-    for subdev in 1..subdevs {
+    for subdev in 0..subdevs {
         pcm_info.set_subdevice(subdev);
         ctl.info(&mut pcm_info)?;
-        println!("{}", pcm_info.get_subdevice_name()?);
+        // Build the full device id
+        let subdevice_id = format!("hw:{},{},{}", card_id, device, subdev).to_string();
+        
+        // Get subdevice name and build a descriptive device name
+        let subdev_name = pcm_info.get_subdevice_name()?;
+        let name = format!("{}, {}, {}", card_name, pcm_name, subdev_name).to_string();
+        
+        //println!("{} - {}", subdevice_id, name);
+        names.push((subdevice_id, name))
     }
 
-    // Build full name from card and pcm names
-    let name = format!("{}, {}", card_name, pcm_name).to_string();
 
-    Ok((device_id, name))
+    Ok(())
 }
 
 pub fn list_hw_devices(input: bool) -> Vec<(String, String)> {
@@ -77,10 +76,7 @@ pub fn list_hw_devices(input: bool) -> Vec<(String, String)> {
         
         if let Ok(card) = maybe_card {
             let mut device = -1;
-            while let Ok(name) = get_card_name(&card, &mut device, input) {
-                names.push(name);
-                device += 1;
-            }
+            while let Ok(()) = get_card_names(&card, &mut device, input, &mut names) {}
         }
     }
     names
@@ -103,9 +99,11 @@ pub fn list_pcm_devices(input: bool) -> Vec<(String, String)> {
     names
 }
 
-pub fn list_device_names(input: bool) -> Vec<String> {
-    let names = Vec::new();
-    names
+pub fn list_device_names(input: bool) -> Vec<(String, String)> {
+    let mut hw_names = list_hw_devices(input);
+    let mut pcm_names = list_pcm_devices(input);
+    hw_names.append(&mut pcm_names);
+    hw_names
 }
 
 /*
