@@ -14,6 +14,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 use wasapi;
+use wasapi::DeviceCollection;
 use windows::w;
 use windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW;
 
@@ -65,6 +66,30 @@ enum DisconnectReason {
     Error,
 }
 
+#[allow(dead_code)]
+fn list_device_names(input: bool) -> Vec<String> {
+    let direction = if input {
+        wasapi::Direction::Capture
+    } else {
+        wasapi::Direction::Render
+    };
+    let collection = wasapi::DeviceCollection::new(&direction);
+    collection
+        .map(|coll| list_device_names_in_collection(&coll).unwrap_or_default())
+        .unwrap_or_default()
+}
+
+fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<String>> {
+    let mut names = Vec::new();
+    let count = collection.get_nbr_devices()?;
+    for n in 0..count {
+        let device = collection.get_device_at_index(n)?;
+        let name = device.get_friendlyname()?;
+        names.push(name);
+    }
+    Ok(names)
+}
+
 fn wave_format(
     sample_format: &SampleFormat,
     samplerate: usize,
@@ -114,6 +139,10 @@ fn open_playback(
     };
     let device = if let Some(name) = devname {
         let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
+        debug!(
+            "Available playback devices: {:?}",
+            list_device_names_in_collection(&collection)
+        );
         collection.get_device_with_name(name)?
     } else {
         wasapi::get_default_device(&wasapi::Direction::Render)?
@@ -181,9 +210,17 @@ fn open_capture(
     let device = if let Some(name) = devname {
         if !loopback {
             let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Capture)?;
+            debug!(
+                "Available capture devices: {:?}",
+                list_device_names_in_collection(&collection)
+            );
             collection.get_device_with_name(name)?
         } else {
             let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
+            debug!(
+                "Available loopback capture (i.e. playback) devices: {:?}",
+                list_device_names_in_collection(&collection)
+            );
             collection.get_device_with_name(name)?
         }
     } else if !loopback {
