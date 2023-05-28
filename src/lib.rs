@@ -377,3 +377,15 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     }
     (playbacktypes, capturetypes)
 }
+
+pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, Option<String>)> {
+    match backend {
+        #[cfg(target_os = "linux")]
+        "Alsa" => alsadevice::list_available_devices(input),
+        #[cfg(target_os = "macos")]
+        "CoreAudio" => coreaudiodevice::list_available_devices(input),
+        #[cfg(target_os = "windows")]
+        "Wasapi" => wasapidevice::list_device_names(input),
+        _ => Vec::new(),
+    }
+}

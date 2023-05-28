@@ -23,8 +23,8 @@ use crate::ExitRequest;
 use crate::ProcessingState;
 use crate::Res;
 use crate::{
-    list_supported_devices, CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus,
-    StopReason,
+    list_available_devices, list_supported_devices, CaptureStatus, PlaybackStatus,
+    ProcessingParameters, ProcessingStatus, StopReason,
 };
 
 #[derive(Debug, Clone)]
@@ -121,6 +121,8 @@ enum WsCommand {
     ResetClippedSamples,
     GetBufferLevel,
     GetSupportedDeviceTypes,
+    GetAvailableCaptureDevices(String),
+    GetAvailablePlaybackDevices(String),
     GetProcessingLoad,
     Exit,
     Stop,
@@ -364,6 +366,14 @@ enum WsReply {
     GetSupportedDeviceTypes {
         result: WsResult,
         value: (Vec<String>, Vec<String>),
+    },
+    GetAvailableCaptureDevices {
+        result: WsResult,
+        value: Vec<(String, Option<String>)>,
+    },
+    GetAvailablePlaybackDevices {
+        result: WsResult,
+        value: Vec<(String, Option<String>)>,
     },
     GetProcessingLoad {
         result: WsResult,
@@ -1170,6 +1180,20 @@ fn handle_command(
         WsCommand::GetSupportedDeviceTypes => {
             let devs = list_supported_devices();
             Some(WsReply::GetSupportedDeviceTypes {
+                result: WsResult::Ok,
+                value: devs,
+            })
+        }
+        WsCommand::GetAvailableCaptureDevices(backend) => {
+            let devs = list_available_devices(&backend, true);
+            Some(WsReply::GetAvailableCaptureDevices {
+                result: WsResult::Ok,
+                value: devs,
+            })
+        }
+        WsCommand::GetAvailablePlaybackDevices(backend) => {
+            let devs = list_available_devices(&backend, false);
+            Some(WsReply::GetAvailablePlaybackDevices {
                 result: WsResult::Ok,
                 value: devs,
             })

@@ -66,8 +66,7 @@ enum DisconnectReason {
     Error,
 }
 
-#[allow(dead_code)]
-fn list_device_names(input: bool) -> Vec<String> {
+pub fn list_device_names(input: bool) -> Vec<(String, Option<String>)> {
     let direction = if input {
         wasapi::Direction::Capture
     } else {
@@ -79,13 +78,15 @@ fn list_device_names(input: bool) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<String>> {
+fn list_device_names_in_collection(
+    collection: &DeviceCollection,
+) -> Res<Vec<(String, Option<String>)>> {
     let mut names = Vec::new();
     let count = collection.get_nbr_devices()?;
     for n in 0..count {
         let device = collection.get_device_at_index(n)?;
         let name = device.get_friendlyname()?;
-        names.push(name);
+        names.push((name, None));
     }
     Ok(names)
 }
