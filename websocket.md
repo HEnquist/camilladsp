@@ -222,7 +222,7 @@ Example entries for Wasapi:
 ```
 [
   ["Microphone (USB Microphone)", null],
-  ["In 3-4 (MOTU M Series)" null]
+  ["In 3-4 (MOTU M Series)", null]
 ]
 ```
 
