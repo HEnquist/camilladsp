@@ -327,6 +327,7 @@ fn run(
                         barrier.wait();
                         debug!("Supervisor loop starts now!");
                         is_starting = false;
+                        status_structs.status.write().unwrap().stop_reason = StopReason::None;
                     }
                 }
                 StatusMessage::CaptureReady => {
