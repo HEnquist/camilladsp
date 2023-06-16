@@ -11,7 +11,6 @@ extern crate fftw;
 extern crate lazy_static;
 #[cfg(target_os = "macos")]
 extern crate coreaudio;
-#[cfg(any(target_os = "windows", target_os = "macos"))]
 extern crate crossbeam_channel;
 #[cfg(target_os = "macos")]
 extern crate dispatch;
