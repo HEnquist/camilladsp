@@ -598,7 +598,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         &mut self,
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
@@ -841,7 +841,7 @@ fn check_for_format_change(rx: &Receiver<DisconnectReason>) -> bool {
 }
 
 fn send_error_or_playbackformatchange(
-    tx: &mpsc::Sender<StatusMessage>,
+    tx: &crossbeam_channel::Sender<StatusMessage>,
     rx: &Receiver<DisconnectReason>,
     err: String,
 ) {
@@ -856,7 +856,7 @@ fn send_error_or_playbackformatchange(
 }
 
 fn send_error_or_captureformatchange(
-    tx: &mpsc::Sender<StatusMessage>,
+    tx: &crossbeam_channel::Sender<StatusMessage>,
     rx: &Receiver<DisconnectReason>,
     err: String,
 ) {
@@ -888,7 +888,7 @@ impl CaptureDevice for WasapiCaptureDevice {
         &mut self,
         channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
