@@ -138,6 +138,13 @@ pub enum ExitState {
     Exit,
 }
 
+pub enum ControllerMessage {
+    // Config must be boxed, to prevent "large size difference between variants" warning
+    ConfigChanged(Box<config::Configuration>),
+    Stop,
+    Exit,
+}
+
 #[derive(Clone, Debug, Copy, Serialize, Eq, PartialEq)]
 pub enum ProcessingState {
     // Processing is running normally.
@@ -150,14 +157,6 @@ pub enum ProcessingState {
     Starting,
     // Capture device isnt providing data, processing is stalled.
     Stalled,
-}
-
-pub struct ExitRequest {}
-
-impl ExitRequest {
-    pub const NONE: usize = 0;
-    pub const EXIT: usize = 1;
-    pub const STOP: usize = 2;
 }
 
 #[derive(Clone, Debug)]
@@ -331,7 +330,6 @@ pub struct StatusStructs {
 pub struct SharedConfigs {
     pub active: Arc<Mutex<Option<config::Configuration>>>,
     pub previous: Arc<Mutex<Option<config::Configuration>>>,
-    pub new: Arc<Mutex<Option<config::Configuration>>>,
 }
 
 impl fmt::Display for ProcessingState {
