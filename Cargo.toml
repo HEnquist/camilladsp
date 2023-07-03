@@ -27,7 +27,9 @@ name = "camilladsp"
 path = "src/bin.rs"
 
 [target.'cfg(target_os="linux")'.dependencies]
-alsa = "0.6.0"
+#alsa = "0.6.0"
+#alsa = { git = "https://github.com/HEnquist/alsa-rs", branch = "ctl_next_device" }
+alsa = { path = "../../rust/alsa-rs" }
 alsa-sys = "0.3.1"
 nix = "0.23"
 zbus = { version = "3.0.0", optional = true }

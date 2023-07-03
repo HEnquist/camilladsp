@@ -53,7 +53,7 @@ pub trait DeviceBufferManager {
                 data.bufsize = hwp.set_buffer_size_near(alt_buffer_frames)?;
             }
         }
-        data.bufsize = hwp.set_buffer_size_near(buffer_frames)?;
+        //data.bufsize = hwp.set_buffer_size_near(buffer_frames)?;
         debug!("Device is using a buffer size of {} frames", data.bufsize);
         Ok(())
     }

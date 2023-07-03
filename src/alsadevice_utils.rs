@@ -1,6 +1,11 @@
 use crate::config::SampleFormat;
 use crate::Res;
+use alsa::Card;
+use alsa::card::Iter;
+use alsa::device_name::HintIter;
+use alsa::Direction;
 use alsa::pcm::{Format, HwParams};
+use alsa::ctl::{Ctl, DeviceIter};
 use alsa_sys;
 
 const STANDARD_RATES: [u32; 17] = [
@@ -13,6 +18,84 @@ pub enum SupportedValues {
     Range(u32, u32),
     Discrete(Vec<u32>),
 }
+
+
+fn get_card_names(card: &Card, input: bool, names: &mut Vec<(String, String)>) -> Res<()> {
+    let dir = if input {
+        Direction::Capture
+    } else {
+        Direction::Playback
+    };
+
+    // Get a Ctl for the card
+    let ctl_id = format!("hw:{}", card.get_index());
+    let ctl = Ctl::new(&ctl_id, false)?;
+
+    // Read card id and name
+    let cardinfo = ctl.card_info()?;
+    let card_id = cardinfo.get_id()?;
+    let card_name = cardinfo.get_name()?;
+    for device in DeviceIter::new(&ctl) {
+        // Read info from Ctl
+        let pcm_info = ctl.pcm_info(device as u32, 0, dir)?;
+
+        // Read PCM name
+        let pcm_name = pcm_info.get_name()?.to_string();
+
+        // Loop through subdevices and get their names
+        let subdevs = pcm_info.get_subdevices_count();
+        for subdev in 0..subdevs {
+            let pcm_info = ctl.pcm_info(device as u32, subdev, dir)?;
+            // Build the full device id
+            let subdevice_id = format!("hw:{},{},{}", card_id, device, subdev).to_string();
+        
+            // Get subdevice name and build a descriptive device name
+            let subdev_name = pcm_info.get_subdevice_name()?;
+            let name = format!("{}, {}, {}", card_name, pcm_name, subdev_name).to_string();
+        
+            //println!("{} - {}", subdevice_id, name);
+            names.push((subdevice_id, name))
+        }
+    }
+
+
+    Ok(())
+}
+
+pub fn list_hw_devices(input: bool) -> Vec<(String, String)> {
+    let mut names = Vec::new();
+    let cards = Iter::new();
+    for maybe_card in cards {
+        if let Ok(card) = maybe_card {
+            get_card_names(&card, input, &mut names).unwrap_or_default();
+        }
+    }
+    names
+}
+
+pub fn list_pcm_devices(input: bool) -> Vec<(String, String)> {
+    let mut names = Vec::new();
+    let hints = HintIter::new_str(None, "pcm").unwrap();
+    let direction = if input {
+        Direction::Capture
+    } else {
+        Direction::Playback
+    };
+    for hint in hints {
+        if hint.name.is_some() && hint.desc.is_some() && (hint.direction.is_none() || hint.direction.map(|dir| dir == direction).unwrap_or_default()) {
+            names.push((hint.name.unwrap(), hint.desc.unwrap()))
+        }
+    }
+    names
+}
+
+pub fn list_device_names(input: bool) -> Vec<(String, String)> {
+    let mut hw_names = list_hw_devices(input);
+    let mut pcm_names = list_pcm_devices(input);
+    hw_names.append(&mut pcm_names);
+    hw_names
+}
+
 
 pub fn state_desc(state: u32) -> String {
     match state {
