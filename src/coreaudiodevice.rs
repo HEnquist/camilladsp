@@ -119,7 +119,7 @@ pub fn list_device_names(input: bool) -> Vec<String> {
     names
 }
 
-pub fn list_available_devices(input:bool) -> Vec<(String, String)> {
+pub fn list_available_devices(input: bool) -> Vec<(String, String)> {
     let names = list_device_names(input);
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }

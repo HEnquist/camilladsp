@@ -1,11 +1,11 @@
 use crate::config::SampleFormat;
 use crate::Res;
-use alsa::Card;
 use alsa::card::Iter;
-use alsa::device_name::HintIter;
-use alsa::Direction;
-use alsa::pcm::{Format, HwParams};
 use alsa::ctl::{Ctl, DeviceIter};
+use alsa::device_name::HintIter;
+use alsa::pcm::{Format, HwParams};
+use alsa::Card;
+use alsa::Direction;
 use alsa_sys;
 
 const STANDARD_RATES: [u32; 17] = [
@@ -18,7 +18,6 @@ pub enum SupportedValues {
     Range(u32, u32),
     Discrete(Vec<u32>),
 }
-
 
 fn get_card_names(card: &Card, input: bool, names: &mut Vec<(String, String)>) -> Res<()> {
     let dir = if input {
@@ -48,16 +47,15 @@ fn get_card_names(card: &Card, input: bool, names: &mut Vec<(String, String)>) -
             let pcm_info = ctl.pcm_info(device as u32, subdev, dir)?;
             // Build the full device id
             let subdevice_id = format!("hw:{},{},{}", card_id, device, subdev).to_string();
-        
+
             // Get subdevice name and build a descriptive device name
             let subdev_name = pcm_info.get_subdevice_name()?;
             let name = format!("{}, {}, {}", card_name, pcm_name, subdev_name).to_string();
-        
+
             //println!("{} - {}", subdevice_id, name);
             names.push((subdevice_id, name))
         }
     }
-
 
     Ok(())
 }
@@ -82,7 +80,14 @@ pub fn list_pcm_devices(input: bool) -> Vec<(String, String)> {
         Direction::Playback
     };
     for hint in hints {
-        if hint.name.is_some() && hint.desc.is_some() && (hint.direction.is_none() || hint.direction.map(|dir| dir == direction).unwrap_or_default()) {
+        if hint.name.is_some()
+            && hint.desc.is_some()
+            && (hint.direction.is_none()
+                || hint
+                    .direction
+                    .map(|dir| dir == direction)
+                    .unwrap_or_default())
+        {
             names.push((hint.name.unwrap(), hint.desc.unwrap()))
         }
     }
@@ -95,7 +100,6 @@ pub fn list_device_names(input: bool) -> Vec<(String, String)> {
     hw_names.append(&mut pcm_names);
     hw_names
 }
-
 
 pub fn state_desc(state: u32) -> String {
     match state {

@@ -79,9 +79,7 @@ pub fn list_device_names(input: bool) -> Vec<(String, String)> {
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
-fn list_device_names_in_collection(
-    collection: &DeviceCollection,
-) -> Res<Vec<String>> {
+fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<String>> {
     let mut names = Vec::new();
     let count = collection.get_nbr_devices()?;
     for n in 0..count {
