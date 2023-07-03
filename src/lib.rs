@@ -378,7 +378,10 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     (playbacktypes, capturetypes)
 }
 
-pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, Option<String>)> {
+// Return a list of supported devices.
+// Returns two strings per device, the device name and a readable name.
+// Some backends do not make a diference between these, and return the same name twice.
+pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String)> {
     match backend {
         #[cfg(target_os = "linux")]
         "Alsa" => alsadevice::list_available_devices(input),

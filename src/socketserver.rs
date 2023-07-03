@@ -369,11 +369,11 @@ enum WsReply {
     },
     GetAvailableCaptureDevices {
         result: WsResult,
-        value: Vec<(String, Option<String>)>,
+        value: Vec<(String, String)>,
     },
     GetAvailablePlaybackDevices {
         result: WsResult,
-        value: Vec<(String, Option<String>)>,
+        value: Vec<(String, String)>,
     },
     GetProcessingLoad {
         result: WsResult,
