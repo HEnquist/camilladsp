@@ -63,10 +63,8 @@ fn get_card_names(card: &Card, input: bool, names: &mut Vec<(String, String)>) -
 pub fn list_hw_devices(input: bool) -> Vec<(String, String)> {
     let mut names = Vec::new();
     let cards = Iter::new();
-    for maybe_card in cards {
-        if let Ok(card) = maybe_card {
-            get_card_names(&card, input, &mut names).unwrap_or_default();
-        }
+    for card in cards.flatten() {
+        get_card_names(&card, input, &mut names).unwrap_or_default();
     }
     names
 }
