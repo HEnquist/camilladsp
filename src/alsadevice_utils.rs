@@ -4,8 +4,8 @@ use alsa::Card;
 use alsa::card::Iter;
 use alsa::device_name::HintIter;
 use alsa::Direction;
-use alsa::pcm::{Info, Format, HwParams};
-use alsa::ctl::Ctl;
+use alsa::pcm::{Format, HwParams};
+use alsa::ctl::{Ctl, DeviceIter};
 use alsa_sys;
 
 const STANDARD_RATES: [u32; 17] = [
@@ -20,7 +20,7 @@ pub enum SupportedValues {
 }
 
 
-fn get_card_names(card: &Card, device: &mut i32, input: bool, names: &mut Vec<(String, String)>) -> Res<()> {
+fn get_card_names(card: &Card, input: bool, names: &mut Vec<(String, String)>) -> Res<()> {
     let dir = if input {
         Direction::Capture
     } else {
@@ -35,34 +35,27 @@ fn get_card_names(card: &Card, device: &mut i32, input: bool, names: &mut Vec<(S
     let cardinfo = ctl.card_info()?;
     let card_id = cardinfo.get_id()?;
     let card_name = cardinfo.get_name()?;
-    *device = ctl.pcm_next_device(*device)?;
+    for device in DeviceIter::new(&ctl) {
+        // Read info from Ctl
+        let pcm_info = ctl.pcm_info(device as u32, 0, dir)?;
 
-    // Create info container
-    let mut pcm_info = Info::new()?;
-    pcm_info.set_device(*device as u32);
-    pcm_info.set_subdevice(0);
-    pcm_info.set_stream(dir);
+        // Read PCM name
+        let pcm_name = pcm_info.get_name()?.to_string();
 
-    // Read info from Ctl
-    ctl.info(&mut pcm_info)?;
-
-    // Read PCM name
-    let pcm_name = pcm_info.get_name()?.to_string();
-
-    // Loop through subdevices and get their names
-    let subdevs = pcm_info.get_subdevices_count();
-    for subdev in 0..subdevs {
-        pcm_info.set_subdevice(subdev);
-        ctl.info(&mut pcm_info)?;
-        // Build the full device id
-        let subdevice_id = format!("hw:{},{},{}", card_id, device, subdev).to_string();
+        // Loop through subdevices and get their names
+        let subdevs = pcm_info.get_subdevices_count();
+        for subdev in 0..subdevs {
+            let pcm_info = ctl.pcm_info(device as u32, subdev, dir)?;
+            // Build the full device id
+            let subdevice_id = format!("hw:{},{},{}", card_id, device, subdev).to_string();
         
-        // Get subdevice name and build a descriptive device name
-        let subdev_name = pcm_info.get_subdevice_name()?;
-        let name = format!("{}, {}, {}", card_name, pcm_name, subdev_name).to_string();
+            // Get subdevice name and build a descriptive device name
+            let subdev_name = pcm_info.get_subdevice_name()?;
+            let name = format!("{}, {}, {}", card_name, pcm_name, subdev_name).to_string();
         
-        //println!("{} - {}", subdevice_id, name);
-        names.push((subdevice_id, name))
+            //println!("{} - {}", subdevice_id, name);
+            names.push((subdevice_id, name))
+        }
     }
 
 
@@ -73,10 +66,8 @@ pub fn list_hw_devices(input: bool) -> Vec<(String, String)> {
     let mut names = Vec::new();
     let cards = Iter::new();
     for maybe_card in cards {
-        
         if let Ok(card) = maybe_card {
-            let mut device = -1;
-            while let Ok(()) = get_card_names(&card, &mut device, input, &mut names) {}
+            get_card_names(&card, input, &mut names).unwrap_or_default();
         }
     }
     names
@@ -95,7 +86,6 @@ pub fn list_pcm_devices(input: bool) -> Vec<(String, String)> {
             names.push((hint.name.unwrap(), hint.desc.unwrap()))
         }
     }
-
     names
 }
 
@@ -106,47 +96,6 @@ pub fn list_device_names(input: bool) -> Vec<(String, String)> {
     hw_names
 }
 
-/*
-static void pcm_list(void)
-{
-	void **hints, **n;
-	char *name, *descr, *descr1, *io;
-	const char *filter;
-
-	if (snd_device_name_hint(-1, "pcm", &hints) < 0)
-		return;
-	n = hints;
-	filter = stream == SND_PCM_STREAM_CAPTURE ? "Input" : "Output";
-	while (*n != NULL) {
-		name = snd_device_name_get_hint(*n, "NAME");
-		descr = snd_device_name_get_hint(*n, "DESC");
-		io = snd_device_name_get_hint(*n, "IOID");
-		if (io != NULL && strcmp(io, filter) != 0)
-			goto __end;
-		printf("%s\n", name);
-		if ((descr1 = descr) != NULL) {
-			printf("    ");
-			while (*descr1) {
-				if (*descr1 == '\n')
-					printf("\n    ");
-				else
-					putchar(*descr1);
-				descr1++;
-			}
-			putchar('\n');
-		}
-	      __end:
-	      	if (name != NULL)
-	      		free(name);
-		if (descr != NULL)
-			free(descr);
-		if (io != NULL)
-			free(io);
-		n++;
-	}
-	snd_device_name_free_hint(hints);
-}
-*/
 
 pub fn state_desc(state: u32) -> String {
     match state {
