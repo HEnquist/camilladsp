@@ -25,7 +25,8 @@ use crate::alsadevice_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
 use crate::alsadevice_utils::{
-    adjust_speed, list_channels_as_text, list_formats_as_text, list_samplerates_as_text, state_desc,
+    adjust_speed, list_channels_as_text, list_device_names, list_formats_as_text,
+    list_samplerates_as_text, state_desc,
 };
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -334,6 +335,12 @@ fn open_pcm(
     buf_manager: &mut dyn DeviceBufferManager,
     capture: bool,
 ) -> Res<alsa::PCM> {
+    let direction = if capture { "Capture" } else { "Playback" };
+    debug!(
+        "Available {} devices: {:?}",
+        direction,
+        list_device_names(capture)
+    );
     // Acquire the lock
     let _lock = ALSA_MUTEX.lock();
     // Open the device
@@ -342,7 +349,6 @@ fn open_pcm(
     } else {
         alsa::PCM::new(&devname, Direction::Playback, true)?
     };
-    let direction = if capture { "Capture" } else { "Playback" };
     // Set hardware parameters
     {
         let hwp = HwParams::any(&pcmdev)?;

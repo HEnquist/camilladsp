@@ -66,17 +66,17 @@ enum DisconnectReason {
     Error,
 }
 
-#[allow(dead_code)]
-fn list_device_names(input: bool) -> Vec<String> {
+pub fn list_device_names(input: bool) -> Vec<(String, String)> {
     let direction = if input {
         wasapi::Direction::Capture
     } else {
         wasapi::Direction::Render
     };
     let collection = wasapi::DeviceCollection::new(&direction);
-    collection
+    let names = collection
         .map(|coll| list_device_names_in_collection(&coll).unwrap_or_default())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
 fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<String>> {

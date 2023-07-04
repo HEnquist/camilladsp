@@ -205,7 +205,34 @@ These commands are used to check the syntax and contents of configurations. They
 - `ReadConfigFile` : same as ReadConfig but reads the config from the file at the given path.
 - `ValidateConfig`: same as ReadConfig but performs more extensive checks to ensure the configuration can be applied.
 
+### Audio device listing
 
+These commands query the audio backend for a list of devices.
+They accept a backend name as input, and return a list of names.
+
+- `GetAvailableCaptureDevices` : get a list of available capture devices. 
+- `GetAvailablePlaybackDevices` : get a list of available playback devices. 
+
+Each element in the returned list consists of one string for the device identifier, and one optional string for the name.
+Some backends use the name as identifier, they then return `null` as name.
+
+The currently supported backend names are `Alsa`, `CoreAudio` and `Wasapi`.
+
+Example entries for Wasapi:
+```
+[
+  ["Microphone (USB Microphone)", null],
+  ["In 3-4 (MOTU M Series)", null]
+]
+```
+
+Example entries for Alsa:
+```
+[
+  ["hw:Loopback,0,0", "Loopback, Loopback PCM, subdevice #0"],
+  ["hw:Generic,0,0", "HD-Audio Generic, ALC236 Analog, subdevice #0"]
+]
+```
 
 ## Controlling from Python using pyCamillaDSP
 
