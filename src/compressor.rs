@@ -55,7 +55,7 @@ impl Compressor {
 
         debug!("Creating compressor '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}", 
                 name, channels, process_channels, monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain(), config.soft_clip(), clip_limit);
-        let limiter = if let Some(limit) = clip_limit {
+        let limiter = if let Some(limit) = config.clip_limit {
             let limitconf = config::LimiterParameters {
                 clip_limit: limit,
                 soft_clip: config.soft_clip,
@@ -177,7 +177,7 @@ impl Processor for Compressor {
                 .clip_limit
                 .map(|lim| (10.0 as PrcFmt).powf(lim / 20.0));
 
-            let limiter = if let Some(limit) = clip_limit {
+            let limiter = if let Some(limit) = config.clip_limit {
                 let limitconf = config::LimiterParameters {
                     clip_limit: limit,
                     soft_clip: config.soft_clip,
