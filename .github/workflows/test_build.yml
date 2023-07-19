@@ -21,7 +21,7 @@ on:
 jobs:
   linux:
     name: Linux
-    if: ${{ inputs.arch }} == 'linux' || ${{ inputs.arch }} == 'all'
+    if: inputs.arch == 'linux' || inputs.arch == 'all'
     runs-on: ubuntu-latest
     #container: ubuntu:20.04
     steps:
@@ -67,7 +67,7 @@ jobs:
 
   arm:
     name: Pi
-    if: ${{ inputs.arch }} == 'arm' || ${{ inputs.arch }} == 'all'
+    if: inputs.arch == 'arm' || inputs.arch == 'all'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -105,7 +105,7 @@ jobs:
 
   arm64:
     name: Pi64
-    if: ${{ inputs.arch }} == 'arm64' || ${{ inputs.arch }} == 'all'
+    if: inputs.arch == 'arm64' || inputs.arch == 'all'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -141,7 +141,7 @@ jobs:
 
   windows:
     name: Windows
-    if: ${{ inputs.arch }} == 'windows' || ${{ inputs.arch }} == 'all'
+    if: inputs.arch == 'windows' || inputs.arch == 'all'
     runs-on: windows-latest
     steps:
       - name: Checkout sources
@@ -172,7 +172,7 @@ jobs:
 
   macos:
     name: macOS
-    if: ${{ inputs.arch }} == 'macos' || ${{ inputs.arch }} == 'all'
+    if: inputs.arch == 'macos' || inputs.arch == 'all'
     runs-on: macos-latest
     steps:
       - name: Checkout sources
@@ -204,7 +204,7 @@ jobs:
 
   macos_arm:
     name: macOS aarch64
-    if: ${{ inputs.arch }} == 'macos_arm' || ${{ inputs.arch }} == 'all'
+    if: inputs.arch == 'macos_arm' || inputs.arch == 'all'
     runs-on: macos-latest
     steps:
       - name: Checkout sources
