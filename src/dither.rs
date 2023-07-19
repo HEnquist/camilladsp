@@ -532,7 +532,7 @@ impl<'a> Dither<'a> {
 
         match conf {
             config::DitherParameters::None { .. } => {
-                let noop = NoopDitherer::default();
+                let noop = NoopDitherer;
                 Self::new(name, bits, noop, shaper)
             }
             config::DitherParameters::Flat { amplitude, .. } => {
