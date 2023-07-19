@@ -138,6 +138,43 @@ jobs:
           path: camilladsp.tar.gz
           name: camilladsp-linux-aarch64.tar.gz
 
+  armv6:
+    name: Pi-Zero
+    if: inputs.arch == 'armv6' || inputs.arch == 'all'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: arm-unknown-linux-gnueabihf
+          override: true
+
+      - name: Build image
+        run: docker build -t cross/armv6:v1 --file Dockerfile_armv6 ./
+        
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          use-cross: true
+          args: --release --target arm-unknown-linux-gnueabihf --features 32bit
+        #env:
+        #  RUSTFLAGS: "-C target-feature=+neon"
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/arm-unknown-linux-gnueabihf/release camilladsp
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          path: camilladsp.tar.gz
+          name: camilladsp-linux-armv6.tar.gz
+
 
   windows:
     name: Windows
