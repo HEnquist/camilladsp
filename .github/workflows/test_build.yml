@@ -1,0 +1,232 @@
+name: Test Build
+
+on:
+  workflow_dispatch
+    inputs:
+      arch:
+        description: 'Architecture to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - linux
+        - arm
+        - arm64
+        - armv6
+        - windows
+        - macos
+        - macos_arm
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    #container: ubuntu:20.04
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Update package list
+        run: sudo apt-get update
+
+      - name: Install utils
+        run: sudo apt-get install curl wget -y
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Install Alsa devel
+        run: sudo apt-get install libasound2-dev -y
+
+      - name: Install PulseAudio
+        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
+
+      - name: Install OpenSSL
+        run: sudo apt-get install openssl libssl-dev -y
+        
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --features pulse-backend
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          path: camilladsp.tar.gz
+          name: camilladsp-linux-amd64.tar.gz
+
+  arm:
+    name: Pi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: armv7-unknown-linux-gnueabihf
+          override: true
+
+      - name: Build image
+        run: docker build -t cross/armv7:v1 --file Dockerfile_armv7 ./
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          use-cross: true
+          args: --release --target armv7-unknown-linux-gnueabihf
+        env:
+          RUSTFLAGS: "-C target-feature=+neon"
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/armv7-unknown-linux-gnueabihf/release camilladsp
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          path: camilladsp.tar.gz
+          name: camilladsp-linux-armv7.tar.gz
+
+
+  arm64:
+    name: Pi64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: aarch64-unknown-linux-gnu
+          override: true
+
+      - name: Build image
+        run: docker build -t cross/armv8:v1 --file Dockerfile_armv8 ./
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          use-cross: true
+          args: --release --target aarch64-unknown-linux-gnu --features neon
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/aarch64-unknown-linux-gnu/release camilladsp
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          path: camilladsp.tar.gz
+          name: camilladsp-linux-aarch64.tar.gz
+
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
+
+      - name: Compress
+        run: powershell Compress-Archive target/release/camilladsp.exe camilladsp.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          path: camilladsp.tar.gz
+          name: camilladsp-windows-amd64.tar.gz
+
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
+        
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          path: camilladsp.tar.gz
+          name: camilladsp-macos-amd64.tar.gz
+
+
+
+  macos_arm:
+    name: macOS aarch64
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain for arm
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          target: aarch64-apple-darwin
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args:  --release --target aarch64-apple-darwin
+        env:
+          SDKROOT: /Applications/Xcode_12.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.1.sdk
+          MACOSX_DEPLOYMENT_TARGET: 11.1
+          DEVELOPER_DIR: /Applications/Xcode_12.4.app
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/aarch64-apple-darwin/release camilladsp
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          path: camilladsp.tar.gz
+          name: camilladsp-macos-aarch64.tar.gz
