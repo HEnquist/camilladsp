@@ -341,9 +341,15 @@ fn playback_loop(
     loop {
         buffer_free_frame_count = audio_client.get_available_space_in_frames()?;
         trace!("New buffer frame count {}", buffer_free_frame_count);
-        let device_time = pos as f64 / device_freq;
-        //println!("pos {} {}, f {}, time {}, diff {}", pos.0, pos.1, f, devtime, devtime-prevtime);
-        //println!("{}",prev_inst.elapsed().as_micros());
+        let mut device_time = pos as f64 / device_freq;
+        if device_time == 0.0 && device_prevtime > 0.0 {
+            debug!("Failed to get accurate device time, skipping check for missing events");
+            // A zero value means that the device position read was delayed due to some
+            // other high priority event, and an accurate reading could not be taken.
+            // To avoid needless resets of the stream, set the position to the expected value,
+            // calculated as the previous value plus the expected increment.
+            device_time = device_prevtime + buffer_free_frame_count as f64 / samplerate;
+        }
         trace!(
             "Device time counted up by {} s",
             device_time - device_prevtime
