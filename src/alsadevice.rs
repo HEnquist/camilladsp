@@ -204,14 +204,26 @@ fn play_buffer(
                 if err.nix_error() == alsa::nix::errno::Errno::EAGAIN {
                     let mut retries = 0;
                     while retries < 10 {
+                        retries += 1;
                         trace!("Read returned EAGAIN error, retry {}", retries);
+                        let res = pcmdevice.wait(Some(timeout_millis));
+                        match res {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                warn!("PB: EAGAIN loop timed out on wait");
+                                continue;
+                            }
+                            Err(err) => {
+                                warn!("PB: EAGAIN loop failed on wait, error: {}", err);
+                                continue;
+                            }
+                        }
                         let res = io.writei(buffer);
                         match res {
                             Err(err) => {
                                 if err.nix_error() != alsa::nix::errno::Errno::EAGAIN {
                                     res?;
                                 }
-                                retries += 1;
                             }
                             Ok(_) => {
                                 break;
