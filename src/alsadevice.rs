@@ -153,7 +153,11 @@ fn play_buffer(
     loop {
         retry_count += 1; //TODO limit this to something sensible
         let timeout_millis = (2.0 * millis_per_frame * frames_to_write as f32) as u32;
-        trace!("PB: try {}, pcmdevice.wait with timeout {} ms", retry_count, timeout_millis);
+        trace!(
+            "PB: try {}, pcmdevice.wait with timeout {} ms",
+            retry_count,
+            timeout_millis
+        );
         let start = if log_enabled!(log::Level::Trace) {
             Some(Instant::now())
         } else {
@@ -202,37 +206,7 @@ fn play_buffer(
                 }
             }
             Err(err) => {
-                if err.nix_error() == alsa::nix::errno::Errno::EAGAIN {
-                    //trace!("PB: encountered EAGAIN on write");
-                /*    let mut retries = 0;
-                    while retries < 10 {
-                        retries += 1;
-                        trace!("Write returned EAGAIN error, retry {}", retries);
-                        let res = pcmdevice.wait(Some(timeout_millis));
-                        match res {
-                            Ok(true) => {}
-                            Ok(false) => {
-                                warn!("PB: EAGAIN loop timed out on wait");
-                                continue;
-                            }
-                            Err(err) => {
-                                warn!("PB: EAGAIN loop failed on wait, error: {}", err);
-                                continue;
-                            }
-                        }
-                        let res = io.writei(buffer);
-                        match res {
-                            Err(err) => {
-                                if err.nix_error() != alsa::nix::errno::Errno::EAGAIN {
-                                    res?;
-                                }
-                            }
-                            Ok(_) => {
-                                break;
-                            }
-                        }
-                    }*/
-                } else {
+                if err.nix_error() != alsa::nix::errno::Errno::EAGAIN {
                     warn!("PB: Retrying playback, error: {}", err);
                     trace!("snd_pcm_prepare");
                     // Would recover() be better than prepare()?
@@ -244,7 +218,7 @@ fn play_buffer(
             }
         };
     }
-    Ok(PlaybackResult ::Normal)
+    Ok(PlaybackResult::Normal)
 }
 
 /// Capture a buffer.
