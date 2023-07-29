@@ -149,9 +149,11 @@ fn play_buffer(
     }
 
     let frames_to_write = buffer.len() / bytes_per_frame;
+    let mut retry_count: usize = 0;
     loop {
+        retry_count += 1; //TODO limit this to something sensible
         let timeout_millis = (2.0 * millis_per_frame * frames_to_write as f32) as u32;
-        trace!("PB: pcmdevice.wait with timeout {} ms", timeout_millis);
+        trace!("PB: try {}, pcmdevice.wait with timeout {} ms", retry_count, timeout_millis);
         let start = if log_enabled!(log::Level::Trace) {
             Some(Instant::now())
         } else {
@@ -200,12 +202,12 @@ fn play_buffer(
                 }
             }
             Err(err) => {
-                warn!("PB: Retrying playback, error: {}", err);
                 if err.nix_error() == alsa::nix::errno::Errno::EAGAIN {
-                    let mut retries = 0;
+                    //trace!("PB: encountered EAGAIN on write");
+                /*    let mut retries = 0;
                     while retries < 10 {
                         retries += 1;
-                        trace!("Read returned EAGAIN error, retry {}", retries);
+                        trace!("Write returned EAGAIN error, retry {}", retries);
                         let res = pcmdevice.wait(Some(timeout_millis));
                         match res {
                             Ok(true) => {}
@@ -229,8 +231,9 @@ fn play_buffer(
                                 break;
                             }
                         }
-                    }
+                    }*/
                 } else {
+                    warn!("PB: Retrying playback, error: {}", err);
                     trace!("snd_pcm_prepare");
                     // Would recover() be better than prepare()?
                     pcmdevice.prepare()?;
@@ -241,7 +244,7 @@ fn play_buffer(
             }
         };
     }
-    Ok(PlaybackResult::Normal)
+    Ok(PlaybackResult ::Normal)
 }
 
 /// Capture a buffer.
