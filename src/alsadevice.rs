@@ -154,7 +154,7 @@ fn play_buffer(
         retry_count += 1; //TODO limit this to something sensible
         let timeout_millis = (2.0 * millis_per_frame * frames_to_write as f32) as u32;
         trace!(
-            "PB: try {}, pcmdevice.wait with timeout {} ms",
+            "PB: write try {}, pcmdevice.wait with timeout {} ms",
             retry_count,
             timeout_millis
         );
@@ -187,18 +187,18 @@ fn play_buffer(
         match io.writei(buffer) {
             Ok(frames_written) => {
                 let cur_frames_to_write = buffer.len() / bytes_per_frame;
-                trace!(
-                    "PB: wrote {} frames to playback device as requested",
-                    frames_written
-                );
                 //trace!("Delay AFTER writing {} is {:?} frames", frames_written, pcmdevice.status().ok().map(|status| status.get_delay()));
                 if frames_written == cur_frames_to_write {
-                    // done writing
+                    trace!(
+                        "PB: wrote {} frames to playback device as requested",
+                        frames_written
+                    );
                     break;
                 } else {
-                    warn!(
-                        "PB: wrote {} instead of requested {}, trying to write the rest",
-                        frames_written, cur_frames_to_write
+                    trace!(
+                        "PB: wrote {} instead of requested {}, trying again to write the rest",
+                        frames_written,
+                        cur_frames_to_write
                     );
                     buffer = &buffer[frames_written * bytes_per_frame..];
                     // repeat writing
@@ -206,8 +206,10 @@ fn play_buffer(
                 }
             }
             Err(err) => {
-                if err.nix_error() != alsa::nix::errno::Errno::EAGAIN {
-                    warn!("PB: Retrying playback, error: {}", err);
+                if err.nix_error() == alsa::nix::errno::Errno::EAGAIN {
+                    trace!("PB: encountered EAGAIN error on write, trying again");
+                } else {
+                    warn!("PB: write error, trying to recover. Error: {}", err);
                     trace!("snd_pcm_prepare");
                     // Would recover() be better than prepare()?
                     pcmdevice.prepare()?;
