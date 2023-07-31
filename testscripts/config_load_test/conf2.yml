@@ -1,0 +1,32 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  enable_rate_adjust: true
+  capture:
+    type: CoreAudio
+    channels: 2
+    device: "BlackHole 2ch"
+  playback:
+    type: CoreAudio
+    channels: 2
+    device: "MacBook Air Speakers"
+
+filters:
+  testfilter:
+    type: Biquad
+    description: "nbr 2"
+    parameters:
+      type: Lowpass
+      freq: 500
+      q: 0.7
+
+pipeline:
+  - type: Filter
+    names: 
+      - testfilter
+    channel: 0
+  - type: Filter
+    names: 
+      - testfilter
+    channel: 1
