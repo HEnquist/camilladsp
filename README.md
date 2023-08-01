@@ -1360,6 +1360,7 @@ Music players:
 * https://moodeaudio.org/ - moOde audio player, audiophile-quality music playback for Raspberry Pi.
 * https://github.com/thoelf/Linux-Stream-Player - Play local files or streamed music with room EQ on Linux. 
 * https://github.com/Lykkedk/SuperPlayer-v8.0.0---SamplerateChanger-v1.0.0 - Automatic filter switching at sample rate change for squeezelite, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/361429-superplayer-dsp_engine-camilladsp-samplerate-switching-esp32-remote-control.html).
+* https://github.com/JWahle/piCoreCDSP - Installs CamillaDSP and GUI on piCorePlayer
 
 Guides and example configs:
 * https://github.com/ynot123/CamillaDSP-Cfgs-FIR-Examples - Example Filter Configuration and Convolver Coefficients.
