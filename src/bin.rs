@@ -120,15 +120,15 @@ fn run(
     rx_ctrl: crossbeam_channel::Receiver<ControllerMessage>,
 ) -> Res<ExitState> {
     let mut is_starting = true;
-    let conf = match shared_configs.active.lock().take() {
+    let mut active_config = match shared_configs.active.lock().clone() {
         Some(cfg) => cfg,
         None => {
             error!("Tried to start without config!");
             return Ok(ExitState::Exit);
         }
     };
-    let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.queuelimit());
-    let (tx_cap, rx_cap) = mpsc::sync_channel(conf.devices.queuelimit());
+    let (tx_pb, rx_pb) = mpsc::sync_channel(active_config.devices.queuelimit());
+    let (tx_cap, rx_cap) = mpsc::sync_channel(active_config.devices.queuelimit());
 
     let (tx_status, rx_status) = crossbeam_channel::unbounded();
     let tx_status_pb = tx_status.clone();
@@ -142,11 +142,9 @@ fn run(
     let barrier_cap = barrier.clone();
     let barrier_proc = barrier.clone();
 
-    let conf_pb = conf.clone();
-    let conf_cap = conf.clone();
-    let conf_proc = conf.clone();
-
-    let mut active_config = conf;
+    let conf_pb = active_config.clone();
+    let conf_cap = active_config.clone();
+    let conf_proc = active_config.clone();
 
     // Processing thread
     processing::run_processing(
