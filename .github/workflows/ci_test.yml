@@ -160,6 +160,8 @@ jobs:
           command: test
           use-cross: true
           args: --target arm-unknown-linux-gnueabihf
+        env: 
+          LD_LIBRARY_PATH: /usr/lib/arm-linux-gnueabihf
 
 
   check_test_windows:
