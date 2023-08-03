@@ -163,8 +163,6 @@ jobs:
           command: build
           use-cross: true
           args: --release --target arm-unknown-linux-gnueabihf --features 32bit
-        #env:
-        #  RUSTFLAGS: "-C target-feature=+neon"
 
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/arm-unknown-linux-gnueabihf/release camilladsp
