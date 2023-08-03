@@ -150,7 +150,7 @@ jobs:
         with:
           command: build
           use-cross: true
-          args: --release --target arm-unknown-linux-gnueabihf --features 32bit
+          args: --release --target arm-unknown-linux-gnueabihf
 
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/arm-unknown-linux-gnueabihf/release camilladsp

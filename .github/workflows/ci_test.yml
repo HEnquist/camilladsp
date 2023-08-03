@@ -152,14 +152,14 @@ jobs:
         with:
           command: check
           use-cross: true
-          args: --target arm-unknown-linux-gnueabihf --features 32bit
+          args: --target arm-unknown-linux-gnueabihf
 
       - name: Run cargo test for arm
         uses: actions-rs/cargo@v1
         with:
           command: test
           use-cross: true
-          args: --target arm-unknown-linux-gnueabihf --features 32bit
+          args: --target arm-unknown-linux-gnueabihf
 
 
   check_test_windows:
