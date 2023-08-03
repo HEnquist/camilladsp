@@ -1,6 +1,11 @@
 [target.arm-unknown-linux-gnueabihf]
 image = "cross/armv6:v1"
 
+[target.arm-unknown-linux-gnueabihf.env]
+passthrough = [
+    "RUSTFLAGS",
+]
+
 [target.armv7-unknown-linux-gnueabihf]
 image = "cross/armv7:v1"
 
