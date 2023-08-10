@@ -151,7 +151,11 @@ fn play_buffer(
     let frames_to_write = buffer.len() / bytes_per_frame;
     let mut retry_count: usize = 0;
     loop {
-        retry_count += 1; //TODO limit this to something sensible
+        retry_count += 1;
+        if retry_count >= 100 {
+            warn!("PB: giving up after {} write attempts", retry_count);
+            return Err(DeviceError::new("Aborting playback after too many write attempts").into());
+        }
         let timeout_millis = (2.0 * millis_per_frame * frames_to_write as f32) as u32;
         trace!(
             "PB: write try {}, pcmdevice.wait with timeout {} ms",
