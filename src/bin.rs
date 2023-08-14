@@ -27,10 +27,11 @@ extern crate time;
 extern crate log;
 
 use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
+use crossbeam_channel::select;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::env;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -38,6 +39,10 @@ use std::time::Duration;
 
 use flexi_logger::DeferredNow;
 use log::Record;
+use signal_hook::consts::signal::*;
+use signal_hook::consts::TERM_SIGNALS;
+#[cfg(not(windows))]
+use signal_hook::iterator::{exfiltrator::SignalOnly, SignalsInfo};
 use time::format_description;
 
 use camillalib::Res;
@@ -49,11 +54,12 @@ use camillalib::processing;
 #[cfg(feature = "websocket")]
 use camillalib::socketserver;
 use camillalib::statefile;
+use camillalib::ControllerMessage;
 #[cfg(feature = "websocket")]
 use std::net::IpAddr;
 
 use camillalib::{
-    list_supported_devices, CaptureStatus, CommandMessage, ExitRequest, ExitState, PlaybackStatus,
+    list_supported_devices, CaptureStatus, CommandMessage, ExitState, PlaybackStatus,
     ProcessingParameters, ProcessingState, ProcessingStatus, SharedConfigs, StatusMessage,
     StatusStructs, StopReason,
 };
@@ -61,8 +67,6 @@ use camillalib::{
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
 const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
 const EXIT_OK: i32 = 0; // All ok
-
-const DELAY: Duration = Duration::from_millis(100);
 
 // Time format string for logger
 const TS_S: &str = "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:6]";
@@ -110,68 +114,23 @@ pub fn custom_logger_format(
     )
 }
 
-fn new_config(
-    config_path: &Arc<Mutex<Option<String>>>,
-    new_config_shared: &Arc<Mutex<Option<config::Configuration>>>,
-) -> Res<config::Configuration> {
-    //new_config is not None, this is the one to use
-    if let Some(mut conf) = new_config_shared.lock().clone() {
-        debug!("Reload using config from websocket");
-        match config::validate_config(&mut conf, None) {
-            Ok(()) => {
-                debug!("Config valid");
-                Ok(conf)
-            }
-            Err(err) => {
-                error!("Invalid config file!");
-                error!("{}", err);
-                Err(err)
-            }
-        }
-    } else if let Some(file) = config_path.lock().clone() {
-        match config::load_config(&file) {
-            Ok(mut conf) => match config::validate_config(&mut conf, Some(&file)) {
-                Ok(()) => {
-                    debug!("Reload using config file");
-                    Ok(conf)
-                }
-                Err(err) => {
-                    error!("Invalid config file!");
-                    error!("{}", err);
-                    Err(err)
-                }
-            },
-            Err(err) => {
-                error!("Config file error:");
-                error!("{}", err);
-                Err(err)
-            }
-        }
-    } else {
-        error!("No new config supplied and no path set");
-        Err(config::ConfigError::new("No new config supplied and no path set").into())
-    }
-}
-
 fn run(
-    signal_reload: Arc<AtomicBool>,
-    signal_exit: Arc<AtomicUsize>,
     shared_configs: SharedConfigs,
-    config_path: Arc<Mutex<Option<String>>>,
     status_structs: StatusStructs,
+    rx_ctrl: crossbeam_channel::Receiver<ControllerMessage>,
 ) -> Res<ExitState> {
     let mut is_starting = true;
-    let conf = match shared_configs.new.lock().take() {
+    let mut active_config = match shared_configs.active.lock().clone() {
         Some(cfg) => cfg,
         None => {
             error!("Tried to start without config!");
             return Ok(ExitState::Exit);
         }
     };
-    let (tx_pb, rx_pb) = mpsc::sync_channel(conf.devices.queuelimit());
-    let (tx_cap, rx_cap) = mpsc::sync_channel(conf.devices.queuelimit());
+    let (tx_pb, rx_pb) = mpsc::sync_channel(active_config.devices.queuelimit());
+    let (tx_cap, rx_cap) = mpsc::sync_channel(active_config.devices.queuelimit());
 
-    let (tx_status, rx_status) = mpsc::channel();
+    let (tx_status, rx_status) = crossbeam_channel::unbounded();
     let tx_status_pb = tx_status.clone();
     let tx_status_cap = tx_status;
 
@@ -183,13 +142,9 @@ fn run(
     let barrier_cap = barrier.clone();
     let barrier_proc = barrier.clone();
 
-    let conf_pb = conf.clone();
-    let conf_cap = conf.clone();
-    let conf_proc = conf.clone();
-
-    let mut active_config = conf;
-    //let conf_yaml = serde_yaml::to_string(&active_config).unwrap();
-    *shared_configs.active.lock() = Some(active_config.clone());
+    let conf_pb = active_config.clone();
+    let conf_cap = active_config.clone();
+    let conf_proc = active_config.clone();
 
     // Processing thread
     processing::run_processing(
@@ -229,241 +184,222 @@ fn run(
 
     let mut pb_ready = false;
     let mut cap_ready = false;
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&signal_reload))?;
-    signal_hook::flag::register_usize(
-        signal_hook::consts::SIGINT,
-        Arc::clone(&signal_exit),
-        ExitRequest::EXIT,
-    )?;
 
     loop {
-        if !is_starting
-            && signal_reload
-                .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
-                .is_ok()
-        {
-            debug!("Reloading configuration...");
-            let new_config = new_config(&config_path, &shared_configs.new);
-
-            match new_config {
-                Ok(conf) => {
-                    let comp = config::config_diff(&active_config, &conf);
-                    match comp {
-                        config::ConfigChange::Pipeline
-                        | config::ConfigChange::MixerParameters
-                        | config::ConfigChange::FilterParameters { .. } => {
-                            tx_pipeconf.send((comp, conf.clone())).unwrap();
-                            active_config = conf;
-                            {
-                                // acquire both locks first to start a "transaction"
-                                let mut act_cfg_shared = shared_configs.active.lock();
-                                let mut new_cfg_shared = shared_configs.new.lock();
-                                *act_cfg_shared = Some(active_config.clone());
-                                *new_cfg_shared = None;
+        // If startup procedure is not finished, do not process config change or exit
+        let ctrl_ch = if is_starting {
+            crossbeam_channel::never()
+        } else {
+            rx_ctrl.clone()
+        };
+        select! {
+            recv(ctrl_ch) -> msg  => {
+                match msg {
+                    Ok(ControllerMessage::ConfigChanged(new_conf)) => {
+                        let comp = config::config_diff(&active_config, &new_conf);
+                        match comp {
+                            config::ConfigChange::Pipeline
+                            | config::ConfigChange::MixerParameters
+                            | config::ConfigChange::FilterParameters { .. } => {
+                                tx_pipeconf.send((comp, *new_conf.clone())).unwrap();
+                                active_config = *new_conf;
+                                *shared_configs.active.lock() = Some(active_config.clone());
+                                let used_channels = config::used_capture_channels(&active_config);
+                                debug!("Using channels {:?}", used_channels);
+                                status_structs.capture.write().used_channels = used_channels;
+                                debug!("Sent changes to pipeline");
                             }
-                            let used_channels = config::used_capture_channels(&active_config);
-                            debug!("Using channels {:?}", used_channels);
-                            status_structs.capture.write().used_channels = used_channels;
-                            debug!("Sent changes to pipeline");
-                        }
-                        config::ConfigChange::Devices => {
-                            debug!("Devices changed, restart required.");
-                            if tx_command_cap.send(CommandMessage::Exit).is_err() {
-                                debug!("Capture thread has already exited");
+                            config::ConfigChange::Devices => {
+                                debug!("Devices changed, restart required.");
+                                if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                                    debug!("Capture thread has already exited");
+                                }
+                                trace!("Wait for pb..");
+                                pb_handle.join().unwrap();
+                                trace!("Wait for cap..");
+                                cap_handle.join().unwrap();
+                                *shared_configs.active.lock() = Some(*new_conf);
+                                trace!("All threads stopped, returning");
+                                return Ok(ExitState::Restart);
                             }
-                            trace!("Wait for pb..");
-                            pb_handle.join().unwrap();
-                            trace!("Wait for cap..");
-                            cap_handle.join().unwrap();
-                            *shared_configs.new.lock() = Some(conf);
-                            trace!("All threads stopped, returning");
-                            return Ok(ExitState::Restart);
+                            config::ConfigChange::None => {
+                                debug!("No changes in config.");
+                            }
+                        };
+                    },
+                    Ok(ControllerMessage::Stop) => {
+                        debug!("Stop requested...");
+                        if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                            debug!("Capture thread has already exited");
                         }
-                        config::ConfigChange::None => {
-                            debug!("No changes in config.");
-                            *shared_configs.new.lock() = None;
+                        trace!("Wait for pb..");
+                        pb_handle.join().unwrap();
+                        trace!("Wait for cap..");
+                        cap_handle.join().unwrap();
+                        {
+                            let mut active_cfg_shared = shared_configs.active.lock();
+                            let mut prev_cfg_shared = shared_configs.previous.lock();
+                            *active_cfg_shared = None;
+                            *prev_cfg_shared = Some(active_config);
                         }
-                    };
-                }
-                Err(err) => {
-                    error!("Config file error: {}", err);
-                }
-            };
-        }
-        if !is_starting {
-            match signal_exit.load(Ordering::Relaxed) {
-                ExitRequest::EXIT => {
-                    debug!("Exit requested...");
-                    signal_exit.store(ExitRequest::NONE, Ordering::Relaxed);
-                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
-                        debug!("Capture thread has already exited");
-                    }
-                    trace!("Wait for pb..");
-                    pb_handle.join().unwrap();
-                    trace!("Wait for cap..");
-                    cap_handle.join().unwrap();
-                    *shared_configs.previous.lock() = Some(active_config);
-                    trace!("All threads stopped, exiting");
-                    return Ok(ExitState::Exit);
-                }
-                ExitRequest::STOP => {
-                    debug!("Stop requested...");
-                    signal_exit.store(ExitRequest::NONE, Ordering::Relaxed);
-                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
-                        debug!("Capture thread has already exited");
-                    }
-                    trace!("Wait for pb..");
-                    pb_handle.join().unwrap();
-                    trace!("Wait for cap..");
-                    cap_handle.join().unwrap();
-                    {
-                        let mut new_cfg_shared = shared_configs.new.lock();
-                        let mut prev_cfg_shared = shared_configs.previous.lock();
-                        *new_cfg_shared = None;
-                        *prev_cfg_shared = Some(active_config);
-                    }
-                    trace!("All threads stopped, stopping");
-                    return Ok(ExitState::Restart);
-                }
-                _ => {}
-            };
-        }
-        match rx_status.recv_timeout(DELAY) {
-            Ok(msg) => match msg {
-                StatusMessage::PlaybackReady => {
-                    debug!("Playback thread ready to start");
-                    pb_ready = true;
-                    if cap_ready {
-                        debug!("Both capture and playback ready, release barrier");
-                        barrier.wait();
-                        debug!("Supervisor loop starts now!");
-                        is_starting = false;
-                    }
-                }
-                StatusMessage::CaptureReady => {
-                    debug!("Capture thread ready to start");
-                    cap_ready = true;
-                    if pb_ready {
-                        debug!("Both capture and playback ready, release barrier");
-                        barrier.wait();
-                        debug!("Supervisor loop starts now!");
-                        is_starting = false;
-                        status_structs.status.write().stop_reason = StopReason::None;
-                    }
-                }
-                StatusMessage::PlaybackError(message) => {
-                    error!("Playback error: {}", message);
-                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
-                        debug!("Capture thread has already exited");
-                    }
-                    if is_starting {
-                        debug!("Error while starting, release barrier");
-                        barrier.wait();
-                    }
-                    debug!("Wait for capture thread to exit..");
-                    status_structs.status.write().stop_reason = StopReason::PlaybackError(message);
-                    cap_handle.join().unwrap();
-                    {
-                        let mut new_cfg_shared = shared_configs.new.lock();
-                        let mut prev_cfg_shared = shared_configs.previous.lock();
-                        *new_cfg_shared = None;
-                        *prev_cfg_shared = Some(active_config);
-                    }
-                    trace!("All threads stopped, returning");
-                    return Ok(ExitState::Restart);
-                }
-                StatusMessage::CaptureError(message) => {
-                    error!("Capture error: {}", message);
-                    if is_starting {
-                        debug!("Error while starting, release barrier");
-                        barrier.wait();
-                    }
-                    debug!("Wait for playback thread to exit..");
-                    status_structs.status.write().stop_reason = StopReason::CaptureError(message);
-                    pb_handle.join().unwrap();
-                    {
-                        let mut new_cfg_shared = shared_configs.new.lock();
-                        let mut prev_cfg_shared = shared_configs.previous.lock();
-                        *new_cfg_shared = None;
-                        *prev_cfg_shared = Some(active_config);
-                    }
-                    trace!("All threads stopped, returning");
-                    return Ok(ExitState::Restart);
-                }
-                StatusMessage::PlaybackFormatChange(rate) => {
-                    error!("Playback stopped due to external format change");
-                    if tx_command_cap.send(CommandMessage::Exit).is_err() {
-                        debug!("Capture thread has already exited");
-                    }
-                    if is_starting {
-                        debug!("Error while starting, release barrier");
-                        barrier.wait();
-                    }
-                    debug!("Wait for capture thread to exit..");
-                    status_structs.status.write().stop_reason =
-                        StopReason::PlaybackFormatChange(rate);
-                    cap_handle.join().unwrap();
-                    {
-                        let mut new_cfg_shared = shared_configs.new.lock();
-                        let mut prev_cfg_shared = shared_configs.previous.lock();
-                        *new_cfg_shared = None;
-                        *prev_cfg_shared = Some(active_config);
-                    }
-                    trace!("All threads stopped, returning");
-                    return Ok(ExitState::Restart);
-                }
-                StatusMessage::CaptureFormatChange(rate) => {
-                    error!("Capture stopped due to external format change");
-                    if is_starting {
-                        debug!("Error while starting, release barrier");
-                        barrier.wait();
-                    }
-                    debug!("Wait for playback thread to exit..");
-                    status_structs.status.write().stop_reason =
-                        StopReason::CaptureFormatChange(rate);
-                    pb_handle.join().unwrap();
-                    {
-                        let mut new_cfg_shared = shared_configs.new.lock();
-                        let mut prev_cfg_shared = shared_configs.previous.lock();
-                        *new_cfg_shared = None;
-                        *prev_cfg_shared = Some(active_config);
-                    }
-                    trace!("All threads stopped, returning");
-                    return Ok(ExitState::Restart);
-                }
-                StatusMessage::PlaybackDone => {
-                    info!("Playback finished");
-                    {
-                        let stat = status_structs.status.upgradable_read();
-                        if stat.stop_reason == StopReason::None {
-                            RwLockUpgradableReadGuard::upgrade(stat).stop_reason = StopReason::Done;
+                        trace!("All threads stopped, stopping");
+                        return Ok(ExitState::Restart);
+                    },
+                    Ok(ControllerMessage::Exit) => {
+                        debug!("Exit requested...");
+                        if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                            debug!("Capture thread has already exited");
                         }
-                    }
-                    *shared_configs.previous.lock() = Some(active_config);
-                    trace!("All threads stopped, returning");
-                    return Ok(ExitState::Restart);
-                }
-                StatusMessage::CaptureDone => {
-                    info!("Capture finished");
-                }
-                StatusMessage::SetSpeed(speed) => {
-                    debug!("SetSpeed message received");
-                    if tx_command_cap
-                        .send(CommandMessage::SetSpeed { speed })
-                        .is_err()
-                    {
-                        debug!("Capture thread has already exited");
+                        trace!("Wait for pb..");
+                        pb_handle.join().unwrap();
+                        trace!("Wait for cap..");
+                        cap_handle.join().unwrap();
+                        *shared_configs.previous.lock() = Some(active_config);
+                        trace!("All threads stopped, exiting");
+                        return Ok(ExitState::Exit);
+                    },
+                    Err(err) => {
+                        return Err(Box::new(err));
                     }
                 }
             },
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                warn!("Capture, Playback and Processing threads have exited");
-                status_structs.status.write().stop_reason = StopReason::UnknownError(
-                    "Capture, Playback and Processing threads have exited".to_string(),
-                );
-                return Ok(ExitState::Restart);
+            recv(rx_status) -> msg => {
+                match msg {
+                    Ok(msg) => match msg {
+                        StatusMessage::PlaybackReady => {
+                            debug!("Playback thread ready to start");
+                            pb_ready = true;
+                            if cap_ready {
+                                debug!("Both capture and playback ready, release barrier");
+                                barrier.wait();
+                                debug!("Supervisor loop starts now!");
+                                is_starting = false;
+                            }
+                        }
+                        StatusMessage::CaptureReady => {
+                            debug!("Capture thread ready to start");
+                            cap_ready = true;
+                            if pb_ready {
+                                debug!("Both capture and playback ready, release barrier");
+                                barrier.wait();
+                                debug!("Supervisor loop starts now!");
+                                is_starting = false;
+                                status_structs.status.write().stop_reason = StopReason::None;
+                            }
+                        }
+                        StatusMessage::PlaybackError(message) => {
+                            error!("Playback error: {}", message);
+                            if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                                debug!("Capture thread has already exited");
+                            }
+                            if is_starting {
+                                debug!("Error while starting, release barrier");
+                                barrier.wait();
+                            }
+                            debug!("Wait for capture thread to exit..");
+                            status_structs.status.write().stop_reason = StopReason::PlaybackError(message);
+                            cap_handle.join().unwrap();
+                            {
+                                let mut active_cfg_shared = shared_configs.active.lock();
+                                let mut prev_cfg_shared = shared_configs.previous.lock();
+                                *active_cfg_shared = None;
+                                *prev_cfg_shared = Some(active_config);
+                            }
+                            trace!("All threads stopped, returning");
+                            return Ok(ExitState::Restart);
+                        }
+                        StatusMessage::CaptureError(message) => {
+                            error!("Capture error: {}", message);
+                            if is_starting {
+                                debug!("Error while starting, release barrier");
+                                barrier.wait();
+                            }
+                            debug!("Wait for playback thread to exit..");
+                            status_structs.status.write().stop_reason = StopReason::CaptureError(message);
+                            pb_handle.join().unwrap();
+                            {
+                                let mut active_cfg_shared = shared_configs.active.lock();
+                                let mut prev_cfg_shared = shared_configs.previous.lock();
+                                *active_cfg_shared = None;
+                                *prev_cfg_shared = Some(active_config);
+                            }
+                            trace!("All threads stopped, returning");
+                            return Ok(ExitState::Restart);
+                        }
+                        StatusMessage::PlaybackFormatChange(rate) => {
+                            error!("Playback stopped due to external format change");
+                            if tx_command_cap.send(CommandMessage::Exit).is_err() {
+                                debug!("Capture thread has already exited");
+                            }
+                            if is_starting {
+                                debug!("Error while starting, release barrier");
+                                barrier.wait();
+                            }
+                            debug!("Wait for capture thread to exit..");
+                            status_structs.status.write().stop_reason =
+                                StopReason::PlaybackFormatChange(rate);
+                            cap_handle.join().unwrap();
+                            {
+                                let mut active_cfg_shared = shared_configs.active.lock();
+                                let mut prev_cfg_shared = shared_configs.previous.lock();
+                                *active_cfg_shared = None;
+                                *prev_cfg_shared = Some(active_config);
+                            }
+                            trace!("All threads stopped, returning");
+                            return Ok(ExitState::Restart);
+                        }
+                        StatusMessage::CaptureFormatChange(rate) => {
+                            error!("Capture stopped due to external format change");
+                            if is_starting {
+                                debug!("Error while starting, release barrier");
+                                barrier.wait();
+                            }
+                            debug!("Wait for playback thread to exit..");
+                            status_structs.status.write().stop_reason =
+                                StopReason::CaptureFormatChange(rate);
+                            pb_handle.join().unwrap();
+                            {
+                                let mut active_cfg_shared = shared_configs.active.lock();
+                                let mut prev_cfg_shared = shared_configs.previous.lock();
+                                *active_cfg_shared = None;
+                                *prev_cfg_shared = Some(active_config);
+                            }
+                            trace!("All threads stopped, returning");
+                            return Ok(ExitState::Restart);
+                        }
+                        StatusMessage::PlaybackDone => {
+                            info!("Playback finished");
+                            {
+                                let stat = status_structs.status.upgradable_read();
+                                if stat.stop_reason == StopReason::None {
+                                    RwLockUpgradableReadGuard::upgrade(stat).stop_reason = StopReason::Done;
+                                }
+                            }
+                            *shared_configs.previous.lock() = Some(active_config);
+                            trace!("All threads stopped, returning");
+                            return Ok(ExitState::Restart);
+                        }
+                        StatusMessage::CaptureDone => {
+                            info!("Capture finished");
+                        }
+                        StatusMessage::SetSpeed(speed) => {
+                            debug!("SetSpeed message received");
+                            if tx_command_cap
+                                .send(CommandMessage::SetSpeed { speed })
+                                .is_err()
+                            {
+                                debug!("Capture thread has already exited");
+                            }
+                        }
+                    },
+                    Err(err) => {
+                        warn!("Capture, Playback and Processing threads have exited: {}", err);
+                        status_structs.status.write().stop_reason = StopReason::UnknownError(
+                            "Capture, Playback and Processing threads have exited".to_string(),
+                        );
+                        return Ok(ExitState::Restart);
+                    }
+                }
             }
         }
     }
@@ -844,25 +780,80 @@ fn main_process() -> i32 {
         }
     }
 
-    let configuration = match &configname {
-        Some(path) => match config::load_validate_config(path) {
+    let (tx_command, rx_command) = crossbeam_channel::unbounded();
+    if let Some(path) = &configname {
+        match config::load_validate_config(path) {
             Ok(conf) => {
                 debug!("Config is valid");
-                Some(conf)
+                tx_command
+                    .send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                    .unwrap();
             }
             Err(err) => {
                 error!("{}", err);
                 debug!("Exiting due to config error");
                 return EXIT_BAD_CONFIG;
             }
-        },
-        None => None,
-    };
+        }
+    }
+
+    let active_config_path = Arc::new(Mutex::new(configname));
+
+    let tx_command_thread = tx_command.clone();
+    let active_path_thread = active_config_path.clone();
+
+    #[cfg(not(windows))]
+    thread::spawn(move || {
+        let mut sigs = vec![SIGHUP, SIGUSR1];
+        sigs.extend(TERM_SIGNALS);
+        let mut signals = SignalsInfo::<SignalOnly>::new(&sigs).unwrap();
+        for info in &mut signals {
+            match info {
+                SIGHUP => {
+                    let path = (*active_path_thread.lock()).clone();
+                    if let Some(path) = path {
+                        match config::load_validate_config(path.as_str()) {
+                            Ok(conf) => {
+                                debug!("Config is valid");
+                                tx_command_thread
+                                    .send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                                    .unwrap();
+                            }
+                            Err(err) => {
+                                error!("Config error during reload: {}", err);
+                            }
+                        };
+                    } else {
+                        error!("Config path not specified, cannot reload");
+                    }
+                }
+                SIGUSR1 => {
+                    tx_command_thread.send(ControllerMessage::Stop).unwrap();
+                }
+                _ => {
+                    tx_command_thread.send(ControllerMessage::Exit).unwrap();
+                }
+            };
+        }
+    });
+
+    #[cfg(windows)]
+    thread::spawn(move || {
+        // On windows we don't have signal_hook::iterator, so we just poll for signal...
+        const DELAY: Duration = Duration::from_millis(100);
+        let signal_exit = Arc::new(AtomicBool::new(false));
+        signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&signal_exit)).unwrap();
+        loop {
+            if signal_exit.load(std::sync::atomic::Ordering::Relaxed) {
+                tx_command_thread.send(ControllerMessage::Exit).unwrap();
+                break;
+            }
+            thread::sleep(DELAY);
+        }
+    });
 
     let wait = matches.is_present("wait");
 
-    let signal_reload = Arc::new(AtomicBool::new(false));
-    let signal_exit = Arc::new(AtomicUsize::new(ExitRequest::NONE));
     let capture_status = Arc::new(RwLock::new(CaptureStatus {
         measured_samplerate: 0,
         update_interval: 1000,
@@ -892,10 +883,7 @@ fn main_process() -> i32 {
         status: processing_status.clone(),
     };
     let active_config = Arc::new(Mutex::new(None));
-    let next_config = Arc::new(Mutex::new(configuration));
     let previous_config = Arc::new(Mutex::new(None));
-
-    let active_config_path = Arc::new(Mutex::new(configname));
 
     #[cfg(feature = "websocket")]
     {
@@ -913,12 +901,10 @@ fn main_process() -> i32 {
             tx_state.try_send(()).unwrap_or(());
 
             let shared_data = socketserver::SharedData {
-                signal_reload: signal_reload.clone(),
-                signal_exit: signal_exit.clone(),
                 active_config: active_config.clone(),
-                active_config_path: active_config_path.clone(),
-                new_config: next_config.clone(),
+                active_config_path,
                 previous_config: previous_config.clone(),
+                command_sender: tx_command,
                 capture_status,
                 playback_status,
                 processing_params,
@@ -961,53 +947,53 @@ fn main_process() -> i32 {
 
     loop {
         debug!("Wait for config");
-        {
-            while next_config.lock().is_none() {
-                if !wait {
-                    debug!("No config and not in wait mode, exiting!");
+
+        loop {
+            let has_config = (*active_config.lock()).is_some();
+            let msg: Result<ControllerMessage, Box<dyn std::error::Error>> = if has_config || !wait
+            {
+                // `try_recv` is used to prevent blocking:
+                // If we already have config, we just try to drain the queue without blocking.
+                // Or, if wait flag is not permitted by user, we do not block here.
+                // If there's neither wait flag nor active config, error will occur in
+                // run() function which will cause program to exit.
+                let res = rx_command.try_recv();
+                match res {
+                    Err(crossbeam_channel::TryRecvError::Empty) => break,
+                    x => x.map_err(|e| Box::new(e) as _),
+                }
+            } else {
+                // If there's no config, and wait flag is present, we wait for the command queue to
+                // send us config or exit command.
+                rx_command.recv().map_err(|e| Box::new(e) as _)
+            };
+            match msg {
+                Ok(ControllerMessage::ConfigChanged(new_conf)) => {
+                    *active_config.lock() = Some(*new_conf);
+                    break;
+                }
+                Ok(ControllerMessage::Stop) => {
+                    *active_config.lock() = None;
+                }
+                Ok(ControllerMessage::Exit) => {
                     return EXIT_OK;
                 }
-                if signal_exit.load(Ordering::Relaxed) == ExitRequest::EXIT {
-                    // exit requested
+                Err(e) => {
+                    warn!("Error recv from cmd queue {}", e);
                     return EXIT_OK;
-                } else if signal_reload
-                    .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
-                    .is_ok()
-                {
-                    debug!("Reloading configuration...");
-                    let conf_loaded = new_config(&active_config_path, &next_config);
-                    let path = active_config_path.lock();
-                    match conf_loaded {
-                        Ok(conf) => {
-                            debug!("Loaded config file: {:?}", path);
-                            *next_config.lock() = Some(conf);
-                        }
-                        Err(err) => {
-                            error!("Could not load config: {:?}, error: {}", path, err);
-                        }
-                    }
                 }
             }
-            thread::sleep(DELAY);
         }
-        signal_reload.store(false, Ordering::Relaxed);
+
         let shared_configs = SharedConfigs {
             active: active_config.clone(),
-            new: next_config.clone(),
             previous: previous_config.clone(),
         };
 
-        debug!("Config ready");
-        let exitstatus = run(
-            signal_reload.clone(),
-            signal_exit.clone(),
-            shared_configs,
-            active_config_path.clone(),
-            status_structs.clone(),
-        );
+        debug!("Config ready, start processing");
+        let exitstatus = run(shared_configs, status_structs.clone(), rx_command.clone());
         debug!("Processing ended with status {:?}", exitstatus);
 
-        *active_config.lock() = None;
         match exitstatus {
             Err(e) => {
                 error!("({}) {}", e.to_string(), e);

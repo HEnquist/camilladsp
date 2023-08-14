@@ -8,7 +8,7 @@ use std::fs::File;
 #[cfg(feature = "secure-websocket")]
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -17,11 +17,10 @@ use tungstenite::accept;
 use tungstenite::Message;
 use tungstenite::WebSocket;
 
-use crate::config;
 use crate::helpers::linear_to_db;
-use crate::ExitRequest;
 use crate::ProcessingState;
 use crate::Res;
+use crate::{config, ControllerMessage};
 use crate::{
     list_available_devices, list_supported_devices, CaptureStatus, PlaybackStatus,
     ProcessingParameters, ProcessingStatus, StopReason,
@@ -29,12 +28,10 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct SharedData {
-    pub signal_reload: Arc<AtomicBool>,
-    pub signal_exit: Arc<AtomicUsize>,
     pub active_config: Arc<Mutex<Option<config::Configuration>>>,
     pub active_config_path: Arc<Mutex<Option<String>>>,
-    pub new_config: Arc<Mutex<Option<config::Configuration>>>,
     pub previous_config: Arc<Mutex<Option<config::Configuration>>>,
+    pub command_sender: crossbeam_channel::Sender<ControllerMessage>,
     pub capture_status: Arc<RwLock<CaptureStatus>>,
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
     pub processing_params: Arc<ProcessingParameters>,
@@ -549,12 +546,50 @@ fn handle_command(
 ) -> Option<WsReply> {
     match command {
         WsCommand::Reload => {
-            shared_data_inst
-                .signal_reload
-                .store(true, Ordering::Relaxed);
-            Some(WsReply::Reload {
-                result: WsResult::Ok,
-            })
+            let cfg_path = shared_data_inst.active_config_path.lock().clone();
+            match cfg_path {
+                Some(path) => match config::load_config(path.as_str()) {
+                    Ok(mut conf) => match config::validate_config(&mut conf, Some(path.as_str())) {
+                        Ok(()) => {
+                            debug!("WS: Config file loaded successfully, send to controller");
+                            match shared_data_inst
+                                .command_sender
+                                .send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                            {
+                                Ok(()) => Some(WsReply::Reload {
+                                    result: WsResult::Ok,
+                                }),
+                                Err(err) => {
+                                    error!("Error sending reload message {}", err);
+                                    Some(WsReply::Reload {
+                                        result: WsResult::Error,
+                                    })
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            error!("Invalid config file!");
+                            error!("{}", err);
+                            Some(WsReply::Reload {
+                                result: WsResult::Error,
+                            })
+                        }
+                    },
+                    Err(err) => {
+                        error!("Config file error:");
+                        error!("{}", err);
+                        Some(WsReply::Reload {
+                            result: WsResult::Error,
+                        })
+                    }
+                },
+                None => {
+                    warn!("Config path not given, cannot reload");
+                    Some(WsReply::Reload {
+                        result: WsResult::Error,
+                    })
+                }
+            }
         }
         WsCommand::GetCaptureRate => {
             let capstat = shared_data_inst.capture_status.read();
@@ -1058,23 +1093,30 @@ fn handle_command(
             match serde_yaml::from_str::<config::Configuration>(&config_yml) {
                 Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => {
-                        *shared_data_inst.new_config.lock() = Some(conf);
-                        shared_data_inst
-                            .signal_reload
-                            .store(true, Ordering::Relaxed);
-                        Some(WsReply::SetConfig {
-                            result: WsResult::Ok,
-                        })
+                        match shared_data_inst
+                            .command_sender
+                            .send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                        {
+                            Ok(()) => Some(WsReply::SetConfig {
+                                result: WsResult::Ok,
+                            }),
+                            Err(error) => {
+                                error!("Error sending new config: {}", error);
+                                Some(WsReply::SetConfig {
+                                    result: WsResult::Error,
+                                })
+                            }
+                        }
                     }
                     Err(error) => {
-                        error!("Error setting config: {}", error);
+                        error!("Error validating config: {}", error);
                         Some(WsReply::SetConfig {
                             result: WsResult::Error,
                         })
                     }
                 },
                 Err(error) => {
-                    error!("Config error: {}", error);
+                    error!("Error parsing yaml: {}", error);
                     Some(WsReply::SetConfig {
                         result: WsResult::Error,
                     })
@@ -1085,23 +1127,30 @@ fn handle_command(
             match serde_json::from_str::<config::Configuration>(&config_json) {
                 Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => {
-                        *shared_data_inst.new_config.lock() = Some(conf);
-                        shared_data_inst
-                            .signal_reload
-                            .store(true, Ordering::Relaxed);
-                        Some(WsReply::SetConfigJson {
-                            result: WsResult::Ok,
-                        })
+                        match shared_data_inst
+                            .command_sender
+                            .send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                        {
+                            Ok(()) => Some(WsReply::SetConfigJson {
+                                result: WsResult::Ok,
+                            }),
+                            Err(error) => {
+                                error!("Error sending new config: {}", error);
+                                Some(WsReply::SetConfigJson {
+                                    result: WsResult::Error,
+                                })
+                            }
+                        }
                     }
                     Err(error) => {
-                        error!("Error setting config: {}", error);
+                        error!("Error validating config: {}", error);
                         Some(WsReply::SetConfigJson {
                             result: WsResult::Error,
                         })
                     }
                 },
                 Err(error) => {
-                    error!("Config error: {}", error);
+                    error!("Error parsing json: {}", error);
                     Some(WsReply::SetConfigJson {
                         result: WsResult::Error,
                     })
@@ -1161,21 +1210,36 @@ fn handle_command(
             }
         }
         WsCommand::Stop => {
-            *shared_data_inst.new_config.lock() = None;
-            shared_data_inst
-                .signal_exit
-                .store(ExitRequest::STOP, Ordering::Relaxed);
-            Some(WsReply::Stop {
-                result: WsResult::Ok,
-            })
+            match shared_data_inst
+                .command_sender
+                .send(ControllerMessage::Stop)
+            {
+                Ok(()) => Some(WsReply::Stop {
+                    result: WsResult::Ok,
+                }),
+                Err(e) => {
+                    error!("Error sending stop message {}", e);
+                    Some(WsReply::Stop {
+                        result: WsResult::Error,
+                    })
+                }
+            }
         }
         WsCommand::Exit => {
-            shared_data_inst
-                .signal_exit
-                .store(ExitRequest::EXIT, Ordering::Relaxed);
-            Some(WsReply::Exit {
-                result: WsResult::Ok,
-            })
+            match shared_data_inst
+                .command_sender
+                .send(ControllerMessage::Exit)
+            {
+                Ok(()) => Some(WsReply::Exit {
+                    result: WsResult::Ok,
+                }),
+                Err(e) => {
+                    error!("Error sending exit message {}", e);
+                    Some(WsReply::Exit {
+                        result: WsResult::Error,
+                    })
+                }
+            }
         }
         WsCommand::GetSupportedDeviceTypes => {
             let devs = list_supported_devices();

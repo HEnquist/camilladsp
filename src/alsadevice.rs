@@ -66,13 +66,13 @@ pub struct AlsaCaptureDevice {
 
 struct CaptureChannels {
     audio: mpsc::SyncSender<AudioMessage>,
-    status: mpsc::Sender<StatusMessage>,
+    status: crossbeam_channel::Sender<StatusMessage>,
     command: mpsc::Receiver<CommandMessage>,
 }
 
 struct PlaybackChannels {
     audio: mpsc::Receiver<AudioMessage>,
-    status: mpsc::Sender<StatusMessage>,
+    status: crossbeam_channel::Sender<StatusMessage>,
 }
 
 struct CaptureParams {
@@ -912,7 +912,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         &mut self,
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
@@ -987,7 +987,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         &mut self,
         channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
