@@ -196,6 +196,9 @@ fn run(
             recv(ctrl_ch) -> msg  => {
                 match msg {
                     Ok(ControllerMessage::ConfigChanged(new_conf)) => {
+                        // TODO drop excessive change requests.
+                        // Check if the channel is empty.
+                        // If not, drop this message and get the next one.
                         let comp = config::config_diff(&active_config, &new_conf);
                         match comp {
                             config::ConfigChange::Pipeline
@@ -780,7 +783,7 @@ fn main_process() -> i32 {
         }
     }
 
-    let (tx_command, rx_command) = crossbeam_channel::unbounded();
+    let (tx_command, rx_command) = crossbeam_channel::bounded(10);
     if let Some(path) = &configname {
         match config::load_validate_config(path) {
             Ok(conf) => {
@@ -947,35 +950,29 @@ fn main_process() -> i32 {
 
     loop {
         debug!("Wait for config");
-
         loop {
             let has_config = (*active_config.lock()).is_some();
-            let msg: Result<ControllerMessage, Box<dyn std::error::Error>> = if has_config || !wait
-            {
-                // `try_recv` is used to prevent blocking:
-                // If we already have config, we just try to drain the queue without blocking.
-                // Or, if wait flag is not permitted by user, we do not block here.
-                // If there's neither wait flag nor active config, error will occur in
-                // run() function which will cause program to exit.
-                let res = rx_command.try_recv();
-                match res {
-                    Err(crossbeam_channel::TryRecvError::Empty) => break,
-                    x => x.map_err(|e| Box::new(e) as _),
-                }
-            } else {
-                // If there's no config, and wait flag is present, we wait for the command queue to
-                // send us config or exit command.
-                rx_command.recv().map_err(|e| Box::new(e) as _)
-            };
-            match msg {
+            let has_commands = !rx_command.is_empty();
+            if has_config && !has_commands {
+                debug!("New config is available and there are no queued commands, continuing");
+                break;
+            }
+            if !wait && !has_commands {
+                debug!("Wait mode is disabled and there are no queued commands, continuing");
+                break;
+            }
+            debug!("Waiting to receive a command");
+            match rx_command.recv() {
                 Ok(ControllerMessage::ConfigChanged(new_conf)) => {
+                    debug!("Config change command received");
                     *active_config.lock() = Some(*new_conf);
-                    break;
                 }
                 Ok(ControllerMessage::Stop) => {
+                    debug!("Stop command received");
                     *active_config.lock() = None;
                 }
                 Ok(ControllerMessage::Exit) => {
+                    debug!("Exit command received");
                     return EXIT_OK;
                 }
                 Err(e) => {
