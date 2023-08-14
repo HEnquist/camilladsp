@@ -196,9 +196,10 @@ fn run(
             recv(ctrl_ch) -> msg  => {
                 match msg {
                     Ok(ControllerMessage::ConfigChanged(new_conf)) => {
-                        // TODO drop excessive change requests.
-                        // Check if the channel is empty.
-                        // If not, drop this message and get the next one.
+                        if !ctrl_ch.is_empty() {
+                            debug!("Dropping config change command since there are more commands in the queue");
+                            continue;
+                        }
                         let comp = config::config_diff(&active_config, &new_conf);
                         match comp {
                             config::ConfigChange::Pipeline
