@@ -66,6 +66,7 @@ use camillalib::{
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
 const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
+const EXIT_FORCED: i32 = 103; // Exit was forced by a second SIGINT
 const EXIT_OK: i32 = 0; // All ok
 
 // Time format string for logger
@@ -196,6 +197,10 @@ fn run(
             recv(ctrl_ch) -> msg  => {
                 match msg {
                     Ok(ControllerMessage::ConfigChanged(new_conf)) => {
+                        if !ctrl_ch.is_empty() {
+                            debug!("Dropping config change command since there are more commands in the queue");
+                            continue;
+                        }
                         let comp = config::config_diff(&active_config, &new_conf);
                         match comp {
                             config::ConfigChange::Pipeline
@@ -656,7 +661,7 @@ fn main_process() -> i32 {
         loglevel = level;
     }
 
-    let _logger = if let Some(logfile) = matches.value_of("logfile") {
+    let logger = if let Some(logfile) = matches.value_of("logfile") {
         let mut path = PathBuf::from(logfile);
         if !path.is_absolute() {
             let mut fullpath = std::env::current_dir().unwrap();
@@ -780,7 +785,7 @@ fn main_process() -> i32 {
         }
     }
 
-    let (tx_command, rx_command) = crossbeam_channel::unbounded();
+    let (tx_command, rx_command) = crossbeam_channel::bounded(10);
     if let Some(path) = &configname {
         match config::load_validate_config(path) {
             Ok(conf) => {
@@ -807,7 +812,9 @@ fn main_process() -> i32 {
         let mut sigs = vec![SIGHUP, SIGUSR1];
         sigs.extend(TERM_SIGNALS);
         let mut signals = SignalsInfo::<SignalOnly>::new(&sigs).unwrap();
+        let mut exit_requested = false;
         for info in &mut signals {
+            debug!("Received signal: {}", info);
             match info {
                 SIGHUP => {
                     let path = (*active_path_thread.lock()).clone();
@@ -815,9 +822,11 @@ fn main_process() -> i32 {
                         match config::load_validate_config(path.as_str()) {
                             Ok(conf) => {
                                 debug!("Config is valid");
-                                tx_command_thread
-                                    .send(ControllerMessage::ConfigChanged(Box::new(conf)))
-                                    .unwrap();
+                                if let Err(e) = tx_command_thread
+                                    .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                                {
+                                    error!("Error sending reload message: {}", e);
+                                }
                             }
                             Err(err) => {
                                 error!("Config error during reload: {}", err);
@@ -828,10 +837,21 @@ fn main_process() -> i32 {
                     }
                 }
                 SIGUSR1 => {
-                    tx_command_thread.send(ControllerMessage::Stop).unwrap();
+                    if let Err(e) = tx_command_thread.try_send(ControllerMessage::Stop) {
+                        error!("Error sending stop message: {}", e);
+                    }
                 }
                 _ => {
-                    tx_command_thread.send(ControllerMessage::Exit).unwrap();
+                    if exit_requested {
+                        warn!("Forcing a shutdown");
+                        logger.flush();
+                        std::process::exit(EXIT_FORCED);
+                    }
+                    info!("Shutting down");
+                    exit_requested = true;
+                    if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
+                        error!("Error sending exit message: {}", e);
+                    }
                 }
             };
         }
@@ -843,9 +863,19 @@ fn main_process() -> i32 {
         const DELAY: Duration = Duration::from_millis(100);
         let signal_exit = Arc::new(AtomicBool::new(false));
         signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&signal_exit)).unwrap();
+        let mut exit_requested = false;
         loop {
             if signal_exit.load(std::sync::atomic::Ordering::Relaxed) {
-                tx_command_thread.send(ControllerMessage::Exit).unwrap();
+                if exit_requested {
+                    warn!("Forcing a shutdown");
+                    logger.flush();
+                    std::process::exit(EXIT_FORCED);
+                }
+                info!("Shutting down");
+                exit_requested = true;
+                if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
+                    error!("Error sending exit message: {}", e);
+                }
                 break;
             }
             thread::sleep(DELAY);
@@ -947,35 +977,29 @@ fn main_process() -> i32 {
 
     loop {
         debug!("Wait for config");
-
         loop {
             let has_config = (*active_config.lock()).is_some();
-            let msg: Result<ControllerMessage, Box<dyn std::error::Error>> = if has_config || !wait
-            {
-                // `try_recv` is used to prevent blocking:
-                // If we already have config, we just try to drain the queue without blocking.
-                // Or, if wait flag is not permitted by user, we do not block here.
-                // If there's neither wait flag nor active config, error will occur in
-                // run() function which will cause program to exit.
-                let res = rx_command.try_recv();
-                match res {
-                    Err(crossbeam_channel::TryRecvError::Empty) => break,
-                    x => x.map_err(|e| Box::new(e) as _),
-                }
-            } else {
-                // If there's no config, and wait flag is present, we wait for the command queue to
-                // send us config or exit command.
-                rx_command.recv().map_err(|e| Box::new(e) as _)
-            };
-            match msg {
+            let has_commands = !rx_command.is_empty();
+            if has_config && !has_commands {
+                debug!("New config is available and there are no queued commands, continuing");
+                break;
+            }
+            if !wait && !has_commands {
+                debug!("Wait mode is disabled and there are no queued commands, continuing");
+                break;
+            }
+            debug!("Waiting to receive a command");
+            match rx_command.recv() {
                 Ok(ControllerMessage::ConfigChanged(new_conf)) => {
+                    debug!("Config change command received");
                     *active_config.lock() = Some(*new_conf);
-                    break;
                 }
                 Ok(ControllerMessage::Stop) => {
+                    debug!("Stop command received");
                     *active_config.lock() = None;
                 }
                 Ok(ControllerMessage::Exit) => {
+                    debug!("Exit command received");
                     return EXIT_OK;
                 }
                 Err(e) => {

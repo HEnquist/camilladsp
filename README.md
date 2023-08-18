@@ -554,6 +554,7 @@ These are the exit codes CamillaDSP will give:
 | 0         | Normal exit, no error |
 | 101       | Invalid config file, see the error message for details |
 | 102       | Error from DSP process, see the error message for details |
+| 103       | Forced exit by a second SIGINT before before a normal exit was completed |
 
 
 ## Reloading the configuration
