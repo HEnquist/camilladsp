@@ -99,7 +99,7 @@ jobs:
         run: docker build -t cross/armv8:v1 --file Dockerfile_armv8 ./
 
       - name: Build
-        run: cross build --release --target aarch64-unknown-linux-gnu --features neon
+        run: cross build --release --target aarch64-unknown-linux-gnu
 
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/aarch64-unknown-linux-gnu/release camilladsp
