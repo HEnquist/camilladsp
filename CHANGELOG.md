@@ -18,12 +18,7 @@ New features:
 - Add an always enabled default volume control.
 - Add several volume control channels (faders).
 - Change Loudness filter to only perform loudness compensation.
-- Add ditherers:
-  - FweightedLong441 and FweightedShort441 variants.
-  - Gesemann441 and Gesemann48.
-  - LipshitzLong441 variant.
-  - ShibataHigh441 variant.
-  - Shibata and ShibataLow 88.2, 96 and 192.
+- Add more ditherers.
 - Add GeneralNotch biquad type.
 - Add Tilt equalizer biquad combo.
 - Add GraphicEqualizer biquad combo.
@@ -31,12 +26,12 @@ New features:
 - Add statefile for persisting runtime parameters to file.
 - Websocket command to get pipeline processing capacity utilization.
 - Add commands to read statefile path and updating status.
+- Improved handling of config changes via SIGHUP and websocket.
 
 Changes:
 - Optimize cpu load in general, and of dithering and delay filters in particular.
-- Uniform dithering renamed to Flat.
-- Simple dithering renamed to Highpass, implements a Wannamaker high passed triangular dither.
-- Shibata441 and Shibata48 dither higher precision and smoother curve.
+- More logical names for dither types.
+- Updated Shibata dither coeffients.
 - Rename `Set/GetConfigName` websocket commands to `Set/GetConfigFilePath`.
 - Removed redundant`change_format` parameter to simplify CoreAudio device config.
 
