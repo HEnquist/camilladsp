@@ -66,6 +66,7 @@ use camillalib::{
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
 const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
+const EXIT_FORCED: i32 = 103; // Exit was forced by a second SIGINT
 const EXIT_OK: i32 = 0; // All ok
 
 // Time format string for logger
@@ -660,7 +661,7 @@ fn main_process() -> i32 {
         loglevel = level;
     }
 
-    let _logger = if let Some(logfile) = matches.value_of("logfile") {
+    let logger = if let Some(logfile) = matches.value_of("logfile") {
         let mut path = PathBuf::from(logfile);
         if !path.is_absolute() {
             let mut fullpath = std::env::current_dir().unwrap();
@@ -811,7 +812,9 @@ fn main_process() -> i32 {
         let mut sigs = vec![SIGHUP, SIGUSR1];
         sigs.extend(TERM_SIGNALS);
         let mut signals = SignalsInfo::<SignalOnly>::new(&sigs).unwrap();
+        let mut exit_requested = false;
         for info in &mut signals {
+            debug!("Received signal: {}", info);
             match info {
                 SIGHUP => {
                     let path = (*active_path_thread.lock()).clone();
@@ -839,6 +842,13 @@ fn main_process() -> i32 {
                     }
                 }
                 _ => {
+                    if exit_requested {
+                        warn!("Forcing a shutdown");
+                        logger.flush();
+                        std::process::exit(EXIT_FORCED);
+                    }
+                    info!("Shutting down");
+                    exit_requested = true;
                     if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
                         error!("Error sending exit message: {}", e);
                     }
@@ -853,8 +863,16 @@ fn main_process() -> i32 {
         const DELAY: Duration = Duration::from_millis(100);
         let signal_exit = Arc::new(AtomicBool::new(false));
         signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&signal_exit)).unwrap();
+        let mut exit_requested = false;
         loop {
             if signal_exit.load(std::sync::atomic::Ordering::Relaxed) {
+                if exit_requested {
+                    warn!("Forcing a shutdown");
+                    logger.flush();
+                    std::process::exit(EXIT_FORCED);
+                }
+                info!("Shutting down");
+                exit_requested = true;
                 if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
                     error!("Error sending exit message: {}", e);
                 }
