@@ -1,4 +1,5 @@
 use clap::crate_version;
+use crossbeam_channel::TrySendError;
 #[cfg(feature = "secure-websocket")]
 use native_tls::{Identity, TlsAcceptor, TlsStream};
 use parking_lot::{Mutex, RwLock};
@@ -549,32 +550,40 @@ fn handle_command(
             let cfg_path = shared_data_inst.active_config_path.lock().clone();
             match cfg_path {
                 Some(path) => match config::load_config(path.as_str()) {
-                    Ok(mut conf) => match config::validate_config(&mut conf, Some(path.as_str())) {
-                        Ok(()) => {
-                            debug!("WS: Config file loaded successfully, send to controller");
-                            match shared_data_inst
-                                .command_sender
-                                .send(ControllerMessage::ConfigChanged(Box::new(conf)))
-                            {
-                                Ok(()) => Some(WsReply::Reload {
-                                    result: WsResult::Ok,
-                                }),
-                                Err(err) => {
-                                    error!("Error sending reload message {}", err);
-                                    Some(WsReply::Reload {
-                                        result: WsResult::Error,
-                                    })
+                    Ok(mut conf) => {
+                        match config::validate_config(&mut conf, Some(path.as_str())) {
+                            Ok(()) => {
+                                debug!("WS: Config file loaded successfully, send to controller");
+                                match shared_data_inst
+                                    .command_sender
+                                    .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                                {
+                                    Ok(()) => Some(WsReply::Reload {
+                                        result: WsResult::Ok,
+                                    }),
+                                    Err(TrySendError::Full(_)) => {
+                                        error!("Error sending reload message, too many requests");
+                                        Some(WsReply::Reload {
+                                            result: WsResult::Error,
+                                        })
+                                    }
+                                    Err(TrySendError::Disconnected(_)) => {
+                                        error!("Error sending reload message, channel was disconnected");
+                                        Some(WsReply::Reload {
+                                            result: WsResult::Error,
+                                        })
+                                    }
                                 }
                             }
+                            Err(err) => {
+                                error!("Invalid config file!");
+                                error!("{}", err);
+                                Some(WsReply::Reload {
+                                    result: WsResult::Error,
+                                })
+                            }
                         }
-                        Err(err) => {
-                            error!("Invalid config file!");
-                            error!("{}", err);
-                            Some(WsReply::Reload {
-                                result: WsResult::Error,
-                            })
-                        }
-                    },
+                    }
                     Err(err) => {
                         error!("Config file error:");
                         error!("{}", err);
@@ -1095,13 +1104,19 @@ fn handle_command(
                     Ok(()) => {
                         match shared_data_inst
                             .command_sender
-                            .send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                            .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
                         {
                             Ok(()) => Some(WsReply::SetConfig {
                                 result: WsResult::Ok,
                             }),
-                            Err(error) => {
-                                error!("Error sending new config: {}", error);
+                            Err(TrySendError::Full(_)) => {
+                                error!("Error sending new config, too many requests");
+                                Some(WsReply::SetConfig {
+                                    result: WsResult::Error,
+                                })
+                            }
+                            Err(TrySendError::Disconnected(_)) => {
+                                error!("Error sending new config, channel was disconnected");
                                 Some(WsReply::SetConfig {
                                     result: WsResult::Error,
                                 })
@@ -1129,13 +1144,19 @@ fn handle_command(
                     Ok(()) => {
                         match shared_data_inst
                             .command_sender
-                            .send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                            .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
                         {
                             Ok(()) => Some(WsReply::SetConfigJson {
                                 result: WsResult::Ok,
                             }),
-                            Err(error) => {
-                                error!("Error sending new config: {}", error);
+                            Err(TrySendError::Full(_)) => {
+                                error!("Error sending new config, too many requests");
+                                Some(WsReply::SetConfigJson {
+                                    result: WsResult::Error,
+                                })
+                            }
+                            Err(TrySendError::Disconnected(_)) => {
+                                error!("Error sending new config, channel was disconnected");
                                 Some(WsReply::SetConfigJson {
                                     result: WsResult::Error,
                                 })
@@ -1212,13 +1233,19 @@ fn handle_command(
         WsCommand::Stop => {
             match shared_data_inst
                 .command_sender
-                .send(ControllerMessage::Stop)
+                .try_send(ControllerMessage::Stop)
             {
                 Ok(()) => Some(WsReply::Stop {
                     result: WsResult::Ok,
                 }),
-                Err(e) => {
-                    error!("Error sending stop message {}", e);
+                Err(TrySendError::Full(_)) => {
+                    error!("Error sending stop message, too many requests");
+                    Some(WsReply::Stop {
+                        result: WsResult::Error,
+                    })
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    error!("Error sending stop message, channel was disconnected");
                     Some(WsReply::Stop {
                         result: WsResult::Error,
                     })
@@ -1228,13 +1255,19 @@ fn handle_command(
         WsCommand::Exit => {
             match shared_data_inst
                 .command_sender
-                .send(ControllerMessage::Exit)
+                .try_send(ControllerMessage::Exit)
             {
                 Ok(()) => Some(WsReply::Exit {
                     result: WsResult::Ok,
                 }),
-                Err(e) => {
-                    error!("Error sending exit message {}", e);
+                Err(TrySendError::Full(_)) => {
+                    error!("Error sending exit message, too many requests");
+                    Some(WsReply::Exit {
+                        result: WsResult::Error,
+                    })
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    error!("Error sending exit message, channel was disconnected");
                     Some(WsReply::Exit {
                         result: WsResult::Error,
                     })

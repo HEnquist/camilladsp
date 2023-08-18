@@ -819,9 +819,11 @@ fn main_process() -> i32 {
                         match config::load_validate_config(path.as_str()) {
                             Ok(conf) => {
                                 debug!("Config is valid");
-                                tx_command_thread
-                                    .send(ControllerMessage::ConfigChanged(Box::new(conf)))
-                                    .unwrap();
+                                if let Err(e) = tx_command_thread
+                                    .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                                {
+                                    error!("Error sending reload message: {}", e);
+                                }
                             }
                             Err(err) => {
                                 error!("Config error during reload: {}", err);
@@ -832,10 +834,14 @@ fn main_process() -> i32 {
                     }
                 }
                 SIGUSR1 => {
-                    tx_command_thread.send(ControllerMessage::Stop).unwrap();
+                    if let Err(e) = tx_command_thread.try_send(ControllerMessage::Stop) {
+                        error!("Error sending stop message: {}", e);
+                    }
                 }
                 _ => {
-                    tx_command_thread.send(ControllerMessage::Exit).unwrap();
+                    if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
+                        error!("Error sending exit message: {}", e);
+                    }
                 }
             };
         }
@@ -849,7 +855,9 @@ fn main_process() -> i32 {
         signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&signal_exit)).unwrap();
         loop {
             if signal_exit.load(std::sync::atomic::Ordering::Relaxed) {
-                tx_command_thread.send(ControllerMessage::Exit).unwrap();
+                if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
+                    error!("Error sending exit message: {}", e);
+                }
                 break;
             }
             thread::sleep(DELAY);
