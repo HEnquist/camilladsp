@@ -39,7 +39,9 @@ use std::time::Duration;
 
 use flexi_logger::DeferredNow;
 use log::Record;
+#[cfg(not(windows))]
 use signal_hook::consts::signal::*;
+#[cfg(not(windows))]
 use signal_hook::consts::TERM_SIGNALS;
 #[cfg(not(windows))]
 use signal_hook::iterator::{exfiltrator::SignalOnly, SignalsInfo};
@@ -812,6 +814,8 @@ fn main_process() -> i32 {
     let active_config_path = Arc::new(Mutex::new(configname));
 
     let tx_command_thread = tx_command.clone();
+
+    #[cfg(not(windows))]
     let active_path_thread = active_config_path.clone();
 
     #[cfg(not(windows))]
@@ -873,6 +877,7 @@ fn main_process() -> i32 {
         let mut exit_requested = false;
         loop {
             if signal_exit.load(std::sync::atomic::Ordering::Relaxed) {
+                signal_exit.store(false, std::sync::atomic::Ordering::Relaxed);
                 if exit_requested {
                     warn!("Forcing a shutdown");
                     logger.flush();
@@ -883,7 +888,6 @@ fn main_process() -> i32 {
                 if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
                     error!("Error sending exit message: {}", e);
                 }
-                break;
             }
             thread::sleep(DELAY);
         }
