@@ -732,34 +732,41 @@ fn main_process() -> i32 {
     };
     debug!("Loaded state: {state:?}");
 
-    let initial_volume = matches
-        .value_of("gain")
-        .map(|s| s.parse::<f32>().unwrap())
-        .unwrap_or(ProcessingParameters::DEFAULT_VOLUME);
+    let initial_volumes =
+        if let Some(v) = matches.value_of("gain").map(|s| s.parse::<f32>().unwrap()) {
+            debug!("Using command line argument for initial volume");
+            [v, v, v, v, v]
+        } else if let Some(s) = &state {
+            debug!("Using statefile for initial volume");
+            s.volume
+        } else {
+            debug!("Using default initial volume");
+            [
+                ProcessingParameters::DEFAULT_VOLUME,
+                ProcessingParameters::DEFAULT_VOLUME,
+                ProcessingParameters::DEFAULT_VOLUME,
+                ProcessingParameters::DEFAULT_VOLUME,
+                ProcessingParameters::DEFAULT_VOLUME,
+            ]
+        };
 
-    let initial_mute = matches.is_present("mute");
-    let initial_mutes = if let Some(s) = &state {
+    let initial_mutes = if matches.is_present("mute") {
+        debug!("Using command line argument for initial mute");
+        [true, true, true, true, true]
+    } else if let Some(s) = &state {
+        debug!("Using statefile for initial mute");
         s.mute
     } else {
+        debug!("Using default initial mute");
         [
-            initial_mute,
-            initial_mute,
-            initial_mute,
-            initial_mute,
-            initial_mute,
+            ProcessingParameters::DEFAULT_MUTE,
+            ProcessingParameters::DEFAULT_MUTE,
+            ProcessingParameters::DEFAULT_MUTE,
+            ProcessingParameters::DEFAULT_MUTE,
+            ProcessingParameters::DEFAULT_MUTE,
         ]
     };
-    let initial_volumes = if let Some(s) = &state {
-        s.volume
-    } else {
-        [
-            initial_volume,
-            initial_volume,
-            initial_volume,
-            initial_volume,
-            initial_volume,
-        ]
-    };
+
     debug!("Initial mute: {initial_mutes:?}");
     debug!("Initial volume: {initial_volumes:?}");
 
