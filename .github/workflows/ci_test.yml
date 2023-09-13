@@ -108,32 +108,23 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          target: arm-unknown-linux-gnueabihf
-          override: true
+          targets: arm-unknown-linux-gnueabihf
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build image
         run: docker build -t cross/armv6:v1 --file Dockerfile_armv6 ./
 
       - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          use-cross: true
-          args: --target arm-unknown-linux-gnueabihf
+        run: cross check --target arm-unknown-linux-gnueabihf
 
       - name: Run cargo test for arm
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          use-cross: true
-          args: --target arm-unknown-linux-gnueabihf
+        run: cross test --target arm-unknown-linux-gnueabihf
         env: 
           LD_LIBRARY_PATH: /usr/lib/arm-linux-gnueabihf
-
 
   check_test_windows:
     name: Check and test Windows
