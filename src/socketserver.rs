@@ -1319,11 +1319,20 @@ fn clamped_volume(vol: f32) -> f32 {
     new_vol
 }
 
+// Workaround to safely subtract from an Instant on all operating systems
+fn get_subtracted_instant(seconds: f32) -> Instant {
+    let now = Instant::now();
+    let mut clamped_seconds = seconds.clamp(0.0, 600.0);
+    let mut maybe_instant = None;
+    while maybe_instant.is_none() && clamped_seconds > 0.1 {
+        maybe_instant = now.checked_sub(Duration::from_secs_f32(clamped_seconds));
+        clamped_seconds /= 2.0;
+    }
+    maybe_instant.unwrap_or(now)
+}
+
 fn playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let clamped_time = time.clamp(0.0, 1000.0);
-    let time_instant = Instant::now()
-        .checked_sub(Duration::from_secs_f32(clamped_time))
-        .unwrap();
+    let time_instant = get_subtracted_instant(time);
     let res = shared_data
         .playback_status
         .read()
@@ -1339,10 +1348,7 @@ fn playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
 }
 
 fn playback_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let clamped_time = time.clamp(0.0, 1000.0);
-    let time_instant = Instant::now()
-        .checked_sub(Duration::from_secs_f32(clamped_time))
-        .unwrap();
+    let time_instant = get_subtracted_instant(time);
     let res = shared_data
         .playback_status
         .read()
@@ -1358,10 +1364,7 @@ fn playback_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
 }
 
 fn capture_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let clamped_time = time.clamp(0.0, 1000.0);
-    let time_instant = Instant::now()
-        .checked_sub(Duration::from_secs_f32(clamped_time))
-        .unwrap();
+    let time_instant = get_subtracted_instant(time);
     let res = shared_data
         .capture_status
         .read()
@@ -1377,10 +1380,7 @@ fn capture_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
 }
 
 fn capture_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let clamped_time = time.clamp(0.0, 1000.0);
-    let time_instant = Instant::now()
-        .checked_sub(Duration::from_secs_f32(clamped_time))
-        .unwrap();
+    let time_instant = get_subtracted_instant(time);
     let res = shared_data
         .capture_status
         .read()
