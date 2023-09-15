@@ -1320,8 +1320,9 @@ fn clamped_volume(vol: f32) -> f32 {
 }
 
 fn playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
+    let clamped_time = time.clamp(0.0, 1000.0);
     let time_instant = Instant::now()
-        .checked_sub(Duration::from_secs_f32(time))
+        .checked_sub(Duration::from_secs_f32(clamped_time))
         .unwrap();
     let res = shared_data
         .playback_status
@@ -1338,8 +1339,9 @@ fn playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
 }
 
 fn playback_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
+    let clamped_time = time.clamp(0.0, 1000.0);
     let time_instant = Instant::now()
-        .checked_sub(Duration::from_secs_f32(time))
+        .checked_sub(Duration::from_secs_f32(clamped_time))
         .unwrap();
     let res = shared_data
         .playback_status
@@ -1356,8 +1358,9 @@ fn playback_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
 }
 
 fn capture_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
+    let clamped_time = time.clamp(0.0, 1000.0);
     let time_instant = Instant::now()
-        .checked_sub(Duration::from_secs_f32(time))
+        .checked_sub(Duration::from_secs_f32(clamped_time))
         .unwrap();
     let res = shared_data
         .capture_status
@@ -1374,8 +1377,9 @@ fn capture_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
 }
 
 fn capture_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
+    let clamped_time = time.clamp(0.0, 1000.0);
     let time_instant = Instant::now()
-        .checked_sub(Duration::from_secs_f32(time))
+        .checked_sub(Duration::from_secs_f32(clamped_time))
         .unwrap();
     let res = shared_data
         .capture_status
