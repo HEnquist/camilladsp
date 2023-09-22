@@ -382,7 +382,12 @@ fn run(
                                     RwLockUpgradableReadGuard::upgrade(stat).stop_reason = StopReason::Done;
                                 }
                             }
-                            *shared_configs.previous.lock() = Some(active_config);
+                            {
+                                let mut active_cfg_shared = shared_configs.active.lock();
+                                let mut prev_cfg_shared = shared_configs.previous.lock();
+                                *active_cfg_shared = None;
+                                *prev_cfg_shared = Some(active_config);
+                            }
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -996,6 +1001,10 @@ fn main_process() -> i32 {
                 break;
             }
             if !wait && !has_commands {
+                if !has_config {
+                    debug!("Wait mode is disabled, there are no queued commands, and no new config. Exiting.");
+                    return EXIT_OK;
+                }
                 debug!("Wait mode is disabled and there are no queued commands, continuing");
                 break;
             }
