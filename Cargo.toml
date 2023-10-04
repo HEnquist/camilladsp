@@ -87,3 +87,6 @@ criterion = "0.3"
 [[bench]]
 name = "filters"
 harness = false
+
+[profile.release]
+codegen-units = 1
