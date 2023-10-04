@@ -112,6 +112,38 @@ jobs:
           asset_name: camilladsp-linux-aarch64.tar.gz
           tag: ${{ github.ref }}
 
+  armv6:
+    name: Pi-Zero
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: arm-unknown-linux-gnueabihf
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build image
+        run: docker build -t cross/armv6:v1 --file Dockerfile_armv6 ./
+
+      - name: Build
+        run: cross build --release --target arm-unknown-linux-gnueabihf
+
+      - name: Compress
+        run: tar -zcvf camilladsp.tar.gz -C target/arm-unknown-linux-gnueabihf/release camilladsp
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp.tar.gz
+          asset_name: camilladsp-linux-armv6.tar.gz
+          tag: ${{ github.ref }}
+
   windows:
     name: Windows
     runs-on: windows-latest
