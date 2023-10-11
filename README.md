@@ -187,8 +187,9 @@ Both 64 and 32 bit architectures are supported. All platforms supported by the R
 
 Pre-built binaries are provided for:
 - x86_64 with SSE4.2 (any Intel Core i3/i5/i7, Atom since 2013, AMD FX and later)
+- armv6 (32-bit arm, for example a Raspberry Pi 1 and Zero)
 - armv7 (32-bit arm, for example a Raspberry Pi 2,3,4 with a 32-bit OS)
-- aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS) 
+- aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS)
 
 ### Windows requirements
 An x86_64 CPU and the 64-bit version of Windows is recommended. Any x86_64 CPU will likely be sufficient.
@@ -245,6 +246,7 @@ The following configurations are provided:
 | Filename | Description | Backends |
 |----------|-------------|----------|
 | `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU with SSE4.2 (any Intel Core i3/i5/i7, Atom since 2013, AMD FX and later) | Alsa, Pulseaudio |
+| `camilladsp-linux-armv6.tar.gz` | Linux on Armv6 (32-bit), intended for Raspberry Pi 1 and Pi Zero but should also work on others | Alsa |
 | `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon (32-bit), intended for Raspberry Pi 2 and up but should also work on others | Alsa |
 | `camilladsp-linux-aarch64.tar.gz` | Linux on Armv8 (64-bit), intended for Raspberry Pi 3 and up, but should also work on others | Alsa |
 | `camilladsp-macos-amd64.tar.gz` | macOS on 64-bit Intel CPU | CoreAudio |
@@ -466,7 +468,7 @@ ARGS:
 
 ```
 
-Most flags have a long and a short form. For example `--port 1234` and `-p1234` are equivalent.
+Most flags and options have a long and a short form. For example `--port 1234` and `-p1234` are equivalent.
 
 If the `--check` flag is given, the program will exit after checking the configuration file.
 Use this if you only want to verify that the configuration is ok, and not start any processing.
@@ -676,8 +678,7 @@ devices:
   adjust_period: 3
   resampler:
     type: AsyncSinc
-    parameters:
-      type: Balanced
+    profile: Balanced
   enable_rate_adjust: true
   capture:
     type: Bluez
