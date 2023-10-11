@@ -186,7 +186,7 @@ A few examples, done with CamillaDSP v0.5.0:
 Both 64 and 32 bit architectures are supported. All platforms supported by the Rustc compiler should work. 
 
 Pre-built binaries are provided for:
-- x86_64 (almost all PCs)
+- x86_64 with SSE4.2 (any Intel Core i3/i5/i7, Atom since 2013, AMD FX and later)
 - armv7 (32-bit arm, for example a Raspberry Pi 2,3,4 with a 32-bit OS)
 - aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS) 
 
@@ -244,7 +244,7 @@ The following configurations are provided:
 
 | Filename | Description | Backends |
 |----------|-------------|----------|
-| `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | Alsa, Pulseaudio |
+| `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU with SSE4.2 (any Intel Core i3/i5/i7, Atom since 2013, AMD FX and later) | Alsa, Pulseaudio |
 | `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon (32-bit), intended for Raspberry Pi 2 and up but should also work on others | Alsa |
 | `camilladsp-linux-aarch64.tar.gz` | Linux on Armv8 (64-bit), intended for Raspberry Pi 3 and up, but should also work on others | Alsa |
 | `camilladsp-macos-amd64.tar.gz` | macOS on 64-bit Intel CPU | CoreAudio |
