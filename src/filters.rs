@@ -454,7 +454,7 @@ impl FilterGroup {
                     "xorpd xmm13, xmm13",
                     "xorpd xmm14, xmm14",
                     "xorpd xmm15, xmm15"
-                    )
+                )
             }
             for filter in &mut self.filters {
                 filter.process_waveform(&mut input.waveforms[self.channel])?;
