@@ -17,6 +17,7 @@ websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
 FFTW = ["fftw"]
 debug = []
+avoid-rustc-issue-116359 = []
 
 [lib]
 name = "camillalib"

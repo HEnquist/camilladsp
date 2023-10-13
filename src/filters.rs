@@ -434,7 +434,7 @@ impl FilterGroup {
         if !input.waveforms[self.channel].is_empty() {
             // Zeroes all sse registers on x86_64 architecturesto work around
             // rustc bug https://github.com/rust-lang/rust/issues/116359
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(target_arch = "x86_64", feature="avoid-rustc-issue-116359"))]
             unsafe {
                 use std::arch::asm;
                 asm!(
