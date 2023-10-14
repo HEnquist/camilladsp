@@ -432,6 +432,30 @@ impl FilterGroup {
     /// Apply all the filters to an AudioChunk.
     fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
         if !input.waveforms[self.channel].is_empty() {
+            // Zeroes all sse registers on x86_64 architecturesto work around
+            // rustc bug https://github.com/rust-lang/rust/issues/116359
+            #[cfg(all(target_arch = "x86_64", feature="avoid-rustc-issue-116359"))]
+            unsafe {
+                use std::arch::asm;
+                asm!(
+                    "xorpd xmm0, xmm0",
+                    "xorpd xmm1, xmm1",
+                    "xorpd xmm2, xmm2",
+                    "xorpd xmm3, xmm3",
+                    "xorpd xmm4, xmm4",
+                    "xorpd xmm5, xmm5",
+                    "xorpd xmm6, xmm6",
+                    "xorpd xmm7, xmm7",
+                    "xorpd xmm8, xmm8",
+                    "xorpd xmm9, xmm9",
+                    "xorpd xmm10, xmm10",
+                    "xorpd xmm11, xmm11",
+                    "xorpd xmm12, xmm12",
+                    "xorpd xmm13, xmm13",
+                    "xorpd xmm14, xmm14",
+                    "xorpd xmm15, xmm15"
+                )
+            }
             for filter in &mut self.filters {
                 filter.process_waveform(&mut input.waveforms[self.channel])?;
             }
