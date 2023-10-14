@@ -3,6 +3,12 @@
 
 //mod filters;
 
+#[cfg(all(target_arch = "x86_64", not(feature = "32bit")))]
+use std::arch::x86_64::{
+    _mm_add_pd, _mm_load1_pd, _mm_load_sd, _mm_loadh_pd, _mm_mul_pd, _mm_mul_sd, _mm_shuffle_pd,
+    _mm_storeh_pd, _mm_storel_pd, _mm_sub_pd, _mm_unpacklo_pd,
+};
+
 use crate::config;
 use crate::filters::Filter;
 
@@ -415,7 +421,46 @@ impl Biquad {
         }
     }
 
-    /// Process a single sample
+    /// Process a single sample, SSE2 version
+    #[cfg(all(target_arch = "x86_64", not(feature = "32bit")))]
+    fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
+        unsafe {
+            // load input
+            let input_input = _mm_load1_pd(&input);
+
+            // load variables
+            let b0 = _mm_load_sd(&self.coeffs.b0);
+            let b0_b1 = _mm_loadh_pd(b0, &self.coeffs.b1);
+            let b2_nul = _mm_load_sd(&self.coeffs.b2);
+
+            let a1 = _mm_load_sd(&self.coeffs.a1);
+            let a1_a2 = _mm_loadh_pd(a1, &self.coeffs.a2);
+
+            let s1 = _mm_load_sd(&self.s1);
+            let s1_s2 = _mm_loadh_pd(s1, &self.s2);
+
+            // calculations
+            let out_s1a = _mm_add_pd(s1_s2, _mm_mul_pd(input_input, b0_b1));
+            let out_out = _mm_unpacklo_pd(out_s1a, out_s1a);
+
+            let s2a_nul = _mm_mul_sd(b2_nul, input_input);
+
+            let s1a_s2a = _mm_shuffle_pd(out_s1a, s2a_nul, 0x01);
+            let s1new_s2new = _mm_sub_pd(s1a_s2a, _mm_mul_pd(a1_a2, out_out));
+
+            // store s1 and s2
+            _mm_storel_pd(&mut self.s1, s1new_s2new);
+            _mm_storeh_pd(&mut self.s2, s1new_s2new);
+
+            // return result
+            let mut out = 0.0;
+            _mm_storel_pd(&mut out, out_out);
+            out
+        }
+    }
+
+    /// Process a single sample, generic version
+    #[cfg(not(all(target_arch = "x86_64", not(feature = "32bit"))))]
     fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
         let out = self.s1 + self.coeffs.b0 * input;
         self.s1 = self.s2 + self.coeffs.b1 * input - self.coeffs.a1 * out;
