@@ -261,6 +261,18 @@ The `.tar.gz`-files can be uncompressed with the `tar` command:
 tar -xvf camilladsp-linux-amd64.tar.gz
 ```
 
+## Running downloaded executables on macOS
+If the binary was downloaded using Safari, then macOS most likely won't allow it to be executed.
+Trying will result in an error message such as:
+`"camilladsp" can't be opened because its integrity cannot be verified.`
+
+The solution is to remove the "quarantine" attribute from the binary using the `xattr` command.
+
+Open a a terminal and run:
+
+```sh
+xattr -d com.apple.quarantine /path/to/camilladsp
+```
 
 # Building
 
