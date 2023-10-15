@@ -21,8 +21,8 @@ extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
 
+extern crate chrono;
 extern crate flexi_logger;
-extern crate time;
 #[macro_use]
 extern crate log;
 
@@ -45,7 +45,6 @@ use signal_hook::consts::signal::*;
 use signal_hook::consts::TERM_SIGNALS;
 #[cfg(not(windows))]
 use signal_hook::iterator::{exfiltrator::SignalOnly, SignalsInfo};
-use time::format_description;
 
 use camillalib::Res;
 
@@ -71,13 +70,6 @@ const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
 const EXIT_FORCED: i32 = 103; // Exit was forced by a second SIGINT
 const EXIT_OK: i32 = 0; // All ok
 
-// Time format string for logger
-const TS_S: &str = "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:6]";
-lazy_static::lazy_static! {
-    static ref TS: Vec<format_description::FormatItem<'static>>
-        = format_description::parse(TS_S).unwrap(/*ok*/);
-}
-
 // Customized version of `colored_opt_format` from flexi_logger.
 fn custom_colored_logger_format(
     w: &mut dyn std::io::Write,
@@ -88,9 +80,7 @@ fn custom_colored_logger_format(
     write!(
         w,
         "{} {:<5} [{}:{}] {}",
-        now.now()
-            .format(&TS)
-            .unwrap_or_else(|_| "Timestamping failed".to_string()),
+        now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
         flexi_logger::style(level).paint(level.to_string()),
         record.file().unwrap_or("<unnamed>"),
         record.line().unwrap_or(0),
@@ -107,9 +97,7 @@ pub fn custom_logger_format(
     write!(
         w,
         "{} {:<5} [{}:{}] {}",
-        now.now()
-            .format(&TS)
-            .unwrap_or_else(|_| "Timestamping failed".to_string()),
+        now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
         record.level(),
         record.file().unwrap_or("<unnamed>"),
         record.line().unwrap_or(0),
