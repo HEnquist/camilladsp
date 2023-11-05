@@ -63,6 +63,7 @@ pub fn save_state(
     match std::fs::OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .open(filename)
     {
         Ok(f) => {
