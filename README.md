@@ -339,7 +339,7 @@ If possible, it's recommended to use a pre-built binary on these systems.
 All the available options, or "features" are:
 - `pulse-backend`: PulseAudio support.
 - `cpal-backend`: Used for Jack support (automatically enabled when needed).
-- `jack-backend`: Jack support.
+- `jack-backend`: Jack support (Linux only).
 - `bluez-backend`: Bluetooth support via BlueALSA (Linux only).
 - `websocket`: Websocket server for control.
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
@@ -504,14 +504,36 @@ The argument should be the path to the logfile. If this file is not writable, Ca
 ### Persistent storage of state
 
 The `--statefile` option is used to give a path to a file where CamillaDSP will save the config file path, and the volume and mute settings.
-On startup, these values will be read from the statefile.
+On startup, these values will be read from the statefile if the file exists and is valid.
 The values in the file will then be kept updated whenever they change.
+If the file doesn't exist, it will be created on the first write.
+
 If the `configfile` argument is given, then this will be used instead of the value from the statefile.
 Similarly, the `--gain` and `--mute` options also override the values in the statefile.
 
 **Use this feature with caution! The volume setting given in the statefile will be applied immediately when CamillaDSP starts processing.**
 In systems that have a gain structure such that a too high volume setting can damage equipment or ears,
 it is recommended to always use the `--gain`  option to set the volume to start at a safe value.
+
+#### Example statefile
+The statefile is a small YAML file that holds the parth to the active config file,
+as well as mute and volume settings for the five faders (`Main` and `Aux1` to `Aux4`)
+```
+---
+config_path: /path/to/config.yml
+mute:
+  - false
+  - false
+  - false
+  - false
+  - false
+volume:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+```
 
 ### Websocket
 
@@ -601,10 +623,11 @@ This makes it possible to pipe raw samples from some applications directly to Ca
 
 ### Jack
 Jack is most commonly used with Linux, but can also be used with both Windows and MacOS.
+The Jack support of CamillaDSP version should be considered experimental.
+It is implemented using the CPAL library, which currently only supports Jack on Linux. 
 
-The Jack support of the current CamillaDSP version (v0.6.0 at the time of writing) should be considered experimental.
-
-The jack server must be running. 
+#### Using Jack
+The Jack server must be running.
 
 Set `device` to "default" for both capture and playback.
 The sample format is fixed at 32-bit float (FLOAT32LE).
