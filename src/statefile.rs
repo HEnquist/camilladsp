@@ -9,12 +9,7 @@ use std::sync::Arc;
 
 use crate::ProcessingParameters;
 
-//use std::path::{Path, PathBuf};
-
-//use crate::PrcFmt;
-//type Res<T> = Result<T, Box<dyn error::Error>>;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct State {
     pub config_path: Option<String>,
@@ -60,6 +55,13 @@ pub fn save_state(
         volume: params.volumes(),
         mute: params.mutes(),
     };
+    if save_state_to_file(filename, &state) {
+        unsaved_changes.store(false, Ordering::Relaxed);
+    }
+}
+
+pub fn save_state_to_file(filename: &str, state: &State) -> bool {
+    debug!("Saving state to {}", filename);
     match std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -72,17 +74,20 @@ pub fn save_state(
                     "Unable to write to statefile '{}', error: {}",
                     filename, writeerr
                 );
-                return;
+                return false;
             }
             if let Err(syncerr) = &f.sync_all() {
                 error!(
                     "Unable to commit statefile '{}' data to disk, error: {}",
                     filename, syncerr
                 );
-                return;
+                return false;
             }
-            unsaved_changes.store(false, Ordering::Relaxed);
+            true
         }
-        Err(openerr) => error!("Unable to open statefile {}, error: {}", filename, openerr),
+        Err(openerr) => {
+            error!("Unable to open statefile {}, error: {}", filename, openerr);
+            false
+        }
     }
 }

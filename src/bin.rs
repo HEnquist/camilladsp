@@ -787,6 +787,20 @@ fn main_process() -> i32 {
         }
     }
 
+    // All state variables are prepared, save to the statefile if needed
+    if let Some(fname) = &statefilename {
+        let state_to_save = statefile::State {
+            config_path: configname.clone(),
+            volume: initial_volumes,
+            mute: initial_mutes,
+        };
+        if state.is_none() || state.map(|s| s != state_to_save).unwrap_or(false) {
+            statefile::save_state_to_file(fname, &state_to_save);
+        } else {
+            debug!("No change to state from {}, not overwriting.", fname);
+        }
+    }
+
     let (tx_command, rx_command) = crossbeam_channel::bounded(10);
     if let Some(path) = &configname {
         match config::load_validate_config(path) {
@@ -930,9 +944,6 @@ fn main_process() -> i32 {
         if let Some(port_str) = matches.value_of("port") {
             let serveraddress = matches.value_of("address").unwrap_or("127.0.0.1");
             let serverport = port_str.parse::<usize>().unwrap();
-
-            // Send one state change to trigger an initial save
-            tx_state.try_send(()).unwrap_or(());
 
             let shared_data = socketserver::SharedData {
                 active_config: active_config.clone(),
