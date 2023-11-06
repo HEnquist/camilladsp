@@ -14,7 +14,7 @@ Mixers are used to route audio between channels and to change the number of chan
 Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT.
 A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples.
 A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
-The full configuration is given in a yaml file.
+The full configuration is given in a YAML file.
 
 # Disclaimer
 
@@ -516,7 +516,7 @@ In systems that have a gain structure such that a too high volume setting can da
 it is recommended to always use the `--gain`  option to set the volume to start at a safe value.
 
 #### Example statefile
-The statefile is a small YAML file that holds the parth to the active config file,
+The statefile is a small YAML file that holds the path to the active config file,
 as well as mute and volume settings for the five faders (`Main` and `Aux1` to `Aux4`)
 ```
 ---
@@ -759,9 +759,15 @@ Rate adjust should also be enabled.
 # Configuration
 
 ## The YAML format
-CamillaDSP is using the YAML format for the configuration file. This is a standard format that was chosen because of its nice readable syntax.
-The Serde library is used for reading the configuration. 
-There are a few things to keep in mind with YAML. The configuration is a tree, and the level is determined by the indentation level.
+CamillaDSP is using the YAML format for the configuration file.
+It is a standard format that was chosen because of its nice readable syntax.
+
+This section is a very brief introduction to the YAML format
+that is intended to cover only what is needed to read and write CamillaDSP config files.
+Please see the full [YAML specification](https://yaml.org/) for more details.
+
+There are a few things to keep in mind with YAML.
+The configuration is a tree, and the level is determined by the indentation level.
 For YAML the indentation is as important as opening and closing brackets in other formats.
 If it's wrong, Serde might not be able to give a good description of what the error is, only that the file is invalid.
 If you get strange errors, first check that the indentation is correct.
@@ -799,6 +805,33 @@ mixers:
 On the root level it contains `filters` and `mixers`. The `mixers` section could just as well be placed before the `filters`.
 Looking at `filters`, the second filter swaps the order of `parameters` and `type`. Both variants are valid.
 The mixer example shows that the `gain` and `channel` properties can be ordered freely.
+
+### Variable types
+CamillaDSP uses values of several different types. The most basic are string, number and boolean.
+| Expression           | Type                                                           |
+| -------------------- | -------------------------------------------------------------- |
+| `value: 123`         | an integer, also acceptable for a parameter expecting a float  |
+| `value: "123"`       | a string, because of the added quotes                          |
+| `value: 123.0`       | a float                                                        |
+| `value: 1.23e2`      | a float in scientific notation, also uppercase `E` is accepted |
+| `value: true`        | a boolean true, also accepts `True` and `TRUE`                 |
+| `value: false`       | a boolean false, also accepts `False` and `FALSE`              |
+| `value: Some text`   | a string, written without quotes                               |
+| `value: "Some text"` | a string, written with quotes                                  |
+| `value: null`        | a null value, also accepts `Null`, `NULL`, `~` and empty       |
+
+Some parameters expect a list. These can be written inline or on multiple rows:
+```yaml
+---
+values_a: [ 1, 2, 3, 4, 5 ]
+
+values_b:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+```
 
 ## Title and description
 
@@ -2055,7 +2088,7 @@ In this case, the bypass may be used to switch between mixers with different set
 
 ## Export filters from REW
 REW can automatically generate a set of filters for correcting the frequency response of a system.
-REW V5.20.14 and later is able to export the filters in the CamillaDSP yaml format.
+REW V5.20.14 and later is able to export the filters in the CamillaDSP YAML format.
 
 - Go to the "EQ Filters" screen. Expand the "Equalizer" section in the list on the right side.
 - Select "CamillaDSP" as Manufacturer and "Filters" as Model.
