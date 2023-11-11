@@ -2100,7 +2100,7 @@ Note that the generated YAML file is not a complete CamillaDSP configuration.
 It contains only filter definitions and pipeline steps, that can be pasted into a CamillaDSP config file.
 
 ## Visualizing the config
-Please note that the `show_config.py` script mentioned here is deprecated, and has been replaced by the `plotcamillaconf` tool from the pycamilladsp-plot library.
+__Please note that the `show_config.py` script mentioned here is deprecated, and has been replaced by the `plotcamillaconf` tool from the pycamilladsp-plot library.__
 The new tool provides the same functionality as well as many improvements.
 The `show_config.py` does not support any of the newer config options, and the script will be removed in a future version.
 
