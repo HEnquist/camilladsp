@@ -30,7 +30,8 @@ pub struct FftConv {
 
 impl FftConv {
     /// Create a new FFT colvolution filter.
-    pub fn new(name: String, data_length: usize, coeffs: &[PrcFmt]) -> Self {
+    pub fn new(name: &str, data_length: usize, coeffs: &[PrcFmt]) -> Self {
+        let name = name.to_string();
         let input_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
         let temp_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); data_length + 1];
         let output_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
@@ -75,20 +76,23 @@ impl FftConv {
         }
     }
 
-    pub fn from_config(name: String, data_length: usize, conf: config::ConvParameters) -> Self {
+    pub fn from_config(name: &str, data_length: usize, conf: config::ConvParameters) -> Self {
         let values = match conf {
-            config::ConvParameters::Values { values, length } => {
-                filters::pad_vector(&values, length)
+            config::ConvParameters::Values { values } => values,
+            config::ConvParameters::Raw(params) => filters::read_coeff_file(
+                &params.filename,
+                &params.format(),
+                params.read_bytes_lines(),
+                params.skip_bytes_lines(),
+            )
+            .unwrap(),
+            config::ConvParameters::Wav(params) => {
+                filters::read_wav(&params.filename, params.channel()).unwrap()
             }
-            config::ConvParameters::Raw {
-                filename,
-                format,
-                read_bytes_lines,
-                skip_bytes_lines,
-            } => filters::read_coeff_file(&filename, &format, read_bytes_lines, skip_bytes_lines)
-                .unwrap(),
-            config::ConvParameters::Wav { filename, channel } => {
-                filters::read_wav(&filename, channel).unwrap()
+            config::ConvParameters::Dummy { length } => {
+                let mut values = vec![0.0; length];
+                values[0] = 1.0;
+                values
             }
         };
         FftConv::new(name, data_length, &values)
@@ -96,8 +100,8 @@ impl FftConv {
 }
 
 impl Filter for FftConv {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
@@ -157,22 +161,26 @@ impl Filter for FftConv {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Conv { parameters: conf } = conf {
+        if let config::Filter::Conv {
+            parameters: conf, ..
+        } = conf
+        {
             let coeffs = match conf {
-                config::ConvParameters::Values { values, length } => {
-                    filters::pad_vector(&values, length)
+                config::ConvParameters::Values { values } => values,
+                config::ConvParameters::Raw(params) => filters::read_coeff_file(
+                    &params.filename,
+                    &params.format(),
+                    params.read_bytes_lines(),
+                    params.skip_bytes_lines(),
+                )
+                .unwrap(),
+                config::ConvParameters::Wav(params) => {
+                    filters::read_wav(&params.filename, params.channel()).unwrap()
                 }
-                config::ConvParameters::Raw {
-                    filename,
-                    format,
-                    read_bytes_lines,
-                    skip_bytes_lines,
-                } => {
-                    filters::read_coeff_file(&filename, &format, read_bytes_lines, skip_bytes_lines)
-                        .unwrap()
-                }
-                config::ConvParameters::Wav { filename, channel } => {
-                    filters::read_wav(&filename, channel).unwrap()
+                config::ConvParameters::Dummy { length } => {
+                    let mut values = vec![0.0; length];
+                    values[0] = 1.0;
+                    values
                 }
             };
 
@@ -213,22 +221,21 @@ impl Filter for FftConv {
 /// Validate a FFT convolution config.
 pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {
-        config::ConvParameters::Values { .. } => Ok(()),
-        config::ConvParameters::Raw {
-            filename,
-            format,
-            read_bytes_lines,
-            skip_bytes_lines,
-        } => {
-            let coeffs =
-                filters::read_coeff_file(filename, format, *read_bytes_lines, *skip_bytes_lines)?;
+        config::ConvParameters::Values { .. } | config::ConvParameters::Dummy { .. } => Ok(()),
+        config::ConvParameters::Raw(params) => {
+            let coeffs = filters::read_coeff_file(
+                &params.filename,
+                &params.format(),
+                params.read_bytes_lines(),
+                params.skip_bytes_lines(),
+            )?;
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }
             Ok(())
         }
-        config::ConvParameters::Wav { filename, channel } => {
-            let coeffs = filters::read_wav(filename, *channel)?;
+        config::ConvParameters::Wav(params) => {
+            let coeffs = filters::read_wav(&params.filename, params.channel())?;
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }
@@ -245,7 +252,7 @@ mod tests {
     use crate::PrcFmt;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
-        println!("{} - {}", left, right);
+        println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 
@@ -261,11 +268,8 @@ mod tests {
     #[test]
     fn check_result() {
         let coeffs = vec![0.5, 0.5];
-        let conf = ConvParameters::Values {
-            values: coeffs,
-            length: 0,
-        };
-        let mut filter = FftConv::from_config("test".to_string(), 8, conf);
+        let conf = ConvParameters::Values { values: coeffs };
+        let mut filter = FftConv::from_config("test", 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
         filter.process_waveform(&mut wave1).unwrap();
@@ -278,7 +282,7 @@ mod tests {
         for m in 0..32 {
             coeffs.push(m as PrcFmt);
         }
-        let mut filter = FftConv::new("test".to_owned(), 8, &coeffs);
+        let mut filter = FftConv::new("test", 8, &coeffs);
         let mut wave1 = vec![0.0 as PrcFmt; 8];
         let mut wave2 = vec![0.0 as PrcFmt; 8];
         let mut wave3 = vec![0.0 as PrcFmt; 8];

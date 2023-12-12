@@ -20,7 +20,9 @@ pub struct DiffEq {
 }
 
 impl DiffEq {
-    pub fn new(name: String, a_in: Vec<PrcFmt>, b_in: Vec<PrcFmt>) -> Self {
+    pub fn new(name: &str, a_in: Vec<PrcFmt>, b_in: Vec<PrcFmt>) -> Self {
+        let name = name.to_string();
+
         let a = if a_in.is_empty() { vec![1.0] } else { a_in };
 
         let b = if b_in.is_empty() { vec![1.0] } else { b_in };
@@ -43,9 +45,9 @@ impl DiffEq {
         }
     }
 
-    pub fn from_config(name: String, conf: config::DiffEqParameters) -> Self {
-        let a = conf.a;
-        let b = conf.b;
+    pub fn from_config(name: &str, conf: config::DiffEqParameters) -> Self {
+        let a = conf.a();
+        let b = conf.b();
         DiffEq::new(name, a, b)
     }
 
@@ -93,8 +95,8 @@ impl DiffEq {
 }
 
 impl Filter for DiffEq {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
@@ -106,12 +108,14 @@ impl Filter for DiffEq {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::DiffEq { parameters: conf } = conf {
-            let name = self.name.clone();
-            *self = DiffEq::from_config(name, conf);
+        if let config::Filter::DiffEq {
+            parameters: conf, ..
+        } = conf
+        {
+            *self = DiffEq::from_config(&self.name, conf);
         } else {
             // This should never happen unless there is a bug somewhere else
-            panic!("Invalid config change!");
+            unreachable!("Invalid config change!");
         }
     }
 }
@@ -128,7 +132,7 @@ mod tests {
     use crate::PrcFmt;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
-        println!("{} - {}", left, right);
+        println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 
@@ -144,7 +148,7 @@ mod tests {
     #[test]
     fn check_result() {
         let mut filter = DiffEq::new(
-            "test".to_string(),
+            "test",
             vec![1.0, -0.1462978543780541, 0.005350765548905586],
             vec![0.21476322779271284, 0.4295264555854257, 0.21476322779271284],
         );

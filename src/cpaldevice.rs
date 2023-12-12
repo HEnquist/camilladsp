@@ -9,11 +9,12 @@ use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
 use cpal::{BufferSize, ChannelCount, HostId, SampleRate, StreamConfig};
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time;
 
@@ -29,7 +30,15 @@ use crate::{CaptureStatus, PlaybackStatus};
 pub enum CpalHost {
     #[cfg(target_os = "macos")]
     CoreAudio,
-    #[cfg(feature = "jack-backend")]
+    #[cfg(all(
+        feature = "jack-backend",
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd"
+        )
+    ))]
     Jack,
 }
 
@@ -51,8 +60,7 @@ pub struct CpalCaptureDevice {
     pub devname: String,
     pub host: CpalHost,
     pub samplerate: usize,
-    pub resampler_conf: config::Resampler,
-    pub enable_resampling: bool,
+    pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
@@ -73,7 +81,15 @@ fn open_cpal_playback(
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
-        #[cfg(feature = "jack-backend")]
+        #[cfg(all(
+            feature = "jack-backend",
+            any(
+                target_os = "linux",
+                target_os = "dragonfly",
+                target_os = "freebsd",
+                target_os = "netbsd"
+            )
+        ))]
         CpalHost::Jack => HostId::Jack,
     };
     let host = cpal::host_from_id(host_id)?;
@@ -93,7 +109,7 @@ fn open_cpal_playback(
         }) {
             Some(dev) => dev,
             None => {
-                let msg = format!("Could not find playback device '{}'", devname);
+                let msg = format!("Could not find playback device '{devname}'");
                 return Err(ConfigError::new(&msg).into());
             }
         }
@@ -122,7 +138,15 @@ fn open_cpal_capture(
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
-        #[cfg(feature = "jack-backend")]
+        #[cfg(all(
+            feature = "jack-backend",
+            any(
+                target_os = "linux",
+                target_os = "dragonfly",
+                target_os = "freebsd",
+                target_os = "netbsd"
+            )
+        ))]
         CpalHost::Jack => HostId::Jack,
     };
     let host = cpal::host_from_id(host_id)?;
@@ -142,7 +166,7 @@ fn open_cpal_capture(
         }) {
             Some(dev) => dev,
             None => {
-                let msg = format!("Could not find capture device '{}'", devname);
+                let msg = format!("Could not find capture device '{devname}'");
                 return Err(ConfigError::new(&msg).into());
             }
         }
@@ -177,7 +201,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
         &mut self,
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
@@ -196,7 +220,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
         let channels_clone = channels;
 
         let bits_per_sample = self.sample_format.bits_per_sample() as i32;
-        let sample_format = self.sample_format.clone();
+        let sample_format = self.sample_format;
         let playback_status_clone = playback_status.clone();
         let handle = thread::Builder::new()
             .name("CpalPlayback".to_string())
@@ -207,7 +231,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
+                        let scalefactor = PrcFmt::coerce(2.0).powi(bits_per_sample - 1);
 
                         let (tx_dev, rx_dev) = mpsc::sync_channel(1);
                         let buffer_fill = Arc::new(AtomicUsize::new(0));
@@ -225,7 +249,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                     VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
                                 let stream = device.build_output_stream(
                                     &stream_config,
-                                    move |mut buffer: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                                    move |buffer: &mut [i16], _: &cpal::OutputCallbackInfo| {
                                         #[cfg(feature = "debug")]
                                         trace!("Playback device requests {} samples", buffer.len());
                                         while sample_queue.len() < buffer.len() {
@@ -259,13 +283,12 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                 }
                                             }
                                         }
-                                        write_data_to_device(&mut buffer, &mut sample_queue);
+                                        write_data_to_device(buffer, &mut sample_queue);
                                         buffer_fill_clone
                                             .store(sample_queue.len(), Ordering::Relaxed);
                                         if clipped > 0 {
                                             playback_status_clone
                                                 .write()
-                                                .unwrap()
                                                 .clipped_samples += clipped;
                                         }
                                     },
@@ -282,7 +305,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                     VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
                                 let stream = device.build_output_stream(
                                     &stream_config,
-                                    move |mut buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                                    move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
                                         #[cfg(feature = "debug")]
                                         trace!("Playback device requests {} samples", buffer.len());
                                         while sample_queue.len() < buffer.len() {
@@ -315,13 +338,12 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                                 }
                                             }
                                         }
-                                        write_data_to_device(&mut buffer, &mut sample_queue);
+                                        write_data_to_device(buffer, &mut sample_queue);
                                         buffer_fill_clone
                                             .store(sample_queue.len(), Ordering::Relaxed);
                                         if clipped > 0 {
                                             playback_status_clone
                                                 .write()
-                                                .unwrap()
                                                 .clipped_samples += clipped;
                                         }
                                     },
@@ -349,6 +371,12 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
+                                    chunk.update_stats(&mut chunk_stats);
+                                    {
+                                        let mut playback_status = playback_status.write();
+                                        playback_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
+                                        playback_status.signal_peak.add_record(chunk_stats.peak_linear());
+                                    }
                                     buffer_avg.add_value(
                                         (buffer_fill.load(Ordering::Relaxed) / channels_clone)
                                             as f64,
@@ -356,7 +384,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                     if adjust
                                         && timer.larger_than_millis((1000.0 * adjust_period) as u64)
                                     {
-                                        if let Some(av_delay) = buffer_avg.get_average() {
+                                        if let Some(av_delay) = buffer_avg.average() {
                                             let speed = calculate_speed(
                                                 av_delay,
                                                 target_level,
@@ -373,15 +401,11 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             status_channel
                                                 .send(StatusMessage::SetSpeed(speed))
                                                 .unwrap();
-                                            playback_status.write().unwrap().buffer_level =
+                                            playback_status.write().buffer_level =
                                                 av_delay as usize;
                                         }
                                     }
-                                    chunk.update_stats(&mut chunk_stats);
-                                    playback_status.write().unwrap().signal_rms =
-                                        chunk_stats.rms_db();
-                                    playback_status.write().unwrap().signal_peak =
-                                        chunk_stats.peak_db();
+
                                     tx_dev.send(chunk).unwrap();
                                 }
                                 Ok(AudioMessage::Pause) => {
@@ -413,7 +437,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
     }
 }
 
-fn get_nbr_capture_samples(
+fn nbr_capture_samples(
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_samples: usize,
     channels: usize,
@@ -447,7 +471,7 @@ impl CaptureDevice for CpalCaptureDevice {
         &mut self,
         channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
@@ -458,10 +482,9 @@ impl CaptureDevice for CpalCaptureDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let bits_per_sample = self.sample_format.bits_per_sample() as i32;
-        let sample_format = self.sample_format.clone();
-        let enable_resampling = self.enable_resampling;
-        let resampler_conf = self.resampler_conf.clone();
-        let async_src = resampler_is_async(&resampler_conf);
+        let sample_format = self.sample_format;
+        let resampler_config = self.resampler_config;
+        let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let stop_on_rate_change = self.stop_on_rate_change;
@@ -469,25 +492,20 @@ impl CaptureDevice for CpalCaptureDevice {
         let handle = thread::Builder::new()
             .name("CpalCapture".to_string())
             .spawn(move || {
-                let mut resampler = if enable_resampling {
-                    debug!("Creating resampler");
-                    get_resampler(
-                        &resampler_conf,
+                let mut resampler = new_resampler(
+                        &resampler_config,
                         channels,
                         samplerate,
                         capture_samplerate,
                         chunksize,
-                    )
-                } else {
-                    None
-                };
+                    );
                 match open_cpal_capture(host_cfg, &devname, capture_samplerate, channels, &sample_format) {
                     Ok((device, stream_config, _sample_format)) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let scalefactor = PrcFmt::new(2.0).powi(bits_per_sample - 1);
+                        let scalefactor = PrcFmt::coerce(2.0).powi(bits_per_sample - 1);
                         let (tx_dev_i, rx_dev_i) = mpsc::sync_channel(1);
                         let (tx_dev_f, rx_dev_f) = mpsc::sync_channel(1);
                         let stream = match sample_format {
@@ -498,8 +516,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                     move |buffer: &[i16], _: &cpal::InputCallbackInfo| {
                                         #[cfg(feature = "debug")]
                                         trace!("Capture device provides {} samples", buffer.len());
-                                        let mut buffer_copy = Vec::new();
-                                        buffer_copy.extend_from_slice(&buffer);
+                                        let buffer_copy = Vec::from(buffer);
                                         tx_dev_i.send(buffer_copy).unwrap();
                                     },
                                     move |err| error!("an error occurred on stream: {}", err)
@@ -514,8 +531,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                     move |buffer: &[f32], _: &cpal::InputCallbackInfo| {
                                         #[cfg(feature = "debug")]
                                         trace!("Capture device provides {} samples", buffer.len());
-                                        let mut buffer_copy = Vec::new();
-                                        buffer_copy.extend_from_slice(&buffer);
+                                        let buffer_copy = Vec::from(buffer);
                                         tx_dev_f.send(buffer_copy).unwrap();
                                     },
                                     move |err| error!("an error occurred on stream: {}", err)
@@ -553,6 +569,7 @@ impl CaptureDevice for CpalCaptureDevice {
                         let mut rate_adjust = 0.0;
                         let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                         let mut state = ProcessingState::Running;
+                        let mut channel_mask = vec![true; channels];
                         loop {
                             match command_channel.try_recv() {
                                 Ok(CommandMessage::Exit) => {
@@ -567,7 +584,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                     if let Some(resampl) = &mut resampler {
                                         debug!("Adjusting resampler rate to {}", speed);
                                         if async_src {
-                                            if resampl.set_resample_ratio_relative(speed).is_err() {
+                                            if resampl.set_resample_ratio_relative(speed, true).is_err() {
                                                 debug!("Failed to set resampling speed to {}", speed);
                                             }
                                         }
@@ -582,7 +599,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                     break;
                                 }
                             };
-                            capture_samples = get_nbr_capture_samples(
+                            capture_samples = nbr_capture_samples(
                                 &resampler,
                                 capture_samples,
                                 channels,
@@ -633,24 +650,27 @@ impl CaptureDevice for CpalCaptureDevice {
                                 _ => panic!("Unsupported sample format"),
                             };
                             averager.add_value(capture_samples);
-                            if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                             {
-                                let samples_per_sec = averager.get_average();
-                                averager.restart();
-                                let measured_rate_f = samples_per_sec / channels as f64;
-                                trace!(
-                                    "Measured sample rate is {} Hz",
-                                    measured_rate_f
-                                );
-                                let mut capt_stat = capture_status.write().unwrap();
-                                capt_stat.measured_samplerate = measured_rate_f as usize;
-                                capt_stat.signal_range = value_range as f32;
-                                capt_stat.rate_adjust = rate_adjust as f32;
-                                capt_stat.state = state;
+                                let capture_status = capture_status.upgradable_read();
+                                if averager.larger_than_millis(capture_status.update_interval as u64)
+                                {
+                                    let samples_per_sec = averager.average();
+                                    averager.restart();
+                                    let measured_rate_f = samples_per_sec / channels as f64;
+                                    trace!(
+                                        "Measured sample rate is {:.1} Hz",
+                                        measured_rate_f
+                                    );
+                                    let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
+                                    capture_status.measured_samplerate = measured_rate_f as usize;
+                                    capture_status.signal_range = value_range as f32;
+                                    capture_status.rate_adjust = rate_adjust as f32;
+                                    capture_status.state = state;
+                                }
                             }
                             watcher_averager.add_value(capture_samples);
                             if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
-                                let samples_per_sec = watcher_averager.get_average();
+                                let samples_per_sec = watcher_averager.average();
                                 watcher_averager.restart();
                                 let measured_rate_f = samples_per_sec / channels as f64;
                                 let changed = valuewatcher.check_value(measured_rate_f as f32);
@@ -668,17 +688,21 @@ impl CaptureDevice for CpalCaptureDevice {
                                         break;
                                     }
                                 }
-                                trace!("Measured sample rate is {} Hz", measured_rate_f);
+                                trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                             }
                             chunk.update_stats(&mut chunk_stats);
                             //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
-                            capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                            capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                            {
+                                let mut capture_status = capture_status.write();
+                                capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
+                                capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                            }
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
-                                    let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
+                                    chunk.update_channel_mask(&mut channel_mask);
+                                    let new_waves = resampl.process(&chunk.waveforms, Some(&channel_mask)).unwrap();
                                     let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                                     if chunk_frames == 0 {
                                         chunk_frames = chunksize;
@@ -701,8 +725,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 }
                             }
                         }
-                        let mut capt_stat = capture_status.write().unwrap();
-                        capt_stat.state = ProcessingState::Inactive;
+                        capture_status.write().state = ProcessingState::Inactive;
                     }
                     Err(err) => {
                         let send_result = status_channel

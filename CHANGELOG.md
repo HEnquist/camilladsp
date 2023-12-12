@@ -1,3 +1,40 @@
+## Unreleased
+New features:
+- Add dynamic range compressor.
+- Add websocket commands to read peak and rms history.
+- Add ToggleMute websocket command.
+- Add AdjustVolume websocket command for relative volume changes.
+- Better handling of USB gadget in Alsa backend.
+- Add option to bypass pipeline steps.
+- Bluetooth capture support on Linux via Bluez.
+- Updated resampler with faster lower quality options.
+- Higher precision of biquad filters.
+- More flexible configuration of resampler type and quality.
+- Allow setting optional config parameters to `null` to use default value.
+- Add "Dummy" convolution filter type for easier CPU load testing.
+- Add title and description fields to various parts of the config.
+- Gain can be specified in dB or linear scale.
+- Websocket command to reset clipped samples counter.
+- Add an always enabled default volume control.
+- Add several volume control channels (faders).
+- Change Loudness filter to only perform loudness compensation.
+- Add more ditherers.
+- Add GeneralNotch biquad type.
+- Add Tilt equalizer biquad combo.
+- Add GraphicEqualizer biquad combo.
+- Support rate adjust for BlachHole on macOS.
+- Add statefile for persisting runtime parameters to file.
+- Websocket command to get pipeline processing capacity utilization.
+- Add commands to read statefile path and updating status.
+- Improved handling of config changes via SIGHUP and websocket.
+
+Changes:
+- Optimize cpu load in general, and of dithering and delay filters in particular.
+- More logical names for dither types.
+- Updated Shibata dither coeffients.
+- Rename `Set/GetConfigName` websocket commands to `Set/GetConfigFilePath`.
+- Removed redundant`change_format` parameter to simplify CoreAudio device config.
+
 ## 1.0.3
 Bugfixes:
  - Volume and Loudness filters keep mute state on config reload.

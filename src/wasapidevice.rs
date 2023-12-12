@@ -4,15 +4,18 @@ use crate::config::{ConfigError, SampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 use wasapi;
+use wasapi::DeviceCollection;
+use windows::w;
 use windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW;
 
 use crate::CommandMessage;
@@ -29,7 +32,7 @@ enum DeviceState {
 
 #[derive(Clone, Debug)]
 pub struct WasapiPlaybackDevice {
-    pub devname: String,
+    pub devname: Option<String>,
     pub exclusive: bool,
     pub samplerate: usize,
     pub chunksize: usize,
@@ -42,12 +45,11 @@ pub struct WasapiPlaybackDevice {
 
 #[derive(Clone, Debug)]
 pub struct WasapiCaptureDevice {
-    pub devname: String,
+    pub devname: Option<String>,
     pub exclusive: bool,
     pub loopback: bool,
     pub samplerate: usize,
-    pub resampler_conf: config::Resampler,
-    pub enable_resampling: bool,
+    pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
@@ -64,33 +66,62 @@ enum DisconnectReason {
     Error,
 }
 
-fn get_wave_format(
+pub fn list_device_names(input: bool) -> Vec<(String, String)> {
+    let direction = if input {
+        wasapi::Direction::Capture
+    } else {
+        wasapi::Direction::Render
+    };
+    let collection = wasapi::DeviceCollection::new(&direction);
+    let names = collection
+        .map(|coll| list_device_names_in_collection(&coll).unwrap_or_default())
+        .unwrap_or_default();
+    names.iter().map(|n| (n.clone(), n.clone())).collect()
+}
+
+fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<String>> {
+    let mut names = Vec::new();
+    let count = collection.get_nbr_devices()?;
+    for n in 0..count {
+        let device = collection.get_device_at_index(n)?;
+        let name = device.get_friendlyname()?;
+        names.push(name);
+    }
+    Ok(names)
+}
+
+fn wave_format(
     sample_format: &SampleFormat,
     samplerate: usize,
     channels: usize,
 ) -> wasapi::WaveFormat {
     match sample_format {
         SampleFormat::S16LE => {
-            wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels)
+            wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels, None)
         }
         SampleFormat::S24LE => {
-            wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels)
+            wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
         SampleFormat::S24LE3 => {
-            wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels)
+            wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
         SampleFormat::S32LE => {
-            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels)
+            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        SampleFormat::FLOAT32LE => {
-            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Float, samplerate, channels)
-        }
+        SampleFormat::FLOAT32LE => wasapi::WaveFormat::new(
+            32,
+            32,
+            &wasapi::SampleType::Float,
+            samplerate,
+            channels,
+            None,
+        ),
         _ => panic!("Unsupported sample format"),
     }
 }
 
 fn open_playback(
-    devname: &str,
+    devname: &Option<String>,
     samplerate: usize,
     channels: usize,
     sample_format: &SampleFormat,
@@ -106,16 +137,20 @@ fn open_playback(
         true => wasapi::ShareMode::Exclusive,
         false => wasapi::ShareMode::Shared,
     };
-    let device = if devname == "default" {
-        wasapi::get_default_device(&wasapi::Direction::Render)?
-    } else {
+    let device = if let Some(name) = devname {
         let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
-        collection.get_device_with_name(devname)?
+        debug!(
+            "Available playback devices: {:?}",
+            list_device_names_in_collection(&collection)
+        );
+        collection.get_device_with_name(name)?
+    } else {
+        wasapi::get_default_device(&wasapi::Direction::Render)?
     };
-    trace!("Found playback device {}", devname);
+    trace!("Found playback device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got playback iaudioclient");
-    let wave_format = get_wave_format(sample_format, samplerate, channels);
+    let wave_format = wave_format(sample_format, samplerate, channels);
     match audio_client.is_supported(&wave_format, &sharemode) {
         Ok(None) => {
             debug!("Playback device supports format {:?}", wave_format)
@@ -142,7 +177,7 @@ fn open_playback(
     );
     audio_client.initialize_client(
         &wave_format,
-        def_time as i64,
+        def_time,
         &wasapi::Direction::Render,
         &sharemode,
         false,
@@ -150,12 +185,12 @@ fn open_playback(
     debug!("initialized capture");
     let handle = audio_client.set_get_eventhandle()?;
     let render_client = audio_client.get_audiorenderclient()?;
-    debug!("Opened Wasapi playback device {}", devname);
+    debug!("Opened Wasapi playback device {:?}", devname);
     Ok((device, audio_client, render_client, handle, wave_format))
 }
 
 fn open_capture(
-    devname: &str,
+    devname: &Option<String>,
     samplerate: usize,
     channels: usize,
     sample_format: &SampleFormat,
@@ -172,21 +207,32 @@ fn open_capture(
         true => wasapi::ShareMode::Exclusive,
         false => wasapi::ShareMode::Shared,
     };
-    let device = if devname == "default" && !loopback {
-        wasapi::get_default_device(&wasapi::Direction::Capture)?
-    } else if devname == "default" && loopback {
-        wasapi::get_default_device(&wasapi::Direction::Render)?
+    let device = if let Some(name) = devname {
+        if !loopback {
+            let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Capture)?;
+            debug!(
+                "Available capture devices: {:?}",
+                list_device_names_in_collection(&collection)
+            );
+            collection.get_device_with_name(name)?
+        } else {
+            let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
+            debug!(
+                "Available loopback capture (i.e. playback) devices: {:?}",
+                list_device_names_in_collection(&collection)
+            );
+            collection.get_device_with_name(name)?
+        }
     } else if !loopback {
-        let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Capture)?;
-        collection.get_device_with_name(devname)?
+        wasapi::get_default_device(&wasapi::Direction::Capture)?
     } else {
-        let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
-        collection.get_device_with_name(devname)?
+        wasapi::get_default_device(&wasapi::Direction::Render)?
     };
-    trace!("Found capture device {}", devname);
+
+    trace!("Found capture device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got capture iaudioclient");
-    let wave_format = get_wave_format(sample_format, samplerate, channels);
+    let wave_format = wave_format(sample_format, samplerate, channels);
     match audio_client.is_supported(&wave_format, &sharemode) {
         Ok(None) => {
             debug!("Capture device supports format {:?}", wave_format)
@@ -213,7 +259,7 @@ fn open_capture(
     );
     audio_client.initialize_client(
         &wave_format,
-        def_time as i64,
+        def_time,
         &wasapi::Direction::Capture,
         &sharemode,
         loopback,
@@ -222,7 +268,7 @@ fn open_capture(
     let handle = audio_client.set_get_eventhandle()?;
     trace!("capture got event handle");
     let capture_client = audio_client.get_audiocaptureclient()?;
-    debug!("Opened Wasapi capture device {}", devname);
+    debug!("Opened Wasapi capture device {:?}", devname);
     Ok((device, audio_client, capture_client, handle, wave_format))
 }
 
@@ -279,7 +325,7 @@ fn playback_loop(
     // Raise priority
     let mut task_idx = 0;
     unsafe {
-        AvSetMmThreadCharacteristicsW("Pro Audio", &mut task_idx);
+        let _ = AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx);
     }
     if task_idx > 0 {
         debug!("Playback thread raised priority, task index: {}", task_idx);
@@ -295,9 +341,15 @@ fn playback_loop(
     loop {
         buffer_free_frame_count = audio_client.get_available_space_in_frames()?;
         trace!("New buffer frame count {}", buffer_free_frame_count);
-        let device_time = pos as f64 / device_freq;
-        //println!("pos {} {}, f {}, time {}, diff {}", pos.0, pos.1, f, devtime, devtime-prevtime);
-        //println!("{}",prev_inst.elapsed().as_micros());
+        let mut device_time = pos as f64 / device_freq;
+        if device_time == 0.0 && device_prevtime > 0.0 {
+            debug!("Failed to get accurate device time, skipping check for missing events");
+            // A zero value means that the device position read was delayed due to some
+            // other high priority event, and an accurate reading could not be taken.
+            // To avoid needless resets of the stream, set the position to the expected value,
+            // calculated as the previous value plus the expected increment.
+            device_time = device_prevtime + buffer_free_frame_count as f64 / samplerate;
+        }
         trace!(
             "Device time counted up by {} s",
             device_time - device_prevtime
@@ -316,7 +368,7 @@ fn playback_loop(
         }
         device_prevtime = device_time;
 
-        while sample_queue.len() < (blockalign as usize * buffer_free_frame_count as usize) {
+        while sample_queue.len() < (blockalign * buffer_free_frame_count as usize) {
             trace!("playback loop needs more samples, reading from channel");
             match sync.rx_play.try_recv() {
                 Ok(PlaybackDeviceMessage::Data(chunk)) => {
@@ -335,8 +387,8 @@ fn playback_loop(
                     return Ok(());
                 }
                 Err(TryRecvError::Empty) => {
-                    for _ in 0..((blockalign as usize * buffer_free_frame_count as usize)
-                        - sample_queue.len())
+                    for _ in
+                        0..((blockalign * buffer_free_frame_count as usize) - sample_queue.len())
                     {
                         sample_queue.push_back(0);
                     }
@@ -353,7 +405,7 @@ fn playback_loop(
         }
         render_client.write_to_device_from_deque(
             buffer_free_frame_count as usize,
-            blockalign as usize,
+            blockalign,
             &mut sample_queue,
             None,
         )?;
@@ -411,7 +463,7 @@ fn capture_loop(
     // Raise priority
     let mut task_idx = 0;
     unsafe {
-        AvSetMmThreadCharacteristicsW("Pro Audio", &mut task_idx);
+        let _ = AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx);
     }
     if task_idx > 0 {
         debug!("Capture thread raised priority, task index: {}", task_idx);
@@ -469,12 +521,12 @@ fn capture_loop(
                 None => channels.rx_empty.recv().unwrap(),
             };
 
-            let mut nbr_bytes = available_frames as usize * blockalign as usize;
+            let mut nbr_bytes = available_frames as usize * blockalign;
             if data.len() < nbr_bytes {
                 data.resize(nbr_bytes, 0);
             }
             let (nbr_frames_read, flags) =
-                capture_client.read_from_device(blockalign as usize, &mut data[0..nbr_bytes])?;
+                capture_client.read_from_device(blockalign, &mut data[0..nbr_bytes])?;
             if nbr_frames_read != available_frames {
                 warn!(
                     "Expected {} frames, got {}",
@@ -498,12 +550,12 @@ fn capture_loop(
             if let Some(extra_frames) = capture_client.get_next_nbr_frames()? {
                 if extra_frames > 0 {
                     trace!("Workaround, reading {} frames more", extra_frames);
-                    let nbr_bytes_extra = extra_frames as usize * blockalign as usize;
+                    let nbr_bytes_extra = extra_frames as usize * blockalign;
                     if data.len() < (nbr_bytes + nbr_bytes_extra) {
                         data.resize(nbr_bytes + nbr_bytes_extra, 0);
                     }
                     let (nbr_frames_read, flags) = capture_client.read_from_device(
-                        blockalign as usize,
+                        blockalign,
                         &mut data[nbr_bytes..(nbr_bytes + nbr_bytes_extra)],
                     )?;
                     if nbr_frames_read != extra_frames {
@@ -546,7 +598,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         &mut self,
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
@@ -561,8 +613,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
-        let sample_format = self.sample_format.clone();
-        let sample_format_dev = self.sample_format.clone();
+        let sample_format = self.sample_format;
+        let sample_format_dev = self.sample_format;
         let handle = thread::Builder::new()
             .name("WasapiPlayback".to_string())
             .spawn(move || {
@@ -678,39 +730,52 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
-                            buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
-                            if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
-                                if let Some(av_delay) = buffer_avg.get_average() {
-                                    let speed = calculate_speed(
-                                        av_delay,
-                                        target_level,
-                                        adjust_period,
-                                        samplerate as u32,
-                                    );
-                                    timer.restart();
-                                    buffer_avg.restart();
-                                    debug!(
-                                        "Current buffer level {:.1}, set capture rate to {:.4}%",
-                                        av_delay,
-                                        100.0 * speed
-                                    );
-                                    status_channel
-                                        .send(StatusMessage::SetSpeed(speed))
-                                        .unwrap_or(());
-                                    playback_status.write().unwrap().buffer_level =
-                                        av_delay as usize;
-                                }
-                            }
-                            chunk.update_stats(&mut chunk_stats);
-                            playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                            playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
                             let mut buf =
                                 vec![
                                     0u8;
                                     channels * chunk.frames * sample_format.bytes_per_sample()
                                 ];
-                            conversion_result =
-                                chunk_to_buffer_rawbytes(&chunk, &mut buf, &sample_format);
+                            buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
+                            {
+                                if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
+                                    if let Some(av_delay) = buffer_avg.average() {
+                                        let speed = calculate_speed(
+                                            av_delay,
+                                            target_level,
+                                            adjust_period,
+                                            samplerate as u32,
+                                        );
+                                        timer.restart();
+                                        buffer_avg.restart();
+                                        debug!(
+                                            "Current buffer level {:.1}, set capture rate to {:.4}%",
+                                            av_delay,
+                                            100.0 * speed
+                                        );
+                                        status_channel
+                                            .send(StatusMessage::SetSpeed(speed))
+                                            .unwrap_or(());
+                                        playback_status.write().buffer_level =
+                                            av_delay as usize;
+                                    }
+                                }
+                                conversion_result =
+                                    chunk_to_buffer_rawbytes(&chunk, &mut buf, &sample_format);
+                                chunk.update_stats(&mut chunk_stats);
+                                {
+                                    let mut playback_status = playback_status.write();
+                                    if conversion_result.1 > 0 {
+                                        playback_status.clipped_samples +=
+                                            conversion_result.1;
+                                    }
+                                    playback_status
+                                        .signal_rms
+                                        .add_record_squared(chunk_stats.rms_linear());
+                                    playback_status
+                                        .signal_peak
+                                        .add_record(chunk_stats.peak_linear());
+                                }
+                            }
                             match tx_dev.send(PlaybackDeviceMessage::Data(buf)) {
                                 Ok(_) => {}
                                 Err(err) => {
@@ -722,10 +787,6 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                     );
                                     break;
                                 }
-                            }
-                            if conversion_result.1 > 0 {
-                                playback_status.write().unwrap().clipped_samples +=
-                                    conversion_result.1;
                             }
                         }
                         Ok(AudioMessage::Pause) => {
@@ -780,7 +841,7 @@ fn check_for_format_change(rx: &Receiver<DisconnectReason>) -> bool {
 }
 
 fn send_error_or_playbackformatchange(
-    tx: &mpsc::Sender<StatusMessage>,
+    tx: &crossbeam_channel::Sender<StatusMessage>,
     rx: &Receiver<DisconnectReason>,
     err: String,
 ) {
@@ -795,7 +856,7 @@ fn send_error_or_playbackformatchange(
 }
 
 fn send_error_or_captureformatchange(
-    tx: &mpsc::Sender<StatusMessage>,
+    tx: &crossbeam_channel::Sender<StatusMessage>,
     rx: &Receiver<DisconnectReason>,
     err: String,
 ) {
@@ -808,7 +869,7 @@ fn send_error_or_captureformatchange(
     }
 }
 
-fn get_nbr_capture_frames(
+fn nbr_capture_frames(
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_frames: usize,
 ) -> usize {
@@ -827,7 +888,7 @@ impl CaptureDevice for WasapiCaptureDevice {
         &mut self,
         channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
@@ -839,10 +900,9 @@ impl CaptureDevice for WasapiCaptureDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let bytes_per_sample = self.sample_format.bytes_per_sample();
-        let sample_format = self.sample_format.clone();
-        let sample_format_dev = self.sample_format.clone();
-        let enable_resampling = self.enable_resampling;
-        let resampler_conf = self.resampler_conf.clone();
+        let sample_format = self.sample_format;
+        let sample_format_dev = self.sample_format;
+        let resampler_conf = self.resampler_config;
         let async_src = resampler_is_async(&resampler_conf);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
@@ -851,18 +911,13 @@ impl CaptureDevice for WasapiCaptureDevice {
         let handle = thread::Builder::new()
             .name("WasapiCapture".to_string())
             .spawn(move || {
-                let mut resampler = if enable_resampling {
-                    debug!("Creating resampler");
-                    get_resampler(
+                let mut resampler = new_resampler(
                         &resampler_conf,
                         channels,
                         samplerate,
                         capture_samplerate,
                         chunksize,
-                    )
-                } else {
-                    None
-                };
+                );
                 // Devices typically give around 1000 frames per buffer, set a reasonable capacity for the channel
                 let channel_capacity = 8*chunksize/1024 + 1;
                 debug!("Using a capture channel capacity of {} buffers.", channel_capacity);
@@ -938,6 +993,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 // TODO check if this ever needs to be resized
                 let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                 let mut expected_chunk_nbr = 0;
+                let mut channel_mask = vec![true; channels];
                 debug!("Capture device ready and waiting");
                 match status_channel.send(StatusMessage::CaptureReady) {
                     Ok(()) => {}
@@ -960,7 +1016,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             if let Some(resampl) = &mut resampler {
                                 debug!("Adjusting resampler rate to {}", speed);
                                 if async_src {
-                                    if resampl.set_resample_ratio_relative(speed).is_err() {
+                                    if resampl.set_resample_ratio_relative(speed, true).is_err() {
                                         debug!("Failed to set resampling speed to {}", speed);
                                     }
                                 }
@@ -989,7 +1045,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             break;
                         }
                     }
-                    capture_frames = get_nbr_capture_frames(
+                    capture_frames = nbr_capture_frames(
                         &resampler,
                         capture_frames,
                     );
@@ -1034,37 +1090,33 @@ impl CaptureDevice for WasapiCaptureDevice {
                         for element in data_buffer.iter_mut().take(capture_bytes) {
                             *element = data_queue.pop_front().unwrap();
                         }
-                        let mut chunk = buffer_to_chunk_rawbytes(
-                            &data_buffer[0..capture_bytes],
-                            channels,
-                            &sample_format,
-                            capture_bytes,
-                            &capture_status.read().unwrap().used_channels,
-                        );
                         averager.add_value(capture_frames);
-                        if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                         {
-                            let samples_per_sec = averager.get_average();
-                            averager.restart();
-                            let measured_rate_f = samples_per_sec;
-                            debug!(
-                                "Measured sample rate is {} Hz",
-                                measured_rate_f
-                            );
-                            let mut capture_status = capture_status.write().unwrap();
-                            capture_status.measured_samplerate = measured_rate_f as usize;
-                            capture_status.signal_range = value_range as f32;
-                            capture_status.rate_adjust = rate_adjust as f32;
-                            capture_status.state = state;
+                            let capture_status = capture_status.upgradable_read();
+                            if averager.larger_than_millis(capture_status.update_interval as u64)
+                            {
+                                let samples_per_sec = averager.average();
+                                averager.restart();
+                                let measured_rate_f = samples_per_sec;
+                                debug!(
+                                    "Measured sample rate is {:.1} Hz",
+                                    measured_rate_f
+                                );
+                                let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
+                                capture_status.measured_samplerate = measured_rate_f as usize;
+                                capture_status.signal_range = value_range as f32;
+                                capture_status.rate_adjust = rate_adjust as f32;
+                                capture_status.state = state;
+                            }
                         }
                         watcher_averager.add_value(capture_frames);
                         if watcher_averager.larger_than_millis(rate_measure_interval)
                         {
-                            let samples_per_sec = watcher_averager.get_average();
+                            let samples_per_sec = watcher_averager.average();
                             watcher_averager.restart();
                             let measured_rate_f = samples_per_sec;
                             debug!(
-                                "Measured sample rate is {} Hz",
+                                "Measured sample rate is {:.1} Hz",
                                 measured_rate_f
                             );
                             let changed = valuewatcher.check_value(measured_rate_f as f32);
@@ -1078,15 +1130,26 @@ impl CaptureDevice for WasapiCaptureDevice {
                                 }
                             }
                         }
+                        let mut chunk = buffer_to_chunk_rawbytes(
+                            &data_buffer[0..capture_bytes],
+                            channels,
+                            &sample_format,
+                            capture_bytes,
+                            &capture_status.read().used_channels,
+                        );
                         chunk.update_stats(&mut chunk_stats);
                         //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
-                        capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                        capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                        {
+                            let mut capture_status = capture_status.write();
+                            capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
+                            capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                        }
                         value_range = chunk.maxval - chunk.minval;
                         state = silence_counter.update(value_range);
                         if state == ProcessingState::Running {
                             if let Some(resampl) = &mut resampler {
-                                let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
+                                chunk.update_channel_mask(&mut channel_mask);
+                                let new_waves = resampl.process(&chunk.waveforms, Some(&channel_mask)).unwrap();
                                 let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                                 if chunk_frames == 0 {
                                     chunk_frames = chunksize;
@@ -1113,8 +1176,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 stop_signal.store(true, Ordering::Relaxed);
                 debug!("Wait for inner capture thread to exit");
                 innerhandle.join().unwrap_or(());
-                let mut capt_stat = capture_status.write().unwrap();
-                capt_stat.state = ProcessingState::Inactive;
+                capture_status.write().state = ProcessingState::Inactive;
             })?;
         Ok(Box::new(handle))
     }

@@ -8,8 +8,11 @@ This will be a simple 2-way crossover with 2 channels in and 4 out.
 First we need to define the input and output devices. Here let's assume 
 we already figured out all the Loopbacks etc and already know the devices to use.
 We need to decide a sample rate, let's go with 44100. For chunksize 1024 is a good values to start at with not too much delay, and low risk of buffer underruns. The best sample format this playback device supports is 32 bit integer so let's put that. The Loopback capture device supports all sample formats so let's just pick a good one.
- ```yaml
- ---
+```yaml
+---
+title: "Example crossover"
+description: "An example of a simple 2-way crossover"
+
 devices:
   samplerate: 44100
   chunksize: 1024
@@ -43,6 +46,7 @@ To copy we just need to say that output channel 0 should have channel 0 as sourc
 ```yaml
 mixers:
   to4chan:
+    description: "Expand 2 channels to 4"
     channels:
       in: 2
       out: 4
@@ -63,6 +67,7 @@ Then we add the two new channels, by copying from channels 0 and 1:
 ```yaml
 mixers:
   to4chan:
+    description: "Expand 2 channels to 4"
     channels:
       in: 2
       out: 4
@@ -173,6 +178,7 @@ Just modify the "gain" parameters in the mixer config:
 ```yaml
 mixers:
   to4chan:
+    description: "Expand 2 channels to 4"
     channels:
       in: 2
       out: 4
@@ -287,8 +293,14 @@ And we are done!
 
 ## Result
 
+Now we have all the parts of the configuration.
+As a final touch, let's add descriptions to all pipeline steps while we have things fresh in memory. 
+
 ```yaml
- ---
+---
+title: "Example crossover"
+description: "An example of a simple 2-way crossover"
+
 devices:
   samplerate: 44100
   chunksize: 1024
@@ -305,6 +317,7 @@ devices:
     
 mixers:
   to4chan:
+    description: "Expand 2 channels to 4"
     channels:
       in: 2
       out: 4
@@ -333,18 +346,21 @@ mixers:
 filters:
   highpass2k:
     type: Biquad
+    description: "2nd order highpass crossover"
     parameters:
       type: Highpass
       freq: 2000
       q: 0.707
   lowpass2k:
     type: Biquad
+    description: "2nd order lowpass crossover"
     parameters:
       type: Lowpass
       freq: 2000
       q: 0.707
   bafflestep:
     type: Biquad
+    description: "Baffle step compensation"
     parameters:
       type: Highshelf
       freq: 500
@@ -352,36 +368,43 @@ filters:
       gain: -4.0
   tweeterdelay:
     type: Delay
+    description: "Time alignment for tweeters"
     parameters:
       delay: 0.5
       unit: ms
 
 pipeline:
   - type: Filter
+    description: "Pre-mixer filters left"
     channel: 0
     names:
       - bafflestep
   - type: Filter
+  description: "Pre-mixer filters right"
     channel: 1
     names:
       - bafflestep
   - type: Mixer
     name: to4chan
   - type: Filter
+    description: "Highpass for left tweeter" 
     channel: 2
     names:
       - highpass2k
       - tweeterdelay
   - type: Filter
+    description: "Highpass for right tweeter" 
     channel: 3
     names:
       - highpass2k
       - tweeterdelay
   - type: Filter
+    description: "Lowpass for left woofer" 
     channel: 0
     names:
       - lowpass2k
   - type: Filter
+    description: "Lowpass for right woofer" 
     channel: 1
     names:
       - lowpass2k

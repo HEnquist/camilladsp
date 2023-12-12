@@ -1,0 +1,116 @@
+---
+devices:
+  samplerate: 44100
+  chunksize: 4096
+  resampler: null
+  capture:
+    type: File
+    filename: "dummy"
+    channels: 2
+    format: S16LE
+  playback:
+    type: File
+    filename: "dummy"
+    channels: 2
+    format: S16LE
+
+mixers:
+  to_four:
+    channels:
+      in: 2
+      out: 4
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 2
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 3
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+  to_two:
+    channels:
+      in: 4
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+          - channel: 2
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+          - channel: 3
+            gain: 0
+            inverted: false
+filters:
+  highpass:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 80
+      order: 4
+  lowpass:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 80
+      order: 4
+
+processors:
+  democompr:
+    type: Compressor
+    parameters:
+      channels: 4
+      attack: 0.1
+      release: 1.0
+      threshold: -20
+      factor: 4.0
+      makeup_gain: 0
+      soft_clip: true
+      clip_limit: -6 
+      monitor_channels: [2, 3]
+      process_channels: [2, 3]
+
+pipeline:
+  - type: Mixer
+    name: to_four
+  - type: Filter
+    channel: 0
+    names:
+      - highpass
+  - type: Filter
+    channel: 1
+    names:
+      - highpass
+  - type: Filter
+    channel: 2
+    names:
+      - lowpass
+  - type: Filter
+    channel: 3
+    names:
+      - lowpass
+  - type: Processor
+    name: democompr
+  - type: Mixer
+    name: to_two
+

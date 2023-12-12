@@ -3,7 +3,7 @@ use crate::config;
 use crate::filters;
 use crate::ProcessingParameters;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier};
 use std::thread;
 
 pub fn run_processing(
@@ -12,10 +12,10 @@ pub fn run_processing(
     tx_pb: mpsc::SyncSender<AudioMessage>,
     rx_cap: mpsc::Receiver<AudioMessage>,
     rx_pipeconf: mpsc::Receiver<(config::ConfigChange, config::Configuration)>,
-    processing_status: Arc<RwLock<ProcessingParameters>>,
+    processing_params: Arc<ProcessingParameters>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_status.clone());
+        let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_params.clone());
         debug!("build filters, waiting to start processing loop");
         barrier_proc.wait();
         debug!("Processing loop starts now!");
@@ -61,15 +61,19 @@ pub fn run_processing(
                     config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
                         debug!("Rebuilding pipeline.");
                         let new_pipeline =
-                            filters::Pipeline::from_config(new_config, processing_status.clone());
+                            filters::Pipeline::from_config(new_config, processing_params.clone());
                         pipeline = new_pipeline;
                     }
-                    config::ConfigChange::FilterParameters { filters, mixers } => {
+                    config::ConfigChange::FilterParameters {
+                        filters,
+                        mixers,
+                        processors,
+                    } => {
                         debug!(
                             "Updating parameters of filters: {:?}, mixers: {:?}.",
                             filters, mixers
                         );
-                        pipeline.update_parameters(new_config, filters, mixers);
+                        pipeline.update_parameters(new_config, &filters, &mixers, &processors);
                     }
                     config::ConfigChange::Devices => {
                         let msg = AudioMessage::EndOfStream;
@@ -80,5 +84,6 @@ pub fn run_processing(
                 };
             };
         }
+        processing_params.set_processing_load(0.0);
     })
 }

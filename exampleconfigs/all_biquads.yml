@@ -3,15 +3,15 @@ devices:
   samplerate: 44100
   chunksize: 1024
   capture:
-    type: Alsa
+    type: File
+    filename: "dummy"
     channels: 2
-    device: "dummy"
     format: S16LE
   playback:
-    type: Alsa
+    type: File
+    filename: "dummy"
     channels: 2
-    device: "dummy"
-    format: S32LE
+    format: S16LE
 
 filters:
 
@@ -137,6 +137,15 @@ filters:
       freq: 1000
       bandwidth: 2.0
 
+  general_notch:
+    type: Biquad
+    parameters:
+      type: GeneralNotch
+      freq_p: 1000
+      freq_z: 2000
+      q_p: 2.0
+      normalize_at_dc: true
+
   bandpass_using_q:
     type: Biquad
     parameters:
@@ -214,6 +223,12 @@ filters:
       freq: 1000
       order: 4
 
+  Tilt:
+    type: BiquadCombo
+    parameters:
+      type: Tilt
+      gain: -5.0
+
   FivePointParametricEqualizer:
     type: BiquadCombo
     parameters:
@@ -238,6 +253,14 @@ filters:
       fhs: 8000
       ghs: 0.5
       qhs: 0.7
+
+  Graphic:
+    type: BiquadCombo
+    parameters:
+      type: GraphicEqualizer
+      freq_min: 20
+      freq_max: 20000
+      gains: [0.0, 1.0, 2.0, 1.0, 0.0]
 
 
    

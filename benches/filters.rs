@@ -11,7 +11,7 @@ use camillalib::PrcFmt;
 /// Bench a single convolution
 fn run_conv(b: &mut Bencher, len: usize, chunksize: usize) {
     let filter = vec![0.0 as PrcFmt; len];
-    let mut conv = FftConv::new("test".to_string(), chunksize, &filter);
+    let mut conv = FftConv::new("test", chunksize, &filter);
     let mut waveform = vec![0.0 as PrcFmt; chunksize];
 
     //let mut spectrum = signal.clone();
@@ -42,7 +42,7 @@ fn bench_biquad(c: &mut Criterion) {
         0.4295264555854257,
         0.21476322779271284,
     );
-    let mut bq = Biquad::new("test".to_string(), chunksize, coeffs);
+    let mut bq = Biquad::new("test", chunksize, coeffs);
     let mut waveform = vec![0.0 as PrcFmt; chunksize];
 
     c.bench_function("Biquad", |b| b.iter(|| bq.process_waveform(&mut waveform)));
@@ -52,7 +52,7 @@ fn bench_biquad(c: &mut Criterion) {
 fn bench_diffeq(c: &mut Criterion) {
     let chunksize = 1024;
     let mut de = DiffEq::new(
-        "test".to_string(),
+        "test",
         vec![1.0, -0.1462978543780541, 0.005350765548905586],
         vec![0.21476322779271284, 0.4295264555854257, 0.21476322779271284],
     );

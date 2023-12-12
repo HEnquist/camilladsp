@@ -8,9 +8,10 @@ use crate::config;
 use crate::config::SampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -61,8 +62,7 @@ pub struct PulsePlaybackDevice {
 pub struct PulseCaptureDevice {
     pub devname: String,
     pub samplerate: usize,
-    pub resampler_conf: config::Resampler,
-    pub enable_resampling: bool,
+    pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
@@ -133,7 +133,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
         &mut self,
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
@@ -141,7 +141,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
-        let sample_format = self.sample_format.clone();
+        let sample_format = self.sample_format;
         let handle = thread::Builder::new()
             .name("PulsePlayback".to_string())
             .spawn(move || {
@@ -195,15 +195,19 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                                 .unwrap();
                                         }
                                     };
-                                    if conversion_result.1 > 0 {
-                                        playback_status.write().unwrap().clipped_samples +=
-                                            conversion_result.1;
-                                    }
                                     chunk.update_stats(&mut chunk_stats);
-                                    playback_status.write().unwrap().signal_rms =
-                                        chunk_stats.rms_db();
-                                    playback_status.write().unwrap().signal_peak =
-                                        chunk_stats.peak_db();
+                                    {
+                                        let mut playback_status = playback_status.write();
+                                        if conversion_result.1 > 0 {
+                                            playback_status.clipped_samples += conversion_result.1;
+                                        }
+                                        playback_status
+                                            .signal_rms
+                                            .add_record_squared(chunk_stats.rms_linear());
+                                        playback_status
+                                            .signal_peak
+                                            .add_record(chunk_stats.peak_linear());
+                                    }
                                     //trace!(
                                     //    "Playback signal RMS: {:?}, peak: {:?}",
                                     //    chunk_stats.rms_db(),
@@ -240,7 +244,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
     }
 }
 
-fn get_nbr_capture_bytes(
+fn nbr_capture_bytes(
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_bytes: usize,
     channels: usize,
@@ -266,7 +270,7 @@ impl CaptureDevice for PulseCaptureDevice {
         &mut self,
         channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
@@ -284,27 +288,21 @@ impl CaptureDevice for PulseCaptureDevice {
             * 2
             * channels
             * store_bytes_per_sample;
-        let sample_format = self.sample_format.clone();
-        let enable_resampling = self.enable_resampling;
-        let resampler_conf = self.resampler_conf.clone();
-        let async_src = resampler_is_async(&resampler_conf);
+        let sample_format = self.sample_format;
+        let resampler_config = self.resampler_config;
+        let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let handle = thread::Builder::new()
             .name("PulseCapture".to_string())
             .spawn(move || {
-                let mut resampler = if enable_resampling {
-                    debug!("Creating resampler");
-                    get_resampler(
-                        &resampler_conf,
+                let mut resampler = new_resampler(
+                        &resampler_config,
                         channels,
                         samplerate,
                         capture_samplerate,
                         chunksize,
-                    )
-                } else {
-                    None
-                };
+                    );
                 match open_pulse(
                     devname,
                     capture_samplerate as u32,
@@ -329,6 +327,7 @@ impl CaptureDevice for PulseCaptureDevice {
                         let mut state = ProcessingState::Running;
                         let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
                         let bytes_per_frame = channels * store_bytes_per_sample;
+                        let mut channel_mask = vec![true; channels];
                         let mut last_instant = Instant::now();
                         loop {
                             match command_channel.try_recv() {
@@ -343,7 +342,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                     rate_adjust = speed;
                                     if let Some(resampl) = &mut resampler {
                                         if async_src {
-                                            if resampl.set_resample_ratio_relative(speed).is_err() {
+                                            if resampl.set_resample_ratio_relative(speed, true).is_err() {
                                                 debug!("Failed to set resampling speed to {}", speed);
                                             }
                                         }
@@ -358,7 +357,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                     break;
                                 }
                             };
-                            capture_bytes = get_nbr_capture_bytes(
+                            capture_bytes = nbr_capture_bytes(
                                 &resampler,
                                 capture_bytes,
                                 channels,
@@ -374,20 +373,21 @@ impl CaptureDevice for PulseCaptureDevice {
                             match read_res {
                                 Ok(()) => {
                                     averager.add_value(capture_bytes);
-                                    if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64) {
-                                        let bytes_per_sec = averager.get_average();
+                                    let capture_status = capture_status.upgradable_read();
+                                    if averager.larger_than_millis(capture_status.update_interval as u64) {
+                                        let bytes_per_sec = averager.average();
                                         averager.restart();
                                         let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
                                         trace!(
-                                            "Measured sample rate is {} Hz, signal RMS is {:?}",
+                                            "Measured sample rate is {:.1} Hz, signal RMS is {:?}",
                                             measured_rate_f,
-                                            capture_status.read().unwrap().signal_rms,
+                                            capture_status.signal_rms.last(),
                                         );
-                                        let mut capt_stat = capture_status.write().unwrap();
-                                        capt_stat.measured_samplerate = measured_rate_f as usize;
-                                        capt_stat.signal_range = value_range as f32;
-                                        capt_stat.rate_adjust = rate_adjust as f32;
-                                        capt_stat.state = state;
+                                        let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
+                                        capture_status.measured_samplerate = measured_rate_f as usize;
+                                        capture_status.signal_range = value_range as f32;
+                                        capture_status.rate_adjust = rate_adjust as f32;
+                                        capture_status.state = state;
                                     }
                                 }
                                 Err(err) => {
@@ -396,14 +396,20 @@ impl CaptureDevice for PulseCaptureDevice {
                                         .unwrap();
                                 }
                             };
-                            let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &sample_format, capture_bytes, &capture_status.read().unwrap().used_channels);
+                            let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &sample_format, capture_bytes, &capture_status.read().used_channels);
                             chunk.update_stats(&mut chunk_stats);
+                            {
+                                let mut capture_status = capture_status.write();
+                                capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
+                                capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                            }
                             //trace!("Capture signal rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
-                                    let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
+                                    chunk.update_channel_mask(&mut channel_mask);
+                                    let new_waves = resampl.process(&chunk.waveforms, Some(&channel_mask)).unwrap();
                                     let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                                     if chunk_frames == 0 {
                                         chunk_frames = chunksize;
@@ -425,10 +431,8 @@ impl CaptureDevice for PulseCaptureDevice {
                                     break;
                                 }
                             }
-                            capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                            capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
                         }
-                        capture_status.write().unwrap().state = ProcessingState::Inactive;
+                        capture_status.write().state = ProcessingState::Inactive;
                     }
                     Err(err) => {
                         let send_result = status_channel

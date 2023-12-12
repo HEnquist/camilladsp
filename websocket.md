@@ -73,7 +73,7 @@ The available commands are listed below. All commands return the result, and for
   * returns the version as a string, like `1.2.3`.
 - `GetSupportedDeviceTypes` : read which playback and capture device types are supported. 
   * return a list containing two lists of strings (for playback and capture), like `[['File', 'Stdout', 'Alsa'], ['File', 'Stdin', 'Alsa']]`.
-- `Stop` : stop processing and wait for a new config to be uploaded either with `SetConfig` or with `SetConfigName`+`Reload`.
+- `Stop` : stop processing and wait for a new config to be uploaded either with `SetConfig` or with `SetConfigFilePath`+`Reload`.
 - `Exit` : stop processing and exit.
 
 ### Websocket server settings
@@ -85,7 +85,7 @@ Commands for reading and changing settings for the websocket server.
 
 ### Read processing status
 
-Commands for reading status parameters.
+#### Commands for reading status parameters.
 - `GetState` : get the current state of the processing as a string. Possible values are: 
   * "Running": the processing is running normally.
   * "Paused": processing is paused because the input signal is silent.
@@ -103,47 +103,98 @@ Commands for reading status parameters.
   * return the value as an integer
 - `GetSignalRange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)
   * returns the value as a float
-- `GetCaptureSignalPeak` : get the peak value in the last chunk for all channels on the capture side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
-- `GetCaptureSignalRms` : get the RMS value in the last chunk for all channels on the capture side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
-- `GetPlaybackSignalPeak` : get the peak value in the last chunk for all channels on the playback side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
-- `GetPlaybackSignalRms` : get the RMS value in the last chunk for all channels on the playback side. The scale is in dB, and a value of 0.0 means full level.
-  * returns the value as a vector of floats
 - `GetRateAdjust` : get the adjustment factor applied to the asynchronous resampler.
   * returns the value as a float
 - `GetBufferLevel` : get the current buffer level of the playback device when rate adjust is enabled, returns zero otherwise.
   * returns the value as an integer
 - `GetClippedSamples` : get the number of clipped samples since the config was loaded.
   * returns the value as an integer
+- `ResetClippedSamples` : reset the clipped samples counter to zero.
+- `GetProcessingLoad` : get the current pipeline processing capacity utilization in percent.
+- `GetStateFilePath` : get the current state file path, returns null if no state file is used.
+- `GetStateFileUpdated` : check if all changes have been saved to the state file.
+
+#### Commands for reading signal RMS and peak. 
+These commands all return a vector of floats, with one value per channel. The values are the channel levels in dB, where 0 dB means full level.
+
+Get the peak or RMS value in the last chunk on the capture or playback side.
+- `GetCaptureSignalPeak`
+- `GetCaptureSignalRms`
+- `GetPlaybackSignalPeak`
+- `GetPlaybackSignalRms`
+
+Get the peak or RMS value measured during a specified time interval. Takes a time in seconds (n.nn),
+and returns the values measured during the last n.nn seconds.
+- `GetCaptureSignalPeakSince`
+- `GetCaptureSignalRmsSince`
+- `GetPlaybackSignalPeakSince`
+- `GetPlaybackSignalRmsSince`
+
+Get the peak or RMS value measured since the last call to the same command from the same client. The first time a client calls this command it returns the values measured since the client connected.
+If the command is repeated very quickly, it may happen that there is no new data. The response is then an empty vector.
+- `GetCaptureSignalPeakSinceLast`
+- `GetCaptureSignalRmsSinceLast`
+- `GetPlaybackSignalPeakSinceLast`
+- `GetPlaybackSignalRmsSinceLast`
+
+Combined commands for reading several levels with a single request. These commands provide the same data as calling all the four commands in each of the groups above. The values are returned as a json object with keys `playback_peak`, `playback_rms`, `capture_peak` and `capture_rms`.
+- `GetSignalLevels`
+- `GetSignalLevelsSince`
+- `GetSignalLevelsSinceLast`
+
+Get the peak since start.
+- `GetSignalPeaksSinceStart` : Get the playback and capture peak level since processing started. The values are returned as a json object with keys `playback` and `capture`.
+- `ResetSignalPeaksSinceStart` : Reset the peak values. Note that this resets the peak for all clients.
 
 
 ### Volume control
 
-Commands for setting and getting the volume setting. These are only relevant if the pipeline includes "Volume" or "Loudness" filters.
-- `GetVolume` : get the current volume setting in dB.
-  * returns the value as a float
-- `SetVolume` : set the volume control to the given value in dB.
-- `GetMute` : get the current mute setting.
-  * returns the muting status as a boolean
-- `SetMute` : set muting to the given value.
+Commands for setting and getting the volume and mute of the default volume control on control `Main`.
+- `GetVolume` : Get the current volume setting in dB.
+  * Returns the value as a float.
+- `SetVolume` : Set the volume control to the given value in dB. Clamped to the range -150 to +50 dB.
+- `AdjustVolume` : Change the volume setting by the given number of dB, positive or negative. The resulting volume is clamped to the range -150 to +50 dB.
+  * Returns the new value as a float.
+- `GetMute` : Get the current mute setting.
+  * Returns the muting status as a boolean.
+- `SetMute` : Set muting to the given value.
+- `ToggleMute` : Toggle muting.
+  * Returns the new muting status as a boolean.
+
+Commands for setting and getting the volume and mute setting of a given fader.
+The faders are selected using an integer, 0 for `Main` and 1 to 4 for `Aux1` to `Aux4`.
+All commands take the fader number as the first parameter.
+- `GetFaderVolume` : Get the current volume setting in dB.
+  * Returns a struct with the fader as an integer and the volume value as a float.
+- `SetFaderVolume` : Set the volume control to the given value in dB. Clamped to the range -150 to +50 dB.
+- `SetFaderExternalVolume` : Special command for setting the volume when a Loudness filter is being combined with an external volume control (without a Volume filter). Clamped to the range -150 to +50 dB.
+- `AdjustFaderVolume` : Change the volume setting by the given number of dB, positive or negative. The resulting volume is clamped to the range -150 to +50 dB.
+  * Returns a struct with the fader as an integer and the new volume value as a float.
+- `GetFaderMute` : Get the current mute setting.
+  * Returns a struct with the fader as an integer and the muting status as a boolean.
+- `SetFaderMute` : Set muting to the given value.
+- `ToggleFaderMute` : Toggle muting.
+  * Returns a struct with the fader as an integer and the new muting status as a boolean.
 
 ### Config management
 
-Commands for reading and changing the active configuration
-- `GetConfig` : read the current configuration as yaml
-  * returns the config in yaml as a string
-- `GetConfigJson` : read the current configuration as json
-  * returns the config in json as a string
-- `GetConfigName` : get name and path of current config file
-  * returns the path as a string
-- `GetPreviousConfig` : read the previous configuration as yaml
-  * returns the previously active config in yaml as a string
-- `SetConfigName` : change config file name given as a string, not applied until `Reload` is called
-- `SetConfig:` : provide a new config as a yaml string. Applied directly.
-- `SetConfigJson` : provide a new config as a JSON string. Applied directly.
-- `Reload` : reload current config file (same as SIGHUP)
+Commands for reading and changing the active configuration.
+- `GetConfig` : Read the current configuration as yaml.
+  * Returns the config in yaml as a string.
+- `GetConfigJson` : Read the current configuration as json.
+  * Returns the config in json as a string.
+- `GetConfigTitle` : Read the title from the current configuration.
+  * Returns the title as a string.
+- `GetConfigDescription` : Read the description from the current configuration.
+  * Returns the description as a string.
+- `GetConfigFilePath` : Get name and path of current config file.
+  * Returns the path as a string.
+- `GetPreviousConfig` : Read the previous configuration as yaml.
+  * Returns the previously active config in yaml as a string.
+- `SetConfigFilePath` : Change config file name given as a string, not applied until `Reload` is called.
+- `SetConfig:` : Provide a new config as a yaml string. Applied directly.
+- `SetConfigJson` : Provide a new config as a JSON string. Applied directly.
+- `Reload` : Reload current config file (same as SIGHUP).
 
 
 ### Config reading and checking
@@ -154,7 +205,34 @@ These commands are used to check the syntax and contents of configurations. They
 - `ReadConfigFile` : same as ReadConfig but reads the config from the file at the given path.
 - `ValidateConfig`: same as ReadConfig but performs more extensive checks to ensure the configuration can be applied.
 
+### Audio device listing
 
+These commands query the audio backend for a list of devices.
+They accept a backend name as input, and return a list of names.
+
+- `GetAvailableCaptureDevices` : get a list of available capture devices. 
+- `GetAvailablePlaybackDevices` : get a list of available playback devices. 
+
+Each element in the returned list consists of one string for the device identifier, and one optional string for the name.
+Some backends use the name as identifier, they then return `null` as name.
+
+The currently supported backend names are `Alsa`, `CoreAudio` and `Wasapi`.
+
+Example entries for Wasapi:
+```
+[
+  ["Microphone (USB Microphone)", null],
+  ["In 3-4 (MOTU M Series)", null]
+]
+```
+
+Example entries for Alsa:
+```
+[
+  ["hw:Loopback,0,0", "Loopback, Loopback PCM, subdevice #0"],
+  ["hw:Generic,0,0", "HD-Audio Generic, ALC236 Analog, subdevice #0"]
+]
+```
 
 ## Controlling from Python using pyCamillaDSP
 
@@ -181,21 +259,21 @@ In [3]: ws = create_connection("ws://127.0.0.1:1234")
 
 ### Get the name of the current config file
 ```ipython
-In [4]: ws.send(json.dumps("GetConfigName"))
+In [4]: ws.send(json.dumps("GetConfigFilePath"))
 Out[4]: 19
 
 In [5]: print(ws.recv())
-{"GetConfigName":{"result":"Ok","value":"/path/to/someconfig.yml"}}
+{"GetConfigFilePath":{"result":"Ok","value":"/path/to/someconfig.yml"}}
 ```
 
 ### Switch to a different config file
 The new config is applied when the "reload" command is sent.
 ```ipython
-In [6]: ws.send(json.dumps({"SetConfigName": "/path/to/otherconfig.yml"}))
+In [6]: ws.send(json.dumps({"SetConfigFilePath": "/path/to/otherconfig.yml"}))
 Out[6]: 52
 
 In [7]: print(ws.recv())
-{"GetConfigName":{"result":"Ok","value":"/path/to/someconfig.yml"}}
+{"GetConfigFilePath":{"result":"Ok","value":"/path/to/someconfig.yml"}}
 
 In [8]: ws.send(json.dumps("Reload"))
 Out[8]: 12

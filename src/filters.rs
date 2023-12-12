@@ -2,6 +2,7 @@ use crate::audiodevice::AudioChunk;
 use crate::basicfilters;
 use crate::biquad;
 use crate::biquadcombo;
+use crate::compressor;
 use crate::config;
 use crate::conversions;
 use crate::diffeq;
@@ -10,6 +11,7 @@ use crate::dither;
 use crate::fftconv;
 #[cfg(feature = "FFTW")]
 use crate::fftconv_fftw as fftconv;
+use crate::limiter;
 use crate::loudness;
 use crate::mixer;
 use rawsample::SampleReader;
@@ -18,7 +20,8 @@ use std::convert::TryInto;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::{BufRead, Read, Seek, SeekFrom};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use std::time::Instant;
 
 use crate::PrcFmt;
 use crate::ProcessingParameters;
@@ -80,7 +83,16 @@ pub trait Filter {
 
     fn update_parameters(&mut self, config: config::Filter);
 
-    fn name(&self) -> String;
+    fn name(&self) -> &str;
+}
+
+pub trait Processor {
+    // Process a chunk containing several channels.
+    fn process_chunk(&mut self, chunk: &mut AudioChunk) -> Res<()>;
+
+    fn update_parameters(&mut self, config: config::Processor);
+
+    fn name(&self) -> &str;
 }
 
 pub fn pad_vector(values: &[PrcFmt], length: usize) -> Vec<PrcFmt> {
@@ -104,10 +116,7 @@ pub fn read_coeff_file(
     let f = match File::open(filename) {
         Ok(f) => f,
         Err(err) => {
-            let msg = format!(
-                "Could not open coefficient file '{}'. Error: {}",
-                filename, err
-            );
+            let msg = format!("Could not open coefficient file '{filename}'. Error: {err}");
             return Err(config::ConfigError::new(&msg).into());
         }
     };
@@ -194,7 +203,7 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
         .zip(wave_b)
         .any(|(a, b)| *a != *b);
     if riff_err || wave_err {
-        let msg = format!("Invalid wav header in file '{}'", filename);
+        let msg = format!("Invalid wav header in file '{filename}'");
         return Err(config::ConfigError::new(&msg).into());
     }
     let mut next_chunk_location = 12;
@@ -235,7 +244,7 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
                 (0xFFFE, _, _) => {
                     // waveformatex
                     if chunk_length != 40 {
-                        let msg = format!("Invalid extended header of wav file '{}'", filename);
+                        let msg = format!("Invalid extended header of wav file '{filename}'");
                         return Err(config::ConfigError::new(&msg).into());
                     }
                     let cb_size = u16::from_le_bytes(data[16..18].try_into().unwrap());
@@ -262,13 +271,13 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
                         (SUBTYPE_FLOAT, 64, 8, 64) => config::FileFormat::FLOAT64LE,
                         (_, _, _, _) => {
                             let msg =
-                                format!("Unsupported extended wav format of file '{}'", filename);
+                                format!("Unsupported extended wav format of file '{filename}'");
                             return Err(config::ConfigError::new(&msg).into());
                         }
                     }
                 }
                 (_, _, _) => {
-                    let msg = format!("Unsupported wav format of file '{}'", filename);
+                    let msg = format!("Unsupported wav format of file '{filename}'");
                     return Err(config::ConfigError::new(&msg).into());
                 }
             };
@@ -298,7 +307,7 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
             data_offset: data_offset as usize,
         });
     }
-    let msg = format!("Unable to parse wav file '{}'", filename);
+    let msg = format!("Unable to parse wav file '{filename}'");
     Err(config::ConfigError::new(&msg).into())
 }
 
@@ -346,60 +355,61 @@ impl FilterGroup {
     /// Creates a group of filters to process a chunk.
     pub fn from_config(
         channel: usize,
-        names: Vec<String>,
+        names: &[String],
         filter_configs: HashMap<String, config::Filter>,
         waveform_length: usize,
         sample_freq: usize,
-        processing_status: Arc<RwLock<ProcessingParameters>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Self {
-        debug!("Build from config");
+        debug!("Build filter group from config");
         let mut filters = Vec::<Box<dyn Filter>>::new();
         for name in names {
-            let filter_cfg = filter_configs[&name].clone();
+            let filter_cfg = filter_configs[name].clone();
+            trace!("Create filter {} with config {:?}", name, filter_cfg);
             let filter: Box<dyn Filter> =
                 match filter_cfg {
-                    config::Filter::Conv { parameters } => Box::new(fftconv::FftConv::from_config(
-                        name,
-                        waveform_length,
-                        parameters,
-                    )),
-                    config::Filter::Biquad { parameters } => Box::new(biquad::Biquad::new(
+                    config::Filter::Conv { parameters, .. } => Box::new(
+                        fftconv::FftConv::from_config(name, waveform_length, parameters),
+                    ),
+                    config::Filter::Biquad { parameters, .. } => Box::new(biquad::Biquad::new(
                         name,
                         sample_freq,
                         biquad::BiquadCoefficients::from_config(sample_freq, parameters),
                     )),
-                    config::Filter::BiquadCombo { parameters } => Box::new(
+                    config::Filter::BiquadCombo { parameters, .. } => Box::new(
                         biquadcombo::BiquadCombo::from_config(name, sample_freq, parameters),
                     ),
-                    config::Filter::Delay { parameters } => Box::new(
+                    config::Filter::Delay { parameters, .. } => Box::new(
                         basicfilters::Delay::from_config(name, sample_freq, parameters),
                     ),
-                    config::Filter::Gain { parameters } => {
+                    config::Filter::Gain { parameters, .. } => {
                         Box::new(basicfilters::Gain::from_config(name, parameters))
                     }
-                    config::Filter::Volume { parameters } => {
+                    config::Filter::Volume { parameters, .. } => {
                         Box::new(basicfilters::Volume::from_config(
                             name,
                             parameters,
                             waveform_length,
                             sample_freq,
-                            processing_status.clone(),
+                            processing_params.clone(),
                         ))
                     }
-                    config::Filter::Loudness { parameters } => {
+                    config::Filter::Loudness { parameters, .. } => {
                         Box::new(loudness::Loudness::from_config(
                             name,
                             parameters,
-                            waveform_length,
                             sample_freq,
-                            processing_status.clone(),
+                            processing_params.clone(),
                         ))
                     }
-                    config::Filter::Dither { parameters } => {
+                    config::Filter::Dither { parameters, .. } => {
                         Box::new(dither::Dither::from_config(name, parameters))
                     }
-                    config::Filter::DiffEq { parameters } => {
+                    config::Filter::DiffEq { parameters, .. } => {
                         Box::new(diffeq::DiffEq::from_config(name, parameters))
+                    }
+                    config::Filter::Limiter { parameters, .. } => {
+                        Box::new(limiter::Limiter::from_config(name, parameters))
                     }
                 };
             filters.push(filter);
@@ -410,11 +420,11 @@ impl FilterGroup {
     pub fn update_parameters(
         &mut self,
         filterconfigs: HashMap<String, config::Filter>,
-        changed: Vec<String>,
+        changed: &[String],
     ) {
         for filter in &mut self.filters {
-            if changed.iter().any(|n| n == &filter.name()) {
-                filter.update_parameters(filterconfigs[&filter.name()].clone());
+            if changed.iter().any(|n| n == filter.name()) {
+                filter.update_parameters(filterconfigs[filter.name()].clone());
             }
         }
     }
@@ -422,6 +432,30 @@ impl FilterGroup {
     /// Apply all the filters to an AudioChunk.
     fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
         if !input.waveforms[self.channel].is_empty() {
+            // Zeroes all sse registers on x86_64 architecturesto work around
+            // rustc bug https://github.com/rust-lang/rust/issues/116359
+            #[cfg(all(target_arch = "x86_64", feature = "avoid-rustc-issue-116359"))]
+            unsafe {
+                use std::arch::asm;
+                asm!(
+                    "xorpd xmm0, xmm0",
+                    "xorpd xmm1, xmm1",
+                    "xorpd xmm2, xmm2",
+                    "xorpd xmm3, xmm3",
+                    "xorpd xmm4, xmm4",
+                    "xorpd xmm5, xmm5",
+                    "xorpd xmm6, xmm6",
+                    "xorpd xmm7, xmm7",
+                    "xorpd xmm8, xmm8",
+                    "xorpd xmm9, xmm9",
+                    "xorpd xmm10, xmm10",
+                    "xorpd xmm11, xmm11",
+                    "xorpd xmm12, xmm12",
+                    "xorpd xmm13, xmm13",
+                    "xorpd xmm14, xmm14",
+                    "xorpd xmm15, xmm15"
+                )
+            }
             for filter in &mut self.filters {
                 filter.process_waveform(&mut input.waveforms[self.channel])?;
             }
@@ -435,59 +469,111 @@ impl FilterGroup {
 pub enum PipelineStep {
     MixerStep(mixer::Mixer),
     FilterStep(FilterGroup),
+    ProcessorStep(Box<dyn Processor>),
 }
 
 pub struct Pipeline {
     steps: Vec<PipelineStep>,
+    volume: basicfilters::Volume,
+    secs_per_chunk: f32,
+    processing_params: Arc<ProcessingParameters>,
 }
 
 impl Pipeline {
     /// Create a new pipeline from a configuration structure.
     pub fn from_config(
         conf: config::Configuration,
-        processing_status: Arc<RwLock<ProcessingParameters>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Self {
         debug!("Build new pipeline");
+        trace!("Pipeline config {:?}", conf.pipeline);
         let mut steps = Vec::<PipelineStep>::new();
-        for step in conf.pipeline {
+        for step in conf.pipeline.unwrap_or_default() {
             match step {
-                config::PipelineStep::Mixer { name } => {
-                    let mixconf = conf.mixers[&name].clone();
-                    let mixer = mixer::Mixer::from_config(name, mixconf);
-                    steps.push(PipelineStep::MixerStep(mixer));
+                config::PipelineStep::Mixer(step) => {
+                    if !step.is_bypassed() {
+                        let mixconf = conf.mixers.as_ref().unwrap()[&step.name].clone();
+                        let mixer = mixer::Mixer::from_config(step.name, mixconf);
+                        steps.push(PipelineStep::MixerStep(mixer));
+                    }
                 }
-                config::PipelineStep::Filter { channel, names } => {
-                    let fltgrp = FilterGroup::from_config(
-                        channel,
-                        names,
-                        conf.filters.clone(),
-                        conf.devices.chunksize,
-                        conf.devices.samplerate,
-                        processing_status.clone(),
-                    );
-                    steps.push(PipelineStep::FilterStep(fltgrp));
+                config::PipelineStep::Filter(step) => {
+                    if !step.is_bypassed() {
+                        let fltgrp = FilterGroup::from_config(
+                            step.channel,
+                            &step.names,
+                            conf.filters.as_ref().unwrap().clone(),
+                            conf.devices.chunksize,
+                            conf.devices.samplerate,
+                            processing_params.clone(),
+                        );
+                        steps.push(PipelineStep::FilterStep(fltgrp));
+                    }
+                }
+                config::PipelineStep::Processor(step) => {
+                    if !step.is_bypassed() {
+                        let procconf = conf.processors.as_ref().unwrap()[&step.name].clone();
+                        let proc = match procconf {
+                            config::Processor::Compressor { parameters, .. } => {
+                                let comp = compressor::Compressor::from_config(
+                                    &step.name,
+                                    parameters,
+                                    conf.devices.samplerate,
+                                    conf.devices.chunksize,
+                                );
+                                Box::new(comp)
+                            }
+                        };
+                        steps.push(PipelineStep::ProcessorStep(proc));
+                    }
                 }
             }
         }
-        Pipeline { steps }
+        let current_volume = processing_params.current_volume(0);
+        let mute = processing_params.is_mute(0);
+        let volume = basicfilters::Volume::new(
+            "default",
+            conf.devices.ramp_time(),
+            current_volume,
+            mute,
+            conf.devices.chunksize,
+            conf.devices.samplerate,
+            processing_params.clone(),
+            0,
+        );
+        let secs_per_chunk = conf.devices.chunksize as f32 / conf.devices.samplerate as f32;
+        Pipeline {
+            steps,
+            volume,
+            secs_per_chunk,
+            processing_params,
+        }
     }
 
     pub fn update_parameters(
         &mut self,
         conf: config::Configuration,
-        filters: Vec<String>,
-        mixers: Vec<String>,
+        filters: &[String],
+        mixers: &[String],
+        processors: &[String],
     ) {
         debug!("Updating parameters");
         for mut step in &mut self.steps {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {
                     if mixers.iter().any(|n| n == &mix.name) {
-                        mix.update_parameters(conf.mixers[&mix.name].clone());
+                        mix.update_parameters(conf.mixers.as_ref().unwrap()[&mix.name].clone());
                     }
                 }
                 PipelineStep::FilterStep(flt) => {
-                    flt.update_parameters(conf.filters.clone(), filters.clone());
+                    flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters);
+                }
+                PipelineStep::ProcessorStep(proc) => {
+                    if processors.iter().any(|n| n == proc.name()) {
+                        proc.update_parameters(
+                            conf.processors.as_ref().unwrap()[proc.name()].clone(),
+                        );
+                    }
                 }
             }
         }
@@ -495,6 +581,8 @@ impl Pipeline {
 
     /// Process an AudioChunk by calling either a MixerStep or a FilterStep
     pub fn process_chunk(&mut self, mut chunk: AudioChunk) -> AudioChunk {
+        let start = Instant::now();
+        self.volume.process_chunk(&mut chunk);
         for mut step in &mut self.steps {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {
@@ -503,8 +591,15 @@ impl Pipeline {
                 PipelineStep::FilterStep(flt) => {
                     flt.process_chunk(&mut chunk).unwrap();
                 }
+                PipelineStep::ProcessorStep(comp) => {
+                    comp.process_chunk(&mut chunk).unwrap();
+                }
             }
         }
+        let secs_elapsed = start.elapsed().as_secs_f32();
+        let load = 100.0 * secs_elapsed / self.secs_per_chunk;
+        self.processing_params.set_processing_load(load);
+        trace!("Processing load: {load}%");
         chunk
     }
 }
@@ -512,15 +607,20 @@ impl Pipeline {
 /// Validate the filter config, to give a helpful message intead of a panic.
 pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
     match filter_config {
-        config::Filter::Conv { parameters } => fftconv::validate_config(parameters),
-        config::Filter::Biquad { parameters } => biquad::validate_config(fs, parameters),
-        config::Filter::Delay { parameters } => basicfilters::validate_delay_config(parameters),
-        config::Filter::Gain { parameters } => basicfilters::validate_gain_config(parameters),
-        config::Filter::Dither { parameters } => dither::validate_config(parameters),
-        config::Filter::DiffEq { parameters } => diffeq::validate_config(parameters),
-        config::Filter::Volume { parameters } => basicfilters::validate_volume_config(parameters),
-        config::Filter::Loudness { parameters } => loudness::validate_config(parameters),
-        config::Filter::BiquadCombo { parameters } => biquadcombo::validate_config(fs, parameters),
+        config::Filter::Conv { parameters, .. } => fftconv::validate_config(parameters),
+        config::Filter::Biquad { parameters, .. } => biquad::validate_config(fs, parameters),
+        config::Filter::Delay { parameters, .. } => basicfilters::validate_delay_config(parameters),
+        config::Filter::Gain { parameters, .. } => basicfilters::validate_gain_config(parameters),
+        config::Filter::Dither { parameters, .. } => dither::validate_config(parameters),
+        config::Filter::DiffEq { parameters, .. } => diffeq::validate_config(parameters),
+        config::Filter::Volume { parameters, .. } => {
+            basicfilters::validate_volume_config(parameters)
+        }
+        config::Filter::Loudness { parameters, .. } => loudness::validate_config(parameters),
+        config::Filter::BiquadCombo { parameters, .. } => {
+            biquadcombo::validate_config(fs, parameters)
+        }
+        config::Filter::Limiter { parameters, .. } => limiter::validate_config(parameters),
     }
 }
 
@@ -534,7 +634,7 @@ mod tests {
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {} = {}", left, right, left - right);
         let res = (left - right).abs() < maxdiff;
-        println!("Ok: {}", res);
+        println!("Ok: {res}");
         res
     }
 
@@ -557,18 +657,14 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded =
             read_coeff_file("testdata/float32.raw", &FileFormat::FLOAT32LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
 
@@ -578,18 +674,14 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded =
             read_coeff_file("testdata/float64.raw", &FileFormat::FLOAT64LE, 24, 8).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
 
@@ -599,17 +691,13 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-4),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded = read_coeff_file("testdata/int16.raw", &FileFormat::S16LE, 6, 2).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-4),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
 
@@ -619,17 +707,13 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded = read_coeff_file("testdata/int24.raw", &FileFormat::S24LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
     #[test]
@@ -638,17 +722,13 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded = read_coeff_file("testdata/int243.raw", &FileFormat::S24LE3, 9, 3).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
     #[test]
@@ -657,17 +737,13 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded = read_coeff_file("testdata/int32.raw", &FileFormat::S32LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
     #[test]
@@ -676,17 +752,13 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
         let loaded = read_coeff_file("testdata/text_header.txt", &FileFormat::TEXT, 4, 1).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),
-            "{:?} != {:?}",
-            loaded,
-            expected
+            "{loaded:?} != {expected:?}"
         );
     }
 
@@ -703,7 +775,7 @@ mod tests {
     #[test]
     pub fn test_analyze_wav() {
         let info = find_data_in_wav("testdata/int32.wav").unwrap();
-        println!("{:?}", info);
+        println!("{info:?}");
         assert_eq!(info.sample_format, FileFormat::S32LE);
         assert_eq!(info.data_offset, 44);
         assert_eq!(info.data_length, 20);
@@ -713,7 +785,7 @@ mod tests {
     #[test]
     pub fn test_read_wav() {
         let values = read_wav("testdata/int32.wav", 0).unwrap();
-        println!("{:?}", values);
+        println!("{values:?}");
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(compare_waveforms(&values, &expected, 1e-9));
         let bad = read_wav("testdata/int32.wav", 1);

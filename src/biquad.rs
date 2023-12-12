@@ -3,6 +3,12 @@
 
 //mod filters;
 
+#[cfg(all(target_arch = "x86_64", not(feature = "32bit")))]
+use std::arch::x86_64::{
+    _mm_add_pd, _mm_load1_pd, _mm_load_sd, _mm_loadh_pd, _mm_mul_pd, _mm_mul_sd, _mm_shuffle_pd,
+    _mm_storeh_pd, _mm_storel_pd, _mm_sub_pd, _mm_unpacklo_pd,
+};
+
 use crate::config;
 use crate::filters::Filter;
 
@@ -99,7 +105,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let alpha = sn / (2.0 * q);
                 let b0 = 1.0 + (alpha * ampl);
                 let b1 = -2.0 * cs;
@@ -117,8 +123,9 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
-                let alpha = sn * ((2.0 as PrcFmt).ln() / 2.0 * bandwidth * omega / sn).sinh();
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
+                let alpha =
+                    sn * ((std::f64::consts::LN_2 as PrcFmt) / 2.0 * bandwidth * omega / sn).sinh();
                 let b0 = 1.0 + (alpha * ampl);
                 let b1 = -2.0 * cs;
                 let b2 = 1.0 - (alpha * ampl);
@@ -132,7 +139,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let beta = sn * ampl.sqrt() / q;
                 let b0 = ampl * ((ampl + 1.0) + (ampl - 1.0) * cs + beta);
                 let b1 = -2.0 * ampl * ((ampl - 1.0) + (ampl + 1.0) * cs);
@@ -150,7 +157,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let alpha =
                     sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope / 12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
@@ -165,7 +172,7 @@ impl BiquadCoefficients {
             config::BiquadParameters::HighshelfFO { freq, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let tn = (omega / 2.0).tan();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let b0 = ampl * tn + ampl.powi(2);
                 let b1 = ampl * tn - ampl.powi(2);
                 let b2 = 0.0;
@@ -178,7 +185,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let beta = sn * ampl.sqrt() / q;
                 let b0 = ampl * ((ampl + 1.0) - (ampl - 1.0) * cs + beta);
                 let b1 = 2.0 * ampl * ((ampl - 1.0) - (ampl + 1.0) * cs);
@@ -196,7 +203,7 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let alpha =
                     sn / 2.0 * ((ampl + 1.0 / ampl) * (1.0 / (slope / 12.0) - 1.0) + 2.0).sqrt();
                 let beta = 2.0 * ampl.sqrt() * alpha;
@@ -211,7 +218,7 @@ impl BiquadCoefficients {
             config::BiquadParameters::LowshelfFO { freq, gain } => {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let tn = (omega / 2.0).tan();
-                let ampl = PrcFmt::new(10.0).powf(gain / 40.0);
+                let ampl = PrcFmt::coerce(10.0).powf(gain / 40.0);
                 let b0 = ampl.powi(2) * tn + ampl;
                 let b1 = ampl.powi(2) * tn - ampl;
                 let b2 = 0.0;
@@ -261,13 +268,35 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let alpha = sn * ((2.0 as PrcFmt).ln() / 2.0 * bandwidth * omega / sn).sinh();
+                let alpha =
+                    sn * ((std::f64::consts::LN_2 as PrcFmt) / 2.0 * bandwidth * omega / sn).sinh();
                 let b0 = 1.0;
                 let b1 = -2.0 * cs;
                 let b2 = 1.0;
                 let a0 = 1.0 + alpha;
                 let a1 = -2.0 * cs;
                 let a2 = 1.0 - alpha;
+                BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
+            }
+            config::BiquadParameters::GeneralNotch(params) => {
+                let tn_z =
+                    ((std::f64::consts::PI as PrcFmt) * params.freq_z / (fs as PrcFmt)).tan();
+                let tn_p =
+                    ((std::f64::consts::PI as PrcFmt) * params.freq_p / (fs as PrcFmt)).tan();
+                let alpha = tn_p / params.q_p;
+                let tn2_p = tn_p.powi(2);
+                let tn2_z = tn_z.powi(2);
+                let gain = if params.normalize_at_dc() {
+                    tn2_p / tn2_z
+                } else {
+                    1.0
+                };
+                let b0 = gain * (1.0 + tn2_z);
+                let b1 = -2.0 * gain * (1.0 - tn2_z);
+                let b2 = gain * (1.0 + tn2_z);
+                let a0 = 1.0 + alpha + tn2_p;
+                let a1 = -2.0 + 2.0 * tn2_p;
+                let a2 = 1.0 - alpha + tn2_p;
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::Bandpass(config::NotchWidth::Q { freq, q }) => {
@@ -290,7 +319,8 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let alpha = sn * ((2.0 as PrcFmt).ln() / 2.0 * bandwidth * omega / sn).sinh();
+                let alpha =
+                    sn * ((std::f64::consts::LN_2 as PrcFmt) / 2.0 * bandwidth * omega / sn).sinh();
                 let b0 = alpha;
                 let b1 = 0.0;
                 let b2 = -alpha;
@@ -319,7 +349,8 @@ impl BiquadCoefficients {
                 let omega = 2.0 * (std::f64::consts::PI as PrcFmt) * freq / (fs as PrcFmt);
                 let sn = omega.sin();
                 let cs = omega.cos();
-                let alpha = sn * ((2.0 as PrcFmt).ln() / 2.0 * bandwidth * omega / sn).sinh();
+                let alpha =
+                    sn * ((std::f64::consts::LN_2 as PrcFmt) / 2.0 * bandwidth * omega / sn).sinh();
                 let b0 = 1.0 - alpha;
                 let b1 = -2.0 * cs;
                 let b2 = 1.0 + alpha;
@@ -380,17 +411,56 @@ pub struct Biquad {
 
 impl Biquad {
     /// Creates a Direct Form 2 Transposed biquad filter from a set of coefficients
-    pub fn new(name: String, samplerate: usize, coefficients: BiquadCoefficients) -> Self {
+    pub fn new(name: &str, samplerate: usize, coefficients: BiquadCoefficients) -> Self {
         Biquad {
             samplerate,
             s1: 0.0,
             s2: 0.0,
             coeffs: coefficients,
-            name,
+            name: name.to_string(),
         }
     }
 
-    /// Process a single sample
+    /// Process a single sample, SSE2 version
+    #[cfg(all(target_arch = "x86_64", not(feature = "32bit")))]
+    fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
+        unsafe {
+            // load input
+            let input_input = _mm_load1_pd(&input);
+
+            // load variables
+            let b0 = _mm_load_sd(&self.coeffs.b0);
+            let b0_b1 = _mm_loadh_pd(b0, &self.coeffs.b1);
+            let b2_nul = _mm_load_sd(&self.coeffs.b2);
+
+            let a1 = _mm_load_sd(&self.coeffs.a1);
+            let a1_a2 = _mm_loadh_pd(a1, &self.coeffs.a2);
+
+            let s1 = _mm_load_sd(&self.s1);
+            let s1_s2 = _mm_loadh_pd(s1, &self.s2);
+
+            // calculations
+            let out_s1a = _mm_add_pd(s1_s2, _mm_mul_pd(input_input, b0_b1));
+            let out_out = _mm_unpacklo_pd(out_s1a, out_s1a);
+
+            let s2a_nul = _mm_mul_sd(b2_nul, input_input);
+
+            let s1a_s2a = _mm_shuffle_pd(out_s1a, s2a_nul, 0x01);
+            let s1new_s2new = _mm_sub_pd(s1a_s2a, _mm_mul_pd(a1_a2, out_out));
+
+            // store s1 and s2
+            _mm_storel_pd(&mut self.s1, s1new_s2new);
+            _mm_storeh_pd(&mut self.s2, s1new_s2new);
+
+            // return result
+            let mut out = 0.0;
+            _mm_storel_pd(&mut out, out_out);
+            out
+        }
+    }
+
+    /// Process a single sample, generic version
+    #[cfg(not(all(target_arch = "x86_64", not(feature = "32bit"))))]
     fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
         let out = self.s1 + self.coeffs.b0 * input;
         self.s1 = self.s2 + self.coeffs.b1 * input - self.coeffs.a1 * out;
@@ -412,8 +482,8 @@ impl Biquad {
 }
 
 impl Filter for Biquad {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
@@ -425,7 +495,10 @@ impl Filter for Biquad {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Biquad { parameters: conf } = conf {
+        if let config::Filter::Biquad {
+            parameters: conf, ..
+        } = conf
+        {
             let coeffs = BiquadCoefficients::from_config(self.samplerate, conf);
             self.coeffs = coeffs;
         } else {
@@ -475,7 +548,8 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
         | config::BiquadParameters::Bandpass(config::NotchWidth::Q { q, .. })
         | config::BiquadParameters::Allpass(config::NotchWidth::Q { q, .. })
         | config::BiquadParameters::Highshelf(config::ShelfSteepness::Q { q, .. })
-        | config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { q, .. }) => {
+        | config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { q, .. })
+        | config::BiquadParameters::GeneralNotch(config::GeneralNotchParams { q_p: q, .. }) => {
             if *q <= 0.0 {
                 return Err(config::ConfigError::new("Q must be > 0").into());
             }
@@ -525,6 +599,17 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
             return Err(config::ConfigError::new("Q must be > 0").into());
         }
     }
+    // Check GeneralNotch frequencies
+    if let config::BiquadParameters::GeneralNotch(params) = parameters {
+        if params.freq_p <= 0.0 || params.freq_z <= 0.0 {
+            return Err(config::ConfigError::new("Pole and zero frequencies must be > 0").into());
+        } else if params.freq_p >= maxfreq || params.freq_z >= maxfreq {
+            return Err(config::ConfigError::new(
+                "Pole and zero frequencies must be < samplerate/2",
+            )
+            .into());
+        }
+    }
     let coeffs = BiquadCoefficients::from_config(samplerate, parameters.clone());
     if !coeffs.is_stable() {
         return Err(config::ConfigError::new("Unstable filter specified").into());
@@ -535,18 +620,20 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 #[cfg(test)]
 mod tests {
     use crate::biquad::{validate_config, Biquad, BiquadCoefficients};
-    use crate::config::{BiquadParameters, NotchWidth, PeakingWidth, ShelfSteepness};
+    use crate::config::{
+        BiquadParameters, GeneralNotchParams, NotchWidth, PeakingWidth, ShelfSteepness,
+    };
     use crate::filters::Filter;
     use crate::PrcFmt;
     use num_complex::Complex;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
-        println!("{} - {}", left, right);
+        println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 
     fn is_close_relative(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
-        println!("{} - {}", left, right);
+        println!("{left} - {right}");
         (left / right - 1.0).abs() < maxdiff
     }
 
@@ -579,7 +666,7 @@ mod tests {
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         let mut wave = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let expected = vec![0.215, 0.461, 0.281, 0.039, 0.004, 0.0, 0.0, 0.0];
-        let mut filter = Biquad::new("test".to_string(), 44100, coeffs);
+        let mut filter = Biquad::new("test", 44100, coeffs);
         filter.process_waveform(&mut wave).unwrap();
         assert!(compare_waveforms(wave, expected, 1e-3));
     }
@@ -588,7 +675,7 @@ mod tests {
     fn make_lowpass() {
         let conf = BiquadParameters::Lowpass {
             freq: 100.0,
-            q: 0.707,
+            q: std::f64::consts::FRAC_1_SQRT_2 as PrcFmt,
         };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -604,7 +691,7 @@ mod tests {
     fn make_highpass() {
         let conf = BiquadParameters::Highpass {
             freq: 100.0,
-            q: 0.707,
+            q: std::f64::consts::FRAC_1_SQRT_2 as PrcFmt,
         };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -689,6 +776,44 @@ mod tests {
         assert!(gain_f0 < -40.0);
         assert!(is_close(gain_lf, 0.0, 0.1));
         assert!(is_close(gain_hf, 0.0, 0.1));
+    }
+
+    #[test]
+    fn make_generalnotch_hp() {
+        let conf = BiquadParameters::GeneralNotch(GeneralNotchParams {
+            freq_p: 2000.0,
+            freq_z: 1000.0,
+            q_p: 1.0,
+            normalize_at_dc: Some(false),
+        });
+        let coeffs = BiquadCoefficients::from_config(44100, conf);
+        assert!(coeffs.is_stable());
+        let (gain_fp, _) = gain_and_phase(coeffs, 1000.0, 44100);
+        let (gain_hf, _) = gain_and_phase(coeffs, 20000.0, 44100);
+        let (gain_lf, _) = gain_and_phase(coeffs, 1.0, 44100);
+        println!("{gain_fp} {gain_hf} {gain_lf}");
+        assert!(gain_fp < -40.0);
+        assert!(is_close(gain_lf, -12.1, 0.1));
+        assert!(is_close(gain_hf, 0.0, 0.1));
+    }
+
+    #[test]
+    fn make_generalnotch_lp() {
+        let conf = BiquadParameters::GeneralNotch(GeneralNotchParams {
+            freq_p: 500.0,
+            freq_z: 1000.0,
+            q_p: 1.0,
+            normalize_at_dc: Some(true),
+        });
+        let coeffs = BiquadCoefficients::from_config(44100, conf);
+        assert!(coeffs.is_stable());
+        let (gain_fp, _) = gain_and_phase(coeffs, 1000.0, 44100);
+        let (gain_hf, _) = gain_and_phase(coeffs, 20000.0, 44100);
+        let (gain_lf, _) = gain_and_phase(coeffs, 1.0, 44100);
+        println!("{gain_fp} {gain_hf} {gain_lf}");
+        assert!(gain_fp < -40.0);
+        assert!(is_close(gain_lf, 0.0, 0.1));
+        assert!(is_close(gain_hf, -12.1, 0.1));
     }
 
     #[test]
@@ -777,7 +902,7 @@ mod tests {
         });
         let conf_q = BiquadParameters::Lowshelf(ShelfSteepness::Q {
             freq: 100.0,
-            q: 0.707,
+            q: std::f64::consts::FRAC_1_SQRT_2 as PrcFmt,
             gain: -24.0,
         });
         let coeffs_slope = BiquadCoefficients::from_config(44100, conf_slope);
@@ -798,7 +923,7 @@ mod tests {
         });
         let conf_q = BiquadParameters::Highshelf(ShelfSteepness::Q {
             freq: 100.0,
-            q: 0.707,
+            q: std::f64::consts::FRAC_1_SQRT_2 as PrcFmt,
             gain: -24.0,
         });
         let coeffs_slope = BiquadCoefficients::from_config(44100, conf_slope);
@@ -818,7 +943,7 @@ mod tests {
         });
         let conf_q = BiquadParameters::Bandpass(NotchWidth::Q {
             freq: 100.0,
-            q: 1.4142,
+            q: std::f64::consts::SQRT_2 as PrcFmt,
         });
         let coeffs_bw = BiquadCoefficients::from_config(44100, conf_bw);
         let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
@@ -838,7 +963,7 @@ mod tests {
         });
         let conf_q = BiquadParameters::Notch(NotchWidth::Q {
             freq: 100.0,
-            q: 1.4142,
+            q: std::f64::consts::SQRT_2 as PrcFmt,
         });
         let coeffs_bw = BiquadCoefficients::from_config(44100, conf_bw);
         let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
@@ -857,7 +982,7 @@ mod tests {
         });
         let conf_q = BiquadParameters::Allpass(NotchWidth::Q {
             freq: 100.0,
-            q: 1.4142,
+            q: std::f64::consts::SQRT_2 as PrcFmt,
         });
         let coeffs_bw = BiquadCoefficients::from_config(44100, conf_bw);
         let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);

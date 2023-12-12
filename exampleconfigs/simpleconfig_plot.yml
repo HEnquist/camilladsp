@@ -3,15 +3,15 @@ devices:
   samplerate: 44100
   chunksize: 1024
   capture:
-    type: Alsa
+    type: File
+    filename: "dummy"
     channels: 2
-    device: "hw:Loopback,0,0"
     format: S16LE
   playback:
-    type: Alsa
+    type: File
+    filename: "dummy"
     channels: 4
-    device: "hw:Generic_1"
-    format: S32LE
+    format: S16LE
 
 filters:
   lowpass_fir:

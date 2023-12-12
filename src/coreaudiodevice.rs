@@ -5,18 +5,24 @@ use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crossbeam_channel::{bounded, TryRecvError, TrySendError};
 use dispatch::Semaphore;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::collections::VecDeque;
+use std::ffi::CStr;
+use std::mem;
+use std::os::raw::{c_char, c_void};
+use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
-    audio_unit_from_device_id, find_matching_physical_format, get_default_device_id,
-    get_device_id_from_name, get_hogging_pid, set_device_physical_stream_format,
+    audio_unit_from_device_id, find_matching_physical_format, get_audio_device_ids,
+    get_default_device_id, get_device_id_from_name, get_device_name, get_hogging_pid,
+    get_supported_physical_stream_formats, set_device_physical_stream_format,
     set_device_sample_rate, toggle_hog_mode, AliveListener, RateListener,
 };
 use coreaudio::audio_unit::render_callback::{self, data};
@@ -32,24 +38,20 @@ use crate::{CaptureStatus, PlaybackStatus};
 
 fn take_ownership(device_id: AudioDeviceID) -> Res<pid_t> {
     let mut device_pid =
-        get_hogging_pid(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+        get_hogging_pid(device_id).map_err(|e| ConfigError::new(&format!("{e}")))?;
     let camilla_pid = std::process::id() as pid_t;
     if device_pid == camilla_pid {
         debug!("We already have exclusive access.");
     } else if device_pid != -1 {
-        warn!(
-            "Device is owned by another process with pid {}!",
-            device_pid
-        );
+        warn!("Device is owned by another process with pid {device_pid}!");
     } else {
         debug!("Device is free, trying to get exclusive access.");
-        device_pid = toggle_hog_mode(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+        device_pid = toggle_hog_mode(device_id).map_err(|e| ConfigError::new(&format!("{e}")))?;
         if device_pid == camilla_pid {
             debug!("We have exclusive access.");
         } else {
             warn!(
-                "Could not get exclusive access. CamillaDSP pid: {}, device owner pid: {}",
-                camilla_pid, device_pid
+                "Could not get exclusive access. CamillaDSP pid: {camilla_pid}, device owner pid: {device_pid}"
             );
         }
     }
@@ -58,18 +60,17 @@ fn take_ownership(device_id: AudioDeviceID) -> Res<pid_t> {
 
 fn release_ownership(device_id: AudioDeviceID) -> Res<()> {
     let device_owner_pid =
-        get_hogging_pid(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+        get_hogging_pid(device_id).map_err(|e| ConfigError::new(&format!("{e}")))?;
     let camilla_pid = std::process::id() as pid_t;
     if device_owner_pid == camilla_pid {
         debug!("Releasing exclusive access.");
         let new_device_pid =
-            toggle_hog_mode(device_id).map_err(|e| ConfigError::new(&format!("{}", e)))?;
+            toggle_hog_mode(device_id).map_err(|e| ConfigError::new(&format!("{e}")))?;
         if new_device_pid == -1 {
             debug!("Exclusive access released.");
         } else {
             warn!(
-                "Could not release exclusive access. CamillaDSP pid: {}, device owner pid: {}",
-                camilla_pid, new_device_pid
+                "Could not release exclusive access. CamillaDSP pid: {camilla_pid}, device owner pid: {new_device_pid}"
             );
         }
     }
@@ -78,12 +79,11 @@ fn release_ownership(device_id: AudioDeviceID) -> Res<()> {
 
 #[derive(Clone, Debug)]
 pub struct CoreaudioPlaybackDevice {
-    pub devname: String,
+    pub devname: Option<String>,
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
-    pub change_format: bool,
+    pub sample_format: Option<SampleFormat>,
     pub exclusive: bool,
     pub target_level: usize,
     pub adjust_period: f32,
@@ -92,30 +92,87 @@ pub struct CoreaudioPlaybackDevice {
 
 #[derive(Clone, Debug)]
 pub struct CoreaudioCaptureDevice {
-    pub devname: String,
+    pub devname: Option<String>,
     pub samplerate: usize,
-    pub resampler_conf: config::Resampler,
-    pub enable_resampling: bool,
+    pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
-    pub change_format: bool,
+    pub sample_format: Option<SampleFormat>,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
 }
 
+pub fn list_device_names(input: bool) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(all_ids) = get_audio_device_ids() {
+        for device_id in all_ids.iter() {
+            if let Ok(name) = get_device_name(*device_id) {
+                if device_supports_scope(*device_id, input) {
+                    names.push(name.to_string());
+                }
+            }
+        }
+    }
+    names
+}
+
+pub fn list_available_devices(input: bool) -> Vec<(String, String)> {
+    let names = list_device_names(input);
+    names.iter().map(|n| (n.clone(), n.clone())).collect()
+}
+
+fn device_supports_scope(device_id: u32, input: bool) -> bool {
+    let scope = if input {
+        kAudioObjectPropertyScopeInput
+    } else {
+        kAudioObjectPropertyScopeOutput
+    };
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyStreamConfiguration,
+        mScope: scope,
+        mElement: kAudioObjectPropertyElementWildcard,
+    };
+
+    let maybe_bufferlist: mem::MaybeUninit<AudioBufferList> = mem::MaybeUninit::zeroed();
+    let data_size = mem::size_of::<AudioBufferList>() as u32;
+
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            &data_size as *const _ as *mut _,
+            &maybe_bufferlist as *const _ as *mut _,
+        )
+    };
+    if status != kAudioHardwareNoError as i32 {
+        return false;
+    }
+    let bufferlist = unsafe { maybe_bufferlist.assume_init() };
+    bufferlist.mNumberBuffers > 0
+}
+
 fn open_coreaudio_playback(
-    devname: &str,
+    devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &SampleFormat,
-    change_format: bool,
+    sample_format: &Option<SampleFormat>,
     exclusive: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
-    let device_id = if devname == "default" {
+    let device_id = if let Some(name) = devname {
+        trace!("Available playback devices: {:?}", list_device_names(false));
+        match get_device_id_from_name(name) {
+            Some(dev) => dev,
+            None => {
+                let msg = format!("Could not find playback device '{name}'");
+                return Err(ConfigError::new(&msg).into());
+            }
+        }
+    } else {
         match get_default_device_id(false) {
             Some(dev) => dev,
             None => {
@@ -123,18 +180,10 @@ fn open_coreaudio_playback(
                 return Err(ConfigError::new(&msg).into());
             }
         }
-    } else {
-        match get_device_id_from_name(devname) {
-            Some(dev) => dev,
-            None => {
-                let msg = format!("Could not find playback device '{}'", devname);
-                return Err(ConfigError::new(&msg).into());
-            }
-        }
     };
 
     let mut audio_unit = audio_unit_from_device_id(device_id, false)
-        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+        .map_err(|e| ConfigError::new(&format!("{e}")))?;
 
     if exclusive {
         take_ownership(device_id)?;
@@ -142,14 +191,14 @@ fn open_coreaudio_playback(
         release_ownership(device_id)?;
     }
 
-    if change_format {
-        let phys_format = match *sample_format {
+    if let Some(sfmt) = sample_format {
+        let phys_format = match *sfmt {
             SampleFormat::S16LE => coreaudio::audio_unit::SampleFormat::I16,
             SampleFormat::S24LE | SampleFormat::S24LE3 => coreaudio::audio_unit::SampleFormat::I24,
             SampleFormat::S32LE => coreaudio::audio_unit::SampleFormat::I32,
             SampleFormat::FLOAT32LE => coreaudio::audio_unit::SampleFormat::F32,
             _ => {
-                let msg = format!("Sample format '{}' not supported!", sample_format);
+                let msg = format!("Sample format '{sfmt}' not supported!");
                 return Err(ConfigError::new(&msg).into());
             }
         };
@@ -161,6 +210,10 @@ fn open_coreaudio_playback(
             channels: channels as u32,
         };
 
+        trace!(
+            "Available formats: {:?}",
+            get_supported_physical_stream_formats(device_id)
+        );
         if let Some(phys_asbd) = find_matching_physical_format(device_id, physical_stream_format) {
             debug!("Set phys playback stream format");
             set_device_physical_stream_format(device_id, phys_asbd).map_err(|_| {
@@ -172,7 +225,7 @@ fn open_coreaudio_playback(
         }
     } else {
         set_device_sample_rate(device_id, samplerate as f64)
-            .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+            .map_err(|e| ConfigError::new(&format!("{e}")))?;
     }
 
     let stream_format = StreamFormat {
@@ -186,20 +239,28 @@ fn open_coreaudio_playback(
     let asbd = stream_format.to_asbd();
     audio_unit
         .set_property(id, Scope::Input, Element::Output, Some(&asbd))
-        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+        .map_err(|e| ConfigError::new(&format!("{e}")))?;
 
-    debug!("Opened CoreAudio playback device {}", devname);
+    debug!("Opened CoreAudio playback device {devname:?}");
     Ok((audio_unit, device_id))
 }
 
 fn open_coreaudio_capture(
-    devname: &str,
+    devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &SampleFormat,
-    change_format: bool,
+    sample_format: &Option<SampleFormat>,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
-    let device_id = if devname == "default" {
+    let device_id = if let Some(name) = devname {
+        debug!("Available capture devices: {:?}", list_device_names(true));
+        match get_device_id_from_name(name) {
+            Some(dev) => dev,
+            None => {
+                let msg = format!("Could not find capture device '{name}'");
+                return Err(ConfigError::new(&msg).into());
+            }
+        }
+    } else {
         match get_default_device_id(true) {
             Some(dev) => dev,
             None => {
@@ -207,27 +268,19 @@ fn open_coreaudio_capture(
                 return Err(ConfigError::new(&msg).into());
             }
         }
-    } else {
-        match get_device_id_from_name(devname) {
-            Some(dev) => dev,
-            None => {
-                let msg = format!("Could not find capture device '{}'", devname);
-                return Err(ConfigError::new(&msg).into());
-            }
-        }
     };
 
     let mut audio_unit = audio_unit_from_device_id(device_id, true)
-        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+        .map_err(|e| ConfigError::new(&format!("{e}")))?;
 
-    if change_format {
-        let phys_format = match *sample_format {
+    if let Some(sfmt) = sample_format {
+        let phys_format = match *sfmt {
             SampleFormat::S16LE => coreaudio::audio_unit::SampleFormat::I16,
             SampleFormat::S24LE | SampleFormat::S24LE3 => coreaudio::audio_unit::SampleFormat::I24,
             SampleFormat::S32LE => coreaudio::audio_unit::SampleFormat::I32,
             SampleFormat::FLOAT32LE => coreaudio::audio_unit::SampleFormat::F32,
             _ => {
-                let msg = format!("Sample format '{}' not supported!", sample_format);
+                let msg = format!("Sample format '{sfmt}' not supported!");
                 return Err(ConfigError::new(&msg).into());
             }
         };
@@ -239,6 +292,10 @@ fn open_coreaudio_capture(
             channels: channels as u32,
         };
 
+        trace!(
+            "Available formats: {:?}",
+            get_supported_physical_stream_formats(device_id)
+        );
         if let Some(phys_asbd) = find_matching_physical_format(device_id, physical_stream_format) {
             debug!("Set phys capture stream format");
             set_device_physical_stream_format(device_id, phys_asbd)
@@ -249,7 +306,7 @@ fn open_coreaudio_capture(
         }
     } else {
         set_device_sample_rate(device_id, samplerate as f64)
-            .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+            .map_err(|e| ConfigError::new(&format!("{e}")))?;
     }
 
     debug!("Set capture stream format");
@@ -264,9 +321,9 @@ fn open_coreaudio_capture(
     let asbd = stream_format.to_asbd();
     audio_unit
         .set_property(id, Scope::Output, Element::Input, Some(&asbd))
-        .map_err(|e| ConfigError::new(&format!("{}", e)))?;
+        .map_err(|e| ConfigError::new(&format!("{e}")))?;
 
-    debug!("Opened CoreAudio capture device {}", devname);
+    debug!("Opened CoreAudio capture device {devname:?}");
     Ok((audio_unit, device_id))
 }
 
@@ -280,15 +337,14 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
         &mut self,
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let sample_format = self.sample_format.clone();
-        let change_format = self.change_format;
+        let sample_format = self.sample_format;
         let exclusive = self.exclusive;
         let target_level = if self.target_level > 0 {
             self.target_level
@@ -302,10 +358,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
             .spawn(move || {
                 // Devices typically request around 1000 frames per buffer, set a reasonable capacity for the channel
                 let channel_capacity = 8 * 1024 / chunksize + 1;
-                debug!(
-                    "Using a playback channel capacity of {} chunks.",
-                    channel_capacity
-                );
+                debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let buffer_fill = Arc::new(AtomicUsize::new(0));
                 let buffer_fill_clone = buffer_fill.clone();
@@ -331,7 +384,6 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     samplerate,
                     channels,
                     &sample_format,
-                    change_format,
                     exclusive,
                 ) {
                     Ok(audio_unit) => audio_unit,
@@ -352,8 +404,8 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     let Args {
                         num_frames, data, ..
                     } = args;
-                    trace!("playback cb called with {} frames", num_frames);
-                    while sample_queue.len() < (blockalign as usize * num_frames as usize) {
+                    trace!("playback cb called with {num_frames} frames");
+                    while sample_queue.len() < (blockalign * num_frames) {
                         trace!("playback loop needs more samples, reading from channel");
                         match rx_dev.try_recv() {
                             Ok(PlaybackDeviceMessage::Data(chunk)) => {
@@ -367,9 +419,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 }
                             }
                             Err(_) => {
-                                for _ in 0..((blockalign as usize * num_frames as usize)
-                                    - sample_queue.len())
-                                {
+                                for _ in 0..((blockalign * num_frames) - sample_queue.len()) {
                                     sample_queue.push_back(0);
                                 }
                                 if running {
@@ -409,10 +459,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
 
                 let mut alive_listener = AliveListener::new(device_id);
                 if let Err(err) = alive_listener.register() {
-                    warn!(
-                        "Unable to register playback device alive listener, error: {}",
-                        err
-                    );
+                    warn!("Unable to register playback device alive listener, error: {err}");
                 }
 
                 match status_channel.send(StatusMessage::PlaybackReady) {
@@ -446,7 +493,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         Ok(AudioMessage::Audio(chunk)) => {
                             buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
                             if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
-                                if let Some(av_delay) = buffer_avg.get_average() {
+                                if let Some(av_delay) = buffer_avg.average() {
                                     let speed = calculate_speed(
                                         av_delay,
                                         target_level,
@@ -463,13 +510,10 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                     status_channel
                                         .send(StatusMessage::SetSpeed(speed))
                                         .unwrap_or(());
-                                    playback_status.write().unwrap().buffer_level =
-                                        av_delay as usize;
+                                    playback_status.write().buffer_level = av_delay as usize;
                                 }
                             }
                             chunk.update_stats(&mut chunk_stats);
-                            playback_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                            playback_status.write().unwrap().signal_peak = chunk_stats.peak_db();
                             let mut buf = vec![
                                 0u8;
                                 channels
@@ -481,19 +525,27 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 &mut buf,
                                 &SampleFormat::FLOAT32LE,
                             );
+                            {
+                                let mut playback_status = playback_status.write();
+                                if conversion_result.1 > 0 {
+                                    playback_status.clipped_samples += conversion_result.1;
+                                }
+                                playback_status
+                                    .signal_rms
+                                    .add_record_squared(chunk_stats.rms_linear());
+                                playback_status
+                                    .signal_peak
+                                    .add_record(chunk_stats.peak_linear());
+                            }
                             match tx_dev.send(PlaybackDeviceMessage::Data(buf)) {
                                 Ok(_) => {}
                                 Err(err) => {
-                                    error!("Playback device channel error: {}", err);
+                                    error!("Playback device channel error: {err}");
                                     status_channel
                                         .send(StatusMessage::PlaybackError(err.to_string()))
                                         .unwrap_or(());
                                     break;
                                 }
-                            }
-                            if conversion_result.1 > 0 {
-                                playback_status.write().unwrap().clipped_samples +=
-                                    conversion_result.1;
                             }
                         }
                         Ok(AudioMessage::Pause) => {
@@ -506,7 +558,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             break;
                         }
                         Err(err) => {
-                            error!("Message channel error: {}", err);
+                            error!("Message channel error: {err}");
                             status_channel
                                 .send(StatusMessage::PlaybackError(err.to_string()))
                                 .unwrap_or(());
@@ -520,13 +572,13 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
     }
 }
 
-fn get_nbr_capture_frames(
+fn nbr_capture_frames(
     resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
     capture_frames: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
         #[cfg(feature = "debug")]
-        trace!("Resampler needs {} frames", resampl.input_frames_next());
+        trace!("Resampler needs {resampl.input_frames_next()} frames");
         resampl.input_frames_next()
     } else {
         capture_frames
@@ -539,7 +591,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         &mut self,
         channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
@@ -548,11 +600,9 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let sample_format = self.sample_format.clone();
-        let change_format = self.change_format;
-        let enable_resampling = self.enable_resampling;
-        let resampler_conf = self.resampler_conf.clone();
-        let async_src = resampler_is_async(&resampler_conf);
+        let sample_format = self.sample_format;
+        let resampler_config = self.resampler_config;
+        let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let stop_on_rate_change = self.stop_on_rate_change;
@@ -562,25 +612,20 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let handle = thread::Builder::new()
             .name("CoreaudioCapture".to_string())
             .spawn(move || {
-                let mut resampler = if enable_resampling {
-                    debug!("Creating resampler");
-                    get_resampler(
-                        &resampler_conf,
+                let mut resampler = new_resampler(
+                        &resampler_config,
                         channels,
                         samplerate,
                         capture_samplerate,
                         chunksize,
-                    )
-                } else {
-                    None
-                };
+                    );
                 // Rough guess of the number of frames per callback. 
                 //let callback_frames = samplerate / 85;
                 let callback_frames = 512;
                 // TODO check if always 512!
                 //trace!("Estimated playback callback period to {} frames", callback_frames);
                 let channel_capacity = 8*chunksize/callback_frames + 1;
-                debug!("Using a capture channel capacity of {} buffers.", channel_capacity);
+                debug!("Using a capture channel capacity of {channel_capacity} buffers.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let (tx_dev_free, rx_dev_free) = bounded(channel_capacity+2);
                 for _ in 0..(channel_capacity+2) {
@@ -593,7 +638,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let device_sph = semaphore.clone();
 
                 trace!("Build input stream");
-                let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels, &sample_format, change_format) {
+                let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels, &sample_format) {
                     Ok(audio_unit) => audio_unit,
                     Err(err) => {
                         status_channel
@@ -603,6 +648,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         return;
                     }
                 };
+
                 let mut chunk_counter = 0;
 
                 type Args = render_callback::Args<data::InterleavedBytes<f32>>;
@@ -614,7 +660,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     let Args {
                         num_frames, data, ..
                     } = args;
-                    trace!("capture call, read {} frames", num_frames);
+                    trace!("capture call, read {num_frames} frames");
                     let mut new_data = match saved_buffer.len() {
                         0 => rx_dev_free.recv().unwrap(),
                         _ => saved_buffer.pop().unwrap(),
@@ -632,7 +678,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             device_sph.signal();
                         },
                         Err(TrySendError::Full((nbr, length_bytes, buf))) => {
-                            debug!("Dropping captured chunk {} with len {}", nbr, length_bytes);
+                            debug!("Dropping captured chunk {nbr} with len {length_bytes}");
                             saved_buffer.push(buf);
                         }
                         Err(_) => {
@@ -655,19 +701,29 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let (rate_tx, rate_rx) = mpsc::channel();
                 let mut rate_listener = RateListener::new(device_id, Some(rate_tx));
                 if let Err(err) = rate_listener.register() {
-                    warn!("Unable to register capture rate listener, error: {}", err);
+                    warn!("Unable to register capture rate listener, error: {err}");
                 }
                 let mut alive_listener = AliveListener::new(device_id);
                 if let Err(err) = alive_listener.register() {
-                    warn!("Unable to register capture device alive listener, error: {}", err);
+                    warn!("Unable to register capture device alive listener, error: {err}");
                 }
 
                 let chunksize_samples = channels * chunksize;
                 let mut capture_frames = chunksize;
-                capture_frames = get_nbr_capture_frames(
+                capture_frames = nbr_capture_frames(
                     &resampler,
                     capture_frames,
                 );
+
+                let pitch_supported = configure_pitch_control(device_id);
+                if pitch_supported {
+                    if samplerate == capture_samplerate && resampler.is_some() {
+                        warn!("Needless 1:1 sample rate conversion active. Not needed since capture device supports rate adjust");
+                    } else if async_src && resampler.is_some() {
+                        warn!("Async resampler not needed since capture device supports rate adjust. Consider switching to Sync type to save CPU time.");
+                    }
+                }
+
                 let mut averager = countertimer::TimeAverage::new();
                 let mut watcher_averager = countertimer::TimeAverage::new();
                 let mut valuewatcher = countertimer::ValueWatcher::new(capture_samplerate as f32, RATE_CHANGE_THRESHOLD_VALUE, RATE_CHANGE_THRESHOLD_COUNT);
@@ -682,6 +738,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                 let mut expected_chunk_nbr = 0;
                 let mut prev_len = 0;
+                let mut channel_mask = vec![true; channels];
                 debug!("Capture device ready and waiting");
                 match status_channel.send(StatusMessage::CaptureReady) {
                     Ok(()) => {}
@@ -708,12 +765,15 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         }
                         Ok(CommandMessage::SetSpeed { speed }) => {
                             rate_adjust = speed;
-                            debug!("Requested to adjust capture speed to {}", speed);
-                            if let Some(resampl) = &mut resampler {
-                                debug!("Adjusting resampler rate to {}", speed);
+                            debug!("Requested to adjust capture speed to {speed}");
+                            if pitch_supported {
+                                set_pitch(device_id, speed as f32);
+                            }
+                            else if let Some(resampl) = &mut resampler {
+                                debug!("Adjusting resampler rate to {speed}");
                                 if async_src {
-                                    if resampl.set_resample_ratio_relative(speed).is_err() {
-                                        debug!("Failed to set resampling speed to {}", speed);
+                                    if resampl.set_resample_ratio_relative(speed, true).is_err() {
+                                        debug!("Failed to set resampling speed to {speed}");
                                     }
                                 }
                                 else {
@@ -729,7 +789,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     }
                     match rate_rx.try_recv() {
                         Ok(rate) => {
-                            debug!("Capture rate change event, new rate: {}",rate);
+                            debug!("Capture rate change event, new rate: {rate}");
                             if rate as usize != capture_samplerate {
                                 channel.send(AudioMessage::EndOfStream).unwrap_or(());
                                 status_channel.send(StatusMessage::CaptureFormatChange(rate as usize)).unwrap_or(());
@@ -749,7 +809,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         status_channel.send(StatusMessage::CaptureError("Capture device is no longer alive".to_string())).unwrap_or(());
                         break 'deviceloop;
                     }
-                    capture_frames = get_nbr_capture_frames(
+                    capture_frames = nbr_capture_frames(
                         &resampler,
                         capture_frames,
                     );
@@ -760,7 +820,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         let _ = semaphore.wait_timeout(Duration::from_millis(20));
                         match rx_dev.try_recv() {
                             Ok((chunk_nbr, length_bytes, data)) => {
-                                trace!("got chunk, length {} bytes", length_bytes);
+                                trace!("got chunk, length {length_bytes} bytes");
                                 expected_chunk_nbr += 1;
                                 if chunk_nbr > expected_chunk_nbr {
                                     warn!("Samples were dropped, missing {} buffers", chunk_nbr-expected_chunk_nbr);
@@ -773,7 +833,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                                 tx_dev_free.send(data).unwrap();
                             }
                             Err(TryRecvError::Empty) => {
-                                trace!("No new data from inner capture thread, try {} of 50", tries);
+                                trace!("No new data from inner capture thread, try {tries} of 50");
                             }
                             Err(TryRecvError::Disconnected) => {
                                 error!("Channel is closed");
@@ -785,11 +845,13 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         tries += 1;
                     }
                     if data_queue.len() < (blockalign * capture_frames) {
-                        let mut capture_status = capture_status.write().unwrap();
-                        capture_status.measured_samplerate = 0;
-                        capture_status.signal_range = 0.0;
-                        capture_status.rate_adjust = 0.0;
-                        capture_status.state = ProcessingState::Stalled;
+                        {
+                            let mut capture_status = capture_status.write();
+                            capture_status.measured_samplerate = 0;
+                            capture_status.signal_range = 0.0;
+                            capture_status.rate_adjust = 0.0;
+                            capture_status.state = ProcessingState::Stalled;
+                        }
                         let msg = AudioMessage::Pause;
                         if channel.send(msg).is_err() {
                             info!("Processing thread has already stopped.");
@@ -797,7 +859,6 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         }
                         continue;
                     }
-
                     for element in data_buffer.iter_mut().take(capture_bytes) {
                         *element = data_queue.pop_front().unwrap();
                     }
@@ -806,37 +867,40 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         channels,
                         &SampleFormat::FLOAT32LE,
                         capture_bytes,
-                        &capture_status.read().unwrap().used_channels,
+                        &capture_status.read().used_channels,
                     );
                     averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
-                    if averager.larger_than_millis(capture_status.read().unwrap().update_interval as u64)
                     {
-                        let samples_per_sec = averager.get_average();
-                        averager.restart();
-                        let measured_rate_f = samples_per_sec;
-                        debug!(
-                            "Measured sample rate is {} Hz",
-                            measured_rate_f
-                        );
-                        let mut capture_status = capture_status.write().unwrap();
-                        capture_status.measured_samplerate = measured_rate_f as usize;
-                        capture_status.signal_range = value_range as f32;
-                        capture_status.rate_adjust = rate_adjust as f32;
-                        capture_status.state = state;
+                        let capture_status = capture_status.upgradable_read();
+                        if averager.larger_than_millis(capture_status.update_interval as u64)
+                        {
+                            let samples_per_sec = averager.average();
+                            averager.restart();
+                            let measured_rate_f = samples_per_sec;
+                            debug!(
+                                "Measured sample rate is {:.1} Hz",
+                                measured_rate_f
+                            );
+                            let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
+                            capture_status.measured_samplerate = measured_rate_f as usize;
+                            capture_status.signal_range = value_range as f32;
+                            capture_status.rate_adjust = rate_adjust as f32;
+                            capture_status.state = state;
+                        }
                     }
                     watcher_averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
                     if watcher_averager.larger_than_millis(rate_measure_interval)
                     {
-                        let samples_per_sec = watcher_averager.get_average();
+                        let samples_per_sec = watcher_averager.average();
                         watcher_averager.restart();
                         let measured_rate_f = samples_per_sec;
                         debug!(
-                            "Rate watcher, measured sample rate is {} Hz",
+                            "Rate watcher, measured sample rate is {:.1} Hz",
                             measured_rate_f
                         );
                         let changed = valuewatcher.check_value(measured_rate_f as f32);
                         if changed {
-                            warn!("sample rate change detected, last rate was {} Hz", measured_rate_f);
+                            warn!("sample rate change detected, last rate was {measured_rate_f} Hz");
                             if stop_on_rate_change {
                                 let msg = AudioMessage::EndOfStream;
                                 channel.send(msg).unwrap_or(());
@@ -848,13 +912,17 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     prev_len = data_queue.len();
                     chunk.update_stats(&mut chunk_stats);
                     //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
-                    capture_status.write().unwrap().signal_rms = chunk_stats.rms_db();
-                    capture_status.write().unwrap().signal_peak = chunk_stats.peak_db();
+                    {
+                        let mut capture_status = capture_status.write();
+                        capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
+                        capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                    }
                     value_range = chunk.maxval - chunk.minval;
                     state = silence_counter.update(value_range);
                     if state == ProcessingState::Running {
                         if let Some(resampl) = &mut resampler {
-                            let new_waves = resampl.process(&chunk.waveforms, None).unwrap();
+                            chunk.update_channel_mask(&mut channel_mask);
+                            let new_waves = resampl.process(&chunk.waveforms, Some(&channel_mask)).unwrap();
                             let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                             if chunk_frames == 0 {
                                 chunk_frames = chunksize;
@@ -877,9 +945,227 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         }
                     }
                 }
-                let mut capt_stat = capture_status.write().unwrap();
-                capt_stat.state = ProcessingState::Inactive;
+                capture_status.write().state = ProcessingState::Inactive;
             })?;
         Ok(Box::new(handle))
+    }
+}
+
+// Will this ever be needed?
+/*
+fn get_pitch(device_id: AudioDeviceID) -> Option<f32> {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyStereoPan,
+        mScope: kAudioObjectPropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+
+    let pan: f32 = 0.0;
+    let data_size = mem::size_of::<f32>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            &data_size as *const _ as *mut _,
+            &pan as *const _ as *mut _,
+        )
+    };
+    if status != 0 {
+        warn!("Unable to get pitch, error code: {}", status);
+        return None;
+    }
+    let pitch = 1.0 + 0.02 * (pan - 0.5);
+    Some(pitch)
+}
+*/
+
+fn set_pitch(device_id: AudioDeviceID, pitch: f32) {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyStereoPan,
+        mScope: kAudioObjectPropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut pan: f32 = (pitch - 1.0) * 50.0 + 0.5;
+    pan = pan.clamp(0.0, 1.0);
+    debug!("Setting capture pitch to: {pitch}, corresponding pan value: {pan}");
+    let data_size = mem::size_of::<f32>() as u32;
+    let status = unsafe {
+        AudioObjectSetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            data_size,
+            &pan as *const _ as *mut _,
+        )
+    };
+    if status != 0 {
+        warn!("Unable to set pitch, error code: {status}",);
+    }
+}
+
+fn set_clock_source_index(device_id: AudioDeviceID, index: u32) -> bool {
+    debug!("Changing capture device clock source to item with index {index}");
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyClockSource,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let data_size = mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        AudioObjectSetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            data_size,
+            &index as *const _ as *mut _,
+        )
+    };
+    if status != 0 {
+        warn!("Unable to set clock source, error code: {status}");
+        return false;
+    }
+    true
+}
+
+/*
+fn get_clock_source_index(device_id: AudioDeviceID) -> Option<u32> {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyClockSource,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let index: u32 = 0;
+    let data_size = mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            &data_size as *const _ as *mut _,
+            &index as *const _ as *mut _,
+        )
+    };
+    if status != 0 {
+        warn!("Unable to set clock source, error code: {}", status);
+        return None;
+    }
+    Some(index)
+}
+*/
+
+fn get_clock_source_names_and_ids(device_id: AudioDeviceID) -> (Vec<String>, Vec<u32>) {
+    let mut names = Vec::new();
+    let mut ids = Vec::new();
+
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyClockSources,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+
+    let data_size = 0u32;
+    let status = unsafe {
+        AudioObjectGetPropertyDataSize(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            &data_size as *const _ as *mut _,
+        )
+    };
+    if status as u32 == kAudioCodecUnknownPropertyError {
+        info!("The capture device has no clock source control");
+        return (names, ids);
+    }
+    if status != 0 {
+        warn!("Unable to read number of clock sources, error code: {status}");
+        return (names, ids);
+    }
+    let nbr_items = data_size / mem::size_of::<u32>() as u32;
+    debug!("Capture device has {nbr_items} clock sources");
+    if nbr_items > 0 {
+        let mut sources = vec![0u32; nbr_items as usize];
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                device_id,
+                &property_address as *const _,
+                0,
+                null(),
+                &data_size as *const _ as *mut _,
+                sources.as_mut_ptr() as *mut _ as *mut _,
+            )
+        };
+        if status != 0 {
+            warn!("Unable to list clock sources, error code: {status}");
+            return (names, ids);
+        }
+
+        for id in sources.iter() {
+            let name = get_item_name(device_id, *id);
+            names.push(name);
+            ids.push(*id)
+        }
+    }
+    debug!(
+        "Available capture device clock source ids: {:?}, names: {:?}",
+        ids, names
+    );
+    (names, ids)
+}
+
+/// Get the clock source item for a device id.
+fn get_item_name(device_id: AudioDeviceID, index: u32) -> String {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyClockSourceNameForIDCFString,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut index: u32 = index;
+    let mut device_name: CFStringRef = null_mut();
+    let data_out = AudioValueTranslation {
+        mInputData: &mut index as *mut u32 as *mut c_void,
+        mInputDataSize: mem::size_of::<u32>() as u32,
+        mOutputData: &mut device_name as *mut CFStringRef as *mut c_void,
+        mOutputDataSize: mem::size_of::<CFStringRef>() as u32,
+    };
+    let data_size = mem::size_of::<AudioValueTranslation>() as u32;
+    let c_str = unsafe {
+        let status = AudioObjectGetPropertyData(
+            device_id,
+            &property_address as *const _,
+            4,
+            &index as *const _ as *const c_void,
+            &data_size as *const _ as *mut _,
+            &data_out as *const _ as *mut _,
+        );
+        if status != 0 {
+            return "".to_owned();
+        }
+        let c_string: *const c_char =
+            CFStringGetCStringPtr(device_name as CFStringRef, kCFStringEncodingUTF8);
+        CStr::from_ptr(c_string as *mut _)
+    };
+    c_str.to_string_lossy().into_owned()
+}
+
+fn configure_pitch_control(device_id: AudioDeviceID) -> bool {
+    let (names, ids) = get_clock_source_names_and_ids(device_id);
+    if names.is_empty() {
+        return false;
+    }
+    match names.iter().position(|n| n == "Internal Adjustable") {
+        Some(idx) => {
+            info!("The capture device supports pitch control");
+            set_clock_source_index(device_id, ids[idx])
+        }
+        None => {
+            info!("The capture device does not support pitch control");
+            false
+        }
     }
 }

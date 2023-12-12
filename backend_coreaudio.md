@@ -9,12 +9,13 @@ CoreAudio is a large API that offers several ways to accomplish most common task
 ## Capturing audio from other applications
 
 To capture audio from applications a virtual sound card is needed. 
-This has been verified to work well with [Soundflower](https://github.com/mattingalls/Soundflower) 
-and [BlackHole](https://github.com/ExistentialAudio/BlackHole). 
-SoundFlower only supports Intel macs, while BlackHole supports both Intel and Apple Silicon. 
-BlackHole has a 2-channel and a 16-channel version. 
-There is currently a bug in the 2-channel version that in some cases can lead to choppy sound. 
-If this happens, try the 16-channel version instead. 
+It is recommended to use [BlackHole](https://github.com/ExistentialAudio/BlackHole).
+This works on both Intel and Apple Silicon macs.
+The latest (currently unreleased) version of BlachHole supports adjusting the rate of the virtual clock.
+This makes it possible to sync the virtual device with a real device, and avoid the need for asynchronous resampling.
+CamillaDSP supports and will use this functionality when it is available.
+
+An alternative is [Soundflower](https://github.com/mattingalls/Soundflower), which is older and only supports Intel macs.
 
 Some player applications can use hog mode to get exclusive access to the playback device. Using this with a virtual soundcard like BlackHole causes problems, and is therefore not recommended.
 
@@ -37,13 +38,11 @@ This example configuration will be used to explain the various options specific 
     channels: 2
     device: "Soundflower (2ch)"
     format: S32LE (*)
-    change_format: true (*)
   playback:
     type: CoreAudio
     channels: 2
     device: "Built-in Output"
     format: S24LE (*)
-    change_format: true (*)
     exclusive: false (*)
 ```
 The parameters marked (*) are optional.
@@ -62,7 +61,7 @@ CamillaDSP always uses 32-bit float uses when transferring data to and from Core
 
 The physical format can be set using the "Audio MIDI Setup" app.
 
-The option `change_format` determines whether CamillaDSP should change the physical format or not. If it is enabled, then CamillaDSP will change the setting to match the selected `format`. 
+The optional `format` parameter determines whether CamillaDSP should change the physical format or not. If a value is given, then CamillaDSP will change the setting to match the selected `format`. 
 To do this, it fetches a list of the supported stream formats for the device. 
 It then searches the list until it finds a suitable one. 
 The criteria is that it must have the right sample rate, the right number of bits, 
@@ -77,9 +76,7 @@ This table shows the mapping between the format setting in "Audio MIDI Setup" an
 - 32-bit Integer: S32LE
 - 32-bit Float: FLOAT32LE
 
-If the `change_format` is set to `false`, then CamillaDSP will leave the sample format unchanged, and only switch the sample rate.
-
-Both `format` and `change_format` are optional. If left out, `format` defaults to 32-bit integer (S32LE), and `change_format` to false.
+If `format` is set to `null` or left out, then CamillaDSP will leave the sample format unchanged, and only switch the sample rate.
 
 The playback device has an `exclusive` setting for whether CamillaDSP should request exclusive
 access to the device or not. This is also known as hog mode. When enabled, no other application 
