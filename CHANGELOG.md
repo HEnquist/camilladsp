@@ -1,4 +1,4 @@
-## Unreleased
+## v2.0.0
 New features:
 - Add dynamic range compressor.
 - Add websocket commands to read peak and rms history.
