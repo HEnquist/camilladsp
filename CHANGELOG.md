@@ -1,6 +1,6 @@
 ## v2.0.1
 Changes:
-- Ignore campture_samplerate when resampling is disabled.
+- Ignore capture_samplerate when resampling is disabled.
 
 ## v2.0.0
 New features:
