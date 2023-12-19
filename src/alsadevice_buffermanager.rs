@@ -15,30 +15,44 @@ pub trait DeviceBufferManager {
 
     fn apply_start_threshold(&mut self, swp: &SwParams) -> Res<()>;
 
-    // Calculate a power-of-two buffer size that is large enough to accommodate any changes due to resampling.
-    fn calculate_buffer_size(&self) -> Frames {
+    // Calculate a power-of-two buffer size that is large enough to accommodate any changes due to resampling,
+    // and at least 4 times the minimum period size to avoid random broken pipes.
+    fn calculate_buffer_size(&self, min_period: Frames) -> Frames {
         let data = self.data();
-        2.0f32.powi(
-            (1.2 * data.chunksize as f32 / data.resampling_ratio)
-                .log2()
-                .ceil() as i32,
-        ) as Frames
+        let mut frames_needed = 1.2 * data.chunksize as f32 / data.resampling_ratio;
+        if frames_needed < 4.0 * min_period as f32 {
+            frames_needed = 4.0 * min_period as f32;
+            debug!(
+                "Minimum period is {} frames, buffer size is minimum {} frames",
+                min_period, frames_needed
+            );
+        }
+        2.0f32.powi(frames_needed.log2().ceil() as i32) as Frames
     }
 
-    // Calculate an alternative buffer size that is 3 multiplied by a power-of-two.
-    // This is for some devices that cannot wotk with the default setting,
+    // Calculate an alternative buffer size that is 3 multiplied by a power-of-two,
+    // and at least 4 times the minimum period size to avoid random broken pipes.
+    // This is for some devices that cannot work with the default setting,
     // and when set_buffer_size_near() does not return a working alternative near the requested one.
     // Caused by driver bugs?
-    fn calculate_buffer_size_alt(&self) -> Frames {
+    fn calculate_buffer_size_alt(&self, min_period: Frames) -> Frames {
         let data = self.data();
-        let frames_needed = 1.2 * data.chunksize as f32 / data.resampling_ratio;
+        let mut frames_needed = 1.2 * data.chunksize as f32 / data.resampling_ratio;
+        if frames_needed < 4.0 * min_period as f32 {
+            frames_needed = 4.0 * min_period as f32;
+            debug!(
+                "Minimum period is {} frames, alternate buffer size is minimum {} frames",
+                min_period, frames_needed
+            );
+        }
         3 * 2.0f32.powi((frames_needed / 3.0).log2().ceil() as i32) as Frames
     }
 
     // Calculate a buffer size and apply it to a hwp container. Only for use when opening a device.
     fn apply_buffer_size(&mut self, hwp: &HwParams) -> Res<()> {
-        let buffer_frames = self.calculate_buffer_size();
-        let alt_buffer_frames = self.calculate_buffer_size_alt();
+        let min_period = hwp.get_period_size_min().unwrap_or(0);
+        let buffer_frames = self.calculate_buffer_size(min_period);
+        let alt_buffer_frames = self.calculate_buffer_size_alt(min_period);
         let data = self.data_mut();
         debug!("Setting buffer size to {} frames", buffer_frames);
         match hwp.set_buffer_size_near(buffer_frames) {
@@ -53,7 +67,6 @@ pub trait DeviceBufferManager {
                 data.bufsize = hwp.set_buffer_size_near(alt_buffer_frames)?;
             }
         }
-        //data.bufsize = hwp.set_buffer_size_near(buffer_frames)?;
         debug!("Device is using a buffer size of {} frames", data.bufsize);
         Ok(())
     }
