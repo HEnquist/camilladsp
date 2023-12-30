@@ -493,9 +493,8 @@ macro_rules! make_handler {
                                 }),
                             };
                             if let Some(rep) = reply {
-                                let write_result = websocket.send(Message::text(
-                                    serde_json::to_string(&rep).unwrap(),
-                                ));
+                                let write_result = websocket
+                                    .send(Message::text(serde_json::to_string(&rep).unwrap()));
                                 if let Err(err) = write_result {
                                     warn!("Failed to write: {}", err);
                                     break;
