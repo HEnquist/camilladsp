@@ -19,7 +19,7 @@ pub trait DeviceBufferManager {
     // and at least 4 times the minimum period size to avoid random broken pipes.
     fn calculate_buffer_size(&self, min_period: Frames) -> Frames {
         let data = self.data();
-        let mut frames_needed = 1.2 * data.chunksize as f32 / data.resampling_ratio;
+        let mut frames_needed = 3.0 * data.chunksize as f32 / data.resampling_ratio;
         if frames_needed < 4.0 * min_period as f32 {
             frames_needed = 4.0 * min_period as f32;
             debug!(
@@ -37,7 +37,7 @@ pub trait DeviceBufferManager {
     // Caused by driver bugs?
     fn calculate_buffer_size_alt(&self, min_period: Frames) -> Frames {
         let data = self.data();
-        let mut frames_needed = 1.2 * data.chunksize as f32 / data.resampling_ratio;
+        let mut frames_needed = 3.0 * data.chunksize as f32 / data.resampling_ratio;
         if frames_needed < 4.0 * min_period as f32 {
             frames_needed = 4.0 * min_period as f32;
             debug!(
