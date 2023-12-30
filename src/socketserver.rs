@@ -480,7 +480,7 @@ macro_rules! make_handler {
         ) {
             match websocket_res {
                 Ok(mut websocket) => loop {
-                    let msg_res = websocket.read_message();
+                    let msg_res = websocket.read();
                     match msg_res {
                         Ok(msg) => {
                             trace!("received: {:?}", msg);
@@ -493,7 +493,7 @@ macro_rules! make_handler {
                                 }),
                             };
                             if let Some(rep) = reply {
-                                let write_result = websocket.write_message(Message::text(
+                                let write_result = websocket.send(Message::text(
                                     serde_json::to_string(&rep).unwrap(),
                                 ));
                                 if let Err(err) = write_result {
