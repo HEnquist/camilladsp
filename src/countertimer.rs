@@ -351,11 +351,11 @@ impl ValueHistory {
     }
 
     pub fn last(&self) -> Option<HistoryRecord> {
-        self.buffer.get(0).cloned()
+        self.buffer.front().cloned()
     }
 
     pub fn last_sqrt(&self) -> Option<HistoryRecord> {
-        let mut result = self.buffer.get(0).cloned();
+        let mut result = self.buffer.front().cloned();
         if let Some(ref mut record) = result {
             record.values.iter_mut().for_each(|val| *val = val.sqrt())
         };

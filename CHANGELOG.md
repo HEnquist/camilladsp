@@ -1,3 +1,8 @@
+## v2.0.1
+Bugfixes:
+- Ignore capture_samplerate when resampling is disabled.
+- Increase Alsa device buffer sizes to avoid errors.
+
 ## v2.0.0
 New features:
 - Add dynamic range compressor.

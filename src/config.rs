@@ -1683,14 +1683,6 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             return Err(ConfigError::new("silence_timeout cannot be negative").into());
         }
     }
-    if let Some(rate) = conf.devices.capture_samplerate {
-        if rate != conf.devices.samplerate && conf.devices.resampler.is_none() {
-            return Err(ConfigError::new(
-                "capture_samplerate must match samplerate when resampling is disabled",
-            )
-            .into());
-        }
-    }
     if conf.devices.ramp_time() < 0.0 {
         return Err(ConfigError::new("Volume ramp time cannot be negative").into());
     }
