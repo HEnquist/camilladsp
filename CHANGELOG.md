@@ -1,3 +1,7 @@
+## v2.0.2
+Bugfixes:
+- Fix a segfault when reading clock source names for some capture devices.
+
 ## v2.0.1
 Bugfixes:
 - Ignore capture_samplerate when resampling is disabled.
