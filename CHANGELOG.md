@@ -1,6 +1,7 @@
 ## v2.0.2
 Bugfixes:
-- Fix a segfault when reading clock source names for some capture devices.
+- MacOS: Fix a segfault when reading clock source names for some capture devices.
+- Windows: Adjust the missed event threshold, avoids some rare stuttering.
 
 ## v2.0.1
 Bugfixes:
