@@ -170,15 +170,9 @@ jobs:
         with:
           targets: aarch64-apple-darwin
 
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
       - name: Run cargo check for arm
-        run: cross check --target aarch64-apple-darwin
-        env:
-          SDKROOT: /Applications/Xcode_14.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX13.1.sdk
-          MACOSX_DEPLOYMENT_TARGET: 13.1
-          DEVELOPER_DIR: /Applications/Xcode_14.2.app
+        run: cargo check --target aarch64-apple-darwin
+
 
 
 
