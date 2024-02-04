@@ -1144,10 +1144,13 @@ fn get_item_name(device_id: AudioDeviceID, index: u32) -> String {
             &data_out as *const _ as *mut _,
         );
         if status != 0 {
-            return "".to_owned();
+            return "(unknown)".to_owned();
         }
         let c_string: *const c_char =
             CFStringGetCStringPtr(device_name as CFStringRef, kCFStringEncodingUTF8);
+        if c_string.is_null() {
+            return "(unknown)".to_owned();
+        }
         CStr::from_ptr(c_string as *mut _)
     };
     c_str.to_string_lossy().into_owned()
