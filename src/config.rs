@@ -1218,7 +1218,7 @@ impl PipelineStepMixer {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct PipelineStepFilter {
-    pub channel: usize,
+    pub channels: Option<Vec<usize>>,
     pub names: Vec<String>,
     #[serde(default)]
     pub description: Option<String>,
@@ -1807,9 +1807,20 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                 }
                 PipelineStep::Filter(step) => {
                     if !step.is_bypassed() {
-                        if step.channel >= num_channels {
-                            let msg = format!("Use of non existing channel {}", step.channel);
-                            return Err(ConfigError::new(&msg).into());
+                        if let Some(channels) = &step.channels {
+                            for channel in channels {
+                                if *channel >= num_channels {
+                                    let msg = format!("Use of non existing channel {}", channel);
+                                    return Err(ConfigError::new(&msg).into());
+                                }
+                            }
+                            for idx in 1..channels.len() {
+                                if channels[idx..].contains(&channels[idx - 1]) {
+                                    let msg =
+                                        format!("Use of duplicated channel {}", &channels[idx - 1]);
+                                    return Err(ConfigError::new(&msg).into());
+                                }
+                            }
                         }
                         for name in &step.names {
                             if let Some(filters) = &conf.filters {

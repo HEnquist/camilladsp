@@ -488,26 +488,35 @@ impl Pipeline {
         debug!("Build new pipeline");
         trace!("Pipeline config {:?}", conf.pipeline);
         let mut steps = Vec::<PipelineStep>::new();
+        let mut num_channels = conf.devices.capture.channels();
         for step in conf.pipeline.unwrap_or_default() {
             match step {
                 config::PipelineStep::Mixer(step) => {
                     if !step.is_bypassed() {
                         let mixconf = conf.mixers.as_ref().unwrap()[&step.name].clone();
+                        num_channels = mixconf.channels.out;
                         let mixer = mixer::Mixer::from_config(step.name, mixconf);
                         steps.push(PipelineStep::MixerStep(mixer));
                     }
                 }
                 config::PipelineStep::Filter(step) => {
                     if !step.is_bypassed() {
-                        let fltgrp = FilterGroup::from_config(
-                            step.channel,
-                            &step.names,
-                            conf.filters.as_ref().unwrap().clone(),
-                            conf.devices.chunksize,
-                            conf.devices.samplerate,
-                            processing_params.clone(),
-                        );
-                        steps.push(PipelineStep::FilterStep(fltgrp));
+                        let step_channels = if let Some(channels) = &step.channels {
+                            channels.clone()
+                        } else {
+                            (0..num_channels).collect()
+                        };
+                        for channel in step_channels {
+                            let fltgrp = FilterGroup::from_config(
+                                channel,
+                                &step.names,
+                                conf.filters.as_ref().unwrap().clone(),
+                                conf.devices.chunksize,
+                                conf.devices.samplerate,
+                                processing_params.clone(),
+                            );
+                            steps.push(PipelineStep::FilterStep(fltgrp));
+                        }
                     }
                 }
                 config::PipelineStep::Processor(step) => {
