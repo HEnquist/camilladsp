@@ -58,7 +58,7 @@ mixers:
 
 pipeline:
   - type: Filter
-    channel: [0, 1]
+    channels: [0, 1]
     names:
       - atten
       - lowpass_fir
