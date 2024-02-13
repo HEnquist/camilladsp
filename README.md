@@ -2059,7 +2059,7 @@ pipeline:
     bypassed: false (*)
   - type: Filter
     description: "Left and right woofer channels"
-    channels: [0, 1]
+    channels: [0, 1] (*)
     bypassed: false (*)
     names:
       - lowpass_fir
@@ -2083,10 +2083,20 @@ Finally a compressor is added as the last step.
 
 ### Filter step
 A filter step, `type: Filter`, can contain one or several filters.
+The chosen filters are given in the `names` property, which is an list of filter names.
 The filters must be defined in the `Filters` section.
-In the example above, channels 0 and 1 get filtered by `lowpass_fir` and `peak1`, while 2 and 3 get filtered by just `highpass_fir`.
+
+The chosen filters will be applied to the channels listed in the `channels` property.
+This property is optional. If it is left out or set to `null`,
+the filters are applied to all the channels at that point in the pipeline.
+An empty list means the filters will not be applied to any channel.
+
+In the example above, channels 0 and 1 get filtered by `lowpass_fir` and `peak1`,
+while 2 and 3 get filtered by just `highpass_fir`.
+
 If several filters are to be applied to a channel, it is recommended to put them in a single filter step.
-This makes the config easier to overview and gives a minor performance benefit, compared to adding each filter in a separate step.
+This makes the config easier to overview and gives a minor performance benefit,
+compared to adding each filter in a separate step.
 
 ### Mixer and Processor step
 Mixer steps, `type: Mixer`, and processor steps, `type: Processor`, are defined in a similar way.

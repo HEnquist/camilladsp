@@ -1218,6 +1218,7 @@ impl PipelineStepMixer {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct PipelineStepFilter {
+    #[serde(default)]
     pub channels: Option<Vec<usize>>,
     pub names: Vec<String>,
     #[serde(default)]
