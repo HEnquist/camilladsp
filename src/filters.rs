@@ -495,18 +495,32 @@ impl Pipeline {
                     if !step.is_bypassed() {
                         let mixconf = conf.mixers.as_ref().unwrap()[&step.name].clone();
                         num_channels = mixconf.channels.out;
+                        debug!(
+                            "Add Mixer step with mixer {}, pipeline becomes {} channels wide",
+                            step.name, mixconf.channels.out
+                        );
                         let mixer = mixer::Mixer::from_config(step.name, mixconf);
                         steps.push(PipelineStep::MixerStep(mixer));
                     }
                 }
                 config::PipelineStep::Filter(step) => {
                     if !step.is_bypassed() {
-                        let step_channels = if let Some(channels) = &step.channels {
-                            channels.clone()
+                        let channels_iter: Box<dyn Iterator<Item = usize>> = if let Some(channels) =
+                            &step.channels
+                        {
+                            debug!(
+                                "Add Filter step with filters {:?} to channels {:?}",
+                                step.names, channels
+                            );
+                            Box::new(channels.iter().copied()) as Box<dyn Iterator<Item = usize>>
                         } else {
-                            (0..num_channels).collect()
+                            debug!(
+                                "Add Filter step with filters {:?} to all {} channels",
+                                step.names, num_channels
+                            );
+                            Box::new(0..num_channels) as Box<dyn Iterator<Item = usize>>
                         };
-                        for channel in step_channels {
+                        for channel in channels_iter {
                             let fltgrp = FilterGroup::from_config(
                                 channel,
                                 &step.names,
@@ -521,6 +535,7 @@ impl Pipeline {
                 }
                 config::PipelineStep::Processor(step) => {
                     if !step.is_bypassed() {
+                        debug!("Add Processor step with processor {}", step.name);
                         let procconf = conf.processors.as_ref().unwrap()[&step.name].clone();
                         let proc = match procconf {
                             config::Processor::Compressor { parameters, .. } => {
