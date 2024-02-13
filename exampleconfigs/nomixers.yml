@@ -22,11 +22,7 @@ filters:
 
 pipeline:
   - type: Filter
-    channel: 0
-    names:
-      - lowpass_fir
-  - type: Filter
-    channel: 1
+    channel: [0, 1]
     names:
       - lowpass_fir
    

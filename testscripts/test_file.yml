@@ -16,7 +16,6 @@ devices:
     format: S32LE
     extra_samples: 1
 
-
 mixers:
   splitter:
     channels:
@@ -34,7 +33,6 @@ mixers:
             gain: 0
             inverted: false
 
-
 filters:
   testlp:
     type: BiquadCombo
@@ -49,18 +47,14 @@ filters:
       freq: 1000
       order: 4
 
-
-
 pipeline:
   - type: Mixer
     name: splitter
   - type: Filter
-    channel: 0
+    channels: [0]
     names:
       - testlp
   - type: Filter
-    channel: 1
+    channels: [1]
     names:
       - testhp
-   
-

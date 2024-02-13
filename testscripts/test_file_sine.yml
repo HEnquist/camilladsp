@@ -29,13 +29,6 @@ filters:
 
 pipeline:
   - type: Filter
-    channel: 0
+    channels: [0, 1]
     names:
       - dummy
-  - type: Filter
-    channel: 1
-    names:
-      - dummy
-
-   
-
