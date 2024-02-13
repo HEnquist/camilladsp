@@ -336,12 +336,16 @@ pub enum PlaybackDevice {
         channels: usize,
         filename: String,
         format: SampleFormat,
+        #[serde(default)]
+        wav_header: Option<bool>,
     },
     #[serde(alias = "STDOUT", alias = "stdout")]
     Stdout {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         format: SampleFormat,
+        #[serde(default)]
+        wav_header: Option<bool>,
     },
     #[cfg(target_os = "macos")]
     #[serde(alias = "COREAUDIO", alias = "coreaudio")]

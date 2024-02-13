@@ -1,3 +1,7 @@
+## 3.0.0
+New features:
+- Optionally write wav header when outputting to file or stdout.
+
 ## v2.0.2
 Bugfixes:
 - MacOS: Fix a segfault when reading clock source names for some capture devices.

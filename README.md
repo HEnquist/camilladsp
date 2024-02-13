@@ -1059,7 +1059,13 @@ A parameter marked (*) in any example is optional. If they are left out from the
   ```
   Note: On Unix-like systems it's also possible to use the File device and set the filename to `/dev/stdin` for capture, or `/dev/stdout` for playback. 
 
-  Please note the `File` capture device isn't able to read wav-files directly.
+  The `File` and `Stdout` playback devices can write a wav-header to the output.
+  Enable this by setting `wav_header` to `true`.
+  Setting it to `false`, `null`, or leaving it out disables the wav header.
+  This is a _streaming_ header, meaning it contains a dummy value for the file length.
+  Most applications ignore this and calculate the correct length from the file size.
+
+  Please note that the `File` capture device isn't able to read wav-files directly.
   If you want to let CamillaDSP play wav-files, please see the [separate guide for converting wav to raw files](coefficients_from_wav.md).
 
   Example config for File:
