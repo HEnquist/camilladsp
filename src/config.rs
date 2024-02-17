@@ -119,7 +119,14 @@ impl fmt::Display for SampleFormat {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub enum Signal {
+    Sine(f64),
+    Square(f64),
+    WhiteNoise,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum CaptureDevice {
@@ -168,6 +175,12 @@ pub enum CaptureDevice {
         channels: usize,
         device: String,
     },
+    SignalGenerator {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
+        channels: usize,
+        signal: Signal,
+        level: PrcFmt,
+    },
 }
 
 impl CaptureDevice {
@@ -196,6 +209,7 @@ impl CaptureDevice {
                 )
             ))]
             CaptureDevice::Jack { channels, .. } => *channels,
+            CaptureDevice::SignalGenerator { channels, .. } => *channels,
         }
     }
 }
@@ -1415,6 +1429,9 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Jack { channels, .. } => {
                 *channels = chans;
             }
+            CaptureDevice::SignalGenerator { channels, .. } => {
+                *channels = chans;
+            }
         }
     }
     if let Some(fmt) = overrides.sample_format {
@@ -1459,6 +1476,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Jack { .. } => {
                 error!("Not possible to override capture format for Jack, ignoring");
             }
+            CaptureDevice::SignalGenerator { .. } => {}
         }
     }
 }

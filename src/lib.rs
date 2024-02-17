@@ -102,6 +102,7 @@ pub mod filereader;
 #[cfg(target_os = "linux")]
 pub mod filereader_nonblock;
 pub mod filters;
+pub mod generatordevice;
 pub mod helpers;
 pub mod limiter;
 pub mod loudness;
@@ -347,7 +348,11 @@ impl fmt::Display for ProcessingState {
 
 pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     let mut playbacktypes = vec!["File".to_owned(), "Stdout".to_owned()];
-    let mut capturetypes = vec!["File".to_owned(), "Stdin".to_owned()];
+    let mut capturetypes = vec![
+        "File".to_owned(),
+        "Stdin".to_owned(),
+        "SignalGenerator".to_owned(),
+    ];
 
     if cfg!(target_os = "linux") {
         playbacktypes.push("Alsa".to_owned());
