@@ -34,13 +34,9 @@ filters:
 
 pipeline:
   - type: Filter
-    channel: 0
+    channels: [0, 1]
     names:
       - demofilter
       - filter$samplerate$
-  - type: Filter
-    channel: 1
-    names:
-      - demofilter
-   
+
 

@@ -1,3 +1,7 @@
+## v3.0.0
+Changes:
+- Filter pipeline steps take a list of channels to filter instead of a single one.
+
 ## v2.0.3
 Bugfixes:
 - MacOS: Fix using Aggregate devices for playback.
