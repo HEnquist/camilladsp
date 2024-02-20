@@ -119,7 +119,14 @@ impl fmt::Display for SampleFormat {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub enum Signal {
+    Sine(f64),
+    Square(f64),
+    WhiteNoise,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum CaptureDevice {
@@ -168,6 +175,12 @@ pub enum CaptureDevice {
         channels: usize,
         device: String,
     },
+    SignalGenerator {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
+        channels: usize,
+        signal: Signal,
+        level: PrcFmt,
+    },
 }
 
 impl CaptureDevice {
@@ -196,6 +209,7 @@ impl CaptureDevice {
                 )
             ))]
             CaptureDevice::Jack { channels, .. } => *channels,
+            CaptureDevice::SignalGenerator { channels, .. } => *channels,
         }
     }
 }
@@ -1222,7 +1236,8 @@ impl PipelineStepMixer {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct PipelineStepFilter {
-    pub channel: usize,
+    #[serde(default)]
+    pub channels: Option<Vec<usize>>,
     pub names: Vec<String>,
     #[serde(default)]
     pub description: Option<String>,
@@ -1419,6 +1434,9 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Jack { channels, .. } => {
                 *channels = chans;
             }
+            CaptureDevice::SignalGenerator { channels, .. } => {
+                *channels = chans;
+            }
         }
     }
     if let Some(fmt) = overrides.sample_format {
@@ -1463,6 +1481,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Jack { .. } => {
                 error!("Not possible to override capture format for Jack, ignoring");
             }
+            CaptureDevice::SignalGenerator { .. } => {}
         }
     }
 }
@@ -1811,9 +1830,20 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                 }
                 PipelineStep::Filter(step) => {
                     if !step.is_bypassed() {
-                        if step.channel >= num_channels {
-                            let msg = format!("Use of non existing channel {}", step.channel);
-                            return Err(ConfigError::new(&msg).into());
+                        if let Some(channels) = &step.channels {
+                            for channel in channels {
+                                if *channel >= num_channels {
+                                    let msg = format!("Use of non existing channel {}", channel);
+                                    return Err(ConfigError::new(&msg).into());
+                                }
+                            }
+                            for idx in 1..channels.len() {
+                                if channels[idx..].contains(&channels[idx - 1]) {
+                                    let msg =
+                                        format!("Use of duplicated channel {}", &channels[idx - 1]);
+                                    return Err(ConfigError::new(&msg).into());
+                                }
+                            }
                         }
                         for name in &step.names {
                             if let Some(filters) = &conf.filters {

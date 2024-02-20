@@ -48,12 +48,9 @@ pipeline:
   - type: Mixer
     name: mono
   - type: Filter
-    channel: 0
+    channels: [0, 1]
     names:
       - lp1
-  - type: Filter
-    channel: 1
-    names:
-      - lp1
+
    
 

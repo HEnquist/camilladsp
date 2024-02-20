@@ -53,14 +53,9 @@ filters:
 
 pipeline:
   - type: Filter
-    channel: 0
+    channels: [0, 1]
     names:
       - atten
       - ditherfancy2
-  - type: Filter
-    channel: 1
-    names:
-      - atten
-      - ditherfancy2
-   
+
 

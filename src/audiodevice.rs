@@ -16,6 +16,7 @@ use crate::coreaudiodevice;
 ))]
 use crate::cpaldevice;
 use crate::filedevice;
+use crate::generatordevice;
 #[cfg(feature = "pulse-backend")]
 use crate::pulsedevice;
 #[cfg(target_os = "windows")]
@@ -608,6 +609,17 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             read_bytes: dev.read_bytes(),
             stop_on_rate_change: conf.stop_on_rate_change(),
             rate_measure_interval: conf.rate_measure_interval(),
+        }),
+        config::CaptureDevice::SignalGenerator {
+            signal,
+            channels,
+            level,
+        } => Box::new(generatordevice::GeneratorDevice {
+            signal,
+            samplerate: conf.samplerate,
+            channels,
+            chunksize: conf.chunksize,
+            level,
         }),
         #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
         config::CaptureDevice::Bluez(ref dev) => Box::new(filedevice::FileCaptureDevice {
