@@ -1000,6 +1000,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   * `type`:
     The available types depend on which features that were included when compiling. All possible types are:
     * `File`
+    * `SignalGenerator` (capture only)
     * `Stdin` (capture only)
     * `Stdout` (playback only)
     * `Bluez` (capture only)
@@ -1112,6 +1113,31 @@ A parameter marked (*) in any example is optional. If they are left out from the
     skip_bytes: 50
     read_bytes: 200
     ```
+
+  The `SignalGenerator` capture device is intended for testing.
+  It requires the parameters `signal` for signal shape, the number of `channels`, and the signal `level` in dB.
+  It can generate sine wave, square wave and white noise.
+  When using the `SignalGenerator`, the resampler config and capture samplerate are ignored.
+  The same signal is generated on every channel.
+
+  Example config for sine wave at 440 Hz and -20 dB:
+  ```
+    capture:
+      type: SignalGenerator
+      channels: 2
+      signal: 
+        Sine: 440
+      level: -20.0
+  ```
+
+  Example config for white noise ad -10 dB:
+  ```
+    capture:
+      type: SignalGenerator
+      channels: 2
+      signal: WhiteNoise
+      level: -10.0
+  ```
 
   ### Wasapi
   See the [separate readme for Wasapi](./backend_wasapi.md#configuration-of-devices).

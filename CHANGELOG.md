@@ -1,4 +1,6 @@
 ## v3.0.0
+New features:
+- Add a signal generator capture device.
 Changes:
 - Filter pipeline steps take a list of channels to filter instead of a single one.
 
