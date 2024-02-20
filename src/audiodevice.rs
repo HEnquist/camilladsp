@@ -610,17 +610,14 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             stop_on_rate_change: conf.stop_on_rate_change(),
             rate_measure_interval: conf.rate_measure_interval(),
         }),
-        config::CaptureDevice::SignalGenerator {
-            signal,
-            channels,
-            level,
-        } => Box::new(generatordevice::GeneratorDevice {
-            signal,
-            samplerate: conf.samplerate,
-            channels,
-            chunksize: conf.chunksize,
-            level,
-        }),
+        config::CaptureDevice::SignalGenerator { signal, channels } => {
+            Box::new(generatordevice::GeneratorDevice {
+                signal,
+                samplerate: conf.samplerate,
+                channels,
+                chunksize: conf.chunksize,
+            })
+        }
         #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
         config::CaptureDevice::Bluez(ref dev) => Box::new(filedevice::FileCaptureDevice {
             source: filedevice::CaptureSource::BluezDBus(dev.service(), dev.dbus_path.clone()),

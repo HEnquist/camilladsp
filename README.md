@@ -1121,8 +1121,13 @@ A parameter marked (*) in any example is optional. If they are left out from the
     ```
 
   The `SignalGenerator` capture device is intended for testing.
-  It requires the parameters `signal` for signal shape, the number of `channels`, and the signal `level` in dB.
-  It can generate sine wave, square wave and white noise.
+  It accepts the number of channels as `channels`.
+  It also requires a block defining the signal properties, called `signal`.
+
+  The signal shape is give by `type`, which accepts `Sine`, `Square` and `WhiteNoise`.
+  All types require the signal level, which is given in dB in the `level` parameter.
+  `Sine` and `Square` also require a frequency, defined by the `freq` parameter.
+
   When using the `SignalGenerator`, the resampler config and capture samplerate are ignored.
   The same signal is generated on every channel.
 
@@ -1132,8 +1137,9 @@ A parameter marked (*) in any example is optional. If they are left out from the
       type: SignalGenerator
       channels: 2
       signal: 
-        Sine: 440
-      level: -20.0
+        type: Sine
+        freq: 440
+        level: -20.0
   ```
 
   Example config for white noise ad -10 dB:
@@ -1141,8 +1147,9 @@ A parameter marked (*) in any example is optional. If they are left out from the
     capture:
       type: SignalGenerator
       channels: 2
-      signal: WhiteNoise
-      level: -10.0
+      signal: 
+        type: WhiteNoise
+        level: -10.0
   ```
 
   ### Wasapi

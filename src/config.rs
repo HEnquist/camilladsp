@@ -120,10 +120,12 @@ impl fmt::Display for SampleFormat {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[serde(tag = "type")]
 pub enum Signal {
-    Sine(f64),
-    Square(f64),
-    WhiteNoise,
+    Sine { freq: f64, level: PrcFmt },
+    Square { freq: f64, level: PrcFmt },
+    WhiteNoise { level: PrcFmt },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -179,7 +181,6 @@ pub enum CaptureDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         signal: Signal,
-        level: PrcFmt,
     },
 }
 

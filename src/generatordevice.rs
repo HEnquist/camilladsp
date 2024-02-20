@@ -97,7 +97,6 @@ pub struct GeneratorDevice {
     pub samplerate: usize,
     pub channels: usize,
     pub signal: config::Signal,
-    pub level: PrcFmt,
 }
 
 struct CaptureChannels {
@@ -112,7 +111,10 @@ struct GeneratorParams {
     capture_status: Arc<RwLock<CaptureStatus>>,
     signal: config::Signal,
     samplerate: usize,
-    amplitude: PrcFmt,
+}
+
+fn decibel_to_amplitude(level: PrcFmt) -> PrcFmt {
+    (10.0 as PrcFmt).powf(level / 20.0)
 }
 
 fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
@@ -126,16 +128,16 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
     let mut noise_gen;
 
     let mut generator: &mut dyn Iterator<Item = PrcFmt> = match params.signal {
-        config::Signal::Sine(freq) => {
-            sine_gen = SineGenerator::new(freq, params.samplerate, params.amplitude);
+        config::Signal::Sine { freq, level } => {
+            sine_gen = SineGenerator::new(freq, params.samplerate, decibel_to_amplitude(level));
             &mut sine_gen as &mut dyn Iterator<Item = PrcFmt>
         }
-        config::Signal::Square(freq) => {
-            square_gen = SquareGenerator::new(freq, params.samplerate, params.amplitude);
+        config::Signal::Square { freq, level } => {
+            square_gen = SquareGenerator::new(freq, params.samplerate, decibel_to_amplitude(level));
             &mut square_gen as &mut dyn Iterator<Item = PrcFmt>
         }
-        config::Signal::WhiteNoise => {
-            noise_gen = NoiseGenerator::new(params.amplitude);
+        config::Signal::WhiteNoise { level } => {
+            noise_gen = NoiseGenerator::new(decibel_to_amplitude(level));
             &mut noise_gen as &mut dyn Iterator<Item = PrcFmt>
         }
     };
@@ -206,7 +208,6 @@ impl CaptureDevice for GeneratorDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let signal = self.signal;
-        let amplitude = (10.0 as PrcFmt).powf(self.level / 20.0);
 
         let handle = thread::Builder::new()
             .name("SignalGenerator".to_string())
@@ -217,7 +218,6 @@ impl CaptureDevice for GeneratorDevice {
                     channels,
                     chunksize,
                     capture_status,
-                    amplitude,
                 };
                 match status_channel.send(StatusMessage::CaptureReady) {
                     Ok(()) => {}
