@@ -1,6 +1,7 @@
 ## v3.0.0
 New features:
 - Add a signal generator capture device.
+- Optionally write wav header when outputting to file or stdout.
 Changes:
 - Filter pipeline steps take a list of channels to filter instead of a single one.
 

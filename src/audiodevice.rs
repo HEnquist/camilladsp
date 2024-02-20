@@ -270,6 +270,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             filename,
             format,
+            wav_header,
             ..
         } => Box::new(filedevice::FilePlaybackDevice {
             destination: filedevice::PlaybackDest::Filename(filename),
@@ -277,15 +278,20 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             chunksize: conf.chunksize,
             channels,
             sample_format: format,
+            wav_header: wav_header.unwrap_or(false),
         }),
         config::PlaybackDevice::Stdout {
-            channels, format, ..
+            channels,
+            format,
+            wav_header,
+            ..
         } => Box::new(filedevice::FilePlaybackDevice {
             destination: filedevice::PlaybackDest::Stdout,
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
             sample_format: format,
+            wav_header: wav_header.unwrap_or(false),
         }),
         #[cfg(target_os = "macos")]
         config::PlaybackDevice::CoreAudio(ref dev) => {
