@@ -27,6 +27,9 @@ use coreaudio::audio_unit::macos_helpers::{
 };
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{AudioUnit, Element, Scope, StreamFormat};
+use coreaudio::error::AudioCodecError;
+use coreaudio::error::Error as CoreAudioError;
+
 use coreaudio::sys::*;
 
 use crate::CommandMessage;
@@ -59,8 +62,12 @@ fn take_ownership(device_id: AudioDeviceID) -> Res<pid_t> {
 }
 
 fn release_ownership(device_id: AudioDeviceID) -> Res<()> {
-    let device_owner_pid =
-        get_hogging_pid(device_id).map_err(|e| ConfigError::new(&format!("{e}")))?;
+    let device_owner_pid = match get_hogging_pid(device_id) {
+        Ok(pid) => pid,
+        Err(CoreAudioError::AudioCodec(AudioCodecError::UnknownProperty)) => return Ok(()),
+        Err(err) => return Err(ConfigError::new(&format!("{err}")).into()),
+    };
+
     let camilla_pid = std::process::id() as pid_t;
     if device_owner_pid == camilla_pid {
         debug!("Releasing exclusive access.");
@@ -136,24 +143,23 @@ fn device_supports_scope(device_id: u32, input: bool) -> bool {
         mElement: kAudioObjectPropertyElementWildcard,
     };
 
-    let maybe_bufferlist: mem::MaybeUninit<AudioBufferList> = mem::MaybeUninit::zeroed();
-    let data_size = mem::size_of::<AudioBufferList>() as u32;
-
+    let data_size = 0u32;
     let status = unsafe {
-        AudioObjectGetPropertyData(
+        AudioObjectGetPropertyDataSize(
             device_id,
             &property_address as *const _,
             0,
             null(),
             &data_size as *const _ as *mut _,
-            &maybe_bufferlist as *const _ as *mut _,
         )
     };
     if status != kAudioHardwareNoError as i32 {
         return false;
     }
-    let bufferlist = unsafe { maybe_bufferlist.assume_init() };
-    bufferlist.mNumberBuffers > 0
+    // This gives the length of the buffer list, there is no need to read the actual list.
+    let nbr_buffers =
+        (data_size - mem::size_of::<u32>() as u32) / mem::size_of::<AudioBuffer>() as u32;
+    nbr_buffers > 0
 }
 
 fn open_coreaudio_playback(
