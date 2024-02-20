@@ -1,3 +1,11 @@
+## v3.0.0
+Changes:
+- Filter pipeline steps take a list of channels to filter instead of a single one.
+
+## v2.0.3
+Bugfixes:
+- MacOS: Fix using Aggregate devices for playback.
+
 ## v2.0.2
 Bugfixes:
 - MacOS: Fix a segfault when reading clock source names for some capture devices.
