@@ -115,6 +115,7 @@ pub mod socketserver;
 pub mod statefile;
 #[cfg(target_os = "windows")]
 pub mod wasapidevice;
+pub mod wavtools;
 
 pub enum StatusMessage {
     PlaybackReady,

@@ -16,10 +16,9 @@ use crate::loudness;
 use crate::mixer;
 use rawsample::SampleReader;
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::fs::File;
 use std::io::BufReader;
-use std::io::{BufRead, Read, Seek, SeekFrom};
+use std::io::{BufRead, Seek, SeekFrom};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -27,55 +26,7 @@ use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::Res;
 
-/// Windows Guid
-/// Used to give sample format in the extended WAVEFORMATEXTENSIBLE wav header
-#[derive(Debug, PartialEq, Eq)]
-struct Guid {
-    data1: u32,
-    data2: u16,
-    data3: u16,
-    data4: [u8; 8],
-}
-
-impl Guid {
-    fn from_slice(data: &[u8; 16]) -> Guid {
-        let data1 = u32::from_le_bytes(data[0..4].try_into().unwrap());
-        let data2 = u16::from_le_bytes(data[4..6].try_into().unwrap());
-        let data3 = u16::from_le_bytes(data[6..8].try_into().unwrap());
-        let data4 = data[8..16].try_into().unwrap();
-        Guid {
-            data1,
-            data2,
-            data3,
-            data4,
-        }
-    }
-}
-
-/// KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
-const SUBTYPE_FLOAT: Guid = Guid {
-    data1: 3,
-    data2: 0,
-    data3: 16,
-    data4: [128, 0, 0, 170, 0, 56, 155, 113],
-};
-
-/// KSDATAFORMAT_SUBTYPE_PCM
-const SUBTYPE_PCM: Guid = Guid {
-    data1: 1,
-    data2: 0,
-    data3: 16,
-    data4: [128, 0, 0, 170, 0, 56, 155, 113],
-};
-
-#[derive(Debug)]
-pub struct WavParams {
-    sample_format: config::FileFormat,
-    sample_rate: usize,
-    data_offset: usize,
-    data_length: usize,
-    channels: usize,
-}
+use crate::wavtools::find_data_in_wav;
 
 pub trait Filter {
     // Filter a Vec
@@ -182,133 +133,6 @@ pub fn read_coeff_file(
         coefficients.len()
     );
     Ok(coefficients)
-}
-
-pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
-    let f = File::open(filename)?;
-    let filesize = f.metadata()?.len();
-    let mut file = BufReader::new(&f);
-    let mut header = [0; 12];
-    let _ = file.read(&mut header)?;
-
-    let riff_b = "RIFF".as_bytes();
-    let wave_b = "WAVE".as_bytes();
-    let data_b = "data".as_bytes();
-    let fmt_b = "fmt ".as_bytes();
-    let riff_err = header.iter().take(4).zip(riff_b).any(|(a, b)| *a != *b);
-    let wave_err = header
-        .iter()
-        .skip(8)
-        .take(4)
-        .zip(wave_b)
-        .any(|(a, b)| *a != *b);
-    if riff_err || wave_err {
-        let msg = format!("Invalid wav header in file '{filename}'");
-        return Err(config::ConfigError::new(&msg).into());
-    }
-    let mut next_chunk_location = 12;
-    let mut found_fmt = false;
-    let mut found_data = false;
-    let mut buffer = [0; 8];
-
-    let mut sample_format = config::FileFormat::S16LE;
-    let mut sample_rate = 0;
-    let mut channels = 0;
-    let mut data_offset = 0;
-    let mut data_length = 0;
-
-    while (!found_fmt || !found_data) && next_chunk_location < filesize {
-        file.seek(SeekFrom::Start(next_chunk_location))?;
-        let _ = file.read(&mut buffer)?;
-        let chunk_length = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
-        trace!("Analyzing wav chunk of length: {}", chunk_length);
-        let is_data = buffer.iter().take(4).zip(data_b).all(|(a, b)| *a == *b);
-        let is_fmt = buffer.iter().take(4).zip(fmt_b).all(|(a, b)| *a == *b);
-        if is_fmt && (chunk_length == 16 || chunk_length == 18 || chunk_length == 40) {
-            found_fmt = true;
-            let mut data = vec![0; chunk_length as usize];
-            let _ = file.read(&mut data).unwrap();
-            let formatcode = u16::from_le_bytes(data[0..2].try_into().unwrap());
-            channels = u16::from_le_bytes(data[2..4].try_into().unwrap());
-            sample_rate = u32::from_le_bytes(data[4..8].try_into().unwrap());
-            let bytes_per_frame = u16::from_le_bytes(data[12..14].try_into().unwrap());
-            let bits = u16::from_le_bytes(data[14..16].try_into().unwrap());
-            let bytes_per_sample = bytes_per_frame / channels;
-            sample_format = match (formatcode, bits, bytes_per_sample) {
-                (1, 16, 2) => config::FileFormat::S16LE,
-                (1, 24, 3) => config::FileFormat::S24LE3,
-                (1, 24, 4) => config::FileFormat::S24LE,
-                (1, 32, 4) => config::FileFormat::S32LE,
-                (3, 32, 4) => config::FileFormat::FLOAT32LE,
-                (3, 64, 8) => config::FileFormat::FLOAT64LE,
-                (0xFFFE, _, _) => {
-                    // waveformatex
-                    if chunk_length != 40 {
-                        let msg = format!("Invalid extended header of wav file '{filename}'");
-                        return Err(config::ConfigError::new(&msg).into());
-                    }
-                    let cb_size = u16::from_le_bytes(data[16..18].try_into().unwrap());
-                    let valid_bits_per_sample =
-                        u16::from_le_bytes(data[18..20].try_into().unwrap());
-                    let channel_mask = u32::from_le_bytes(data[20..24].try_into().unwrap());
-                    let subformat = &data[24..40];
-                    let subformat_guid = Guid::from_slice(subformat.try_into().unwrap());
-                    trace!(
-                        "Found extended wav fmt chunk: subformatcode: {:?}, cb_size: {}, channel_mask: {}, valid bits per sample: {}",
-                        subformat_guid, cb_size, channel_mask, valid_bits_per_sample
-                    );
-                    match (
-                        subformat_guid,
-                        bits,
-                        bytes_per_sample,
-                        valid_bits_per_sample,
-                    ) {
-                        (SUBTYPE_PCM, 16, 2, 16) => config::FileFormat::S16LE,
-                        (SUBTYPE_PCM, 24, 3, 24) => config::FileFormat::S24LE3,
-                        (SUBTYPE_PCM, 24, 4, 24) => config::FileFormat::S24LE,
-                        (SUBTYPE_PCM, 32, 4, 32) => config::FileFormat::S32LE,
-                        (SUBTYPE_FLOAT, 32, 4, 32) => config::FileFormat::FLOAT32LE,
-                        (SUBTYPE_FLOAT, 64, 8, 64) => config::FileFormat::FLOAT64LE,
-                        (_, _, _, _) => {
-                            let msg =
-                                format!("Unsupported extended wav format of file '{filename}'");
-                            return Err(config::ConfigError::new(&msg).into());
-                        }
-                    }
-                }
-                (_, _, _) => {
-                    let msg = format!("Unsupported wav format of file '{filename}'");
-                    return Err(config::ConfigError::new(&msg).into());
-                }
-            };
-            trace!(
-                "Found wav fmt chunk: formatcode: {}, channels: {}, samplerate: {}, bits: {}, bytes_per_frame: {}",
-                formatcode, channels, sample_rate, bits, bytes_per_frame
-            );
-        } else if is_data {
-            found_data = true;
-            data_offset = next_chunk_location + 8;
-            data_length = chunk_length;
-            trace!(
-                "Found wav data chunk, start: {}, length: {}",
-                data_offset,
-                data_length
-            )
-        }
-        next_chunk_location += 8 + chunk_length as u64;
-    }
-    if found_data && found_fmt {
-        trace!("Wav file with parameters: format: {:?},  samplerate: {}, channels: {}, data_length: {}, data_offset: {}", sample_format, sample_rate, channels, data_length, data_offset);
-        return Ok(WavParams {
-            sample_format,
-            sample_rate: sample_rate as usize,
-            channels: channels as usize,
-            data_length: data_length as usize,
-            data_offset: data_offset as usize,
-        });
-    }
-    let msg = format!("Unable to parse wav file '{filename}'");
-    Err(config::ConfigError::new(&msg).into())
 }
 
 pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {

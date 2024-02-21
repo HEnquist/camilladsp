@@ -25,6 +25,7 @@ use crate::filedevice_bluez;
 use crate::filereader::BlockingReader;
 #[cfg(target_os = "linux")]
 use crate::filereader_nonblock::NonBlockingReader;
+use crate::wavtools::write_wav_header;
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingState;
@@ -104,54 +105,6 @@ pub enum ReadResult {
 
 pub trait Reader {
     fn read(&mut self, data: &mut [u8]) -> Result<ReadResult, Box<dyn Error>>;
-}
-
-// Write a wav header. We don't know the final length so we set the file size and data length to u32::MAX.
-fn write_wav_header(
-    dest: &mut Box<dyn Write>,
-    channels: usize,
-    sample_format: SampleFormat,
-    samplerate: usize,
-) -> std::io::Result<()> {
-    // Header
-    dest.write_all("RIFF".as_bytes())?;
-    // file size, 4 bytes, unknown so set to max
-    dest.write_all(&u32::MAX.to_le_bytes())?;
-    dest.write_all("WAVE".as_bytes())?;
-
-    let (formatcode, bits_per_sample, bytes_per_sample) = match sample_format {
-        SampleFormat::S16LE => (1, 16, 2),
-        SampleFormat::S24LE3 => (1, 24, 3),
-        SampleFormat::S24LE => (1, 24, 4),
-        SampleFormat::S32LE => (1, 32, 4),
-        SampleFormat::FLOAT32LE => (3, 32, 4),
-        SampleFormat::FLOAT64LE => (3, 64, 8),
-    };
-
-    // format block
-    dest.write_all("fmt ".as_bytes())?;
-    // size of fmt block, 4 bytes
-    dest.write_all(&16_u32.to_le_bytes())?;
-    // format code, 2 bytes
-    dest.write_all(&(formatcode as u16).to_le_bytes())?;
-    // number of channels, 2 bytes
-    dest.write_all(&(channels as u16).to_le_bytes())?;
-    // samplerate, 4 bytes
-    dest.write_all(&(samplerate as u32).to_le_bytes())?;
-    // bytes per second sec, 4 bytes
-    dest.write_all(&((channels * samplerate * bytes_per_sample) as u32).to_le_bytes())?;
-    // block alignment, 2 bytes
-    dest.write_all(&((channels * bytes_per_sample) as u16).to_le_bytes())?;
-    // bits per sample, 2 bytes
-    dest.write_all(&(bits_per_sample as u16).to_le_bytes())?;
-
-    // data block
-    dest.write_all("data".as_bytes())?;
-    // data length, 4 bytes, unknown so set to max
-    dest.write_all(&u32::MAX.to_le_bytes())?;
-
-    // audio data starts from here
-    Ok(())
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
