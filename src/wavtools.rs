@@ -269,3 +269,47 @@ pub fn write_wav_header(
     // audio data starts from here
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::find_data_in_wav;
+    use super::find_data_in_wav_stream;
+    use super::write_wav_header;
+    use crate::config::{FileFormat, SampleFormat};
+    use std::io::Cursor;
+
+    #[test]
+    pub fn test_analyze_wav() {
+        let info = find_data_in_wav("testdata/int32.wav").unwrap();
+        println!("{info:?}");
+        assert_eq!(info.sample_format, FileFormat::S32LE);
+        assert_eq!(info.data_offset, 44);
+        assert_eq!(info.data_length, 20);
+        assert_eq!(info.channels, 1);
+        assert_eq!(info.sample_rate, 44100);
+    }
+
+    #[test]
+    pub fn test_analyze_wavex() {
+        let info = find_data_in_wav("testdata/int32_ex.wav").unwrap();
+        println!("{info:?}");
+        assert_eq!(info.sample_format, FileFormat::FLOAT32LE);
+        assert_eq!(info.data_offset, 104);
+        assert_eq!(info.data_length, 20);
+        assert_eq!(info.channels, 1);
+        assert_eq!(info.sample_rate, 44100);
+    }
+
+    #[test]
+    fn write_and_read_wav() {
+        let bytes = vec![0_u8; 1000];
+        let mut buffer = Cursor::new(bytes);
+        write_wav_header(&mut buffer, 2, SampleFormat::S32LE, 44100).unwrap();
+        let info = find_data_in_wav_stream(buffer).unwrap();
+        assert_eq!(info.sample_format, FileFormat::S32LE);
+        assert_eq!(info.data_offset, 44);
+        assert_eq!(info.channels, 2);
+        assert_eq!(info.sample_rate, 44100);
+        assert_eq!(info.data_length, u32::MAX as usize);
+    }
+}

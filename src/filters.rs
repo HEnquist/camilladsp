@@ -475,7 +475,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use crate::config::FileFormat;
-    use crate::filters::{find_data_in_wav, read_wav};
+    use crate::filters::read_wav;
     use crate::filters::{pad_vector, read_coeff_file};
     use crate::PrcFmt;
 
@@ -618,16 +618,6 @@ mod tests {
         assert!(compare_waveforms(&values, &values_0, 1e-15));
         let values_5 = pad_vector(&values, 5);
         assert!(compare_waveforms(&values_padded, &values_5, 1e-15));
-    }
-
-    #[test]
-    pub fn test_analyze_wav() {
-        let info = find_data_in_wav("testdata/int32.wav").unwrap();
-        println!("{info:?}");
-        assert_eq!(info.sample_format, FileFormat::S32LE);
-        assert_eq!(info.data_offset, 44);
-        assert_eq!(info.data_length, 20);
-        assert_eq!(info.channels, 1);
     }
 
     #[test]
