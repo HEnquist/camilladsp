@@ -5,12 +5,12 @@ devices:
   target_level: 512
   adjust_period: 10
   playback:
-    type: Raw
+    type: File
     channels: 2
     filename: "result_i32.raw"
     format: S32LE
   capture:
-    type: Raw
+    type: File
     channels: 1
     filename: "spike_i32.raw"
     format: S32LE
