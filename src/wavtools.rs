@@ -222,7 +222,8 @@ pub fn find_data_in_wav_stream(mut f: impl Read + Seek) -> Res<WavParams> {
     Err(ConfigError::new("Unable to parse as wav").into())
 }
 
-// Write a wav header. We don't know the final length so we set the file size and data length to u32::MAX.
+// Write a wav header.
+// We don't know the final length so we set the file size and data length to u32::MAX.
 pub fn write_wav_header(
     dest: &mut impl Write,
     channels: usize,
@@ -254,7 +255,7 @@ pub fn write_wav_header(
     dest.write_all(&(channels as u16).to_le_bytes())?;
     // samplerate, 4 bytes
     dest.write_all(&(samplerate as u32).to_le_bytes())?;
-    // bytes per second sec, 4 bytes
+    // bytes per second, 4 bytes
     dest.write_all(&((channels * samplerate * bytes_per_sample) as u32).to_le_bytes())?;
     // block alignment, 2 bytes
     dest.write_all(&((channels * bytes_per_sample) as u16).to_le_bytes())?;
@@ -291,7 +292,7 @@ mod tests {
 
     #[test]
     pub fn test_analyze_wavex() {
-        let info = find_data_in_wav("testdata/int32_ex.wav").unwrap();
+        let info = find_data_in_wav("testdata/f32_ex.wav").unwrap();
         println!("{info:?}");
         assert_eq!(info.sample_format, FileFormat::FLOAT32LE);
         assert_eq!(info.data_offset, 104);
