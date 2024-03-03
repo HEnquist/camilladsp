@@ -120,6 +120,43 @@ fn wave_format(
     }
 }
 
+fn get_supported_wave_format(
+    audio_client: &wasapi::AudioClient,
+    sample_format: &SampleFormat,
+    samplerate: usize,
+    channels: usize,
+    sharemode: &wasapi::ShareMode,
+) -> Res<wasapi::WaveFormat> {
+    let wave_format = wave_format(sample_format, samplerate, channels);
+    match sharemode {
+        wasapi::ShareMode::Exclusive => {
+            return audio_client.is_supported_exclusive_with_quirks(&wave_format);
+        }
+        wasapi::ShareMode::Shared => {
+            match audio_client.is_supported(&wave_format, &sharemode) {
+                Ok(None) => {
+                    debug!("Device supports format {:?}", wave_format);
+                    return Ok(wave_format);
+                }
+                Ok(Some(modified)) => {
+                    let msg = format!(
+                        "Device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
+                        wave_format, modified
+                    );
+                    return Err(ConfigError::new(&msg).into());
+                }
+                Err(err) => {
+                    let msg = format!(
+                        "Device doesn't support format:\n{:#?}\nError: {}",
+                        wave_format, err
+                    );
+                    return Err(ConfigError::new(&msg).into());
+                }
+            };
+        }
+    }
+}
+
 fn open_playback(
     devname: &Option<String>,
     samplerate: usize,
@@ -150,26 +187,13 @@ fn open_playback(
     trace!("Found playback device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got playback iaudioclient");
-    let wave_format = wave_format(sample_format, samplerate, channels);
-    match audio_client.is_supported(&wave_format, &sharemode) {
-        Ok(None) => {
-            debug!("Playback device supports format {:?}", wave_format)
-        }
-        Ok(Some(modified)) => {
-            let msg = format!(
-                "Playback device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
-                wave_format, modified
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-        Err(err) => {
-            let msg = format!(
-                "Playback device doesn't support format:\n{:#?}\nError: {}",
-                wave_format, err
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-    };
+    let wave_format = get_supported_wave_format(
+        &audio_client,
+        sample_format,
+        samplerate,
+        channels,
+        &sharemode,
+    )?;
     let (def_time, min_time) = audio_client.get_periods()?;
     debug!(
         "playback default period {}, min period {}",
@@ -182,7 +206,7 @@ fn open_playback(
         &sharemode,
         false,
     )?;
-    debug!("initialized capture");
+    debug!("initialized playback audio client");
     let handle = audio_client.set_get_eventhandle()?;
     let render_client = audio_client.get_audiorenderclient()?;
     debug!("Opened Wasapi playback device {:?}", devname);
@@ -232,26 +256,13 @@ fn open_capture(
     trace!("Found capture device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got capture iaudioclient");
-    let wave_format = wave_format(sample_format, samplerate, channels);
-    match audio_client.is_supported(&wave_format, &sharemode) {
-        Ok(None) => {
-            debug!("Capture device supports format {:?}", wave_format)
-        }
-        Ok(Some(modified)) => {
-            let msg = format!(
-                "Capture device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
-                wave_format, modified
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-        Err(err) => {
-            let msg = format!(
-                "Capture device doesn't support format:\n{:#?}\nError: {}",
-                wave_format, err
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-    };
+    let wave_format = get_supported_wave_format(
+        &audio_client,
+        sample_format,
+        samplerate,
+        channels,
+        &sharemode,
+    )?;
     let (def_time, min_time) = audio_client.get_periods()?;
     debug!(
         "capture default period {}, min period {}",
@@ -264,7 +275,7 @@ fn open_capture(
         &sharemode,
         loopback,
     )?;
-    debug!("initialized capture");
+    debug!("initialized capture audio client");
     let handle = audio_client.set_get_eventhandle()?;
     trace!("capture got event handle");
     let capture_client = audio_client.get_audiocaptureclient()?;
