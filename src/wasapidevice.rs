@@ -15,7 +15,7 @@ use std::thread;
 use std::time::Duration;
 use wasapi;
 use wasapi::DeviceCollection;
-use windows::w;
+use windows::core::w;
 use windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW;
 
 use crate::CommandMessage;
