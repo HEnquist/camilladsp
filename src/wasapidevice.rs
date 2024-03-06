@@ -195,17 +195,19 @@ fn open_playback(
         &sharemode,
     )?;
     let (def_time, min_time) = audio_client.get_periods()?;
-    debug!(
-        "playback default period {}, min period {}",
-        def_time, min_time
-    );
+    let aligned_time =
+        audio_client.calculate_aligned_period_near(def_time, Some(128), &wave_format)?;
     audio_client.initialize_client(
         &wave_format,
-        def_time,
+        aligned_time,
         &wasapi::Direction::Render,
         &sharemode,
         false,
     )?;
+    debug!(
+        "playback default period {}, min period {}, aligned period {}",
+        def_time, min_time, aligned_time
+    );
     debug!("initialized playback audio client");
     let handle = audio_client.set_get_eventhandle()?;
     let render_client = audio_client.get_audiorenderclient()?;
