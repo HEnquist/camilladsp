@@ -364,7 +364,7 @@ fn playback_loop(
             device_time = device_prevtime + buffer_free_frame_count as f64 / samplerate;
         }
         trace!(
-            "Device time counted up by {} s",
+            "Device time counted up by {:.4} s",
             device_time - device_prevtime
         );
         if buffer_free_frame_count > 0
@@ -372,7 +372,7 @@ fn playback_loop(
                 > 1.75 * (buffer_free_frame_count as f64 / samplerate)
         {
             warn!(
-                "Missing event! Resetting stream. Interval {} s, expected {} s",
+                "Missing event! Resetting stream. Interval {:.4} s, expected {:.4} s",
                 device_time - device_prevtime,
                 buffer_free_frame_count as f64 / samplerate
             );
