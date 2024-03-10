@@ -1,6 +1,7 @@
 use crate::compressor;
 use crate::filters;
 use crate::mixer;
+use crate::wavtools::find_data_in_wav_stream;
 use parking_lot::RwLock;
 use serde::{de, Deserialize, Serialize};
 //use serde_with;
@@ -119,6 +120,57 @@ impl fmt::Display for SampleFormat {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+// Similar to SampleFormat, but also includes TEXT
+pub enum FileFormat {
+    TEXT,
+    S16LE,
+    S24LE,
+    S24LE3,
+    S32LE,
+    FLOAT32LE,
+    FLOAT64LE,
+}
+
+impl FileFormat {
+    pub fn bits_per_sample(&self) -> usize {
+        match self {
+            FileFormat::S16LE => 16,
+            FileFormat::S24LE => 24,
+            FileFormat::S24LE3 => 24,
+            FileFormat::S32LE => 32,
+            FileFormat::FLOAT32LE => 32,
+            FileFormat::FLOAT64LE => 64,
+            FileFormat::TEXT => 0,
+        }
+    }
+
+    pub fn bytes_per_sample(&self) -> usize {
+        match self {
+            FileFormat::S16LE => 2,
+            FileFormat::S24LE => 4,
+            FileFormat::S24LE3 => 3,
+            FileFormat::S32LE => 4,
+            FileFormat::FLOAT32LE => 4,
+            FileFormat::FLOAT64LE => 8,
+            FileFormat::TEXT => 0,
+        }
+    }
+
+    pub fn from_sample_format(sample_format: &SampleFormat) -> Self {
+        match sample_format {
+            SampleFormat::S16LE => FileFormat::S16LE,
+            SampleFormat::S24LE => FileFormat::S24LE,
+            SampleFormat::S24LE3 => FileFormat::S24LE3,
+            SampleFormat::S32LE => FileFormat::S32LE,
+            SampleFormat::FLOAT32LE => FileFormat::FLOAT32LE,
+            SampleFormat::FLOAT64LE => FileFormat::FLOAT64LE,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
@@ -221,7 +273,8 @@ pub struct CaptureDeviceFile {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
     pub filename: String,
-    pub format: SampleFormat,
+    #[serde(default)]
+    pub format: Option<SampleFormat>,
     #[serde(default)]
     pub extra_samples: Option<usize>,
     #[serde(default)]
@@ -643,45 +696,6 @@ pub enum Filter {
         description: Option<String>,
         parameters: LimiterParameters,
     },
-}
-
-#[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub enum FileFormat {
-    TEXT,
-    S16LE,
-    S24LE,
-    S24LE3,
-    S32LE,
-    FLOAT32LE,
-    FLOAT64LE,
-}
-
-impl FileFormat {
-    pub fn bits_per_sample(&self) -> usize {
-        match self {
-            FileFormat::S16LE => 16,
-            FileFormat::S24LE => 24,
-            FileFormat::S24LE3 => 24,
-            FileFormat::S32LE => 32,
-            FileFormat::FLOAT32LE => 32,
-            FileFormat::FLOAT64LE => 64,
-            FileFormat::TEXT => 0,
-        }
-    }
-
-    pub fn bytes_per_sample(&self) -> usize {
-        match self {
-            FileFormat::S16LE => 2,
-            FileFormat::S24LE => 4,
-            FileFormat::S24LE3 => 3,
-            FileFormat::S32LE => 4,
-            FileFormat::FLOAT32LE => 4,
-            FileFormat::FLOAT64LE => 8,
-            FileFormat::TEXT => 0,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1331,6 +1345,7 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
 }
 
 fn apply_overrides(configuration: &mut Configuration) {
+    // TODO update to get overrides from wav capture file
     let overrides = OVERRIDES.read();
     if let Some(rate) = overrides.samplerate {
         let cfg_rate = configuration.devices.samplerate;
@@ -1444,7 +1459,8 @@ fn apply_overrides(configuration: &mut Configuration) {
         debug!("Apply override for capture sample format: {}", fmt);
         match &mut configuration.devices.capture {
             CaptureDevice::File(dev) => {
-                dev.format = fmt;
+                // TODO dont update if null!
+                dev.format = Some(fmt);
             }
             CaptureDevice::Stdin(dev) => {
                 dev.format = fmt;
@@ -1789,6 +1805,29 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                 "The CoreAudio playback backend does not support FLOAT64LE sample format",
             )
             .into());
+        }
+    }
+    if let CaptureDevice::File(dev) = &conf.devices.capture {
+        let fname = &dev.filename;
+        let f = match File::open(fname) {
+            Ok(f) => f,
+            Err(err) => {
+                let msg = format!("Could not open input file '{fname}'. Error: {err}");
+                return Err(ConfigError::new(&msg).into());
+            }
+        };
+        if dev.format.is_none() {
+            let file = BufReader::new(&f);
+            let wav_info = find_data_in_wav_stream(file)?;
+            // TODO warn if samplerate is wrong
+            // TODO 2, next step: update overrides for channels and sample rate
+            if wav_info.channels != dev.channels {
+                let msg = format!(
+                    "Wav file '{}' has wrong number of channels, expected: {}, found: {}",
+                    fname, dev.channels, wav_info.channels
+                );
+                return Err(ConfigError::new(&msg).into());
+            }
         }
     }
     let mut num_channels = conf.devices.capture.channels();

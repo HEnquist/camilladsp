@@ -601,7 +601,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             resampler_config: conf.resampler,
             chunksize: conf.chunksize,
             channels: dev.channels,
-            sample_format: dev.format,
+            sample_format: Some(dev.format),
             extra_samples: dev.extra_samples(),
             silence_threshold: conf.silence_threshold(),
             silence_timeout: conf.silence_timeout(),

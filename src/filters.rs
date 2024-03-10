@@ -147,7 +147,7 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
 
     let alldata = read_coeff_file(
         filename,
-        &params.sample_format,
+        &config::FileFormat::from_sample_format(&params.sample_format),
         params.data_length,
         params.data_offset,
     )?;
