@@ -16,7 +16,9 @@ use std::time::Duration;
 use wasapi;
 use wasapi::DeviceCollection;
 use windows::core::w;
-use windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW;
+use windows::Win32::System::Threading::{
+    AvSetMmThreadCharacteristicsW, AvSetMmThreadPriority, AVRT_PRIORITY_HIGH,
+};
 
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -337,11 +339,12 @@ fn playback_loop(
 
     // Raise priority
     let mut task_idx = 0;
-    unsafe {
-        let _ = AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx);
-    }
+    let task_handle = unsafe { AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx)? };
     if task_idx > 0 {
         debug!("Playback thread raised priority, task index: {}", task_idx);
+        unsafe {
+            AvSetMmThreadPriority(task_handle, AVRT_PRIORITY_HIGH)?;
+        }
     } else {
         warn!("Failed to raise playback thread priority");
     }
@@ -476,11 +479,12 @@ fn capture_loop(
 
     // Raise priority
     let mut task_idx = 0;
-    unsafe {
-        let _ = AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx);
-    }
+    let task_handle = unsafe { AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx)? };
     if task_idx > 0 {
         debug!("Capture thread raised priority, task index: {}", task_idx);
+        unsafe {
+            AvSetMmThreadPriority(task_handle, AVRT_PRIORITY_HIGH)?;
+        }
     } else {
         warn!("Failed to raise capture thread priority");
     }
