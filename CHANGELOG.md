@@ -4,6 +4,8 @@ New features:
 - Optionally write wav header when outputting to file or stdout.
 Changes:
 - Filter pipeline steps take a list of channels to filter instead of a single one.
+Bugfixes:
+- Fix compatibility issues for some WASAPI devices.
 
 ## v2.0.3
 Bugfixes:
