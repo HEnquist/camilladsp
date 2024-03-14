@@ -158,7 +158,7 @@ pub fn find_data_in_wav_stream(mut f: impl Read + Seek) -> Res<WavParams> {
     // Bytes 8 to 12 must be WAVE
     let wave_err = !compare_4cc(&header[8..], WAVE);
     if riff_err || wave_err {
-        return Err(ConfigError::new("Invalid header").into());
+        return Err(ConfigError::new("Invalid wav header").into());
     }
 
     let mut next_chunk_location = 12;

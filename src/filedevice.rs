@@ -553,7 +553,7 @@ impl CaptureDevice for FileCaptureDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let capture_samplerate = self.capture_samplerate;
-        let channels = self.channels;
+        let mut channels = self.channels;
         let mut skip_bytes = self.skip_bytes;
         let mut read_bytes = self.read_bytes;
         let sample_format = match &self.source {
@@ -561,10 +561,11 @@ impl CaptureDevice for FileCaptureDevice {
                 if self.sample_format.is_none() {
                     // No format was given, try to get from the file.
                     // Only works if the file is in wav format.
+                    // Also update channels and read & skip bytes.
                     let wav_info = find_data_in_wav(fname)?;
                     skip_bytes = wav_info.data_offset;
                     read_bytes = wav_info.data_length;
-                    // TODO check channels?
+                    channels = wav_info.channels;
                     wav_info.sample_format
                 } else {
                     self.sample_format.unwrap()

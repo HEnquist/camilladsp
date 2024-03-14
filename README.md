@@ -452,7 +452,7 @@ A flexible tool for processing audio
 Built with features: websocket
 
 Supported device types:
-Capture: File, Stdin, Wasapi
+Capture: RawFile, WavFile, Stdin, Wasapi
 Playback: File, Stdout, Wasapi
 
 USAGE:
@@ -616,12 +616,15 @@ It is also possible to use pipes for apps that support reading or writing audio 
 These backends are supported on all platforms.
 
 ### File or pipe
-Audio can be read from a file or a pipe using the `File` device type.
+Audio can be read from a file or a pipe using the `RawFile` device type.
 This can read raw interleaved samples in most common formats.
 
 To instead read from stdin, use the `Stdin` type.
 This makes it possible to pipe raw samples from some applications directly to CamillaDSP,
 without going via a virtual soundcard.
+
+Wav files can be read using the `WavFile` device type.
+See [the capture device section](#file-rawfile-wavfile-stdin-stdout) for more details.
 
 ### Jack
 Jack is most commonly used with Linux, but can also be used with both Windows and MacOS.
@@ -999,7 +1002,9 @@ A parameter marked (*) in any example is optional. If they are left out from the
   A device needs:
   * `type`:
     The available types depend on which features that were included when compiling. All possible types are:
-    * `File`
+    * `RawFile` (capture only)
+    * `WavFile` (capture only)
+    * `File` (playback only)
     * `SignalGenerator` (capture only)
     * `Stdin` (capture only)
     * `Stdout` (playback only)
@@ -1010,9 +1015,9 @@ A parameter marked (*) in any example is optional. If they are left out from the
     * `Alsa`
     * `Pulse`
   * `channels`: number of channels
-  * `device`: device name (for Alsa, Pulse, Wasapi, CoreAudio). For CoreAudio and Wasapi, "default" will give the default device.
-  * `filename` path to the file (for File)
-  * `format`: sample format (for all except Jack).
+  * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `CoreAudio`). For `CoreAudio` and `Wasapi`, `null` will give the default device.
+  * `filename` path to the file (for `File`, `RawFile` and `WavFile`)
+  * `format`: sample format (for all except `Jack`).
 
     Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
     * S16LE - Signed 16-bit int, stored as two bytes
@@ -1049,14 +1054,17 @@ A parameter marked (*) in any example is optional. If they are left out from the
     | FLOAT32LE  | FLOAT_LE   | FLOAT32LE |
     | FLOAT64LE  | FLOAT64_LE | -         |
 
-  ### File, Stdin, Stdout
-  The `File` device type reads or writes to a file, while `Stdin` reads from stdin and `Stdout` writes to stdout.
+  ### File, RawFile, WavFile, Stdin, Stdout
+  The `RawFile` device type reads from a file, while `Stdin` reads from stdin.
+  `File` and `Stdout` writes to a file and stdout, respectively.
   The format is raw interleaved samples, in the selected sample format.
+
   If the capture device reaches the end of a file, the program will exit once all chunks have been played.
   That delayed sound that would end up in a later chunk will be cut off.
   To avoid this, set the optional parameter `extra_samples` for the File capture device.
   This causes the capture device to yield the given number of samples (per channel) after reaching end of file,
   allowing any delayed sound to be played back.
+
   The `Stdin` capture device and `Stdout` playback device use stdin and stdout, so it's possible
   to easily pipe audio between applications:
   ```
@@ -1072,13 +1080,14 @@ A parameter marked (*) in any example is optional. If they are left out from the
   This is a _streaming_ header, meaning it contains a dummy value for the file length.
   Most applications ignore this and calculate the correct length from the file size.
 
-  Please note that the `File` capture device isn't able to read wav-files directly.
-  If you want to let CamillaDSP play wav-files, please see the [separate guide for converting wav to raw files](coefficients_from_wav.md).
+  To read from a wav file, use the `WavFile` capture device.
+  The samplerate and numnber of channels of the file is used to override the values in the config,
+  similar to how these values can be [overriden from the command line](#overriding-config-values).
 
-  Example config for File:
-  ```
+  Example config for raw files:
+  ```yaml
     capture:
-      type: File
+      type: RawFile
       channels: 2
       filename: "/path/to/inputfile.raw"
       format: S16LE
@@ -1093,7 +1102,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   ```
 
   Example config for Stdin/Stdout:
-  ```
+  ```yaml
     capture:
       type: Stdin
       channels: 2
@@ -1107,9 +1116,24 @@ A parameter marked (*) in any example is optional. If they are left out from the
       format: S32LE
   ```
 
-  The `File` and `Stdin` capture devices support two additional optional parameters, for advanced handling of raw files and testing:
+  Example config for wav input and output:
+  ```yaml
+    capture:
+      type: WavFile
+      filename: "/path/to/inputfile.wav"
+    playback:
+      type: File
+      channels: 2
+      format: S32LE
+      wav_header: true
+      filename: "/path/to/outputfile.wav"
+  ```
+
+
+  The `RawFile` and `Stdin` capture devices support two additional optional parameters, for advanced handling of raw files and testing:
   * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream.
-    This can be used to skip over the header of some formats like .wav (which typically has a fixed size 44-byte header).
+    This can be used to skip over the header of some formats like .wav
+    (which often has a 44-byte header).
     Leaving it out or setting to zero means no bytes are skipped.
   * `read_bytes`: Read only up until the specified number of bytes.
     Leave it out or set it to zero to read until the end of the file or stream.

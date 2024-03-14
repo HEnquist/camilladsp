@@ -7,7 +7,7 @@ devices:
     profile: Fast
   capture_samplerate: 44100
   playback:
-    type: File
+    type: RawFile
     channels: 2
     filename: "result_f64.raw"
     format: FLOAT64LE
