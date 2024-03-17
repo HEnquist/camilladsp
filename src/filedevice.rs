@@ -266,7 +266,7 @@ fn capture_loop(
     msg_channels: CaptureChannels,
     mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
 ) {
-    debug!("starting captureloop");
+    debug!("preparing captureloop");
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
     let bytes_per_frame = params.channels * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];

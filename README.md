@@ -1083,6 +1083,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   To read from a wav file, use the `WavFile` capture device.
   The samplerate and numnber of channels of the file is used to override the values in the config,
   similar to how these values can be [overriden from the command line](#overriding-config-values).
+  Note that `WavFile` only supports reading from files. Reading from a pipe is not supported.
 
   Example config for raw files:
   ```yaml
