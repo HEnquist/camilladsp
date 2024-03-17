@@ -3,7 +3,7 @@ devices:
   samplerate: 44100
   chunksize: 4096
   capture:
-    type: File
+    type: RawFile
     filename: "dummy"
     channels: 2
     format: S16LE

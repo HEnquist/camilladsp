@@ -1,6 +1,7 @@
 use crate::compressor;
 use crate::filters;
 use crate::mixer;
+use crate::wavtools::{find_data_in_wav_stream, WavParams};
 use parking_lot::RwLock;
 use serde::{de, Deserialize, Serialize};
 //use serde_with;
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 use crate::PrcFmt;
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
+#[derive(Clone)]
 pub struct Overrides {
     pub samplerate: Option<usize>,
     pub sample_format: Option<SampleFormat>,
@@ -119,6 +121,57 @@ impl fmt::Display for SampleFormat {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+// Similar to SampleFormat, but also includes TEXT
+pub enum FileFormat {
+    TEXT,
+    S16LE,
+    S24LE,
+    S24LE3,
+    S32LE,
+    FLOAT32LE,
+    FLOAT64LE,
+}
+
+impl FileFormat {
+    pub fn bits_per_sample(&self) -> usize {
+        match self {
+            FileFormat::S16LE => 16,
+            FileFormat::S24LE => 24,
+            FileFormat::S24LE3 => 24,
+            FileFormat::S32LE => 32,
+            FileFormat::FLOAT32LE => 32,
+            FileFormat::FLOAT64LE => 64,
+            FileFormat::TEXT => 0,
+        }
+    }
+
+    pub fn bytes_per_sample(&self) -> usize {
+        match self {
+            FileFormat::S16LE => 2,
+            FileFormat::S24LE => 4,
+            FileFormat::S24LE3 => 3,
+            FileFormat::S32LE => 4,
+            FileFormat::FLOAT32LE => 4,
+            FileFormat::FLOAT64LE => 8,
+            FileFormat::TEXT => 0,
+        }
+    }
+
+    pub fn from_sample_format(sample_format: &SampleFormat) -> Self {
+        match sample_format {
+            SampleFormat::S16LE => FileFormat::S16LE,
+            SampleFormat::S24LE => FileFormat::S24LE,
+            SampleFormat::S24LE3 => FileFormat::S24LE3,
+            SampleFormat::S32LE => FileFormat::S32LE,
+            SampleFormat::FLOAT32LE => FileFormat::FLOAT32LE,
+            SampleFormat::FLOAT64LE => FileFormat::FLOAT64LE,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
@@ -151,8 +204,8 @@ pub enum CaptureDevice {
         device: String,
         format: SampleFormat,
     },
-    #[serde(alias = "FILE", alias = "file")]
-    File(CaptureDeviceFile),
+    RawFile(CaptureDeviceRawFile),
+    WavFile(CaptureDeviceWavFile),
     #[serde(alias = "STDIN", alias = "stdin")]
     Stdin(CaptureDeviceStdin),
     #[cfg(target_os = "macos")]
@@ -193,7 +246,10 @@ impl CaptureDevice {
             CaptureDevice::Bluez(dev) => dev.channels,
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { channels, .. } => *channels,
-            CaptureDevice::File(dev) => dev.channels,
+            CaptureDevice::RawFile(dev) => dev.channels,
+            CaptureDevice::WavFile(dev) => {
+                dev.wav_info().map(|info| info.channels).unwrap_or_default()
+            }
             CaptureDevice::Stdin(dev) => dev.channels,
             #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => dev.channels,
@@ -217,7 +273,7 @@ impl CaptureDevice {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct CaptureDeviceFile {
+pub struct CaptureDeviceRawFile {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
     pub filename: String,
@@ -230,7 +286,7 @@ pub struct CaptureDeviceFile {
     pub read_bytes: Option<usize>,
 }
 
-impl CaptureDeviceFile {
+impl CaptureDeviceRawFile {
     pub fn extra_samples(&self) -> usize {
         self.extra_samples.unwrap_or_default()
     }
@@ -239,6 +295,33 @@ impl CaptureDeviceFile {
     }
     pub fn read_bytes(&self) -> usize {
         self.read_bytes.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceWavFile {
+    pub filename: String,
+    #[serde(default)]
+    pub extra_samples: Option<usize>,
+}
+
+impl CaptureDeviceWavFile {
+    pub fn extra_samples(&self) -> usize {
+        self.extra_samples.unwrap_or_default()
+    }
+
+    pub fn wav_info(&self) -> Res<WavParams> {
+        let fname = &self.filename;
+        let f = match File::open(fname) {
+            Ok(f) => f,
+            Err(err) => {
+                let msg = format!("Could not open input file '{fname}'. Reason: {err}");
+                return Err(ConfigError::new(&msg).into());
+            }
+        };
+        let file = BufReader::new(&f);
+        find_data_in_wav_stream(file)
     }
 }
 
@@ -643,45 +726,6 @@ pub enum Filter {
         description: Option<String>,
         parameters: LimiterParameters,
     },
-}
-
-#[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub enum FileFormat {
-    TEXT,
-    S16LE,
-    S24LE,
-    S24LE3,
-    S32LE,
-    FLOAT32LE,
-    FLOAT64LE,
-}
-
-impl FileFormat {
-    pub fn bits_per_sample(&self) -> usize {
-        match self {
-            FileFormat::S16LE => 16,
-            FileFormat::S24LE => 24,
-            FileFormat::S24LE3 => 24,
-            FileFormat::S32LE => 32,
-            FileFormat::FLOAT32LE => 32,
-            FileFormat::FLOAT64LE => 64,
-            FileFormat::TEXT => 0,
-        }
-    }
-
-    pub fn bytes_per_sample(&self) -> usize {
-        match self {
-            FileFormat::S16LE => 2,
-            FileFormat::S24LE => 4,
-            FileFormat::S24LE3 => 3,
-            FileFormat::S32LE => 4,
-            FileFormat::FLOAT32LE => 4,
-            FileFormat::FLOAT64LE => 8,
-            FileFormat::TEXT => 0,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1303,7 +1347,7 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
     let file = match File::open(filename) {
         Ok(f) => f,
         Err(err) => {
-            let msg = format!("Could not open config file '{filename}'. Error: {err}");
+            let msg = format!("Could not open config file '{filename}'. Reason: {err}");
             return Err(ConfigError::new(&msg).into());
         }
     };
@@ -1312,7 +1356,7 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
     let _number_of_bytes: usize = match buffered_reader.read_to_string(&mut contents) {
         Ok(number_of_bytes) => number_of_bytes,
         Err(err) => {
-            let msg = format!("Could not read config file '{filename}'. Error: {err}");
+            let msg = format!("Could not read config file '{filename}'. Reason: {err}");
             return Err(ConfigError::new(&msg).into());
         }
     };
@@ -1323,15 +1367,24 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
             return Err(ConfigError::new(&msg).into());
         }
     };
-    //Ok(configuration)
-    //apply_overrides(&mut configuration);
-    //replace_tokens_in_config(&mut configuration);
-    //replace_relative_paths_in_config(&mut configuration, filename);
     Ok(configuration)
 }
 
 fn apply_overrides(configuration: &mut Configuration) {
-    let overrides = OVERRIDES.read();
+    let mut overrides = OVERRIDES.read().clone();
+    // Only one match arm for now, might be more later.
+    #[allow(clippy::single_match)]
+    match &configuration.devices.capture {
+        CaptureDevice::WavFile(dev) => {
+            if let Ok(wav_info) = dev.wav_info() {
+                overrides.channels = Some(wav_info.channels);
+                overrides.sample_format = Some(wav_info.sample_format);
+                overrides.samplerate = Some(wav_info.sample_rate);
+                debug!("Updating overrides with values from wav input file, rate {}, format: {}, channels: {}", wav_info.sample_rate, wav_info.sample_format, wav_info.channels);
+            }
+        }
+        _ => {}
+    }
     if let Some(rate) = overrides.samplerate {
         let cfg_rate = configuration.devices.samplerate;
         let cfg_chunksize = configuration.devices.chunksize;
@@ -1351,7 +1404,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             configuration.devices.chunksize = scaled_chunksize;
             #[allow(unreachable_patterns)]
             match &mut configuration.devices.capture {
-                CaptureDevice::File(dev) => {
+                CaptureDevice::RawFile(dev) => {
                     let new_extra = dev.extra_samples() * rate / cfg_rate;
                     debug!(
                         "Scale extra samples: {} -> {}",
@@ -1384,7 +1437,7 @@ fn apply_overrides(configuration: &mut Configuration) {
         debug!("Apply override for extra_samples: {}", extra);
         #[allow(unreachable_patterns)]
         match &mut configuration.devices.capture {
-            CaptureDevice::File(dev) => {
+            CaptureDevice::RawFile(dev) => {
                 dev.extra_samples = Some(extra);
             }
             CaptureDevice::Stdin(dev) => {
@@ -1396,9 +1449,10 @@ fn apply_overrides(configuration: &mut Configuration) {
     if let Some(chans) = overrides.channels {
         debug!("Apply override for capture channels: {}", chans);
         match &mut configuration.devices.capture {
-            CaptureDevice::File(dev) => {
+            CaptureDevice::RawFile(dev) => {
                 dev.channels = chans;
             }
+            CaptureDevice::WavFile(_dev) => {}
             CaptureDevice::Stdin(dev) => {
                 dev.channels = chans;
             }
@@ -1443,9 +1497,10 @@ fn apply_overrides(configuration: &mut Configuration) {
     if let Some(fmt) = overrides.sample_format {
         debug!("Apply override for capture sample format: {}", fmt);
         match &mut configuration.devices.capture {
-            CaptureDevice::File(dev) => {
+            CaptureDevice::RawFile(dev) => {
                 dev.format = fmt;
             }
+            CaptureDevice::WavFile(_dev) => {}
             CaptureDevice::Stdin(dev) => {
                 dev.format = fmt;
             }
@@ -1790,6 +1845,31 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             )
             .into());
         }
+    }
+    if let CaptureDevice::RawFile(dev) = &conf.devices.capture {
+        let fname = &dev.filename;
+        match File::open(fname) {
+            Ok(f) => f,
+            Err(err) => {
+                let msg = format!("Could not open input file '{fname}'. Reason: {err}");
+                return Err(ConfigError::new(&msg).into());
+            }
+        };
+    }
+    if let CaptureDevice::WavFile(dev) = &conf.devices.capture {
+        let fname = &dev.filename;
+        let f = match File::open(fname) {
+            Ok(f) => f,
+            Err(err) => {
+                let msg = format!("Could not open input file '{fname}'. Reason: {err}");
+                return Err(ConfigError::new(&msg).into());
+            }
+        };
+        let file = BufReader::new(&f);
+        let _wav_info = find_data_in_wav_stream(file).map_err(|err| {
+            let msg = format!("Error reading wav file '{fname}'. Reason: {err}");
+            ConfigError::new(&msg)
+        })?;
     }
     let mut num_channels = conf.devices.capture.channels();
     let fs = conf.devices.samplerate;

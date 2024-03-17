@@ -67,7 +67,7 @@ pub fn read_coeff_file(
     let f = match File::open(filename) {
         Ok(f) => f,
         Err(err) => {
-            let msg = format!("Could not open coefficient file '{filename}'. Error: {err}");
+            let msg = format!("Could not open coefficient file '{filename}'. Reason: {err}");
             return Err(config::ConfigError::new(&msg).into());
         }
     };
@@ -90,7 +90,7 @@ pub fn read_coeff_file(
                 match line {
                     Err(err) => {
                         let msg = format!(
-                            "Can't read line {} of file '{}'. Error: {}",
+                            "Can't read line {} of file '{}'. Reason: {}",
                             nbr + 1 + skip_bytes_lines,
                             filename,
                             err
@@ -101,7 +101,7 @@ pub fn read_coeff_file(
                         Ok(val) => coefficients.push(val),
                         Err(err) => {
                             let msg = format!(
-                                "Can't parse value on line {} of file '{}'. Error: {}",
+                                "Can't parse value on line {} of file '{}'. Reason: {}",
                                 nbr + 1 + skip_bytes_lines,
                                 filename,
                                 err
@@ -147,7 +147,7 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
 
     let alldata = read_coeff_file(
         filename,
-        &params.sample_format,
+        &config::FileFormat::from_sample_format(&params.sample_format),
         params.data_length,
         params.data_offset,
     )?;
