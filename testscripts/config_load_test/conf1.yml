@@ -25,8 +25,8 @@ pipeline:
   - type: Filter
     names: 
       - testfilter
-    channel: 0
+    channels: [0]
   - type: Filter
     names: 
       - testfilter
-    channel: 1
+    channels: [1]

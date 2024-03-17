@@ -3,7 +3,7 @@ devices:
   samplerate: 44100
   chunksize: 1024
   capture:
-    type: File
+    type: RawFile
     filename: "dummy"
     channels: 2
     format: S16LE
@@ -22,11 +22,7 @@ filters:
 
 pipeline:
   - type: Filter
-    channel: 0
-    names:
-      - lowpass_fir
-  - type: Filter
-    channel: 1
+    channels: [0, 1]
     names:
       - lowpass_fir
    

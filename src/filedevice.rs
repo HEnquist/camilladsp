@@ -25,6 +25,7 @@ use crate::filedevice_bluez;
 use crate::filereader::BlockingReader;
 #[cfg(target_os = "linux")]
 use crate::filereader_nonblock::NonBlockingReader;
+use crate::wavtools::{find_data_in_wav, write_wav_header};
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingState;
@@ -38,6 +39,7 @@ pub struct FilePlaybackDevice {
     pub samplerate: usize,
     pub channels: usize,
     pub sample_format: SampleFormat,
+    pub wav_header: bool,
 }
 
 #[derive(Clone)]
@@ -61,7 +63,7 @@ pub struct FileCaptureDevice {
     pub capture_samplerate: usize,
     pub resampler_config: Option<config::Resampler>,
     pub channels: usize,
-    pub sample_format: SampleFormat,
+    pub sample_format: Option<SampleFormat>,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub extra_samples: usize,
@@ -119,6 +121,8 @@ impl PlaybackDevice for FilePlaybackDevice {
         let channels = self.channels;
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let sample_format = self.sample_format;
+        let samplerate = self.samplerate;
+        let wav_header = self.wav_header;
         let handle = thread::Builder::new()
             .name("FilePlayback".to_string())
             .spawn(move || {
@@ -140,6 +144,16 @@ impl PlaybackDevice for FilePlaybackDevice {
                         };
                         barrier.wait();
                         debug!("starting playback loop");
+                        if wav_header {
+                            match write_wav_header(&mut file, channels, sample_format, samplerate) {
+                                Ok(()) => debug!("Wrote Wav header"),
+                                Err(err) => {
+                                    status_channel
+                                        .send(StatusMessage::PlaybackError(err.to_string()))
+                                        .unwrap_or(());
+                                }
+                            }
+                        }
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
                         loop {
                             match channel.recv() {
@@ -218,38 +232,32 @@ fn nbr_capture_bytes(
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        //let new_capture_bytes = resampl.input_frames_next() * channels * store_bytes_per_sample;
-        //trace!(
-        //    "Resampler needs {} frames, will read {} bytes",
-        //    resampl.input_frames_next(),
-        //    new_capture_bytes
-        //);
-        //new_capture_bytes
         resampl.input_frames_next() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }
 }
 
-fn capture_bytes(
+// Adjust buffer size if needed, and check if capture is done
+fn limit_capture_bytes(
     bytes_to_read: usize,
     nbr_bytes_read: usize,
     capture_bytes: usize,
     buf: &mut Vec<u8>,
-) -> usize {
-    let capture_bytes = if bytes_to_read == 0
+) -> (usize, bool) {
+    let (capture_bytes, done) = if bytes_to_read == 0
         || (bytes_to_read > 0 && (nbr_bytes_read + capture_bytes) <= bytes_to_read)
     {
-        capture_bytes
+        (capture_bytes, false)
     } else {
         debug!("Stopping capture, reached read_bytes limit");
-        bytes_to_read - nbr_bytes_read
+        (bytes_to_read - nbr_bytes_read, true)
     };
     if capture_bytes > buf.len() {
         debug!("Capture buffer too small, extending");
         buf.append(&mut vec![0u8; capture_bytes - buf.len()]);
     }
-    capture_bytes
+    (capture_bytes, done)
 }
 
 fn capture_loop(
@@ -258,13 +266,14 @@ fn capture_loop(
     msg_channels: CaptureChannels,
     mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
 ) {
-    debug!("starting captureloop");
+    debug!("preparing captureloop");
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
     let bytes_per_frame = params.channels * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];
     let mut bytes_read = 0;
     let mut bytes_to_capture = chunksize_bytes;
     let mut bytes_to_capture_tmp;
+    let mut capture_done: bool;
     let mut extra_bytes_left = params.extra_bytes;
     let mut nbr_bytes_read = 0;
     let rate_measure_interval_ms = (1000.0 * params.rate_measure_interval) as u64;
@@ -328,7 +337,7 @@ fn capture_loop(
             params.channels,
             params.store_bytes_per_sample,
         );
-        bytes_to_capture_tmp = capture_bytes(
+        (bytes_to_capture_tmp, capture_done) = limit_capture_bytes(
             params.read_bytes,
             nbr_bytes_read,
             bytes_to_capture,
@@ -336,8 +345,8 @@ fn capture_loop(
         );
         //let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         let read_res = file.read(&mut buf[0..bytes_to_capture_tmp]);
-        match read_res {
-            Ok(ReadResult::EndOfFile(bytes)) => {
+        match (read_res, capture_done) {
+            (Ok(ReadResult::EndOfFile(bytes)), _) | (Ok(ReadResult::Complete(bytes)), true) => {
                 bytes_read = bytes;
                 nbr_bytes_read += bytes;
                 if bytes > 0 {
@@ -377,7 +386,7 @@ fn capture_loop(
                     break;
                 }
             }
-            Ok(ReadResult::Timeout(bytes)) => {
+            (Ok(ReadResult::Timeout(bytes)), _) => {
                 bytes_read = bytes;
                 nbr_bytes_read += bytes;
                 if bytes > 0 {
@@ -412,7 +421,8 @@ fn capture_loop(
                     continue;
                 }
             }
-            Ok(ReadResult::Complete(bytes)) => {
+            (Ok(ReadResult::Complete(bytes)), false) => {
+                trace!("successfully read {} bytes", bytes);
                 if stalled {
                     debug!("Leaving stalled state, resuming processing");
                     stalled = false;
@@ -463,7 +473,7 @@ fn capture_loop(
                     trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                 }
             }
-            Err(err) => {
+            (Err(err), _) => {
                 debug!("Encountered a read error");
                 msg_channels
                     .status
@@ -543,8 +553,28 @@ impl CaptureDevice for FileCaptureDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let capture_samplerate = self.capture_samplerate;
-        let channels = self.channels;
-        let store_bytes_per_sample = self.sample_format.bytes_per_sample();
+        let mut channels = self.channels;
+        let mut skip_bytes = self.skip_bytes;
+        let mut read_bytes = self.read_bytes;
+        let sample_format = match &self.source {
+            CaptureSource::Filename(fname) => {
+                if self.sample_format.is_none() {
+                    // No format was given, try to get from the file.
+                    // Only works if the file is in wav format.
+                    // Also update channels and read & skip bytes.
+                    let wav_info = find_data_in_wav(fname)?;
+                    skip_bytes = wav_info.data_offset;
+                    read_bytes = wav_info.data_length;
+                    channels = wav_info.channels;
+                    wav_info.sample_format
+                } else {
+                    self.sample_format.unwrap()
+                }
+            }
+            _ => self.sample_format.unwrap(),
+        };
+        let store_bytes_per_sample = sample_format.bytes_per_sample();
+        let extra_bytes = self.extra_samples * store_bytes_per_sample * channels;
         let buffer_bytes = 2.0f32.powf(
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
                 .log2()
@@ -553,12 +583,8 @@ impl CaptureDevice for FileCaptureDevice {
             * 2
             * channels
             * store_bytes_per_sample;
-        let sample_format = self.sample_format;
         let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
-        let extra_bytes = self.extra_samples * store_bytes_per_sample * channels;
-        let skip_bytes = self.skip_bytes;
-        let read_bytes = self.read_bytes;
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let stop_on_rate_change = self.stop_on_rate_change;

@@ -1,3 +1,12 @@
+## v3.0.0
+New features:
+- Add a signal generator capture device.
+- Optionally write wav header when outputting to file or stdout.
+- Add `WavFile` capture device type for reading wav files.
+Changes:
+- Rename `File` capture device to `RawFile`.
+- Filter pipeline steps take a list of channels to filter instead of a single one.
+
 ## v2.0.3
 Bugfixes:
 - MacOS: Fix using Aggregate devices for playback.

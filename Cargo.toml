@@ -67,8 +67,8 @@ tungstenite = { version = "0.21.0", optional = true }
 native-tls = { version = "0.2.7", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-rubato = "0.14.1"
-#rubato = { git = "https://github.com/HEnquist/rubato", branch = "next-0.13" }
+rubato = "0.15.0"
+#rubato = { git = "https://github.com/HEnquist/rubato", branch = "optional_fft" }
 cpal = { version = "0.13.3", optional = true }
 #rawsample = { path = "../../rust/rawsample" }
 #rawsample = { git = "https://github.com/HEnquist/rawsample", branch = "main" }

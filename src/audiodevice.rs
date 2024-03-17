@@ -16,6 +16,7 @@ use crate::coreaudiodevice;
 ))]
 use crate::cpaldevice;
 use crate::filedevice;
+use crate::generatordevice;
 #[cfg(feature = "pulse-backend")]
 use crate::pulsedevice;
 #[cfg(target_os = "windows")]
@@ -269,6 +270,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             filename,
             format,
+            wav_header,
             ..
         } => Box::new(filedevice::FilePlaybackDevice {
             destination: filedevice::PlaybackDest::Filename(filename),
@@ -276,15 +278,20 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             chunksize: conf.chunksize,
             channels,
             sample_format: format,
+            wav_header: wav_header.unwrap_or(false),
         }),
         config::PlaybackDevice::Stdout {
-            channels, format, ..
+            channels,
+            format,
+            wav_header,
+            ..
         } => Box::new(filedevice::FilePlaybackDevice {
             destination: filedevice::PlaybackDest::Stdout,
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
             sample_format: format,
+            wav_header: wav_header.unwrap_or(false),
         }),
         #[cfg(target_os = "macos")]
         config::PlaybackDevice::CoreAudio(ref dev) => {
@@ -571,19 +578,35 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_threshold: conf.silence_threshold(),
             silence_timeout: conf.silence_timeout(),
         }),
-        config::CaptureDevice::File(ref dev) => Box::new(filedevice::FileCaptureDevice {
+        config::CaptureDevice::RawFile(ref dev) => Box::new(filedevice::FileCaptureDevice {
             source: filedevice::CaptureSource::Filename(dev.filename.clone()),
             samplerate: conf.samplerate,
             capture_samplerate,
             resampler_config: conf.resampler,
             chunksize: conf.chunksize,
             channels: dev.channels,
-            sample_format: dev.format,
+            sample_format: Some(dev.format),
             extra_samples: dev.extra_samples(),
             silence_threshold: conf.silence_threshold(),
             silence_timeout: conf.silence_timeout(),
             skip_bytes: dev.skip_bytes(),
             read_bytes: dev.read_bytes(),
+            stop_on_rate_change: conf.stop_on_rate_change(),
+            rate_measure_interval: conf.rate_measure_interval(),
+        }),
+        config::CaptureDevice::WavFile(ref dev) => Box::new(filedevice::FileCaptureDevice {
+            source: filedevice::CaptureSource::Filename(dev.filename.clone()),
+            samplerate: conf.samplerate,
+            capture_samplerate,
+            resampler_config: conf.resampler,
+            chunksize: conf.chunksize,
+            channels: 0,
+            sample_format: None,
+            extra_samples: dev.extra_samples(),
+            silence_threshold: conf.silence_threshold(),
+            silence_timeout: conf.silence_timeout(),
+            skip_bytes: 0,
+            read_bytes: 0,
             stop_on_rate_change: conf.stop_on_rate_change(),
             rate_measure_interval: conf.rate_measure_interval(),
         }),
@@ -594,7 +617,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             resampler_config: conf.resampler,
             chunksize: conf.chunksize,
             channels: dev.channels,
-            sample_format: dev.format,
+            sample_format: Some(dev.format),
             extra_samples: dev.extra_samples(),
             silence_threshold: conf.silence_threshold(),
             silence_timeout: conf.silence_timeout(),
@@ -603,6 +626,14 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             stop_on_rate_change: conf.stop_on_rate_change(),
             rate_measure_interval: conf.rate_measure_interval(),
         }),
+        config::CaptureDevice::SignalGenerator { signal, channels } => {
+            Box::new(generatordevice::GeneratorDevice {
+                signal,
+                samplerate: conf.samplerate,
+                channels,
+                chunksize: conf.chunksize,
+            })
+        }
         #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
         config::CaptureDevice::Bluez(ref dev) => Box::new(filedevice::FileCaptureDevice {
             source: filedevice::CaptureSource::BluezDBus(dev.service(), dev.dbus_path.clone()),
@@ -611,7 +642,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             resampler_config: conf.resampler,
             chunksize: conf.chunksize,
             channels: dev.channels,
-            sample_format: dev.format,
+            sample_format: Some(dev.format),
             extra_samples: 0,
             silence_threshold: conf.silence_threshold(),
             silence_timeout: conf.silence_timeout(),
