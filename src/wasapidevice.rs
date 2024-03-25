@@ -15,8 +15,10 @@ use std::thread;
 use std::time::Duration;
 use wasapi;
 use wasapi::DeviceCollection;
-use windows::w;
-use windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW;
+use windows::core::w;
+use windows::Win32::System::Threading::{
+    AvSetMmThreadCharacteristicsW, AvSetMmThreadPriority, AVRT_PRIORITY_HIGH,
+};
 
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -120,6 +122,43 @@ fn wave_format(
     }
 }
 
+fn get_supported_wave_format(
+    audio_client: &wasapi::AudioClient,
+    sample_format: &SampleFormat,
+    samplerate: usize,
+    channels: usize,
+    sharemode: &wasapi::ShareMode,
+) -> Res<wasapi::WaveFormat> {
+    let wave_format = wave_format(sample_format, samplerate, channels);
+    match sharemode {
+        wasapi::ShareMode::Exclusive => {
+            return audio_client.is_supported_exclusive_with_quirks(&wave_format);
+        }
+        wasapi::ShareMode::Shared => {
+            match audio_client.is_supported(&wave_format, &sharemode) {
+                Ok(None) => {
+                    debug!("Device supports format {:?}", wave_format);
+                    return Ok(wave_format);
+                }
+                Ok(Some(modified)) => {
+                    let msg = format!(
+                        "Device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
+                        wave_format, modified
+                    );
+                    return Err(ConfigError::new(&msg).into());
+                }
+                Err(err) => {
+                    let msg = format!(
+                        "Device doesn't support format:\n{:#?}\nError: {}",
+                        wave_format, err
+                    );
+                    return Err(ConfigError::new(&msg).into());
+                }
+            };
+        }
+    }
+}
+
 fn open_playback(
     devname: &Option<String>,
     samplerate: usize,
@@ -150,39 +189,28 @@ fn open_playback(
     trace!("Found playback device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got playback iaudioclient");
-    let wave_format = wave_format(sample_format, samplerate, channels);
-    match audio_client.is_supported(&wave_format, &sharemode) {
-        Ok(None) => {
-            debug!("Playback device supports format {:?}", wave_format)
-        }
-        Ok(Some(modified)) => {
-            let msg = format!(
-                "Playback device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
-                wave_format, modified
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-        Err(err) => {
-            let msg = format!(
-                "Playback device doesn't support format:\n{:#?}\nError: {}",
-                wave_format, err
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-    };
+    let wave_format = get_supported_wave_format(
+        &audio_client,
+        sample_format,
+        samplerate,
+        channels,
+        &sharemode,
+    )?;
     let (def_time, min_time) = audio_client.get_periods()?;
-    debug!(
-        "playback default period {}, min period {}",
-        def_time, min_time
-    );
+    let aligned_time =
+        audio_client.calculate_aligned_period_near(def_time, Some(128), &wave_format)?;
     audio_client.initialize_client(
         &wave_format,
-        def_time,
+        aligned_time,
         &wasapi::Direction::Render,
         &sharemode,
         false,
     )?;
-    debug!("initialized capture");
+    debug!(
+        "playback default period {}, min period {}, aligned period {}",
+        def_time, min_time, aligned_time
+    );
+    debug!("initialized playback audio client");
     let handle = audio_client.set_get_eventhandle()?;
     let render_client = audio_client.get_audiorenderclient()?;
     debug!("Opened Wasapi playback device {:?}", devname);
@@ -232,26 +260,13 @@ fn open_capture(
     trace!("Found capture device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got capture iaudioclient");
-    let wave_format = wave_format(sample_format, samplerate, channels);
-    match audio_client.is_supported(&wave_format, &sharemode) {
-        Ok(None) => {
-            debug!("Capture device supports format {:?}", wave_format)
-        }
-        Ok(Some(modified)) => {
-            let msg = format!(
-                "Capture device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
-                wave_format, modified
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-        Err(err) => {
-            let msg = format!(
-                "Capture device doesn't support format:\n{:#?}\nError: {}",
-                wave_format, err
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-    };
+    let wave_format = get_supported_wave_format(
+        &audio_client,
+        sample_format,
+        samplerate,
+        channels,
+        &sharemode,
+    )?;
     let (def_time, min_time) = audio_client.get_periods()?;
     debug!(
         "capture default period {}, min period {}",
@@ -264,7 +279,7 @@ fn open_capture(
         &sharemode,
         loopback,
     )?;
-    debug!("initialized capture");
+    debug!("initialized capture audio client");
     let handle = audio_client.set_get_eventhandle()?;
     trace!("capture got event handle");
     let capture_client = audio_client.get_audiocaptureclient()?;
@@ -324,11 +339,12 @@ fn playback_loop(
 
     // Raise priority
     let mut task_idx = 0;
-    unsafe {
-        let _ = AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx);
-    }
+    let task_handle = unsafe { AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx)? };
     if task_idx > 0 {
         debug!("Playback thread raised priority, task index: {}", task_idx);
+        unsafe {
+            AvSetMmThreadPriority(task_handle, AVRT_PRIORITY_HIGH)?;
+        }
     } else {
         warn!("Failed to raise playback thread priority");
     }
@@ -351,7 +367,7 @@ fn playback_loop(
             device_time = device_prevtime + buffer_free_frame_count as f64 / samplerate;
         }
         trace!(
-            "Device time counted up by {} s",
+            "Device time counted up by {:.4} s",
             device_time - device_prevtime
         );
         if buffer_free_frame_count > 0
@@ -359,7 +375,7 @@ fn playback_loop(
                 > 1.75 * (buffer_free_frame_count as f64 / samplerate)
         {
             warn!(
-                "Missing event! Resetting stream. Interval {} s, expected {} s",
+                "Missing event! Resetting stream. Interval {:.4} s, expected {:.4} s",
                 device_time - device_prevtime,
                 buffer_free_frame_count as f64 / samplerate
             );
@@ -463,11 +479,12 @@ fn capture_loop(
 
     // Raise priority
     let mut task_idx = 0;
-    unsafe {
-        let _ = AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx);
-    }
+    let task_handle = unsafe { AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx)? };
     if task_idx > 0 {
         debug!("Capture thread raised priority, task index: {}", task_idx);
+        unsafe {
+            AvSetMmThreadPriority(task_handle, AVRT_PRIORITY_HIGH)?;
+        }
     } else {
         warn!("Failed to raise capture thread priority");
     }
