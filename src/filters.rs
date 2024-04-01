@@ -382,6 +382,7 @@ impl Pipeline {
         let volume = basicfilters::Volume::new(
             "default",
             conf.devices.ramp_time(),
+            conf.devices.volume_limit(),
             current_volume,
             mute,
             conf.devices.chunksize,

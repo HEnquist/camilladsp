@@ -565,6 +565,8 @@ pub struct Devices {
     pub rate_measure_interval: Option<f32>,
     #[serde(default)]
     pub volume_ramp_time: Option<f32>,
+    #[serde(default)]
+    pub volume_limit: Option<f32>,
 }
 
 // Getters for all the defaults
@@ -607,6 +609,10 @@ impl Devices {
 
     pub fn ramp_time(&self) -> f32 {
         self.volume_ramp_time.unwrap_or(400.0)
+    }
+
+    pub fn volume_limit(&self) -> f32 {
+        self.volume_limit.unwrap_or(50.0)
     }
 }
 
@@ -965,11 +971,16 @@ pub struct VolumeParameters {
     #[serde(default)]
     pub ramp_time: Option<f32>,
     pub fader: VolumeFader,
+    pub limit: Option<f32>,
 }
 
 impl VolumeParameters {
     pub fn ramp_time(&self) -> f32 {
         self.ramp_time.unwrap_or(400.0)
+    }
+
+    pub fn limit(&self) -> f32 {
+        self.limit.unwrap_or(50.0)
     }
 }
 
@@ -1764,6 +1775,12 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     if conf.devices.ramp_time() < 0.0 {
         return Err(ConfigError::new("Volume ramp time cannot be negative").into());
+    }
+    if conf.devices.volume_limit() > 50.0 {
+        return Err(ConfigError::new("Volume limit cannot be above +50 dB").into());
+    }
+    if conf.devices.volume_limit() < -150.0 {
+        return Err(ConfigError::new("Volume limit cannot be less than -150 dB").into());
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
