@@ -5,7 +5,7 @@ devices:
   target_level: 512
   adjust_period: 10
   playback:
-    type: File
+    type: RawFile
     channels: 2
     filename: "result_i32.raw"
     format: S32LE

@@ -2,10 +2,14 @@
 New features:
 - Add a signal generator capture device.
 - Optionally write wav header when outputting to file or stdout.
+- Add `WavFile` capture device type for reading wav files.
+- Optional limit for volume controls.
 Changes:
+- Rename `File` capture device to `RawFile`.
 - Filter pipeline steps take a list of channels to filter instead of a single one.
 Bugfixes:
-- Fix compatibility issues for some WASAPI devices.
+- Windows: Fix compatibility issues for some WASAPI devices.
+- MacOS: Support devices appearing as separate capture and playback devices.
 
 ## v2.0.3
 Bugfixes:

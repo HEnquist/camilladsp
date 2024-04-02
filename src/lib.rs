@@ -350,7 +350,8 @@ impl fmt::Display for ProcessingState {
 pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     let mut playbacktypes = vec!["File".to_owned(), "Stdout".to_owned()];
     let mut capturetypes = vec![
-        "File".to_owned(),
+        "RawFile".to_owned(),
+        "WavFile".to_owned(),
         "Stdin".to_owned(),
         "SignalGenerator".to_owned(),
     ];
