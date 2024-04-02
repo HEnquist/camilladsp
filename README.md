@@ -2199,30 +2199,6 @@ REW V5.20.14 and later is able to export the filters in the CamillaDSP YAML form
 Note that the generated YAML file is not a complete CamillaDSP configuration.
 It contains only filter definitions and pipeline steps, that can be pasted into a CamillaDSP config file.
 
-## Visualizing the config
-__Please note that the `show_config.py` script mentioned here is deprecated, and has been replaced by the `plotcamillaconf` tool from the pycamilladsp-plot library.__
-The new tool provides the same functionality as well as many improvements.
-The `show_config.py` does not support any of the newer config options, and the script will be removed in a future version.
-
-A Python script is included to view the configuration.
-This plots the transfer functions of all included filters, as well as plots a flowchart of the entire processing pipeline. Run it with:
-```
-python show_config.py /path/to/config.yml
-```
-
-Example flowchart:
-
-![Example](pipeline.png)
-
-Note that the script assumes a valid configuration file and will not give any helpful error messages if it's not,
-so it's a good idea to first use CamillaDSP to validate the file.
-The script requires the following:
-* Python 3
-* Numpy
-* Matplotlib
-* PyYAML
-
-
 # Related projects
 Other projects using CamillaDSP:
 * https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels.
