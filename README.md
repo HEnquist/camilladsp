@@ -854,13 +854,16 @@ The `title` property is intended for a short title, while `description` can be l
 ## Volume control
 There is a volume control that is enabled regardless of what configuration file is loaded.
 
-CamillaDSP defines a total of five control "channels" for volume.
-The default volume control reacts to the `Main` control channel.
+CamillaDSP defines a total of five control "channels" for volume called "faders".
+The default volume control reacts to the `Main` fader.
 When the volume or mute setting is changed, the gain is smoothly ramped to the new setting.
 The duration of this ramp can be customized via the `volume_ramp_time` parameter
 in the `devices` section.
 The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
 
+The range of the volume control can be limited.
+Set the `volume_limit` to the desired maximum volume value.
+This setting is optional. If left out or set to `null`, it defaults to +50 dB.
 
 In addition to this, there are four additional control channels, named `Aux1` to `Aux4`.
 These can be used to implement for example a separate volume control for a headphone output,
@@ -883,6 +886,7 @@ devices:
   stop_on_rate_change: false (*)
   rate_measure_interval: 1.0 (*)
   volume_ramp_time: 400.0 (*)
+  volume_limit: -12.0 (*)
   capture:
     type: Pulse
     channels: 2
@@ -1517,6 +1521,10 @@ The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds
 The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
 The value will be rounded to the nearest number of chunks.
 
+The range of the volume control can be limited via the optional `limit` parameter.
+This sets a limit for the maximum value of the volume.
+If left out or set to `null`, it defaults to +50 dB.
+
 Example Volume filter:
 ```
 filters:
@@ -1524,6 +1532,7 @@ filters:
     type: Volume
     parameters:
       ramp_time: 200 (*)
+      limit: 10.0 (*)
       fader: Aux1
 ```
 

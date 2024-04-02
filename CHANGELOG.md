@@ -3,6 +3,7 @@ New features:
 - Add a signal generator capture device.
 - Optionally write wav header when outputting to file or stdout.
 - Add `WavFile` capture device type for reading wav files.
+- Optional limit for volume controls.
 Changes:
 - Rename `File` capture device to `RawFile`.
 - Filter pipeline steps take a list of channels to filter instead of a single one.
