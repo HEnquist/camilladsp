@@ -77,7 +77,7 @@ impl Volume {
             chunksize,
             processing_params,
             fader,
-            volume_limit: limit
+            volume_limit: limit,
         }
     }
 
@@ -131,7 +131,7 @@ impl Volume {
         let shared_mute = self.processing_params.is_mute(self.fader);
 
         // are we above the set limit?
-         let target_volume = shared_vol.min(self.volume_limit);
+        let target_volume = shared_vol.min(self.volume_limit);
 
         // Volume setting changed
         if (target_volume - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
@@ -250,15 +250,6 @@ impl Filter for Volume {
             self.volume_limit = conf.limit();
             if (self.volume_limit as PrcFmt) < self.current_volume {
                 self.current_volume = self.volume_limit as PrcFmt;
-            }
-            if self.volume_limit < self.target_volume {
-                self.target_volume = self.volume_limit;
-                self.target_linear_gain = if self.mute {
-                    0.0
-                } else {
-                    let tempgain: PrcFmt = 10.0;
-                    tempgain.powf(self.target_volume as PrcFmt / 20.0)
-                };
             }
         } else {
             // This should never happen unless there is a bug somewhere else
