@@ -21,7 +21,7 @@ use std::time::Duration;
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
     audio_unit_from_device_id, find_matching_physical_format, get_audio_device_ids,
-    get_default_device_id, get_device_id_from_name, get_device_name, get_hogging_pid,
+    get_audio_device_supports_scope, get_default_device_id, get_device_name, get_hogging_pid,
     get_supported_physical_stream_formats, set_device_physical_stream_format,
     set_device_sample_rate, toggle_hog_mode, AliveListener, RateListener,
 };
@@ -62,6 +62,7 @@ fn take_ownership(device_id: AudioDeviceID) -> Res<pid_t> {
 }
 
 fn release_ownership(device_id: AudioDeviceID) -> Res<()> {
+    trace!("Releasing any device ownership for device id {}", device_id);
     let device_owner_pid = match get_hogging_pid(device_id) {
         Ok(pid) => pid,
         Err(CoreAudioError::AudioCodec(AudioCodecError::UnknownProperty)) => return Ok(()),
@@ -82,6 +83,26 @@ fn release_ownership(device_id: AudioDeviceID) -> Res<()> {
         }
     }
     Ok(())
+}
+
+/// Find the device id for a device name and scope (input or output).
+/// Some devices are listed as two device ids with the same name,
+/// where one supports playback and the other capture.
+pub fn get_device_id_from_name_and_scope(name: &str, input: bool) -> Option<AudioDeviceID> {
+    let scope = match input {
+        false => Scope::Output,
+        true => Scope::Input,
+    };
+    if let Ok(all_ids) = get_audio_device_ids() {
+        return all_ids
+            .iter()
+            .find(|id| {
+                get_device_name(**id).unwrap_or_default() == name
+                    && get_audio_device_supports_scope(**id, scope).unwrap_or_default()
+            })
+            .copied();
+    }
+    None
 }
 
 #[derive(Clone, Debug)]
@@ -171,7 +192,7 @@ fn open_coreaudio_playback(
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if let Some(name) = devname {
         trace!("Available playback devices: {:?}", list_device_names(false));
-        match get_device_id_from_name(name) {
+        match get_device_id_from_name_and_scope(name, false) {
             Some(dev) => dev,
             None => {
                 let msg = format!("Could not find playback device '{name}'");
@@ -187,10 +208,12 @@ fn open_coreaudio_playback(
             }
         }
     };
+    trace!("Playback device id: {}", device_id);
 
     let mut audio_unit = audio_unit_from_device_id(device_id, false)
         .map_err(|e| ConfigError::new(&format!("{e}")))?;
 
+    trace!("Created playback audio unit");
     if exclusive {
         take_ownership(device_id)?;
     } else {
@@ -230,6 +253,7 @@ fn open_coreaudio_playback(
             return Err(ConfigError::new(msg).into());
         }
     } else {
+        trace!("Set playback device sample rate");
         set_device_sample_rate(device_id, samplerate as f64)
             .map_err(|e| ConfigError::new(&format!("{e}")))?;
     }
@@ -259,7 +283,7 @@ fn open_coreaudio_capture(
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if let Some(name) = devname {
         debug!("Available capture devices: {:?}", list_device_names(true));
-        match get_device_id_from_name(name) {
+        match get_device_id_from_name_and_scope(name, true) {
             Some(dev) => dev,
             None => {
                 let msg = format!("Could not find capture device '{name}'");
