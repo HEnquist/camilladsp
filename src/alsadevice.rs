@@ -179,11 +179,18 @@ fn play_buffer(
                 return Ok(PlaybackResult::Stalled);
             }
             Err(err) => {
-                warn!(
-                    "PB: device failed while waiting for available buffer space, error: {}",
-                    err
-                );
-                return Err(Box::new(err));
+                if err.nix_error() == alsa::nix::errno::Errno::EPIPE {
+                    warn!("PB: wait underrun, trying to recover. Error: {}", err);
+                    trace!("snd_pcm_prepare");
+                    // Would recover() be better than prepare()?
+                    pcmdevice.prepare()?;
+                } else {
+                    warn!(
+                        "PB: device failed while waiting for available buffer space, error: {}",
+                        err
+                    );
+                    return Err(Box::new(err));
+                }
             }
         }
 
@@ -209,11 +216,13 @@ fn play_buffer(
                     continue;
                 }
             }
-            Err(err) => {
-                if err.nix_error() == alsa::nix::errno::Errno::EAGAIN {
+            Err(err) => match err.nix_error() {
+                alsa::nix::errno::Errno::EAGAIN => {
                     trace!("PB: encountered EAGAIN error on write, trying again");
-                } else {
-                    warn!("PB: write error, trying to recover. Error: {}", err);
+                    continue;
+                }
+                alsa::nix::errno::Errno::EPIPE => {
+                    warn!("PB: write underrun, trying to recover. Error: {}", err);
                     trace!("snd_pcm_prepare");
                     // Would recover() be better than prepare()?
                     pcmdevice.prepare()?;
@@ -221,7 +230,11 @@ fn play_buffer(
                     io.writei(buffer)?;
                     break;
                 }
-            }
+                _ => {
+                    warn!("PB: write failed, error: {}", err);
+                    return Err(Box::new(err));
+                }
+            },
         };
     }
     Ok(PlaybackResult::Normal)
@@ -278,11 +291,18 @@ fn capture_buffer(
                 return Ok(CaptureResult::Stalled);
             }
             Err(err) => {
-                warn!(
-                    "Capture device failed while waiting for available frames, error: {}",
-                    err
-                );
-                return Err(Box::new(err));
+                if err.nix_error() == alsa::nix::errno::Errno::EPIPE {
+                    warn!("Capture: wait overrun, trying to recover. Error: {}", err);
+                    trace!("snd_pcm_prepare");
+                    // Would recover() be better than prepare()?
+                    pcmdevice.prepare()?;
+                } else {
+                    warn!(
+                        "Capture: device failed while waiting for available frames, error: {}",
+                        err
+                    );
+                    return Err(Box::new(err));
+                }
             }
         }
         match io.readi(buffer) {
@@ -303,14 +323,19 @@ fn capture_buffer(
             }
             Err(err) => match err.nix_error() {
                 alsa::nix::errno::Errno::EIO => {
-                    warn!("Capture failed with error: {}", err);
+                    warn!("Capture: read failed with error: {}", err);
                     return Err(Box::new(err));
                 }
-                // TODO: do we need separate handling of xruns that happen in the tiny
-                // window between state() and readi()?
+                alsa::nix::errno::Errno::EAGAIN => {
+                    trace!("Capture: encountered EAGAIN error on read, trying again");
+                    continue;
+                }
                 alsa::nix::errno::Errno::EPIPE => {
-                    warn!("Capture failed, error: {}", err);
-                    return Err(Box::new(err));
+                    warn!("Capture: read overrun, trying to recover. Error: {}", err);
+                    trace!("snd_pcm_prepare");
+                    // Would recover() be better than prepare()?
+                    pcmdevice.prepare()?;
+                    continue;
                 }
                 _ => {
                     warn!("Capture failed, error: {}", err);
