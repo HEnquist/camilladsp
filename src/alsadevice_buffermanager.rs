@@ -91,6 +91,7 @@ pub trait DeviceBufferManager {
                     hwp.set_period_size_near(alt_period_frames, alsa::ValueOr::Nearest)?;
             }
         }
+        debug!("Device is using a period size of {} frames", data.period);
         Ok(())
     }
 
