@@ -122,7 +122,7 @@ fn play_buffer(
     io: &alsa::pcm::IO<u8>,
     millis_per_frame: f32,
     bytes_per_frame: usize,
-    buf_manager: &mut PlaybackBufferManager,
+    buf_manager: &PlaybackBufferManager,
 ) -> Res<PlaybackResult> {
     let playback_state = pcmdevice.state_raw();
     xtrace!("Playback state {:?}", playback_state);
@@ -424,7 +424,7 @@ fn playback_loop_bytes(
     channels: PlaybackChannels,
     pcmdevice: &alsa::PCM,
     params: PlaybackParams,
-    buf_manager: &mut PlaybackBufferManager,
+    buf_manager: &PlaybackBufferManager,
 ) {
     let mut timer = countertimer::Stopwatch::new();
     let mut chunk_stats = ChunkStats {
@@ -990,7 +990,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             audio: channel,
                             status: status_channel,
                         };
-                        playback_loop_bytes(pb_channels, &pcmdevice, pb_params, &mut buf_manager);
+                        playback_loop_bytes(pb_channels, &pcmdevice, pb_params, &buf_manager);
                     }
                     Err(err) => {
                         let send_result =
