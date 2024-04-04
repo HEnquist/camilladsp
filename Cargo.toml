@@ -52,13 +52,13 @@ serde_json = "1.0"
 serde_with = "1.11"
 realfft = "3.0.0"
 #realfft = { git = "https://github.com/HEnquist/realfft", branch = "better_errors" }
-fftw = { version = "0.7.0", optional = true }
+fftw = { version = "0.8.0", optional = true }
 num-complex = "0.4"
 num-traits = "0.2"
 signal-hook = "0.3.8"
 rand = { version = "0.8.3", default_features = false, features = ["small_rng", "std"] }
 rand_distr = "0.4.3"
-clap = "2.33.0"
+clap = { version = "4.5.4", features = ["cargo"] }
 lazy_static = "1.4.0"
 log = "0.4.14"
 flexi_logger = { version = "0.27.2", features = ["async", "colors"] }

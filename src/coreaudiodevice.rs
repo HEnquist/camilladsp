@@ -608,7 +608,7 @@ fn nbr_capture_frames(
 ) -> usize {
     if let Some(resampl) = &resampler {
         #[cfg(feature = "debug")]
-        trace!("Resampler needs {resampl.input_frames_next()} frames");
+        trace!("Resampler needs {} frames", resampl.input_frames_next());
         resampl.input_frames_next()
     } else {
         capture_frames
