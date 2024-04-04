@@ -461,6 +461,7 @@ fn playback_loop_bytes(
     }
     let mut capture_speed: f64 = 1.0;
     let mut prev_delay_diff: Option<f64> = None;
+    trace!("PB: {:?}", buf_manager);
     loop {
         let eos_in_drain = if device_stalled {
             drain_check_eos(&channels.audio)
@@ -490,7 +491,6 @@ fn playback_loop_bytes(
                 conversion_result =
                     chunk_to_buffer_rawbytes(&chunk, &mut buffer, &params.sample_format);
 
-                trace!("PB: {:?}", buf_manager);
                 let playback_res = play_buffer(
                     &buffer,
                     pcmdevice,
