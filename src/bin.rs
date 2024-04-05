@@ -26,7 +26,7 @@ extern crate flexi_logger;
 #[macro_use]
 extern crate log;
 
-use clap::{crate_authors, crate_description, crate_version, App, AppSettings, Arg};
+use clap::{crate_authors, crate_description, crate_version, Arg, ArgAction, Command};
 use crossbeam_channel::select;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::env;
@@ -448,215 +448,204 @@ fn main_process() -> i32 {
         playback_types
     );
 
-    let clapapp = App::new("CamillaDSP")
+    let clapapp = Command::new("CamillaDSP")
         .version(crate_version!())
-        .about(longabout.as_str())
+        .about(longabout)
         .author(crate_authors!())
-        .setting(AppSettings::ArgRequiredElseHelp)
+        //.setting(AppSettings::ArgRequiredElseHelp)
         .arg(
-            Arg::with_name("configfile")
+            Arg::new("configfile")
                 .help("The configuration file to use")
                 .index(1)
-                //.required(true),
-                .required_unless_one(&["wait", "statefile"]),
+                .value_name("CONFIGFILE")
+                .action(ArgAction::Set)
+                .value_parser(clap::builder::NonEmptyStringValueParser::new())
+                .required_unless_present_any(["wait", "statefile"]),
         )
         .arg(
-            Arg::with_name("statefile")
+            Arg::new("statefile")
                 .help("Use the given file to persist the state")
-                .short("s")
+                .short('s')
                 .long("statefile")
-                .takes_value(true)
-                .display_order(2),
+                .value_name("STATEFILE")
+                .action(ArgAction::Set)
+                .display_order(2)
+                .value_parser(clap::builder::NonEmptyStringValueParser::new()),
         )
         .arg(
-            Arg::with_name("check")
+            Arg::new("check")
                 .help("Check config file and exit")
-                .short("c")
+                .short('c')
                 .long("check")
-                .requires("configfile"),
+                .requires("configfile")
+                .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::with_name("verbosity")
-                .short("v")
-                .multiple(true)
-                .help("Increase message verbosity"),
+            Arg::new("verbosity")
+                .help("Increase message verbosity")
+                .short('v')
+                .action(ArgAction::Count),
         )
         .arg(
-            Arg::with_name("loglevel")
-                .short("l")
-                .long("loglevel")
-                .display_order(100)
-                .takes_value(true)
-                .possible_value("trace")
-                .possible_value("debug")
-                .possible_value("info")
-                .possible_value("warn")
-                .possible_value("error")
-                .possible_value("off")
+            Arg::new("loglevel")
                 .help("Set log level")
-                .conflicts_with("verbosity"),
-        )
-        .arg(
-            Arg::with_name("logfile")
-                .short("o")
-                .long("logfile")
+                .short('l')
+                .long("loglevel")
+                .value_name("LOGLEVEL")
                 .display_order(100)
-                .takes_value(true)
-                .help("Write logs to file"),
+                .conflicts_with("verbosity")
+                .action(ArgAction::Set)
+                .value_parser(["trace", "debug", "info", "warn", "error", "off"]),
         )
         .arg(
-            Arg::with_name("gain")
+            Arg::new("logfile")
+                .help("Write logs to file")
+                .short('o')
+                .long("logfile")
+                .value_name("LOGFILE")
+                .display_order(100)
+                .action(ArgAction::Set),
+        )
+        .arg(
+            Arg::new("gain")
                 .help("Set initial gain in dB for Volume and Loudness filters")
-                .short("g")
+                .short('g')
                 .long("gain")
+                .value_name("GAIN")
                 .display_order(200)
-                .takes_value(true)
-                .validator(|v: String| -> Result<(), String> {
+                .action(ArgAction::Set)
+                .value_parser(|v: &str| -> Result<f32, String> {
                     if let Ok(gain) = v.parse::<f32>() {
                         if (-120.0..=20.0).contains(&gain) {
-                            return Ok(());
+                            return Ok(gain);
                         }
                     }
                     Err(String::from("Must be a number between -120 and +20"))
                 }),
         )
         .arg(
-            Arg::with_name("mute")
+            Arg::new("mute")
                 .help("Start with Volume and Loudness filters muted")
-                .short("m")
+                .short('m')
                 .long("mute")
-                .display_order(200),
+                .display_order(200)
+                .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::with_name("samplerate")
+            Arg::new("samplerate")
                 .help("Override samplerate in config")
-                .short("r")
+                .short('r')
                 .long("samplerate")
+                .value_name("SAMPLERATE")
                 .display_order(300)
-                .takes_value(true)
-                .validator(|v: String| -> Result<(), String> {
-                    if let Ok(rate) = v.parse::<usize>() {
-                        if rate > 0 {
-                            return Ok(());
-                        }
-                    }
-                    Err(String::from("Must be an integer > 0"))
-                }),
+                .action(ArgAction::Set)
+                .value_parser(clap::builder::RangedU64ValueParser::<usize>::new().range(1..)),
         )
         .arg(
-            Arg::with_name("channels")
+            Arg::new("channels")
                 .help("Override number of channels of capture device in config")
-                .short("n")
+                .short('n')
                 .long("channels")
+                .value_name("CHANNELS")
                 .display_order(300)
-                .takes_value(true)
-                .validator(|v: String| -> Result<(), String> {
-                    if let Ok(rate) = v.parse::<usize>() {
-                        if rate > 0 {
-                            return Ok(());
-                        }
-                    }
-                    Err(String::from("Must be an integer > 0"))
-                }),
+                .action(ArgAction::Set)
+                .value_parser(clap::builder::RangedU64ValueParser::<usize>::new().range(1..)),
         )
         .arg(
-            Arg::with_name("extra_samples")
+            Arg::new("extra_samples")
                 .help("Override number of extra samples in config")
-                .short("e")
+                .short('e')
                 .long("extra_samples")
+                .value_name("EXTRA_SAMPLES")
                 .display_order(300)
-                .takes_value(true)
-                .validator(|v: String| -> Result<(), String> {
-                    if let Ok(_samples) = v.parse::<usize>() {
-                        return Ok(());
-                    }
-                    Err(String::from("Must be an integer > 0"))
-                }),
+                .action(ArgAction::Set)
+                .value_parser(clap::builder::RangedU64ValueParser::<usize>::new().range(1..)),
         )
         .arg(
-            Arg::with_name("format")
-                .short("f")
+            Arg::new("format")
+                .short('f')
                 .long("format")
+                .value_name("FORMAT")
                 .display_order(310)
-                .takes_value(true)
-                .possible_value("S16LE")
-                .possible_value("S24LE")
-                .possible_value("S24LE3")
-                .possible_value("S32LE")
-                .possible_value("FLOAT32LE")
-                .possible_value("FLOAT64LE")
+                .action(ArgAction::Set)
+                .value_parser([
+                    "S16LE",
+                    "S24LE",
+                    "S24LE3",
+                    "S32LE",
+                    "FLOAT32LE",
+                    "FLOAT64LE",
+                ])
                 .help("Override sample format of capture device in config"),
         );
     #[cfg(feature = "websocket")]
     let clapapp = clapapp
         .arg(
-            Arg::with_name("port")
+            Arg::new("port")
                 .help("Port for websocket server")
-                .short("p")
+                .short('p')
                 .long("port")
+                .value_name("PORT")
                 .display_order(200)
-                .takes_value(true)
-                .validator(|v: String| -> Result<(), String> {
-                    if let Ok(port) = v.parse::<usize>() {
-                        if port > 0 && port < 65535 {
-                            return Ok(());
-                        }
-                    }
-                    Err(String::from("Must be an integer between 0 and 65535"))
-                }),
+                .action(ArgAction::Set)
+                .value_parser(clap::builder::RangedU64ValueParser::<usize>::new().range(0..65535)),
         )
         .arg(
-            Arg::with_name("address")
+            Arg::new("address")
                 .help("IP address to bind websocket server to")
-                .short("a")
+                .short('a')
                 .long("address")
+                .value_name("ADDRESS")
                 .display_order(200)
-                .takes_value(true)
+                .action(ArgAction::Set)
                 .requires("port")
-                .validator(|val: String| -> Result<(), String> {
+                .value_parser(|val: &str| -> Result<String, String> {
                     if val.parse::<IpAddr>().is_ok() {
-                        return Ok(());
+                        return Ok(val.to_string());
                     }
                     Err(String::from("Must be a valid IP address"))
                 }),
         )
         .arg(
-            Arg::with_name("wait")
-                .short("w")
+            Arg::new("wait")
+                .short('w')
                 .long("wait")
                 .help("Wait for config from websocket")
-                .requires("port"),
+                .requires("port")
+                .action(ArgAction::SetTrue),
         );
     #[cfg(feature = "secure-websocket")]
     let clapapp = clapapp
         .arg(
-            Arg::with_name("cert")
-                .long("cert")
-                .takes_value(true)
+            Arg::new("cert")
                 .help("Path to .pfx/.p12 certificate file")
+                .long("cert")
+                .value_name("CERT")
+                .action(ArgAction::Set)
                 .requires("port"),
         )
         .arg(
-            Arg::with_name("pass")
-                .long("pass")
-                .takes_value(true)
+            Arg::new("pass")
                 .help("Password for .pfx/.p12 certificate file")
+                .long("pass")
+                .value_name("PASS")
+                .action(ArgAction::Set)
                 .requires("port"),
         );
     let matches = clapapp.get_matches();
 
-    let mut loglevel = match matches.occurrences_of("verbosity") {
+    let mut loglevel = match matches.get_count("verbosity") {
         0 => "info",
         1 => "debug",
         2 => "trace",
         _ => "trace",
     };
 
-    if let Some(level) = matches.value_of("loglevel") {
+    if let Some(level) = matches.get_one::<String>("loglevel") {
         loglevel = level;
     }
 
-    let logger = if let Some(logfile) = matches.value_of("logfile") {
+    let logger = if let Some(logfile) = matches.get_one::<String>("logfile") {
         let mut path = PathBuf::from(logfile);
         if !path.is_absolute() {
             let mut fullpath = std::env::current_dir().unwrap();
@@ -701,25 +690,19 @@ fn main_process() -> i32 {
     #[cfg(target_os = "windows")]
     wasapi::initialize_mta().unwrap();
 
-    let mut configname = matches.value_of("configfile").map(|path| path.to_string());
+    let mut configname = matches.get_one::<String>("configfile").cloned();
 
     {
         let mut overrides = config::OVERRIDES.write();
-        overrides.samplerate = matches
-            .value_of("samplerate")
-            .map(|s| s.parse::<usize>().unwrap());
-        overrides.extra_samples = matches
-            .value_of("extra_samples")
-            .map(|s| s.parse::<usize>().unwrap());
-        overrides.channels = matches
-            .value_of("channels")
-            .map(|s| s.parse::<usize>().unwrap());
+        overrides.samplerate = matches.get_one::<usize>("samplerate").copied();
+        overrides.extra_samples = matches.get_one::<usize>("extra_samples").copied();
+        overrides.channels = matches.get_one::<usize>("channels").copied();
         overrides.sample_format = matches
-            .value_of("format")
+            .get_one::<String>("format")
             .map(|s| config::SampleFormat::from_name(s).unwrap());
     }
 
-    let statefilename = matches.value_of("statefile").map(|path| path.to_string());
+    let statefilename: Option<String> = matches.get_one::<String>("statefile").cloned();
     let state = if let Some(filename) = &statefilename {
         statefile::load_state(filename)
     } else {
@@ -727,25 +710,24 @@ fn main_process() -> i32 {
     };
     debug!("Loaded state: {state:?}");
 
-    let initial_volumes =
-        if let Some(v) = matches.value_of("gain").map(|s| s.parse::<f32>().unwrap()) {
-            debug!("Using command line argument for initial volume");
-            [v, v, v, v, v]
-        } else if let Some(s) = &state {
-            debug!("Using statefile for initial volume");
-            s.volume
-        } else {
-            debug!("Using default initial volume");
-            [
-                ProcessingParameters::DEFAULT_VOLUME,
-                ProcessingParameters::DEFAULT_VOLUME,
-                ProcessingParameters::DEFAULT_VOLUME,
-                ProcessingParameters::DEFAULT_VOLUME,
-                ProcessingParameters::DEFAULT_VOLUME,
-            ]
-        };
+    let initial_volumes = if let Some(v) = matches.get_one::<f32>("gain") {
+        debug!("Using command line argument for initial volume");
+        [*v, *v, *v, *v, *v]
+    } else if let Some(s) = &state {
+        debug!("Using statefile for initial volume");
+        s.volume
+    } else {
+        debug!("Using default initial volume");
+        [
+            ProcessingParameters::DEFAULT_VOLUME,
+            ProcessingParameters::DEFAULT_VOLUME,
+            ProcessingParameters::DEFAULT_VOLUME,
+            ProcessingParameters::DEFAULT_VOLUME,
+            ProcessingParameters::DEFAULT_VOLUME,
+        ]
+    };
 
-    let initial_mutes = if matches.is_present("mute") {
+    let initial_mutes = if matches.get_flag("mute") {
         debug!("Using command line argument for initial mute");
         [true, true, true, true, true]
     } else if let Some(s) = &state {
@@ -767,7 +749,7 @@ fn main_process() -> i32 {
 
     debug!("Read config file {:?}", configname);
 
-    if matches.is_present("check") {
+    if matches.get_flag("check") {
         match config::load_validate_config(&configname.unwrap()) {
             Ok(_) => {
                 println!("Config is valid");
@@ -900,7 +882,7 @@ fn main_process() -> i32 {
         }
     });
 
-    let wait = matches.is_present("wait");
+    let wait = matches.get_flag("wait");
 
     let capture_status = Arc::new(RwLock::new(CaptureStatus {
         measured_samplerate: 0,
@@ -941,9 +923,12 @@ fn main_process() -> i32 {
         let active_config_path_clone = active_config_path.clone();
         let unsaved_state_changes = Arc::new(AtomicBool::new(false));
 
-        if let Some(port_str) = matches.value_of("port") {
-            let serveraddress = matches.value_of("address").unwrap_or("127.0.0.1");
-            let serverport = port_str.parse::<usize>().unwrap();
+        if let Some(port) = matches.get_one::<usize>("port") {
+            let serveraddress = matches
+                .get_one::<String>("address")
+                .cloned()
+                .unwrap_or("127.0.0.1".to_string());
+            let serverport = *port;
 
             let shared_data = socketserver::SharedData {
                 active_config: active_config.clone(),
@@ -960,11 +945,11 @@ fn main_process() -> i32 {
             };
             let server_params = socketserver::ServerParameters {
                 port: serverport,
-                address: serveraddress,
+                address: &serveraddress,
                 #[cfg(feature = "secure-websocket")]
-                cert_file: matches.value_of("cert"),
+                cert_file: matches.get_one::<String>("cert").map(|x| x.as_str()),
                 #[cfg(feature = "secure-websocket")]
-                cert_pass: matches.value_of("pass"),
+                cert_pass: matches.get_one::<String>("pass").map(|x| x.as_str()),
             };
             socketserver::start_server(server_params, shared_data);
         }
