@@ -11,6 +11,7 @@ use alsa::hctl::{Elem, HCtl};
 use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::{Direction, ValueOr, PCM};
 use alsa_sys;
+use nix::errno::Errno;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::ffi::CString;
@@ -128,7 +129,7 @@ fn play_buffer(
     if playback_state < 0 {
         // This should never happen but sometimes does anyway,
         // for example if a USB device is unplugged.
-        let nixerr = alsa::nix::errno::from_i32(-playback_state);
+        let nixerr = Errno::from_raw(-playback_state);
         error!(
             "PB: Alsa snd_pcm_state() of playback device returned an unexpected error: {}",
             nixerr
@@ -210,7 +211,7 @@ fn play_buffer(
                 }
             }
             Err(err) => {
-                if err.nix_error() == alsa::nix::errno::Errno::EAGAIN {
+                if Errno::from_raw(err.errno()) == Errno::EAGAIN {
                     trace!("PB: encountered EAGAIN error on write, trying again");
                 } else {
                     warn!("PB: write error, trying to recover. Error: {}", err);
@@ -243,7 +244,7 @@ fn capture_buffer(
     } else if capture_state < 0 {
         // This should never happen but sometimes does anyway,
         // for example if a USB device is unplugged.
-        let nixerr = alsa::nix::errno::from_i32(-capture_state);
+        let nixerr = Errno::from_raw(-capture_state);
         error!(
             "Alsa snd_pcm_state() of capture device returned an unexpected error: {}",
             capture_state
@@ -301,14 +302,14 @@ fn capture_buffer(
                     continue;
                 }
             }
-            Err(err) => match err.nix_error() {
-                alsa::nix::errno::Errno::EIO => {
+            Err(err) => match Errno::from_raw(err.errno()) {
+                Errno::EIO => {
                     warn!("Capture failed with error: {}", err);
                     return Err(Box::new(err));
                 }
                 // TODO: do we need separate handling of xruns that happen in the tiny
                 // window between state() and readi()?
-                alsa::nix::errno::Errno::EPIPE => {
+                Errno::EPIPE => {
                     warn!("Capture failed, error: {}", err);
                     return Err(Box::new(err));
                 }

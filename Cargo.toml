@@ -4,7 +4,7 @@ version = "3.0.0"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2021"
 description = "A flexible tool for processing audio"
-rust-version = "1.61"
+rust-version = "1.74"
 
 [features]
 default = ["websocket"]
@@ -28,9 +28,9 @@ name = "camilladsp"
 path = "src/bin.rs"
 
 [target.'cfg(target_os="linux")'.dependencies]
-alsa = "0.8.1"
+alsa = "0.9.0"
 alsa-sys = "0.3.1"
-nix = "0.23"
+nix = { version = "0.28", features = ["poll", "signal"] }
 zbus = { version = "3.0.0", optional = true }
 
 [target.'cfg(target_os="macos")'.dependencies]
