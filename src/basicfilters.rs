@@ -174,6 +174,7 @@ impl Volume {
 
         // Not in a ramp
         if self.ramp_step == 0 {
+            xtrace!("Vol: applying linear gain {}", self.target_linear_gain);
             for waveform in chunk.waveforms.iter_mut() {
                 for item in waveform.iter_mut() {
                     *item *= self.target_linear_gain;
@@ -182,7 +183,7 @@ impl Volume {
         }
         // Ramping
         else if self.ramp_step <= self.ramptime_in_chunks {
-            trace!("ramp step {}", self.ramp_step);
+            trace!("Vol: ramp step {}", self.ramp_step);
             let ramp = self.make_ramp();
             self.ramp_step += 1;
             if self.ramp_step > self.ramptime_in_chunks {

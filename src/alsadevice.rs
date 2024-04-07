@@ -124,7 +124,7 @@ fn play_buffer(
     buf_manager: &mut PlaybackBufferManager,
 ) -> Res<PlaybackResult> {
     let playback_state = pcmdevice.state_raw();
-    //trace!("Playback state {:?}", playback_state);
+    xtrace!("Playback state {:?}", playback_state);
     if playback_state < 0 {
         // This should never happen but sometimes does anyway,
         // for example if a USB device is unplugged.
@@ -214,7 +214,6 @@ fn play_buffer(
                     trace!("PB: encountered EAGAIN error on write, trying again");
                 } else {
                     warn!("PB: write error, trying to recover. Error: {}", err);
-                    trace!("snd_pcm_prepare");
                     // Would recover() be better than prepare()?
                     pcmdevice.prepare()?;
                     buf_manager.sleep_for_target_delay(millis_per_frame);
@@ -573,7 +572,7 @@ fn playback_loop_bytes(
                             debug!(
                                 "PB: buffer level: {:.1}, signal rms: {:?}",
                                 avg_delay,
-                                playback_status.signal_rms.last()
+                                playback_status.signal_rms.last_sqrt()
                             );
                         }
                     }
@@ -750,7 +749,7 @@ fn capture_loop_bytes(
         );
         match capture_res {
             Ok(CaptureResult::Normal) => {
-                //trace!("Captured {} bytes", capture_bytes);
+                xtrace!("Captured {} bytes", capture_bytes);
                 averager.add_value(capture_bytes);
                 {
                     let capture_status = params.capture_status.upgradable_read();
@@ -890,7 +889,7 @@ fn nbr_capture_bytes_and_frames(
     buf: &mut Vec<u8>,
 ) -> (usize, Frames) {
     let (capture_bytes_new, capture_frames_new) = if let Some(resampl) = &resampler {
-        //trace!("Resampler needs {} frames", resampl.input_frames_next());
+        xtrace!("Resampler needs {} frames", resampl.input_frames_next());
         let frames = resampl.input_frames_next();
         (
             frames * params.channels * params.store_bytes_per_sample,

@@ -185,11 +185,6 @@ impl PlaybackDevice for FilePlaybackDevice {
                                             .signal_peak
                                             .add_record(chunk_stats.peak_linear());
                                     }
-                                    trace!(
-                                        "Playback signal RMS: {:?}, peak: {:?}",
-                                        chunk_stats.rms_db(),
-                                        chunk_stats.peak_db()
-                                    );
                                 }
                                 Ok(AudioMessage::Pause) => {
                                     trace!("Pause message received");
@@ -489,11 +484,6 @@ fn capture_loop(
             &params.capture_status.read().used_channels,
         );
         chunk.update_stats(&mut chunk_stats);
-        //trace!(
-        //    "Capture rms {:?}, peak {:?}",
-        //    chunk_stats.rms_db(),
-        //    chunk_stats.peak_db()
-        //);
         {
             let mut capture_status = params.capture_status.write();
             capture_status

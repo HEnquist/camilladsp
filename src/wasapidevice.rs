@@ -1156,7 +1156,6 @@ impl CaptureDevice for WasapiCaptureDevice {
                             &capture_status.read().used_channels,
                         );
                         chunk.update_stats(&mut chunk_stats);
-                        //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                         {
                             let mut capture_status = capture_status.write();
                             capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
