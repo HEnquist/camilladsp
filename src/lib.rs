@@ -52,6 +52,39 @@ use std::sync::{
     Arc,
 };
 
+// Logging macros to give extra logs
+// when the "debug" feature is enabled.
+#[allow(unused)]
+macro_rules! xtrace { ($($x:tt)*) => (
+    #[cfg(feature = "debug")] {
+        log::trace!($($x)*)
+    }
+) }
+#[allow(unused)]
+macro_rules! xdebug { ($($x:tt)*) => (
+    #[cfg(feature = "debug")] {
+        log::debug!($($x)*)
+    }
+) }
+#[allow(unused)]
+macro_rules! xinfo { ($($x:tt)*) => (
+    #[cfg(feature = "debug")] {
+        log::info!($($x)*)
+    }
+) }
+#[allow(unused)]
+macro_rules! xwarn { ($($x:tt)*) => (
+    #[cfg(feature = "debug")] {
+        log::warn!($($x)*)
+    }
+) }
+#[allow(unused)]
+macro_rules! xerror { ($($x:tt)*) => (
+    #[cfg(feature = "debug")] {
+        log::error!($($x)*)
+    }
+) }
+
 // Sample format
 #[cfg(feature = "32bit")]
 pub type PrcFmt = f32;

@@ -187,6 +187,11 @@ impl AudioChunk {
             *peakval = peak;
             *rmsval = rms;
         }
+        xtrace!(
+            "Stats: rms {:?}, peak {:?}",
+            stats.rms_db(),
+            stats.peak_db()
+        );
     }
 
     pub fn update_channel_mask(&self, mask: &mut [bool]) {

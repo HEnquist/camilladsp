@@ -208,11 +208,6 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                             .signal_peak
                                             .add_record(chunk_stats.peak_linear());
                                     }
-                                    //trace!(
-                                    //    "Playback signal RMS: {:?}, peak: {:?}",
-                                    //    chunk_stats.rms_db(),
-                                    //    chunk_stats.peak_db()
-                                    //);
                                 }
                                 Ok(AudioMessage::Pause) => {
                                     trace!("Pause message received");
@@ -251,13 +246,6 @@ fn nbr_capture_bytes(
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        //let new_capture_bytes = resampl.input_frames_next() * channels * store_bytes_per_sample;
-        //trace!(
-        //    "Resampler needs {} frames, will read {} bytes",
-        //    resampl.input_frames_next(),
-        //    new_capture_bytes
-        //);
-        //new_capture_bytes
         resampl.input_frames_next() * channels * store_bytes_per_sample
     } else {
         capture_bytes
@@ -381,7 +369,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                         trace!(
                                             "Measured sample rate is {:.1} Hz, signal RMS is {:?}",
                                             measured_rate_f,
-                                            capture_status.signal_rms.last(),
+                                            capture_status.signal_rms.last_sqrt(),
                                         );
                                         let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
                                         capture_status.measured_samplerate = measured_rate_f as usize;
@@ -403,7 +391,6 @@ impl CaptureDevice for PulseCaptureDevice {
                                 capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                                 capture_status.signal_peak.add_record(chunk_stats.peak_linear());
                             }
-                            //trace!("Capture signal rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
