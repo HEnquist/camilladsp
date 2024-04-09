@@ -104,6 +104,7 @@ enum WsCommand {
     GetMute,
     SetMute(bool),
     ToggleMute,
+    GetFaders,
     GetFaderVolume(usize),
     SetFaderVolume(usize, f32),
     SetFaderExternalVolume(usize, f32),
@@ -145,6 +146,12 @@ struct AllLevels {
 struct PbCapLevels {
     playback: Vec<f32>,
     capture: Vec<f32>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+struct Fader {
+    volume: f32,
+    mute: bool,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -314,6 +321,10 @@ enum WsReply {
     },
     SetFaderExternalVolume {
         result: WsResult,
+    },
+    GetFaders {
+        result: WsResult,
+        value: Vec<Fader>,
     },
     GetFaderVolume {
         result: WsResult,
@@ -888,6 +899,22 @@ fn handle_command(
             Some(WsReply::ToggleMute {
                 result: WsResult::Ok,
                 value: !tempmute,
+            })
+        }
+        WsCommand::GetFaders => {
+            let volumes = shared_data_inst.processing_params.volumes();
+            let mutes = shared_data_inst.processing_params.mutes();
+            let faders = volumes
+                .iter()
+                .zip(mutes)
+                .map(|(v, m)| Fader {
+                    volume: *v,
+                    mute: m,
+                })
+                .collect();
+            Some(WsReply::GetFaders {
+                result: WsResult::Ok,
+                value: faders,
             })
         }
         WsCommand::GetFaderVolume(ctrl) => {

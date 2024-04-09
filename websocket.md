@@ -176,6 +176,10 @@ All commands take the fader number as the first parameter.
 - `ToggleFaderMute` : Toggle muting.
   * Returns a struct with the fader as an integer and the new muting status as a boolean.
 
+There is also a command for getting the volume and mute settings for all faders with a single query.
+- `GetFaders` : Read all faders.
+  * Returns a list of objects, each containing a `volume` and a `mute` property.
+
 ### Config management
 
 Commands for reading and changing the active configuration.
