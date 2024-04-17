@@ -91,6 +91,7 @@ pub trait DeviceBufferManager {
                     hwp.set_period_size_near(alt_period_frames, alsa::ValueOr::Nearest)?;
             }
         }
+        debug!("Device is using a period size of {} frames", data.period);
         Ok(())
     }
 
@@ -124,8 +125,8 @@ pub trait DeviceBufferManager {
         Ok(())
     }
 
-    fn frames_to_stall(&mut self) -> Frames {
-        let data = self.data_mut();
+    fn frames_to_stall(&self) -> Frames {
+        let data = self.data();
         // +1 to make sure the device really stalls
         data.bufsize - data.avail_min + 1
     }
@@ -210,7 +211,7 @@ impl PlaybackBufferManager {
         }
     }
 
-    pub fn sleep_for_target_delay(&mut self, millis_per_frame: f32) {
+    pub fn sleep_for_target_delay(&self, millis_per_frame: f32) {
         let sleep_millis = (self.target_level as f32 * millis_per_frame) as u64;
         trace!(
             "Sleeping for {} frames = {} ms",

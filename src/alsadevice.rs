@@ -122,7 +122,7 @@ fn play_buffer(
     io: &alsa::pcm::IO<u8>,
     millis_per_frame: f32,
     bytes_per_frame: usize,
-    buf_manager: &mut PlaybackBufferManager,
+    buf_manager: &PlaybackBufferManager,
 ) -> Res<PlaybackResult> {
     let playback_state = pcmdevice.state_raw();
     xtrace!("Playback state {:?}", playback_state);
@@ -180,11 +180,18 @@ fn play_buffer(
                 return Ok(PlaybackResult::Stalled);
             }
             Err(err) => {
-                warn!(
-                    "PB: device failed while waiting for available buffer space, error: {}",
-                    err
-                );
-                return Err(Box::new(err));
+                if Errno::from_raw(err.errno()) == Errno::EPIPE {
+                    warn!("PB: wait underrun, trying to recover. Error: {}", err);
+                    trace!("snd_pcm_prepare");
+                    // Would recover() be better than prepare()?
+                    pcmdevice.prepare()?;
+                } else {
+                    warn!(
+                        "PB: device failed while waiting for available buffer space, error: {}",
+                        err
+                    );
+                    return Err(Box::new(err));
+                }
             }
         }
 
@@ -210,18 +217,25 @@ fn play_buffer(
                     continue;
                 }
             }
-            Err(err) => {
-                if Errno::from_raw(err.errno()) == Errno::EAGAIN {
+            Err(err) => match Errno::from_raw(err.errno()) {
+                Errno::EAGAIN => {
                     trace!("PB: encountered EAGAIN error on write, trying again");
-                } else {
-                    warn!("PB: write error, trying to recover. Error: {}", err);
+                    continue;
+                }
+                Errno::EPIPE => {
+                    warn!("PB: write underrun, trying to recover. Error: {}", err);
+                    trace!("snd_pcm_prepare");
                     // Would recover() be better than prepare()?
                     pcmdevice.prepare()?;
                     buf_manager.sleep_for_target_delay(millis_per_frame);
                     io.writei(buffer)?;
                     break;
                 }
-            }
+                _ => {
+                    warn!("PB: write failed, error: {}", err);
+                    return Err(Box::new(err));
+                }
+            },
         };
     }
     Ok(PlaybackResult::Normal)
@@ -278,11 +292,18 @@ fn capture_buffer(
                 return Ok(CaptureResult::Stalled);
             }
             Err(err) => {
-                warn!(
-                    "Capture device failed while waiting for available frames, error: {}",
-                    err
-                );
-                return Err(Box::new(err));
+                if Errno::from_raw(err.errno()) == Errno::EPIPE {
+                    warn!("Capture: wait overrun, trying to recover. Error: {}", err);
+                    trace!("snd_pcm_prepare");
+                    // Would recover() be better than prepare()?
+                    pcmdevice.prepare()?;
+                } else {
+                    warn!(
+                        "Capture: device failed while waiting for available frames, error: {}",
+                        err
+                    );
+                    return Err(Box::new(err));
+                }
             }
         }
         match io.readi(buffer) {
@@ -303,14 +324,19 @@ fn capture_buffer(
             }
             Err(err) => match Errno::from_raw(err.errno()) {
                 Errno::EIO => {
-                    warn!("Capture failed with error: {}", err);
+                    warn!("Capture: read failed with error: {}", err);
                     return Err(Box::new(err));
                 }
-                // TODO: do we need separate handling of xruns that happen in the tiny
-                // window between state() and readi()?
+                Errno::EAGAIN => {
+                    trace!("Capture: encountered EAGAIN error on read, trying again");
+                    continue;
+                }
                 Errno::EPIPE => {
-                    warn!("Capture failed, error: {}", err);
-                    return Err(Box::new(err));
+                    warn!("Capture: read overrun, trying to recover. Error: {}", err);
+                    trace!("snd_pcm_prepare");
+                    // Would recover() be better than prepare()?
+                    pcmdevice.prepare()?;
+                    continue;
                 }
                 _ => {
                     warn!("Capture failed, error: {}", err);
@@ -398,7 +424,7 @@ fn playback_loop_bytes(
     channels: PlaybackChannels,
     pcmdevice: &alsa::PCM,
     params: PlaybackParams,
-    buf_manager: &mut PlaybackBufferManager,
+    buf_manager: &PlaybackBufferManager,
 ) {
     let mut timer = countertimer::Stopwatch::new();
     let mut chunk_stats = ChunkStats {
@@ -435,6 +461,7 @@ fn playback_loop_bytes(
     }
     let mut capture_speed: f64 = 1.0;
     let mut prev_delay_diff: Option<f64> = None;
+    trace!("PB: {:?}", buf_manager);
     loop {
         let eos_in_drain = if device_stalled {
             drain_check_eos(&channels.audio)
@@ -464,7 +491,6 @@ fn playback_loop_bytes(
                 conversion_result =
                     chunk_to_buffer_rawbytes(&chunk, &mut buffer, &params.sample_format);
 
-                trace!("PB: {:?}", buf_manager);
                 let playback_res = play_buffer(
                     &buffer,
                     pcmdevice,
@@ -964,7 +990,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             audio: channel,
                             status: status_channel,
                         };
-                        playback_loop_bytes(pb_channels, &pcmdevice, pb_params, &mut buf_manager);
+                        playback_loop_bytes(pb_channels, &pcmdevice, pb_params, &buf_manager);
                     }
                     Err(err) => {
                         let send_result =
