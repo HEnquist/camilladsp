@@ -4,12 +4,14 @@ New features:
 - Optionally write wav header when outputting to file or stdout.
 - Add `WavFile` capture device type for reading wav files.
 - Optional limit for volume controls.
+- Add websocket command for reading all faders with a single call.
 Changes:
 - Rename `File` capture device to `RawFile`.
 - Filter pipeline steps take a list of channels to filter instead of a single one.
 Bugfixes:
 - Windows: Fix compatibility issues for some WASAPI devices.
 - MacOS: Support devices appearing as separate capture and playback devices.
+- Linux: Improved Alsa error handling.
 
 ## v2.0.3
 Bugfixes:
