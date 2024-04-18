@@ -1748,12 +1748,17 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     if let Some(fname) = filename {
         replace_relative_paths_in_config(conf, fname);
     }
+    #[cfg(target_os = "linux")]
+    let target_level_limit = if matches!(conf.devices.playback, PlaybackDevice::Alsa { .. }) {
+        4 * conf.devices.chunksize
+    } else {
+        2 * conf.devices.chunksize
+    };
+    #[cfg(not(target_os = "linux"))]
+    let target_level_limit = 2 * conf.devices.chunksize;
 
-    if conf.devices.target_level() >= 2 * conf.devices.chunksize {
-        let msg = format!(
-            "target_level can't be larger than {}",
-            2 * conf.devices.chunksize
-        );
+    if conf.devices.target_level() >= target_level_limit {
+        let msg = format!("target_level can't be larger than {}", target_level_limit);
         return Err(ConfigError::new(&msg).into());
     }
     if let Some(period) = conf.devices.adjust_period {
