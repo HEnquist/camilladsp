@@ -3,9 +3,11 @@ use crate::Res;
 use alsa::card::Iter;
 use alsa::ctl::{Ctl, DeviceIter};
 use alsa::device_name::HintIter;
-use alsa::pcm::{Format, HwParams};
+use alsa::pcm::{Format, HwParams, PCM};
+use alsa::poll;
 use alsa::Card;
 use alsa::Direction;
+use alsa::poll::Descriptors;
 use alsa_sys;
 
 const STANDARD_RATES: [u32; 17] = [
@@ -264,3 +266,19 @@ pub fn adjust_speed(
 pub fn is_within(value: f64, target: f64, equality_range: f64) -> bool {
     value <= (target + equality_range) && value >= (target - equality_range)
 }
+
+//pub fn snd_pcm_wait(pcm: &PCM, timeout: isize)
+//{
+	//if pcm.avail()? >= pcm.avail_min() {
+	//	pcm.state();
+	//}
+//	return snd_pcm_wait_nocheck(pcm, timeout);
+//}
+
+pub fn snd_pcm_wait_nocheck(pcm: &PCM, timeout: i32) -> Res<()>
+{
+    let mut fds = pcm.get()?;
+    poll::poll(&mut fds, timeout)?;
+    Ok(())
+}
+
