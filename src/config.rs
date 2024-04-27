@@ -192,7 +192,10 @@ pub enum CaptureDevice {
         channels: usize,
         device: String,
         format: SampleFormat,
-        // TODO FD add option for stopping on Loopback / Gadget going inactive
+        #[serde(default)]
+        stop_on_inactive: Option<bool>,
+        #[serde(default)]
+        use_virtual_volume: Option<bool>,
     },
     #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
     #[serde(alias = "BLUEZ", alias = "bluez")]

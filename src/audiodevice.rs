@@ -554,6 +554,8 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels,
             ref device,
             format,
+            stop_on_inactive,
+            use_virtual_volume,
         } => Box::new(alsadevice::AlsaCaptureDevice {
             devname: device.clone(),
             samplerate: conf.samplerate,
@@ -566,6 +568,8 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_timeout: conf.silence_timeout(),
             stop_on_rate_change: conf.stop_on_rate_change(),
             rate_measure_interval: conf.rate_measure_interval(),
+            stop_on_inactive: stop_on_inactive.unwrap_or_default(),
+            use_virtual_volume: use_virtual_volume.unwrap_or_default(),
         }),
         #[cfg(feature = "pulse-backend")]
         config::CaptureDevice::Pulse {

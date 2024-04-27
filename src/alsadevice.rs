@@ -103,6 +103,7 @@ fn process_events(
     ctl: &Ctl,
     elems: &CaptureElements,
     status_channel: &crossbeam_channel::Sender<StatusMessage>,
+    params: &CaptureParams,
 ) {
     while let Ok(Some(ev)) = ctl.read() {
         let nid = ev.get_id().get_numid();
@@ -110,16 +111,28 @@ fn process_events(
         let action = get_event_action(nid, elems, ctl);
         match action {
             EventAction::SourceInactive => {
-                panic!("TODO FD stop nicely");
+                if params.stop_on_inactive {
+                    status_channel
+                        .send(StatusMessage::CaptureDone)
+                        .unwrap_or_default();
+                    panic!("TODO FD stop nicely");
+                }
             }
             EventAction::FormatChange => {
-                panic!("TODO FD stop nicely");
+                if params.stop_on_inactive {
+                    status_channel
+                        .send(StatusMessage::CaptureFormatChange(0))
+                        .unwrap_or_default();
+                    panic!("TODO FD stop nicely");
+                }
             }
             EventAction::SetVolume(vol) => {
-                debug!("Set main fader to {} dB", vol);
-                status_channel
-                    .send(StatusMessage::SetVolume(vol))
-                    .unwrap_or_default();
+                if params.use_virtual_volume {
+                    debug!("Set main fader to {} dB", vol);
+                    status_channel
+                        .send(StatusMessage::SetVolume(vol))
+                        .unwrap_or_default();
+                }
             }
             EventAction::None => {}
         }
@@ -287,6 +300,8 @@ pub struct AlsaCaptureDevice {
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
+    pub stop_on_inactive: bool,
+    pub use_virtual_volume: bool,
 }
 
 struct CaptureChannels {
@@ -314,6 +329,8 @@ struct CaptureParams {
     capture_status: Arc<RwLock<CaptureStatus>>,
     stop_on_rate_change: bool,
     rate_measure_interval: f32,
+    stop_on_inactive: bool,
+    use_virtual_volume: bool,
 }
 
 struct PlaybackParams {
@@ -466,18 +483,18 @@ fn play_buffer(
 }
 
 /// Capture a buffer.
+#[allow(clippy::too_many_arguments)]
 fn capture_buffer(
     mut buffer: &mut [u8],
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
-    samplerate: usize,
     frames_to_read: usize,
-    bytes_per_frame: usize,
     fds: &mut FileDescriptors,
     ctl: &Option<Ctl>,
     hctl: &Option<HCtl>,
     elems: &CaptureElements,
     status_channel: &crossbeam_channel::Sender<StatusMessage>,
+    params: &CaptureParams,
 ) -> Res<CaptureResult> {
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
@@ -499,7 +516,7 @@ fn capture_buffer(
         );
         pcmdevice.start()?;
     }
-    let millis_per_chunk = 1000 * frames_to_read / samplerate;
+    let millis_per_chunk = 1000 * frames_to_read / params.samplerate;
 
     loop {
         let mut timeout_millis = 4 * millis_per_chunk as u32;
@@ -545,7 +562,7 @@ fn capture_buffer(
                     if pollresult.ctl {
                         debug!("Other events");
                         if let Some(c) = ctl {
-                            process_events(c, elems, status_channel);
+                            process_events(c, elems, status_channel, params);
                         }
                         if let Some(h) = hctl {
                             let ev = h.handle_events().unwrap();
@@ -576,7 +593,7 @@ fn capture_buffer(
         }
         match io.readi(buffer) {
             Ok(frames_read) => {
-                let frames_req = buffer.len() / bytes_per_frame;
+                let frames_req = buffer.len() / params.bytes_per_frame;
                 if frames_read == frames_req {
                     trace!("Capture read {} frames as requested", frames_read);
                     return Ok(CaptureResult::Normal);
@@ -585,7 +602,7 @@ fn capture_buffer(
                         "Capture read {} frames instead of the requested {}",
                         frames_read, frames_req
                     );
-                    buffer = &mut buffer[frames_read * bytes_per_frame..];
+                    buffer = &mut buffer[frames_read * params.bytes_per_frame..];
                     // repeat reading
                     continue;
                 }
@@ -918,7 +935,7 @@ fn capture_loop_bytes(
     let device = pcminfo.get_device();
     let subdevice = pcminfo.get_subdevice();
 
-    let mut fds = pcmdevice.get().unwrap();
+    let fds = pcmdevice.get().unwrap();
     println!("{:?}", fds);
     let nbr_pcm_fds = fds.len();
     let mut file_descriptors = FileDescriptors { fds, nbr_pcm_fds };
@@ -1055,14 +1072,13 @@ fn capture_loop_bytes(
             &mut buffer[0..capture_bytes],
             pcmdevice,
             &io,
-            params.capture_samplerate,
             capture_frames as usize,
-            params.bytes_per_frame,
             &mut file_descriptors,
             &ctl,
             &hctl,
             &capture_elements,
             &channels.status,
+            &params,
         );
         match capture_res {
             Ok(CaptureResult::Normal) => {
@@ -1321,6 +1337,8 @@ impl CaptureDevice for AlsaCaptureDevice {
         let async_src = resampler_is_async(&resampler_config);
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
+        let stop_on_inactive = self.stop_on_inactive;
+        let use_virtual_volume = self.use_virtual_volume;
         let mut buf_manager = CaptureBufferManager::new(
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
@@ -1365,6 +1383,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                             capture_status,
                             stop_on_rate_change,
                             rate_measure_interval,
+                            stop_on_inactive,
+                            use_virtual_volume,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,
