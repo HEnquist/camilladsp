@@ -17,7 +17,6 @@ use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::ffi::CString;
 use std::fmt::Debug;
-use std::fs::File;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Barrier};
@@ -67,49 +66,39 @@ struct FileDescriptors {
 #[derive(Debug)]
 struct PollResult {
     poll_res: usize,
-    pcm: Option<i16>,
-    ctl: Option<HashSet<u32>>,
+    pcm: bool,
+    ctl: bool,
 }
 
 impl FileDescriptors {
-    fn wait(&mut self, ctl: &Option<Ctl>, timeout: i32) -> alsa::Result<PollResult> {
+    fn wait(&mut self, timeout: i32) -> alsa::Result<PollResult> {
         let nbr_ready = alsa::poll::poll(&mut self.fds, timeout)?;
+        debug!("Got {} ready fds", nbr_ready);
         let mut nbr_found = 0;
-        let mut pcm_res = None;
+        let mut pcm_res = false;
         for fd in self.fds.iter().take(self.nbr_pcm_fds) {
             if fd.revents > 0 {
-                pcm_res = Some(fd.revents);
+                pcm_res = true;
                 nbr_found += 1;
                 if nbr_found == nbr_ready {
                     // We are done, let's return early
-                    return Ok(PollResult{poll_res: nbr_ready, pcm: pcm_res, ctl: None});
+                    
+                    return Ok(PollResult{poll_res: nbr_ready, pcm: pcm_res, ctl: false});
                 }
             }
         }
-        let mut ctl_res = None;
-        if let Some(c) = ctl {
-            for fd in self.fds.iter().skip(self.nbr_pcm_fds) {
-                if fd.revents > 0 {
-                    nbr_found += 1;
-                    if ctl_res.is_none() {
-                        ctl_res = Some(HashSet::new());
-                    }
-                    while let Some(ev) = c.read().unwrap() {
-                        let nid = ev.get_id().get_numid();
-                        if let Some(hs) = &mut ctl_res {
-                            hs.insert(nid);
-                        }
-                    }
-                    if nbr_found == nbr_ready {
-                        // We are done, skip the remaining
-                        break;
-                    }
-                }
-            }
-        }
-        Ok(PollResult{poll_res: nbr_ready, pcm: pcm_res, ctl: ctl_res})
+        // There were more ready file descriptors than PCM, must be ctl
+        Ok(PollResult{poll_res: nbr_ready, pcm: pcm_res, ctl: true})
     }
 }
+
+fn read_events(ctl: &Ctl) {
+    while let Ok(Some(ev)) = ctl.read() {
+        let nid = ev.get_id().get_numid();
+        debug!("Event from numid {}", nid);
+    }
+}
+
 
 fn handle_events(events: &HashSet<u32>, elems: &CaptureElements) {
     for numid in events {
@@ -425,17 +414,24 @@ fn capture_buffer(
                 }
             }
         }*/
-        match fds.wait(ctl, timeout_millis as i32) {
+        match fds.wait(timeout_millis as i32) {
             Ok(pollresult) => {
                 if pollresult.poll_res == 0 {
                     trace!("Wait timed out, capture device takes too long to capture frames");
                     return Ok(CaptureResult::Stalled);
                 }
-                if let Some(revents) = pollresult.pcm {
-                    debug!("Capture waited for {:?}, {}", start.map(|s| s.elapsed()), revents);
+                if pollresult.pcm {
+                    debug!("Capture waited for {:?}", start.map(|s| s.elapsed()));
                 } 
-                if let Some(ids) = pollresult.ctl {
-                    debug!("Other events {:?}", ids);
+                if pollresult.ctl {
+                    debug!("Other events");
+                    if let Some(h) = hctl {
+                        let ev = h.handle_events().unwrap();
+                        debug!("hctl handle events {}", ev);
+                    }
+                    if let Some(c) = ctl {
+                        read_events(c);
+                    }
                 }
             }
             Err(err) => {
@@ -810,7 +806,7 @@ fn capture_loop_bytes(
 
     // Virtual devices such as pcm plugins don't have a hw card ID
     // Only try to create the HCtl when the device has an ID
-    let hctl = (card >= 0).then(|| HCtl::new(&format!("hw:{}", card), false).unwrap());
+    let hctl = (card >= 0).then(|| HCtl::new(&format!("hw:{}", card), true).unwrap());
     let ctl = (card >= 0).then(|| Ctl::new(&format!("hw:{}", card), true).unwrap());
     
     if let Some(c) = &ctl {
