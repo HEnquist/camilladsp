@@ -9,8 +9,8 @@ use alsa::ctl::{Ctl, ElemId, ElemIface};
 use alsa::ctl::{ElemType, ElemValue};
 use alsa::hctl::{Elem, HCtl};
 use alsa::pcm::{Access, Format, Frames, HwParams};
-use alsa::{Direction, ValueOr, PCM};
 use alsa::poll::Descriptors;
+use alsa::{Direction, ValueOr, PCM};
 use alsa_sys;
 use nix::errno::Errno;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
@@ -22,7 +22,6 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
-use std::collections::HashSet;
 
 use crate::alsadevice_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
@@ -82,45 +81,109 @@ impl FileDescriptors {
                 nbr_found += 1;
                 if nbr_found == nbr_ready {
                     // We are done, let's return early
-                    
-                    return Ok(PollResult{poll_res: nbr_ready, pcm: pcm_res, ctl: false});
+
+                    return Ok(PollResult {
+                        poll_res: nbr_ready,
+                        pcm: pcm_res,
+                        ctl: false,
+                    });
                 }
             }
         }
         // There were more ready file descriptors than PCM, must be ctl
-        Ok(PollResult{poll_res: nbr_ready, pcm: pcm_res, ctl: true})
+        Ok(PollResult {
+            poll_res: nbr_ready,
+            pcm: pcm_res,
+            ctl: true,
+        })
     }
 }
 
-fn read_events(ctl: &Ctl) {
+fn read_events(ctl: &Ctl, elems: &CaptureElements) {
     while let Ok(Some(ev)) = ctl.read() {
         let nid = ev.get_id().get_numid();
         debug!("Event from numid {}", nid);
+        handle_event(nid, elems);
     }
 }
 
-
-fn handle_events(events: &HashSet<u32>, elems: &CaptureElements) {
-    for numid in events {
-        println!("Event from numid {}", numid);
-        if let Some(eldata) = &elems.loopback_active {
-            if eldata.numid == *numid {
-                println!("Active");
-            }
+fn handle_event(numid: u32, elems: &CaptureElements) {
+    if let Some(eldata) = &elems.loopback_active {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_boolean(0).unwrap())
+                .unwrap();
+            debug!("Loopback active: {}", value);
+            return;
         }
-        else if let Some(eldata) = &elems.loopback_rate {
-            if eldata.numid == *numid {
-                println!("Rate");
-            }
+    } else if let Some(eldata) = &elems.loopback_rate {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap();
+            debug!("Loopback rate: {}", value);
+            return;
         }
-
+    } else if let Some(eldata) = &elems.loopback_format {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap();
+            debug!("Loopback format: {}", value);
+            return;
+        }
+    } else if let Some(eldata) = &elems.loopback_channels {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap();
+            debug!("Loopback channels: {}", value);
+            return;
+        }
+    } else if let Some(eldata) = &elems.loopback_volume {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap();
+            debug!("Loopback volume: {}", value);
+            return;
+        }
+    } else if let Some(eldata) = &elems.gadget_vol {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap();
+            debug!("Gadget volume: {}", value);
+            return;
+        }
+    } else if let Some(eldata) = &elems.gadget_rate {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap();
+            debug!("Gadget rate: {}", value);
+            return;
+        }
     }
+    debug!("Ignoring event from unknown numid {}", numid);
 }
-
-
 
 impl<'a> CaptureElements<'a> {
-    fn find_elements(&mut self, h:&'a HCtl, device: u32, subdevice: u32) {
+    fn find_elements(&mut self, h: &'a HCtl, device: u32, subdevice: u32) {
         self.loopback_active = find_elem(h, device, subdevice, "PCM Slave Active");
         self.loopback_rate = find_elem(h, device, subdevice, "PCM Slave Rate");
         self.loopback_format = find_elem(h, device, subdevice, "PCM Slave Format");
@@ -132,7 +195,6 @@ impl<'a> CaptureElements<'a> {
     }
 }
 
-
 fn find_elem<'a>(hctl: &'a HCtl, device: u32, subdevice: u32, name: &str) -> Option<ElemData<'a>> {
     let mut elem_id = ElemId::new(ElemIface::PCM);
     elem_id.set_device(device);
@@ -141,7 +203,7 @@ fn find_elem<'a>(hctl: &'a HCtl, device: u32, subdevice: u32, name: &str) -> Opt
     let element = hctl.find_elem(&elem_id);
     element.map(|e| {
         let numid = e.get_id().map(|id| id.get_numid()).unwrap_or_default();
-        ElemData {element: e, numid }
+        ElemData { element: e, numid }
     })
 }
 
@@ -357,6 +419,7 @@ fn capture_buffer(
     fds: &mut FileDescriptors,
     ctl: &Option<Ctl>,
     hctl: &Option<HCtl>,
+    elems: &CaptureElements,
 ) -> Res<CaptureResult> {
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
@@ -414,38 +477,42 @@ fn capture_buffer(
                 }
             }
         }*/
-        match fds.wait(timeout_millis as i32) {
-            Ok(pollresult) => {
-                if pollresult.poll_res == 0 {
-                    trace!("Wait timed out, capture device takes too long to capture frames");
-                    return Ok(CaptureResult::Stalled);
-                }
-                if pollresult.pcm {
-                    debug!("Capture waited for {:?}", start.map(|s| s.elapsed()));
-                } 
-                if pollresult.ctl {
-                    debug!("Other events");
-                    if let Some(h) = hctl {
-                        let ev = h.handle_events().unwrap();
-                        debug!("hctl handle events {}", ev);
+        loop {
+            match fds.wait(timeout_millis as i32) {
+                Ok(pollresult) => {
+                    if pollresult.poll_res == 0 {
+                        trace!("Wait timed out, capture device takes too long to capture frames");
+                        return Ok(CaptureResult::Stalled);
                     }
-                    if let Some(c) = ctl {
-                        read_events(c);
+                    if pollresult.ctl {
+                        debug!("Other events");
+                        if let Some(c) = ctl {
+                            read_events(c, elems);
+                        }
+                        if let Some(h) = hctl {
+                            let ev = h.handle_events().unwrap();
+                            debug!("hctl handle events {}", ev);
+                        }
+                    }
+                    if pollresult.pcm {
+                        debug!("Capture waited for {:?}", start.map(|s| s.elapsed()));
+                        break;
                     }
                 }
-            }
-            Err(err) => {
-                if Errno::from_raw(err.errno()) == Errno::EPIPE {
-                    warn!("Capture: wait overrun, trying to recover. Error: {}", err);
-                    trace!("snd_pcm_prepare");
-                    // Would recover() be better than prepare()?
-                    pcmdevice.prepare()?;
-                } else {
-                    warn!(
-                        "Capture: device failed while waiting for available frames, error: {}",
-                        err
-                    );
-                    return Err(Box::new(err));
+                Err(err) => {
+                    if Errno::from_raw(err.errno()) == Errno::EPIPE {
+                        warn!("Capture: wait overrun, trying to recover. Error: {}", err);
+                        trace!("snd_pcm_prepare");
+                        // Would recover() be better than prepare()?
+                        pcmdevice.prepare()?;
+                        break;
+                    } else {
+                        warn!(
+                            "Capture: device failed while waiting for available frames, error: {}",
+                            err
+                        );
+                        return Err(Box::new(err));
+                    }
                 }
             }
         }
@@ -796,8 +863,7 @@ fn capture_loop_bytes(
     let mut fds = pcmdevice.get().unwrap();
     println!("{:?}", fds);
     let nbr_pcm_fds = fds.len();
-    let mut file_descriptors = FileDescriptors {fds, nbr_pcm_fds};
-
+    let mut file_descriptors = FileDescriptors { fds, nbr_pcm_fds };
 
     let mut element_loopback: Option<Elem> = None;
     let mut element_uac2_gadget: Option<Elem> = None;
@@ -808,7 +874,7 @@ fn capture_loop_bytes(
     // Only try to create the HCtl when the device has an ID
     let hctl = (card >= 0).then(|| HCtl::new(&format!("hw:{}", card), true).unwrap());
     let ctl = (card >= 0).then(|| Ctl::new(&format!("hw:{}", card), true).unwrap());
-    
+
     if let Some(c) = &ctl {
         c.subscribe_events(true).unwrap();
     }
@@ -936,8 +1002,8 @@ fn capture_loop_bytes(
             params.bytes_per_frame,
             &mut file_descriptors,
             &ctl,
-            &hctl
-
+            &hctl,
+            &capture_elements,
         );
         match capture_res {
             Ok(CaptureResult::Normal) => {
