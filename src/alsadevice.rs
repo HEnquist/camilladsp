@@ -49,9 +49,9 @@ struct ElemData<'a> {
 #[derive(Default)]
 struct CaptureElements<'a> {
     loopback_active: Option<ElemData<'a>>,
-    loopback_rate: Option<ElemData<'a>>,
-    loopback_format: Option<ElemData<'a>>,
-    loopback_channels: Option<ElemData<'a>>,
+    // loopback_rate: Option<ElemData<'a>>,
+    // loopback_format: Option<ElemData<'a>>,
+    // loopback_channels: Option<ElemData<'a>>,
     loopback_volume: Option<ElemData<'a>>,
     gadget_rate: Option<ElemData<'a>>,
     gadget_vol: Option<ElemData<'a>>,
@@ -103,11 +103,18 @@ fn read_events(ctl: &Ctl, elems: &CaptureElements) {
     while let Ok(Some(ev)) = ctl.read() {
         let nid = ev.get_id().get_numid();
         debug!("Event from numid {}", nid);
-        handle_event(nid, elems);
+        let action = get_event_action(nid, elems, ctl);
     }
 }
 
-fn handle_event(numid: u32, elems: &CaptureElements) {
+enum EventAction {
+    None,
+    SetVolume(f32),
+    FormatChange,
+    SourceInactive,
+}
+
+fn get_event_action(numid: u32, elems: &CaptureElements, ctl: &Ctl) -> EventAction {
     if let Some(eldata) = &elems.loopback_active {
         if eldata.numid == numid {
             let value = eldata
@@ -116,9 +123,15 @@ fn handle_event(numid: u32, elems: &CaptureElements) {
                 .map(|v| v.get_boolean(0).unwrap())
                 .unwrap();
             debug!("Loopback active: {}", value);
-            return;
+            if value {
+                return EventAction::None;
+            }
+            return EventAction::SourceInactive;
         }
-    } else if let Some(eldata) = &elems.loopback_rate {
+    }
+    // Include this if the notify functionality of the loopback gets fixed
+    /*
+    if let Some(eldata) = &elems.loopback_rate {
         if eldata.numid == numid {
             let value = eldata
                 .element
@@ -126,9 +139,10 @@ fn handle_event(numid: u32, elems: &CaptureElements) {
                 .map(|v| v.get_integer(0).unwrap())
                 .unwrap();
             debug!("Loopback rate: {}", value);
-            return;
+            return EventAction::FormatChange;
         }
-    } else if let Some(eldata) = &elems.loopback_format {
+    }
+    if let Some(eldata) = &elems.loopback_format {
         if eldata.numid == numid {
             let value = eldata
                 .element
@@ -136,9 +150,10 @@ fn handle_event(numid: u32, elems: &CaptureElements) {
                 .map(|v| v.get_integer(0).unwrap())
                 .unwrap();
             debug!("Loopback format: {}", value);
-            return;
+            return EventAction::FormatChange;
         }
-    } else if let Some(eldata) = &elems.loopback_channels {
+    }
+    if let Some(eldata) = &elems.loopback_channels {
         if eldata.numid == numid {
             let value = eldata
                 .element
@@ -146,29 +161,40 @@ fn handle_event(numid: u32, elems: &CaptureElements) {
                 .map(|v| v.get_integer(0).unwrap())
                 .unwrap();
             debug!("Loopback channels: {}", value);
-            return;
+            return EventAction::FormatChange;
         }
-    } else if let Some(eldata) = &elems.loopback_volume {
+    } */
+    if let Some(eldata) = &elems.loopback_volume {
         if eldata.numid == numid {
             let value = eldata
                 .element
                 .read()
                 .map(|v| v.get_integer(0).unwrap())
                 .unwrap();
-            debug!("Loopback volume: {}", value);
-            return;
+            let vol_db = ctl
+                .convert_to_db(&eldata.element.get_id().unwrap(), value as i64)
+                .unwrap()
+                .to_db();
+            debug!("Loopback volume: {} raw, {} dB", value, vol_db);
+            return EventAction::SetVolume(vol_db);
         }
-    } else if let Some(eldata) = &elems.gadget_vol {
+    }
+    if let Some(eldata) = &elems.gadget_vol {
         if eldata.numid == numid {
             let value = eldata
                 .element
                 .read()
                 .map(|v| v.get_integer(0).unwrap())
                 .unwrap();
-            debug!("Gadget volume: {}", value);
-            return;
+            let vol_db = ctl
+                .convert_to_db(&eldata.element.get_id().unwrap(), value as i64)
+                .unwrap()
+                .to_db();
+            debug!("Gadget volume: {} raw, {} dB", value, vol_db);
+            return EventAction::SetVolume(vol_db);
         }
-    } else if let Some(eldata) = &elems.gadget_rate {
+    }
+    if let Some(eldata) = &elems.gadget_rate {
         if eldata.numid == numid {
             let value = eldata
                 .element
@@ -176,33 +202,45 @@ fn handle_event(numid: u32, elems: &CaptureElements) {
                 .map(|v| v.get_integer(0).unwrap())
                 .unwrap();
             debug!("Gadget rate: {}", value);
-            return;
+            if value == 0 {
+                return EventAction::SourceInactive;
+            }
+            return EventAction::FormatChange;
         }
     }
     debug!("Ignoring event from unknown numid {}", numid);
+    EventAction::None
 }
 
 impl<'a> CaptureElements<'a> {
     fn find_elements(&mut self, h: &'a HCtl, device: u32, subdevice: u32) {
-        self.loopback_active = find_elem(h, device, subdevice, "PCM Slave Active");
-        self.loopback_rate = find_elem(h, device, subdevice, "PCM Slave Rate");
-        self.loopback_format = find_elem(h, device, subdevice, "PCM Slave Format");
-        self.loopback_channels = find_elem(h, device, subdevice, "PCM Slave Channels");
-        self.loopback_volume = find_elem(h, device, subdevice, "PCM Playback Volume");
-        self.gadget_rate = find_elem(h, device, subdevice, "Capture Rate");
-        self.gadget_vol = find_elem(h, device, subdevice, "PCM Capture Volume");
+        self.loopback_active = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Active");
+        // self.loopback_rate = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Rate");
+        // self.loopback_format = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Format");
+        // self.loopback_channels = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Channels");
+        self.loopback_volume = find_elem(h, ElemIface::Mixer, 0, 0, "PCM Playback Volume");
+        self.gadget_rate = find_elem(h, ElemIface::PCM, device, subdevice, "Capture Rate");
+        self.gadget_vol = find_elem(h, ElemIface::Mixer, device, subdevice, "PCM Capture Volume");
         //also "PCM Playback Volume" and "Playback Rate"
     }
 }
 
-fn find_elem<'a>(hctl: &'a HCtl, device: u32, subdevice: u32, name: &str) -> Option<ElemData<'a>> {
-    let mut elem_id = ElemId::new(ElemIface::PCM);
+fn find_elem<'a>(
+    hctl: &'a HCtl,
+    iface: ElemIface,
+    device: u32,
+    subdevice: u32,
+    name: &str,
+) -> Option<ElemData<'a>> {
+    let mut elem_id = ElemId::new(iface);
     elem_id.set_device(device);
     elem_id.set_subdevice(subdevice);
     elem_id.set_name(&CString::new(name).unwrap());
     let element = hctl.find_elem(&elem_id);
+    debug!("Look up element with name {}", name);
     element.map(|e| {
         let numid = e.get_id().map(|id| id.get_numid()).unwrap_or_default();
+        debug!("Found element with name {} and numid {}", name, numid);
         ElemData { element: e, numid }
     })
 }
