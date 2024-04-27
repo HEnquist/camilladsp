@@ -144,7 +144,7 @@ fn run(
         tx_pb,
         rx_cap,
         rx_pipeconf,
-        status_structs.processing,
+        status_structs.processing.clone(),
     );
 
     // Playback thread
@@ -390,6 +390,10 @@ fn run(
                             {
                                 debug!("Capture thread has already exited");
                             }
+                        }
+                        StatusMessage::SetVolume(vol) => {
+                            debug!("SetVolume message to  {} dB received", vol);
+                            status_structs.processing.set_target_volume(0, vol);
                         }
                     },
                     Err(err) => {

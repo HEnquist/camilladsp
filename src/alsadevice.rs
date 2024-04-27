@@ -90,7 +90,7 @@ impl FileDescriptors {
                 }
             }
         }
-        // There were more ready file descriptors than PCM, must be ctl
+        // There were other ready file descriptors than PCM, must be controls
         Ok(PollResult {
             poll_res: nbr_ready,
             pcm: pcm_res,
@@ -99,11 +99,30 @@ impl FileDescriptors {
     }
 }
 
-fn read_events(ctl: &Ctl, elems: &CaptureElements) {
+fn process_events(
+    ctl: &Ctl,
+    elems: &CaptureElements,
+    status_channel: &crossbeam_channel::Sender<StatusMessage>,
+) {
     while let Ok(Some(ev)) = ctl.read() {
         let nid = ev.get_id().get_numid();
         debug!("Event from numid {}", nid);
         let action = get_event_action(nid, elems, ctl);
+        match action {
+            EventAction::SourceInactive => {
+                panic!("TODO stop nicely");
+            }
+            EventAction::FormatChange => {
+                panic!("TODO stop nicely");
+            }
+            EventAction::SetVolume(vol) => {
+                debug!("Set main fader to {} dB", vol);
+                status_channel
+                    .send(StatusMessage::SetVolume(vol))
+                    .unwrap_or_default();
+            }
+            EventAction::None => {}
+        }
     }
 }
 
@@ -221,7 +240,7 @@ impl<'a> CaptureElements<'a> {
         self.loopback_volume = find_elem(h, ElemIface::Mixer, 0, 0, "PCM Playback Volume");
         self.gadget_rate = find_elem(h, ElemIface::PCM, device, subdevice, "Capture Rate");
         self.gadget_vol = find_elem(h, ElemIface::Mixer, device, subdevice, "PCM Capture Volume");
-        //also "PCM Playback Volume" and "Playback Rate"
+        //also "PCM Playback Volume" and "Playback Rate" for Gadget playback side
     }
 }
 
@@ -458,6 +477,7 @@ fn capture_buffer(
     ctl: &Option<Ctl>,
     hctl: &Option<HCtl>,
     elems: &CaptureElements,
+    status_channel: &crossbeam_channel::Sender<StatusMessage>,
 ) -> Res<CaptureResult> {
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
@@ -525,7 +545,7 @@ fn capture_buffer(
                     if pollresult.ctl {
                         debug!("Other events");
                         if let Some(c) = ctl {
-                            read_events(c, elems);
+                            process_events(c, elems, status_channel);
                         }
                         if let Some(h) = hctl {
                             let ev = h.handle_events().unwrap();
@@ -1042,6 +1062,7 @@ fn capture_loop_bytes(
             &ctl,
             &hctl,
             &capture_elements,
+            &channels.status,
         );
         match capture_res {
             Ok(CaptureResult::Normal) => {
