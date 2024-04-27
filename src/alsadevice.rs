@@ -110,10 +110,10 @@ fn process_events(
         let action = get_event_action(nid, elems, ctl);
         match action {
             EventAction::SourceInactive => {
-                panic!("TODO stop nicely");
+                panic!("TODO FD stop nicely");
             }
             EventAction::FormatChange => {
-                panic!("TODO stop nicely");
+                panic!("TODO FD stop nicely");
             }
             EventAction::SetVolume(vol) => {
                 debug!("Set main fader to {} dB", vol);
