@@ -989,6 +989,7 @@ fn capture_loop_bytes(
         element_uac2_gadget = h.find_elem(&elid_uac2_gadget);
 
         capture_elements.find_elements(h, device, subdevice);
+        // TODO FD read the volume at startup
     }
     if element_loopback.is_some() || element_uac2_gadget.is_some() {
         info!("Capture device supports rate adjust");

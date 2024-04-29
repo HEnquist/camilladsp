@@ -124,6 +124,8 @@ This example configuration will be used to explain the various options specific 
     channels: 2
     device: "hw:0,1"
     format: S16LE
+    stop_on_inactive: false (*)
+    use_virtual_volume: false (*)
   playback:
     type: Alsa
     channels: 2
@@ -136,6 +138,28 @@ See [Find name of device](#find-name-of-device) for what to write in the `device
 
 ### Sample rate and format
 Please see [Find valid playback and capture parameters](#find-valid-playback-and-capture-parameters).
+
+### Linking volume control to device volume
+When capturing from the Alsa loopback or the USB Audio Gadget,
+it's possible to let CamillaDSP follow the device volume control.
+Both of these devices provide a "dummy" volume control that does not alter the signal.
+This can be used to forward the volume setting from a player to CamillaDSP.
+To enable this, set the `use_virtual_volume` setting to `true`.
+Any change of the loopback or gadget volume then gets applied
+to the CamillaDSP main volume control.
+
+### Subscribe to Alsa control events
+The Alsa capture device subscribes to control events from the USB Gadget and Loopback devices.
+For the loopback, it subscribes to events from the `PCM Slave Active` control,
+and for the gadget it subscribes to events from `Capture Rate`.
+Both of these can indicate when playback has stopped.
+If CamillaDSP should stop when that happens, set `stop_on_inactive` to `true`.
+For the loopback, this means that CamillaDSP releases the capture side,
+making it possible for a player application to re-open at another sample rate.
+
+For the gadget, the control can also indicate that the sample rate changed.
+When this happens, the capture can no longer continue and CamillaDSP will stop.
+The new sample rate can then be read by the `GetStopReason` websocket command.
 
 ## Links
 ### ALSA Documentation
