@@ -104,7 +104,7 @@ fn process_events(
     elems: &CaptureElements,
     status_channel: &crossbeam_channel::Sender<StatusMessage>,
     params: &CaptureParams,
-) {
+) -> CaptureResult {
     while let Ok(Some(ev)) = ctl.read() {
         let nid = ev.get_id().get_numid();
         debug!("Event from numid {}", nid);
@@ -112,23 +112,25 @@ fn process_events(
         match action {
             EventAction::SourceInactive => {
                 if params.stop_on_inactive {
+                    debug!(
+                        "Stopping, capture device is inactive and stop_on_inactive is set to true"
+                    );
                     status_channel
                         .send(StatusMessage::CaptureDone)
                         .unwrap_or_default();
-                    panic!("TODO FD stop nicely");
+                    return CaptureResult::Done;
                 }
             }
             EventAction::FormatChange(value) => {
-                if params.stop_on_inactive {
-                    status_channel
-                        .send(StatusMessage::CaptureFormatChange(value))
-                        .unwrap_or_default();
-                    panic!("TODO FD stop nicely");
-                }
+                debug!("Stopping, capture device sample format changed");
+                status_channel
+                    .send(StatusMessage::CaptureFormatChange(value))
+                    .unwrap_or_default();
+                return CaptureResult::Done;
             }
             EventAction::SetVolume(vol) => {
                 if params.use_virtual_volume {
-                    debug!("Set main fader to {} dB", vol);
+                    debug!("Alsa volume change event, set main fader to {} dB", vol);
                     status_channel
                         .send(StatusMessage::SetVolume(vol))
                         .unwrap_or_default();
@@ -137,6 +139,7 @@ fn process_events(
             EventAction::None => {}
         }
     }
+    CaptureResult::Normal
 }
 
 enum EventAction {
@@ -357,6 +360,7 @@ struct PlaybackParams {
 enum CaptureResult {
     Normal,
     Stalled,
+    Done,
 }
 
 #[derive(Debug)]
@@ -569,9 +573,14 @@ fn capture_buffer(
                         return Ok(CaptureResult::Stalled);
                     }
                     if pollresult.ctl {
-                        debug!("Other events");
+                        debug!("Got a control events");
                         if let Some(c) = ctl {
-                            process_events(c, elems, status_channel, params);
+                            let event_result = process_events(c, elems, status_channel, params);
+                            match event_result {
+                                CaptureResult::Done => return Ok(event_result),
+                                CaptureResult::Stalled => debug!("Capture device is stalled"),
+                                CaptureResult::Normal => {}
+                            };
                         }
                         if let Some(h) = hctl {
                             let ev = h.handle_events().unwrap();
@@ -1148,6 +1157,13 @@ fn capture_loop_bytes(
                         .unwrap_or_else(|err| warn!("Capture error {:?}", err));
                     params.capture_status.write().state = ProcessingState::Stalled;
                 }
+            }
+            Ok(CaptureResult::Done) => {
+                info!("Capture stopped");
+                let msg = AudioMessage::EndOfStream;
+                channels.audio.send(msg).unwrap_or(());
+                params.capture_status.write().state = ProcessingState::Inactive;
+                return;
             }
             Err(msg) => {
                 channels
