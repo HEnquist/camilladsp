@@ -108,7 +108,7 @@ fn process_events(
     while let Ok(Some(ev)) = ctl.read() {
         let nid = ev.get_id().get_numid();
         debug!("Event from numid {}", nid);
-        let action = get_event_action(nid, elems, ctl);
+        let action = get_event_action(nid, elems, ctl, params);
         match action {
             EventAction::SourceInactive => {
                 if params.stop_on_inactive {
@@ -118,10 +118,10 @@ fn process_events(
                     panic!("TODO FD stop nicely");
                 }
             }
-            EventAction::FormatChange => {
+            EventAction::FormatChange(value) => {
                 if params.stop_on_inactive {
                     status_channel
-                        .send(StatusMessage::CaptureFormatChange(0))
+                        .send(StatusMessage::CaptureFormatChange(value))
                         .unwrap_or_default();
                     panic!("TODO FD stop nicely");
                 }
@@ -142,11 +142,16 @@ fn process_events(
 enum EventAction {
     None,
     SetVolume(f32),
-    FormatChange,
+    FormatChange(usize),
     SourceInactive,
 }
 
-fn get_event_action(numid: u32, elems: &CaptureElements, ctl: &Ctl) -> EventAction {
+fn get_event_action(
+    numid: u32,
+    elems: &CaptureElements,
+    ctl: &Ctl,
+    params: &CaptureParams,
+) -> EventAction {
     if let Some(eldata) = &elems.loopback_active {
         if eldata.numid == numid {
             let value = eldata
@@ -171,7 +176,7 @@ fn get_event_action(numid: u32, elems: &CaptureElements, ctl: &Ctl) -> EventActi
                 .map(|v| v.get_integer(0).unwrap())
                 .unwrap();
             debug!("Loopback rate: {}", value);
-            return EventAction::FormatChange;
+            return EventAction::FormatChange(value);
         }
     }
     if let Some(eldata) = &elems.loopback_format {
@@ -232,12 +237,16 @@ fn get_event_action(numid: u32, elems: &CaptureElements, ctl: &Ctl) -> EventActi
                 .element
                 .read()
                 .map(|v| v.get_integer(0).unwrap())
-                .unwrap();
+                .unwrap() as usize;
             debug!("Gadget rate: {}", value);
             if value == 0 {
                 return EventAction::SourceInactive;
             }
-            return EventAction::FormatChange;
+            if value != params.capture_samplerate {
+                return EventAction::FormatChange(value);
+            }
+            debug!("Capture device resumed with unchanged sample rate");
+            return EventAction::None;
         }
     }
     debug!("Ignoring event from unknown numid {}", numid);
