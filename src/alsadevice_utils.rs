@@ -317,6 +317,13 @@ impl<'a> ElemData<'a> {
             .and_then(|elval| elval.get_integer(0))
     }
 
+    pub fn read_as_bool(&self) -> Option<bool> {
+        self.element
+            .read()
+            .ok()
+            .and_then(|elval| elval.get_boolean(0))
+    }
+
     pub fn read_volume_in_db(&self, ctl: &Ctl) -> Option<f32> {
         self.read_as_int().and_then(|intval| {
             ctl.convert_to_db(&self.element.get_id().unwrap(), intval as i64)
@@ -437,99 +444,79 @@ pub fn get_event_action(
 ) -> EventAction {
     if let Some(eldata) = &elems.loopback_active {
         if eldata.numid == numid {
-            let value = eldata
-                .element
-                .read()
-                .map(|v| v.get_boolean(0).unwrap())
-                .unwrap();
-            debug!("Loopback active: {}", value);
-            if value {
-                return EventAction::None;
+            let value = eldata.read_as_bool();
+            debug!("Loopback active: {:?}", value);
+            if let Some(active) = value {
+                if active {
+                    return EventAction::None;
+                }
+                return EventAction::SourceInactive;
             }
-            return EventAction::SourceInactive;
         }
     }
     // Include this if the notify functionality of the loopback gets fixed
     /*
     if let Some(eldata) = &elems.loopback_rate {
         if eldata.numid == numid {
-            let value = eldata
-                .element
-                .read()
-                .map(|v| v.get_integer(0).unwrap())
-                .unwrap();
-            debug!("Loopback rate: {}", value);
-            return EventAction::FormatChange(value);
+            let value = eldata.read_as_int();
+            debug!("Gadget rate: {:?}", value);
+            if let Some(rate) = value {
+                debug!("Loopback rate: {}", rate);
+                return EventAction::FormatChange(rate);
+            }
         }
     }
     if let Some(eldata) = &elems.loopback_format {
         if eldata.numid == numid {
-            let value = eldata
-                .element
-                .read()
-                .map(|v| v.get_integer(0).unwrap())
-                .unwrap();
-            debug!("Loopback format: {}", value);
-            return EventAction::FormatChange;
+            let value = eldata.read_as_int();
+            debug!("Gadget rate: {:?}", value);
+            if let Some(format) = value {
+                debug!("Loopback format: {}", format);
+                return EventAction::FormatChange(TODO add sample format!);
+            }
         }
     }
     if let Some(eldata) = &elems.loopback_channels {
         if eldata.numid == numid {
-            let value = eldata
-                .element
-                .read()
-                .map(|v| v.get_integer(0).unwrap())
-                .unwrap();
-            debug!("Loopback channels: {}", value);
-            return EventAction::FormatChange;
+            debug!("Gadget rate: {:?}", value);
+            if let Some(chans) = value {
+                debug!("Loopback channels: {}", chans);
+                return EventAction::FormatChange(TODO add channels!);
+            }
         }
     } */
     if let Some(eldata) = &elems.loopback_volume {
         if eldata.numid == numid {
-            let value = eldata
-                .element
-                .read()
-                .map(|v| v.get_integer(0).unwrap())
-                .unwrap();
-            let vol_db = ctl
-                .convert_to_db(&eldata.element.get_id().unwrap(), value as i64)
-                .unwrap()
-                .to_db();
-            debug!("Loopback volume: {} raw, {} dB", value, vol_db);
-            return EventAction::SetVolume(vol_db);
+            let vol_db = eldata.read_volume_in_db(ctl);
+            debug!("Loopback volume: {:?} dB", vol_db);
+            if let Some(vol) = vol_db {
+                return EventAction::SetVolume(vol);
+            }
         }
     }
     if let Some(eldata) = &elems.gadget_vol {
         if eldata.numid == numid {
-            let value = eldata
-                .element
-                .read()
-                .map(|v| v.get_integer(0).unwrap())
-                .unwrap();
-            let vol_db = ctl
-                .convert_to_db(&eldata.element.get_id().unwrap(), value as i64)
-                .unwrap()
-                .to_db();
-            debug!("Gadget volume: {} raw, {} dB", value, vol_db);
-            return EventAction::SetVolume(vol_db);
+            let vol_db = eldata.read_volume_in_db(ctl);
+            debug!("Gadget volume: {:?} dB", vol_db);
+            if let Some(vol) = vol_db {
+                return EventAction::SetVolume(vol);
+            }
         }
     }
     if let Some(eldata) = &elems.gadget_rate {
         if eldata.numid == numid {
-            let value = eldata
-                .element
-                .read()
-                .map(|v| v.get_integer(0).unwrap())
-                .unwrap() as usize;
-            debug!("Gadget rate: {}", value);
-            if value == 0 {
-                return EventAction::SourceInactive;
+            let value = eldata.read_as_int();
+            debug!("Gadget rate: {:?}", value);
+            if let Some(rate) = value {
+                if rate == 0 {
+                    return EventAction::SourceInactive;
+                }
+                if rate as usize != params.capture_samplerate {
+                    return EventAction::FormatChange(rate as usize);
+                }
+                debug!("Capture device resumed with unchanged sample rate");
+                return EventAction::None;
             }
-            if value != params.capture_samplerate {
-                return EventAction::FormatChange(value);
-            }
-            debug!("Capture device resumed with unchanged sample rate");
-            return EventAction::None;
         }
     }
     debug!("Ignoring event from unknown numid {}", numid);
