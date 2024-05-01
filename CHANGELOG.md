@@ -6,6 +6,7 @@ New features:
 - Optional limit for volume controls.
 - Add websocket command for reading all faders with a single call.
 - Linux: Subscribe to capture device control events for volume, sample rate and format changes.
+- Linux: Optionally select Alsa sample format automatically.
 Changes:
 - Rename `File` capture device to `RawFile`.
 - Filter pipeline steps take a list of channels to filter instead of a single one.

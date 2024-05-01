@@ -191,7 +191,8 @@ pub enum CaptureDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
-        format: SampleFormat,
+        #[serde(default)]
+        format: Option<SampleFormat>,
         #[serde(default)]
         stop_on_inactive: Option<bool>,
         #[serde(default)]
@@ -422,7 +423,8 @@ pub enum PlaybackDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
-        format: SampleFormat,
+        #[serde(default)]
+        format: Option<SampleFormat>,
     },
     #[cfg(feature = "pulse-backend")]
     #[serde(alias = "PULSE", alias = "pulse")]
@@ -1521,7 +1523,7 @@ fn apply_overrides(configuration: &mut Configuration) {
             }
             #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { format, .. } => {
-                *format = fmt;
+                *format = Some(fmt);
             }
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
             CaptureDevice::Bluez(dev) => {
