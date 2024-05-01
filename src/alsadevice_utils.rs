@@ -1,7 +1,7 @@
 use crate::config::SampleFormat;
 use crate::{CaptureStatus, PlaybackStatus, PrcFmt, Res, StatusMessage};
 use alsa::card::Iter;
-use alsa::ctl::{Ctl, DeviceIter, ElemId, ElemIface};
+use alsa::ctl::{Ctl, DeviceIter, ElemId, ElemIface, ElemType, ElemValue};
 use alsa::device_name::HintIter;
 use alsa::hctl::{Elem, HCtl};
 use alsa::pcm::{Format, HwParams};
@@ -330,6 +330,13 @@ impl<'a> ElemData<'a> {
                 .ok()
                 .map(|v| v.to_db())
         })
+    }
+
+    pub fn write_as_int(&self, value: i32) {
+        let mut elval = ElemValue::new(ElemType::Integer).unwrap();
+        if elval.set_integer(0, value).is_some() {
+            self.element.write(&elval).unwrap_or_default();
+        }
     }
 }
 

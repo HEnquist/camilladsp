@@ -23,9 +23,9 @@ use crate::alsadevice_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
 use crate::alsadevice_utils::{
-    adjust_speed, list_channels_as_text, list_device_names, list_formats_as_text,
+    adjust_speed, find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
     list_samplerates_as_text, process_events, state_desc, CaptureElements, CaptureParams,
-    CaptureResult, FileDescriptors, PlaybackParams,
+    CaptureResult, ElemData, FileDescriptors, PlaybackParams,
 };
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -671,8 +671,8 @@ fn capture_loop_bytes(
     let nbr_pcm_fds = fds.len();
     let mut file_descriptors = FileDescriptors { fds, nbr_pcm_fds };
 
-    let mut element_loopback: Option<Elem> = None;
-    let mut element_uac2_gadget: Option<Elem> = None;
+    let mut element_loopback: Option<ElemData> = None;
+    let mut element_uac2_gadget: Option<ElemData> = None;
 
     let mut capture_elements = CaptureElements::default();
 
@@ -689,17 +689,20 @@ fn capture_loop_bytes(
         file_descriptors.fds.extend(ctl_fds.iter());
         println!("{:?}", file_descriptors.fds);
         h.load().unwrap();
-        let mut elid_loopback = ElemId::new(ElemIface::PCM);
-        elid_loopback.set_device(device);
-        elid_loopback.set_subdevice(subdevice);
-        elid_loopback.set_name(&CString::new("PCM Rate Shift 100000").unwrap());
-        element_loopback = h.find_elem(&elid_loopback);
-
-        let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
-        elid_uac2_gadget.set_device(device);
-        elid_uac2_gadget.set_subdevice(subdevice);
-        elid_uac2_gadget.set_name(&CString::new("Capture Pitch 1000000").unwrap());
-        element_uac2_gadget = h.find_elem(&elid_uac2_gadget);
+        element_loopback = find_elem(
+            h,
+            ElemIface::PCM,
+            device,
+            subdevice,
+            "PCM Rate Shift 100000",
+        );
+        element_uac2_gadget = find_elem(
+            h,
+            ElemIface::PCM,
+            device,
+            subdevice,
+            "Capture Pitch 1000000",
+        );
 
         capture_elements.find_elements(h, device, subdevice);
         if let Some(c) = &ctl {
@@ -771,14 +774,11 @@ fn capture_loop_bytes(
                 break;
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
-                let mut elval = ElemValue::new(ElemType::Integer).unwrap();
                 rate_adjust = speed;
                 if let Some(elem_loopback) = &element_loopback {
-                    elval.set_integer(0, (100_000.0 / speed) as i32).unwrap();
-                    elem_loopback.write(&elval).unwrap();
+                    elem_loopback.write_as_int((100_000.0 / speed) as i32);
                 } else if let Some(elem_uac2_gadget) = &element_uac2_gadget {
-                    elval.set_integer(0, (speed * 1_000_000.0) as i32).unwrap();
-                    elem_uac2_gadget.write(&elval).unwrap();
+                    elem_uac2_gadget.write_as_int((speed * 1_000_000.0) as i32);
                 } else if let Some(resampl) = &mut resampler {
                     if params.async_src {
                         if resampl.set_resample_ratio_relative(speed, true).is_err() {
