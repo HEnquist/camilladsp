@@ -371,7 +371,7 @@ fn open_pcm(
     sample_format: &SampleFormat,
     buf_manager: &mut dyn DeviceBufferManager,
     capture: bool,
-) -> Res<alsa::PCM> {
+) -> Res<(alsa::PCM, SampleFormat)> {
     let direction = if capture { "Capture" } else { "Playback" };
     debug!(
         "Available {} devices: {:?}",
@@ -433,7 +433,7 @@ fn open_pcm(
         pcmdev.sw_params(&swp)?;
         debug!("{} device \"{}\" successfully opened", direction, devname);
     }
-    Ok(pcmdev)
+    Ok((pcmdev, *sample_format))
 }
 
 fn playback_loop_bytes(
@@ -1014,7 +1014,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let bytes_per_sample = self.sample_format.bytes_per_sample();
-        let sample_format = self.sample_format;
+        let conf_sample_format = self.sample_format;
         let mut buf_manager =
             PlaybackBufferManager::new(chunksize as Frames, target_level as Frames);
         let handle = thread::Builder::new()
@@ -1024,11 +1024,11 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     devname,
                     samplerate as u32,
                     channels as u32,
-                    &sample_format,
+                    &conf_sample_format,
                     &mut buf_manager,
                     false,
                 ) {
-                    Ok(pcmdevice) => {
+                    Ok((pcmdevice, sample_format)) => {
                         match status_channel.send(StatusMessage::PlaybackReady) {
                             Ok(()) => {}
                             Err(_err) => {}
@@ -1087,7 +1087,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
-        let sample_format = self.sample_format;
+        let conf_sample_format = self.sample_format;
         let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
         let stop_on_rate_change = self.stop_on_rate_change;
@@ -1113,11 +1113,11 @@ impl CaptureDevice for AlsaCaptureDevice {
                     devname,
                     capture_samplerate as u32,
                     channels as u32,
-                    &sample_format,
+                    &conf_sample_format,
                     &mut buf_manager,
                     true,
                 ) {
-                    Ok(pcmdevice) => {
+                    Ok((pcmdevice, sample_format)) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
                             Ok(()) => {}
                             Err(_err) => {}

@@ -248,6 +248,31 @@ pub fn list_formats(hwp: &HwParams) -> Res<Vec<SampleFormat>> {
     Ok(formats)
 }
 
+pub fn pick_preferred_format(hwp: &HwParams) -> Option<SampleFormat> {
+    // Start with integer formats, in descending quality
+    if hwp.test_format(Format::s32()).is_ok() {
+        return Some(SampleFormat::S32LE);
+    }
+    // The two 24-bit formats are equivalent, the order does not matter
+    if hwp.test_format(Format::S243LE).is_ok() {
+        return Some(SampleFormat::S24LE3);
+    }
+    if hwp.test_format(Format::s24()).is_ok() {
+        return Some(SampleFormat::S24LE);
+    }
+    if hwp.test_format(Format::s16()).is_ok() {
+        return Some(SampleFormat::S16LE);
+    }
+    // float formats are unusual, try these last
+    if hwp.test_format(Format::float()).is_ok() {
+        return Some(SampleFormat::FLOAT32LE);
+    }
+    if hwp.test_format(Format::float64()).is_ok() {
+        return Some(SampleFormat::FLOAT64LE);
+    }
+    None
+}
+
 pub fn list_formats_as_text(hwp: &HwParams) -> String {
     let supported_formats_res = list_formats(hwp);
     if let Ok(formats) = supported_formats_res {
