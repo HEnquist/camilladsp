@@ -1,14 +1,15 @@
 use crate::config::SampleFormat;
-use crate::Res;
+use crate::{CaptureStatus, PlaybackStatus, PrcFmt, Res, StatusMessage};
 use alsa::card::Iter;
-use alsa::ctl::{Ctl, DeviceIter};
+use alsa::ctl::{Ctl, DeviceIter, ElemId, ElemIface};
 use alsa::device_name::HintIter;
-use alsa::pcm::{Format, HwParams, PCM};
-use alsa::poll;
-use alsa::poll::Descriptors;
-use alsa::Card;
-use alsa::Direction;
+use alsa::hctl::{Elem, HCtl};
+use alsa::pcm::{Format, HwParams};
+use alsa::{Card, Direction};
 use alsa_sys;
+use parking_lot::RwLock;
+use std::ffi::CString;
+use std::sync::Arc;
 
 const STANDARD_RATES: [u32; 17] = [
     5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
@@ -21,7 +22,43 @@ pub enum SupportedValues {
     Discrete(Vec<u32>),
 }
 
-fn get_card_names(card: &Card, input: bool, names: &mut Vec<(String, String)>) -> Res<()> {
+pub struct CaptureParams {
+    pub channels: usize,
+    pub sample_format: SampleFormat,
+    pub silence_timeout: PrcFmt,
+    pub silence_threshold: PrcFmt,
+    pub chunksize: usize,
+    pub store_bytes_per_sample: usize,
+    pub bytes_per_frame: usize,
+    pub samplerate: usize,
+    pub capture_samplerate: usize,
+    pub async_src: bool,
+    pub capture_status: Arc<RwLock<CaptureStatus>>,
+    pub stop_on_rate_change: bool,
+    pub rate_measure_interval: f32,
+    pub stop_on_inactive: bool,
+    pub use_virtual_volume: bool,
+}
+
+pub struct PlaybackParams {
+    pub channels: usize,
+    pub target_level: usize,
+    pub adjust_period: f32,
+    pub adjust_enabled: bool,
+    pub sample_format: SampleFormat,
+    pub playback_status: Arc<RwLock<PlaybackStatus>>,
+    pub bytes_per_frame: usize,
+    pub samplerate: usize,
+    pub chunksize: usize,
+}
+
+pub enum CaptureResult {
+    Normal,
+    Stalled,
+    Done,
+}
+
+pub fn get_card_names(card: &Card, input: bool, names: &mut Vec<(String, String)>) -> Res<()> {
     let dir = if input {
         Direction::Capture
     } else {
@@ -267,16 +304,267 @@ pub fn is_within(value: f64, target: f64, equality_range: f64) -> bool {
     value <= (target + equality_range) && value >= (target - equality_range)
 }
 
-//pub fn snd_pcm_wait(pcm: &PCM, timeout: isize)
-//{
-//if pcm.avail()? >= pcm.avail_min() {
-//	pcm.state();
-//}
-//	return snd_pcm_wait_nocheck(pcm, timeout);
-//}
+pub struct ElemData<'a> {
+    element: Elem<'a>,
+    numid: u32,
+}
 
-pub fn snd_pcm_wait_nocheck(pcm: &PCM, timeout: i32) -> Res<()> {
-    let mut fds = pcm.get()?;
-    poll::poll(&mut fds, timeout)?;
-    Ok(())
+impl<'a> ElemData<'a> {
+    pub fn read_as_int(&self) -> Option<i32> {
+        self.element
+            .read()
+            .ok()
+            .and_then(|elval| elval.get_integer(0))
+    }
+
+    pub fn read_volume_in_db(&self, ctl: &Ctl) -> Option<f32> {
+        self.read_as_int().and_then(|intval| {
+            ctl.convert_to_db(&self.element.get_id().unwrap(), intval as i64)
+                .ok()
+                .map(|v| v.to_db())
+        })
+    }
+}
+
+#[derive(Default)]
+pub struct CaptureElements<'a> {
+    pub loopback_active: Option<ElemData<'a>>,
+    // pub loopback_rate: Option<ElemData<'a>>,
+    // pub loopback_format: Option<ElemData<'a>>,
+    // pub loopback_channels: Option<ElemData<'a>>,
+    pub loopback_volume: Option<ElemData<'a>>,
+    pub gadget_rate: Option<ElemData<'a>>,
+    pub gadget_vol: Option<ElemData<'a>>,
+}
+
+pub struct FileDescriptors {
+    pub fds: Vec<alsa::poll::pollfd>,
+    pub nbr_pcm_fds: usize,
+}
+
+#[derive(Debug)]
+pub struct PollResult {
+    pub poll_res: usize,
+    pub pcm: bool,
+    pub ctl: bool,
+}
+
+impl FileDescriptors {
+    pub fn wait(&mut self, timeout: i32) -> alsa::Result<PollResult> {
+        let nbr_ready = alsa::poll::poll(&mut self.fds, timeout)?;
+        debug!("Got {} ready fds", nbr_ready);
+        let mut nbr_found = 0;
+        let mut pcm_res = false;
+        for fd in self.fds.iter().take(self.nbr_pcm_fds) {
+            if fd.revents > 0 {
+                pcm_res = true;
+                nbr_found += 1;
+                if nbr_found == nbr_ready {
+                    // We are done, let's return early
+
+                    return Ok(PollResult {
+                        poll_res: nbr_ready,
+                        pcm: pcm_res,
+                        ctl: false,
+                    });
+                }
+            }
+        }
+        // There were other ready file descriptors than PCM, must be controls
+        Ok(PollResult {
+            poll_res: nbr_ready,
+            pcm: pcm_res,
+            ctl: true,
+        })
+    }
+}
+
+pub fn process_events(
+    ctl: &Ctl,
+    elems: &CaptureElements,
+    status_channel: &crossbeam_channel::Sender<StatusMessage>,
+    params: &CaptureParams,
+) -> CaptureResult {
+    while let Ok(Some(ev)) = ctl.read() {
+        let nid = ev.get_id().get_numid();
+        debug!("Event from numid {}", nid);
+        let action = get_event_action(nid, elems, ctl, params);
+        match action {
+            EventAction::SourceInactive => {
+                if params.stop_on_inactive {
+                    debug!(
+                        "Stopping, capture device is inactive and stop_on_inactive is set to true"
+                    );
+                    status_channel
+                        .send(StatusMessage::CaptureDone)
+                        .unwrap_or_default();
+                    return CaptureResult::Done;
+                }
+            }
+            EventAction::FormatChange(value) => {
+                debug!("Stopping, capture device sample format changed");
+                status_channel
+                    .send(StatusMessage::CaptureFormatChange(value))
+                    .unwrap_or_default();
+                return CaptureResult::Done;
+            }
+            EventAction::SetVolume(vol) => {
+                if params.use_virtual_volume {
+                    debug!("Alsa volume change event, set main fader to {} dB", vol);
+                    status_channel
+                        .send(StatusMessage::SetVolume(vol))
+                        .unwrap_or_default();
+                }
+            }
+            EventAction::None => {}
+        }
+    }
+    CaptureResult::Normal
+}
+
+pub enum EventAction {
+    None,
+    SetVolume(f32),
+    FormatChange(usize),
+    SourceInactive,
+}
+
+pub fn get_event_action(
+    numid: u32,
+    elems: &CaptureElements,
+    ctl: &Ctl,
+    params: &CaptureParams,
+) -> EventAction {
+    if let Some(eldata) = &elems.loopback_active {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_boolean(0).unwrap())
+                .unwrap();
+            debug!("Loopback active: {}", value);
+            if value {
+                return EventAction::None;
+            }
+            return EventAction::SourceInactive;
+        }
+    }
+    // Include this if the notify functionality of the loopback gets fixed
+    /*
+    if let Some(eldata) = &elems.loopback_rate {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap();
+            debug!("Loopback rate: {}", value);
+            return EventAction::FormatChange(value);
+        }
+    }
+    if let Some(eldata) = &elems.loopback_format {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap();
+            debug!("Loopback format: {}", value);
+            return EventAction::FormatChange;
+        }
+    }
+    if let Some(eldata) = &elems.loopback_channels {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap();
+            debug!("Loopback channels: {}", value);
+            return EventAction::FormatChange;
+        }
+    } */
+    if let Some(eldata) = &elems.loopback_volume {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap();
+            let vol_db = ctl
+                .convert_to_db(&eldata.element.get_id().unwrap(), value as i64)
+                .unwrap()
+                .to_db();
+            debug!("Loopback volume: {} raw, {} dB", value, vol_db);
+            return EventAction::SetVolume(vol_db);
+        }
+    }
+    if let Some(eldata) = &elems.gadget_vol {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap();
+            let vol_db = ctl
+                .convert_to_db(&eldata.element.get_id().unwrap(), value as i64)
+                .unwrap()
+                .to_db();
+            debug!("Gadget volume: {} raw, {} dB", value, vol_db);
+            return EventAction::SetVolume(vol_db);
+        }
+    }
+    if let Some(eldata) = &elems.gadget_rate {
+        if eldata.numid == numid {
+            let value = eldata
+                .element
+                .read()
+                .map(|v| v.get_integer(0).unwrap())
+                .unwrap() as usize;
+            debug!("Gadget rate: {}", value);
+            if value == 0 {
+                return EventAction::SourceInactive;
+            }
+            if value != params.capture_samplerate {
+                return EventAction::FormatChange(value);
+            }
+            debug!("Capture device resumed with unchanged sample rate");
+            return EventAction::None;
+        }
+    }
+    debug!("Ignoring event from unknown numid {}", numid);
+    EventAction::None
+}
+
+impl<'a> CaptureElements<'a> {
+    pub fn find_elements(&mut self, h: &'a HCtl, device: u32, subdevice: u32) {
+        self.loopback_active = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Active");
+        // self.loopback_rate = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Rate");
+        // self.loopback_format = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Format");
+        // self.loopback_channels = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Channels");
+        self.loopback_volume = find_elem(h, ElemIface::Mixer, 0, 0, "PCM Playback Volume");
+        self.gadget_rate = find_elem(h, ElemIface::PCM, device, subdevice, "Capture Rate");
+        self.gadget_vol = find_elem(h, ElemIface::Mixer, device, subdevice, "PCM Capture Volume");
+        //also "PCM Playback Volume" and "Playback Rate" for Gadget playback side
+    }
+}
+
+pub fn find_elem<'a>(
+    hctl: &'a HCtl,
+    iface: ElemIface,
+    device: u32,
+    subdevice: u32,
+    name: &str,
+) -> Option<ElemData<'a>> {
+    let mut elem_id = ElemId::new(iface);
+    elem_id.set_device(device);
+    elem_id.set_subdevice(subdevice);
+    elem_id.set_name(&CString::new(name).unwrap());
+    let element = hctl.find_elem(&elem_id);
+    debug!("Look up element with name {}", name);
+    element.map(|e| {
+        let numid = e.get_id().map(|id| id.get_numid()).unwrap_or_default();
+        debug!("Found element with name {} and numid {}", name, numid);
+        ElemData { element: e, numid }
+    })
 }
