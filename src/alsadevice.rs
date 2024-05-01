@@ -71,17 +71,14 @@ struct PollResult {
 
 impl<'a> ElemData<'a> {
     fn read_as_int(&self) -> Option<i32> {
-        self
-            .element
+        self.element
             .read()
-            .map(|elval| elval.get_integer(0))
             .ok()
-            .flatten()
+            .and_then(|elval| elval.get_integer(0))
     }
 
     fn read_volume_in_db(&self, ctl: &Ctl) -> Option<f32> {
-        self.read_as_int()
-        .and_then(|intval| {
+        self.read_as_int().and_then(|intval| {
             ctl.convert_to_db(&self.element.get_id().unwrap(), intval as i64)
                 .ok()
                 .map(|v| v.to_db())
@@ -1019,7 +1016,8 @@ fn capture_loop_bytes(
                 }
                 info!("Using initial volume from Alsa: {:?}", vol_db);
                 if let Some(vol) = vol_db {
-                    channels.status
+                    channels
+                        .status
                         .send(StatusMessage::SetVolume(vol))
                         .unwrap_or_default();
                 }
