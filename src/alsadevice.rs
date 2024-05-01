@@ -69,6 +69,26 @@ struct PollResult {
     ctl: bool,
 }
 
+impl<'a> ElemData<'a> {
+    fn read_as_int(&self) -> Option<i32> {
+        self
+            .element
+            .read()
+            .map(|elval| elval.get_integer(0))
+            .ok()
+            .flatten()
+    }
+
+    fn read_volume_in_db(&self, ctl: &Ctl) -> Option<f32> {
+        self.read_as_int()
+        .and_then(|intval| {
+            ctl.convert_to_db(&self.element.get_id().unwrap(), intval as i64)
+                .ok()
+                .map(|v| v.to_db())
+        })
+    }
+}
+
 impl FileDescriptors {
     fn wait(&mut self, timeout: i32) -> alsa::Result<PollResult> {
         let nbr_ready = alsa::poll::poll(&mut self.fds, timeout)?;
@@ -559,7 +579,7 @@ fn capture_buffer(
                 } else {
                     warn!(
                         "Capture: device failed while waiting for available frames, error: {}",
-                        err
+                        errq
                     );
                     return Err(Box::new(err));
                 }
@@ -989,7 +1009,22 @@ fn capture_loop_bytes(
         element_uac2_gadget = h.find_elem(&elid_uac2_gadget);
 
         capture_elements.find_elements(h, device, subdevice);
-        // TODO FD read the volume at startup
+        if let Some(c) = &ctl {
+            let mut vol_db = None;
+            if params.use_virtual_volume {
+                if let Some(ref vol_elem) = capture_elements.loopback_volume {
+                    vol_db = vol_elem.read_volume_in_db(c);
+                } else if let Some(ref vol_elem) = capture_elements.gadget_vol {
+                    vol_db = vol_elem.read_volume_in_db(c);
+                }
+                info!("Using initial volume from Alsa: {:?}", vol_db);
+                if let Some(vol) = vol_db {
+                    channels.status
+                        .send(StatusMessage::SetVolume(vol))
+                        .unwrap_or_default();
+                }
+            }
+        }
     }
     if element_loopback.is_some() || element_uac2_gadget.is_some() {
         info!("Capture device supports rate adjust");
