@@ -62,7 +62,7 @@ pub struct AlsaCaptureDevice {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
-    pub use_virtual_volume: bool,
+    pub follow_volume_control: Option<String>,
 }
 
 struct CaptureChannels {
@@ -249,35 +249,12 @@ fn capture_buffer(
         if timeout_millis < 10 {
             timeout_millis = 10;
         }
-        let start = if log_enabled!(log::Level::Debug) {
+        let start = if log_enabled!(log::Level::Trace) {
             Some(Instant::now())
         } else {
             None
         };
         trace!("Capture pcmdevice.wait with timeout {} ms", timeout_millis);
-        /*match pcmdevice.wait(Some(timeout_millis)) {
-            Ok(true) => {
-                trace!("Capture waited for {:?}, ready", start.map(|s| s.elapsed()));
-            }
-            Ok(false) => {
-                trace!("Wait timed out, capture device takes too long to capture frames");
-                return Ok(CaptureResult::Stalled);
-            }
-            Err(err) => {
-                if Errno::from_raw(err.errno()) == Errno::EPIPE {
-                    warn!("Capture: wait overrun, trying to recover. Error: {}", err);
-                    trace!("snd_pcm_prepare");
-                    // Would recover() be better than prepare()?
-                    pcmdevice.prepare()?;
-                } else {
-                    warn!(
-                        "Capture: device failed while waiting for available frames, error: {}",
-                        errq
-                    );
-                    return Err(Box::new(err));
-                }
-            }
-        }*/
         loop {
             match fds.wait(timeout_millis as i32) {
                 Ok(pollresult) => {
@@ -286,7 +263,7 @@ fn capture_buffer(
                         return Ok(CaptureResult::Stalled);
                     }
                     if pollresult.ctl {
-                        debug!("Got a control events");
+                        trace!("Got a control events");
                         if let Some(c) = ctl {
                             let event_result = process_events(c, elems, status_channel, params);
                             match event_result {
@@ -297,11 +274,11 @@ fn capture_buffer(
                         }
                         if let Some(h) = hctl {
                             let ev = h.handle_events().unwrap();
-                            debug!("hctl handle events {}", ev);
+                            trace!("hctl handle events {}", ev);
                         }
                     }
                     if pollresult.pcm {
-                        debug!("Capture waited for {:?}", start.map(|s| s.elapsed()));
+                        trace!("Capture waited for {:?}", start.map(|s| s.elapsed()));
                         break;
                     }
                 }
@@ -714,15 +691,10 @@ fn capture_loop_bytes(
             "Capture Pitch 1000000",
         );
 
-        capture_elements.find_elements(h, device, subdevice);
+        capture_elements.find_elements(h, device, subdevice, &params.follow_volume_control);
         if let Some(c) = &ctl {
-            let mut vol_db = None;
-            if params.use_virtual_volume {
-                if let Some(ref vol_elem) = capture_elements.loopback_volume {
-                    vol_db = vol_elem.read_volume_in_db(c);
-                } else if let Some(ref vol_elem) = capture_elements.gadget_vol {
-                    vol_db = vol_elem.read_volume_in_db(c);
-                }
+            if let Some(ref vol_elem) = capture_elements.volume {
+                let vol_db = vol_elem.read_volume_in_db(c);
                 info!("Using initial volume from Alsa: {:?}", vol_db);
                 if let Some(vol) = vol_db {
                     channels
@@ -1101,7 +1073,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let stop_on_inactive = self.stop_on_inactive;
-        let use_virtual_volume = self.use_virtual_volume;
+        let follow_volume_control = self.follow_volume_control.clone();
         let mut buf_manager = CaptureBufferManager::new(
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
@@ -1148,7 +1120,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             stop_on_rate_change,
                             rate_measure_interval,
                             stop_on_inactive,
-                            use_virtual_volume,
+                            follow_volume_control,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,

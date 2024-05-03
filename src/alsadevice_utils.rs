@@ -37,7 +37,7 @@ pub struct CaptureParams {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
-    pub use_virtual_volume: bool,
+    pub follow_volume_control: Option<String>,
 }
 
 pub struct PlaybackParams {
@@ -371,9 +371,8 @@ pub struct CaptureElements<'a> {
     // pub loopback_rate: Option<ElemData<'a>>,
     // pub loopback_format: Option<ElemData<'a>>,
     // pub loopback_channels: Option<ElemData<'a>>,
-    pub loopback_volume: Option<ElemData<'a>>,
     pub gadget_rate: Option<ElemData<'a>>,
-    pub gadget_vol: Option<ElemData<'a>>,
+    pub volume: Option<ElemData<'a>>,
 }
 
 pub struct FileDescriptors {
@@ -391,7 +390,7 @@ pub struct PollResult {
 impl FileDescriptors {
     pub fn wait(&mut self, timeout: i32) -> alsa::Result<PollResult> {
         let nbr_ready = alsa::poll::poll(&mut self.fds, timeout)?;
-        debug!("Got {} ready fds", nbr_ready);
+        trace!("Got {} ready fds", nbr_ready);
         let mut nbr_found = 0;
         let mut pcm_res = false;
         for fd in self.fds.iter().take(self.nbr_pcm_fds) {
@@ -448,12 +447,10 @@ pub fn process_events(
                 return CaptureResult::Done;
             }
             EventAction::SetVolume(vol) => {
-                if params.use_virtual_volume {
-                    debug!("Alsa volume change event, set main fader to {} dB", vol);
-                    status_channel
-                        .send(StatusMessage::SetVolume(vol))
-                        .unwrap_or_default();
-                }
+                debug!("Alsa volume change event, set main fader to {} dB", vol);
+                status_channel
+                    .send(StatusMessage::SetVolume(vol))
+                    .unwrap_or_default();
             }
             EventAction::None => {}
         }
@@ -517,19 +514,10 @@ pub fn get_event_action(
             }
         }
     } */
-    if let Some(eldata) = &elems.loopback_volume {
+    if let Some(eldata) = &elems.volume {
         if eldata.numid == numid {
             let vol_db = eldata.read_volume_in_db(ctl);
-            debug!("Loopback volume: {:?} dB", vol_db);
-            if let Some(vol) = vol_db {
-                return EventAction::SetVolume(vol);
-            }
-        }
-    }
-    if let Some(eldata) = &elems.gadget_vol {
-        if eldata.numid == numid {
-            let vol_db = eldata.read_volume_in_db(ctl);
-            debug!("Gadget volume: {:?} dB", vol_db);
+            debug!("Mixer volume control: {:?} dB", vol_db);
             if let Some(vol) = vol_db {
                 return EventAction::SetVolume(vol);
             }
@@ -556,15 +544,21 @@ pub fn get_event_action(
 }
 
 impl<'a> CaptureElements<'a> {
-    pub fn find_elements(&mut self, h: &'a HCtl, device: u32, subdevice: u32) {
+    pub fn find_elements(
+        &mut self,
+        h: &'a HCtl,
+        device: u32,
+        subdevice: u32,
+        volume_name: &Option<String>,
+    ) {
         self.loopback_active = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Active");
         // self.loopback_rate = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Rate");
         // self.loopback_format = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Format");
         // self.loopback_channels = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Channels");
-        self.loopback_volume = find_elem(h, ElemIface::Mixer, 0, 0, "PCM Playback Volume");
         self.gadget_rate = find_elem(h, ElemIface::PCM, device, subdevice, "Capture Rate");
-        self.gadget_vol = find_elem(h, ElemIface::Mixer, device, subdevice, "PCM Capture Volume");
-        //also "PCM Playback Volume" and "Playback Rate" for Gadget playback side
+        self.volume = volume_name
+            .as_ref()
+            .and_then(|name| find_elem(h, ElemIface::Mixer, 0, 0, name));
     }
 }
 

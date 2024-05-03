@@ -196,7 +196,7 @@ pub enum CaptureDevice {
         #[serde(default)]
         stop_on_inactive: Option<bool>,
         #[serde(default)]
-        use_virtual_volume: Option<bool>,
+        follow_volume_control: Option<String>,
     },
     #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
     #[serde(alias = "BLUEZ", alias = "bluez")]
