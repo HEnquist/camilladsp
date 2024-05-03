@@ -156,7 +156,7 @@ This example configuration will be used to explain the various options specific 
     device: "hw:0,1"
     format: S16LE (*)
     stop_on_inactive: false (*)
-    use_virtual_volume: false (*)
+    follow_volume_control: "PCM Playback Volume" (*)
   playback:
     type: Alsa
     channels: 2
@@ -179,13 +179,35 @@ but are supported by very few devices. Therefore these are checked last.
 Please also see [Find valid playback and capture parameters](#find-valid-playback-and-capture-parameters).
 
 ### Linking volume control to device volume
-When capturing from the Alsa loopback or the USB Audio Gadget,
-it's possible to let CamillaDSP follow the device volume control.
-Both of these devices provide a "dummy" volume control that does not alter the signal.
-This can be used to forward the volume setting from a player to CamillaDSP.
-To enable this, set the `use_virtual_volume` setting to `true`.
-Any change of the loopback or gadget volume then gets applied
-to the CamillaDSP main volume control.
+It is possible to let CamillaDSP follow the a volume control of the capture device.
+This is mostly useful when capturing from the USB Audio Gadget,
+which provides a control named `PCM Capture Volume` that is controlled by the USB host.
+
+This does not alter the signal, and can be used to forward the volume setting from a player to CamillaDSP.
+To enable this, set the `follow_volume_control` setting to the name of the volume control.
+Any change of the volume then gets applied to the CamillaDSP main volume control.
+
+The available controls for a device can be listed with `amixer`.
+List controls for card 1:
+```sh
+amixer -c 1 controls
+```
+
+List controls with values and more details:
+```sh
+amixer -c 1 contents
+```
+
+The chosen control should be one that does not affect the signal volume,
+otherwise the volume gets applied twice.
+It must also have a scale in decibel like in this example:
+```
+numid=15,iface=MIXER,name='Master Playback Volume'
+  ; type=INTEGER,access=rw---R--,values=1,min=0,max=87,step=0
+  : values=52
+  | dBscale-min=-65.25dB,step=0.75dB,mute=0
+```
+
 
 ### Subscribe to Alsa control events
 The Alsa capture device subscribes to control events from the USB Gadget and Loopback devices.
