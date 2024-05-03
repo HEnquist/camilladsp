@@ -679,15 +679,15 @@ fn capture_loop_bytes(
         element_loopback = find_elem(
             h,
             ElemIface::PCM,
-            device,
-            subdevice,
+            Some(device),
+            Some(subdevice),
             "PCM Rate Shift 100000",
         );
         element_uac2_gadget = find_elem(
             h,
             ElemIface::PCM,
-            device,
-            subdevice,
+            Some(device),
+            Some(subdevice),
             "Capture Pitch 1000000",
         );
 

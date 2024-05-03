@@ -551,27 +551,43 @@ impl<'a> CaptureElements<'a> {
         subdevice: u32,
         volume_name: &Option<String>,
     ) {
-        self.loopback_active = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Active");
+        self.loopback_active = find_elem(
+            h,
+            ElemIface::PCM,
+            Some(device),
+            Some(subdevice),
+            "PCM Slave Active",
+        );
         // self.loopback_rate = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Rate");
         // self.loopback_format = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Format");
         // self.loopback_channels = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Channels");
-        self.gadget_rate = find_elem(h, ElemIface::PCM, device, subdevice, "Capture Rate");
+        self.gadget_rate = find_elem(
+            h,
+            ElemIface::PCM,
+            Some(device),
+            Some(subdevice),
+            "Capture Rate",
+        );
         self.volume = volume_name
             .as_ref()
-            .and_then(|name| find_elem(h, ElemIface::Mixer, 0, 0, name));
+            .and_then(|name| find_elem(h, ElemIface::Mixer, None, None, name));
     }
 }
 
 pub fn find_elem<'a>(
     hctl: &'a HCtl,
     iface: ElemIface,
-    device: u32,
-    subdevice: u32,
+    device: Option<u32>,
+    subdevice: Option<u32>,
     name: &str,
 ) -> Option<ElemData<'a>> {
     let mut elem_id = ElemId::new(iface);
-    elem_id.set_device(device);
-    elem_id.set_subdevice(subdevice);
+    if let Some(dev) = device {
+        elem_id.set_device(dev);
+    }
+    if let Some(subdev) = subdevice {
+        elem_id.set_subdevice(subdev);
+    }
     elem_id.set_name(&CString::new(name).unwrap());
     let element = hctl.find_elem(&elem_id);
     debug!("Look up element with name {}", name);
