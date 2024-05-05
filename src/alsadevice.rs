@@ -141,6 +141,8 @@ fn play_buffer(
         buf_manager.sleep_for_target_delay(millis_per_frame);
     } else if playback_state == alsa_sys::SND_PCM_STATE_PREPARED as i32 {
         info!("PB: Starting playback from Prepared state");
+        // This sleep applies for the first chunk and in combination with the threshold=1 (i.e. start at first write)
+        // and the next chunk generates the initial target delay.
         buf_manager.sleep_for_target_delay(millis_per_frame);
     } else if playback_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
         warn!(
