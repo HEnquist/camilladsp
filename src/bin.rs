@@ -765,7 +765,7 @@ fn main_process() -> i32 {
 
     if configname.is_none() {
         if let Some(s) = &state {
-            configname = s.config_path.clone();
+            configname.clone_from(&s.config_path)
         }
     }
 
