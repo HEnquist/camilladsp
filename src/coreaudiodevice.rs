@@ -3,6 +3,7 @@ use crate::config;
 use crate::config::{ConfigError, SampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
+use crate::helpers::PIRateController;
 use crossbeam_channel::{bounded, TryRecvError, TrySendError};
 use dispatch::Semaphore;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
@@ -404,6 +405,8 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 // TODO check if always 512!
                 //trace!("Estimated playback callback period to {} frames", callback_frames);
 
+                let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
+                let mut rate_adjust_value = 1.0;
                 trace!("Build output stream");
                 let mut conversion_result;
                 let mut sample_queue: VecDeque<u8> =
@@ -524,22 +527,29 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
                             if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
                                 if let Some(av_delay) = buffer_avg.average() {
-                                    let speed = calculate_speed(
-                                        av_delay,
-                                        target_level,
-                                        adjust_period,
-                                        samplerate as u32,
-                                    );
+                                    let speed = rate_controller.next(av_delay);
+                                    let changed = (speed - rate_adjust_value).abs() > 0.000_001;
+
                                     timer.restart();
                                     buffer_avg.restart();
-                                    debug!(
-                                        "Current buffer level {:.1}, set capture rate to {:.4}%",
-                                        av_delay,
-                                        100.0 * speed
-                                    );
-                                    status_channel
-                                        .send(StatusMessage::SetSpeed(speed))
-                                        .unwrap_or(());
+                                    if changed {
+                                        debug!(
+                                            "Current buffer level {:.1}, set capture rate to {:.4}%",
+                                            av_delay,
+                                            100.0 * speed
+                                        );
+                                        status_channel
+                                            .send(StatusMessage::SetSpeed(speed))
+                                            .unwrap_or(());
+                                        rate_adjust_value = speed;
+                                    }
+                                    else {
+                                        debug!(
+                                            "Current buffer level {:.1}, leaving capture rate at {:.4}%",
+                                            av_delay,
+                                            100.0 * rate_adjust_value
+                                        );
+                                    }
                                     playback_status.write().buffer_level = av_delay as usize;
                                 }
                             }

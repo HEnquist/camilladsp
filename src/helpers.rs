@@ -79,3 +79,46 @@ pub fn linear_to_db(values: &mut [f32]) {
         }
     });
 }
+
+// A simple PI controller for rate adjustments
+pub struct PIRateController {
+    target_level: f64,
+    interval: f64,
+    k_p: f64,
+    k_i: f64,
+    frames_per_interval: f64,
+    accumulated: f64,
+}
+
+impl PIRateController {
+    /// Create a new controller with default gains
+    pub fn new_with_default_gains(fs: usize, interval: f64, target_level: usize) -> Self {
+        let k_p = 0.2;
+        let k_i = 0.004;
+        Self::new(fs, interval, target_level, k_p, k_i)
+    }
+
+    pub fn new(fs: usize, interval: f64, target_level: usize, k_p: f64, k_i: f64) -> Self {
+        let frames_per_interval = interval * fs as f64;
+        Self {
+            target_level: target_level as f64,
+            interval,
+            k_p,
+            k_i,
+            frames_per_interval,
+            accumulated: 0.0,
+        }
+    }
+
+    /// Calculate the control output for the next measured value
+    pub fn next(&mut self, level: f64) -> f64 {
+        let err = level - self.target_level;
+        let rel_diff = err / self.frames_per_interval;
+        self.accumulated += rel_diff * self.interval;
+        let proportional = self.k_p * rel_diff;
+        let integral = self.k_i * self.accumulated;
+        let mut rate_diff = proportional + integral;
+        rate_diff = rate_diff.clamp(-0.005, 0.005);
+        1.0 - rate_diff
+    }
+}
