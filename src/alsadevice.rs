@@ -1,14 +1,13 @@
 extern crate alsa;
 extern crate nix;
 use crate::audiodevice::*;
-use crate::config;
-use crate::config::SampleFormat;
+use crate::config::{Resampler, SampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
-use alsa::ctl::{ElemId, ElemIface};
-use alsa::ctl::{ElemType, ElemValue};
+use alsa::ctl::{Ctl, ElemId, ElemIface, ElemType, ElemValue};
 use alsa::hctl::{Elem, HCtl};
 use alsa::pcm::{Access, Format, Frames, HwParams};
+use alsa::poll::Descriptors;
 use alsa::{Direction, ValueOr, PCM};
 use alsa_sys;
 use nix::errno::Errno;
@@ -16,9 +15,7 @@ use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::ffi::CString;
 use std::fmt::Debug;
-use std::sync::mpsc;
-use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Barrier};
+use std::sync::{mpsc, Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
@@ -26,8 +23,9 @@ use crate::alsadevice_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
 use crate::alsadevice_utils::{
-    adjust_speed, list_channels_as_text, list_device_names, list_formats_as_text,
-    list_samplerates_as_text, state_desc,
+    adjust_speed, find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
+    list_samplerates_as_text, pick_preferred_format, process_events, state_desc, CaptureElements,
+    CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams,
 };
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -45,7 +43,7 @@ pub struct AlsaPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
+    pub sample_format: Option<SampleFormat>,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -55,14 +53,16 @@ pub struct AlsaCaptureDevice {
     pub devname: String,
     pub samplerate: usize,
     pub capture_samplerate: usize,
-    pub resampler_config: Option<config::Resampler>,
+    pub resampler_config: Option<Resampler>,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
+    pub sample_format: Option<SampleFormat>,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
+    pub stop_on_inactive: bool,
+    pub follow_volume_control: Option<String>,
 }
 
 struct CaptureChannels {
@@ -74,39 +74,6 @@ struct CaptureChannels {
 struct PlaybackChannels {
     audio: mpsc::Receiver<AudioMessage>,
     status: crossbeam_channel::Sender<StatusMessage>,
-}
-
-struct CaptureParams {
-    channels: usize,
-    sample_format: SampleFormat,
-    silence_timeout: PrcFmt,
-    silence_threshold: PrcFmt,
-    chunksize: usize,
-    store_bytes_per_sample: usize,
-    bytes_per_frame: usize,
-    samplerate: usize,
-    capture_samplerate: usize,
-    async_src: bool,
-    capture_status: Arc<RwLock<CaptureStatus>>,
-    stop_on_rate_change: bool,
-    rate_measure_interval: f32,
-}
-
-struct PlaybackParams {
-    channels: usize,
-    target_level: usize,
-    adjust_period: f32,
-    adjust_enabled: bool,
-    sample_format: SampleFormat,
-    playback_status: Arc<RwLock<PlaybackStatus>>,
-    bytes_per_frame: usize,
-    samplerate: usize,
-    chunksize: usize,
-}
-
-enum CaptureResult {
-    Normal,
-    Stalled,
 }
 
 #[derive(Debug)]
@@ -244,13 +211,18 @@ fn play_buffer(
 }
 
 /// Capture a buffer.
+#[allow(clippy::too_many_arguments)]
 fn capture_buffer(
     mut buffer: &mut [u8],
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
-    samplerate: usize,
     frames_to_read: usize,
-    bytes_per_frame: usize,
+    fds: &mut FileDescriptors,
+    ctl: &Option<Ctl>,
+    hctl: &Option<HCtl>,
+    elems: &CaptureElements,
+    status_channel: &crossbeam_channel::Sender<StatusMessage>,
+    params: &CaptureParams,
 ) -> Res<CaptureResult> {
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
@@ -272,7 +244,7 @@ fn capture_buffer(
         );
         pcmdevice.start()?;
     }
-    let millis_per_chunk = 1000 * frames_to_read / samplerate;
+    let millis_per_chunk = 1000 * frames_to_read / params.samplerate;
 
     loop {
         let mut timeout_millis = 4 * millis_per_chunk as u32;
@@ -285,32 +257,53 @@ fn capture_buffer(
             None
         };
         trace!("Capture pcmdevice.wait with timeout {} ms", timeout_millis);
-        match pcmdevice.wait(Some(timeout_millis)) {
-            Ok(true) => {
-                trace!("Capture waited for {:?}, ready", start.map(|s| s.elapsed()));
-            }
-            Ok(false) => {
-                trace!("Wait timed out, capture device takes too long to capture frames");
-                return Ok(CaptureResult::Stalled);
-            }
-            Err(err) => {
-                if Errno::from_raw(err.errno()) == Errno::EPIPE {
-                    warn!("Capture: wait overrun, trying to recover. Error: {}", err);
-                    trace!("snd_pcm_prepare");
-                    // Would recover() be better than prepare()?
-                    pcmdevice.prepare()?;
-                } else {
-                    warn!(
-                        "Capture: device failed while waiting for available frames, error: {}",
-                        err
-                    );
-                    return Err(Box::new(err));
+        loop {
+            match fds.wait(timeout_millis as i32) {
+                Ok(pollresult) => {
+                    if pollresult.poll_res == 0 {
+                        trace!("Wait timed out, capture device takes too long to capture frames");
+                        return Ok(CaptureResult::Stalled);
+                    }
+                    if pollresult.ctl {
+                        trace!("Got a control events");
+                        if let Some(c) = ctl {
+                            let event_result = process_events(c, elems, status_channel, params);
+                            match event_result {
+                                CaptureResult::Done => return Ok(event_result),
+                                CaptureResult::Stalled => debug!("Capture device is stalled"),
+                                CaptureResult::Normal => {}
+                            };
+                        }
+                        if let Some(h) = hctl {
+                            let ev = h.handle_events().unwrap();
+                            trace!("hctl handle events {}", ev);
+                        }
+                    }
+                    if pollresult.pcm {
+                        trace!("Capture waited for {:?}", start.map(|s| s.elapsed()));
+                        break;
+                    }
+                }
+                Err(err) => {
+                    if Errno::from_raw(err.errno()) == Errno::EPIPE {
+                        warn!("Capture: wait overrun, trying to recover. Error: {}", err);
+                        trace!("snd_pcm_prepare");
+                        // Would recover() be better than prepare()?
+                        pcmdevice.prepare()?;
+                        break;
+                    } else {
+                        warn!(
+                            "Capture: device failed while waiting for available frames, error: {}",
+                            err
+                        );
+                        return Err(Box::new(err));
+                    }
                 }
             }
         }
         match io.readi(buffer) {
             Ok(frames_read) => {
-                let frames_req = buffer.len() / bytes_per_frame;
+                let frames_req = buffer.len() / params.bytes_per_frame;
                 if frames_read == frames_req {
                     trace!("Capture read {} frames as requested", frames_read);
                     return Ok(CaptureResult::Normal);
@@ -319,7 +312,7 @@ fn capture_buffer(
                         "Capture read {} frames instead of the requested {}",
                         frames_read, frames_req
                     );
-                    buffer = &mut buffer[frames_read * bytes_per_frame..];
+                    buffer = &mut buffer[frames_read * params.bytes_per_frame..];
                     // repeat reading
                     continue;
                 }
@@ -354,10 +347,10 @@ fn open_pcm(
     devname: String,
     samplerate: u32,
     channels: u32,
-    sample_format: &SampleFormat,
+    sample_format: &Option<SampleFormat>,
     buf_manager: &mut dyn DeviceBufferManager,
     capture: bool,
-) -> Res<alsa::PCM> {
+) -> Res<(alsa::PCM, SampleFormat)> {
     let direction = if capture { "Capture" } else { "Playback" };
     debug!(
         "Available {} devices: {:?}",
@@ -373,6 +366,7 @@ fn open_pcm(
         alsa::PCM::new(&devname, Direction::Playback, true)?
     };
     // Set hardware parameters
+    let chosen_format;
     {
         let hwp = HwParams::any(&pcmdev)?;
 
@@ -388,8 +382,17 @@ fn open_pcm(
 
         // Set sample format
         debug!("{}: {}", direction, list_formats_as_text(&hwp));
-        debug!("{}: setting format to {}", direction, sample_format);
-        match sample_format {
+        chosen_format = match sample_format {
+            Some(sfmt) => *sfmt,
+            None => {
+                let preferred = pick_preferred_format(&hwp)
+                    .ok_or(DeviceError::new("Unable to find a supported sample format"))?;
+                debug!("{}: Picked sample format {}", direction, preferred);
+                preferred
+            }
+        };
+        debug!("{}: setting format to {}", direction, chosen_format);
+        match chosen_format {
             SampleFormat::S16LE => hwp.set_format(Format::s16())?,
             SampleFormat::S24LE => hwp.set_format(Format::s24())?,
             SampleFormat::S24LE3 => hwp.set_format(Format::s24_3())?,
@@ -419,7 +422,7 @@ fn open_pcm(
         pcmdev.sw_params(&swp)?;
         debug!("{} device \"{}\" successfully opened", direction, devname);
     }
-    Ok(pcmdev)
+    Ok((pcmdev, chosen_format))
 }
 
 fn playback_loop_bytes(
@@ -629,7 +632,7 @@ fn playback_loop_bytes(
     }
 }
 
-fn drain_check_eos(audio: &Receiver<AudioMessage>) -> Option<AudioMessage> {
+fn drain_check_eos(audio: &mpsc::Receiver<AudioMessage>) -> Option<AudioMessage> {
     let mut eos: Option<AudioMessage> = None;
     while let Some(msg) = audio.try_iter().next() {
         if let AudioMessage::EndOfStream = msg {
@@ -652,26 +655,58 @@ fn capture_loop_bytes(
     let device = pcminfo.get_device();
     let subdevice = pcminfo.get_subdevice();
 
-    let mut element_loopback: Option<Elem> = None;
-    let mut element_uac2_gadget: Option<Elem> = None;
+    let fds = pcmdevice.get().unwrap();
+    println!("{:?}", fds);
+    let nbr_pcm_fds = fds.len();
+    let mut file_descriptors = FileDescriptors { fds, nbr_pcm_fds };
+
+    let mut element_loopback: Option<ElemData> = None;
+    let mut element_uac2_gadget: Option<ElemData> = None;
+
+    let mut capture_elements = CaptureElements::default();
+
     // Virtual devices such as pcm plugins don't have a hw card ID
     // Only try to create the HCtl when the device has an ID
-    let h = (card >= 0).then(|| HCtl::new(&format!("hw:{}", card), false).unwrap());
-    if let Some(h) = &h {
-        h.load().unwrap();
-        let mut elid_loopback = ElemId::new(ElemIface::PCM);
-        elid_loopback.set_device(device);
-        elid_loopback.set_subdevice(subdevice);
-        elid_loopback.set_name(&CString::new("PCM Rate Shift 100000").unwrap());
-        element_loopback = h.find_elem(&elid_loopback);
+    let hctl = (card >= 0).then(|| HCtl::new(&format!("hw:{}", card), true).unwrap());
+    let ctl = (card >= 0).then(|| Ctl::new(&format!("hw:{}", card), true).unwrap());
 
-        let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
-        elid_uac2_gadget.set_device(device);
-        elid_uac2_gadget.set_subdevice(subdevice);
-        elid_uac2_gadget.set_name(&CString::new("Capture Pitch 1000000").unwrap());
-        element_uac2_gadget = h.find_elem(&elid_uac2_gadget);
+    if let Some(c) = &ctl {
+        c.subscribe_events(true).unwrap();
     }
+    if let Some(h) = &hctl {
+        let ctl_fds = h.get().unwrap();
+        file_descriptors.fds.extend(ctl_fds.iter());
+        println!("{:?}", file_descriptors.fds);
+        h.load().unwrap();
+        element_loopback = find_elem(
+            h,
+            ElemIface::PCM,
+            Some(device),
+            Some(subdevice),
+            "PCM Rate Shift 100000",
+        );
+        element_uac2_gadget = find_elem(
+            h,
+            ElemIface::PCM,
+            Some(device),
+            Some(subdevice),
+            "Capture Pitch 1000000",
+        );
 
+        capture_elements.find_elements(h, device, subdevice, &params.follow_volume_control);
+        if let Some(c) = &ctl {
+            if let Some(ref vol_elem) = capture_elements.volume {
+                let vol_db = vol_elem.read_volume_in_db(c);
+                info!("Using initial volume from Alsa: {:?}", vol_db);
+                if let Some(vol) = vol_db {
+                    channels
+                        .status
+                        .send(StatusMessage::SetVolume(vol))
+                        .unwrap_or_default();
+                }
+            }
+        }
+    }
     if element_loopback.is_some() || element_uac2_gadget.is_some() {
         info!("Capture device supports rate adjust");
         if params.samplerate == params.capture_samplerate && resampler.is_some() {
@@ -723,14 +758,11 @@ fn capture_loop_bytes(
                 break;
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
-                let mut elval = ElemValue::new(ElemType::Integer).unwrap();
                 rate_adjust = speed;
                 if let Some(elem_loopback) = &element_loopback {
-                    elval.set_integer(0, (100_000.0 / speed) as i32).unwrap();
-                    elem_loopback.write(&elval).unwrap();
+                    elem_loopback.write_as_int((100_000.0 / speed) as i32);
                 } else if let Some(elem_uac2_gadget) = &element_uac2_gadget {
-                    elval.set_integer(0, (speed * 1_000_000.0) as i32).unwrap();
-                    elem_uac2_gadget.write(&elval).unwrap();
+                    elem_uac2_gadget.write_as_int((speed * 1_000_000.0) as i32);
                 } else if let Some(resampl) = &mut resampler {
                     if params.async_src {
                         if resampl.set_resample_ratio_relative(speed, true).is_err() {
@@ -772,9 +804,13 @@ fn capture_loop_bytes(
             &mut buffer[0..capture_bytes],
             pcmdevice,
             &io,
-            params.capture_samplerate,
             capture_frames as usize,
-            params.bytes_per_frame,
+            &mut file_descriptors,
+            &ctl,
+            &hctl,
+            &capture_elements,
+            &channels.status,
+            &params,
         );
         match capture_res {
             Ok(CaptureResult::Normal) => {
@@ -835,6 +871,13 @@ fn capture_loop_bytes(
                         .unwrap_or_else(|err| warn!("Capture error {:?}", err));
                     params.capture_status.write().state = ProcessingState::Stalled;
                 }
+            }
+            Ok(CaptureResult::Done) => {
+                info!("Capture stopped");
+                let msg = AudioMessage::EndOfStream;
+                channels.audio.send(msg).unwrap_or(());
+                params.capture_status.write().state = ProcessingState::Inactive;
+                return;
             }
             Err(msg) => {
                 channels
@@ -954,8 +997,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bytes_per_sample = self.sample_format.bytes_per_sample();
-        let sample_format = self.sample_format;
+        let conf_sample_format = self.sample_format;
         let mut buf_manager =
             PlaybackBufferManager::new(chunksize as Frames, target_level as Frames);
         let handle = thread::Builder::new()
@@ -965,16 +1007,16 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     devname,
                     samplerate as u32,
                     channels as u32,
-                    &sample_format,
+                    &conf_sample_format,
                     &mut buf_manager,
                     false,
                 ) {
-                    Ok(pcmdevice) => {
+                    Ok((pcmdevice, sample_format)) => {
                         match status_channel.send(StatusMessage::PlaybackReady) {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-
+                        let bytes_per_sample = sample_format.bytes_per_sample();
                         barrier.wait();
                         debug!("Starting playback loop");
                         let pb_params = PlaybackParams {
@@ -1025,14 +1067,15 @@ impl CaptureDevice for AlsaCaptureDevice {
         let chunksize = self.chunksize;
 
         let channels = self.channels;
-        let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
-        let sample_format = self.sample_format;
+        let conf_sample_format = self.sample_format;
         let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
+        let stop_on_inactive = self.stop_on_inactive;
+        let follow_volume_control = self.follow_volume_control.clone();
         let mut buf_manager = CaptureBufferManager::new(
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
@@ -1052,15 +1095,16 @@ impl CaptureDevice for AlsaCaptureDevice {
                     devname,
                     capture_samplerate as u32,
                     channels as u32,
-                    &sample_format,
+                    &conf_sample_format,
                     &mut buf_manager,
                     true,
                 ) {
-                    Ok(pcmdevice) => {
+                    Ok((pcmdevice, sample_format)) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
+                        let store_bytes_per_sample = sample_format.bytes_per_sample();
                         barrier.wait();
                         debug!("Starting captureloop");
                         let cap_params = CaptureParams {
@@ -1077,6 +1121,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                             capture_status,
                             stop_on_rate_change,
                             rate_measure_interval,
+                            stop_on_inactive,
+                            follow_volume_control,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,

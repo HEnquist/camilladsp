@@ -160,6 +160,7 @@ pub enum StatusMessage {
     PlaybackDone,
     CaptureDone,
     SetSpeed(f64),
+    SetVolume(f32),
 }
 
 pub enum CommandMessage {
