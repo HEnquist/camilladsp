@@ -56,7 +56,7 @@ fftw = { version = "0.8.0", optional = true }
 num-complex = "0.4"
 num-traits = "0.2"
 signal-hook = "0.3.8"
-rand = { version = "0.8.3", default_features = false, features = ["small_rng", "std"] }
+rand = { version = "0.8.3", default-features = false, features = ["small_rng", "std"] }
 rand_distr = "0.4.3"
 clap = { version = "4.5.4", features = ["cargo"] }
 lazy_static = "1.4.0"

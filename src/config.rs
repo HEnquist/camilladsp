@@ -582,7 +582,7 @@ impl Devices {
     }
 
     pub fn adjust_period(&self) -> f32 {
-        self.adjust_period.unwrap_or(5.0)
+        self.adjust_period.unwrap_or(10.0)
     }
 
     pub fn rate_measure_interval(&self) -> f32 {
