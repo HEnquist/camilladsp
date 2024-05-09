@@ -168,12 +168,19 @@ impl PIRateController {
             self.target_level
         };
         let err = level - current_target;
-        let rel_diff = err / self.frames_per_interval;
-        self.accumulated += rel_diff * self.interval;
-        let proportional = self.k_p * rel_diff;
+        let rel_err = err / self.frames_per_interval;
+        self.accumulated += rel_err * self.interval;
+        let proportional = self.k_p * rel_err;
         let integral = self.k_i * self.accumulated;
-        let mut rate_diff = proportional + integral;
-        rate_diff = rate_diff.clamp(-0.005, 0.005);
-        1.0 - rate_diff
+        let mut output = proportional + integral;
+        trace!(
+            "Rate controller, error: {}, output: {}, P: {}, I: {}",
+            err,
+            output,
+            proportional,
+            integral
+        );
+        output = output.clamp(-0.005, 0.005);
+        1.0 - output
     }
 }

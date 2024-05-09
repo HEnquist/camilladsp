@@ -3,6 +3,7 @@ use crate::config;
 use crate::config::{ConfigError, SampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
+use crate::helpers::PIRateController;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
@@ -132,30 +133,28 @@ fn get_supported_wave_format(
     let wave_format = wave_format(sample_format, samplerate, channels);
     match sharemode {
         wasapi::ShareMode::Exclusive => {
-            return audio_client.is_supported_exclusive_with_quirks(&wave_format);
+            audio_client.is_supported_exclusive_with_quirks(&wave_format)
         }
-        wasapi::ShareMode::Shared => {
-            match audio_client.is_supported(&wave_format, &sharemode) {
-                Ok(None) => {
-                    debug!("Device supports format {:?}", wave_format);
-                    return Ok(wave_format);
-                }
-                Ok(Some(modified)) => {
-                    let msg = format!(
-                        "Device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
-                        wave_format, modified
-                    );
-                    return Err(ConfigError::new(&msg).into());
-                }
-                Err(err) => {
-                    let msg = format!(
-                        "Device doesn't support format:\n{:#?}\nError: {}",
-                        wave_format, err
-                    );
-                    return Err(ConfigError::new(&msg).into());
-                }
-            };
-        }
+        wasapi::ShareMode::Shared => match audio_client.is_supported(&wave_format, sharemode) {
+            Ok(None) => {
+                debug!("Device supports format {:?}", wave_format);
+                Ok(wave_format)
+            }
+            Ok(Some(modified)) => {
+                let msg = format!(
+                    "Device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
+                    wave_format, modified
+                );
+                Err(ConfigError::new(&msg).into())
+            }
+            Err(err) => {
+                let msg = format!(
+                    "Device doesn't support format:\n{:#?}\nError: {}",
+                    wave_format, err
+                );
+                Err(ConfigError::new(&msg).into())
+            }
+        },
     }
 }
 
@@ -654,6 +653,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     peak: vec![0.0; channels],
                 };
 
+                let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
+
                 trace!("Build output stream");
                 let mut conversion_result;
 
@@ -757,12 +758,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             {
                                 if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
                                     if let Some(av_delay) = buffer_avg.average() {
-                                        let speed = calculate_speed(
-                                            av_delay,
-                                            target_level,
-                                            adjust_period,
-                                            samplerate as u32,
-                                        );
+                                        let speed = rate_controller.next(av_delay);
                                         timer.restart();
                                         buffer_avg.restart();
                                         debug!(
@@ -1116,10 +1112,6 @@ impl CaptureDevice for WasapiCaptureDevice {
                                 let samples_per_sec = averager.average();
                                 averager.restart();
                                 let measured_rate_f = samples_per_sec;
-                                debug!(
-                                    "Measured sample rate is {:.1} Hz",
-                                    measured_rate_f
-                                );
                                 let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
                                 capture_status.measured_samplerate = measured_rate_f as usize;
                                 capture_status.signal_range = value_range as f32;
