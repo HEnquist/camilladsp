@@ -5,6 +5,7 @@ use crate::conversions::{
     chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
 };
 use crate::countertimer;
+use crate::helpers::PIRateController;
 use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
@@ -240,6 +241,8 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         let mut timer = countertimer::Stopwatch::new();
                         let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
 
+                        let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
+
                         let stream = match sample_format {
                             SampleFormat::S16LE => {
                                 trace!("Build i16 output stream");
@@ -385,12 +388,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         && timer.larger_than_millis((1000.0 * adjust_period) as u64)
                                     {
                                         if let Some(av_delay) = buffer_avg.average() {
-                                            let speed = calculate_speed(
-                                                av_delay,
-                                                target_level,
-                                                adjust_period,
-                                                samplerate as u32,
-                                            );
+                                            let speed = rate_controller.next(av_delay);
                                             timer.restart();
                                             buffer_avg.restart();
                                             debug!(
