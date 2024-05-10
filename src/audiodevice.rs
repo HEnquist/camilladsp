@@ -722,21 +722,6 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     }
 }
 
-pub fn calculate_speed(avg_level: f64, target_level: usize, adjust_period: f32, srate: u32) -> f64 {
-    let diff = avg_level as isize - target_level as isize;
-    let rel_diff = (diff as f64) / (srate as f64);
-    let speed = 1.0 - 0.5 * rel_diff / adjust_period as f64;
-    debug!(
-        "Avg. buffer level: {:.1}, target level: {:.1}, corrected capture rate: {:.4}%, ({:+.1}Hz at {}Hz)",
-        avg_level,
-        target_level,
-        100.0 * speed,
-        srate as f64 * (speed-1.0),
-        srate
-    );
-    speed
-}
-
 #[cfg(test)]
 mod tests {
     use crate::audiodevice::{rms_and_peak, AudioChunk, ChunkStats};

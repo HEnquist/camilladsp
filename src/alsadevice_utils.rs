@@ -282,53 +282,6 @@ pub fn list_formats_as_text(hwp: &HwParams) -> String {
     }
 }
 
-pub fn adjust_speed(
-    avg_delay: f64,
-    target_delay: usize,
-    prev_diff: Option<f64>,
-    mut capture_speed: f64,
-) -> (f64, f64) {
-    let latency = avg_delay * capture_speed;
-    let diff = latency - target_delay as f64;
-    match prev_diff {
-        None => (1.0, diff),
-        Some(prev_diff) => {
-            let equality_range = target_delay as f64 / 100.0; // in frames
-            let speed_delta = 1e-5;
-            if diff > 0.0 {
-                if diff > (prev_diff + equality_range) {
-                    // playback latency grows, need to slow down capture more
-                    capture_speed -= 3.0 * speed_delta;
-                } else if is_within(diff, prev_diff, equality_range) {
-                    // positive, not changed from last cycle, need to slow down capture a bit
-                    capture_speed -= speed_delta;
-                }
-            } else if diff < 0.0 {
-                if diff < (prev_diff - equality_range) {
-                    // playback latency sinks, need to speed up capture more
-                    capture_speed += 3.0 * speed_delta;
-                } else if is_within(diff, prev_diff, equality_range) {
-                    // negative, not changed from last cycle, need to speed up capture a bit
-                    capture_speed += speed_delta
-                }
-            }
-            debug!(
-                "Avg. buffer delay: {:.1}, target delay: {:.1}, diff: {}, prev_div: {}, corrected capture rate: {:.4}%",
-                avg_delay,
-                target_delay,
-                diff,
-                prev_diff,
-                100.0 * capture_speed
-            );
-            (capture_speed, diff)
-        }
-    }
-}
-
-pub fn is_within(value: f64, target: f64, equality_range: f64) -> bool {
-    value <= (target + equality_range) && value >= (target - equality_range)
-}
-
 pub struct ElemData<'a> {
     element: Elem<'a>,
     numid: u32,

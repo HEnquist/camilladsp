@@ -23,10 +23,11 @@ use crate::alsadevice_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
 use crate::alsadevice_utils::{
-    adjust_speed, find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
+    find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
     list_samplerates_as_text, pick_preferred_format, process_events, state_desc, CaptureElements,
     CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams,
 };
+use crate::helpers::PIRateController;
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingState;
@@ -464,8 +465,12 @@ fn playback_loop_bytes(
     if element_uac2_gadget.is_some() {
         info!("Playback device supports rate adjust");
     }
-    let mut capture_speed: f64 = 1.0;
-    let mut prev_delay_diff: Option<f64> = None;
+
+    let mut rate_controller = PIRateController::new_with_default_gains(
+        params.samplerate,
+        params.adjust_period as f64,
+        params.target_level,
+    );
     trace!("PB: {:?}", buf_manager);
     loop {
         let eos_in_drain = if device_stalled {
@@ -574,30 +579,22 @@ fn playback_loop_bytes(
                             timer.restart();
                             buffer_avg.restart();
                             if adjust {
-                                let (new_capture_speed, new_delay_diff) = adjust_speed(
-                                    avg_delay,
-                                    params.target_level,
-                                    prev_delay_diff,
-                                    capture_speed,
-                                );
-                                if prev_delay_diff.is_some() {
-                                    // not first cycle
-                                    capture_speed = new_capture_speed;
-                                    if let Some(elem_uac2_gadget) = &element_uac2_gadget {
-                                        let mut elval = ElemValue::new(ElemType::Integer).unwrap();
-                                        // speed is reciprocal on playback side
-                                        elval
-                                            .set_integer(0, (1_000_000.0 / capture_speed) as i32)
-                                            .unwrap();
-                                        elem_uac2_gadget.write(&elval).unwrap();
-                                    } else {
-                                        channels
-                                            .status
-                                            .send(StatusMessage::SetSpeed(capture_speed))
-                                            .unwrap_or(());
-                                    }
+                                let capture_speed = rate_controller.next(avg_delay);
+                                if let Some(elem_uac2_gadget) = &element_uac2_gadget {
+                                    let mut elval = ElemValue::new(ElemType::Integer).unwrap();
+                                    // speed is reciprocal on playback side
+                                    elval
+                                        .set_integer(0, (1_000_000.0 / capture_speed) as i32)
+                                        .unwrap();
+                                    elem_uac2_gadget.write(&elval).unwrap();
+                                    debug!("Set gadget playback speed to {}", capture_speed);
+                                } else {
+                                    debug!("Send SetSpeed message for speed {}", capture_speed);
+                                    channels
+                                        .status
+                                        .send(StatusMessage::SetSpeed(capture_speed))
+                                        .unwrap_or(());
                                 }
-                                prev_delay_diff = Some(new_delay_diff);
                             }
                             let mut playback_status = params.playback_status.write();
                             playback_status.buffer_level = avg_delay as usize;
@@ -760,11 +757,14 @@ fn capture_loop_bytes(
             Ok(CommandMessage::SetSpeed { speed }) => {
                 rate_adjust = speed;
                 if let Some(elem_loopback) = &element_loopback {
+                    debug!("Setting capture loopback speed to {}", speed);
                     elem_loopback.write_as_int((100_000.0 / speed) as i32);
                 } else if let Some(elem_uac2_gadget) = &element_uac2_gadget {
+                    debug!("Setting capture gadget speed to {}", speed);
                     elem_uac2_gadget.write_as_int((speed * 1_000_000.0) as i32);
                 } else if let Some(resampl) = &mut resampler {
                     if params.async_src {
+                        debug!("Setting async resampler speed to {}", speed);
                         if resampl.set_resample_ratio_relative(speed, true).is_err() {
                             debug!("Failed to set resampling speed to {}", speed);
                         }
