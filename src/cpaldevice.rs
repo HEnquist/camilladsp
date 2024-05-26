@@ -41,6 +41,12 @@ pub enum CpalHost {
         )
     ))]
     Jack,
+    #[cfg(all(
+        feature = "asio-backend",
+        feature = "cpal-backend",
+        target_os = "windows"
+    ))]
+    Asio,
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +98,12 @@ fn open_cpal_playback(
             )
         ))]
         CpalHost::Jack => HostId::Jack,
+        #[cfg(all(
+            feature = "asio-backend",
+            feature = "cpal-backend",
+            target_os = "windows"
+        ))]
+        CpalHost::Asio => HostId::Asio,
     };
     let host = cpal::host_from_id(host_id)?;
     let device = if devname == "default" {
@@ -117,6 +129,7 @@ fn open_cpal_playback(
     };
     let cpal_format = match sample_format {
         SampleFormat::S16LE => cpal::SampleFormat::I16,
+        SampleFormat::S32LE => cpal::SampleFormat::I32,
         SampleFormat::FLOAT32LE => cpal::SampleFormat::F32,
         _ => panic!("Unsupported sample format"),
     };
@@ -149,6 +162,12 @@ fn open_cpal_capture(
             )
         ))]
         CpalHost::Jack => HostId::Jack,
+        #[cfg(all(
+            feature = "asio-backend",
+            feature = "cpal-backend",
+            target_os = "windows"
+        ))]
+        CpalHost::Asio => HostId::Asio,
     };
     let host = cpal::host_from_id(host_id)?;
     let device = if devname == "default" {
@@ -175,6 +194,7 @@ fn open_cpal_capture(
 
     let cpal_format = match sample_format {
         SampleFormat::S16LE => cpal::SampleFormat::I16,
+        SampleFormat::S32LE => cpal::SampleFormat::I32,
         SampleFormat::FLOAT32LE => cpal::SampleFormat::F32,
         _ => panic!("Unsupported sample format"),
     };
@@ -296,8 +316,66 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         }
                                     },
                                     move |err| error!("an error occurred on stream: {}", err),
+                                    None,
                                 );
                                 trace!("i16 output stream ready");
+                                stream
+                            }
+                            SampleFormat::S32LE => {
+                                trace!("Build i32 output stream");
+                                let mut clipped = 0;
+                                let mut running = true;
+                                let mut sample_queue: VecDeque<i32> =
+                                    VecDeque::with_capacity(4 * chunksize_clone * channels_clone);
+                                let stream = device.build_output_stream(
+                                    &stream_config,
+                                    move |buffer: &mut [i32], _: &cpal::OutputCallbackInfo| {
+                                        #[cfg(feature = "debug")]
+                                        trace!("Playback device requests {} samples", buffer.len());
+                                        while sample_queue.len() < buffer.len() {
+                                            //trace!("Convert chunk to device format");
+                                            match rx_dev.recv_timeout(time::Duration::from_micros(
+                                                (1000000 * buffer.len()
+                                                    / (samplerate * channels_clone))
+                                                    as u64,
+                                            )) {
+                                                Ok(chunk) => {
+                                                    if !running {
+                                                        running = true;
+                                                        info!("Restarting playback after buffer underrun");
+                                                    }
+                                                    clipped = chunk_to_queue_int(
+                                                        &chunk,
+                                                        &mut sample_queue,
+                                                        scalefactor,
+                                                    )
+                                                }
+                                                Err(_) => {
+                                                    if running {
+                                                        running = false;
+                                                        warn!("Playback interrupted, no data available");
+                                                    }
+                                                    // Something went wrong, lets just clear the buffer
+                                                    for sample in buffer.iter_mut() {
+                                                        *sample = 0;
+                                                    }
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                        write_data_to_device(buffer, &mut sample_queue);
+                                        buffer_fill_clone
+                                            .store(sample_queue.len(), Ordering::Relaxed);
+                                        if clipped > 0 {
+                                            playback_status_clone
+                                                .write()
+                                                .clipped_samples += clipped;
+                                        }
+                                    },
+                                    move |err| error!("an error occurred on stream: {}", err),
+                                    None,
+                                );
+                                trace!("i32 output stream ready");
                                 stream
                             }
                             SampleFormat::FLOAT32LE => {
@@ -351,6 +429,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         }
                                     },
                                     move |err| error!("an error occurred on stream: {}", err),
+                                    None
                                 );
                                 trace!("f32 output stream ready");
                                 stream
@@ -504,7 +583,8 @@ impl CaptureDevice for CpalCaptureDevice {
                             Err(_err) => {}
                         }
                         let scalefactor = PrcFmt::coerce(2.0).powi(bits_per_sample - 1);
-                        let (tx_dev_i, rx_dev_i) = mpsc::sync_channel(1);
+                        let (tx_dev_i16, rx_dev_i16) = mpsc::sync_channel(1);
+                        let (tx_dev_i32, rx_dev_i32) = mpsc::sync_channel(1);
                         let (tx_dev_f, rx_dev_f) = mpsc::sync_channel(1);
                         let stream = match sample_format {
                             SampleFormat::S16LE => {
@@ -515,11 +595,28 @@ impl CaptureDevice for CpalCaptureDevice {
                                         #[cfg(feature = "debug")]
                                         trace!("Capture device provides {} samples", buffer.len());
                                         let buffer_copy = Vec::from(buffer);
-                                        tx_dev_i.send(buffer_copy).unwrap();
+                                        tx_dev_i16.send(buffer_copy).unwrap();
                                     },
-                                    move |err| error!("an error occurred on stream: {}", err)
+                                    move |err| error!("an error occurred on stream: {}", err),
+                                    None
                                 );
                                 trace!("i16 input stream ready");
+                                stream
+                            },
+                            SampleFormat::S32LE => {
+                                trace!("Build i32 input stream");
+                                let stream = device.build_input_stream(
+                                    &stream_config,
+                                    move |buffer: &[i32], _: &cpal::InputCallbackInfo| {
+                                        #[cfg(feature = "debug")]
+                                        trace!("Capture device provides {} samples", buffer.len());
+                                        let buffer_copy = Vec::from(buffer);
+                                        tx_dev_i32.send(buffer_copy).unwrap();
+                                    },
+                                    move |err| error!("an error occurred on stream: {}", err),
+                                    None
+                                );
+                                trace!("i32 input stream ready");
                                 stream
                             },
                             SampleFormat::FLOAT32LE => {
@@ -532,7 +629,8 @@ impl CaptureDevice for CpalCaptureDevice {
                                         let buffer_copy = Vec::from(buffer);
                                         tx_dev_f.send(buffer_copy).unwrap();
                                     },
-                                    move |err| error!("an error occurred on stream: {}", err)
+                                    move |err| error!("an error occurred on stream: {}", err),
+                                    None
                                 );
                                 trace!("f32 input stream ready");
                                 stream
@@ -555,7 +653,8 @@ impl CaptureDevice for CpalCaptureDevice {
                         }
                         let chunksize_samples = channels * chunksize;
                         let mut capture_samples = chunksize_samples;
-                        let mut sample_queue_i: VecDeque<i16> = VecDeque::with_capacity(2*chunksize*channels);
+                        let mut sample_queue_i16: VecDeque<i16> = VecDeque::with_capacity(2*chunksize*channels);
+                        let mut sample_queue_i32: VecDeque<i32> = VecDeque::with_capacity(2*chunksize*channels);
                         let mut sample_queue_f: VecDeque<f32> = VecDeque::with_capacity(2*chunksize*channels);
                         let mut averager = countertimer::TimeAverage::new();
                         let mut watcher_averager = countertimer::TimeAverage::new();
@@ -605,11 +704,11 @@ impl CaptureDevice for CpalCaptureDevice {
 
                             let mut chunk = match sample_format {
                                 SampleFormat::S16LE => {
-                                    while sample_queue_i.len() < capture_samples {
+                                    while sample_queue_i16.len() < capture_samples {
                                         //trace!("Read message to fill capture buffer");
-                                        match rx_dev_i.recv() {
+                                        match rx_dev_i16.recv() {
                                             Ok(buf) => {
-                                                write_data_from_device(&buf, &mut sample_queue_i);
+                                                write_data_from_device(&buf, &mut sample_queue_i16);
                                             }
                                             Err(err) => {
                                                 status_channel
@@ -619,7 +718,28 @@ impl CaptureDevice for CpalCaptureDevice {
                                         }
                                     }
                                     queue_to_chunk_int(
-                                        &mut sample_queue_i,
+                                        &mut sample_queue_i16,
+                                        capture_samples/channels,
+                                        channels,
+                                        scalefactor,
+                                    )
+                                },
+                                SampleFormat::S32LE => {
+                                    while sample_queue_i32.len() < capture_samples {
+                                        //trace!("Read message to fill capture buffer");
+                                        match rx_dev_i32.recv() {
+                                            Ok(buf) => {
+                                                write_data_from_device(&buf, &mut sample_queue_i32);
+                                            }
+                                            Err(err) => {
+                                                status_channel
+                                                    .send(StatusMessage::CaptureError(err.to_string()))
+                                                    .unwrap();
+                                            }
+                                        }
+                                    }
+                                    queue_to_chunk_int(
+                                        &mut sample_queue_i32,
                                         capture_samples/channels,
                                         channels,
                                         scalefactor,

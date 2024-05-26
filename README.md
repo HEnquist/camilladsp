@@ -338,8 +338,9 @@ If possible, it's recommended to use a pre-built binary on these systems.
 ## Customized build
 All the available options, or "features" are:
 - `pulse-backend`: PulseAudio support.
-- `cpal-backend`: Used for Jack support (automatically enabled when needed).
+- `cpal-backend`: Used for Jack and ASIO support (automatically enabled when needed).
 - `jack-backend`: Jack support (Linux only).
+- `asio-backend`: ASIO support (Windows only).
 - `bluez-backend`: Bluetooth support via BlueALSA (Linux only).
 - `websocket`: Websocket server for control.
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
@@ -381,6 +382,9 @@ The `jack-backend` feature requires jack and its development files. To install:
 - Fedora: ```sudo dnf install jack-audio-connection-kit jack-audio-connection-kit-devel```
 - Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
 - Arch:  ```sudo pacman -S jack```
+
+The `asio-backend` feature has a number of special requirements.
+Please see the [CPAL documentation](https://github.com/rustaudio/cpal?tab=readme-ov-file#asio-on-windows)
 
 ## Optimize for your system
 By default Cargo builds for a generic system, meaning the resulting binary might not run as fast as possible on your system.
@@ -644,6 +648,25 @@ CamillaDSP will show up in Jack as "cpal_client_in" and "cpal_client_out".
 
 ## Windows
 See the [separate readme for Wasapi](./backend_wasapi.md).
+
+### Experimental ASIO support
+There is experimental support for ASIO, using the ASIO support of the CPAL library.
+
+The ASIO license terms do not allow distribution of pre-built binaries.
+Therefore a custom build is required to use this feature.
+See [Customized Build](#customized-build).
+
+The ASIO API has a number of limitations.
+In CamillaDSP the capture and playback devices are initialized
+and accessed from two separate threads.
+This is not compatible with the ASIO API,
+meaning that it's not possible to use ASIO for both playback and capture simultaneosly.
+To use an ASIO playback device, it is therefore necessary to use a Wasapi capture device (or vice versa).
+
+Other known issues when using ASIO:
+- CamillaDSP may sometimes fail to exit when requested by Ctrl-C or via a websocket command.
+  If this happens, it is necessary to terminate the process in Task Manager.
+
 
 ## MacOS (CoreAudio)
 See the [separate readme for CoreAudio](./backend_coreaudio.md).
@@ -1015,11 +1038,12 @@ A parameter marked (*) in any example is optional. If they are left out from the
     * `Bluez` (capture only)
     * `Jack`
     * `Wasapi`
+    * `Asio`
     * `CoreAudio`
     * `Alsa`
     * `Pulse`
   * `channels`: number of channels
-  * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `CoreAudio`). For `CoreAudio` and `Wasapi`, `null` will give the default device.
+  * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `CoreAudio`, `Asio`). For `CoreAudio` and `Wasapi`, `null` will give the default device.
   * `filename` path to the file (for `File`, `RawFile` and `WavFile`)
   * `format`: sample format (for all except `Jack`).
 

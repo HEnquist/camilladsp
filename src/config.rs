@@ -235,6 +235,17 @@ pub enum CaptureDevice {
         channels: usize,
         device: String,
     },
+    #[cfg(all(
+        feature = "cpal-backend",
+        feature = "asio-backend",
+        target_os = "windows"
+    ))]
+    Asio {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
     SignalGenerator {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
@@ -271,6 +282,12 @@ impl CaptureDevice {
                 )
             ))]
             CaptureDevice::Jack { channels, .. } => *channels,
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "asio-backend",
+                target_os = "windows"
+            ))]
+            CaptureDevice::Asio { channels, .. } => *channels,
             CaptureDevice::SignalGenerator { channels, .. } => *channels,
         }
     }
@@ -473,6 +490,17 @@ pub enum PlaybackDevice {
         channels: usize,
         device: String,
     },
+    #[cfg(all(
+        feature = "cpal-backend",
+        feature = "asio-backend",
+        target_os = "windows"
+    ))]
+    Asio {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
+        channels: usize,
+        device: String,
+        format: SampleFormat,
+    },
 }
 
 impl PlaybackDevice {
@@ -499,6 +527,12 @@ impl PlaybackDevice {
                 )
             ))]
             PlaybackDevice::Jack { channels, .. } => *channels,
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "asio-backend",
+                target_os = "windows"
+            ))]
+            PlaybackDevice::Asio { channels, .. } => *channels,
         }
     }
 }
@@ -1506,6 +1540,14 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Jack { channels, .. } => {
                 *channels = chans;
             }
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "asio-backend",
+                target_os = "windows"
+            ))]
+            CaptureDevice::Asio { channels, .. } => {
+                *channels = chans;
+            }
             CaptureDevice::SignalGenerator { channels, .. } => {
                 *channels = chans;
             }
@@ -1553,6 +1595,14 @@ fn apply_overrides(configuration: &mut Configuration) {
             ))]
             CaptureDevice::Jack { .. } => {
                 error!("Not possible to override capture format for Jack, ignoring");
+            }
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "asio-backend",
+                target_os = "windows"
+            ))]
+            CaptureDevice::Asio { format, .. } => {
+                *format = fmt;
             }
             CaptureDevice::SignalGenerator { .. } => {}
         }

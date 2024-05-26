@@ -420,6 +420,9 @@ fn main_process() -> i32 {
     if cfg!(feature = "jack-backend") {
         features.push("jack-backend");
     }
+    if cfg!(feature = "asio-backend") {
+        features.push("asio-backend");
+    }
     if cfg!(all(target_os = "linux", feature = "bluez-backend")) {
         features.push("bluez-backend");
     }

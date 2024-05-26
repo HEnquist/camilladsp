@@ -4,14 +4,21 @@ use crate::alsadevice;
 use crate::config;
 #[cfg(target_os = "macos")]
 use crate::coreaudiodevice;
-#[cfg(all(
-    feature = "cpal-backend",
-    feature = "jack-backend",
-    any(
-        target_os = "linux",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "netbsd"
+#[cfg(any(
+    all(
+        feature = "cpal-backend",
+        feature = "jack-backend",
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd"
+        ),
+    ),
+    all(
+        feature = "cpal-backend",
+        feature = "asio-backend",
+        target_os = "windows"
     )
 ))]
 use crate::cpaldevice;
@@ -344,6 +351,26 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             chunksize: conf.chunksize,
             channels,
             sample_format: config::SampleFormat::FLOAT32LE,
+            target_level: conf.target_level(),
+            adjust_period: conf.adjust_period(),
+            enable_rate_adjust: conf.rate_adjust(),
+        }),
+        #[cfg(all(
+            feature = "cpal-backend",
+            feature = "asio-backend",
+            target_os = "windows"
+        ))]
+        config::PlaybackDevice::Asio {
+            channels,
+            ref device,
+            format,
+        } => Box::new(cpaldevice::CpalPlaybackDevice {
+            devname: device.clone(),
+            host: cpaldevice::CpalHost::Asio,
+            samplerate: conf.samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            sample_format: format,
             target_level: conf.target_level(),
             adjust_period: conf.adjust_period(),
             enable_rate_adjust: conf.rate_adjust(),
@@ -714,6 +741,29 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             chunksize: conf.chunksize,
             channels,
             sample_format: config::SampleFormat::FLOAT32LE,
+            silence_threshold: conf.silence_threshold(),
+            silence_timeout: conf.silence_timeout(),
+            stop_on_rate_change: conf.stop_on_rate_change(),
+            rate_measure_interval: conf.rate_measure_interval(),
+        }),
+        #[cfg(all(
+            feature = "cpal-backend",
+            feature = "asio-backend",
+            target_os = "windows"
+        ))]
+        config::CaptureDevice::Asio {
+            channels,
+            ref device,
+            format,
+        } => Box::new(cpaldevice::CpalCaptureDevice {
+            devname: device.clone(),
+            host: cpaldevice::CpalHost::Asio,
+            samplerate: conf.samplerate,
+            resampler_config: conf.resampler,
+            capture_samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            sample_format: format,
             silence_threshold: conf.silence_threshold(),
             silence_timeout: conf.silence_timeout(),
             stop_on_rate_change: conf.stop_on_rate_change(),
