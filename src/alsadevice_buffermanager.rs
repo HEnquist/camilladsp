@@ -99,12 +99,7 @@ pub trait DeviceBufferManager {
     fn apply_avail_min(&mut self, swp: &SwParams) -> Res<()> {
         let data = self.data_mut();
         // maximum timing safety - headroom for one io_size only
-        if data.io_size < data.period {
-            warn!(
-                "Trying to set avail_min to {}, must be larger than or equal to period of {}",
-                data.io_size, data.period
-            );
-        } else if data.io_size > data.bufsize {
+        if data.io_size > data.bufsize {
             let msg = format!("Trying to set avail_min to {}, must be smaller than or equal to device buffer size of {}",
                 data.io_size, data.bufsize);
             error!("{}", msg);
