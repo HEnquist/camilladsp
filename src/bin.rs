@@ -26,7 +26,7 @@ extern crate flexi_logger;
 #[macro_use]
 extern crate log;
 
-use clap::{crate_authors, crate_description, crate_version, Arg, ArgAction, Command};
+use clap::{crate_authors, crate_description, crate_name, crate_version, Arg, ArgAction, Command};
 use crossbeam_channel::select;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::env;
@@ -103,6 +103,15 @@ pub fn custom_logger_format(
         record.line().unwrap_or(0),
         &record.args()
     )
+}
+
+fn parse_gain_value(v: &str) -> Result<f32, String> {
+    if let Ok(gain) = v.parse::<f32>() {
+        if (-120.0..=20.0).contains(&gain) {
+            return Ok(gain);
+        }
+    }
+    Err(String::from("Must be a number between -120 and +20"))
 }
 
 fn run(
@@ -445,7 +454,10 @@ fn main_process() -> i32 {
     let capture_types = format!("Capture: {}", cap_types.join(", "));
 
     let longabout = format!(
-        "{}\n\n{}\n\nSupported device types:\n{}\n{}",
+        "{} v{}\n{}\n{}\n\n{}\n\nSupported device types:\n{}\n{}",
+        crate_name!(),
+        crate_version!(),
+        crate_authors!(),
         crate_description!(),
         featurelist,
         capture_types,
@@ -512,27 +524,84 @@ fn main_process() -> i32 {
         )
         .arg(
             Arg::new("gain")
-                .help("Set initial gain in dB for Volume and Loudness filters")
+                .help("Initial gain in dB for main volume control")
                 .short('g')
                 .long("gain")
                 .value_name("GAIN")
-                .display_order(200)
+                .display_order(300)
                 .action(ArgAction::Set)
-                .value_parser(|v: &str| -> Result<f32, String> {
-                    if let Ok(gain) = v.parse::<f32>() {
-                        if (-120.0..=20.0).contains(&gain) {
-                            return Ok(gain);
-                        }
-                    }
-                    Err(String::from("Must be a number between -120 and +20"))
-                }),
+                .value_parser(parse_gain_value),
+        )
+        .arg(
+            Arg::new("gain1")
+                .help("Initial gain in dB for Aux1 fader")
+                .long("gain1")
+                .value_name("GAIN1")
+                .display_order(301)
+                .action(ArgAction::Set)
+                .value_parser(parse_gain_value),
+        )
+        .arg(
+            Arg::new("gain2")
+                .help("Initial gain in dB for Aux2 fader")
+                .long("gain2")
+                .value_name("GAIN2")
+                .display_order(302)
+                .action(ArgAction::Set)
+                .value_parser(parse_gain_value),
+        )
+        .arg(
+            Arg::new("gain3")
+                .help("Initial gain in dB for Aux3 fader")
+                .long("gain3")
+                .value_name("GAIN3")
+                .display_order(303)
+                .action(ArgAction::Set)
+                .value_parser(parse_gain_value),
+        )
+        .arg(
+            Arg::new("gain4")
+                .help("Initial gain in dB for Aux4 fader")
+                .long("gain4")
+                .value_name("GAIN4")
+                .display_order(304)
+                .action(ArgAction::Set)
+                .value_parser(parse_gain_value),
         )
         .arg(
             Arg::new("mute")
-                .help("Start with Volume and Loudness filters muted")
+                .help("Start with main volume control muted")
                 .short('m')
                 .long("mute")
-                .display_order(200)
+                .display_order(310)
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("mute1")
+                .help("Start with Aux1 fader muted")
+                .long("mute1")
+                .display_order(311)
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("mute2")
+                .help("Start with Aux2 fader muted")
+                .long("mute2")
+                .display_order(312)
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("mute3")
+                .help("Start with Aux3 fader muted")
+                .long("mute3")
+                .display_order(313)
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("mute4")
+                .help("Start with Aux4 fader muted")
+                .long("mute4")
+                .display_order(314)
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -541,7 +610,7 @@ fn main_process() -> i32 {
                 .short('r')
                 .long("samplerate")
                 .value_name("SAMPLERATE")
-                .display_order(300)
+                .display_order(400)
                 .action(ArgAction::Set)
                 .value_parser(clap::builder::RangedU64ValueParser::<usize>::new().range(1..)),
         )
@@ -551,7 +620,7 @@ fn main_process() -> i32 {
                 .short('n')
                 .long("channels")
                 .value_name("CHANNELS")
-                .display_order(300)
+                .display_order(400)
                 .action(ArgAction::Set)
                 .value_parser(clap::builder::RangedU64ValueParser::<usize>::new().range(1..)),
         )
@@ -561,7 +630,7 @@ fn main_process() -> i32 {
                 .short('e')
                 .long("extra_samples")
                 .value_name("EXTRA_SAMPLES")
-                .display_order(300)
+                .display_order(400)
                 .action(ArgAction::Set)
                 .value_parser(clap::builder::RangedU64ValueParser::<usize>::new().range(1..)),
         )
@@ -570,7 +639,7 @@ fn main_process() -> i32 {
                 .short('f')
                 .long("format")
                 .value_name("FORMAT")
-                .display_order(310)
+                .display_order(410)
                 .action(ArgAction::Set)
                 .value_parser([
                     "S16LE",
@@ -614,6 +683,7 @@ fn main_process() -> i32 {
             Arg::new("wait")
                 .short('w')
                 .long("wait")
+                .display_order(200)
                 .help("Wait for config from websocket")
                 .requires("port")
                 .action(ArgAction::SetTrue),
@@ -625,6 +695,7 @@ fn main_process() -> i32 {
                 .help("Path to .pfx/.p12 certificate file")
                 .long("cert")
                 .value_name("CERT")
+                .display_order(220)
                 .action(ArgAction::Set)
                 .requires("port"),
         )
@@ -633,6 +704,7 @@ fn main_process() -> i32 {
                 .help("Password for .pfx/.p12 certificate file")
                 .long("pass")
                 .value_name("PASS")
+                .display_order(220)
                 .action(ArgAction::Set)
                 .requires("port"),
         );
@@ -714,10 +786,7 @@ fn main_process() -> i32 {
     };
     debug!("Loaded state: {state:?}");
 
-    let initial_volumes = if let Some(v) = matches.get_one::<f32>("gain") {
-        debug!("Using command line argument for initial volume");
-        [*v, *v, *v, *v, *v]
-    } else if let Some(s) = &state {
+    let mut initial_volumes = if let Some(s) = &state {
         debug!("Using statefile for initial volume");
         s.volume
     } else {
@@ -730,11 +799,28 @@ fn main_process() -> i32 {
             ProcessingParameters::DEFAULT_VOLUME,
         ]
     };
+    if let Some(v) = matches.get_one::<f32>("gain") {
+        debug!("Using command line argument for initial main volume");
+        initial_volumes[0] = *v;
+    }
+    if let Some(v) = matches.get_one::<f32>("gain1") {
+        debug!("Using command line argument for initial Aux1 volume");
+        initial_volumes[1] = *v;
+    }
+    if let Some(v) = matches.get_one::<f32>("gain2") {
+        debug!("Using command line argument for initial Aux2 volume");
+        initial_volumes[2] = *v;
+    }
+    if let Some(v) = matches.get_one::<f32>("gain3") {
+        debug!("Using command line argument for initial Aux3 volume");
+        initial_volumes[3] = *v;
+    }
+    if let Some(v) = matches.get_one::<f32>("gain4") {
+        debug!("Using command line argument for initial Aux4 volume");
+        initial_volumes[4] = *v;
+    }
 
-    let initial_mutes = if matches.get_flag("mute") {
-        debug!("Using command line argument for initial mute");
-        [true, true, true, true, true]
-    } else if let Some(s) = &state {
+    let mut initial_mutes = if let Some(s) = &state {
         debug!("Using statefile for initial mute");
         s.mute
     } else {
@@ -747,6 +833,26 @@ fn main_process() -> i32 {
             ProcessingParameters::DEFAULT_MUTE,
         ]
     };
+    if matches.get_flag("mute") {
+        debug!("Using command line argument for initial main mute");
+        initial_mutes[0] = true;
+    }
+    if matches.get_flag("mute1") {
+        debug!("Using command line argument for initial Aux1 mute");
+        initial_mutes[1] = true;
+    }
+    if matches.get_flag("mute2") {
+        debug!("Using command line argument for initial Aux2 mute");
+        initial_mutes[2] = true;
+    }
+    if matches.get_flag("mute3") {
+        debug!("Using command line argument for initial Aux3 mute");
+        initial_mutes[3] = true;
+    }
+    if matches.get_flag("mute4") {
+        debug!("Using command line argument for initial Aux4 mute");
+        initial_mutes[4] = true;
+    }
 
     debug!("Initial mute: {initial_mutes:?}");
     debug!("Initial volume: {initial_volumes:?}");

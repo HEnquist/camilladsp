@@ -444,44 +444,47 @@ See more about the configuration file below.
 ## Command line options
 Starting with the --help flag prints a short help message:
 ```
-> camilladsp.exe --help
-CamillaDSP 2.0.0
+> camilladsp --help
+CamillaDSP v3.0.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
 Built with features: websocket
 
 Supported device types:
-Capture: RawFile, WavFile, Stdin, Wasapi
-Playback: File, Stdout, Wasapi
+Capture: RawFile, WavFile, Stdin, SignalGenerator, CoreAudio
+Playback: File, Stdout, CoreAudio
 
-USAGE:
-    camilladsp.exe [FLAGS] [OPTIONS] <configfile>
+Usage: camilladsp [OPTIONS] [CONFIGFILE]
 
-FLAGS:
-    -m, --mute       Start with the volume control muted
-    -c, --check      Check config file and exit
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-    -v               Increase message verbosity
-    -w, --wait       Wait for config from websocket
+Arguments:
+  [CONFIGFILE]  The configuration file to use
 
-OPTIONS:
-    -s, --statefile <statefile>            Use the given file to persist the state
-    -o, --logfile <logfile>                Write logs to file
-    -l, --loglevel <loglevel>              Set log level [possible values: trace, debug, info, warn, error, off]
-    -a, --address <address>                IP address to bind websocket server to
-    -g, --gain <gain>                      Set initial gain in dB for the volume control
-    -p, --port <port>                      Port for websocket server
-    -n, --channels <channels>              Override number of channels of capture device in config
-    -e, --extra_samples <extra_samples>    Override number of extra samples in config
-    -r, --samplerate <samplerate>          Override samplerate in config
-    -f, --format <format>                  Override sample format of capture device in config [possible values: S16LE,
-                                           S24LE, S24LE3, S32LE, FLOAT32LE, FLOAT64LE]
-
-ARGS:
-    <configfile>    The configuration file to use
-
+Options:
+  -c, --check                          Check config file and exit
+  -s, --statefile <STATEFILE>          Use the given file to persist the state
+  -v...                                Increase message verbosity
+  -l, --loglevel <LOGLEVEL>            Set log level [possible values: trace, debug, info, warn, error, off]
+  -o, --logfile <LOGFILE>              Write logs to file
+  -a, --address <ADDRESS>              IP address to bind websocket server to
+  -p, --port <PORT>                    Port for websocket server
+  -w, --wait                           Wait for config from websocket
+  -g, --gain <GAIN>                    Initial gain in dB for main volume control
+      --gain1 <GAIN1>                  Initial gain in dB for Aux1 fader
+      --gain2 <GAIN2>                  Initial gain in dB for Aux2 fader
+      --gain3 <GAIN3>                  Initial gain in dB for Aux3 fader
+      --gain4 <GAIN4>                  Initial gain in dB for Aux4 fader
+  -m, --mute                           Start with main volume control muted
+      --mute1                          Start with Aux1 fader muted
+      --mute2                          Start with Aux2 fader muted
+      --mute3                          Start with Aux3 fader muted
+      --mute4                          Start with Aux4 fader muted
+  -e, --extra_samples <EXTRA_SAMPLES>  Override number of extra samples in config
+  -n, --channels <CHANNELS>            Override number of channels of capture device in config
+  -r, --samplerate <SAMPLERATE>        Override samplerate in config
+  -f, --format <FORMAT>                Override sample format of capture device in config [possible values: S16LE, S24LE, S24LE3, S32LE, FLOAT32LE, FLOAT64LE]
+  -h, --help                           Print help
+  -V, --version                        Print version
 ```
 
 Most flags and options have a long and a short form. For example `--port 1234` and `-p1234` are equivalent.
@@ -509,11 +512,12 @@ The values in the file will then be kept updated whenever they change.
 If the file doesn't exist, it will be created on the first write.
 
 If the `configfile` argument is given, then this will be used instead of the value from the statefile.
-Similarly, the `--gain` and `--mute` options also override the values in the statefile.
+Similarly, the `--gain` and `--mute` options also override the values in the statefile for the main fader
+while the `--gain1` to `--gain4` and `--mute1` to `--mute4` do the same for the Aux faders.
 
 **Use this feature with caution! The volume setting given in the statefile will be applied immediately when CamillaDSP starts processing.**
 In systems that have a gain structure such that a too high volume setting can damage equipment or ears,
-it is recommended to always use the `--gain`  option to set the volume to start at a safe value.
+it is recommended to always use the `--gain` and `--gain1..4` options to set the volume to start at a safe value.
 
 #### Example statefile
 The statefile is a small YAML file that holds the path to the active config file,
@@ -565,22 +569,25 @@ But if the `extra_samples` override is used, the given value is used without sca
 
 ### Initial volume
 
-The `--gain` option can accept negative values,
+The `--gain` and `--gain1..4` options can accept negative values,
 but this requires a little care since the minus sign can be misinterpreted as another option.
 It works as long as there is no space in front of the minus sign.
 
-These work (for a gain of +/- 12.3 dB):
+These all work for positive values (with 12.3 dB used as an example):
 ```
 -g12.3
+--gain=12.3
 -g 12.3
 --gain 12.3
---gain=12.3
+```
 
+These work for negative values (note that there is no space before the minus sign):
+```
 -g-12.3
 --gain=-12.3
 ```
 
-These will __NOT__ work:
+These have a space before the minus sign and do __NOT__ work:
 ```
 -g -12.3
 --gain -12.3

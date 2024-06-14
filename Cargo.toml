@@ -1,5 +1,5 @@
 [package]
-name = "camilladsp"
+name = "CamillaDSP"
 version = "3.0.0"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2021"
