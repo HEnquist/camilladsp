@@ -442,6 +442,7 @@ fn playback_loop_bytes(
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
     let millis_per_frame: f32 = 1000.0 / params.samplerate as f32;
     let mut device_stalled = false;
+    let mut pcm_paused = false;
 
     let io = pcmdevice.io_bytes();
     debug!("Playback loop uses a buffer of {} frames", params.chunksize);
@@ -509,6 +510,7 @@ fn playback_loop_bytes(
                     params.bytes_per_frame,
                     buf_manager,
                 );
+                pcm_paused = false;
                 device_stalled = match playback_res {
                     Ok(PlaybackResult::Normal) => {
                         if device_stalled {
@@ -609,12 +611,25 @@ fn playback_loop_bytes(
             }
             Ok(AudioMessage::Pause) => {
                 trace!("PB: Pause message received");
+                if !pcm_paused {
+                    let pause_res = pcmdevice.pause(true);
+                    trace!("pcm_pause result {:?}", pause_res);
+                    if pause_res.is_ok() {
+                        pcm_paused = true
+                    }
+                }
             }
             Ok(AudioMessage::EndOfStream) => {
                 channels
                     .status
                     .send(StatusMessage::PlaybackDone)
                     .unwrap_or(());
+                // Only drain if the device isn't paused
+                if !pcm_paused {
+                    let drain_res = pcmdevice.drain();
+                    // Draining isn't strictly needed, ignore any error and don't retry
+                    trace!("pcm_drain result {:?}", drain_res);
+                }
                 break;
             }
             Err(err) => {
@@ -623,6 +638,12 @@ fn playback_loop_bytes(
                     .status
                     .send(StatusMessage::PlaybackError(err.to_string()))
                     .unwrap_or(());
+                // Only drain if the device isn't paused
+                if !pcm_paused {
+                    let drain_res = pcmdevice.drain();
+                    // Draining isn't strictly needed, ignore any error and don't retry
+                    trace!("pcm_drain result {:?}", drain_res);
+                }
                 break;
             }
         }
@@ -653,7 +674,7 @@ fn capture_loop_bytes(
     let subdevice = pcminfo.get_subdevice();
 
     let fds = pcmdevice.get().unwrap();
-    println!("{:?}", fds);
+    trace!("File descriptors: {:?}", fds);
     let nbr_pcm_fds = fds.len();
     let mut file_descriptors = FileDescriptors { fds, nbr_pcm_fds };
 
@@ -673,7 +694,7 @@ fn capture_loop_bytes(
     if let Some(h) = &hctl {
         let ctl_fds = h.get().unwrap();
         file_descriptors.fds.extend(ctl_fds.iter());
-        println!("{:?}", file_descriptors.fds);
+        //println!("{:?}", file_descriptors.fds);
         h.load().unwrap();
         element_loopback = find_elem(
             h,
@@ -907,6 +928,7 @@ fn capture_loop_bytes(
                 .add_record(chunk_stats.peak_linear());
         }
         value_range = chunk.maxval - chunk.minval;
+        trace!("Captured chunk with value range {}", value_range);
         if device_stalled {
             state = ProcessingState::Stalled;
         } else {
