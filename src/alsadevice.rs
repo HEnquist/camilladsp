@@ -443,7 +443,13 @@ fn playback_loop_bytes(
     let millis_per_frame: f32 = 1000.0 / params.samplerate as f32;
     let mut device_stalled = false;
     let mut pcm_paused = false;
-
+    let can_pause = pcmdevice
+        .hw_params_current()
+        .map(|p| p.can_pause())
+        .unwrap_or_default();
+    if can_pause {
+        debug!("Playback device supports pausing the stream")
+    }
     let io = pcmdevice.io_bytes();
     debug!("Playback loop uses a buffer of {} frames", params.chunksize);
     let mut buffer = vec![0u8; params.chunksize * params.bytes_per_frame];
@@ -611,7 +617,7 @@ fn playback_loop_bytes(
             }
             Ok(AudioMessage::Pause) => {
                 trace!("PB: Pause message received");
-                if !pcm_paused {
+                if can_pause && !pcm_paused {
                     let pause_res = pcmdevice.pause(true);
                     trace!("pcm_pause result {:?}", pause_res);
                     if pause_res.is_ok() {
