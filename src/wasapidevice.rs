@@ -421,7 +421,6 @@ fn playback_loop(
         }
         render_client.write_to_device_from_deque(
             buffer_free_frame_count as usize,
-            blockalign,
             &mut sample_queue,
             None,
         )?;
@@ -543,7 +542,7 @@ fn capture_loop(
                 data.resize(nbr_bytes, 0);
             }
             let (nbr_frames_read, flags) =
-                capture_client.read_from_device(blockalign, &mut data[0..nbr_bytes])?;
+                capture_client.read_from_device(&mut data[0..nbr_bytes])?;
             if nbr_frames_read != available_frames {
                 warn!(
                     "Expected {} frames, got {}",
@@ -571,10 +570,8 @@ fn capture_loop(
                     if data.len() < (nbr_bytes + nbr_bytes_extra) {
                         data.resize(nbr_bytes + nbr_bytes_extra, 0);
                     }
-                    let (nbr_frames_read, flags) = capture_client.read_from_device(
-                        blockalign,
-                        &mut data[nbr_bytes..(nbr_bytes + nbr_bytes_extra)],
-                    )?;
+                    let (nbr_frames_read, flags) = capture_client
+                        .read_from_device(&mut data[nbr_bytes..(nbr_bytes + nbr_bytes_extra)])?;
                     if nbr_frames_read != extra_frames {
                         warn!("Expected {} frames, got {}", extra_frames, nbr_frames_read);
                     }
