@@ -151,8 +151,6 @@ impl Processor for Compressor {
     }
 
     fn update_parameters(&mut self, config: config::Processor) {
-        // TODO remove when there is more than one type of Processor.
-        #[allow(irrefutable_let_patterns)]
         if let config::Processor::Compressor {
             parameters: config, ..
         } = config

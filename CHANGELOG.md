@@ -9,6 +9,7 @@ New features:
 - Linux: Optionally select Alsa sample format automatically.
 - Improved controller for rate adjustment.
 - Command line options fo setting aux volume and mute.
+- Add noise gate.
 Changes:
 - Rename `File` capture device to `RawFile`.
 - Filter pipeline steps take a list of channels to filter instead of a single one.

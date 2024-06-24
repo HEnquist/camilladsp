@@ -140,6 +140,7 @@ pub mod helpers;
 pub mod limiter;
 pub mod loudness;
 pub mod mixer;
+pub mod noisegate;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;

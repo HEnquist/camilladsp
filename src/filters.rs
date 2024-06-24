@@ -14,6 +14,7 @@ use crate::fftconv_fftw as fftconv;
 use crate::limiter;
 use crate::loudness;
 use crate::mixer;
+use crate::noisegate;
 use rawsample::SampleReader;
 use std::collections::HashMap;
 use std::fs::File;
@@ -369,7 +370,16 @@ impl Pipeline {
                                     conf.devices.samplerate,
                                     conf.devices.chunksize,
                                 );
-                                Box::new(comp)
+                                Box::new(comp) as Box<dyn Processor>
+                            }
+                            config::Processor::NoiseGate { parameters, .. } => {
+                                let gate = noisegate::NoiseGate::from_config(
+                                    &step.name,
+                                    parameters,
+                                    conf.devices.samplerate,
+                                    conf.devices.chunksize,
+                                );
+                                Box::new(gate) as Box<dyn Processor>
                             }
                         };
                         steps.push(PipelineStep::ProcessorStep(proc));

@@ -1,6 +1,7 @@
 use crate::compressor;
 use crate::filters;
 use crate::mixer;
+use crate::noisegate;
 use crate::wavtools::{find_data_in_wav_stream, WavParams};
 use parking_lot::RwLock;
 use serde::{de, Deserialize, Serialize};
@@ -1217,6 +1218,11 @@ pub enum Processor {
         description: Option<String>,
         parameters: CompressorParameters,
     },
+    NoiseGate {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: NoiseGateParameters,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1254,6 +1260,30 @@ impl CompressorParameters {
 
     pub fn soft_clip(&self) -> bool {
         self.soft_clip.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct NoiseGateParameters {
+    pub channels: usize,
+    #[serde(default)]
+    pub monitor_channels: Option<Vec<usize>>,
+    #[serde(default)]
+    pub process_channels: Option<Vec<usize>>,
+    pub attack: PrcFmt,
+    pub release: PrcFmt,
+    pub threshold: PrcFmt,
+    pub attenuation: PrcFmt,
+}
+
+impl NoiseGateParameters {
+    pub fn monitor_channels(&self) -> Vec<usize> {
+        self.monitor_channels.clone().unwrap_or_default()
+    }
+
+    pub fn process_channels(&self) -> Vec<usize> {
+        self.process_channels.clone().unwrap_or_default()
     }
 }
 
@@ -1731,7 +1761,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     }
     if let (Some(newprocs), Some(oldprocs)) = (&newconf.processors, &currentconf.processors) {
         for (proc, params) in newprocs {
-            // The pipeline didn't change, any added compressor isn't included and can be skipped
+            // The pipeline didn't change, any added processor isn't included and can be skipped
             if let Some(current_proc) = oldprocs.get(proc) {
                 if params != current_proc {
                     processors.push(proc.to_string());
@@ -1997,6 +2027,26 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                             Err(err) => {
                                                 let msg = format!(
                                                     "Invalid processor '{}'. Reason: {}",
+                                                    step.name, err
+                                                );
+                                                return Err(ConfigError::new(&msg).into());
+                                            }
+                                        }
+                                    }
+                                    Processor::NoiseGate { parameters, .. } => {
+                                        let channels = parameters.channels;
+                                        if channels != num_channels {
+                                            let msg = format!(
+                                                "NoiseGate '{}' has wrong number of channels. Expected {}, found {}.",
+                                                step.name, num_channels, channels
+                                            );
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
+                                        match noisegate::validate_noise_gate(parameters) {
+                                            Ok(_) => {}
+                                            Err(err) => {
+                                                let msg = format!(
+                                                    "Invalid noise gate '{}'. Reason: {}",
                                                     step.name, err
                                                 );
                                                 return Err(ConfigError::new(&msg).into());
