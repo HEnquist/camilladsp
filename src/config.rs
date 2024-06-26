@@ -1282,6 +1282,7 @@ pub enum PipelineStep {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PipelineStepMixer {
     pub name: String,
     #[serde(default)]
@@ -1297,6 +1298,7 @@ impl PipelineStepMixer {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PipelineStepFilter {
     #[serde(default)]
     pub channels: Option<Vec<usize>>,
@@ -1314,6 +1316,7 @@ impl PipelineStepFilter {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PipelineStepProcessor {
     pub name: String,
     #[serde(default)]
