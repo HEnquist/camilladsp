@@ -44,7 +44,7 @@ jobs:
         run: cargo test --features bluez-backend,cpal-backend,jack-backend,pulse-backend,
 
       - name: Run cargo test with all optional features
-        run: cargo test --features 32bit,debug,fftw,secure-websocket
+        run: cargo test --features 32bit,debug,secure-websocket
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check

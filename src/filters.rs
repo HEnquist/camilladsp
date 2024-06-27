@@ -7,10 +7,7 @@ use crate::config;
 use crate::conversions;
 use crate::diffeq;
 use crate::dither;
-#[cfg(not(feature = "FFTW"))]
 use crate::fftconv;
-#[cfg(feature = "FFTW")]
-use crate::fftconv_fftw as fftconv;
 use crate::limiter;
 use crate::loudness;
 use crate::mixer;

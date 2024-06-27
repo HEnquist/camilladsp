@@ -2,8 +2,6 @@
 extern crate alsa;
 extern crate camillalib;
 extern crate clap;
-#[cfg(feature = "FFTW")]
-extern crate fftw;
 extern crate lazy_static;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_binding as pulse;
@@ -12,7 +10,6 @@ extern crate libpulse_simple_binding as psimple;
 extern crate parking_lot;
 extern crate rand;
 extern crate rand_distr;
-#[cfg(not(feature = "FFTW"))]
 extern crate realfft;
 extern crate rubato;
 extern crate serde;
@@ -437,9 +434,6 @@ fn main_process() -> i32 {
     }
     if cfg!(feature = "secure-websocket") {
         features.push("secure-websocket");
-    }
-    if cfg!(feature = "FFTW") {
-        features.push("FFTW");
     }
     if cfg!(feature = "32bit") {
         features.push("32bit");

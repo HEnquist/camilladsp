@@ -15,7 +15,6 @@ bluez-backend = ["zbus"]
 32bit = []
 websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
-FFTW = ["fftw"]
 debug = []
 avoid-rustc-issue-116359 = []
 
@@ -52,7 +51,6 @@ serde_json = "1.0"
 serde_with = "1.11"
 realfft = "3.0.0"
 #realfft = { git = "https://github.com/HEnquist/realfft", branch = "better_errors" }
-fftw = { version = "0.8.0", optional = true }
 num-complex = "0.4"
 num-traits = "0.2"
 signal-hook = "0.3.8"

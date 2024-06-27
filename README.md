@@ -300,12 +300,6 @@ CamillaDSP includes a Websocket server that can be used to pass commands to the 
 This feature is enabled by default, but can be left out. The feature name is "websocket".
 For usage see the section "Controlling via websocket".
 
-The default FFT library is RustFFT, but it's also possible to use FFTW.
-This is enabled by the feature "FFTW". When the chunksize is a power of two, like 1024 or 4096, then FFTW and RustFFT are very similar in speed.
-But if the chunksize is a "strange" number like a large prime, then FFTW can be faster.
-FFTW is a much larger and more complicated library,
-so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT too slow.
-
 ## Building in Linux with standard features
 These instructions assume that the linux distribution used is one of Fedora, Debian, Ubunty or Arch.
 They should also work also work on distributions closely related to one of these, such as Manjaro (Arch),
@@ -343,7 +337,6 @@ All the available options, or "features" are:
 - `bluez-backend`: Bluetooth support via BlueALSA (Linux only).
 - `websocket`: Websocket server for control.
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
-- `FFTW`: Use FFTW instead of RustFFT.
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64).
 - `debug`: Enable extra logging, useful for debugging.
 - `avoid-rustc-issue-116359`: Enable a workaround for [rust issue #116359](https://github.com/rust-lang/rust/issues/116359).
@@ -356,18 +349,18 @@ Cargo doesn't allow disabling a single default feature,
 but you can disable the whole group with the `--no-default-features` flag.
 Then you have to manually add all the ones you want.
 
-Example 1: You want `websocket`, `pulse-backend` and `FFTW`. The first one is included by default so you only need to add `FFTW` and `pulse-backend`:
+Example 1: You want `websocket` and `pulse-backend`. The first one is included by default so you only need to add `pulse-backend`:
 ```
-cargo build --release --features FFTW --features pulse-backend
+cargo build --release --features pulse-backend
 (or)
-cargo install --path . --features FFTW --features pulse-backend
+cargo install --path . --features pulse-backend
 ```
 
-Example 2: You want `32bit` and `FFTW`. Since you don't want `websocket` you have to disable the defaults:
+Example 2: You want only `32bit`. Since you don't want `websocket` you have to disable the defaults:
 ```
-cargo build --release --no-default-features --features FFTW --features 32bit
+cargo build --release --no-default-features --features 32bit
 (or)
-cargo install --path . --no-default-features --features FFTW --features 32bit
+cargo install --path . --no-default-features --features 32bit
 ```
 
 ### Additional dependencies
@@ -419,14 +412,12 @@ $env:RUSTFLAGS="-C target-cpu=native"
 cargo build --release
 ```
 
-On macOS both the PulseAudio and FFTW features can be used. The necessary dependencies can be installed with brew:
+The PulseAudio backend can be used on macOS.
+The necessary dependencies can be installed with brew:
 ```
-brew install fftw
 brew install pkg-config
 brew install pulseaudio
 ```
-
-The FFTW feature can also be used on Windows. There is no need to install anything extra.
 
 
 # How to run
