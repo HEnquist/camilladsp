@@ -9,6 +9,7 @@ New features:
 - Linux: Optionally select Alsa sample format automatically.
 - Improved controller for rate adjustment.
 - Command line options fo setting aux volume and mute.
+- Add noise gate.
 Changes:
 - Remove the optional use of FFTW instead of RustFFT.
 - Rename `File` capture device to `RawFile`.
