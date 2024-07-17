@@ -8,7 +8,8 @@ New features:
 - Linux: Subscribe to capture device control events for volume, sample rate and format changes.
 - Linux: Optionally select Alsa sample format automatically.
 - Improved controller for rate adjustment.
-- Command line options fo setting aux volume and mute.
+- Command line options for setting aux volume and mute.
+- Optional user-defined volume limits for volume adjust commands. 
 Changes:
 - Remove the optional use of FFTW instead of RustFFT.
 - Rename `File` capture device to `RawFile`.

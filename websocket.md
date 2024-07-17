@@ -63,7 +63,7 @@ ws.on('message', function message(data) {
     }
 });
 ```
-*Wrapped the parse with a try/catch as that's good practice to avoid crashes with improperly formatted JSON etc.*
+*Wrapping the parse with a try/catch is good practice to avoid crashes with improperly formatted JSON etc.*
 
 ## All commands
 The available commands are listed below. All commands return the result, and for the ones that return a value are this described here.
@@ -143,33 +143,61 @@ Combined commands for reading several levels with a single request. These comman
 - `GetSignalLevelsSinceLast`
 
 Get the peak since start.
-- `GetSignalPeaksSinceStart` : Get the playback and capture peak level since processing started. The values are returned as a json object with keys `playback` and `capture`.
+- `GetSignalPeaksSinceStart` : Get the playback and capture peak level since processing started.
+  The values are returned as a json object with keys `playback` and `capture`.
 - `ResetSignalPeaksSinceStart` : Reset the peak values. Note that this resets the peak for all clients.
 
 
 ### Volume control
 
 Commands for setting and getting the volume and mute of the default volume control on control `Main`.
+
 - `GetVolume` : Get the current volume setting in dB.
   * Returns the value as a float.
+
 - `SetVolume` : Set the volume control to the given value in dB. Clamped to the range -150 to +50 dB.
-- `AdjustVolume` : Change the volume setting by the given number of dB, positive or negative. The resulting volume is clamped to the range -150 to +50 dB.
+
+- `AdjustVolume` : Change the volume setting by the given number of dB, positive or negative.
+  The resulting volume is clamped to the range -150 to +50 dB.
+  The allowed range can be reduced by providing two more values, for minimum and maximum.
+
+  Example, reduce the volume by 3 dB, with limits of -50 and +10 dB:
+  ```{"AdjustVolume": [-3.0, -50.0, 10.0]}```
+
   * Returns the new value as a float.
+
 - `GetMute` : Get the current mute setting.
   * Returns the muting status as a boolean.
+
 - `SetMute` : Set muting to the given value.
+
 - `ToggleMute` : Toggle muting.
   * Returns the new muting status as a boolean.
+
 
 Commands for setting and getting the volume and mute setting of a given fader.
 The faders are selected using an integer, 0 for `Main` and 1 to 4 for `Aux1` to `Aux4`.
 All commands take the fader number as the first parameter.
+
 - `GetFaderVolume` : Get the current volume setting in dB.
   * Returns a struct with the fader as an integer and the volume value as a float.
+
 - `SetFaderVolume` : Set the volume control to the given value in dB. Clamped to the range -150 to +50 dB.
+
 - `SetFaderExternalVolume` : Special command for setting the volume when a Loudness filter is being combined with an external volume control (without a Volume filter). Clamped to the range -150 to +50 dB.
-- `AdjustFaderVolume` : Change the volume setting by the given number of dB, positive or negative. The resulting volume is clamped to the range -150 to +50 dB.
+
+- `AdjustFaderVolume` : Change the volume setting by the given number of dB, positive or negative.
+  The resulting volume is clamped to the range -150 to +50 dB.
+  The allowed range can be reduced by providing two more values, for minimum and maximum.
+
+  Example, reduce the volume of fader 0 by 3 dB, with default limits:
+  ```{"AdjustFaderVolume": [0, -3.0]}```
+
+  Example, reduce the volume of fader 0 by 3 dB, with limits of -50 and +10 dB:
+  ```{"AdjustFaderVolume": [0, [-3.0, -50.0, 10.0]]}```
+
   * Returns a struct with the fader as an integer and the new volume value as a float.
+
 - `GetFaderMute` : Get the current mute setting.
   * Returns a struct with the fader as an integer and the muting status as a boolean.
 - `SetFaderMute` : Set muting to the given value.
@@ -179,6 +207,7 @@ All commands take the fader number as the first parameter.
 There is also a command for getting the volume and mute settings for all faders with a single query.
 - `GetFaders` : Read all faders.
   * Returns a list of objects, each containing a `volume` and a `mute` property.
+
 
 ### Config management
 
