@@ -1,12 +1,11 @@
 use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::filters::Processor;
-use crate::limiter::Limiter;
 use crate::PrcFmt;
 use crate::Res;
 
 #[derive(Clone, Debug)]
-pub struct Compressor {
+pub struct NoiseGate {
     pub name: String,
     pub channels: usize,
     pub monitor_channels: Vec<usize>,
@@ -15,18 +14,16 @@ pub struct Compressor {
     pub release: PrcFmt,
     pub threshold: PrcFmt,
     pub factor: PrcFmt,
-    pub makeup_gain: PrcFmt,
-    pub limiter: Option<Limiter>,
     pub samplerate: usize,
     pub scratch: Vec<PrcFmt>,
     pub prev_loudness: PrcFmt,
 }
 
-impl Compressor {
-    /// Creates a Compressor from a config struct
+impl NoiseGate {
+    /// Creates a NoiseGate from a config struct
     pub fn from_config(
         name: &str,
-        config: config::CompressorParameters,
+        config: config::NoiseGateParameters,
         samplerate: usize,
         chunksize: usize,
     ) -> Self {
@@ -47,25 +44,14 @@ impl Compressor {
         }
         let attack = (-1.0 / srate / config.attack).exp();
         let release = (-1.0 / srate / config.release).exp();
-        let clip_limit = config
-            .clip_limit
-            .map(|lim| (10.0 as PrcFmt).powf(lim / 20.0));
-
         let scratch = vec![0.0; chunksize];
 
-        debug!("Creating compressor '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}", 
-                name, channels, process_channels, monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain(), config.soft_clip(), clip_limit);
-        let limiter = if let Some(limit) = config.clip_limit {
-            let limitconf = config::LimiterParameters {
-                clip_limit: limit,
-                soft_clip: config.soft_clip,
-            };
-            Some(Limiter::from_config("Limiter", limitconf))
-        } else {
-            None
-        };
+        debug!("Creating noisegate '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, attenuation: {}", 
+                name, channels, process_channels, monitor_channels, attack, release, config.threshold, config.attenuation);
 
-        Compressor {
+        let factor = (10.0 as PrcFmt).powf(-config.attenuation / 20.0);
+
+        NoiseGate {
             name,
             channels,
             monitor_channels,
@@ -73,12 +59,10 @@ impl Compressor {
             attack,
             release,
             threshold: config.threshold,
-            factor: config.factor,
-            makeup_gain: config.makeup_gain(),
-            limiter,
+            factor,
             samplerate,
             scratch,
-            prev_loudness: -100.0,
+            prev_loudness: 0.0,
         }
     }
 
@@ -110,13 +94,11 @@ impl Compressor {
     /// Calculate linear gain, store result in self.scratch
     fn calculate_linear_gain(&mut self) {
         for val in self.scratch.iter_mut() {
-            if *val > self.threshold {
-                *val = -(*val - self.threshold) * (self.factor - 1.0) / self.factor;
+            if *val < self.threshold {
+                *val = self.factor;
             } else {
-                *val = 0.0;
+                *val = 1.0;
             }
-            *val += self.makeup_gain;
-            *val = (10.0 as PrcFmt).powf(*val / 20.0);
         }
     }
 
@@ -125,33 +107,26 @@ impl Compressor {
             *val *= gain;
         }
     }
-
-    fn apply_limiter(&self, input: &mut [PrcFmt]) {
-        if let Some(limiter) = &self.limiter {
-            limiter.apply_clip(input);
-        }
-    }
 }
 
-impl Processor for Compressor {
+impl Processor for NoiseGate {
     fn name(&self) -> &str {
         &self.name
     }
 
-    /// Apply a Compressor to an AudioChunk, modifying it in-place.
+    /// Apply a NoiseGate to an AudioChunk, modifying it in-place.
     fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
         self.sum_monitor_channels(input);
         self.estimate_loudness();
         self.calculate_linear_gain();
         for ch in self.process_channels.iter() {
             self.apply_gain(&mut input.waveforms[*ch]);
-            self.apply_limiter(&mut input.waveforms[*ch]);
         }
         Ok(())
     }
 
     fn update_parameters(&mut self, config: config::Processor) {
-        if let config::Processor::Compressor {
+        if let config::Processor::NoiseGate {
             parameters: config, ..
         } = config
         {
@@ -171,31 +146,16 @@ impl Processor for Compressor {
             }
             let attack = (-1.0 / srate / config.attack).exp();
             let release = (-1.0 / srate / config.release).exp();
-            let clip_limit = config
-                .clip_limit
-                .map(|lim| (10.0 as PrcFmt).powf(lim / 20.0));
-
-            let limiter = if let Some(limit) = config.clip_limit {
-                let limitconf = config::LimiterParameters {
-                    clip_limit: limit,
-                    soft_clip: config.soft_clip,
-                };
-                Some(Limiter::from_config("Limiter", limitconf))
-            } else {
-                None
-            };
 
             self.monitor_channels = monitor_channels;
             self.process_channels = process_channels;
             self.attack = attack;
             self.release = release;
             self.threshold = config.threshold;
-            self.factor = config.factor;
-            self.makeup_gain = config.makeup_gain();
-            self.limiter = limiter;
+            self.factor = (10.0 as PrcFmt).powf(-config.attenuation / 20.0);
 
-            debug!("Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}", 
-                self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain(), config.soft_clip(), clip_limit);
+            debug!("Updated noise gate '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, attenuation: {}", 
+                self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.attenuation);
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
@@ -203,8 +163,8 @@ impl Processor for Compressor {
     }
 }
 
-/// Validate the compressor config, to give a helpful message intead of a panic.
-pub fn validate_compressor(config: &config::CompressorParameters) -> Res<()> {
+/// Validate the noise gate config, to give a helpful message intead of a panic.
+pub fn validate_noise_gate(config: &config::NoiseGateParameters) -> Res<()> {
     let channels = config.channels;
     if config.attack <= 0.0 {
         let msg = "Attack value must be larger than zero.";

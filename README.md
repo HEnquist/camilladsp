@@ -100,6 +100,7 @@ It does not matter if the damage is caused by incorrect usage or a bug in the so
    - **[Difference equation](#difference-equation)**
 - **[Processors](#processors)**
    - **[Compressor](#compressor)**
+   - **[NoiseGate](#noise-gate)**
 - **[Pipeline](#pipeline)**
    - **[Filter step](#filter-step)**
    - **[Mixer and Processor step](#mixer-and-processor-step)**
@@ -2058,7 +2059,6 @@ Both a and b are optional. If left out, they default to [1.0].
 ## Processors
 The `processors` section contains the definitions for the Processors.
 These are special "filters" that work on several channels at the same time.
-At present only one type of processor, "Compressor", has been implemented.
 
 Processors take an optional `description` property.
 This is intended for the user and is not used by CamillaDSP itself.
@@ -2102,8 +2102,43 @@ pipeline:
     Note that soft clipping introduces some harmonic distortion to the signal.
     This setting is ignored if `enable_clip = false`. Optional, defaults to `false`.
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
-  * `process_channels`: a list of channels that should be compressed. Optional, defaults to all channels.
+  * `process_channels`: a list of channels to be compressed. Optional, defaults to all channels.
 
+### Noise Gate
+The "NoiseGate" processor implements a simple noise gate.
+It monitors the given channels to estimate the current loudness,
+using the same algorithm as the compressor.
+When the loudness is above the threshold,
+the gate "opens" and the sound is passed through unaltered.
+When it is below, the gate "closes" and attenuates the selected channels by the given amount.
+
+Example:
+```
+processors:
+  demogate:
+    type: NoiseGate
+    parameters:
+      channels: 2
+      attack: 0.025
+      release: 1.0
+      threshold: -25
+      attenuation: 50.0
+      monitor_channels: [0, 1] (*)
+      process_channels: [0, 1] (*)
+
+pipeline:
+  - type: Processor
+    name: demogate
+```
+
+  Parameters:
+  * `channels`: number of channels, must match the number of channels of the pipeline where the compressor is inserted.
+  * `attack`: time constant in seconds for attack, how fast the gate reacts to an increase of the loudness.
+  * `release`: time constant in seconds for release, how fast the gate reacts when the loudness decreases.
+  * `threshold`: the loudness threshold in dB where gate "opens".
+  * `attenuation`: the amount of attenuation in dB to apply when the gate is "closed".
+  * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
+  * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
 
 
 ## Pipeline
