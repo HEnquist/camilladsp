@@ -198,6 +198,8 @@ pub enum CaptureDevice {
         stop_on_inactive: Option<bool>,
         #[serde(default)]
         follow_volume_control: Option<String>,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
     },
     #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
     #[serde(alias = "BLUEZ", alias = "bluez")]
@@ -209,6 +211,8 @@ pub enum CaptureDevice {
         channels: usize,
         device: String,
         format: SampleFormat,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
     },
     RawFile(CaptureDeviceRawFile),
     WavFile(CaptureDeviceWavFile),
@@ -235,11 +239,15 @@ pub enum CaptureDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
     },
     SignalGenerator {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         signal: Signal,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
     },
 }
 
@@ -290,6 +298,8 @@ pub struct CaptureDeviceRawFile {
     pub skip_bytes: Option<usize>,
     #[serde(default)]
     pub read_bytes: Option<usize>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 impl CaptureDeviceRawFile {
@@ -310,6 +320,8 @@ pub struct CaptureDeviceWavFile {
     pub filename: String,
     #[serde(default)]
     pub extra_samples: Option<usize>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 impl CaptureDeviceWavFile {
@@ -343,6 +355,8 @@ pub struct CaptureDeviceStdin {
     pub skip_bytes: Option<usize>,
     #[serde(default)]
     pub read_bytes: Option<usize>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 impl CaptureDeviceStdin {
@@ -369,6 +383,8 @@ pub struct CaptureDeviceBluez {
     // from D-Bus properties
     pub format: SampleFormat,
     pub channels: usize,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
@@ -390,6 +406,8 @@ pub struct CaptureDeviceWasapi {
     exclusive: Option<bool>,
     #[serde(default)]
     loopback: Option<bool>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 #[cfg(target_os = "windows")]
@@ -412,6 +430,8 @@ pub struct CaptureDeviceCA {
     pub device: Option<String>,
     #[serde(default)]
     pub format: Option<SampleFormat>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -1207,6 +1227,8 @@ pub struct Mixer {
     pub description: Option<String>,
     pub channels: MixerChannels,
     pub mapping: Vec<MixerMapping>,
+    #[serde(default)]
+    labels: Option<Vec<Option<String>>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
