@@ -707,6 +707,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         config::CaptureDevice::Jack {
             channels,
             ref device,
+            ..
         } => Box::new(cpaldevice::CpalCaptureDevice {
             devname: device.clone(),
             host: cpaldevice::CpalHost::Jack,

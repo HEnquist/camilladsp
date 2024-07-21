@@ -1228,7 +1228,7 @@ pub struct Mixer {
     pub channels: MixerChannels,
     pub mapping: Vec<MixerMapping>,
     #[serde(default)]
-    labels: Option<Vec<Option<String>>>,
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
