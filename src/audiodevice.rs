@@ -556,6 +556,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             format,
             stop_on_inactive,
             ref follow_volume_control,
+            ..
         } => Box::new(alsadevice::AlsaCaptureDevice {
             devname: device.clone(),
             samplerate: conf.samplerate,
@@ -576,6 +577,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels,
             ref device,
             format,
+            ..
         } => Box::new(pulsedevice::PulseCaptureDevice {
             devname: device.clone(),
             samplerate: conf.samplerate,
@@ -635,14 +637,14 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             stop_on_rate_change: conf.stop_on_rate_change(),
             rate_measure_interval: conf.rate_measure_interval(),
         }),
-        config::CaptureDevice::SignalGenerator { signal, channels } => {
-            Box::new(generatordevice::GeneratorDevice {
-                signal,
-                samplerate: conf.samplerate,
-                channels,
-                chunksize: conf.chunksize,
-            })
-        }
+        config::CaptureDevice::SignalGenerator {
+            signal, channels, ..
+        } => Box::new(generatordevice::GeneratorDevice {
+            signal,
+            samplerate: conf.samplerate,
+            channels,
+            chunksize: conf.chunksize,
+        }),
         #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
         config::CaptureDevice::Bluez(ref dev) => Box::new(filedevice::FileCaptureDevice {
             source: filedevice::CaptureSource::BluezDBus(dev.service(), dev.dbus_path.clone()),
@@ -705,6 +707,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         config::CaptureDevice::Jack {
             channels,
             ref device,
+            ..
         } => Box::new(cpaldevice::CpalCaptureDevice {
             devname: device.clone(),
             host: cpaldevice::CpalHost::Jack,

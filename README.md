@@ -891,6 +891,7 @@ devices:
     channels: 2
     device: "MySink.monitor"
     format: S16LE
+    labels: ["L", "R"] (*)
   playback:
     type: Alsa
     channels: 2
@@ -1223,6 +1224,12 @@ A parameter marked (*) in any example is optional. If they are left out from the
       device: "default"
   ```
 
+  ### Channel labels
+  All capture device types have an optional `labels` property.
+  This accepts a list of strings, and is meant to be used by a GUI
+  to display meaningful channel names.
+  CamillaDSP itself does not use these labels.
+
 ## Resampling
 
 Resampling is provided by the [Rubato library.](https://github.com/HEnquist/rubato)
@@ -1383,6 +1390,7 @@ Example for a mixer that copies two channels into four:
 mixers:
   ExampleMixer:
     description: "Example mixer to convert two channels to four" (*)
+    labels: ["L_LF", "R_LF", "L_HF", "R_HF"] (*)
     channels:
       in: 2
       out: 4
@@ -1422,7 +1430,12 @@ Each source has a `channel` number, a `gain` value, a `scale` for the gain (`dB`
 A channel that has no sources will be filled with silence.
 The `mute` option determines if an output channel of the mixer should be muted.
 The `mute`, `gain`, `scale` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 in dB, and not inverted.
+
 The optional `description` property is intended for the user and is not used by CamillaDSP itself.
+
+Similar to [capture devices](#channel-labels), the mixer also has a `labels` property.
+This is meant to define labels for the output channels from the mixer.
+The labels are intended to be used by GUIs and are not used by CamillaDSP.
 
 Another example, a simple stereo to mono mixer:
 ```
