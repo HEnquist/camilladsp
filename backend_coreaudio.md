@@ -11,14 +11,23 @@ One format is used for communicating with the application.
 This is typically 32-bit float, the same format that CoreAudio uses internally.
 The other format (called the physical format) is the one used to send or receive data to/from the sound card driver.
 
-## Microphone permissions
-In order to capture audio on macOS, the application needs the be given permission.
-First time CamillaDSP is launched, there should be a pop-up asking if the Terminal app
+## Microphone access
+In order to capture audio on macOS, an application needs the be given access.
+First time CamillaDSP is launched, the system should show a popup asking if the Terminal app
 should be allowed to use the microphone.
-This may be misleading, as the "microphone" permission covers all recording of sound,
-and not only the microphone.
-If there is no pop-up, or if the permission was mistakenly denied,
-TODO mention steps.
+This is somewhat misleading, as the microphone access covers all recording of sound,
+not only from the microphone.
+
+Without this access, there is no error message and CamillaDSP appears to be running ok,
+but only records silence.
+If this happens, open System Settings, select "Privacy & Security", and click "Microphone".
+Verify that "Terminal" is listed and enabled.
+
+There is no way to manually add approved apps to the list.
+If "Terminal" is not listed, try executing `tccutil reset Microphone` in the terminal.
+This resets the microphone access for all apps,
+and should make the popup appear next time CamillaDSP is started.
+
 
 ## Capturing audio from other applications
 

@@ -49,7 +49,9 @@
 
 - Why don't I get any sound on MacOS?
 
-  TODO mention microphone permission
+  Apps need to be granted access to the microphone in order to record sound from any source.
+  Without microphone access, things appear to be running well but only silence is recorded.
+  See [Microphone access](./backend_coreaudio.md#microphone-access)
 
 ## Filtering
 
