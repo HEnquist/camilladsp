@@ -47,6 +47,10 @@
 
   Note the extra padding bytes (`0x00`) in S24LE. This scheme means that the samples get an "easier" alignment in memory, while wasting some space. In practice, this format isn't used much.
 
+- Why don't I get any sound on MacOS?
+
+  TODO mention microphone permission
+
 ## Filtering
 
 - I only have filters with negative gain, why do I get clipping anyway?

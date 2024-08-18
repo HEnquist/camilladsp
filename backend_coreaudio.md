@@ -9,7 +9,16 @@ CamillaDSP uses the low-level AudioUnits for playback and capture.
 An AudioUnit that represents a hardware device has two stream formats.
 One format is used for communicating with the application.
 This is typically 32-bit float, the same format that CoreAudio uses internally.
-The other format (called the physical format) is the one used to send or receive data to/from the sound card driver. 
+The other format (called the physical format) is the one used to send or receive data to/from the sound card driver.
+
+## Microphone permissions
+In order to capture audio on macOS, the application needs the be given permission.
+First time CamillaDSP is launched, there should be a pop-up asking if the Terminal app
+should be allowed to use the microphone.
+This may be misleading, as the "microphone" permission covers all recording of sound,
+and not only the microphone.
+If there is no pop-up, or if the permission was mistakenly denied,
+TODO mention steps.
 
 ## Capturing audio from other applications
 
