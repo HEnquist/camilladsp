@@ -1699,7 +1699,7 @@ fn check_and_replace_relative_path(path_str: &mut String, config_path: &Path) {
     } else {
         debug!("{} is relative", path_str);
         let mut in_config_dir = config_path.to_path_buf();
-        in_config_dir.push(&path_str);
+        in_config_dir.push(path_str);
         if in_config_dir.exists() {
             debug!("Using {} found relative to config file dir", path_str);
             *path_str = in_config_dir.to_string_lossy().into();
