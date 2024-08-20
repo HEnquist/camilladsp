@@ -106,7 +106,7 @@ It does not matter if the damage is caused by incorrect usage or a bug in the so
    - **[Mixer and Processor step](#mixer-and-processor-step)**
    - **[Tokens in names](#tokens-in-names)**
    - **[Bypassing steps](#bypassing-steps)**
-- **[Export filters from REW](#export-filters-from-rew)**
+- **[Using filters from REW](#using-filters-from-rew)**
 - **[Visualizing the config](#visualizing-the-config)**
 
 **[Related projects](#related-projects)**
