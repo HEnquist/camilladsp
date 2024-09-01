@@ -13,9 +13,8 @@ use std::ffi::CStr;
 use std::mem;
 use std::os::raw::{c_char, c_void};
 use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -391,7 +390,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 let channel_capacity = 8 * 1024 / chunksize + 3;
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
-                let buffer_fill = Arc::new(AtomicUsize::new(0));
+                let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(samplerate)));
                 let buffer_fill_clone = buffer_fill.clone();
                 let mut buffer_avg = countertimer::Averager::new();
                 let mut timer = countertimer::Stopwatch::new();
@@ -400,10 +399,6 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     peak: vec![0.0; channels],
                 };
                 let blockalign = 4 * channels;
-                // Rough guess of the number of frames per callback.
-                let callback_frames = 512;
-                // TODO check if always 512!
-                //trace!("Estimated playback callback period to {} frames", callback_frames);
 
                 let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
                 let mut rate_adjust_value = 1.0;
@@ -466,16 +461,18 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         let byte = sample_queue.pop_front().unwrap_or(0);
                         *bufferbyte = byte;
                     }
-                    let mut curr_buffer_fill =
+                    let curr_buffer_fill =
                         sample_queue.len() / blockalign + rx_dev.len() * chunksize;
                     // Reduce the measured buffer fill by approximtely one callback size
                     // to force a larger.
-                    if curr_buffer_fill > callback_frames {
-                        curr_buffer_fill -= callback_frames;
-                    } else {
-                        curr_buffer_fill = 0;
+                    //if curr_buffer_fill > callback_frames {
+                    //    curr_buffer_fill -= callback_frames;
+                    //} else {
+                    //    curr_buffer_fill = 0;
+                    //}
+                    if let Ok(mut estimator) = buffer_fill_clone.try_lock() {
+                        estimator.add(curr_buffer_fill)
                     }
-                    buffer_fill_clone.store(curr_buffer_fill, Ordering::Relaxed);
                     Ok(())
                 });
                 match callback_res {
@@ -524,7 +521,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
-                            buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
+                            buffer_avg.add_value(buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default());
                             if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
                                 if let Some(av_delay) = buffer_avg.average() {
                                     let speed = rate_controller.next(av_delay);
