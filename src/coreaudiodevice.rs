@@ -388,7 +388,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
             .name("CoreaudioPlayback".to_string())
             .spawn(move || {
                 // Devices typically request around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = 8 * 1024 / chunksize + 1;
+                let channel_capacity = 8 * 1024 / chunksize + 3;
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let buffer_fill = Arc::new(AtomicUsize::new(0));
