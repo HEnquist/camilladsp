@@ -9,9 +9,9 @@ use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Duration;
 use wasapi;
@@ -289,7 +289,7 @@ fn open_capture(
 struct PlaybackSync {
     rx_play: Receiver<PlaybackDeviceMessage>,
     tx_cb: Sender<DisconnectReason>,
-    bufferfill: Arc<AtomicUsize>,
+    bufferfill: Arc<Mutex<countertimer::DeviceBufferEstimator>>,
 }
 
 enum PlaybackDeviceMessage {
@@ -425,7 +425,9 @@ fn playback_loop(
             None,
         )?;
         let curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
-        sync.bufferfill.store(curr_buffer_fill, Ordering::Relaxed);
+        if let Ok(mut estimator) = sync.bufferfill.try_lock() {
+            estimator.add(curr_buffer_fill)
+        }
         trace!("write ok");
         //println!("{} bef",prev_inst.elapsed().as_micros());
         if handle.wait_for_event(1000).is_err() {
@@ -641,7 +643,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let (tx_state_dev, rx_state_dev) = bounded(0);
                 let (tx_disconnectreason, rx_disconnectreason) = unbounded();
-                let buffer_fill = Arc::new(AtomicUsize::new(0));
+                let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(samplerate)));
                 let buffer_fill_clone = buffer_fill.clone();
                 let mut buffer_avg = countertimer::Averager::new();
                 let mut timer = countertimer::Stopwatch::new();
@@ -751,7 +753,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                     0u8;
                                     channels * chunk.frames * sample_format.bytes_per_sample()
                                 ];
-                            buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
+                            buffer_avg.add_value(buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default());
                             {
                                 if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
                                     if let Some(av_delay) = buffer_avg.average() {

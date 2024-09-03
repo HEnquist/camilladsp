@@ -14,7 +14,7 @@ loads = []
 levels = []
 
 start = time.time()
-start_time = datetime.now().isoformat()
+start_time = datetime.now().strftime("%y.%m.%d_%H.%M.%S")
 
 pyplot.ion()
 fig = pyplot.figure()
