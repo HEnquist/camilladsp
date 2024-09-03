@@ -463,13 +463,6 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     }
                     let curr_buffer_fill =
                         sample_queue.len() / blockalign + rx_dev.len() * chunksize;
-                    // Reduce the measured buffer fill by approximtely one callback size
-                    // to force a larger.
-                    //if curr_buffer_fill > callback_frames {
-                    //    curr_buffer_fill -= callback_frames;
-                    //} else {
-                    //    curr_buffer_fill = 0;
-                    //}
                     if let Ok(mut estimator) = buffer_fill_clone.try_lock() {
                         estimator.add(curr_buffer_fill)
                     }

@@ -635,7 +635,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
             .name("WasapiPlayback".to_string())
             .spawn(move || {
                 // Devices typically request around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = 8 * 1024 / chunksize + 1;
+                let channel_capacity = 8 * 1024 / chunksize + 3;
                 debug!(
                     "Using a playback channel capacity of {} chunks.",
                     channel_capacity
