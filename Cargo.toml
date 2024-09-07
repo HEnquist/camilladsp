@@ -74,7 +74,7 @@ rawsample = "0.2.0"
 circular-queue = "0.2.6"
 parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
 crossbeam-channel = "0.5"
-audio_thread_priority = "0.32.0"
+audio_thread_priority = { version = "0.32.0", default-features = false }
 
 [build-dependencies]
 version_check = "0.9"
