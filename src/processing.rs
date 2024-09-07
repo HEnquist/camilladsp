@@ -109,7 +109,7 @@ pub fn run_processing(
         if let Some(h) = thread_handle {
             match demote_current_thread_from_real_time(h) {
                 Ok(_) => {
-                    debug!("Procesing thread returned to normal priority.")
+                    debug!("Processing thread returned to normal priority.")
                 }
                 Err(_) => {
                     warn!("Could not bring the processing thread back to normal priority.")
