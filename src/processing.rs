@@ -2,6 +2,9 @@ use crate::audiodevice::*;
 use crate::config;
 use crate::filters;
 use crate::ProcessingParameters;
+use audio_thread_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -15,8 +18,26 @@ pub fn run_processing(
     processing_params: Arc<ProcessingParameters>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
+        let chunksize = conf_proc.devices.chunksize;
+        let samplerate = conf_proc.devices.samplerate;
         let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_params.clone());
         debug!("build filters, waiting to start processing loop");
+
+        let thread_handle =
+            match promote_current_thread_to_real_time(chunksize as u32, samplerate as u32) {
+                Ok(h) => {
+                    debug!("Processing thread has real-time priority.");
+                    Some(h)
+                }
+                Err(err) => {
+                    warn!(
+                        "Processing thread could not get real time priority, error: {}",
+                        err
+                    );
+                    None
+                }
+            };
+
         barrier_proc.wait();
         debug!("Processing loop starts now!");
         loop {
@@ -85,5 +106,15 @@ pub fn run_processing(
             };
         }
         processing_params.set_processing_load(0.0);
+        if let Some(h) = thread_handle {
+            match demote_current_thread_from_real_time(h) {
+                Ok(_) => {
+                    debug!("Procesing thread returned to normal priority.")
+                }
+                Err(_) => {
+                    warn!("Could not bring the processing thread back to normal priority.")
+                }
+            };
+        }
     })
 }

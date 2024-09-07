@@ -32,6 +32,10 @@ use coreaudio::error::Error as CoreAudioError;
 
 use coreaudio::sys::*;
 
+use audio_thread_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
+
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingState;
@@ -502,6 +506,20 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         return;
                     }
                 }
+                let thread_handle =
+                match promote_current_thread_to_real_time(chunksize as u32, samplerate as u32) {
+                    Ok(h) => {
+                        debug!("Playback thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Playback thread could not get real time priority, error: {}",
+                            err
+                        );
+                        None
+                    }
+                };
                 'deviceloop: loop {
                     if !alive_listener.is_alive() {
                         error!("Playback device is no longer alive");
@@ -595,6 +613,16 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             break;
                         }
                     }
+                }
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => {
+                            debug!("Playback thread returned to normal priority.")
+                        }
+                        Err(_) => {
+                            warn!("Could not bring the playback thread back to normal priority.")
+                        }
+                    };
                 }
                 release_ownership(device_id).unwrap_or(());
             })?;
@@ -784,6 +812,19 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         return;
                     },
                 }
+                let thread_handle = match promote_current_thread_to_real_time(chunksize as u32, samplerate as u32) {
+                    Ok(h) => {
+                        debug!("Capture thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Capture thread could not get real time priority, error: {}",
+                            err
+                        );
+                        None
+                    }
+                };
                 'deviceloop: loop {
                     match command_channel.try_recv() {
                         Ok(CommandMessage::Exit) => {
@@ -973,6 +1014,16 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             break;
                         }
                     }
+                }
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => {
+                            debug!("Capture thread returned to normal priority.")
+                        }
+                        Err(_) => {
+                            warn!("Could not bring the capture thread back to normal priority.")
+                        }
+                    };
                 }
                 capture_status.write().state = ProcessingState::Inactive;
             })?;
