@@ -509,6 +509,7 @@ impl Pipeline {
 // Loop trough the pipeline to merge individual filter steps,
 // in order use rayon to apply them in parallel.
 fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Vec<PipelineStep> {
+    debug!("Merging filter steps to enable parallel processing");
     let mut new_steps: Vec<PipelineStep> = Vec::new();
     let mut parfilt = None;
     let mut active_channels = nbr_channels;
@@ -516,25 +517,32 @@ fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Ve
         match step {
             PipelineStep::MixerStep(ref mix) => {
                 if parfilt.is_some() {
+                    debug!("Append parallel filter step to pipeline");
                     new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
                 }
                 active_channels = mix.channels_out;
+                debug!("Append mixer step to pipeline");
                 new_steps.push(step);
             }
             PipelineStep::ProcessorStep(_) => {
                 if parfilt.is_some() {
+                    debug!("Append parallel filter step to pipeline");
                     new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
                 }
+                debug!("Append processor step to pipeline");
                 new_steps.push(step);
             }
             PipelineStep::ParallelFiltersStep(_) => {
                 if parfilt.is_some() {
+                    debug!("Append parallel filter step to pipeline");
                     new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
                 }
+                debug!("Append existing parallel filter step to pipeline");
                 new_steps.push(step);
             }
             PipelineStep::FilterStep(mut flt) => {
                 if parfilt.is_none() {
+                    debug!("Start new parallel filter step");
                     let mut filters = Vec::with_capacity(active_channels);
                     for _ in 0..active_channels {
                         filters.push(Vec::new());
@@ -542,12 +550,18 @@ fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Ve
                     parfilt = Some(ParallelFilters { filters });
                 }
                 if let Some(ref mut f) = parfilt {
+                    debug!(
+                        "Adding {} filters to channel {} of parallel filter step",
+                        flt.filters.len(),
+                        flt.channel
+                    );
                     f.filters[flt.channel].append(&mut flt.filters);
                 }
             }
         }
     }
     if parfilt.is_some() {
+        debug!("Append parallel filter step to pipeline");
         new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
     }
     new_steps
