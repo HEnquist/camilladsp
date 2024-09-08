@@ -20,6 +20,8 @@ use std::io::{BufRead, Seek, SeekFrom};
 use std::sync::Arc;
 use std::time::Instant;
 
+use rayon::prelude::*;
+
 use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::Res;
@@ -170,7 +172,7 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
 
 pub struct FilterGroup {
     channel: usize,
-    filters: Vec<Box<dyn Filter>>,
+    filters: Vec<Box<dyn Filter + Send>>,
 }
 
 impl FilterGroup {
@@ -184,11 +186,11 @@ impl FilterGroup {
         processing_params: Arc<ProcessingParameters>,
     ) -> Self {
         debug!("Build filter group from config");
-        let mut filters = Vec::<Box<dyn Filter>>::new();
+        let mut filters = Vec::<Box<dyn Filter + Send>>::new();
         for name in names {
             let filter_cfg = filter_configs[name].clone();
             trace!("Create filter {} with config {:?}", name, filter_cfg);
-            let filter: Box<dyn Filter> =
+            let filter: Box<dyn Filter + Send> =
                 match filter_cfg {
                     config::Filter::Conv { parameters, .. } => Box::new(
                         fftconv::FftConv::from_config(name, waveform_length, parameters),
@@ -286,11 +288,48 @@ impl FilterGroup {
     }
 }
 
+pub struct ParallelFilters {
+    filters: Vec<Vec<Box<dyn Filter + Send>>>,
+}
+
+impl ParallelFilters {
+    pub fn update_parameters(
+        &mut self,
+        filterconfigs: HashMap<String, config::Filter>,
+        changed: &[String],
+    ) {
+        for channel_filters in &mut self.filters {
+            for filter in channel_filters {
+                if changed.iter().any(|n| n == filter.name()) {
+                    filter.update_parameters(filterconfigs[filter.name()].clone());
+                }
+            }
+        }
+    }
+
+    /// Apply all the filters to an AudioChunk.
+    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+        self.filters
+            .par_iter_mut()
+            .zip(input.waveforms.par_iter_mut())
+            .for_each(|(f, w)| {
+                for filt in f {
+                    if !w.is_empty() {
+                        let _ = filt.process_waveform(w);
+                    }
+                }
+            });
+
+        Ok(())
+    }
+}
+
 /// A Pipeline is made up of a series of PipelineSteps,
-/// each one can be a single Mixer of a group of Filters
+/// each one can be a single Mixer or a group of Filters
 pub enum PipelineStep {
     MixerStep(mixer::Mixer),
     FilterStep(FilterGroup),
+    ParallelFiltersStep(ParallelFilters),
     ProcessorStep(Box<dyn Processor>),
 }
 
@@ -398,6 +437,7 @@ impl Pipeline {
             0,
         );
         let secs_per_chunk = conf.devices.chunksize as f32 / conf.devices.samplerate as f32;
+        steps = parallelize_filters(&mut steps, conf.devices.capture.channels());
         Pipeline {
             steps,
             volume,
@@ -424,6 +464,9 @@ impl Pipeline {
                 PipelineStep::FilterStep(flt) => {
                     flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters);
                 }
+                PipelineStep::ParallelFiltersStep(flt) => {
+                    flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters);
+                }
                 PipelineStep::ProcessorStep(proc) => {
                     if processors.iter().any(|n| n == proc.name()) {
                         proc.update_parameters(
@@ -447,6 +490,9 @@ impl Pipeline {
                 PipelineStep::FilterStep(flt) => {
                     flt.process_chunk(&mut chunk).unwrap();
                 }
+                PipelineStep::ParallelFiltersStep(flt) => {
+                    flt.process_chunk(&mut chunk).unwrap();
+                }
                 PipelineStep::ProcessorStep(comp) => {
                     comp.process_chunk(&mut chunk).unwrap();
                 }
@@ -458,6 +504,53 @@ impl Pipeline {
         trace!("Processing load: {load}%");
         chunk
     }
+}
+
+// Loop trough the pipeline to merge individual filter steps,
+// in order use rayon to apply them in parallel.
+fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Vec<PipelineStep> {
+    let mut new_steps: Vec<PipelineStep> = Vec::new();
+    let mut parfilt = None;
+    let mut active_channels = nbr_channels;
+    for step in steps.drain(..) {
+        match step {
+            PipelineStep::MixerStep(ref mix) => {
+                if parfilt.is_some() {
+                    new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+                }
+                active_channels = mix.channels_out;
+                new_steps.push(step);
+            }
+            PipelineStep::ProcessorStep(_) => {
+                if parfilt.is_some() {
+                    new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+                }
+                new_steps.push(step);
+            }
+            PipelineStep::ParallelFiltersStep(_) => {
+                if parfilt.is_some() {
+                    new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+                }
+                new_steps.push(step);
+            }
+            PipelineStep::FilterStep(mut flt) => {
+                if parfilt.is_none() {
+                    let mut filters = Vec::with_capacity(active_channels);
+                    for _ in 0..active_channels {
+                        filters.push(Vec::new());
+                    }
+                    parfilt = Some(ParallelFilters { filters });
+                }
+                if let Some(ref mut f) = parfilt {
+                    f.filters[flt.channel].append(&mut flt.filters);
+                }
+            }
+        }
+    }
+    if parfilt.is_some() {
+        new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+    }
+    new_steps
 }
 
 /// Validate the filter config, to give a helpful message intead of a panic.
