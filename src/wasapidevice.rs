@@ -16,9 +16,9 @@ use std::thread;
 use std::time::Duration;
 use wasapi;
 use wasapi::DeviceCollection;
-use windows::core::w;
-use windows::Win32::System::Threading::{
-    AvSetMmThreadCharacteristicsW, AvSetMmThreadPriority, AVRT_PRIORITY_HIGH,
+
+use audio_thread_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 
 use crate::CommandMessage;
@@ -337,16 +337,19 @@ fn playback_loop(
     debug!("Waited for data for {} ms", waited_millis);
 
     // Raise priority
-    let mut task_idx = 0;
-    let task_handle = unsafe { AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx)? };
-    if task_idx > 0 {
-        debug!("Playback thread raised priority, task index: {}", task_idx);
-        unsafe {
-            AvSetMmThreadPriority(task_handle, AVRT_PRIORITY_HIGH)?;
+    let _thread_handle = match promote_current_thread_to_real_time(0, 1) {
+        Ok(h) => {
+            debug!("Playback inner thread has real-time priority.");
+            Some(h)
         }
-    } else {
-        warn!("Failed to raise playback thread priority");
-    }
+        Err(err) => {
+            warn!(
+                "Playback inner thread could not get real time priority, error: {}",
+                err
+            );
+            None
+        }
+    };
 
     audio_client.start_stream()?;
     let mut running = true;
@@ -478,16 +481,19 @@ fn capture_loop(
     let mut saved_buffer: Option<Vec<u8>> = None;
 
     // Raise priority
-    let mut task_idx = 0;
-    let task_handle = unsafe { AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx)? };
-    if task_idx > 0 {
-        debug!("Capture thread raised priority, task index: {}", task_idx);
-        unsafe {
-            AvSetMmThreadPriority(task_handle, AVRT_PRIORITY_HIGH)?;
+    let _thread_handle = match promote_current_thread_to_real_time(0, 1) {
+        Ok(h) => {
+            debug!("Capture inner thread has real-time priority.");
+            Some(h)
         }
-    } else {
-        warn!("Failed to raise capture thread priority");
-    }
+        Err(err) => {
+            warn!(
+                "Capture inner thread could not get real time priority, error: {}",
+                err
+            );
+            None
+        }
+    };
     trace!("Starting capture stream");
     audio_client.start_stream()?;
     trace!("Started capture stream");
@@ -724,6 +730,19 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 }
                 debug!("Playback device ready and waiting");
                 barrier.wait();
+                let thread_handle = match promote_current_thread_to_real_time(0, 1) {
+                    Ok(h) => {
+                        debug!("Playback outer thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Playback outer thread could not get real time priority, error: {}",
+                            err
+                        );
+                        None
+                    }
+                };
                 debug!("Playback device starts now!");
                 loop {
                     match rx_state_dev.try_recv() {
@@ -821,6 +840,16 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             break;
                         }
                     }
+                }
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => {
+                            debug!("Playback outer thread returned to normal priority.")
+                        }
+                        Err(_) => {
+                            warn!("Could not bring the outer playback thread back to normal priority.")
+                        }
+                    };
                 }
                 match tx_dev.send(PlaybackDeviceMessage::Stop) {
                     Ok(_) => {
@@ -1013,6 +1042,19 @@ impl CaptureDevice for WasapiCaptureDevice {
                     Err(_err) => {}
                 }
                 barrier.wait();
+                let thread_handle = match promote_current_thread_to_real_time(0, 1) {
+                    Ok(h) => {
+                        debug!("Capture outer thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Capture outer thread could not get real time priority, error: {}",
+                            err
+                        );
+                        None
+                    }
+                };
                 debug!("Capture device starts now!");
                 loop {
                     match command_channel.try_recv() {
@@ -1180,6 +1222,16 @@ impl CaptureDevice for WasapiCaptureDevice {
                             break;
                         }
                     }
+                }
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => {
+                            debug!("Capture outer thread returned to normal priority.")
+                        }
+                        Err(_) => {
+                            warn!("Could not bring the outer capture thread back to normal priority.")
+                        }
+                    };
                 }
                 stop_signal.store(true, Ordering::Relaxed);
                 debug!("Wait for inner capture thread to exit");

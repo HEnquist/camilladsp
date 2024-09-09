@@ -19,6 +19,10 @@ use std::sync::{mpsc, Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
+use audio_thread_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
+
 use crate::alsadevice_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
@@ -479,6 +483,22 @@ fn playback_loop_bytes(
         params.target_level,
     );
     trace!("PB: {:?}", buf_manager);
+    let thread_handle = match promote_current_thread_to_real_time(
+        params.chunksize as u32,
+        params.samplerate as u32,
+    ) {
+        Ok(h) => {
+            debug!("Playback thread has real-time priority.");
+            Some(h)
+        }
+        Err(err) => {
+            warn!(
+                "Playback thread could not get real time priority, error: {}",
+                err
+            );
+            None
+        }
+    };
     loop {
         let eos_in_drain = if device_stalled {
             drain_check_eos(&channels.audio)
@@ -654,6 +674,16 @@ fn playback_loop_bytes(
             }
         }
     }
+    if let Some(h) = thread_handle {
+        match demote_current_thread_from_real_time(h) {
+            Ok(_) => {
+                debug!("Playback thread returned to normal priority.")
+            }
+            Err(_) => {
+                warn!("Could not bring the playback thread back to normal priority.")
+            }
+        };
+    }
 }
 
 fn drain_check_eos(audio: &mpsc::Receiver<AudioMessage>) -> Option<AudioMessage> {
@@ -769,6 +799,22 @@ fn capture_loop_bytes(
         peak: vec![0.0; params.channels],
     };
     let mut channel_mask = vec![true; params.channels];
+    let thread_handle = match promote_current_thread_to_real_time(
+        params.chunksize as u32,
+        params.samplerate as u32,
+    ) {
+        Ok(h) => {
+            debug!("Capture thread has real-time priority.");
+            Some(h)
+        }
+        Err(err) => {
+            warn!(
+                "Capture thread could not get real time priority, error: {}",
+                err
+            );
+            None
+        }
+    };
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -966,6 +1012,16 @@ fn capture_loop_bytes(
                 break;
             }
         }
+    }
+    if let Some(h) = thread_handle {
+        match demote_current_thread_from_real_time(h) {
+            Ok(_) => {
+                debug!("Capture thread returned to normal priority.")
+            }
+            Err(_) => {
+                warn!("Could not bring the capture thread back to normal priority.")
+            }
+        };
     }
     params.capture_status.write().state = ProcessingState::Inactive;
 }
