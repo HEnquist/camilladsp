@@ -312,14 +312,12 @@ impl ParallelFilters {
         self.filters
             .par_iter_mut()
             .zip(input.waveforms.par_iter_mut())
+            .filter(|(f, w)| !f.is_empty() && !w.is_empty())
             .for_each(|(f, w)| {
                 for filt in f {
-                    if !w.is_empty() {
-                        let _ = filt.process_waveform(w);
-                    }
+                    let _ = filt.process_waveform(w);
                 }
             });
-
         Ok(())
     }
 }
@@ -437,7 +435,9 @@ impl Pipeline {
             0,
         );
         let secs_per_chunk = conf.devices.chunksize as f32 / conf.devices.samplerate as f32;
-        steps = parallelize_filters(&mut steps, conf.devices.capture.channels());
+        if conf.devices.multithreaded() {
+            steps = parallelize_filters(&mut steps, conf.devices.capture.channels());
+        }
         Pipeline {
             steps,
             volume,
