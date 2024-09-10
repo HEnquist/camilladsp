@@ -596,6 +596,8 @@ pub struct Devices {
     pub volume_limit: Option<f32>,
     #[serde(default)]
     pub multithreaded: Option<bool>,
+    #[serde(default)]
+    pub worker_threads: Option<usize>,
 }
 
 // Getters for all the defaults
@@ -646,6 +648,10 @@ impl Devices {
 
     pub fn multithreaded(&self) -> bool {
         self.multithreaded.unwrap_or(false)
+    }
+
+    pub fn worker_threads(&self) -> usize {
+        self.worker_threads.unwrap_or(0)
     }
 }
 
