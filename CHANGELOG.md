@@ -1,5 +1,7 @@
 ## v3.0.0
 New features:
+- Optional multithreaded filter processing.
+- Request higher proprity of audio threads for improved stability.
 - Add a signal generator capture device.
 - Optionally write wav header when outputting to file or stdout.
 - Add `WavFile` capture device type for reading wav files.
