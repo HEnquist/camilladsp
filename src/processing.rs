@@ -22,6 +22,27 @@ pub fn run_processing(
         let samplerate = conf_proc.devices.samplerate;
         let multithreaded = conf_proc.devices.multithreaded();
         let nbr_threads = conf_proc.devices.worker_threads();
+        let hw_threads = std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or_default();
+        if nbr_threads > hw_threads && multithreaded {
+            warn!(
+                "Requested {} worker threads. For optimal performance, this number should not \
+                exceed the available CPU cores, which is {}.",
+                nbr_threads, hw_threads
+            );
+        }
+        if hw_threads == 1 && multithreaded {
+            warn!(
+                "This system only has one CPU core, multithreaded processing is not recommended."
+            );
+        }
+        if nbr_threads == 1 && multithreaded {
+            warn!(
+                "Requested multithreaded processing with one worker thread. \
+                   Performance can improve by adding more threads or disabling multithreading."
+            );
+        }
         let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_params.clone());
         debug!("build filters, waiting to start processing loop");
 
