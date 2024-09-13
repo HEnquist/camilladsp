@@ -993,10 +993,13 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
 * `stop_on_rate_change` and `rate_measure_interval` (both optional)
 
-  Setting `stop_on_rate_change` to `true` makes CamillaDSP stop the processing if the measured capture sample rate changes. Default is `false`.
+  Setting `stop_on_rate_change` to `true` makes CamillaDSP stop the processing
+  if the measured capture sample rate changes.
+  Default is `false`.
   The `rate_measure_interval` setting is used for adjusting the measurement period.
   A longer period gives a more accurate measurement of the rate, at the cost of slower response when the rate changes.
-  The default is 1.0 seconds. Processing will stop after 3 measurements in a row are more than 4% off from the configured rate.
+  The default is 1.0 seconds.
+  Processing will stop after 3 measurements in a row are more than 4% off from the configured rate.
   The value of 4% is chosen to allow some variation, while still catching changes between for example 44.1 to 48 kHz.
 
 * `volume_ramp_time` (optional, defaults to 400 ms)
@@ -1005,27 +1008,29 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
 * `multithreaded` and `worker_threads` (optional, defaults to `false` and automatic)
   Setting `multithreaded` to `true` enables multithreaded processing.
-  When enabled, CamillaDSP creates a number of filtering tasks, by grouping the filters for each channel.
-  These tasks are then sent to a thread pool, where a number of threads are waiting to pick up work.
+  When this is enabled, CamillaDSP creates several filtering tasks by grouping the filters for each channel.
+  These tasks are then sent to a thread pool, where multiple threads are ready to pick up the work.
   On a machine with multiple CPU cores, this allows filters to be processed in parallel,
-  which may increase performance.
-  After the workers have finished all the tasks, the results are returned to the main processing thread.
+  potentially boosting performance.
+  Once all tasks are completed, the results are returned to the main processing thread.
 
-  Since Mixers and Processors work on all channels in the pipeline,
-  these cannnot be parallelized and are processed in the main thread.
-  Therefore, only the filters between mixers and/or processors can be
-  parallelized.
+  However, Mixers and Processors, which work on all channels in the pipeline,
+  cannot be parallelized and are processed in the main thread.
+  Therefore, only the filters between mixers and/or processors can be parallelized.
 
-  Multithreaded processing can help for configurations that require a lot of processing power,
-  for example by using very long FIR filters, high sample rates, or very large number of channels.
-  It should only be used if needed, and should normally be disabled.
-  The synchronization with the worker threads adds some overhead that increases the overall CPU usage.
-  It also makes CamillaDSP more likely to be affected by other processes using the CPU,
+  Multithreaded processing is beneficial for configurations that require significant processing power,
+  such as using very long FIR filters, high sample rates, or a large number of channels.
+  It should only be enabled if necessary, as it typically should remain disabled.
+  Synchronizing with worker threads adds some overhead, increasing overall CPU usage.
+  It also makes CamillaDSP more susceptible to other processes using the CPU,
   which may cause buffer underruns.
 
-  The number of worker threads can set manually using the `worker_threads` setting.
-  Leave it out or set it to zero to use the default of one worker thread per hardware thread
-  of the machine.
+  An exception to this recommendation is when both the input and output are files on disk,
+  allowing processing to run faster than real time.
+  In this scenario, multithreading is likely to improve throughput and should usually be enabled.
+
+  The number of worker threads can be set manually using the `worker_threads` setting.
+  If left out or set to zero, it defaults to one worker thread per hardware thread of the machine.
 
 * `capture` and `playback`
   Input and output devices are defined in the same way.
@@ -1161,7 +1166,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
   ```
 
 
-  The `RawFile` and `Stdin` capture devices support two additional optional parameters, for advanced handling of raw files and testing:
+  The `RawFile` and `Stdin` capture devices support two additional optional parameters,
+  for advanced handling of raw files and testing:
   * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream.
     This can be used to skip over the header of some formats like .wav
     (which often has a 44-byte header).
@@ -1169,7 +1175,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
   * `read_bytes`: Read only up until the specified number of bytes.
     Leave it out or set it to zero to read until the end of the file or stream.
 
-  * Example, this will skip the first 50 bytes of the file (index 0-49) and then read the following 200 bytes (index 50-249).
+  * Example, this will skip the first 50 bytes of the file (index 0-49)
+    and then read the following 200 bytes (index 50-249).
     ```
     skip_bytes: 50
     read_bytes: 200
