@@ -886,6 +886,8 @@ devices:
   rate_measure_interval: 1.0 (*)
   volume_ramp_time: 400.0 (*)
   volume_limit: -12.0 (*)
+  multithreaded: false (*)
+  worker_threads: 4 (*)
   capture:
     type: Pulse
     channels: 2
@@ -1000,6 +1002,30 @@ A parameter marked (*) in any example is optional. If they are left out from the
 * `volume_ramp_time` (optional, defaults to 400 ms)
   This setting controls the duration of this ramp when changing volume of the default volume control.
   The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
+
+* `multithreaded` and `worker_threads` (optional, defaults to `false` and automatic)
+  Setting `multithreaded` to `true` enables multithreaded processing.
+  When enabled, CamillaDSP creates a number of filtering tasks, by grouping the filters for each channel.
+  These tasks are then sent to a thread pool, where a number of threads are waiting to pick up work.
+  On a machine with multiple CPU cores, this allows filters to be processed in parallel,
+  which may increase performance.
+  After the workers have finished all the tasks, the results are returned to the main processing thread.
+
+  Since Mixers and Processors work on all channels in the pipeline,
+  these cannnot be parallelized and are processed in the main thread.
+  Therefore, only the filters between mixers and/or processors can be
+  parallelized.
+
+  Multithreaded processing can help for configurations that require a lot of processing power,
+  for example by using very long FIR filters, high sample rates, or very large number of channels.
+  It should only be used if needed, and should normally be disabled.
+  The synchronization with the worker threads adds some overhead that increases the overall CPU usage.
+  It also makes CamillaDSP more likely to be affected by other processes using the CPU,
+  which may cause buffer underruns.
+
+  The number of worker threads can set manually using the `worker_threads` setting.
+  Leave it out or set it to zero to use the default of one worker thread per hardware thread
+  of the machine.
 
 * `capture` and `playback`
   Input and output devices are defined in the same way.

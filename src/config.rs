@@ -594,6 +594,10 @@ pub struct Devices {
     pub volume_ramp_time: Option<f32>,
     #[serde(default)]
     pub volume_limit: Option<f32>,
+    #[serde(default)]
+    pub multithreaded: Option<bool>,
+    #[serde(default)]
+    pub worker_threads: Option<usize>,
 }
 
 // Getters for all the defaults
@@ -640,6 +644,14 @@ impl Devices {
 
     pub fn volume_limit(&self) -> f32 {
         self.volume_limit.unwrap_or(50.0)
+    }
+
+    pub fn multithreaded(&self) -> bool {
+        self.multithreaded.unwrap_or(false)
+    }
+
+    pub fn worker_threads(&self) -> usize {
+        self.worker_threads.unwrap_or(0)
     }
 }
 
