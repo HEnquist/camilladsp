@@ -457,7 +457,9 @@ Options:
   -s, --statefile <STATEFILE>          Use the given file to persist the state
   -v...                                Increase message verbosity
   -l, --loglevel <LOGLEVEL>            Set log level [possible values: trace, debug, info, warn, error, off]
-  -o, --logfile <LOGFILE>              Write logs to file
+  -o, --logfile <LOGFILE>              Write logs to the given file path
+      --log_rotate_size <ROTATE_SIZE>  Rotate log file when the size in bytes exceeds this value
+      --log_keep_nbr <KEEP_NBR>        Number of previous log files to keep
   -a, --address <ADDRESS>              IP address to bind websocket server to
   -p, --port <PORT>                    Port for websocket server
   -w, --wait                           Wait for config from websocket
@@ -493,8 +495,19 @@ Alternatively, the log level can be changed with the verbosity flag.
 By passing the verbosity flag once, `-v`, `debug` messages are enabled.
 If it's given twice, `-vv`, it also prints `trace` messages.
 
-The log messages are normally written to the terminal via stderr, but they can instead be written to a file by giving the `--logfile` option.
-The argument should be the path to the logfile. If this file is not writable, CamillaDSP will panic and exit.
+The log messages are normally written to the terminal via stderr,
+but they can instead be written to a file by giving the `--logfile` option.
+The argument should be the path to the logfile.
+If this file is not writable, CamillaDSP will panic and exit.
+
+Log rotation can be enabled by the `--log_rotate_size` option.
+This creates a new log file whenever the log fize size exceeds the given size in bytes.
+When rotation is enabled the current log file gets an added infix of `_rCURRENT`,
+so for example `logfile.log` becomes `logfile_rCURRENT.log`.
+When the file is rotated, the old logs are kept with a timestamp as infix,
+for example `logfile_r2023-01-29_12-59-00.log`.
+The default is to keep all previous log files,
+but this can be limited by setting the `--log_keep_nbr` option to the desired number.
 
 ### Persistent storage of state
 
