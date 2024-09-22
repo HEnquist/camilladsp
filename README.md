@@ -988,7 +988,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   Setting the rate can be done in two ways.
   * Some capture devices provide a way to adjust the speed of their virtual sample clock (also called pitch adjust).
     This is available with the Alsa Loopback and USB Audio gadget devices on Linux,
-    as well as the latest (currently unreleased) version or BlackHole on macOS.
+    as well as BlackHole version 0.5.0 and later on macOS.
     When capturing from any of these devices, the adjustment can be done by tuning the virtual sample clock of the device.
     This avoids the need for asynchronous resampling.
   * If asynchronous resampling is enabled, the adjustment can be done by tuning the resampling ratio.
