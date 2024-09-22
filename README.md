@@ -922,18 +922,51 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
 * `chunksize`
 
-  All processing is done in chunks of data. The `chunksize` is the number of samples each chunk will have per channel.
-  It's good if the number is an "easy" number like a power of two, since this speeds up the FFT in the Convolution filter.
+  All processing is done in chunks of data.
+  The `chunksize` is the number of samples each chunk will have per channel.
+
   Suggested starting points for different sample rates:
   - 44.1 or 48 kHz: 1024
   - 88.2 or 96 kHz: 2048
   - 176.4 or 192 kHz: 4096
 
-  The duration in seconds of a chunk is `chunksize/samplerate`, so the suggested values corresponds to about 22 ms per chunk.
-  This is a reasonable value, and making it shorter can increase the cpu usage and make buffer underruns more likely.
+  The duration in seconds of a chunk is `chunksize/samplerate`,
+  so the suggested values corresponds to about 22 ms per chunk.
+  This is a reasonable value.
 
-  If you have long FIR filters you can reduce CPU usage by making the chunksize larger.
-  When increasing, try increasing in factors of two, like 1024 -> 2048 or 4096 -> 8192.
+  A larger chunk size generally reduces CPU usage,
+  but since the entire chunk must be captured before processing,
+  it can cause unacceptably long delays.
+  Conversely, using a smaller chunk size can reduce latency
+  but will increase CPU usage and the risk of buffer underruns.
+
+  __Choosing chunk size for best performance__
+
+  FIR filters are automatically padded as needed,
+  so there is no need match chunk size and filter length.
+
+  CamillaDSP uses FFT for convolution, with an FFT length of `2 * chunksize`.
+  Therefore, the chunk size should be chosen for optimal FFT performance.
+
+  Using a power of two for the chunk size is ideal for best performance.
+  The FFT also works well with numbers that can be expressed as products
+  of small primes, like `2^4 * 3^3 = 1296`.
+
+  Avoid using prime numbers, such as 1297,
+  or numbers with large prime factors, like `29 * 43 = 1247`.
+
+  __Long FIR filters__
+
+  When a FIR filter is longer than the chunk size, the convolver uses segmented convolution.
+  The number of segments is calculated as `filter_length / chunk size`,
+  and rounded up to the nearest integer.
+
+  Using a smaller chunk size (more segments) can reduce latency
+  but is less efficient and needs more processing power.
+  If you have long FIR filters, try different chunk sizes
+  to find the best balance between latency and processing power.
+
+  When increasing the chunk size, try doubling it, like going from 1024 to 2048 or 4096 to 8192.
 
 
 * `queuelimit` (optional, defaults to 4)
