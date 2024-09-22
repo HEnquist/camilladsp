@@ -509,11 +509,31 @@ fn main_process() -> i32 {
         )
         .arg(
             Arg::new("logfile")
-                .help("Write logs to file")
+                .help("Write logs to the given file path")
                 .short('o')
                 .long("logfile")
                 .value_name("LOGFILE")
-                .display_order(100)
+                .display_order(101)
+                .action(ArgAction::Set),
+        )
+        .arg(
+            Arg::new("log_rotate_size")
+                .help("Rotate log file when the size in bytes exceeds this value")
+                .long("log_rotate_size")
+                .value_name("ROTATE_SIZE")
+                .display_order(102)
+                .requires("logfile")
+                .value_parser(clap::value_parser!(u32).range(1000..))
+                .action(ArgAction::Set),
+        )
+        .arg(
+            Arg::new("log_keep_nbr")
+                .help("Number of previous log files to keep")
+                .long("log_keep_nbr")
+                .value_name("KEEP_NBR")
+                .display_order(103)
+                .requires("log_rotate_size")
+                .value_parser(clap::value_parser!(u32))
                 .action(ArgAction::Set),
         )
         .arg(
@@ -722,13 +742,27 @@ fn main_process() -> i32 {
             fullpath.push(path);
             path = fullpath;
         }
-        flexi_logger::Logger::try_with_str(loglevel)
+        let mut logger = flexi_logger::Logger::try_with_str(loglevel)
             .unwrap()
             .format(custom_logger_format)
             .log_to_file(flexi_logger::FileSpec::try_from(path).unwrap())
-            .write_mode(flexi_logger::WriteMode::Async)
-            .start()
-            .unwrap()
+            .write_mode(flexi_logger::WriteMode::Async);
+
+        let cleanup = if let Some(keep_nbr) = matches.get_one::<u32>("log_keep_nbr") {
+            flexi_logger::Cleanup::KeepLogFiles(*keep_nbr as usize)
+        } else {
+            flexi_logger::Cleanup::Never
+        };
+
+        if let Some(rotate_size) = matches.get_one::<u32>("log_rotate_size") {
+            logger = logger.rotate(
+                flexi_logger::Criterion::Size(*rotate_size as u64),
+                flexi_logger::Naming::Timestamps,
+                cleanup,
+            );
+        }
+
+        logger.start().unwrap()
     } else {
         flexi_logger::Logger::try_with_str(loglevel)
             .unwrap()

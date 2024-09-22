@@ -14,6 +14,7 @@ New features:
 - Optional user-defined volume limits for volume adjust commands.
 - Add noise gate.
 - Add optional channel labels for capture devices and mixers.
+- Optional log file rotation.
 Changes:
 - Remove the optional use of FFTW instead of RustFFT.
 - Rename `File` capture device to `RawFile`.
