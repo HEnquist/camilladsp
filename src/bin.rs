@@ -401,6 +401,10 @@ fn run(
                             debug!("SetVolume message to  {} dB received", vol);
                             status_structs.processing.set_target_volume(0, vol);
                         }
+                        StatusMessage::SetMute(mute) => {
+                            debug!("SetMute message to {} received", mute);
+                            status_structs.processing.set_mute(0, mute);
+                        }
                     },
                     Err(err) => {
                         warn!("Capture, Playback and Processing threads have exited: {}", err);

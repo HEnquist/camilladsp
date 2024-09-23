@@ -38,6 +38,7 @@ pub struct CaptureParams {
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
     pub follow_volume_control: Option<String>,
+    pub follow_mute_control: Option<String>,
 }
 
 pub struct PlaybackParams {
@@ -326,6 +327,7 @@ pub struct CaptureElements<'a> {
     // pub loopback_channels: Option<ElemData<'a>>,
     pub gadget_rate: Option<ElemData<'a>>,
     pub volume: Option<ElemData<'a>>,
+    pub mute: Option<ElemData<'a>>,
 }
 
 pub struct FileDescriptors {
@@ -405,6 +407,12 @@ pub fn process_events(
                     .send(StatusMessage::SetVolume(vol))
                     .unwrap_or_default();
             }
+            EventAction::SetMute(mute) => {
+                debug!("Alsa mute change event, set mute state to {}", mute);
+                status_channel
+                    .send(StatusMessage::SetMute(mute))
+                    .unwrap_or_default();
+            }
             EventAction::None => {}
         }
     }
@@ -414,6 +422,7 @@ pub fn process_events(
 pub enum EventAction {
     None,
     SetVolume(f32),
+    SetMute(bool),
     FormatChange(usize),
     SourceInactive,
 }
@@ -476,6 +485,15 @@ pub fn get_event_action(
             }
         }
     }
+    if let Some(eldata) = &elems.mute {
+        if eldata.numid == numid {
+            let active = eldata.read_as_boolean(ctl);
+            debug!("Mixer switch active: {:?}", active);
+            if let Some(active_val) = active {
+                return EventAction::SetMute(!active_val);
+            }
+        }
+    }
     if let Some(eldata) = &elems.gadget_rate {
         if eldata.numid == numid {
             let value = eldata.read_as_int();
@@ -503,6 +521,7 @@ impl<'a> CaptureElements<'a> {
         device: u32,
         subdevice: u32,
         volume_name: &Option<String>,
+        mute_name: &Option<String>,
     ) {
         self.loopback_active = find_elem(
             h,
@@ -522,6 +541,9 @@ impl<'a> CaptureElements<'a> {
             "Capture Rate",
         );
         self.volume = volume_name
+            .as_ref()
+            .and_then(|name| find_elem(h, ElemIface::Mixer, None, None, name));
+        self.mute = mute_name
             .as_ref()
             .and_then(|name| find_elem(h, ElemIface::Mixer, None, None, name));
     }

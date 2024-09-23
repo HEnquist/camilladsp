@@ -199,6 +199,8 @@ pub enum CaptureDevice {
         #[serde(default)]
         follow_volume_control: Option<String>,
         #[serde(default)]
+        follow_mute_control: Option<String>,
+        #[serde(default)]
         labels: Option<Vec<Option<String>>>,
     },
     #[cfg(all(target_os = "linux", feature = "bluez-backend"))]

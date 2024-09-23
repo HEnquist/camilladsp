@@ -68,6 +68,7 @@ pub struct AlsaCaptureDevice {
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
     pub follow_volume_control: Option<String>,
+    pub follow_mute_control: Option<String>,
 }
 
 struct CaptureChannels {
@@ -747,7 +748,13 @@ fn capture_loop_bytes(
             "Capture Pitch 1000000",
         );
 
-        capture_elements.find_elements(h, device, subdevice, &params.follow_volume_control);
+        capture_elements.find_elements(
+            h,
+            device,
+            subdevice,
+            &params.follow_volume_control,
+            &params.follow_mute_control,
+        );
         if let Some(c) = &ctl {
             if let Some(ref vol_elem) = capture_elements.volume {
                 let vol_db = vol_elem.read_volume_in_db(c);
@@ -756,6 +763,16 @@ fn capture_loop_bytes(
                     channels
                         .status
                         .send(StatusMessage::SetVolume(vol))
+                        .unwrap_or_default();
+                }
+            }
+            if let Some(ref mute_elem) = capture_elements.mute {
+                let active = mute_elem.read_as_boolean(c);
+                info!("Using initial active switch from Alsa: {:?}", active);
+                if let Some(active_val) = active {
+                    channels
+                        .status
+                        .send(StatusMessage::SetMute(!active_val))
                         .unwrap_or_default();
                 }
             }
@@ -1160,6 +1177,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let rate_measure_interval = self.rate_measure_interval;
         let stop_on_inactive = self.stop_on_inactive;
         let follow_volume_control = self.follow_volume_control.clone();
+        let follow_mute_control = self.follow_mute_control.clone();
         let mut buf_manager = CaptureBufferManager::new(
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
@@ -1207,6 +1225,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             rate_measure_interval,
                             stop_on_inactive,
                             follow_volume_control,
+                            follow_mute_control,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,
