@@ -487,7 +487,7 @@ pub fn get_event_action(
     }
     if let Some(eldata) = &elems.mute {
         if eldata.numid == numid {
-            let active = eldata.read_as_boolean(ctl);
+            let active = eldata.read_as_bool();
             debug!("Mixer switch active: {:?}", active);
             if let Some(active_val) = active {
                 return EventAction::SetMute(!active_val);

@@ -767,7 +767,7 @@ fn capture_loop_bytes(
                 }
             }
             if let Some(ref mute_elem) = capture_elements.mute {
-                let active = mute_elem.read_as_boolean(c);
+                let active = mute_elem.read_as_bool();
                 info!("Using initial active switch from Alsa: {:?}", active);
                 if let Some(active_val) = active {
                     channels
