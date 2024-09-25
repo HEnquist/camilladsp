@@ -14,8 +14,8 @@ use rand_distr::{Distribution, Uniform};
 use crate::CaptureStatus;
 use crate::CommandMessage;
 use crate::PrcFmt;
-use crate::ProcessingState;
 use crate::ProcessingParameters;
+use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 

@@ -28,8 +28,9 @@ use crate::alsadevice_buffermanager::{
 };
 use crate::alsadevice_utils::{
     find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
-    list_samplerates_as_text, pick_preferred_format, process_events, state_desc, CaptureElements,
-    CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams, sync_linked_controls
+    list_samplerates_as_text, pick_preferred_format, process_events, state_desc,
+    sync_linked_controls, CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors,
+    PlaybackParams,
 };
 use crate::helpers::PIRateController;
 use crate::CommandMessage;
@@ -274,7 +275,8 @@ fn capture_buffer(
                     if pollresult.ctl {
                         trace!("Got a control event");
                         if let Some(c) = ctl {
-                            let event_result = process_events(c, elems, status_channel, params, processing_params);
+                            let event_result =
+                                process_events(c, elems, status_channel, params, processing_params);
                             match event_result {
                                 CaptureResult::Done => return Ok(event_result),
                                 CaptureResult::Stalled => debug!("Capture device is stalled"),
@@ -285,7 +287,6 @@ fn capture_buffer(
                             let ev = h.handle_events().unwrap();
                             trace!("hctl handle events {}", ev);
                         }
-                        sync_linked_controls(processing_params, params);
                     }
                     if pollresult.pcm {
                         trace!("Capture waited for {:?}", start.map(|s| s.elapsed()));
@@ -1036,6 +1037,7 @@ fn capture_loop_bytes(
                 break;
             }
         }
+        sync_linked_controls(processing_params, &mut params);
     }
     if let Some(h) = thread_handle {
         match demote_current_thread_from_real_time(h) {

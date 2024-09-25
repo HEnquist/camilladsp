@@ -584,7 +584,10 @@ pub fn find_elem<'a>(
     })
 }
 
-pub fn sync_linked_controls(processing_params: &Arc<ProcessingParameters>, capture_params: &mut CaptureParams) {
+pub fn sync_linked_controls(
+    processing_params: &Arc<ProcessingParameters>,
+    capture_params: &mut CaptureParams,
+) {
     if let Some(vol) = capture_params.followed_volume_value {
         let target_vol = processing_params.target_volume(0);
         if (vol - target_vol).abs() > 0.1 {
