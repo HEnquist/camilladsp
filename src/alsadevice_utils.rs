@@ -621,9 +621,9 @@ pub fn sync_linked_controls(
         if let Some(mute) = capture_params.followed_mute_value {
             let target_mute = processing_params.is_mute(0);
             if mute != target_mute {
-                info!("Updating linked mute control to {}", target_mute);
+                info!("Updating linked switch control to {}", !target_mute);
                 if let Some(mute_elem) = &elements.mute {
-                    mute_elem.write_as_bool(target_mute);
+                    mute_elem.write_as_bool(!target_mute);
                 }
             }
         }
