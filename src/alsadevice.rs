@@ -1037,7 +1037,7 @@ fn capture_loop_bytes(
                 break;
             }
         }
-        sync_linked_controls(processing_params, &mut params, &mut capture_elements);
+        sync_linked_controls(processing_params, &mut params, &mut capture_elements, &ctl);
     }
     if let Some(h) = thread_handle {
         match demote_current_thread_from_real_time(h) {
