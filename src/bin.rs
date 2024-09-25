@@ -176,6 +176,7 @@ fn run(
             tx_status_cap,
             rx_command_cap,
             status_structs.capture.clone(),
+            status_structs.processing.clone(),
         )
         .unwrap();
 

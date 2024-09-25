@@ -37,7 +37,7 @@ use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::Res;
 use crate::StatusMessage;
-use crate::{CaptureStatus, PlaybackStatus};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 pub const RATE_CHANGE_THRESHOLD_COUNT: usize = 3;
 pub const RATE_CHANGE_THRESHOLD_VALUE: f32 = 0.04;
@@ -238,6 +238,7 @@ pub trait CaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
+        capture_status: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
 }
 

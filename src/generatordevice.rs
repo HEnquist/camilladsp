@@ -15,6 +15,7 @@ use crate::CaptureStatus;
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingState;
+use crate::ProcessingParameters;
 use crate::Res;
 use crate::StatusMessage;
 
@@ -203,6 +204,7 @@ impl CaptureDevice for GeneratorDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
+        _processing_status: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;

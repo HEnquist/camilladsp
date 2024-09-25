@@ -31,7 +31,7 @@ use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
-use crate::{CaptureStatus, PlaybackStatus};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 pub struct FilePlaybackDevice {
     pub destination: PlaybackDest,
@@ -538,6 +538,7 @@ impl CaptureDevice for FileCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
+        _processing_status: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let source = self.source.clone();
         let samplerate = self.samplerate;
