@@ -315,9 +315,27 @@ impl<'a> ElemData<'a> {
         })
     }
 
+    pub fn write_volume_in_db(&self, ctl: &Ctl, value: f32) {
+        let intval = ctl.convert_from_db(
+            &self.element.get_id().unwrap(),
+            alsa::mixer::MilliBel::from_db(value),
+            alsa::Round::Floor,
+        );
+        if let Ok(val) = intval {
+            self.write_as_int(val as i32);
+        }
+    }
+
     pub fn write_as_int(&self, value: i32) {
         let mut elval = ElemValue::new(ElemType::Integer).unwrap();
         if elval.set_integer(0, value).is_some() {
+            self.element.write(&elval).unwrap_or_default();
+        }
+    }
+
+    pub fn write_as_bool(&self, value: bool) {
+        let mut elval = ElemValue::new(ElemType::Boolean).unwrap();
+        if elval.set_boolean(0, value).is_some() {
             self.element.write(&elval).unwrap_or_default();
         }
     }
@@ -587,6 +605,7 @@ pub fn find_elem<'a>(
 pub fn sync_linked_controls(
     processing_params: &Arc<ProcessingParameters>,
     capture_params: &mut CaptureParams,
+    elements: &mut CaptureElements,
 ) {
     if let Some(vol) = capture_params.followed_volume_value {
         let target_vol = processing_params.target_volume(0);
@@ -598,6 +617,9 @@ pub fn sync_linked_controls(
         let target_mute = processing_params.is_mute(0);
         if mute != target_mute {
             info!("Updating linked mute control to {}", target_mute);
+            if let Some(vol_elem) = &elements.mute {
+                vol_elem.write_as_bool(mute);
+            }
         }
     }
 }
