@@ -176,6 +176,7 @@ fn run(
             tx_status_cap,
             rx_command_cap,
             status_structs.capture.clone(),
+            status_structs.processing.clone(),
         )
         .unwrap();
 
@@ -400,6 +401,10 @@ fn run(
                         StatusMessage::SetVolume(vol) => {
                             debug!("SetVolume message to  {} dB received", vol);
                             status_structs.processing.set_target_volume(0, vol);
+                        }
+                        StatusMessage::SetMute(mute) => {
+                            debug!("SetMute message to {} received", mute);
+                            status_structs.processing.set_mute(0, mute);
                         }
                     },
                     Err(err) => {

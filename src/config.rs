@@ -197,7 +197,9 @@ pub enum CaptureDevice {
         #[serde(default)]
         stop_on_inactive: Option<bool>,
         #[serde(default)]
-        follow_volume_control: Option<String>,
+        link_volume_control: Option<String>,
+        #[serde(default)]
+        link_mute_control: Option<String>,
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
     },

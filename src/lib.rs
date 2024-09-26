@@ -156,6 +156,7 @@ pub enum StatusMessage {
     CaptureDone,
     SetSpeed(f64),
     SetVolume(f32),
+    SetMute(bool),
 }
 
 pub enum CommandMessage {
