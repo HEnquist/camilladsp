@@ -39,10 +39,10 @@ pub struct CaptureParams {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
-    pub follow_volume_control: Option<String>,
-    pub follow_mute_control: Option<String>,
-    pub followed_volume_value: Option<f32>,
-    pub followed_mute_value: Option<bool>,
+    pub link_volume_control: Option<String>,
+    pub link_mute_control: Option<String>,
+    pub linked_volume_value: Option<f32>,
+    pub linked_mute_value: Option<bool>,
 }
 
 pub struct PlaybackParams {
@@ -427,7 +427,7 @@ pub fn process_events(
             EventAction::SetVolume(vol) => {
                 debug!("Alsa volume change event, set main fader to {} dB", vol);
                 processing_params.set_target_volume(0, vol);
-                params.followed_volume_value = Some(vol);
+                params.linked_volume_value = Some(vol);
                 //status_channel
                 //    .send(StatusMessage::SetVolume(vol))
                 //    .unwrap_or_default();
@@ -435,7 +435,7 @@ pub fn process_events(
             EventAction::SetMute(mute) => {
                 debug!("Alsa mute change event, set mute state to {}", mute);
                 processing_params.set_mute(0, mute);
-                params.followed_mute_value = Some(mute);
+                params.linked_mute_value = Some(mute);
                 //status_channel
                 //    .send(StatusMessage::SetMute(mute))
                 //    .unwrap_or_default();
@@ -508,7 +508,7 @@ pub fn get_event_action(
             let vol_db = eldata.read_volume_in_db(ctl);
             debug!("Mixer volume control: {:?} dB", vol_db);
             if let Some(vol) = vol_db {
-                params.followed_volume_value = Some(vol);
+                params.linked_volume_value = Some(vol);
                 return EventAction::SetVolume(vol);
             }
         }
@@ -518,7 +518,7 @@ pub fn get_event_action(
             let active = eldata.read_as_bool();
             debug!("Mixer switch active: {:?}", active);
             if let Some(active_val) = active {
-                params.followed_mute_value = Some(!active_val);
+                params.linked_mute_value = Some(!active_val);
                 return EventAction::SetMute(!active_val);
             }
         }
@@ -609,7 +609,7 @@ pub fn sync_linked_controls(
     ctl: &Option<Ctl>,
 ) {
     if let Some(c) = ctl {
-        if let Some(vol) = capture_params.followed_volume_value {
+        if let Some(vol) = capture_params.linked_volume_value {
             let target_vol = processing_params.target_volume(0);
             if (vol - target_vol).abs() > 0.1 {
                 info!("Updating linked volume control to {} dB", target_vol);
@@ -618,7 +618,7 @@ pub fn sync_linked_controls(
                 vol_elem.write_volume_in_db(c, target_vol);
             }
         }
-        if let Some(mute) = capture_params.followed_mute_value {
+        if let Some(mute) = capture_params.linked_mute_value {
             let target_mute = processing_params.is_mute(0);
             if mute != target_mute {
                 info!("Updating linked switch control to {}", !target_mute);

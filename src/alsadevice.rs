@@ -68,8 +68,8 @@ pub struct AlsaCaptureDevice {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
-    pub follow_volume_control: Option<String>,
-    pub follow_mute_control: Option<String>,
+    pub link_volume_control: Option<String>,
+    pub link_mute_control: Option<String>,
 }
 
 struct CaptureChannels {
@@ -757,15 +757,15 @@ fn capture_loop_bytes(
             h,
             device,
             subdevice,
-            &params.follow_volume_control,
-            &params.follow_mute_control,
+            &params.link_volume_control,
+            &params.link_mute_control,
         );
         if let Some(c) = &ctl {
             if let Some(ref vol_elem) = capture_elements.volume {
                 let vol_db = vol_elem.read_volume_in_db(c);
                 info!("Using initial volume from Alsa: {:?}", vol_db);
                 if let Some(vol) = vol_db {
-                    params.followed_volume_value = Some(vol);
+                    params.linked_volume_value = Some(vol);
                     channels
                         .status
                         .send(StatusMessage::SetVolume(vol))
@@ -776,7 +776,7 @@ fn capture_loop_bytes(
                 let active = mute_elem.read_as_bool();
                 info!("Using initial active switch from Alsa: {:?}", active);
                 if let Some(active_val) = active {
-                    params.followed_mute_value = Some(!active_val);
+                    params.linked_mute_value = Some(!active_val);
                     channels
                         .status
                         .send(StatusMessage::SetMute(!active_val))
@@ -1186,8 +1186,8 @@ impl CaptureDevice for AlsaCaptureDevice {
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let stop_on_inactive = self.stop_on_inactive;
-        let follow_volume_control = self.follow_volume_control.clone();
-        let follow_mute_control = self.follow_mute_control.clone();
+        let link_volume_control = self.link_volume_control.clone();
+        let link_mute_control = self.link_mute_control.clone();
         let mut buf_manager = CaptureBufferManager::new(
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
@@ -1234,10 +1234,10 @@ impl CaptureDevice for AlsaCaptureDevice {
                             stop_on_rate_change,
                             rate_measure_interval,
                             stop_on_inactive,
-                            follow_volume_control,
-                            follow_mute_control,
-                            followed_mute_value: None,
-                            followed_volume_value: None,
+                            link_volume_control,
+                            link_mute_control,
+                            linked_mute_value: None,
+                            linked_volume_value: None,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,
