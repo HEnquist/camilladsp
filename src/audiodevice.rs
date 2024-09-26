@@ -238,7 +238,7 @@ pub trait CaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
-        capture_status: Arc<ProcessingParameters>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
