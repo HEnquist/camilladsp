@@ -28,8 +28,9 @@ use crate::alsadevice_buffermanager::{
 };
 use crate::alsadevice_utils::{
     find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
-    list_samplerates_as_text, pick_preferred_format, process_events, state_desc, CaptureElements,
-    CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams,
+    list_samplerates_as_text, pick_preferred_format, process_events, state_desc,
+    sync_linked_controls, CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors,
+    PlaybackParams,
 };
 use crate::helpers::PIRateController;
 use crate::CommandMessage;
@@ -37,7 +38,7 @@ use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
-use crate::{CaptureStatus, PlaybackStatus};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 lazy_static! {
     static ref ALSA_MUTEX: Mutex<()> = Mutex::new(());
@@ -67,8 +68,8 @@ pub struct AlsaCaptureDevice {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
-    pub follow_volume_control: Option<String>,
-    pub follow_mute_control: Option<String>,
+    pub link_volume_control: Option<String>,
+    pub link_mute_control: Option<String>,
 }
 
 struct CaptureChannels {
@@ -228,7 +229,8 @@ fn capture_buffer(
     hctl: &Option<HCtl>,
     elems: &CaptureElements,
     status_channel: &crossbeam_channel::Sender<StatusMessage>,
-    params: &CaptureParams,
+    params: &mut CaptureParams,
+    processing_params: &Arc<ProcessingParameters>,
 ) -> Res<CaptureResult> {
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
@@ -271,9 +273,10 @@ fn capture_buffer(
                         return Ok(CaptureResult::Stalled);
                     }
                     if pollresult.ctl {
-                        trace!("Got a control events");
+                        trace!("Got a control event");
                         if let Some(c) = ctl {
-                            let event_result = process_events(c, elems, status_channel, params);
+                            let event_result =
+                                process_events(c, elems, status_channel, params, processing_params);
                             match event_result {
                                 CaptureResult::Done => return Ok(event_result),
                                 CaptureResult::Stalled => debug!("Capture device is stalled"),
@@ -700,9 +703,10 @@ fn drain_check_eos(audio: &mpsc::Receiver<AudioMessage>) -> Option<AudioMessage>
 fn capture_loop_bytes(
     channels: CaptureChannels,
     pcmdevice: &alsa::PCM,
-    params: CaptureParams,
+    mut params: CaptureParams,
     mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
     buf_manager: &mut CaptureBufferManager,
+    processing_params: &Arc<ProcessingParameters>,
 ) {
     let io = pcmdevice.io_bytes();
     let pcminfo = pcmdevice.info().unwrap();
@@ -728,6 +732,7 @@ fn capture_loop_bytes(
     if let Some(c) = &ctl {
         c.subscribe_events(true).unwrap();
     }
+
     if let Some(h) = &hctl {
         let ctl_fds = h.get().unwrap();
         file_descriptors.fds.extend(ctl_fds.iter());
@@ -752,14 +757,15 @@ fn capture_loop_bytes(
             h,
             device,
             subdevice,
-            &params.follow_volume_control,
-            &params.follow_mute_control,
+            &params.link_volume_control,
+            &params.link_mute_control,
         );
         if let Some(c) = &ctl {
             if let Some(ref vol_elem) = capture_elements.volume {
                 let vol_db = vol_elem.read_volume_in_db(c);
                 info!("Using initial volume from Alsa: {:?}", vol_db);
                 if let Some(vol) = vol_db {
+                    params.linked_volume_value = Some(vol);
                     channels
                         .status
                         .send(StatusMessage::SetVolume(vol))
@@ -770,6 +776,7 @@ fn capture_loop_bytes(
                 let active = mute_elem.read_as_bool();
                 info!("Using initial active switch from Alsa: {:?}", active);
                 if let Some(active_val) = active {
+                    params.linked_mute_value = Some(!active_val);
                     channels
                         .status
                         .send(StatusMessage::SetMute(!active_val))
@@ -900,7 +907,8 @@ fn capture_loop_bytes(
             &hctl,
             &capture_elements,
             &channels.status,
-            &params,
+            &mut params,
+            processing_params,
         );
         match capture_res {
             Ok(CaptureResult::Normal) => {
@@ -1029,6 +1037,7 @@ fn capture_loop_bytes(
                 break;
             }
         }
+        sync_linked_controls(processing_params, &mut params, &mut capture_elements, &ctl);
     }
     if let Some(h) = thread_handle {
         match demote_current_thread_from_real_time(h) {
@@ -1161,6 +1170,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -1176,8 +1186,8 @@ impl CaptureDevice for AlsaCaptureDevice {
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let stop_on_inactive = self.stop_on_inactive;
-        let follow_volume_control = self.follow_volume_control.clone();
-        let follow_mute_control = self.follow_mute_control.clone();
+        let link_volume_control = self.link_volume_control.clone();
+        let link_mute_control = self.link_mute_control.clone();
         let mut buf_manager = CaptureBufferManager::new(
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
@@ -1224,8 +1234,10 @@ impl CaptureDevice for AlsaCaptureDevice {
                             stop_on_rate_change,
                             rate_measure_interval,
                             stop_on_inactive,
-                            follow_volume_control,
-                            follow_mute_control,
+                            link_volume_control,
+                            link_mute_control,
+                            linked_mute_value: None,
+                            linked_volume_value: None,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,
@@ -1238,6 +1250,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             cap_params,
                             resampler,
                             &mut buf_manager,
+                            &processing_params,
                         );
                     }
                     Err(err) => {

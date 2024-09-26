@@ -37,7 +37,7 @@ use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::Res;
 use crate::StatusMessage;
-use crate::{CaptureStatus, PlaybackStatus};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 pub const RATE_CHANGE_THRESHOLD_COUNT: usize = 3;
 pub const RATE_CHANGE_THRESHOLD_VALUE: f32 = 0.04;
@@ -238,6 +238,7 @@ pub trait CaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
 }
 
@@ -555,8 +556,8 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             ref device,
             format,
             stop_on_inactive,
-            ref follow_volume_control,
-            ref follow_mute_control,
+            ref link_volume_control,
+            ref link_mute_control,
             ..
         } => Box::new(alsadevice::AlsaCaptureDevice {
             devname: device.clone(),
@@ -571,8 +572,8 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             stop_on_rate_change: conf.stop_on_rate_change(),
             rate_measure_interval: conf.rate_measure_interval(),
             stop_on_inactive: stop_on_inactive.unwrap_or_default(),
-            follow_volume_control: follow_volume_control.clone(),
-            follow_mute_control: follow_mute_control.clone(),
+            link_volume_control: link_volume_control.clone(),
+            link_mute_control: link_mute_control.clone(),
         }),
         #[cfg(feature = "pulse-backend")]
         config::CaptureDevice::Pulse {

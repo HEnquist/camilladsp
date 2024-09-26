@@ -11,6 +11,8 @@ use parking_lot::RwLock;
 use std::ffi::CString;
 use std::sync::Arc;
 
+use crate::ProcessingParameters;
+
 const STANDARD_RATES: [u32; 17] = [
     5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
     352800, 384000, 705600, 768000,
@@ -37,8 +39,10 @@ pub struct CaptureParams {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
-    pub follow_volume_control: Option<String>,
-    pub follow_mute_control: Option<String>,
+    pub link_volume_control: Option<String>,
+    pub link_mute_control: Option<String>,
+    pub linked_volume_value: Option<f32>,
+    pub linked_mute_value: Option<bool>,
 }
 
 pub struct PlaybackParams {
@@ -311,9 +315,27 @@ impl<'a> ElemData<'a> {
         })
     }
 
+    pub fn write_volume_in_db(&self, ctl: &Ctl, value: f32) {
+        let intval = ctl.convert_from_db(
+            &self.element.get_id().unwrap(),
+            alsa::mixer::MilliBel::from_db(value),
+            alsa::Round::Floor,
+        );
+        if let Ok(val) = intval {
+            self.write_as_int(val as i32);
+        }
+    }
+
     pub fn write_as_int(&self, value: i32) {
         let mut elval = ElemValue::new(ElemType::Integer).unwrap();
         if elval.set_integer(0, value).is_some() {
+            self.element.write(&elval).unwrap_or_default();
+        }
+    }
+
+    pub fn write_as_bool(&self, value: bool) {
+        let mut elval = ElemValue::new(ElemType::Boolean).unwrap();
+        if elval.set_boolean(0, value).is_some() {
             self.element.write(&elval).unwrap_or_default();
         }
     }
@@ -376,7 +398,8 @@ pub fn process_events(
     ctl: &Ctl,
     elems: &CaptureElements,
     status_channel: &crossbeam_channel::Sender<StatusMessage>,
-    params: &CaptureParams,
+    params: &mut CaptureParams,
+    processing_params: &Arc<ProcessingParameters>,
 ) -> CaptureResult {
     while let Ok(Some(ev)) = ctl.read() {
         let nid = ev.get_id().get_numid();
@@ -403,15 +426,19 @@ pub fn process_events(
             }
             EventAction::SetVolume(vol) => {
                 debug!("Alsa volume change event, set main fader to {} dB", vol);
-                status_channel
-                    .send(StatusMessage::SetVolume(vol))
-                    .unwrap_or_default();
+                processing_params.set_target_volume(0, vol);
+                params.linked_volume_value = Some(vol);
+                //status_channel
+                //    .send(StatusMessage::SetVolume(vol))
+                //    .unwrap_or_default();
             }
             EventAction::SetMute(mute) => {
                 debug!("Alsa mute change event, set mute state to {}", mute);
-                status_channel
-                    .send(StatusMessage::SetMute(mute))
-                    .unwrap_or_default();
+                processing_params.set_mute(0, mute);
+                params.linked_mute_value = Some(mute);
+                //status_channel
+                //    .send(StatusMessage::SetMute(mute))
+                //    .unwrap_or_default();
             }
             EventAction::None => {}
         }
@@ -431,7 +458,7 @@ pub fn get_event_action(
     numid: u32,
     elems: &CaptureElements,
     ctl: &Ctl,
-    params: &CaptureParams,
+    params: &mut CaptureParams,
 ) -> EventAction {
     if let Some(eldata) = &elems.loopback_active {
         if eldata.numid == numid {
@@ -481,6 +508,7 @@ pub fn get_event_action(
             let vol_db = eldata.read_volume_in_db(ctl);
             debug!("Mixer volume control: {:?} dB", vol_db);
             if let Some(vol) = vol_db {
+                params.linked_volume_value = Some(vol);
                 return EventAction::SetVolume(vol);
             }
         }
@@ -490,6 +518,7 @@ pub fn get_event_action(
             let active = eldata.read_as_bool();
             debug!("Mixer switch active: {:?}", active);
             if let Some(active_val) = active {
+                params.linked_mute_value = Some(!active_val);
                 return EventAction::SetMute(!active_val);
             }
         }
@@ -571,4 +600,32 @@ pub fn find_elem<'a>(
         debug!("Found element with name {} and numid {}", name, numid);
         ElemData { element: e, numid }
     })
+}
+
+pub fn sync_linked_controls(
+    processing_params: &Arc<ProcessingParameters>,
+    capture_params: &mut CaptureParams,
+    elements: &mut CaptureElements,
+    ctl: &Option<Ctl>,
+) {
+    if let Some(c) = ctl {
+        if let Some(vol) = capture_params.linked_volume_value {
+            let target_vol = processing_params.target_volume(0);
+            if (vol - target_vol).abs() > 0.1 {
+                info!("Updating linked volume control to {} dB", target_vol);
+            }
+            if let Some(vol_elem) = &elements.volume {
+                vol_elem.write_volume_in_db(c, target_vol);
+            }
+        }
+        if let Some(mute) = capture_params.linked_mute_value {
+            let target_mute = processing_params.is_mute(0);
+            if mute != target_mute {
+                info!("Updating linked switch control to {}", !target_mute);
+                if let Some(mute_elem) = &elements.mute {
+                    mute_elem.write_as_bool(!target_mute);
+                }
+            }
+        }
+    }
 }
