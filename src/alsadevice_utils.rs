@@ -612,7 +612,7 @@ pub fn sync_linked_controls(
         if let Some(vol) = capture_params.linked_volume_value {
             let target_vol = processing_params.target_volume(0);
             if (vol - target_vol).abs() > 0.1 {
-                info!("Updating linked volume control to {} dB", target_vol);
+                debug!("Updating linked volume control to {} dB", target_vol);
             }
             if let Some(vol_elem) = &elements.volume {
                 vol_elem.write_volume_in_db(c, target_vol);
@@ -621,7 +621,7 @@ pub fn sync_linked_controls(
         if let Some(mute) = capture_params.linked_mute_value {
             let target_mute = processing_params.is_mute(0);
             if mute != target_mute {
-                info!("Updating linked switch control to {}", !target_mute);
+                debug!("Updating linked switch control to {}", !target_mute);
                 if let Some(mute_elem) = &elements.mute {
                     mute_elem.write_as_bool(!target_mute);
                 }
