@@ -938,7 +938,10 @@ A parameter marked (*) in any example is optional. If they are left out from the
   but since the entire chunk must be captured before processing,
   it can cause unacceptably long delays.
   Conversely, using a smaller chunk size can reduce latency
-  but will increase CPU usage and the risk of buffer underruns.
+  but will increase CPU usage.
+  Additionally, the shorter duration of each chunk makes CamillaDSP
+  more vulnerable to disruptions from other system activities,
+  potentially causing buffer underruns.
 
   __Choosing chunk size for best performance__
 
@@ -961,8 +964,11 @@ A parameter marked (*) in any example is optional. If they are left out from the
   The number of segments is calculated as `filter_length / chunk size`,
   and rounded up to the nearest integer.
 
-  Using a smaller chunk size (more segments) can reduce latency
-  but is less efficient and needs more processing power.
+  Using a smaller chunk size (i.e. more segments) reduces latency
+  but makes the convoultion process less efficient and thus needs more processing power.
+  Although a smaller chunk size leads to increased CPU usage for all filters,
+  the difference is larger for FIR filters than the other types.
+
   If you have long FIR filters, try different chunk sizes
   to find the best balance between latency and processing power.
 
