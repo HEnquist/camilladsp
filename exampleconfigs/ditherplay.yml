@@ -27,13 +27,13 @@ filters:
   dithereven:
     type: Dither
     parameters:
-      type: Uniform
+      type: Flat
       bits: 8
       amplitude: 1.0
   dithersimple:
     type: Dither
     parameters:
-      type: Simple
+      type: Highpass
       bits: 8
   ditherfancy:
     type: Dither
