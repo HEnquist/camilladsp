@@ -38,6 +38,7 @@ pub struct Volume {
     chunksize: usize,
     processing_params: Arc<ProcessingParameters>,
     fader: usize,
+    volume_limit: f32,
 }
 
 impl Volume {
@@ -45,6 +46,7 @@ impl Volume {
     pub fn new(
         name: &str,
         ramp_time_ms: f32,
+        limit: f32,
         current_volume: f32,
         mute: bool,
         chunksize: usize,
@@ -75,6 +77,7 @@ impl Volume {
             chunksize,
             processing_params,
             fader,
+            volume_limit: limit,
         }
     }
 
@@ -91,6 +94,7 @@ impl Volume {
         Self::new(
             name,
             conf.ramp_time(),
+            conf.limit(),
             current_volume,
             mute,
             chunksize,
@@ -126,13 +130,16 @@ impl Volume {
         let shared_vol = self.processing_params.target_volume(self.fader);
         let shared_mute = self.processing_params.is_mute(self.fader);
 
+        // are we above the set limit?
+        let target_volume = shared_vol.min(self.volume_limit);
+
         // Volume setting changed
-        if (shared_vol - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
+        if (target_volume - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
             if self.ramptime_in_chunks > 0 {
                 trace!(
                     "starting ramp: {} -> {}, mute: {}",
                     self.current_volume,
-                    shared_vol,
+                    target_volume,
                     shared_mute
                 );
                 self.ramp_start = self.current_volume;
@@ -141,22 +148,22 @@ impl Volume {
                 trace!(
                     "switch volume without ramp: {} -> {}, mute: {}",
                     self.current_volume,
-                    shared_vol,
+                    target_volume,
                     shared_mute
                 );
                 self.current_volume = if shared_mute {
                     0.0
                 } else {
-                    shared_vol as PrcFmt
+                    target_volume as PrcFmt
                 };
                 self.ramp_step = 0;
             }
-            self.target_volume = shared_vol;
+            self.target_volume = target_volume;
             self.target_linear_gain = if shared_mute {
                 0.0
             } else {
                 let tempgain: PrcFmt = 10.0;
-                tempgain.powf(shared_vol as PrcFmt / 20.0)
+                tempgain.powf(target_volume as PrcFmt / 20.0)
             };
             self.mute = shared_mute;
         }
@@ -167,6 +174,7 @@ impl Volume {
 
         // Not in a ramp
         if self.ramp_step == 0 {
+            xtrace!("Vol: applying linear gain {}", self.target_linear_gain);
             for waveform in chunk.waveforms.iter_mut() {
                 for item in waveform.iter_mut() {
                     *item *= self.target_linear_gain;
@@ -175,7 +183,7 @@ impl Volume {
         }
         // Ramping
         else if self.ramp_step <= self.ramptime_in_chunks {
-            trace!("ramp step {}", self.ramp_step);
+            trace!("Vol: ramp step {}", self.ramp_step);
             let ramp = self.make_ramp();
             self.ramp_step += 1;
             if self.ramp_step > self.ramptime_in_chunks {
@@ -240,6 +248,10 @@ impl Filter for Volume {
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
             self.fader = conf.fader as usize;
+            self.volume_limit = conf.limit();
+            if (self.volume_limit as PrcFmt) < self.current_volume {
+                self.current_volume = self.volume_limit as PrcFmt;
+            }
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");

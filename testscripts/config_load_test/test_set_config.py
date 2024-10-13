@@ -5,6 +5,9 @@ import os
 import signal
 import shutil
 from subprocess import check_output
+from copy import deepcopy
+import yaml
+import json
 
 # ---------- Constants -----------
 
@@ -81,6 +84,83 @@ def test_set_via_ws(camillaclient, delay, reps):
         time.sleep(0.5)
         assert_active(camillaclient, "nbr 4")
 
+def test_only_pipeline_via_ws(camillaclient):
+    # Change between configs that only differ in the pipeline
+    print("Changing slowly")
+    for n in range(4):
+        print(f"Set config 1")
+        conf = yaml.safe_load(CONFIGS[0])
+        # conf1 unmodified
+        camillaclient.config.set_active(conf)
+        time.sleep(1)
+        active = camillaclient.config.active()
+        assert active["pipeline"][0]["names"] == ["testfilter"]
+
+        # conf1 with added filter in pipeline
+        active["pipeline"][0]["names"] = ["testfilter", "testfilter"]
+        camillaclient.config.set_active(active)
+        time.sleep(1)
+        active = camillaclient.config.active()
+        assert active["pipeline"][0]["names"] == ["testfilter", "testfilter"]
+
+        # conf1 with empty pipeline
+        active["pipeline"] = []
+        camillaclient.config.set_active(active)
+        time.sleep(1)
+        active = camillaclient.config.active()
+        assert active["pipeline"] == []
+
+def test_only_filter_via_ws(camillaclient):
+    # Change between configs that only differ in the filter defs
+    print("Changing slowly")
+    for n in range(4):
+        print(f"Set config 1")
+        conf = yaml.safe_load(CONFIGS[0])
+        # conf1 unmodified
+        camillaclient.config.set_active(conf)
+        time.sleep(1)
+        active = camillaclient.config.active()
+        assert active["filters"]["testfilter"]["parameters"]["freq"] == 5000.0
+
+        # conf1 with added filter in pipeline
+        active["filters"]["testfilter"]["parameters"]["freq"] = 6000.0
+        camillaclient.config.set_active(active)
+        time.sleep(1)
+        active = camillaclient.config.active()
+        assert active["filters"]["testfilter"]["parameters"]["freq"] == 6000.0
+
+        # conf1 with empty pipeline
+        active["filters"]["testfilter"]["parameters"]["freq"] = 7000.0
+        camillaclient.config.set_active(active)
+        time.sleep(1)
+        active = camillaclient.config.active()
+        assert active["filters"]["testfilter"]["parameters"]["freq"] == 7000.0
+
+def test_only_pipeline_json_via_ws(camillaclient):
+    # Change between configs that only differ in the pipeline, sent as json
+    print("Changing slowly")
+    for n in range(4):
+        print(f"Set config 1")
+        conf = yaml.safe_load(CONFIGS[0])
+        # conf1 unmodified
+        camillaclient.config.set_active_json(json.dumps(conf))
+        time.sleep(1)
+        active = camillaclient.config.active()
+        assert active["pipeline"][0]["names"] == ["testfilter"]
+
+        # conf1 with added filter in pipeline
+        active["pipeline"][0]["names"] = ["testfilter", "testfilter"]
+        camillaclient.config.set_active_json(json.dumps(active))
+        time.sleep(1)
+        active = camillaclient.config.active()
+        assert active["pipeline"][0]["names"] == ["testfilter", "testfilter"]
+
+        # conf1 with empty pipeline
+        active["pipeline"] = []
+        camillaclient.config.set_active_json(json.dumps(active))
+        time.sleep(1)
+        active = camillaclient.config.active()
+        assert active["pipeline"] == []
 
 # ---------- Test changing config by changing config path and reloading -----------
 

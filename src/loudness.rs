@@ -100,7 +100,7 @@ impl Filter for Loudness {
             let high_boost = (relboost * self.high_boost) as PrcFmt;
             let low_boost = (relboost * self.low_boost) as PrcFmt;
             self.active = relboost > 0.001;
-            info!(
+            debug!(
                 "Updating loudness biquads, relative boost {}%",
                 100.0 * relboost
             );

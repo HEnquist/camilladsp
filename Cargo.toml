@@ -1,10 +1,10 @@
 [package]
-name = "camilladsp"
-version = "2.0.3"
+name = "CamillaDSP"
+version = "3.0.0"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2021"
 description = "A flexible tool for processing audio"
-rust-version = "1.61"
+rust-version = "1.74"
 
 [features]
 default = ["websocket"]
@@ -15,7 +15,6 @@ bluez-backend = ["zbus"]
 32bit = []
 websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
-FFTW = ["fftw"]
 debug = []
 avoid-rustc-issue-116359 = []
 
@@ -28,9 +27,9 @@ name = "camilladsp"
 path = "src/bin.rs"
 
 [target.'cfg(target_os="linux")'.dependencies]
-alsa = "0.8.1"
+alsa = "0.9.0"
 alsa-sys = "0.3.1"
-nix = "0.23"
+nix = { version = "0.28", features = ["poll", "signal"] }
 zbus = { version = "3.0.0", optional = true }
 
 [target.'cfg(target_os="macos")'.dependencies]
@@ -42,8 +41,8 @@ dispatch = "0.2.0"
 [target.'cfg(target_os="windows")'.dependencies]
 #wasapi = { path = "../../rust/wasapi" }
 #wasapi = { git = "https://github.com/HEnquist/wasapi-rs", branch = "win041" }
-wasapi = "0.13.0"
-windows = {version = "0.48.0", features = ["Win32_System_Threading", "Win32_Foundation"] }
+wasapi = "0.15.0"
+windows = {version = "0.57.0", features = ["Win32_System_Threading", "Win32_Foundation"] }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -52,13 +51,12 @@ serde_json = "1.0"
 serde_with = "1.11"
 realfft = "3.0.0"
 #realfft = { git = "https://github.com/HEnquist/realfft", branch = "better_errors" }
-fftw = { version = "0.7.0", optional = true }
 num-complex = "0.4"
 num-traits = "0.2"
 signal-hook = "0.3.8"
-rand = { version = "0.8.3", default_features = false, features = ["small_rng", "std"] }
+rand = { version = "0.8.3", default-features = false, features = ["small_rng", "std"] }
 rand_distr = "0.4.3"
-clap = "2.33.0"
+clap = { version = "4.5.4", features = ["cargo"] }
 lazy_static = "1.4.0"
 log = "0.4.14"
 flexi_logger = { version = "0.27.2", features = ["async", "colors"] }
@@ -67,8 +65,8 @@ tungstenite = { version = "0.21.0", optional = true }
 native-tls = { version = "0.2.7", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-rubato = "0.14.1"
-#rubato = { git = "https://github.com/HEnquist/rubato", branch = "next-0.13" }
+rubato = "0.15.0"
+#rubato = { git = "https://github.com/HEnquist/rubato", branch = "optional_fft" }
 cpal = { version = "0.13.3", optional = true }
 #rawsample = { path = "../../rust/rawsample" }
 #rawsample = { git = "https://github.com/HEnquist/rawsample", branch = "main" }
@@ -76,6 +74,8 @@ rawsample = "0.2.0"
 circular-queue = "0.2.6"
 parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
 crossbeam-channel = "0.5"
+rayon = "1.10.0"
+audio_thread_priority = { version = "0.32.0", default-features = false }
 
 [build-dependencies]
 version_check = "0.9"

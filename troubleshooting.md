@@ -58,11 +58,11 @@
   
   The coefficient file for a filter was found to be empty.
 
-- Could not open coefficient file '*examplefile.raw*'. Error:  *description from OS*
+- Could not open coefficient file '*examplefile.raw*'. Reason:  *description from OS*
 
   The specified file could not be opened. The description from the OS may give more info.
 
-- Can't parse value on line *X* of file '*examplefile.txt*'. Error: *description from parser*
+- Can't parse value on line *X* of file '*examplefile.txt*'. Reason: *description from parser*
 
   The value on the specified line could not be parsed as a number. Check that the file only contains numbers.
 

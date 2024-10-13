@@ -12,7 +12,7 @@ devices:
     filename: "result_f64.raw"
     format: FLOAT64LE
   capture:
-    type: File
+    type: RawFile
     channels: 2
     filename: "sine_120_44100_f64_2ch.raw"
     format: FLOAT64LE

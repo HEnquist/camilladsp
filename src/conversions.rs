@@ -61,6 +61,7 @@ pub fn chunk_to_buffer_rawbytes(
         }
         clipped += PrcFmt::write_samples(&nextframe, &mut cursor, &rawformat).unwrap();
     }
+    xtrace!("Convert, nbr clipped: {}, peak: {}", clipped, peak);
     if clipped > 0 {
         warn!(
             "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",

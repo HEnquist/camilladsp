@@ -7,75 +7,26 @@ use crate::config;
 use crate::conversions;
 use crate::diffeq;
 use crate::dither;
-#[cfg(not(feature = "FFTW"))]
 use crate::fftconv;
-#[cfg(feature = "FFTW")]
-use crate::fftconv_fftw as fftconv;
 use crate::limiter;
 use crate::loudness;
 use crate::mixer;
+use crate::noisegate;
 use rawsample::SampleReader;
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::fs::File;
 use std::io::BufReader;
-use std::io::{BufRead, Read, Seek, SeekFrom};
+use std::io::{BufRead, Seek, SeekFrom};
 use std::sync::Arc;
 use std::time::Instant;
+
+use rayon::prelude::*;
 
 use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::Res;
 
-/// Windows Guid
-/// Used to give sample format in the extended WAVEFORMATEXTENSIBLE wav header
-#[derive(Debug, PartialEq, Eq)]
-struct Guid {
-    data1: u32,
-    data2: u16,
-    data3: u16,
-    data4: [u8; 8],
-}
-
-impl Guid {
-    fn from_slice(data: &[u8; 16]) -> Guid {
-        let data1 = u32::from_le_bytes(data[0..4].try_into().unwrap());
-        let data2 = u16::from_le_bytes(data[4..6].try_into().unwrap());
-        let data3 = u16::from_le_bytes(data[6..8].try_into().unwrap());
-        let data4 = data[8..16].try_into().unwrap();
-        Guid {
-            data1,
-            data2,
-            data3,
-            data4,
-        }
-    }
-}
-
-/// KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
-const SUBTYPE_FLOAT: Guid = Guid {
-    data1: 3,
-    data2: 0,
-    data3: 16,
-    data4: [128, 0, 0, 170, 0, 56, 155, 113],
-};
-
-/// KSDATAFORMAT_SUBTYPE_PCM
-const SUBTYPE_PCM: Guid = Guid {
-    data1: 1,
-    data2: 0,
-    data3: 16,
-    data4: [128, 0, 0, 170, 0, 56, 155, 113],
-};
-
-#[derive(Debug)]
-pub struct WavParams {
-    sample_format: config::FileFormat,
-    sample_rate: usize,
-    data_offset: usize,
-    data_length: usize,
-    channels: usize,
-}
+use crate::wavtools::find_data_in_wav;
 
 pub trait Filter {
     // Filter a Vec
@@ -116,7 +67,7 @@ pub fn read_coeff_file(
     let f = match File::open(filename) {
         Ok(f) => f,
         Err(err) => {
-            let msg = format!("Could not open coefficient file '{filename}'. Error: {err}");
+            let msg = format!("Could not open coefficient file '{filename}'. Reason: {err}");
             return Err(config::ConfigError::new(&msg).into());
         }
     };
@@ -139,7 +90,7 @@ pub fn read_coeff_file(
                 match line {
                     Err(err) => {
                         let msg = format!(
-                            "Can't read line {} of file '{}'. Error: {}",
+                            "Can't read line {} of file '{}'. Reason: {}",
                             nbr + 1 + skip_bytes_lines,
                             filename,
                             err
@@ -150,7 +101,7 @@ pub fn read_coeff_file(
                         Ok(val) => coefficients.push(val),
                         Err(err) => {
                             let msg = format!(
-                                "Can't parse value on line {} of file '{}'. Error: {}",
+                                "Can't parse value on line {} of file '{}'. Reason: {}",
                                 nbr + 1 + skip_bytes_lines,
                                 filename,
                                 err
@@ -184,133 +135,6 @@ pub fn read_coeff_file(
     Ok(coefficients)
 }
 
-pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
-    let f = File::open(filename)?;
-    let filesize = f.metadata()?.len();
-    let mut file = BufReader::new(&f);
-    let mut header = [0; 12];
-    let _ = file.read(&mut header)?;
-
-    let riff_b = "RIFF".as_bytes();
-    let wave_b = "WAVE".as_bytes();
-    let data_b = "data".as_bytes();
-    let fmt_b = "fmt ".as_bytes();
-    let riff_err = header.iter().take(4).zip(riff_b).any(|(a, b)| *a != *b);
-    let wave_err = header
-        .iter()
-        .skip(8)
-        .take(4)
-        .zip(wave_b)
-        .any(|(a, b)| *a != *b);
-    if riff_err || wave_err {
-        let msg = format!("Invalid wav header in file '{filename}'");
-        return Err(config::ConfigError::new(&msg).into());
-    }
-    let mut next_chunk_location = 12;
-    let mut found_fmt = false;
-    let mut found_data = false;
-    let mut buffer = [0; 8];
-
-    let mut sample_format = config::FileFormat::S16LE;
-    let mut sample_rate = 0;
-    let mut channels = 0;
-    let mut data_offset = 0;
-    let mut data_length = 0;
-
-    while (!found_fmt || !found_data) && next_chunk_location < filesize {
-        file.seek(SeekFrom::Start(next_chunk_location))?;
-        let _ = file.read(&mut buffer)?;
-        let chunk_length = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
-        trace!("Analyzing wav chunk of length: {}", chunk_length);
-        let is_data = buffer.iter().take(4).zip(data_b).all(|(a, b)| *a == *b);
-        let is_fmt = buffer.iter().take(4).zip(fmt_b).all(|(a, b)| *a == *b);
-        if is_fmt && (chunk_length == 16 || chunk_length == 18 || chunk_length == 40) {
-            found_fmt = true;
-            let mut data = vec![0; chunk_length as usize];
-            let _ = file.read(&mut data).unwrap();
-            let formatcode = u16::from_le_bytes(data[0..2].try_into().unwrap());
-            channels = u16::from_le_bytes(data[2..4].try_into().unwrap());
-            sample_rate = u32::from_le_bytes(data[4..8].try_into().unwrap());
-            let bytes_per_frame = u16::from_le_bytes(data[12..14].try_into().unwrap());
-            let bits = u16::from_le_bytes(data[14..16].try_into().unwrap());
-            let bytes_per_sample = bytes_per_frame / channels;
-            sample_format = match (formatcode, bits, bytes_per_sample) {
-                (1, 16, 2) => config::FileFormat::S16LE,
-                (1, 24, 3) => config::FileFormat::S24LE3,
-                (1, 24, 4) => config::FileFormat::S24LE,
-                (1, 32, 4) => config::FileFormat::S32LE,
-                (3, 32, 4) => config::FileFormat::FLOAT32LE,
-                (3, 64, 8) => config::FileFormat::FLOAT64LE,
-                (0xFFFE, _, _) => {
-                    // waveformatex
-                    if chunk_length != 40 {
-                        let msg = format!("Invalid extended header of wav file '{filename}'");
-                        return Err(config::ConfigError::new(&msg).into());
-                    }
-                    let cb_size = u16::from_le_bytes(data[16..18].try_into().unwrap());
-                    let valid_bits_per_sample =
-                        u16::from_le_bytes(data[18..20].try_into().unwrap());
-                    let channel_mask = u32::from_le_bytes(data[20..24].try_into().unwrap());
-                    let subformat = &data[24..40];
-                    let subformat_guid = Guid::from_slice(subformat.try_into().unwrap());
-                    trace!(
-                        "Found extended wav fmt chunk: subformatcode: {:?}, cb_size: {}, channel_mask: {}, valid bits per sample: {}",
-                        subformat_guid, cb_size, channel_mask, valid_bits_per_sample
-                    );
-                    match (
-                        subformat_guid,
-                        bits,
-                        bytes_per_sample,
-                        valid_bits_per_sample,
-                    ) {
-                        (SUBTYPE_PCM, 16, 2, 16) => config::FileFormat::S16LE,
-                        (SUBTYPE_PCM, 24, 3, 24) => config::FileFormat::S24LE3,
-                        (SUBTYPE_PCM, 24, 4, 24) => config::FileFormat::S24LE,
-                        (SUBTYPE_PCM, 32, 4, 32) => config::FileFormat::S32LE,
-                        (SUBTYPE_FLOAT, 32, 4, 32) => config::FileFormat::FLOAT32LE,
-                        (SUBTYPE_FLOAT, 64, 8, 64) => config::FileFormat::FLOAT64LE,
-                        (_, _, _, _) => {
-                            let msg =
-                                format!("Unsupported extended wav format of file '{filename}'");
-                            return Err(config::ConfigError::new(&msg).into());
-                        }
-                    }
-                }
-                (_, _, _) => {
-                    let msg = format!("Unsupported wav format of file '{filename}'");
-                    return Err(config::ConfigError::new(&msg).into());
-                }
-            };
-            trace!(
-                "Found wav fmt chunk: formatcode: {}, channels: {}, samplerate: {}, bits: {}, bytes_per_frame: {}",
-                formatcode, channels, sample_rate, bits, bytes_per_frame
-            );
-        } else if is_data {
-            found_data = true;
-            data_offset = next_chunk_location + 8;
-            data_length = chunk_length;
-            trace!(
-                "Found wav data chunk, start: {}, length: {}",
-                data_offset,
-                data_length
-            )
-        }
-        next_chunk_location += 8 + chunk_length as u64;
-    }
-    if found_data && found_fmt {
-        trace!("Wav file with parameters: format: {:?},  samplerate: {}, channels: {}, data_length: {}, data_offset: {}", sample_format, sample_rate, channels, data_length, data_offset);
-        return Ok(WavParams {
-            sample_format,
-            sample_rate: sample_rate as usize,
-            channels: channels as usize,
-            data_length: data_length as usize,
-            data_offset: data_offset as usize,
-        });
-    }
-    let msg = format!("Unable to parse wav file '{filename}'");
-    Err(config::ConfigError::new(&msg).into())
-}
-
 pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
     let params = find_data_in_wav(filename)?;
     if channel >= params.channels {
@@ -323,7 +147,7 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
 
     let alldata = read_coeff_file(
         filename,
-        &params.sample_format,
+        &config::FileFormat::from_sample_format(&params.sample_format),
         params.data_length,
         params.data_offset,
     )?;
@@ -348,7 +172,7 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
 
 pub struct FilterGroup {
     channel: usize,
-    filters: Vec<Box<dyn Filter>>,
+    filters: Vec<Box<dyn Filter + Send>>,
 }
 
 impl FilterGroup {
@@ -362,11 +186,11 @@ impl FilterGroup {
         processing_params: Arc<ProcessingParameters>,
     ) -> Self {
         debug!("Build filter group from config");
-        let mut filters = Vec::<Box<dyn Filter>>::new();
+        let mut filters = Vec::<Box<dyn Filter + Send>>::new();
         for name in names {
             let filter_cfg = filter_configs[name].clone();
             trace!("Create filter {} with config {:?}", name, filter_cfg);
-            let filter: Box<dyn Filter> =
+            let filter: Box<dyn Filter + Send> =
                 match filter_cfg {
                     config::Filter::Conv { parameters, .. } => Box::new(
                         fftconv::FftConv::from_config(name, waveform_length, parameters),
@@ -464,11 +288,46 @@ impl FilterGroup {
     }
 }
 
+pub struct ParallelFilters {
+    filters: Vec<Vec<Box<dyn Filter + Send>>>,
+}
+
+impl ParallelFilters {
+    pub fn update_parameters(
+        &mut self,
+        filterconfigs: HashMap<String, config::Filter>,
+        changed: &[String],
+    ) {
+        for channel_filters in &mut self.filters {
+            for filter in channel_filters {
+                if changed.iter().any(|n| n == filter.name()) {
+                    filter.update_parameters(filterconfigs[filter.name()].clone());
+                }
+            }
+        }
+    }
+
+    /// Apply all the filters to an AudioChunk.
+    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+        self.filters
+            .par_iter_mut()
+            .zip(input.waveforms.par_iter_mut())
+            .filter(|(f, w)| !f.is_empty() && !w.is_empty())
+            .for_each(|(f, w)| {
+                for filt in f {
+                    let _ = filt.process_waveform(w);
+                }
+            });
+        Ok(())
+    }
+}
+
 /// A Pipeline is made up of a series of PipelineSteps,
-/// each one can be a single Mixer of a group of Filters
+/// each one can be a single Mixer or a group of Filters
 pub enum PipelineStep {
     MixerStep(mixer::Mixer),
     FilterStep(FilterGroup),
+    ParallelFiltersStep(ParallelFilters),
     ProcessorStep(Box<dyn Processor>),
 }
 
@@ -488,30 +347,54 @@ impl Pipeline {
         debug!("Build new pipeline");
         trace!("Pipeline config {:?}", conf.pipeline);
         let mut steps = Vec::<PipelineStep>::new();
+        let mut num_channels = conf.devices.capture.channels();
         for step in conf.pipeline.unwrap_or_default() {
             match step {
                 config::PipelineStep::Mixer(step) => {
                     if !step.is_bypassed() {
                         let mixconf = conf.mixers.as_ref().unwrap()[&step.name].clone();
+                        num_channels = mixconf.channels.out;
+                        debug!(
+                            "Add Mixer step with mixer {}, pipeline becomes {} channels wide",
+                            step.name, mixconf.channels.out
+                        );
                         let mixer = mixer::Mixer::from_config(step.name, mixconf);
                         steps.push(PipelineStep::MixerStep(mixer));
                     }
                 }
                 config::PipelineStep::Filter(step) => {
                     if !step.is_bypassed() {
-                        let fltgrp = FilterGroup::from_config(
-                            step.channel,
-                            &step.names,
-                            conf.filters.as_ref().unwrap().clone(),
-                            conf.devices.chunksize,
-                            conf.devices.samplerate,
-                            processing_params.clone(),
-                        );
-                        steps.push(PipelineStep::FilterStep(fltgrp));
+                        let channels_iter: Box<dyn Iterator<Item = usize>> = if let Some(channels) =
+                            &step.channels
+                        {
+                            debug!(
+                                "Add Filter step with filters {:?} to channels {:?}",
+                                step.names, channels
+                            );
+                            Box::new(channels.iter().copied()) as Box<dyn Iterator<Item = usize>>
+                        } else {
+                            debug!(
+                                "Add Filter step with filters {:?} to all {} channels",
+                                step.names, num_channels
+                            );
+                            Box::new(0..num_channels) as Box<dyn Iterator<Item = usize>>
+                        };
+                        for channel in channels_iter {
+                            let fltgrp = FilterGroup::from_config(
+                                channel,
+                                &step.names,
+                                conf.filters.as_ref().unwrap().clone(),
+                                conf.devices.chunksize,
+                                conf.devices.samplerate,
+                                processing_params.clone(),
+                            );
+                            steps.push(PipelineStep::FilterStep(fltgrp));
+                        }
                     }
                 }
                 config::PipelineStep::Processor(step) => {
                     if !step.is_bypassed() {
+                        debug!("Add Processor step with processor {}", step.name);
                         let procconf = conf.processors.as_ref().unwrap()[&step.name].clone();
                         let proc = match procconf {
                             config::Processor::Compressor { parameters, .. } => {
@@ -521,7 +404,16 @@ impl Pipeline {
                                     conf.devices.samplerate,
                                     conf.devices.chunksize,
                                 );
-                                Box::new(comp)
+                                Box::new(comp) as Box<dyn Processor>
+                            }
+                            config::Processor::NoiseGate { parameters, .. } => {
+                                let gate = noisegate::NoiseGate::from_config(
+                                    &step.name,
+                                    parameters,
+                                    conf.devices.samplerate,
+                                    conf.devices.chunksize,
+                                );
+                                Box::new(gate) as Box<dyn Processor>
                             }
                         };
                         steps.push(PipelineStep::ProcessorStep(proc));
@@ -534,6 +426,7 @@ impl Pipeline {
         let volume = basicfilters::Volume::new(
             "default",
             conf.devices.ramp_time(),
+            conf.devices.volume_limit(),
             current_volume,
             mute,
             conf.devices.chunksize,
@@ -542,6 +435,9 @@ impl Pipeline {
             0,
         );
         let secs_per_chunk = conf.devices.chunksize as f32 / conf.devices.samplerate as f32;
+        if conf.devices.multithreaded() {
+            steps = parallelize_filters(&mut steps, conf.devices.capture.channels());
+        }
         Pipeline {
             steps,
             volume,
@@ -568,6 +464,9 @@ impl Pipeline {
                 PipelineStep::FilterStep(flt) => {
                     flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters);
                 }
+                PipelineStep::ParallelFiltersStep(flt) => {
+                    flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters);
+                }
                 PipelineStep::ProcessorStep(proc) => {
                     if processors.iter().any(|n| n == proc.name()) {
                         proc.update_parameters(
@@ -591,6 +490,9 @@ impl Pipeline {
                 PipelineStep::FilterStep(flt) => {
                     flt.process_chunk(&mut chunk).unwrap();
                 }
+                PipelineStep::ParallelFiltersStep(flt) => {
+                    flt.process_chunk(&mut chunk).unwrap();
+                }
                 PipelineStep::ProcessorStep(comp) => {
                     comp.process_chunk(&mut chunk).unwrap();
                 }
@@ -602,6 +504,67 @@ impl Pipeline {
         trace!("Processing load: {load}%");
         chunk
     }
+}
+
+// Loop trough the pipeline to merge individual filter steps,
+// in order use rayon to apply them in parallel.
+fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Vec<PipelineStep> {
+    debug!("Merging filter steps to enable parallel processing");
+    let mut new_steps: Vec<PipelineStep> = Vec::new();
+    let mut parfilt = None;
+    let mut active_channels = nbr_channels;
+    for step in steps.drain(..) {
+        match step {
+            PipelineStep::MixerStep(ref mix) => {
+                if parfilt.is_some() {
+                    debug!("Append parallel filter step to pipeline");
+                    new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+                }
+                active_channels = mix.channels_out;
+                debug!("Append mixer step to pipeline");
+                new_steps.push(step);
+            }
+            PipelineStep::ProcessorStep(_) => {
+                if parfilt.is_some() {
+                    debug!("Append parallel filter step to pipeline");
+                    new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+                }
+                debug!("Append processor step to pipeline");
+                new_steps.push(step);
+            }
+            PipelineStep::ParallelFiltersStep(_) => {
+                if parfilt.is_some() {
+                    debug!("Append parallel filter step to pipeline");
+                    new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+                }
+                debug!("Append existing parallel filter step to pipeline");
+                new_steps.push(step);
+            }
+            PipelineStep::FilterStep(mut flt) => {
+                if parfilt.is_none() {
+                    debug!("Start new parallel filter step");
+                    let mut filters = Vec::with_capacity(active_channels);
+                    for _ in 0..active_channels {
+                        filters.push(Vec::new());
+                    }
+                    parfilt = Some(ParallelFilters { filters });
+                }
+                if let Some(ref mut f) = parfilt {
+                    debug!(
+                        "Adding {} filters to channel {} of parallel filter step",
+                        flt.filters.len(),
+                        flt.channel
+                    );
+                    f.filters[flt.channel].append(&mut flt.filters);
+                }
+            }
+        }
+    }
+    if parfilt.is_some() {
+        debug!("Append parallel filter step to pipeline");
+        new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+    }
+    new_steps
 }
 
 /// Validate the filter config, to give a helpful message intead of a panic.
@@ -627,7 +590,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use crate::config::FileFormat;
-    use crate::filters::{find_data_in_wav, read_wav};
+    use crate::filters::read_wav;
     use crate::filters::{pad_vector, read_coeff_file};
     use crate::PrcFmt;
 
@@ -770,16 +733,6 @@ mod tests {
         assert!(compare_waveforms(&values, &values_0, 1e-15));
         let values_5 = pad_vector(&values, 5);
         assert!(compare_waveforms(&values_padded, &values_5, 1e-15));
-    }
-
-    #[test]
-    pub fn test_analyze_wav() {
-        let info = find_data_in_wav("testdata/int32.wav").unwrap();
-        println!("{info:?}");
-        assert_eq!(info.sample_format, FileFormat::S32LE);
-        assert_eq!(info.data_offset, 44);
-        assert_eq!(info.data_length, 20);
-        assert_eq!(info.channels, 1);
     }
 
     #[test]

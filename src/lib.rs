@@ -5,8 +5,6 @@ extern crate alsa_sys;
 extern crate clap;
 #[cfg(feature = "cpal-backend")]
 extern crate cpal;
-#[cfg(feature = "FFTW")]
-extern crate fftw;
 #[macro_use]
 extern crate lazy_static;
 #[cfg(target_os = "macos")]
@@ -27,7 +25,6 @@ extern crate num_traits;
 extern crate rand;
 extern crate rand_distr;
 extern crate rawsample;
-#[cfg(not(feature = "FFTW"))]
 extern crate realfft;
 extern crate rubato;
 extern crate serde;
@@ -51,6 +48,39 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
     Arc,
 };
+
+// Logging macros to give extra logs
+// when the "debug" feature is enabled.
+#[allow(unused)]
+macro_rules! xtrace { ($($x:tt)*) => (
+    #[cfg(feature = "debug")] {
+        log::trace!($($x)*)
+    }
+) }
+#[allow(unused)]
+macro_rules! xdebug { ($($x:tt)*) => (
+    #[cfg(feature = "debug")] {
+        log::debug!($($x)*)
+    }
+) }
+#[allow(unused)]
+macro_rules! xinfo { ($($x:tt)*) => (
+    #[cfg(feature = "debug")] {
+        log::info!($($x)*)
+    }
+) }
+#[allow(unused)]
+macro_rules! xwarn { ($($x:tt)*) => (
+    #[cfg(feature = "debug")] {
+        log::warn!($($x)*)
+    }
+) }
+#[allow(unused)]
+macro_rules! xerror { ($($x:tt)*) => (
+    #[cfg(feature = "debug")] {
+        log::error!($($x)*)
+    }
+) }
 
 // Sample format
 #[cfg(feature = "32bit")]
@@ -90,10 +120,7 @@ pub mod countertimer;
 pub mod cpaldevice;
 pub mod diffeq;
 pub mod dither;
-#[cfg(not(feature = "FFTW"))]
 pub mod fftconv;
-#[cfg(feature = "FFTW")]
-pub mod fftconv_fftw;
 pub mod filedevice;
 #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
 pub mod filedevice_bluez;
@@ -102,10 +129,12 @@ pub mod filereader;
 #[cfg(target_os = "linux")]
 pub mod filereader_nonblock;
 pub mod filters;
+pub mod generatordevice;
 pub mod helpers;
 pub mod limiter;
 pub mod loudness;
 pub mod mixer;
+pub mod noisegate;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;
@@ -114,6 +143,7 @@ pub mod socketserver;
 pub mod statefile;
 #[cfg(target_os = "windows")]
 pub mod wasapidevice;
+pub mod wavtools;
 
 pub enum StatusMessage {
     PlaybackReady,
@@ -125,6 +155,8 @@ pub enum StatusMessage {
     PlaybackDone,
     CaptureDone,
     SetSpeed(f64),
+    SetVolume(f32),
+    SetMute(bool),
 }
 
 pub enum CommandMessage {
@@ -347,7 +379,12 @@ impl fmt::Display for ProcessingState {
 
 pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     let mut playbacktypes = vec!["File".to_owned(), "Stdout".to_owned()];
-    let mut capturetypes = vec!["File".to_owned(), "Stdin".to_owned()];
+    let mut capturetypes = vec![
+        "RawFile".to_owned(),
+        "WavFile".to_owned(),
+        "Stdin".to_owned(),
+        "SignalGenerator".to_owned(),
+    ];
 
     if cfg!(target_os = "linux") {
         playbacktypes.push("Alsa".to_owned());

@@ -3,24 +3,25 @@ use nix;
 use std::error::Error;
 use std::io::ErrorKind;
 use std::io::Read;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, BorrowedFd};
 use std::time;
 use std::time::Duration;
 
 use crate::filedevice::{ReadResult, Reader};
 
-pub struct NonBlockingReader<R> {
-    poll: nix::poll::PollFd,
+pub struct NonBlockingReader<'a, R: 'a> {
+    poll: nix::poll::PollFd<'a>,
     signals: nix::sys::signal::SigSet,
     timeout: Option<nix::sys::time::TimeSpec>,
     timelimit: time::Duration,
     inner: R,
 }
 
-impl<R: Read + AsRawFd> NonBlockingReader<R> {
+impl<'a, R: Read + AsRawFd + 'a> NonBlockingReader<'a, R> {
     pub fn new(inner: R, timeout_millis: u64) -> Self {
         let flags = nix::poll::PollFlags::POLLIN;
-        let poll = nix::poll::PollFd::new(inner.as_raw_fd(), flags);
+        let poll: nix::poll::PollFd<'_> =
+            nix::poll::PollFd::new(unsafe { BorrowedFd::borrow_raw(inner.as_raw_fd()) }, flags);
         let mut signals = nix::sys::signal::SigSet::empty();
         signals.add(nix::sys::signal::Signal::SIGIO);
         let timelimit = time::Duration::from_millis(timeout_millis);
@@ -35,13 +36,13 @@ impl<R: Read + AsRawFd> NonBlockingReader<R> {
     }
 }
 
-impl<R: Read + AsRawFd> Reader for NonBlockingReader<R> {
+impl<'a, R: Read + AsRawFd + 'a> Reader for NonBlockingReader<'a, R> {
     fn read(&mut self, data: &mut [u8]) -> Result<ReadResult, Box<dyn Error>> {
         let mut buf = &mut *data;
         let mut bytes_read = 0;
         let start = time::Instant::now();
         loop {
-            let res = nix::poll::ppoll(&mut [self.poll], self.timeout, self.signals)?;
+            let res = nix::poll::ppoll(&mut [self.poll], self.timeout, Some(self.signals))?;
             //println!("loop...");
             if res == 0 {
                 return Ok(ReadResult::Timeout(bytes_read));

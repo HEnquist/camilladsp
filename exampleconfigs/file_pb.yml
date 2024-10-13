@@ -5,7 +5,7 @@ devices:
   silence_threshold: -60
   silence_timeout: 3.0
   capture:
-    type: File
+    type: RawFile
     channels: 2
     filename: "/home/henrik/test.raw"
     format: S16LE

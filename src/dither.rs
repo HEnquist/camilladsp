@@ -10,7 +10,7 @@ pub struct Dither<'a> {
     pub name: String,
     pub scalefact: PrcFmt,
     // have to `Box` because `dyn Ditherer` is not `Sized`.
-    ditherer: Box<dyn Ditherer + 'a>,
+    ditherer: Box<dyn Ditherer + Send + 'a>,
     shaper: Option<NoiseShaper<'a>>,
 }
 
@@ -453,7 +453,7 @@ impl<'a> NoiseShaper<'a> {
 }
 
 impl<'a> Dither<'a> {
-    pub fn new<D: Ditherer + 'a>(
+    pub fn new<D: Ditherer + Send + 'a>(
         name: &str,
         bits: usize,
         ditherer: D,

@@ -5,6 +5,7 @@ use crate::conversions::{
     chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
 };
 use crate::countertimer;
+use crate::helpers::PIRateController;
 use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
@@ -21,6 +22,7 @@ use std::time;
 use crate::CommandMessage;
 use crate::NewValue;
 use crate::PrcFmt;
+use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
@@ -240,6 +242,8 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         let mut timer = countertimer::Stopwatch::new();
                         let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
 
+                        let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
+
                         let stream = match sample_format {
                             SampleFormat::S16LE => {
                                 trace!("Build i16 output stream");
@@ -385,12 +389,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         && timer.larger_than_millis((1000.0 * adjust_period) as u64)
                                     {
                                         if let Some(av_delay) = buffer_avg.average() {
-                                            let speed = calculate_speed(
-                                                av_delay,
-                                                target_level,
-                                                adjust_period,
-                                                samplerate as u32,
-                                            );
+                                            let speed = rate_controller.next(av_delay);
                                             timer.restart();
                                             buffer_avg.restart();
                                             debug!(
@@ -474,6 +473,7 @@ impl CaptureDevice for CpalCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
+        _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let host_cfg = self.host.clone();
         let devname = self.devname.clone();
@@ -691,7 +691,6 @@ impl CaptureDevice for CpalCaptureDevice {
                                 trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                             }
                             chunk.update_stats(&mut chunk_stats);
-                            //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
                             {
                                 let mut capture_status = capture_status.write();
                                 capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());

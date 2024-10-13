@@ -61,6 +61,13 @@ pub struct ServerParameters<'a> {
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
+#[serde(untagged)]
+enum ValueWithOptionalLimits {
+    Plain(f32),
+    Limited(f32, f32, f32),
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
 enum WsCommand {
     SetConfigFilePath(String),
     SetConfig(String),
@@ -100,14 +107,15 @@ enum WsCommand {
     SetUpdateInterval(usize),
     GetVolume,
     SetVolume(f32),
-    AdjustVolume(f32),
+    AdjustVolume(ValueWithOptionalLimits),
     GetMute,
     SetMute(bool),
     ToggleMute,
+    GetFaders,
     GetFaderVolume(usize),
     SetFaderVolume(usize, f32),
     SetFaderExternalVolume(usize, f32),
-    AdjustFaderVolume(usize, f32),
+    AdjustFaderVolume(usize, ValueWithOptionalLimits),
     GetFaderMute(usize),
     SetFaderMute(usize, bool),
     ToggleFaderMute(usize),
@@ -145,6 +153,12 @@ struct AllLevels {
 struct PbCapLevels {
     playback: Vec<f32>,
     capture: Vec<f32>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+struct Fader {
+    volume: f32,
+    mute: bool,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -314,6 +328,10 @@ enum WsReply {
     },
     SetFaderExternalVolume {
         result: WsResult,
+    },
+    GetFaders {
+        result: WsResult,
+        value: Vec<Fader>,
     },
     GetFaderVolume {
         result: WsResult,
@@ -840,10 +858,28 @@ fn handle_command(
                 result: WsResult::Ok,
             })
         }
-        WsCommand::AdjustVolume(nbr) => {
+        WsCommand::AdjustVolume(value) => {
             let mut tempvol = shared_data_inst.processing_params.target_volume(0);
-            tempvol += nbr;
-            tempvol = clamped_volume(tempvol);
+            let (volchange, minvol, maxvol) = match value {
+                ValueWithOptionalLimits::Plain(vol) => (vol, -150.0, 50.0),
+                ValueWithOptionalLimits::Limited(vol, min, max) => (vol, min, max),
+            };
+            if maxvol < minvol {
+                return Some(WsReply::AdjustVolume {
+                    result: WsResult::Error,
+                    value: tempvol,
+                });
+            }
+            tempvol += volchange;
+            if tempvol < minvol {
+                tempvol = minvol;
+                warn!("Clamped volume at {} dB", minvol)
+            }
+            if tempvol > maxvol {
+                tempvol = maxvol;
+                warn!("Clamped volume at {} dB", maxvol)
+            }
+
             shared_data_inst
                 .processing_params
                 .set_target_volume(0, tempvol);
@@ -888,6 +924,22 @@ fn handle_command(
             Some(WsReply::ToggleMute {
                 result: WsResult::Ok,
                 value: !tempmute,
+            })
+        }
+        WsCommand::GetFaders => {
+            let volumes = shared_data_inst.processing_params.volumes();
+            let mutes = shared_data_inst.processing_params.mutes();
+            let faders = volumes
+                .iter()
+                .zip(mutes)
+                .map(|(v, m)| Fader {
+                    volume: *v,
+                    mute: m,
+                })
+                .collect();
+            Some(WsReply::GetFaders {
+                result: WsResult::Ok,
+                value: faders,
             })
         }
         WsCommand::GetFaderVolume(ctrl) => {
@@ -947,16 +999,33 @@ fn handle_command(
                 result: WsResult::Ok,
             })
         }
-        WsCommand::AdjustFaderVolume(ctrl, nbr) => {
+        WsCommand::AdjustFaderVolume(ctrl, value) => {
+            let (volchange, minvol, maxvol) = match value {
+                ValueWithOptionalLimits::Plain(vol) => (vol, -150.0, 50.0),
+                ValueWithOptionalLimits::Limited(vol, min, max) => (vol, min, max),
+            };
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::AdjustFaderVolume {
                     result: WsResult::Error,
-                    value: (ctrl, nbr),
+                    value: (ctrl, volchange),
                 });
             }
             let mut tempvol = shared_data_inst.processing_params.target_volume(ctrl);
-            tempvol += nbr;
-            tempvol = clamped_volume(tempvol);
+            if maxvol < minvol {
+                return Some(WsReply::AdjustFaderVolume {
+                    result: WsResult::Error,
+                    value: (ctrl, tempvol),
+                });
+            }
+            tempvol += volchange;
+            if tempvol < minvol {
+                tempvol = minvol;
+                warn!("Clamped volume at {} dB", minvol)
+            }
+            if tempvol > maxvol {
+                tempvol = maxvol;
+                warn!("Clamped volume at {} dB", maxvol)
+            }
             shared_data_inst
                 .processing_params
                 .set_target_volume(ctrl, tempvol);

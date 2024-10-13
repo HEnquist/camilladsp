@@ -7,7 +7,7 @@ devices:
     profile: Balanced
   capture_samplerate: 44100
   capture:
-    type: File
+    type: RawFile
     filename: "dummy"
     channels: 2
     format: S16LE
