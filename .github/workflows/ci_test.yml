@@ -142,6 +142,22 @@ jobs:
       - name: Run cargo test
         run: cargo test --no-default-features
 
+  check_test_windows7:
+    name: Check and test Windows7 (rustc 1.75)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@1.75.0
+
+      - name: Run cargo check
+        run: cargo check --no-default-features
+
+      - name: Run cargo test
+        run: cargo test --no-default-features
+
   check_test_macos:
     name: Check and test macOS
     runs-on: macos-latest
