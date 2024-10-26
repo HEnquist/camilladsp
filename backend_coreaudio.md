@@ -2,7 +2,8 @@
 
 ## Introduction
 CoreAudio is the standard audio API of macOS.
-The CoreAudio support of CamillaDSP is provided via the [coreaudio-rs library](https://github.com/RustAudio/coreaudio-rs). 
+The CoreAudio support of CamillaDSP is provided via the
+[coreaudio-rs library](https://github.com/RustAudio/coreaudio-rs).
 
 CoreAudio is a large API that offers several ways to accomplish most common tasks.
 CamillaDSP uses the low-level AudioUnits for playback and capture.
