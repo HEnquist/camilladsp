@@ -72,6 +72,8 @@ pub struct AlsaCaptureDevice {
     pub stop_on_inactive: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
+    pub buffersize: Option<usize>,
+    pub period: Option<usize>,
 }
 
 struct CaptureChannels {
@@ -354,6 +356,7 @@ fn capture_buffer(
 }
 
 /// Open an Alsa PCM device
+#[allow(clippy::too_many_arguments)]
 fn open_pcm(
     devname: String,
     samplerate: u32,
@@ -1200,6 +1203,8 @@ impl CaptureDevice for AlsaCaptureDevice {
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
         );
+        let optional_buffersize = self.buffersize;
+        let optional_period = self.period;
 
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
@@ -1218,8 +1223,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                     &conf_sample_format,
                     &mut buf_manager,
                     true,
-                    None,
-                    None,
+                    optional_buffersize,
+                    optional_period,
                 ) {
                     Ok((pcmdevice, sample_format)) => {
                         match status_channel.send(StatusMessage::CaptureReady) {

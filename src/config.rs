@@ -202,6 +202,10 @@ pub enum CaptureDevice {
         link_mute_control: Option<String>,
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
+        #[serde(default)]
+        buffersize: Option<usize>,
+        #[serde(default)]
+        period: Option<usize>,
     },
     #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
     #[serde(alias = "BLUEZ", alias = "bluez")]
@@ -448,7 +452,9 @@ pub enum PlaybackDevice {
         device: String,
         #[serde(default)]
         format: Option<SampleFormat>,
+        #[serde(default)]
         buffersize: Option<usize>,
+        #[serde(default)]
         period: Option<usize>,
     },
     #[cfg(feature = "pulse-backend")]

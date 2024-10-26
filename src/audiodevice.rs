@@ -562,6 +562,8 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             stop_on_inactive,
             ref link_volume_control,
             ref link_mute_control,
+            buffersize,
+            period,
             ..
         } => Box::new(alsadevice::AlsaCaptureDevice {
             devname: device.clone(),
@@ -578,6 +580,8 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             stop_on_inactive: stop_on_inactive.unwrap_or_default(),
             link_volume_control: link_volume_control.clone(),
             link_mute_control: link_mute_control.clone(),
+            buffersize,
+            period,
         }),
         #[cfg(feature = "pulse-backend")]
         config::CaptureDevice::Pulse {
