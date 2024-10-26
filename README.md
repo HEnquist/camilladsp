@@ -1,4 +1,4 @@
-# CamillaDSP v2.0
+# CamillaDSP v3.0
 ![CI test and lint](https://github.com/HEnquist/camilladsp/workflows/CI%20test%20and%20lint/badge.svg)
 
 A tool to create audio processing pipelines for applications such as active crossovers or room correction.
@@ -100,12 +100,13 @@ It does not matter if the damage is caused by incorrect usage or a bug in the so
    - **[Difference equation](#difference-equation)**
 - **[Processors](#processors)**
    - **[Compressor](#compressor)**
+   - **[NoiseGate](#noise-gate)**
 - **[Pipeline](#pipeline)**
    - **[Filter step](#filter-step)**
    - **[Mixer and Processor step](#mixer-and-processor-step)**
    - **[Tokens in names](#tokens-in-names)**
    - **[Bypassing steps](#bypassing-steps)**
-- **[Export filters from REW](#export-filters-from-rew)**
+- **[Using filters from REW](#using-filters-from-rew)**
 - **[Visualizing the config](#visualizing-the-config)**
 
 **[Related projects](#related-projects)**
@@ -300,12 +301,6 @@ CamillaDSP includes a Websocket server that can be used to pass commands to the 
 This feature is enabled by default, but can be left out. The feature name is "websocket".
 For usage see the section "Controlling via websocket".
 
-The default FFT library is RustFFT, but it's also possible to use FFTW.
-This is enabled by the feature "FFTW". When the chunksize is a power of two, like 1024 or 4096, then FFTW and RustFFT are very similar in speed.
-But if the chunksize is a "strange" number like a large prime, then FFTW can be faster.
-FFTW is a much larger and more complicated library,
-so using FFTW is only recommended if you for some reason can't use an "easy" chunksize and this makes RustFFT too slow.
-
 ## Building in Linux with standard features
 These instructions assume that the linux distribution used is one of Fedora, Debian, Ubunty or Arch.
 They should also work also work on distributions closely related to one of these, such as Manjaro (Arch),
@@ -344,7 +339,6 @@ All the available options, or "features" are:
 - `bluez-backend`: Bluetooth support via BlueALSA (Linux only).
 - `websocket`: Websocket server for control.
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
-- `FFTW`: Use FFTW instead of RustFFT.
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64).
 - `debug`: Enable extra logging, useful for debugging.
 - `avoid-rustc-issue-116359`: Enable a workaround for [rust issue #116359](https://github.com/rust-lang/rust/issues/116359).
@@ -357,18 +351,18 @@ Cargo doesn't allow disabling a single default feature,
 but you can disable the whole group with the `--no-default-features` flag.
 Then you have to manually add all the ones you want.
 
-Example 1: You want `websocket`, `pulse-backend` and `FFTW`. The first one is included by default so you only need to add `FFTW` and `pulse-backend`:
+Example 1: You want `websocket` and `pulse-backend`. The first one is included by default so you only need to add `pulse-backend`:
 ```
-cargo build --release --features FFTW --features pulse-backend
+cargo build --release --features pulse-backend
 (or)
-cargo install --path . --features FFTW --features pulse-backend
+cargo install --path . --features pulse-backend
 ```
 
-Example 2: You want `32bit` and `FFTW`. Since you don't want `websocket` you have to disable the defaults:
+Example 2: You want only `32bit`. Since you don't want `websocket` you have to disable the defaults:
 ```
-cargo build --release --no-default-features --features FFTW --features 32bit
+cargo build --release --no-default-features --features 32bit
 (or)
-cargo install --path . --no-default-features --features FFTW --features 32bit
+cargo install --path . --no-default-features --features 32bit
 ```
 
 ### Additional dependencies
@@ -423,14 +417,12 @@ $env:RUSTFLAGS="-C target-cpu=native"
 cargo build --release
 ```
 
-On macOS both the PulseAudio and FFTW features can be used. The necessary dependencies can be installed with brew:
+The PulseAudio backend can be used on macOS.
+The necessary dependencies can be installed with brew:
 ```
-brew install fftw
 brew install pkg-config
 brew install pulseaudio
 ```
-
-The FFTW feature can also be used on Windows. There is no need to install anything extra.
 
 
 # How to run
@@ -448,44 +440,49 @@ See more about the configuration file below.
 ## Command line options
 Starting with the --help flag prints a short help message:
 ```
-> camilladsp.exe --help
-CamillaDSP 2.0.0
+> camilladsp --help
+CamillaDSP v3.0.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
 Built with features: websocket
 
 Supported device types:
-Capture: RawFile, WavFile, Stdin, Wasapi
-Playback: File, Stdout, Wasapi
+Capture: RawFile, WavFile, Stdin, SignalGenerator, CoreAudio
+Playback: File, Stdout, CoreAudio
 
-USAGE:
-    camilladsp.exe [FLAGS] [OPTIONS] <configfile>
+Usage: camilladsp [OPTIONS] [CONFIGFILE]
 
-FLAGS:
-    -m, --mute       Start with the volume control muted
-    -c, --check      Check config file and exit
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-    -v               Increase message verbosity
-    -w, --wait       Wait for config from websocket
+Arguments:
+  [CONFIGFILE]  The configuration file to use
 
-OPTIONS:
-    -s, --statefile <statefile>            Use the given file to persist the state
-    -o, --logfile <logfile>                Write logs to file
-    -l, --loglevel <loglevel>              Set log level [possible values: trace, debug, info, warn, error, off]
-    -a, --address <address>                IP address to bind websocket server to
-    -g, --gain <gain>                      Set initial gain in dB for the volume control
-    -p, --port <port>                      Port for websocket server
-    -n, --channels <channels>              Override number of channels of capture device in config
-    -e, --extra_samples <extra_samples>    Override number of extra samples in config
-    -r, --samplerate <samplerate>          Override samplerate in config
-    -f, --format <format>                  Override sample format of capture device in config [possible values: S16LE,
-                                           S24LE, S24LE3, S32LE, FLOAT32LE, FLOAT64LE]
-
-ARGS:
-    <configfile>    The configuration file to use
-
+Options:
+  -c, --check                          Check config file and exit
+  -s, --statefile <STATEFILE>          Use the given file to persist the state
+  -v...                                Increase message verbosity
+  -l, --loglevel <LOGLEVEL>            Set log level [possible values: trace, debug, info, warn, error, off]
+  -o, --logfile <LOGFILE>              Write logs to the given file path
+      --log_rotate_size <ROTATE_SIZE>  Rotate log file when the size in bytes exceeds this value
+      --log_keep_nbr <KEEP_NBR>        Number of previous log files to keep
+  -a, --address <ADDRESS>              IP address to bind websocket server to
+  -p, --port <PORT>                    Port for websocket server
+  -w, --wait                           Wait for config from websocket
+  -g, --gain <GAIN>                    Initial gain in dB for main volume control
+      --gain1 <GAIN1>                  Initial gain in dB for Aux1 fader
+      --gain2 <GAIN2>                  Initial gain in dB for Aux2 fader
+      --gain3 <GAIN3>                  Initial gain in dB for Aux3 fader
+      --gain4 <GAIN4>                  Initial gain in dB for Aux4 fader
+  -m, --mute                           Start with main volume control muted
+      --mute1                          Start with Aux1 fader muted
+      --mute2                          Start with Aux2 fader muted
+      --mute3                          Start with Aux3 fader muted
+      --mute4                          Start with Aux4 fader muted
+  -e, --extra_samples <EXTRA_SAMPLES>  Override number of extra samples in config
+  -n, --channels <CHANNELS>            Override number of channels of capture device in config
+  -r, --samplerate <SAMPLERATE>        Override samplerate in config
+  -f, --format <FORMAT>                Override sample format of capture device in config [possible values: S16LE, S24LE, S24LE3, S32LE, FLOAT32LE, FLOAT64LE]
+  -h, --help                           Print help
+  -V, --version                        Print version
 ```
 
 Most flags and options have a long and a short form. For example `--port 1234` and `-p1234` are equivalent.
@@ -502,8 +499,19 @@ Alternatively, the log level can be changed with the verbosity flag.
 By passing the verbosity flag once, `-v`, `debug` messages are enabled.
 If it's given twice, `-vv`, it also prints `trace` messages.
 
-The log messages are normally written to the terminal via stderr, but they can instead be written to a file by giving the `--logfile` option.
-The argument should be the path to the logfile. If this file is not writable, CamillaDSP will panic and exit.
+The log messages are normally written to the terminal via stderr,
+but they can instead be written to a file by giving the `--logfile` option.
+The argument should be the path to the logfile.
+If this file is not writable, CamillaDSP will panic and exit.
+
+Log rotation can be enabled by the `--log_rotate_size` option.
+This creates a new log file whenever the log fize size exceeds the given size in bytes.
+When rotation is enabled the current log file gets an added infix of `_rCURRENT`,
+so for example `logfile.log` becomes `logfile_rCURRENT.log`.
+When the file is rotated, the old logs are kept with a timestamp as infix,
+for example `logfile_r2023-01-29_12-59-00.log`.
+The default is to keep all previous log files,
+but this can be limited by setting the `--log_keep_nbr` option to the desired number.
 
 ### Persistent storage of state
 
@@ -513,11 +521,12 @@ The values in the file will then be kept updated whenever they change.
 If the file doesn't exist, it will be created on the first write.
 
 If the `configfile` argument is given, then this will be used instead of the value from the statefile.
-Similarly, the `--gain` and `--mute` options also override the values in the statefile.
+Similarly, the `--gain` and `--mute` options also override the values in the statefile for the main fader
+while the `--gain1` to `--gain4` and `--mute1` to `--mute4` do the same for the Aux faders.
 
 **Use this feature with caution! The volume setting given in the statefile will be applied immediately when CamillaDSP starts processing.**
 In systems that have a gain structure such that a too high volume setting can damage equipment or ears,
-it is recommended to always use the `--gain`  option to set the volume to start at a safe value.
+it is recommended to always use the `--gain` and `--gain1..4` options to set the volume to start at a safe value.
 
 #### Example statefile
 The statefile is a small YAML file that holds the path to the active config file,
@@ -569,22 +578,25 @@ But if the `extra_samples` override is used, the given value is used without sca
 
 ### Initial volume
 
-The `--gain` option can accept negative values,
+The `--gain` and `--gain1..4` options can accept negative values,
 but this requires a little care since the minus sign can be misinterpreted as another option.
 It works as long as there is no space in front of the minus sign.
 
-These work (for a gain of +/- 12.3 dB):
+These all work for positive values (with 12.3 dB used as an example):
 ```
 -g12.3
+--gain=12.3
 -g 12.3
 --gain 12.3
---gain=12.3
+```
 
+These work for negative values (note that there is no space before the minus sign):
+```
 -g-12.3
 --gain=-12.3
 ```
 
-These will __NOT__ work:
+These have a space before the minus sign and do __NOT__ work:
 ```
 -g -12.3
 --gain -12.3
@@ -910,11 +922,14 @@ devices:
   rate_measure_interval: 1.0 (*)
   volume_ramp_time: 400.0 (*)
   volume_limit: -12.0 (*)
+  multithreaded: false (*)
+  worker_threads: 4 (*)
   capture:
     type: Pulse
     channels: 2
     device: "MySink.monitor"
     format: S16LE
+    labels: ["L", "R"] (*)
   playback:
     type: Alsa
     channels: 2
@@ -930,18 +945,57 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
 * `chunksize`
 
-  All processing is done in chunks of data. The `chunksize` is the number of samples each chunk will have per channel.
-  It's good if the number is an "easy" number like a power of two, since this speeds up the FFT in the Convolution filter.
+  All processing is done in chunks of data.
+  The `chunksize` is the number of samples each chunk will have per channel.
+
   Suggested starting points for different sample rates:
   - 44.1 or 48 kHz: 1024
   - 88.2 or 96 kHz: 2048
   - 176.4 or 192 kHz: 4096
 
-  The duration in seconds of a chunk is `chunksize/samplerate`, so the suggested values corresponds to about 22 ms per chunk.
-  This is a reasonable value, and making it shorter can increase the cpu usage and make buffer underruns more likely.
+  The duration in seconds of a chunk is `chunksize/samplerate`,
+  so the suggested values corresponds to about 22 ms per chunk.
+  This is a reasonable value.
 
-  If you have long FIR filters you can reduce CPU usage by making the chunksize larger.
-  When increasing, try increasing in factors of two, like 1024 -> 2048 or 4096 -> 8192.
+  A larger chunk size generally reduces CPU usage,
+  but since the entire chunk must be captured before processing,
+  it can cause unacceptably long delays.
+  Conversely, using a smaller chunk size can reduce latency
+  but will increase CPU usage.
+  Additionally, the shorter duration of each chunk makes CamillaDSP
+  more vulnerable to disruptions from other system activities,
+  potentially causing buffer underruns.
+
+  __Choosing chunk size for best performance__
+
+  FIR filters are automatically padded as needed,
+  so there is no need match chunk size and filter length.
+
+  CamillaDSP uses FFT for convolution, with an FFT length of `2 * chunksize`.
+  Therefore, the chunk size should be chosen for optimal FFT performance.
+
+  Using a power of two for the chunk size is ideal for best performance.
+  The FFT also works well with numbers that can be expressed as products
+  of small primes, like `2^4 * 3^3 = 1296`.
+
+  Avoid using prime numbers, such as 1297,
+  or numbers with large prime factors, like `29 * 43 = 1247`.
+
+  __Long FIR filters__
+
+  When a FIR filter is longer than the chunk size, the convolver uses segmented convolution.
+  The number of segments is calculated as `filter_length / chunk size`,
+  and rounded up to the nearest integer.
+
+  Using a smaller chunk size (i.e. more segments) reduces latency
+  but makes the convoultion process less efficient and thus needs more processing power.
+  Although a smaller chunk size leads to increased CPU usage for all filters,
+  the difference is larger for FIR filters than the other types.
+
+  If you have long FIR filters, try different chunk sizes
+  to find the best balance between latency and processing power.
+
+  When increasing the chunk size, try doubling it, like going from 1024 to 2048 or 4096 to 8192.
 
 
 * `queuelimit` (optional, defaults to 4)
@@ -963,7 +1017,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   Setting the rate can be done in two ways.
   * Some capture devices provide a way to adjust the speed of their virtual sample clock (also called pitch adjust).
     This is available with the Alsa Loopback and USB Audio gadget devices on Linux,
-    as well as the latest (currently unreleased) version or BlackHole on macOS.
+    as well as BlackHole version 0.5.0 and later on macOS.
     When capturing from any of these devices, the adjustment can be done by tuning the virtual sample clock of the device.
     This avoids the need for asynchronous resampling.
   * If asynchronous resampling is enabled, the adjustment can be done by tuning the resampling ratio.
@@ -1014,15 +1068,44 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
 * `stop_on_rate_change` and `rate_measure_interval` (both optional)
 
-  Setting `stop_on_rate_change` to `true` makes CamillaDSP stop the processing if the measured capture sample rate changes. Default is `false`.
+  Setting `stop_on_rate_change` to `true` makes CamillaDSP stop the processing
+  if the measured capture sample rate changes.
+  Default is `false`.
   The `rate_measure_interval` setting is used for adjusting the measurement period.
   A longer period gives a more accurate measurement of the rate, at the cost of slower response when the rate changes.
-  The default is 1.0 seconds. Processing will stop after 3 measurements in a row are more than 4% off from the configured rate.
+  The default is 1.0 seconds.
+  Processing will stop after 3 measurements in a row are more than 4% off from the configured rate.
   The value of 4% is chosen to allow some variation, while still catching changes between for example 44.1 to 48 kHz.
 
 * `volume_ramp_time` (optional, defaults to 400 ms)
   This setting controls the duration of this ramp when changing volume of the default volume control.
   The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
+
+* `multithreaded` and `worker_threads` (optional, defaults to `false` and automatic)
+  Setting `multithreaded` to `true` enables multithreaded processing.
+  When this is enabled, CamillaDSP creates several filtering tasks by grouping the filters for each channel.
+  These tasks are then sent to a thread pool, where multiple threads are ready to pick up the work.
+  On a machine with multiple CPU cores, this allows filters to be processed in parallel,
+  potentially boosting performance.
+  Once all tasks are completed, the results are returned to the main processing thread.
+
+  However, Mixers and Processors, which work on all channels in the pipeline,
+  cannot be parallelized and are processed in the main thread.
+  Therefore, only the filters between mixers and/or processors can be parallelized.
+
+  Multithreaded processing is beneficial for configurations that require significant processing power,
+  such as using very long FIR filters, high sample rates, or a large number of channels.
+  It should only be enabled if necessary, as it typically should remain disabled.
+  Synchronizing with worker threads adds some overhead, increasing overall CPU usage.
+  It also makes CamillaDSP more susceptible to other processes using the CPU,
+  which may cause buffer underruns.
+
+  An exception to this recommendation is when both the input and output are files on disk,
+  allowing processing to run faster than real time.
+  In this scenario, multithreading is likely to improve throughput and should usually be enabled.
+
+  The number of worker threads can be set manually using the `worker_threads` setting.
+  If left out or set to zero, it defaults to one worker thread per hardware thread of the machine.
 
 * `capture` and `playback`
   Input and output devices are defined in the same way.
@@ -1159,7 +1242,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
   ```
 
 
-  The `RawFile` and `Stdin` capture devices support two additional optional parameters, for advanced handling of raw files and testing:
+  The `RawFile` and `Stdin` capture devices support two additional optional parameters,
+  for advanced handling of raw files and testing:
   * `skip_bytes`: Number of bytes to skip at the beginning of the file or stream.
     This can be used to skip over the header of some formats like .wav
     (which often has a 44-byte header).
@@ -1167,7 +1251,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
   * `read_bytes`: Read only up until the specified number of bytes.
     Leave it out or set it to zero to read until the end of the file or stream.
 
-  * Example, this will skip the first 50 bytes of the file (index 0-49) and then read the following 200 bytes (index 50-249).
+  * Example, this will skip the first 50 bytes of the file (index 0-49)
+    and then read the following 200 bytes (index 50-249).
     ```
     skip_bytes: 50
     read_bytes: 200
@@ -1247,6 +1332,12 @@ A parameter marked (*) in any example is optional. If they are left out from the
       channels: 2
       device: "default"
   ```
+
+  ### Channel labels
+  All capture device types have an optional `labels` property.
+  This accepts a list of strings, and is meant to be used by a GUI
+  to display meaningful channel names.
+  CamillaDSP itself does not use these labels.
 
 ## Resampling
 
@@ -1408,6 +1499,7 @@ Example for a mixer that copies two channels into four:
 mixers:
   ExampleMixer:
     description: "Example mixer to convert two channels to four" (*)
+    labels: ["L_LF", "R_LF", "L_HF", "R_HF"] (*)
     channels:
       in: 2
       out: 4
@@ -1447,7 +1539,12 @@ Each source has a `channel` number, a `gain` value, a `scale` for the gain (`dB`
 A channel that has no sources will be filled with silence.
 The `mute` option determines if an output channel of the mixer should be muted.
 The `mute`, `gain`, `scale` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 in dB, and not inverted.
+
 The optional `description` property is intended for the user and is not used by CamillaDSP itself.
+
+Similar to [capture devices](#channel-labels), the mixer also has a `labels` property.
+This is meant to define labels for the output channels from the mixer.
+The labels are intended to be used by GUIs and are not used by CamillaDSP.
 
 Another example, a simple stereo to mono mixer:
 ```
@@ -1673,6 +1770,18 @@ If the filename includes the tokens `$samplerate$` or `$channels$`,
 these will be replaced by the corresponding values from the config.
 For example, if samplerate is 44100,
 the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`.
+
+#### Generating FIR coefficients
+There are many ways to generate impulse responses for FIR filters.
+Typically they are generated by some dedicated application.
+See also [Measurement and filter generation tools](#measurement-and-filter-generation-tools).
+
+[rePhase](#rephase) is a popular choice that is free to use.
+It allows building fully linear-phase active crossovers with arbitrary slopes.
+It also supports compensating the phase shifts of loudspeakers and existing crossovers.
+In the Impulse Settings box configure the rate to the same as used in CamillaDSP
+and the format to 64 bits IEEE-754 (.dbl).
+This corresponds to raw samples in FLOAT64LE format in CamillaDSP.
 
 #### Values directly in config file
 
@@ -2084,7 +2193,6 @@ Both a and b are optional. If left out, they default to [1.0].
 ## Processors
 The `processors` section contains the definitions for the Processors.
 These are special "filters" that work on several channels at the same time.
-At present only one type of processor, "Compressor", has been implemented.
 
 Processors take an optional `description` property.
 This is intended for the user and is not used by CamillaDSP itself.
@@ -2128,8 +2236,43 @@ pipeline:
     Note that soft clipping introduces some harmonic distortion to the signal.
     This setting is ignored if `enable_clip = false`. Optional, defaults to `false`.
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
-  * `process_channels`: a list of channels that should be compressed. Optional, defaults to all channels.
+  * `process_channels`: a list of channels to be compressed. Optional, defaults to all channels.
 
+### Noise Gate
+The "NoiseGate" processor implements a simple noise gate.
+It monitors the given channels to estimate the current loudness,
+using the same algorithm as the compressor.
+When the loudness is above the threshold,
+the gate "opens" and the sound is passed through unaltered.
+When it is below, the gate "closes" and attenuates the selected channels by the given amount.
+
+Example:
+```
+processors:
+  demogate:
+    type: NoiseGate
+    parameters:
+      channels: 2
+      attack: 0.025
+      release: 1.0
+      threshold: -25
+      attenuation: 50.0
+      monitor_channels: [0, 1] (*)
+      process_channels: [0, 1] (*)
+
+pipeline:
+  - type: Processor
+    name: demogate
+```
+
+  Parameters:
+  * `channels`: number of channels, must match the number of channels of the pipeline where the compressor is inserted.
+  * `attack`: time constant in seconds for attack, how fast the gate reacts to an increase of the loudness.
+  * `release`: time constant in seconds for release, how fast the gate reacts when the loudness decreases.
+  * `threshold`: the loudness threshold in dB where gate "opens".
+  * `attenuation`: the amount of attenuation in dB to apply when the gate is "closed".
+  * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
+  * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
 
 
 ## Pipeline
@@ -2210,8 +2353,8 @@ Take care when bypassing mixers. If a mixer is used to change the number of chan
 then bypassing it will make the pipeline output the wrong number of channels.
 In this case, the bypass may be used to switch between mixers with different settings.
 
-## Export filters from REW
-REW can automatically generate a set of filters for correcting the frequency response of a system.
+## Using filters from REW
+[REW](#rew) can automatically generate a set of filters for correcting the frequency response of a system.
 REW V5.20.14 and later is able to export the filters in the CamillaDSP YAML format.
 
 - Go to the "EQ Filters" screen. Expand the "Equalizer" section in the list on the right side.
@@ -2222,32 +2365,44 @@ REW V5.20.14 and later is able to export the filters in the CamillaDSP YAML form
 
 Note that the generated YAML file is not a complete CamillaDSP configuration.
 It contains only filter definitions and pipeline steps, that can be pasted into a CamillaDSP config file.
+If using [CamillaGUI](#gui), it is also possible to import the filters into an existing configuration.
 
 # Related projects
-Other projects using CamillaDSP:
+## Other projects using CamillaDSP
 * https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels.
 * https://github.com/raptorlightning/I2S-Hat - An SPDIF Hat for the Raspberry Pi 2-X for SPDIF Communication, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/375834-i2s-hat-raspberry-pi-hat-spdif-i2s-communication-dsp.html).
 * https://github.com/daverz/camilla-remote-control - Interface for remote control of CamillaDSP using a FLIRC USB infrared receiver or remote keyboard.
 * https://github.com/Wang-Yue/CamillaDSP-Monitor - A script that provides a DSP pipeline and a spectral analyzer similar to those of the RME ADI-2 DAC/Pro.
 
-Music players:
+## Music players
 * https://moodeaudio.org/ - moOde audio player, audiophile-quality music playback for Raspberry Pi.
 * https://github.com/thoelf/Linux-Stream-Player - Play local files or streamed music with room EQ on Linux.
 * https://github.com/Lykkedk/SuperPlayer-v8.0.0---SamplerateChanger-v1.0.0 - Automatic filter switching at sample rate change for squeezelite, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/361429-superplayer-dsp_engine-camilladsp-samplerate-switching-esp32-remote-control.html).
 * https://github.com/JWahle/piCoreCDSP - Installs CamillaDSP and GUI on piCorePlayer
 * [FusionDsp](https://docs.google.com/document/d/e/2PACX-1vRhU4i830YaaUlB6-FiDAdvl69T3Iej_9oSbNTeSpiW0DlsyuTLSv5IsVSYMmkwbFvNbdAT0Tj6Yjjh/pub) a plugin based on CamillaDsp for [Volumio](https://volumio.com), the music player, with graphic equalizer, parametric equalizer, FIR filters, Loudness, AutoEq profile for headphone and more!
 
-Guides and example configs:
+## Guides and example configs
 * https://github.com/ynot123/CamillaDSP-Cfgs-FIR-Examples - Example Filter Configuration and Convolver Coefficients.
 * https://github.com/hughpyle/raspot - Hugh's raspotify config
 * https://github.com/Wang-Yue/camilladsp-crossfeed - Bauer stereophonic-to-binaural crossfeed for headphones
 * https://github.com/jensgk/akg_k702_camilladsp_eq - Headphone EQ and Crossfeed for the AKG K702 headphones
 * https://github.com/phelluy/room_eq_mac_m1 - Room Equalization HowTo with REW and Apple Silicon
 
-Projects of general nature which can be useful together with CamillaDSP:
+## Projects of general nature which can be useful together with CamillaDSP
 * https://github.com/scripple/alsa_hook_hwparams - Alsa hooks for reacting to sample rate and format changes.
 * https://github.com/HEnquist/cpal-listdevices - List audio devices with names and supported formats under Windows and macOS.
 
+## Measurement and filter generation tools
+### rePhase 
+https://rephase.org/ - rePhase is a free FIR generation tool for building
+fully linear-phase active crossovers with arbitrary slopes.
+### REW
+https://www.roomeqwizard.com/ - REW is free software for room acoustic measurement,
+loudspeaker measurement and audio device measurement.
+### DRC
+https://drc-fir.sourceforge.net/ -  DRC is a program used to generate correction filters
+for acoustic compensation of HiFi and audio systems in general,
+including listening room compensation.
 
 # Getting help
 

@@ -2,14 +2,33 @@
 
 ## Introduction
 CoreAudio is the standard audio API of macOS.
-The CoreAudio support of CamillaDSP is provided via the [coreaudio-rs library](https://github.com/RustAudio/coreaudio-rs). 
+The CoreAudio support of CamillaDSP is provided via the
+[coreaudio-rs library](https://github.com/RustAudio/coreaudio-rs).
 
 CoreAudio is a large API that offers several ways to accomplish most common tasks.
 CamillaDSP uses the low-level AudioUnits for playback and capture.
 An AudioUnit that represents a hardware device has two stream formats.
 One format is used for communicating with the application.
 This is typically 32-bit float, the same format that CoreAudio uses internally.
-The other format (called the physical format) is the one used to send or receive data to/from the sound card driver. 
+The other format (called the physical format) is the one used to send or receive data to/from the sound card driver.
+
+## Microphone access
+In order to capture audio on macOS, an application needs the be given access.
+First time CamillaDSP is launched, the system should show a popup asking if the Terminal app
+should be allowed to use the microphone.
+This is somewhat misleading, as the microphone access covers all recording of sound,
+not only from the microphone.
+
+Without this access, there is no error message and CamillaDSP appears to be running ok,
+but only records silence.
+If this happens, open System Settings, select "Privacy & Security", and click "Microphone".
+Verify that "Terminal" is listed and enabled.
+
+There is no way to manually add approved apps to the list.
+If "Terminal" is not listed, try executing `tccutil reset Microphone` in the terminal.
+This resets the microphone access for all apps,
+and should make the popup appear next time CamillaDSP is started.
+
 
 ## Capturing audio from other applications
 

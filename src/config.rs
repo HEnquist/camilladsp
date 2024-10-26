@@ -1,6 +1,7 @@
 use crate::compressor;
 use crate::filters;
 use crate::mixer;
+use crate::noisegate;
 use crate::wavtools::{find_data_in_wav_stream, WavParams};
 use parking_lot::RwLock;
 use serde::{de, Deserialize, Serialize};
@@ -196,7 +197,11 @@ pub enum CaptureDevice {
         #[serde(default)]
         stop_on_inactive: Option<bool>,
         #[serde(default)]
-        follow_volume_control: Option<String>,
+        link_volume_control: Option<String>,
+        #[serde(default)]
+        link_mute_control: Option<String>,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
     },
     #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
     #[serde(alias = "BLUEZ", alias = "bluez")]
@@ -208,6 +213,8 @@ pub enum CaptureDevice {
         channels: usize,
         device: String,
         format: SampleFormat,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
     },
     RawFile(CaptureDeviceRawFile),
     WavFile(CaptureDeviceWavFile),
@@ -234,6 +241,8 @@ pub enum CaptureDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
     },
     #[cfg(all(
         feature = "cpal-backend",
@@ -250,6 +259,8 @@ pub enum CaptureDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         signal: Signal,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
     },
 }
 
@@ -306,6 +317,8 @@ pub struct CaptureDeviceRawFile {
     pub skip_bytes: Option<usize>,
     #[serde(default)]
     pub read_bytes: Option<usize>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 impl CaptureDeviceRawFile {
@@ -326,6 +339,8 @@ pub struct CaptureDeviceWavFile {
     pub filename: String,
     #[serde(default)]
     pub extra_samples: Option<usize>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 impl CaptureDeviceWavFile {
@@ -359,6 +374,8 @@ pub struct CaptureDeviceStdin {
     pub skip_bytes: Option<usize>,
     #[serde(default)]
     pub read_bytes: Option<usize>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 impl CaptureDeviceStdin {
@@ -385,6 +402,8 @@ pub struct CaptureDeviceBluez {
     // from D-Bus properties
     pub format: SampleFormat,
     pub channels: usize,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
@@ -406,6 +425,8 @@ pub struct CaptureDeviceWasapi {
     exclusive: Option<bool>,
     #[serde(default)]
     loopback: Option<bool>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 #[cfg(target_os = "windows")]
@@ -428,6 +449,8 @@ pub struct CaptureDeviceCA {
     pub device: Option<String>,
     #[serde(default)]
     pub format: Option<SampleFormat>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -607,6 +630,10 @@ pub struct Devices {
     pub volume_ramp_time: Option<f32>,
     #[serde(default)]
     pub volume_limit: Option<f32>,
+    #[serde(default)]
+    pub multithreaded: Option<bool>,
+    #[serde(default)]
+    pub worker_threads: Option<usize>,
 }
 
 // Getters for all the defaults
@@ -653,6 +680,14 @@ impl Devices {
 
     pub fn volume_limit(&self) -> f32 {
         self.volume_limit.unwrap_or(50.0)
+    }
+
+    pub fn multithreaded(&self) -> bool {
+        self.multithreaded.unwrap_or(false)
+    }
+
+    pub fn worker_threads(&self) -> usize {
+        self.worker_threads.unwrap_or(0)
     }
 }
 
@@ -1240,6 +1275,8 @@ pub struct Mixer {
     pub description: Option<String>,
     pub channels: MixerChannels,
     pub mapping: Vec<MixerMapping>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1250,6 +1287,11 @@ pub enum Processor {
         #[serde(default)]
         description: Option<String>,
         parameters: CompressorParameters,
+    },
+    NoiseGate {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: NoiseGateParameters,
     },
 }
 
@@ -1293,6 +1335,30 @@ impl CompressorParameters {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct NoiseGateParameters {
+    pub channels: usize,
+    #[serde(default)]
+    pub monitor_channels: Option<Vec<usize>>,
+    #[serde(default)]
+    pub process_channels: Option<Vec<usize>>,
+    pub attack: PrcFmt,
+    pub release: PrcFmt,
+    pub threshold: PrcFmt,
+    pub attenuation: PrcFmt,
+}
+
+impl NoiseGateParameters {
+    pub fn monitor_channels(&self) -> Vec<usize> {
+        self.monitor_channels.clone().unwrap_or_default()
+    }
+
+    pub fn process_channels(&self) -> Vec<usize> {
+        self.process_channels.clone().unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct LimiterParameters {
     #[serde(default)]
     pub soft_clip: Option<bool>,
@@ -1316,6 +1382,7 @@ pub enum PipelineStep {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PipelineStepMixer {
     pub name: String,
     #[serde(default)]
@@ -1331,6 +1398,7 @@ impl PipelineStepMixer {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PipelineStepFilter {
     #[serde(default)]
     pub channels: Option<Vec<usize>>,
@@ -1348,6 +1416,7 @@ impl PipelineStepFilter {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PipelineStepProcessor {
     pub name: String,
     #[serde(default)]
@@ -1781,7 +1850,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     }
     if let (Some(newprocs), Some(oldprocs)) = (&newconf.processors, &currentconf.processors) {
         for (proc, params) in newprocs {
-            // The pipeline didn't change, any added compressor isn't included and can be skipped
+            // The pipeline didn't change, any added processor isn't included and can be skipped
             if let Some(current_proc) = oldprocs.get(proc) {
                 if params != current_proc {
                     processors.push(proc.to_string());
@@ -2047,6 +2116,26 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                             Err(err) => {
                                                 let msg = format!(
                                                     "Invalid processor '{}'. Reason: {}",
+                                                    step.name, err
+                                                );
+                                                return Err(ConfigError::new(&msg).into());
+                                            }
+                                        }
+                                    }
+                                    Processor::NoiseGate { parameters, .. } => {
+                                        let channels = parameters.channels;
+                                        if channels != num_channels {
+                                            let msg = format!(
+                                                "NoiseGate '{}' has wrong number of channels. Expected {}, found {}.",
+                                                step.name, num_channels, channels
+                                            );
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
+                                        match noisegate::validate_noise_gate(parameters) {
+                                            Ok(_) => {}
+                                            Err(err) => {
+                                                let msg = format!(
+                                                    "Invalid noise gate '{}'. Reason: {}",
                                                     step.name, err
                                                 );
                                                 return Err(ConfigError::new(&msg).into());

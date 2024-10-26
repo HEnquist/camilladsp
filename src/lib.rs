@@ -5,8 +5,6 @@ extern crate alsa_sys;
 extern crate clap;
 #[cfg(feature = "cpal-backend")]
 extern crate cpal;
-#[cfg(feature = "FFTW")]
-extern crate fftw;
 #[macro_use]
 extern crate lazy_static;
 #[cfg(target_os = "macos")]
@@ -27,7 +25,6 @@ extern crate num_traits;
 extern crate rand;
 extern crate rand_distr;
 extern crate rawsample;
-#[cfg(not(feature = "FFTW"))]
 extern crate realfft;
 extern crate rubato;
 extern crate serde;
@@ -123,10 +120,7 @@ pub mod countertimer;
 pub mod cpaldevice;
 pub mod diffeq;
 pub mod dither;
-#[cfg(not(feature = "FFTW"))]
 pub mod fftconv;
-#[cfg(feature = "FFTW")]
-pub mod fftconv_fftw;
 pub mod filedevice;
 #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
 pub mod filedevice_bluez;
@@ -140,6 +134,7 @@ pub mod helpers;
 pub mod limiter;
 pub mod loudness;
 pub mod mixer;
+pub mod noisegate;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;
@@ -161,6 +156,7 @@ pub enum StatusMessage {
     CaptureDone,
     SetSpeed(f64),
     SetVolume(f32),
+    SetMute(bool),
 }
 
 pub enum CommandMessage {

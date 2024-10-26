@@ -179,13 +179,18 @@ but are supported by very few devices. Therefore these are checked last.
 Please also see [Find valid playback and capture parameters](#find-valid-playback-and-capture-parameters).
 
 ### Linking volume control to device volume
-It is possible to let CamillaDSP follow the a volume control of the capture device.
+It is possible to let CamillaDSP link its volume and mute controls to controls on the capture device.
 This is mostly useful when capturing from the USB Audio Gadget,
-which provides a control named `PCM Capture Volume` that is controlled by the USB host.
+which provides a volume control named `PCM Capture Volume`
+and a mute control called `PCM Capture Switch` that are controlled by the USB host.
 
-This does not alter the signal, and can be used to forward the volume setting from a player to CamillaDSP.
-To enable this, set the `follow_volume_control` setting to the name of the volume control.
-Any change of the volume then gets applied to the CamillaDSP main volume control.
+This volume control does not alter the signal,
+and can be used to forward the volume setting from a player to CamillaDSP.
+To enable this, set the `link_volume_control` setting to the name of the volume control.
+The corresponding setting for the mute control is `link_mute_control`.
+Any change of the volume or mute then gets applied to the CamillaDSP main volume control.
+The link works in both directions, so that volume and mute changes requested
+over the websocket interface also get sent to the USB host.
 
 The available controls for a device can be listed with `amixer`.
 List controls for card 1:
@@ -198,9 +203,11 @@ List controls with values and more details:
 amixer -c 1 contents
 ```
 
-The chosen control should be one that does not affect the signal volume,
+The chosen volume control should be one that does not affect the signal volume,
 otherwise the volume gets applied twice.
-It must also have a scale in decibel like in this example:
+It must also have a scale in decibel, and take a single value (`values=1`).
+
+Example:
 ```
 numid=15,iface=MIXER,name='Master Playback Volume'
   ; type=INTEGER,access=rw---R--,values=1,min=0,max=87,step=0
@@ -208,6 +215,16 @@ numid=15,iface=MIXER,name='Master Playback Volume'
   | dBscale-min=-65.25dB,step=0.75dB,mute=0
 ```
 
+The mute control shoule be a _switch_, meaning that is has states `on` and `off`,
+where `on` is not muted and `off` is muted.
+It must also take a single value (`values=1`).
+
+Example:
+```
+numid=6,iface=MIXER,name='PCM Capture Switch'
+  ; type=BOOLEAN,access=rw------,values=1
+  : values=on
+```
 
 ### Subscribe to Alsa control events
 The Alsa capture device subscribes to control events from the USB Gadget and Loopback devices.

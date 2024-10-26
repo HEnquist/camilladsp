@@ -44,7 +44,7 @@ jobs:
         run: cargo test --features bluez-backend,cpal-backend,jack-backend,pulse-backend,
 
       - name: Run cargo test with all optional features
-        run: cargo test --features 32bit,debug,fftw,secure-websocket
+        run: cargo test --features 32bit,debug,secure-websocket
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
@@ -135,6 +135,22 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Run cargo check
+        run: cargo check --no-default-features
+
+      - name: Run cargo test
+        run: cargo test --no-default-features
+
+  check_test_windows7:
+    name: Check and test Windows7 (rustc 1.75)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@1.75.0
 
       - name: Run cargo check
         run: cargo check --no-default-features

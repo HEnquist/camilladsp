@@ -9,20 +9,21 @@ use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Duration;
 use wasapi;
 use wasapi::DeviceCollection;
-use windows::core::w;
-use windows::Win32::System::Threading::{
-    AvSetMmThreadCharacteristicsW, AvSetMmThreadPriority, AVRT_PRIORITY_HIGH,
+
+use audio_thread_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 
 use crate::CommandMessage;
 use crate::PrcFmt;
+use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
@@ -289,7 +290,7 @@ fn open_capture(
 struct PlaybackSync {
     rx_play: Receiver<PlaybackDeviceMessage>,
     tx_cb: Sender<DisconnectReason>,
-    bufferfill: Arc<AtomicUsize>,
+    bufferfill: Arc<Mutex<countertimer::DeviceBufferEstimator>>,
 }
 
 enum PlaybackDeviceMessage {
@@ -337,16 +338,19 @@ fn playback_loop(
     debug!("Waited for data for {} ms", waited_millis);
 
     // Raise priority
-    let mut task_idx = 0;
-    let task_handle = unsafe { AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx)? };
-    if task_idx > 0 {
-        debug!("Playback thread raised priority, task index: {}", task_idx);
-        unsafe {
-            AvSetMmThreadPriority(task_handle, AVRT_PRIORITY_HIGH)?;
+    let _thread_handle = match promote_current_thread_to_real_time(0, 1) {
+        Ok(h) => {
+            debug!("Playback inner thread has real-time priority.");
+            Some(h)
         }
-    } else {
-        warn!("Failed to raise playback thread priority");
-    }
+        Err(err) => {
+            warn!(
+                "Playback inner thread could not get real time priority, error: {}",
+                err
+            );
+            None
+        }
+    };
 
     audio_client.start_stream()?;
     let mut running = true;
@@ -421,12 +425,13 @@ fn playback_loop(
         }
         render_client.write_to_device_from_deque(
             buffer_free_frame_count as usize,
-            blockalign,
             &mut sample_queue,
             None,
         )?;
         let curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
-        sync.bufferfill.store(curr_buffer_fill, Ordering::Relaxed);
+        if let Ok(mut estimator) = sync.bufferfill.try_lock() {
+            estimator.add(curr_buffer_fill)
+        }
         trace!("write ok");
         //println!("{} bef",prev_inst.elapsed().as_micros());
         if handle.wait_for_event(1000).is_err() {
@@ -477,16 +482,19 @@ fn capture_loop(
     let mut saved_buffer: Option<Vec<u8>> = None;
 
     // Raise priority
-    let mut task_idx = 0;
-    let task_handle = unsafe { AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx)? };
-    if task_idx > 0 {
-        debug!("Capture thread raised priority, task index: {}", task_idx);
-        unsafe {
-            AvSetMmThreadPriority(task_handle, AVRT_PRIORITY_HIGH)?;
+    let _thread_handle = match promote_current_thread_to_real_time(0, 1) {
+        Ok(h) => {
+            debug!("Capture inner thread has real-time priority.");
+            Some(h)
         }
-    } else {
-        warn!("Failed to raise capture thread priority");
-    }
+        Err(err) => {
+            warn!(
+                "Capture inner thread could not get real time priority, error: {}",
+                err
+            );
+            None
+        }
+    };
     trace!("Starting capture stream");
     audio_client.start_stream()?;
     trace!("Started capture stream");
@@ -543,7 +551,7 @@ fn capture_loop(
                 data.resize(nbr_bytes, 0);
             }
             let (nbr_frames_read, flags) =
-                capture_client.read_from_device(blockalign, &mut data[0..nbr_bytes])?;
+                capture_client.read_from_device(&mut data[0..nbr_bytes])?;
             if nbr_frames_read != available_frames {
                 warn!(
                     "Expected {} frames, got {}",
@@ -571,10 +579,8 @@ fn capture_loop(
                     if data.len() < (nbr_bytes + nbr_bytes_extra) {
                         data.resize(nbr_bytes + nbr_bytes_extra, 0);
                     }
-                    let (nbr_frames_read, flags) = capture_client.read_from_device(
-                        blockalign,
-                        &mut data[nbr_bytes..(nbr_bytes + nbr_bytes_extra)],
-                    )?;
+                    let (nbr_frames_read, flags) = capture_client
+                        .read_from_device(&mut data[nbr_bytes..(nbr_bytes + nbr_bytes_extra)])?;
                     if nbr_frames_read != extra_frames {
                         warn!("Expected {} frames, got {}", extra_frames, nbr_frames_read);
                     }
@@ -636,7 +642,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
             .name("WasapiPlayback".to_string())
             .spawn(move || {
                 // Devices typically request around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = 8 * 1024 / chunksize + 1;
+                let channel_capacity = 8 * 1024 / chunksize + 3;
                 debug!(
                     "Using a playback channel capacity of {} chunks.",
                     channel_capacity
@@ -644,7 +650,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let (tx_state_dev, rx_state_dev) = bounded(0);
                 let (tx_disconnectreason, rx_disconnectreason) = unbounded();
-                let buffer_fill = Arc::new(AtomicUsize::new(0));
+                let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(samplerate)));
                 let buffer_fill_clone = buffer_fill.clone();
                 let mut buffer_avg = countertimer::Averager::new();
                 let mut timer = countertimer::Stopwatch::new();
@@ -725,6 +731,19 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 }
                 debug!("Playback device ready and waiting");
                 barrier.wait();
+                let thread_handle = match promote_current_thread_to_real_time(0, 1) {
+                    Ok(h) => {
+                        debug!("Playback outer thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Playback outer thread could not get real time priority, error: {}",
+                            err
+                        );
+                        None
+                    }
+                };
                 debug!("Playback device starts now!");
                 loop {
                     match rx_state_dev.try_recv() {
@@ -754,7 +773,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                     0u8;
                                     channels * chunk.frames * sample_format.bytes_per_sample()
                                 ];
-                            buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
+                            buffer_avg.add_value(buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default());
                             {
                                 if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
                                     if let Some(av_delay) = buffer_avg.average() {
@@ -822,6 +841,16 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             break;
                         }
                     }
+                }
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => {
+                            debug!("Playback outer thread returned to normal priority.")
+                        }
+                        Err(_) => {
+                            warn!("Could not bring the outer playback thread back to normal priority.")
+                        }
+                    };
                 }
                 match tx_dev.send(PlaybackDeviceMessage::Stop) {
                     Ok(_) => {
@@ -905,6 +934,7 @@ impl CaptureDevice for WasapiCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
+        _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let exclusive = self.exclusive;
         let loopback = self.loopback;
@@ -1014,6 +1044,19 @@ impl CaptureDevice for WasapiCaptureDevice {
                     Err(_err) => {}
                 }
                 barrier.wait();
+                let thread_handle = match promote_current_thread_to_real_time(0, 1) {
+                    Ok(h) => {
+                        debug!("Capture outer thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Capture outer thread could not get real time priority, error: {}",
+                            err
+                        );
+                        None
+                    }
+                };
                 debug!("Capture device starts now!");
                 loop {
                     match command_channel.try_recv() {
@@ -1181,6 +1224,16 @@ impl CaptureDevice for WasapiCaptureDevice {
                             break;
                         }
                     }
+                }
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => {
+                            debug!("Capture outer thread returned to normal priority.")
+                        }
+                        Err(_) => {
+                            warn!("Could not bring the outer capture thread back to normal priority.")
+                        }
+                    };
                 }
                 stop_signal.store(true, Ordering::Relaxed);
                 debug!("Wait for inner capture thread to exit");

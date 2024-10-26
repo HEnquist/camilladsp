@@ -47,6 +47,12 @@
 
   Note the extra padding bytes (`0x00`) in S24LE. This scheme means that the samples get an "easier" alignment in memory, while wasting some space. In practice, this format isn't used much.
 
+- Why don't I get any sound on MacOS?
+
+  Apps need to be granted access to the microphone in order to record sound from any source.
+  Without microphone access, things appear to be running well but only silence is recorded.
+  See [Microphone access](./backend_coreaudio.md#microphone-access)
+
 ## Filtering
 
 - I only have filters with negative gain, why do I get clipping anyway?

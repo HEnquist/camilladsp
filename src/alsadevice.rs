@@ -19,13 +19,18 @@ use std::sync::{mpsc, Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
+use audio_thread_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
+
 use crate::alsadevice_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
 use crate::alsadevice_utils::{
     find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
-    list_samplerates_as_text, pick_preferred_format, process_events, state_desc, CaptureElements,
-    CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams,
+    list_samplerates_as_text, pick_preferred_format, process_events, state_desc,
+    sync_linked_controls, CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors,
+    PlaybackParams,
 };
 use crate::helpers::PIRateController;
 use crate::CommandMessage;
@@ -33,7 +38,7 @@ use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
-use crate::{CaptureStatus, PlaybackStatus};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 lazy_static! {
     static ref ALSA_MUTEX: Mutex<()> = Mutex::new(());
@@ -63,7 +68,8 @@ pub struct AlsaCaptureDevice {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
-    pub follow_volume_control: Option<String>,
+    pub link_volume_control: Option<String>,
+    pub link_mute_control: Option<String>,
 }
 
 struct CaptureChannels {
@@ -223,7 +229,8 @@ fn capture_buffer(
     hctl: &Option<HCtl>,
     elems: &CaptureElements,
     status_channel: &crossbeam_channel::Sender<StatusMessage>,
-    params: &CaptureParams,
+    params: &mut CaptureParams,
+    processing_params: &Arc<ProcessingParameters>,
 ) -> Res<CaptureResult> {
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
@@ -266,9 +273,10 @@ fn capture_buffer(
                         return Ok(CaptureResult::Stalled);
                     }
                     if pollresult.ctl {
-                        trace!("Got a control events");
+                        trace!("Got a control event");
                         if let Some(c) = ctl {
-                            let event_result = process_events(c, elems, status_channel, params);
+                            let event_result =
+                                process_events(c, elems, status_channel, params, processing_params);
                             match event_result {
                                 CaptureResult::Done => return Ok(event_result),
                                 CaptureResult::Stalled => debug!("Capture device is stalled"),
@@ -442,7 +450,14 @@ fn playback_loop_bytes(
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
     let millis_per_frame: f32 = 1000.0 / params.samplerate as f32;
     let mut device_stalled = false;
-
+    let mut pcm_paused = false;
+    let can_pause = pcmdevice
+        .hw_params_current()
+        .map(|p| p.can_pause())
+        .unwrap_or_default();
+    if can_pause {
+        debug!("Playback device supports pausing the stream")
+    }
     let io = pcmdevice.io_bytes();
     debug!("Playback loop uses a buffer of {} frames", params.chunksize);
     let mut buffer = vec![0u8; params.chunksize * params.bytes_per_frame];
@@ -472,6 +487,22 @@ fn playback_loop_bytes(
         params.target_level,
     );
     trace!("PB: {:?}", buf_manager);
+    let thread_handle = match promote_current_thread_to_real_time(
+        params.chunksize as u32,
+        params.samplerate as u32,
+    ) {
+        Ok(h) => {
+            debug!("Playback thread has real-time priority.");
+            Some(h)
+        }
+        Err(err) => {
+            warn!(
+                "Playback thread could not get real time priority, error: {}",
+                err
+            );
+            None
+        }
+    };
     loop {
         let eos_in_drain = if device_stalled {
             drain_check_eos(&channels.audio)
@@ -509,6 +540,7 @@ fn playback_loop_bytes(
                     params.bytes_per_frame,
                     buf_manager,
                 );
+                pcm_paused = false;
                 device_stalled = match playback_res {
                     Ok(PlaybackResult::Normal) => {
                         if device_stalled {
@@ -609,12 +641,25 @@ fn playback_loop_bytes(
             }
             Ok(AudioMessage::Pause) => {
                 trace!("PB: Pause message received");
+                if can_pause && !pcm_paused {
+                    let pause_res = pcmdevice.pause(true);
+                    trace!("pcm_pause result {:?}", pause_res);
+                    if pause_res.is_ok() {
+                        pcm_paused = true
+                    }
+                }
             }
             Ok(AudioMessage::EndOfStream) => {
                 channels
                     .status
                     .send(StatusMessage::PlaybackDone)
                     .unwrap_or(());
+                // Only drain if the device isn't paused
+                if !pcm_paused {
+                    let drain_res = pcmdevice.drain();
+                    // Draining isn't strictly needed, ignore any error and don't retry
+                    trace!("pcm_drain result {:?}", drain_res);
+                }
                 break;
             }
             Err(err) => {
@@ -623,9 +668,25 @@ fn playback_loop_bytes(
                     .status
                     .send(StatusMessage::PlaybackError(err.to_string()))
                     .unwrap_or(());
+                // Only drain if the device isn't paused
+                if !pcm_paused {
+                    let drain_res = pcmdevice.drain();
+                    // Draining isn't strictly needed, ignore any error and don't retry
+                    trace!("pcm_drain result {:?}", drain_res);
+                }
                 break;
             }
         }
+    }
+    if let Some(h) = thread_handle {
+        match demote_current_thread_from_real_time(h) {
+            Ok(_) => {
+                debug!("Playback thread returned to normal priority.")
+            }
+            Err(_) => {
+                warn!("Could not bring the playback thread back to normal priority.")
+            }
+        };
     }
 }
 
@@ -642,9 +703,10 @@ fn drain_check_eos(audio: &mpsc::Receiver<AudioMessage>) -> Option<AudioMessage>
 fn capture_loop_bytes(
     channels: CaptureChannels,
     pcmdevice: &alsa::PCM,
-    params: CaptureParams,
+    mut params: CaptureParams,
     mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
     buf_manager: &mut CaptureBufferManager,
+    processing_params: &Arc<ProcessingParameters>,
 ) {
     let io = pcmdevice.io_bytes();
     let pcminfo = pcmdevice.info().unwrap();
@@ -653,7 +715,7 @@ fn capture_loop_bytes(
     let subdevice = pcminfo.get_subdevice();
 
     let fds = pcmdevice.get().unwrap();
-    println!("{:?}", fds);
+    trace!("File descriptors: {:?}", fds);
     let nbr_pcm_fds = fds.len();
     let mut file_descriptors = FileDescriptors { fds, nbr_pcm_fds };
 
@@ -670,10 +732,11 @@ fn capture_loop_bytes(
     if let Some(c) = &ctl {
         c.subscribe_events(true).unwrap();
     }
+
     if let Some(h) = &hctl {
         let ctl_fds = h.get().unwrap();
         file_descriptors.fds.extend(ctl_fds.iter());
-        println!("{:?}", file_descriptors.fds);
+        //println!("{:?}", file_descriptors.fds);
         h.load().unwrap();
         element_loopback = find_elem(
             h,
@@ -690,15 +753,33 @@ fn capture_loop_bytes(
             "Capture Pitch 1000000",
         );
 
-        capture_elements.find_elements(h, device, subdevice, &params.follow_volume_control);
+        capture_elements.find_elements(
+            h,
+            device,
+            subdevice,
+            &params.link_volume_control,
+            &params.link_mute_control,
+        );
         if let Some(c) = &ctl {
             if let Some(ref vol_elem) = capture_elements.volume {
                 let vol_db = vol_elem.read_volume_in_db(c);
                 info!("Using initial volume from Alsa: {:?}", vol_db);
                 if let Some(vol) = vol_db {
+                    params.linked_volume_value = Some(vol);
                     channels
                         .status
                         .send(StatusMessage::SetVolume(vol))
+                        .unwrap_or_default();
+                }
+            }
+            if let Some(ref mute_elem) = capture_elements.mute {
+                let active = mute_elem.read_as_bool();
+                info!("Using initial active switch from Alsa: {:?}", active);
+                if let Some(active_val) = active {
+                    params.linked_mute_value = Some(!active_val);
+                    channels
+                        .status
+                        .send(StatusMessage::SetMute(!active_val))
                         .unwrap_or_default();
                 }
             }
@@ -742,6 +823,22 @@ fn capture_loop_bytes(
         peak: vec![0.0; params.channels],
     };
     let mut channel_mask = vec![true; params.channels];
+    let thread_handle = match promote_current_thread_to_real_time(
+        params.chunksize as u32,
+        params.samplerate as u32,
+    ) {
+        Ok(h) => {
+            debug!("Capture thread has real-time priority.");
+            Some(h)
+        }
+        Err(err) => {
+            warn!(
+                "Capture thread could not get real time priority, error: {}",
+                err
+            );
+            None
+        }
+    };
     loop {
         match channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -810,7 +907,8 @@ fn capture_loop_bytes(
             &hctl,
             &capture_elements,
             &channels.status,
-            &params,
+            &mut params,
+            processing_params,
         );
         match capture_res {
             Ok(CaptureResult::Normal) => {
@@ -907,6 +1005,7 @@ fn capture_loop_bytes(
                 .add_record(chunk_stats.peak_linear());
         }
         value_range = chunk.maxval - chunk.minval;
+        trace!("Captured chunk with value range {}", value_range);
         if device_stalled {
             state = ProcessingState::Stalled;
         } else {
@@ -938,6 +1037,17 @@ fn capture_loop_bytes(
                 break;
             }
         }
+        sync_linked_controls(processing_params, &mut params, &mut capture_elements, &ctl);
+    }
+    if let Some(h) = thread_handle {
+        match demote_current_thread_from_real_time(h) {
+            Ok(_) => {
+                debug!("Capture thread returned to normal priority.")
+            }
+            Err(_) => {
+                warn!("Could not bring the capture thread back to normal priority.")
+            }
+        };
     }
     params.capture_status.write().state = ProcessingState::Inactive;
 }
@@ -1060,6 +1170,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -1075,7 +1186,8 @@ impl CaptureDevice for AlsaCaptureDevice {
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let stop_on_inactive = self.stop_on_inactive;
-        let follow_volume_control = self.follow_volume_control.clone();
+        let link_volume_control = self.link_volume_control.clone();
+        let link_mute_control = self.link_mute_control.clone();
         let mut buf_manager = CaptureBufferManager::new(
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
@@ -1122,7 +1234,10 @@ impl CaptureDevice for AlsaCaptureDevice {
                             stop_on_rate_change,
                             rate_measure_interval,
                             stop_on_inactive,
-                            follow_volume_control,
+                            link_volume_control,
+                            link_mute_control,
+                            linked_mute_value: None,
+                            linked_volume_value: None,
                         };
                         let cap_channels = CaptureChannels {
                             audio: channel,
@@ -1135,6 +1250,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             cap_params,
                             resampler,
                             &mut buf_manager,
+                            &processing_params,
                         );
                     }
                     Err(err) => {

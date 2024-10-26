@@ -208,6 +208,7 @@ mod tests {
             description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
+            labels: None,
         };
         let used = used_input_channels(&conf);
         assert_eq!(used, vec![true, true]);
@@ -268,6 +269,7 @@ mod tests {
             description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
+            labels: None,
         };
         let used = used_input_channels(&conf);
         assert_eq!(used, vec![false, true]);
@@ -328,6 +330,7 @@ mod tests {
             description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
+            labels: None,
         };
         let used = used_input_channels(&conf);
         assert_eq!(used, vec![false, true]);
@@ -388,6 +391,7 @@ mod tests {
             description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
+            labels: None,
         };
         let used = used_input_channels(&conf);
         assert_eq!(used, vec![false, true]);
@@ -448,6 +452,7 @@ mod tests {
             description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
+            labels: None,
         };
         let mix = mixer::Mixer::from_config("dummy".to_string(), conf);
         assert_eq!(mix.channels_in, 2);
@@ -535,6 +540,7 @@ mod tests {
             description: None,
             channels: chans,
             mapping: vec![map0, map1, map2, map3],
+            labels: None,
         };
         let mix = mixer::Mixer::from_config("dummy".to_string(), conf);
         assert_eq!(mix.channels_in, 2);
