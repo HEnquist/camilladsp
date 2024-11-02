@@ -589,8 +589,7 @@ fn playback_loop_bytes(
                 if !device_stalled {
                     // updates only for non-stalled device
                     chunk.update_stats(&mut chunk_stats);
-                    {
-                        let mut playback_status = params.playback_status.write();
+                    if let Some(mut playback_status) = params.playback_status.try_write() {
                         if conversion_result.1 > 0 {
                             playback_status.clipped_samples += conversion_result.1;
                         }
@@ -600,6 +599,8 @@ fn playback_loop_bytes(
                         playback_status
                             .signal_peak
                             .add_record(chunk_stats.peak_linear());
+                    } else {
+                        warn!("playback status blocked, skip update");
                     }
                     if let Some(delay) = delay_at_chunk_recvd {
                         if delay != 0 {
@@ -628,13 +629,16 @@ fn playback_loop_bytes(
                                         .unwrap_or(());
                                 }
                             }
-                            let mut playback_status = params.playback_status.write();
-                            playback_status.buffer_level = avg_delay as usize;
-                            debug!(
-                                "PB: buffer level: {:.1}, signal rms: {:?}",
-                                avg_delay,
-                                playback_status.signal_rms.last_sqrt()
-                            );
+                            if let Some(mut playback_status) = params.playback_status.try_write() {
+                                playback_status.buffer_level = avg_delay as usize;
+                                debug!(
+                                    "PB: buffer level: {:.1}, signal rms: {:?}",
+                                    avg_delay,
+                                    playback_status.signal_rms.last_sqrt()
+                                );
+                            } else {
+                                warn!("playback params blocked, skip update 2");
+                            }
                         }
                     }
                 }
@@ -914,8 +918,7 @@ fn capture_loop_bytes(
             Ok(CaptureResult::Normal) => {
                 xtrace!("Captured {} bytes", capture_bytes);
                 averager.add_value(capture_bytes);
-                {
-                    let capture_status = params.capture_status.upgradable_read();
+                if let Some(capture_status) = params.capture_status.try_upgradable_read() {
                     if averager.larger_than_millis(capture_status.update_interval as u64) {
                         device_stalled = false;
                         let bytes_per_sec = averager.average();
@@ -923,12 +926,19 @@ fn capture_loop_bytes(
                         let measured_rate_f = bytes_per_sec
                             / (params.channels * params.store_bytes_per_sample) as f64;
                         trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
-                        let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
-                        capture_status.measured_samplerate = measured_rate_f as usize;
-                        capture_status.signal_range = value_range as f32;
-                        capture_status.rate_adjust = rate_adjust as f32;
-                        capture_status.state = state;
+                        if let Ok(mut capture_status) =
+                            RwLockUpgradableReadGuard::try_upgrade(capture_status)
+                        {
+                            capture_status.measured_samplerate = measured_rate_f as usize;
+                            capture_status.signal_range = value_range as f32;
+                            capture_status.rate_adjust = rate_adjust as f32;
+                            capture_status.state = state;
+                        } else {
+                            warn!("capture status upgrade blocked, skip update");
+                        }
                     }
+                } else {
+                    warn!("capture status blocked, skip update");
                 }
                 watcher_averager.add_value(capture_bytes);
                 if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
@@ -995,14 +1005,15 @@ fn capture_loop_bytes(
             &params.capture_status.read().used_channels,
         );
         chunk.update_stats(&mut chunk_stats);
-        {
-            let mut capture_status = params.capture_status.write();
+        if let Some(mut capture_status) = params.capture_status.try_write() {
             capture_status
                 .signal_rms
                 .add_record_squared(chunk_stats.rms_linear());
             capture_status
                 .signal_peak
                 .add_record(chunk_stats.peak_linear());
+        } else {
+            warn!("capture status blocked, skip update 2");
         }
         value_range = chunk.maxval - chunk.minval;
         trace!("Captured chunk with value range {}", value_range);
