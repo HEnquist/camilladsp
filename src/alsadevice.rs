@@ -600,7 +600,7 @@ fn playback_loop_bytes(
                             .signal_peak
                             .add_record(chunk_stats.peak_linear());
                     } else {
-                        warn!("playback status blocked, skip update");
+                        xtrace!("playback status blocked, skip update");
                     }
                     if let Some(delay) = delay_at_chunk_recvd {
                         if delay != 0 {
@@ -637,7 +637,7 @@ fn playback_loop_bytes(
                                     playback_status.signal_rms.last_sqrt()
                                 );
                             } else {
-                                warn!("playback params blocked, skip update 2");
+                                xtrace!("playback params blocked, skip rms update");
                             }
                         }
                     }
@@ -938,7 +938,7 @@ fn capture_loop_bytes(
                         }
                     }
                 } else {
-                    warn!("capture status blocked, skip update");
+                    xtrace!("capture status blocked, skip update");
                 }
                 watcher_averager.add_value(capture_bytes);
                 if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
@@ -1013,7 +1013,7 @@ fn capture_loop_bytes(
                 .signal_peak
                 .add_record(chunk_stats.peak_linear());
         } else {
-            warn!("capture status blocked, skip update 2");
+            xtrace!("capture status blocked, skip rms update");
         }
         value_range = chunk.maxval - chunk.minval;
         trace!("Captured chunk with value range {}", value_range);
