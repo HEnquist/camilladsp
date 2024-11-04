@@ -934,7 +934,7 @@ fn capture_loop_bytes(
                             capture_status.rate_adjust = rate_adjust as f32;
                             capture_status.state = state;
                         } else {
-                            warn!("capture status upgrade blocked, skip update");
+                            xtrace!("capture status upgrade blocked, skip update");
                         }
                     }
                 } else {
