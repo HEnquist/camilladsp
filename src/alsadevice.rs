@@ -255,9 +255,9 @@ fn capture_buffer(
     let millis_per_chunk = 1000 * frames_to_read / params.samplerate;
 
     loop {
-        let mut timeout_millis = 4 * millis_per_chunk as u32;
-        if timeout_millis < 10 {
-            timeout_millis = 10;
+        let mut timeout_millis = 8 * millis_per_chunk as u32;
+        if timeout_millis < 20 {
+            timeout_millis = 20;
         }
         let start = if log_enabled!(log::Level::Trace) {
             Some(Instant::now())
