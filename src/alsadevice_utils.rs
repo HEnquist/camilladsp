@@ -539,7 +539,7 @@ pub fn get_event_action(
             }
         }
     }
-    debug!("Ignoring event from unknown numid {}", numid);
+    trace!("Ignoring event from control with numid {}", numid);
     EventAction::None
 }
 
