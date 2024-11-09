@@ -13,7 +13,7 @@
   The config file is invalid Yaml. The error from the Yaml parser is printed in the next line.
 
 ### Config options
-- target_level can't be larger than *1234*,
+- target_level cannot be larger than *1234*,
 
   Target level can't be larger than twice the chunksize.
 

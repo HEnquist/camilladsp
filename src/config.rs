@@ -1832,8 +1832,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     #[cfg(not(target_os = "linux"))]
     let target_level_limit = 2 * conf.devices.chunksize;
 
-    if conf.devices.target_level() >= target_level_limit {
-        let msg = format!("target_level can't be larger than {}", target_level_limit);
+    if conf.devices.target_level() > target_level_limit {
+        let msg = format!("target_level cannot be larger than {}", target_level_limit);
         return Err(ConfigError::new(&msg).into());
     }
     if let Some(period) = conf.devices.adjust_period {
