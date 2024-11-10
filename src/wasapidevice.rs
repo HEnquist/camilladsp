@@ -301,6 +301,7 @@ enum PlaybackDeviceMessage {
 }
 
 // Playback loop, play samples received from channel
+#[allow(clippy::too_many_arguments)]
 fn playback_loop(
     audio_client: wasapi::AudioClient,
     render_client: wasapi::AudioRenderClient,
