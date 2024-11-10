@@ -6,6 +6,8 @@ use crate::countertimer;
 use crate::helpers::PIRateController;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use ringbuf::wrap::caching::Caching;
+use ringbuf::{traits::*, HeapRb};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -16,8 +18,6 @@ use std::thread;
 use std::time::Duration;
 use wasapi;
 use wasapi::DeviceCollection;
-use ringbuf::{traits::*, HeapRb};
-use ringbuf::wrap::caching::Caching;
 
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -481,7 +481,7 @@ fn capture_loop(
 
     let mut inactive = false;
 
-    let mut data = vec![0u8; 4*blockalign*1024];
+    let mut data = vec![0u8; 8 * blockalign * 1024];
 
     // Raise priority
     let _thread_handle = match promote_current_thread_to_real_time(0, 1) {
@@ -538,7 +538,6 @@ fn capture_loop(
 
         // If no available frames, just skip the rest of this loop iteration
         if available_frames > 0 {
-
             let nbr_bytes = available_frames as usize * blockalign;
 
             let (nbr_frames_read, flags) =
@@ -563,7 +562,7 @@ fn capture_loop(
             // in shared mode. This device seems to misbehave and not provide
             // the buffers right after the event occurs.
             // Check if more samples are available and read again.
-            /* 
+            /*
             if let Some(extra_frames) = capture_client.get_next_nbr_frames()? {
                 if extra_frames > 0 {
                     debug!("Workaround, reading {} frames more", extra_frames);
@@ -588,20 +587,24 @@ fn capture_loop(
             } */
             let pushed_bytes = channels.ringbuf.push_slice(&data[0..nbr_bytes]);
             if pushed_bytes < nbr_bytes {
-                debug!("Ring buffer is full, dropped {} out of {} bytes", nbr_bytes - pushed_bytes, nbr_bytes);
+                debug!(
+                    "Ring buffer is full, dropped {} out of {} bytes",
+                    nbr_bytes - pushed_bytes,
+                    nbr_bytes
+                );
             }
-            if nbr_bytes > 0 {
-                match channels.tx_filled.try_send((chunk_nbr, pushed_bytes)) {
-                    Ok(()) => {}
-                    Err(TrySendError::Full((nbr, length))) => {
-                        // TODO this should not happen, make sure ringbuffer gets full first..
-                        debug!("Dropping captured chunk {} with len {}", nbr, length);
-                    }
-                    Err(TrySendError::Disconnected(_)) => {
-                        error!("Error sending, channel disconnected");
-                        audio_client.stop_stream()?;
-                        return Err(DeviceError::new("Channel disconnected").into());
-                    }
+            match channels.tx_filled.try_send((chunk_nbr, pushed_bytes)) {
+                Ok(()) => {}
+                Err(TrySendError::Full((nbr, length))) => {
+                    warn!(
+                        "Notification channel full, dropping chunk nbr {} with len {}",
+                        nbr, length
+                    );
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    error!("Error sending, channel disconnected");
+                    audio_client.stop_stream()?;
+                    return Err(DeviceError::new("Channel disconnected").into());
                 }
             }
             chunk_nbr += 1;
@@ -958,14 +961,14 @@ impl CaptureDevice for WasapiCaptureDevice {
                         chunksize,
                 );
                 // Devices typically give around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = 8*chunksize/1024 + 1;
+                let channel_capacity = 16*chunksize/1024 + 10;
                 debug!("Using a capture channel capacity of {} buffers.", channel_capacity);
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
 
                 let (tx_state_dev, rx_state_dev) = bounded(0);
                 let (tx_disconnectreason, rx_disconnectreason) = unbounded();
 
-                let ringbuffer = HeapRb::<u8>::new(channels * bytes_per_sample * chunksize * 4);
+                let ringbuffer = HeapRb::<u8>::new(channels * bytes_per_sample * ( 2 * chunksize + 2048 ));
                 let (device_producer, mut device_consumer) = ringbuffer.split();
 
                 trace!("Build input stream");
@@ -1015,7 +1018,6 @@ impl CaptureDevice for WasapiCaptureDevice {
                         return;
                     },
                 }
-                let chunksize_samples = channels * chunksize;
                 let mut capture_frames = chunksize;
                 let mut averager = countertimer::TimeAverage::new();
                 let mut watcher_averager = countertimer::TimeAverage::new();
@@ -1027,7 +1029,6 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let mut state = ProcessingState::Running;
                 let mut saved_state = state;
                 let blockalign = bytes_per_sample*channels;
-                let mut data_queue: VecDeque<u8> = VecDeque::with_capacity(4 * blockalign * chunksize_samples );
                 // TODO check if this ever needs to be resized
                 let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                 let mut expected_chunk_nbr = 0;
@@ -1101,7 +1102,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         capture_frames,
                     );
                     let capture_bytes = blockalign * capture_frames;
-                    while data_queue.len() < (blockalign * capture_frames) {
+                    while device_consumer.occupied_len() < (blockalign * capture_frames) {
                         trace!("capture device needs more samples to make chunk, reading from channel");
                         match rx_dev.recv() {
                             Ok((chunk_nbr, data_bytes)) => {
@@ -1123,9 +1124,6 @@ impl CaptureDevice for WasapiCaptureDevice {
                                     warn!("Samples were dropped, missing {} buffers", chunk_nbr - expected_chunk_nbr);
                                     expected_chunk_nbr = chunk_nbr;
                                 }
-                                for element in device_consumer.pop_iter().take(data_bytes) {
-                                    data_queue.push_back(element);
-                                }
                             }
                             Err(err) => {
                                 error!("Channel is closed");
@@ -1136,9 +1134,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         }
                     }
                     if state != ProcessingState::Stalled {
-                        for element in data_buffer.iter_mut().take(capture_bytes) {
-                            *element = data_queue.pop_front().unwrap();
-                        }
+                        device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
                         averager.add_value(capture_frames);
                         if let Some(capture_status) = capture_status.try_upgradable_read() {
                             if averager.larger_than_millis(capture_status.update_interval as u64)
