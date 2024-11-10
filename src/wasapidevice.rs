@@ -296,7 +296,7 @@ struct PlaybackSync {
 }
 
 enum PlaybackDeviceMessage {
-    Data(Vec<u8>),
+    Data(usize),
     Stop,
 }
 
@@ -309,6 +309,7 @@ fn playback_loop(
     chunksize: usize,
     samplerate: f64,
     sync: PlaybackSync,
+    mut ringbuffer: Caching<Arc<HeapRb<u8>>, false, true>,
 ) -> Res<()> {
     let mut buffer_free_frame_count = audio_client.get_bufferframecount()?;
     let mut sample_queue: VecDeque<u8> = VecDeque::with_capacity(
@@ -393,10 +394,10 @@ fn playback_loop(
         while sample_queue.len() < (blockalign * buffer_free_frame_count as usize) {
             trace!("playback loop needs more samples, reading from channel");
             match sync.rx_play.try_recv() {
-                Ok(PlaybackDeviceMessage::Data(chunk)) => {
+                Ok(PlaybackDeviceMessage::Data(frames)) => {
                     trace!("got chunk");
-                    for element in chunk.iter() {
-                        sample_queue.push_back(*element);
+                    for element in ringbuffer.pop_iter().take(frames) {
+                        sample_queue.push_back(element);
                     }
                     if !running {
                         running = true;
@@ -588,7 +589,7 @@ fn capture_loop(
             let pushed_bytes = channels.ringbuf.push_slice(&data[0..nbr_bytes]);
             if pushed_bytes < nbr_bytes {
                 debug!(
-                    "Ring buffer is full, dropped {} out of {} bytes",
+                    "Capture ring buffer is full, dropped {} out of {} bytes",
                     nbr_bytes - pushed_bytes,
                     nbr_bytes
                 );
@@ -661,6 +662,9 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 trace!("Build output stream");
                 let mut conversion_result;
 
+                let ringbuffer = HeapRb::<u8>::new(channels * sample_format.bytes_per_sample() * ( 2 * chunksize + 2048 ));
+                let (mut device_producer, device_consumer) = ringbuffer.split();
+
                 // wasapi device loop
                 let innerhandle = thread::Builder::new()
                     .name("WasapiPlaybackInner".to_string())
@@ -697,6 +701,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             chunksize,
                             samplerate as f64,
                             sync,
+                            device_consumer,
                         );
                         if let Err(err) = result {
                             let msg = format!("Playback failed with error: {}", err);
@@ -741,6 +746,13 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                         None
                     }
                 };
+
+                let mut buf =
+                    vec![
+                        0u8;
+                        channels * chunksize * sample_format.bytes_per_sample()
+                    ];
+
                 debug!("Playback device starts now!");
                 loop {
                     match rx_state_dev.try_recv() {
@@ -765,11 +777,6 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
-                            let mut buf =
-                                vec![
-                                    0u8;
-                                    channels * chunk.frames * sample_format.bytes_per_sample()
-                                ];
                             buffer_avg.add_value(buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default());
 
                             if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
@@ -807,7 +814,15 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             else {
                                 xtrace!("playback status blocked, skip rms update");
                             }
-                            match tx_dev.send(PlaybackDeviceMessage::Data(buf)) {
+                            let pushed_bytes = device_producer.push_slice(&buf[0..conversion_result.0]);
+                            if pushed_bytes < conversion_result.0 {
+                                debug!(
+                                    "Playback ring buffer is full, dropped {} out of {} bytes",
+                                    conversion_result.0 - pushed_bytes,
+                                    conversion_result.0
+                                );
+                            }
+                            match tx_dev.send(PlaybackDeviceMessage::Data(pushed_bytes)) {
                                 Ok(_) => {}
                                 Err(err) => {
                                     error!("Playback device channel error: {}", err);
