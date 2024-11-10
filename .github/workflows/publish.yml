@@ -192,8 +192,8 @@ jobs:
           asset_name: camilladsp-windows7-amd64.zip
           tag: ${{ github.ref }}
   macos:
-    name: macOS
-    runs-on: macos-latest
+    name: macOS Intel
+    runs-on: macos-13
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -217,7 +217,7 @@ jobs:
 
 
   macos_arm:
-    name: macOS aarch64
+    name: macOS Arm
     runs-on: macos-latest
     steps:
       - name: Checkout sources
@@ -225,14 +225,12 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
 
       - name: Build
-        run: cargo build --release --target aarch64-apple-darwin
+        run: cargo build --release
 
       - name: Compress
-        run: tar -zcvf camilladsp.tar.gz -C target/aarch64-apple-darwin/release camilladsp
+        run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
