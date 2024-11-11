@@ -395,9 +395,9 @@ fn playback_loop(
         while sample_queue.len() < (blockalign * buffer_free_frame_count as usize) {
             trace!("playback loop needs more samples, reading from channel");
             match sync.rx_play.try_recv() {
-                Ok(PlaybackDeviceMessage::Data(frames)) => {
+                Ok(PlaybackDeviceMessage::Data(bytes)) => {
                     trace!("got chunk");
-                    for element in ringbuffer.pop_iter().take(frames) {
+                    for element in ringbuffer.pop_iter().take(bytes) {
                         sample_queue.push_back(element);
                     }
                     if !running {
