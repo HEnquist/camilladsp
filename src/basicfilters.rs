@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use circular_queue::CircularQueue;
+use ringbuf::storage::Heap;
+use ringbuf::traits::*;
+use ringbuf::LocalRb;
 
 use crate::audiodevice::AudioChunk;
 use crate::biquad::{Biquad, BiquadCoefficients};
@@ -21,7 +23,7 @@ pub struct Gain {
 pub struct Delay {
     pub name: String,
     samplerate: usize,
-    queue: CircularQueue<PrcFmt>,
+    queue: LocalRb<Heap<PrcFmt>>,
     biquad: Option<Biquad>,
 }
 
@@ -347,9 +349,9 @@ impl Delay {
 
         // for super-small delays, store at least a single sample
         let integerdelay = integerdelay.max(1);
-        let mut queue = CircularQueue::with_capacity(integerdelay);
+        let mut queue = LocalRb::new(integerdelay);
         for _ in 0..integerdelay {
-            queue.push(0.0);
+            let _ = queue.try_push(0.0);
         }
 
         Self {
@@ -379,7 +381,7 @@ impl Filter for Delay {
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         for item in waveform.iter_mut() {
             // this returns the item that was popped while pushing
-            *item = self.queue.push(*item).unwrap();
+            *item = self.queue.push_overwrite(*item).unwrap();
         }
         if let Some(bq) = &mut self.biquad {
             bq.process_waveform(waveform)?;
