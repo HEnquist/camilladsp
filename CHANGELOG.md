@@ -1,5 +1,7 @@
 ## v3.0.0
 New features:
+- Optional multithreaded filter processing.
+- Request higher proprity of audio threads for improved stability.
 - Add a signal generator capture device.
 - Optionally write wav header when outputting to file or stdout.
 - Add `WavFile` capture device type for reading wav files.
@@ -8,9 +10,13 @@ New features:
 - Linux: Subscribe to capture device control events for volume, sample rate and format changes.
 - Linux: Optionally select Alsa sample format automatically.
 - Improved controller for rate adjustment.
-- Command line options fo setting aux volume and mute.
+- Command line options for setting aux volume and mute.
+- Optional user-defined volume limits for volume adjust commands.
 - Add noise gate.
+- Add optional channel labels for capture devices and mixers.
+- Optional log file rotation.
 Changes:
+- Remove the optional use of FFTW instead of RustFFT.
 - Rename `File` capture device to `RawFile`.
 - Filter pipeline steps take a list of channels to filter instead of a single one.
 Bugfixes:

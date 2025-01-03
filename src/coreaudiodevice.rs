@@ -13,9 +13,8 @@ use std::ffi::CStr;
 use std::mem;
 use std::os::raw::{c_char, c_void};
 use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -33,8 +32,13 @@ use coreaudio::error::Error as CoreAudioError;
 
 use coreaudio::sys::*;
 
+use audio_thread_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
+
 use crate::CommandMessage;
 use crate::PrcFmt;
+use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
@@ -388,10 +392,10 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
             .name("CoreaudioPlayback".to_string())
             .spawn(move || {
                 // Devices typically request around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = 8 * 1024 / chunksize + 1;
+                let channel_capacity = 8 * 1024 / chunksize + 3;
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
-                let buffer_fill = Arc::new(AtomicUsize::new(0));
+                let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(samplerate)));
                 let buffer_fill_clone = buffer_fill.clone();
                 let mut buffer_avg = countertimer::Averager::new();
                 let mut timer = countertimer::Stopwatch::new();
@@ -400,10 +404,6 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     peak: vec![0.0; channels],
                 };
                 let blockalign = 4 * channels;
-                // Rough guess of the number of frames per callback.
-                let callback_frames = 512;
-                // TODO check if always 512!
-                //trace!("Estimated playback callback period to {} frames", callback_frames);
 
                 let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
                 let mut rate_adjust_value = 1.0;
@@ -466,16 +466,11 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         let byte = sample_queue.pop_front().unwrap_or(0);
                         *bufferbyte = byte;
                     }
-                    let mut curr_buffer_fill =
+                    let curr_buffer_fill =
                         sample_queue.len() / blockalign + rx_dev.len() * chunksize;
-                    // Reduce the measured buffer fill by approximtely one callback size
-                    // to force a larger.
-                    if curr_buffer_fill > callback_frames {
-                        curr_buffer_fill -= callback_frames;
-                    } else {
-                        curr_buffer_fill = 0;
+                    if let Ok(mut estimator) = buffer_fill_clone.try_lock() {
+                        estimator.add(curr_buffer_fill)
                     }
-                    buffer_fill_clone.store(curr_buffer_fill, Ordering::Relaxed);
                     Ok(())
                 });
                 match callback_res {
@@ -512,6 +507,20 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         return;
                     }
                 }
+                let thread_handle =
+                match promote_current_thread_to_real_time(chunksize as u32, samplerate as u32) {
+                    Ok(h) => {
+                        debug!("Playback thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Playback thread could not get real time priority, error: {}",
+                            err
+                        );
+                        None
+                    }
+                };
                 'deviceloop: loop {
                     if !alive_listener.is_alive() {
                         error!("Playback device is no longer alive");
@@ -524,7 +533,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
-                            buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
+                            buffer_avg.add_value(buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default());
                             if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
                                 if let Some(av_delay) = buffer_avg.average() {
                                     let speed = rate_controller.next(av_delay);
@@ -565,8 +574,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 &mut buf,
                                 &SampleFormat::FLOAT32LE,
                             );
-                            {
-                                let mut playback_status = playback_status.write();
+                            if let Some(mut playback_status) = playback_status.try_write() {
                                 if conversion_result.1 > 0 {
                                     playback_status.clipped_samples += conversion_result.1;
                                 }
@@ -576,6 +584,9 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 playback_status
                                     .signal_peak
                                     .add_record(chunk_stats.peak_linear());
+                            }
+                            else {
+                                xtrace!("playback status blocket, skip rms update");
                             }
                             match tx_dev.send(PlaybackDeviceMessage::Data(buf)) {
                                 Ok(_) => {}
@@ -606,6 +617,16 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         }
                     }
                 }
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => {
+                            debug!("Playback thread returned to normal priority.")
+                        }
+                        Err(_) => {
+                            warn!("Could not bring the playback thread back to normal priority.")
+                        }
+                    };
+                }
                 release_ownership(device_id).unwrap_or(());
             })?;
         Ok(Box::new(handle))
@@ -634,6 +655,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
+        _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -794,6 +816,19 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         return;
                     },
                 }
+                let thread_handle = match promote_current_thread_to_real_time(chunksize as u32, samplerate as u32) {
+                    Ok(h) => {
+                        debug!("Capture thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Capture thread could not get real time priority, error: {}",
+                            err
+                        );
+                        None
+                    }
+                };
                 'deviceloop: loop {
                     match command_channel.try_recv() {
                         Ok(CommandMessage::Exit) => {
@@ -885,12 +920,14 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         tries += 1;
                     }
                     if data_queue.len() < (blockalign * capture_frames) {
-                        {
-                            let mut capture_status = capture_status.write();
+                        if let Some(mut capture_status) = capture_status.try_write() {
                             capture_status.measured_samplerate = 0;
                             capture_status.signal_range = 0.0;
                             capture_status.rate_adjust = 0.0;
                             capture_status.state = ProcessingState::Stalled;
+                        }
+                        else {
+                            xtrace!("capture status blocked, skip update");
                         }
                         let msg = AudioMessage::Pause;
                         if channel.send(msg).is_err() {
@@ -910,8 +947,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         &capture_status.read().used_channels,
                     );
                     averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
-                    {
-                        let capture_status = capture_status.upgradable_read();
+                    if let Some(capture_status) = capture_status.try_upgradable_read() {
                         if averager.larger_than_millis(capture_status.update_interval as u64)
                         {
                             let samples_per_sec = averager.average();
@@ -921,12 +957,19 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                                 "Measured sample rate is {:.1} Hz",
                                 measured_rate_f
                             );
-                            let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
-                            capture_status.measured_samplerate = measured_rate_f as usize;
-                            capture_status.signal_range = value_range as f32;
-                            capture_status.rate_adjust = rate_adjust as f32;
-                            capture_status.state = state;
+                            if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
+                                capture_status.measured_samplerate = measured_rate_f as usize;
+                                capture_status.signal_range = value_range as f32;
+                                capture_status.rate_adjust = rate_adjust as f32;
+                                capture_status.state = state;
+                            }
+                            else {
+                                xtrace!("capture status upgrade blocked, skip update");
+                            }
                         }
+                    }
+                    else {
+                        xtrace!("capture status blocked, skip update");
                     }
                     watcher_averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
                     if watcher_averager.larger_than_millis(rate_measure_interval)
@@ -951,10 +994,12 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     }
                     prev_len = data_queue.len();
                     chunk.update_stats(&mut chunk_stats);
-                    {
-                        let mut capture_status = capture_status.write();
+                    if let Some(mut capture_status) = capture_status.try_write() {
                         capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                         capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                    }
+                    else {
+                        xtrace!("capture status blocked, skip rms update");
                     }
                     value_range = chunk.maxval - chunk.minval;
                     state = silence_counter.update(value_range);
@@ -983,6 +1028,16 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             break;
                         }
                     }
+                }
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => {
+                            debug!("Capture thread returned to normal priority.")
+                        }
+                        Err(_) => {
+                            warn!("Could not bring the capture thread back to normal priority.")
+                        }
+                    };
                 }
                 capture_status.write().state = ProcessingState::Inactive;
             })?;
