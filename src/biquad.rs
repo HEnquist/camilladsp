@@ -461,7 +461,7 @@ impl Biquad {
 
     /// Process a single sample, generic version
     #[cfg(not(all(target_arch = "x86_64", not(feature = "32bit"))))]
-    fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
+    pub fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
         let out = self.s1 + self.coeffs.b0 * input;
         self.s1 = self.s2 + self.coeffs.b1 * input - self.coeffs.a1 * out;
         self.s2 = self.coeffs.b2 * input - self.coeffs.a2 * out;

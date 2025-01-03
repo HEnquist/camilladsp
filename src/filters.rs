@@ -15,6 +15,7 @@ use crate::limiter;
 use crate::loudness;
 use crate::mixer;
 use crate::noisegate;
+use crate::race;
 use rawsample::SampleReader;
 use std::collections::HashMap;
 use std::fs::File;
@@ -380,6 +381,14 @@ impl Pipeline {
                                     conf.devices.chunksize,
                                 );
                                 Box::new(gate) as Box<dyn Processor>
+                            }
+                            config::Processor::RACE { parameters, .. } => {
+                                let race = race::RACE::from_config(
+                                    &step.name,
+                                    parameters,
+                                    conf.devices.samplerate,
+                                );
+                                Box::new(race) as Box<dyn Processor>
                             }
                         };
                         steps.push(PipelineStep::ProcessorStep(proc));

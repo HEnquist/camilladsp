@@ -2,6 +2,7 @@ use crate::compressor;
 use crate::filters;
 use crate::mixer;
 use crate::noisegate;
+use crate::race;
 use crate::wavtools::{find_data_in_wav_stream, WavParams};
 use parking_lot::RwLock;
 use serde::{de, Deserialize, Serialize};
@@ -1223,6 +1224,11 @@ pub enum Processor {
         description: Option<String>,
         parameters: NoiseGateParameters,
     },
+    RACE {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: RACEParameters,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1284,6 +1290,30 @@ impl NoiseGateParameters {
 
     pub fn process_channels(&self) -> Vec<usize> {
         self.process_channels.clone().unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RACEParameters {
+    pub channels: usize,
+    pub channel_a: usize,
+    pub channel_b: usize,
+    pub delay: PrcFmt,
+    #[serde(default)]
+    pub subsample_delay: Option<bool>,
+    #[serde(default)]
+    pub delay_unit: Option<TimeUnit>,
+    pub attenuation: PrcFmt,
+}
+
+impl RACEParameters {
+    pub fn subsample_delay(&self) -> bool {
+        self.subsample_delay.unwrap_or_default()
+    }
+
+    pub fn delay_unit(&self) -> TimeUnit {
+        self.delay_unit.unwrap_or(TimeUnit::Milliseconds)
     }
 }
 
@@ -2047,6 +2077,26 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                             Err(err) => {
                                                 let msg = format!(
                                                     "Invalid noise gate '{}'. Reason: {}",
+                                                    step.name, err
+                                                );
+                                                return Err(ConfigError::new(&msg).into());
+                                            }
+                                        }
+                                    }
+                                    Processor::RACE { parameters, .. } => {
+                                        let channels = parameters.channels;
+                                        if channels != num_channels {
+                                            let msg = format!(
+                                                "RACE processor '{}' has wrong number of channels. Expected {}, found {}.",
+                                                step.name, num_channels, channels
+                                            );
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
+                                        match race::validate_race(parameters) {
+                                            Ok(_) => {}
+                                            Err(err) => {
+                                                let msg = format!(
+                                                    "Invalid RACE processor '{}'. Reason: {}",
                                                     step.name, err
                                                 );
                                                 return Err(ConfigError::new(&msg).into());
