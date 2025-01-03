@@ -423,7 +423,7 @@ impl Biquad {
 
     /// Process a single sample, SSE2 version
     #[cfg(all(target_arch = "x86_64", not(feature = "32bit")))]
-    fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
+    pub fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
         unsafe {
             // load input
             let input_input = _mm_load1_pd(&input);
