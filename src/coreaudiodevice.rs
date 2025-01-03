@@ -574,8 +574,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 &mut buf,
                                 &SampleFormat::FLOAT32LE,
                             );
-                            {
-                                let mut playback_status = playback_status.write();
+                            if let Some(mut playback_status) = playback_status.try_write() {
                                 if conversion_result.1 > 0 {
                                     playback_status.clipped_samples += conversion_result.1;
                                 }
@@ -585,6 +584,9 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 playback_status
                                     .signal_peak
                                     .add_record(chunk_stats.peak_linear());
+                            }
+                            else {
+                                xtrace!("playback status blocket, skip rms update");
                             }
                             match tx_dev.send(PlaybackDeviceMessage::Data(buf)) {
                                 Ok(_) => {}
@@ -918,12 +920,14 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         tries += 1;
                     }
                     if data_queue.len() < (blockalign * capture_frames) {
-                        {
-                            let mut capture_status = capture_status.write();
+                        if let Some(mut capture_status) = capture_status.try_write() {
                             capture_status.measured_samplerate = 0;
                             capture_status.signal_range = 0.0;
                             capture_status.rate_adjust = 0.0;
                             capture_status.state = ProcessingState::Stalled;
+                        }
+                        else {
+                            xtrace!("capture status blocked, skip update");
                         }
                         let msg = AudioMessage::Pause;
                         if channel.send(msg).is_err() {
@@ -943,8 +947,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         &capture_status.read().used_channels,
                     );
                     averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
-                    {
-                        let capture_status = capture_status.upgradable_read();
+                    if let Some(capture_status) = capture_status.try_upgradable_read() {
                         if averager.larger_than_millis(capture_status.update_interval as u64)
                         {
                             let samples_per_sec = averager.average();
@@ -954,12 +957,19 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                                 "Measured sample rate is {:.1} Hz",
                                 measured_rate_f
                             );
-                            let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
-                            capture_status.measured_samplerate = measured_rate_f as usize;
-                            capture_status.signal_range = value_range as f32;
-                            capture_status.rate_adjust = rate_adjust as f32;
-                            capture_status.state = state;
+                            if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
+                                capture_status.measured_samplerate = measured_rate_f as usize;
+                                capture_status.signal_range = value_range as f32;
+                                capture_status.rate_adjust = rate_adjust as f32;
+                                capture_status.state = state;
+                            }
+                            else {
+                                xtrace!("capture status upgrade blocked, skip update");
+                            }
                         }
+                    }
+                    else {
+                        xtrace!("capture status blocked, skip update");
                     }
                     watcher_averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
                     if watcher_averager.larger_than_millis(rate_measure_interval)
@@ -984,10 +994,12 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     }
                     prev_len = data_queue.len();
                     chunk.update_stats(&mut chunk_stats);
-                    {
-                        let mut capture_status = capture_status.write();
+                    if let Some(mut capture_status) = capture_status.try_write() {
                         capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                         capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                    }
+                    else {
+                        xtrace!("capture status blocked, skip rms update");
                     }
                     value_range = chunk.maxval - chunk.minval;
                     state = silence_counter.update(value_range);

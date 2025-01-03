@@ -774,40 +774,41 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                     channels * chunk.frames * sample_format.bytes_per_sample()
                                 ];
                             buffer_avg.add_value(buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default());
-                            {
-                                if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
-                                    if let Some(av_delay) = buffer_avg.average() {
-                                        let speed = rate_controller.next(av_delay);
-                                        timer.restart();
-                                        buffer_avg.restart();
-                                        debug!(
-                                            "Current buffer level {:.1}, set capture rate to {:.4}%",
-                                            av_delay,
-                                            100.0 * speed
-                                        );
-                                        status_channel
-                                            .send(StatusMessage::SetSpeed(speed))
-                                            .unwrap_or(());
-                                        playback_status.write().buffer_level =
-                                            av_delay as usize;
-                                    }
+
+                            if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
+                                if let Some(av_delay) = buffer_avg.average() {
+                                    let speed = rate_controller.next(av_delay);
+                                    timer.restart();
+                                    buffer_avg.restart();
+                                    debug!(
+                                        "Current buffer level {:.1}, set capture rate to {:.4}%",
+                                        av_delay,
+                                        100.0 * speed
+                                    );
+                                    status_channel
+                                        .send(StatusMessage::SetSpeed(speed))
+                                        .unwrap_or(());
+                                    playback_status.write().buffer_level =
+                                        av_delay as usize;
                                 }
-                                conversion_result =
-                                    chunk_to_buffer_rawbytes(&chunk, &mut buf, &sample_format);
-                                chunk.update_stats(&mut chunk_stats);
-                                {
-                                    let mut playback_status = playback_status.write();
-                                    if conversion_result.1 > 0 {
-                                        playback_status.clipped_samples +=
-                                            conversion_result.1;
-                                    }
-                                    playback_status
-                                        .signal_rms
-                                        .add_record_squared(chunk_stats.rms_linear());
-                                    playback_status
-                                        .signal_peak
-                                        .add_record(chunk_stats.peak_linear());
+                            }
+                            conversion_result =
+                                chunk_to_buffer_rawbytes(&chunk, &mut buf, &sample_format);
+                            chunk.update_stats(&mut chunk_stats);
+                            if let Some(mut playback_status) = playback_status.try_write() {
+                                if conversion_result.1 > 0 {
+                                    playback_status.clipped_samples +=
+                                        conversion_result.1;
                                 }
+                                playback_status
+                                    .signal_rms
+                                    .add_record_squared(chunk_stats.rms_linear());
+                                playback_status
+                                    .signal_peak
+                                    .add_record(chunk_stats.peak_linear());
+                            }
+                            else {
+                                xtrace!("playback status blocked, skip rms update");
                             }
                             match tx_dev.send(PlaybackDeviceMessage::Data(buf)) {
                                 Ok(_) => {}
@@ -1148,19 +1149,25 @@ impl CaptureDevice for WasapiCaptureDevice {
                             *element = data_queue.pop_front().unwrap();
                         }
                         averager.add_value(capture_frames);
-                        {
-                            let capture_status = capture_status.upgradable_read();
+                        if let Some(capture_status) = capture_status.try_upgradable_read() {
                             if averager.larger_than_millis(capture_status.update_interval as u64)
                             {
                                 let samples_per_sec = averager.average();
                                 averager.restart();
                                 let measured_rate_f = samples_per_sec;
-                                let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
-                                capture_status.measured_samplerate = measured_rate_f as usize;
-                                capture_status.signal_range = value_range as f32;
-                                capture_status.rate_adjust = rate_adjust as f32;
-                                capture_status.state = state;
+                                if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
+                                    capture_status.measured_samplerate = measured_rate_f as usize;
+                                    capture_status.signal_range = value_range as f32;
+                                    capture_status.rate_adjust = rate_adjust as f32;
+                                    capture_status.state = state;
+                                }
+                                else {
+                                    xtrace!("capture status upgrade blocked, skip update");
+                                }
                             }
+                        }
+                        else {
+                            xtrace!("capture status blocked, skip update");
                         }
                         watcher_averager.add_value(capture_frames);
                         if watcher_averager.larger_than_millis(rate_measure_interval)
@@ -1191,10 +1198,12 @@ impl CaptureDevice for WasapiCaptureDevice {
                             &capture_status.read().used_channels,
                         );
                         chunk.update_stats(&mut chunk_stats);
-                        {
-                            let mut capture_status = capture_status.write();
+                        if let Some(mut capture_status) = capture_status.try_write() {
                             capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                             capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                        }
+                        else {
+                            xtrace!("capture status blocked, skip rms update");
                         }
                         value_range = chunk.maxval - chunk.minval;
                         state = silence_counter.update(value_range);

@@ -173,8 +173,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         }
                                     };
                                     chunk.update_stats(&mut chunk_stats);
-                                    {
-                                        let mut playback_status = playback_status.write();
+                                    if let Some(mut playback_status) = playback_status.try_write() {
                                         if nbr_clipped > 0 {
                                             playback_status.clipped_samples += nbr_clipped;
                                         }
@@ -184,6 +183,8 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         playback_status
                                             .signal_peak
                                             .add_record(chunk_stats.peak_linear());
+                                    } else {
+                                        xtrace!("playback status blocked, skip rms update");
                                     }
                                 }
                                 Ok(AudioMessage::Pause) => {
@@ -428,20 +429,26 @@ fn capture_loop(
                 nbr_bytes_read += bytes;
                 averager.add_value(bytes);
 
-                {
-                    let capture_status = params.capture_status.upgradable_read();
+                if let Some(capture_status) = params.capture_status.try_upgradable_read() {
                     if averager.larger_than_millis(capture_status.update_interval as u64) {
                         let bytes_per_sec = averager.average();
                         averager.restart();
                         let measured_rate_f = bytes_per_sec
                             / (params.channels * params.store_bytes_per_sample) as f64;
                         trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
-                        let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
-                        capture_status.measured_samplerate = measured_rate_f as usize;
-                        capture_status.signal_range = value_range as f32;
-                        capture_status.rate_adjust = rate_adjust as f32;
-                        capture_status.state = state;
+                        if let Ok(mut capture_status) =
+                            RwLockUpgradableReadGuard::try_upgrade(capture_status)
+                        {
+                            capture_status.measured_samplerate = measured_rate_f as usize;
+                            capture_status.signal_range = value_range as f32;
+                            capture_status.rate_adjust = rate_adjust as f32;
+                            capture_status.state = state;
+                        } else {
+                            xtrace!("capture status upgrade blocked, skip update");
+                        }
                     }
+                } else {
+                    xtrace!("capture status blocked, skip update");
                 }
                 watcher_averager.add_value(bytes);
                 if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
@@ -484,14 +491,15 @@ fn capture_loop(
             &params.capture_status.read().used_channels,
         );
         chunk.update_stats(&mut chunk_stats);
-        {
-            let mut capture_status = params.capture_status.write();
+        if let Some(mut capture_status) = params.capture_status.try_write() {
             capture_status
                 .signal_rms
                 .add_record_squared(chunk_stats.rms_linear());
             capture_status
                 .signal_peak
                 .add_record(chunk_stats.peak_linear());
+        } else {
+            xtrace!("capture status blocked, skip rms update");
         }
         value_range = chunk.maxval - chunk.minval;
         state = silence_counter.update(value_range);
