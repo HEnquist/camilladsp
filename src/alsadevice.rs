@@ -459,7 +459,7 @@ fn playback_loop_bytes(
                 } else {
                     None
                 };
-                trace!("PB: Avail at chunk rcvd: {:?}", avail_at_chunk_recvd);
+                //trace!("PB: Avail at chunk rcvd: {:?}", avail_at_chunk_recvd);
 
                 conversion_result =
                     chunk_to_buffer_rawbytes(&chunk, &mut buffer, &params.sample_format);
