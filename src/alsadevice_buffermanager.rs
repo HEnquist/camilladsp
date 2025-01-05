@@ -125,6 +125,8 @@ pub trait DeviceBufferManager {
         // +1 to make sure the device really stalls
         data.bufsize - data.avail_min + 1
     }
+
+    fn current_delay(&self, avail: Frames) -> Frames;
 }
 
 #[derive(Debug)]
@@ -182,6 +184,10 @@ impl DeviceBufferManager for CaptureBufferManager {
         self.data.threshold = threshold;
         Ok(())
     }
+
+    fn current_delay(&self, avail: Frames) -> Frames {
+        avail
+    }
 }
 
 #[derive(Debug)]
@@ -232,5 +238,9 @@ impl DeviceBufferManager for PlaybackBufferManager {
         swp.set_start_threshold(threshold)?;
         self.data.threshold = threshold;
         Ok(())
+    }
+
+    fn current_delay(&self, avail: Frames) -> Frames {
+        self.data.bufsize - avail
     }
 }

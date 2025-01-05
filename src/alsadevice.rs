@@ -520,14 +520,14 @@ fn playback_loop_bytes(
         match msg {
             Ok(AudioMessage::Audio(chunk)) => {
                 // measure delay only on running non-stalled device
-                let delay_at_chunk_recvd = if !device_stalled
+                let avail_at_chunk_recvd = if !device_stalled
                     && pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32
                 {
-                    pcmdevice.status().ok().map(|status| status.get_delay())
+                    pcmdevice.avail().ok()
                 } else {
                     None
                 };
-                //trace!("PB: Delay at chunk rcvd: {:?}", delay_at_chunk_recvd);
+                //trace!("PB: Avail at chunk rcvd: {:?}", avail_at_chunk_recvd);
 
                 conversion_result =
                     chunk_to_buffer_rawbytes(&chunk, &mut buffer, &params.sample_format);
@@ -602,10 +602,9 @@ fn playback_loop_bytes(
                     } else {
                         xtrace!("playback status blocked, skip update");
                     }
-                    if let Some(delay) = delay_at_chunk_recvd {
-                        if delay != 0 {
-                            buffer_avg.add_value(delay as f64);
-                        }
+                    if let Some(avail) = avail_at_chunk_recvd {
+                        let delay = buf_manager.current_delay(avail);
+                        buffer_avg.add_value(delay as f64);
                     }
                     if timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
                         if let Some(avg_delay) = buffer_avg.average() {
