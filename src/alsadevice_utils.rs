@@ -292,7 +292,7 @@ pub struct ElemData<'a> {
     numid: u32,
 }
 
-impl<'a> ElemData<'a> {
+impl ElemData<'_> {
     pub fn read_as_int(&self) -> Option<i32> {
         self.element
             .read()
