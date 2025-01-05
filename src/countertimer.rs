@@ -4,9 +4,6 @@ use crate::ProcessingState;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-/// A counter for watching if the signal has been silent
-/// for longer than a given limit.
-
 pub struct DeviceBufferEstimator {
     update_time: Instant,
     frames: usize,
@@ -38,6 +35,8 @@ impl DeviceBufferEstimator {
     }
 }
 
+/// A counter for watching if the signal has been silent
+/// for longer than a given limit.
 pub struct SilenceCounter {
     silence_threshold: PrcFmt,
     silence_limit_nbr: usize,
