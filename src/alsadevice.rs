@@ -53,6 +53,8 @@ pub struct AlsaPlaybackDevice {
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
+    pub buffersize: Option<usize>,
+    pub period: Option<usize>,
 }
 
 pub struct AlsaCaptureDevice {
@@ -70,6 +72,8 @@ pub struct AlsaCaptureDevice {
     pub stop_on_inactive: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
+    pub buffersize: Option<usize>,
+    pub period: Option<usize>,
 }
 
 struct CaptureChannels {
@@ -352,6 +356,7 @@ fn capture_buffer(
 }
 
 /// Open an Alsa PCM device
+#[allow(clippy::too_many_arguments)]
 fn open_pcm(
     devname: String,
     samplerate: u32,
@@ -359,6 +364,8 @@ fn open_pcm(
     sample_format: &Option<SampleFormat>,
     buf_manager: &mut dyn DeviceBufferManager,
     capture: bool,
+    optional_buffersize: Option<usize>,
+    optional_period: Option<usize>,
 ) -> Res<(alsa::PCM, SampleFormat)> {
     let direction = if capture { "Capture" } else { "Playback" };
     debug!(
@@ -412,8 +419,8 @@ fn open_pcm(
 
         // Set access mode, buffersize and periods
         hwp.set_access(Access::RWInterleaved)?;
-        buf_manager.apply_buffer_size(&hwp)?;
-        buf_manager.apply_period_size(&hwp)?;
+        buf_manager.apply_buffer_size(&hwp, optional_buffersize)?;
+        buf_manager.apply_period_size(&hwp, optional_period)?;
 
         // Apply
         pcmdev.hw_params(&hwp)?;
@@ -1120,6 +1127,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let conf_sample_format = self.sample_format;
         let mut buf_manager =
             PlaybackBufferManager::new(chunksize as Frames, target_level as Frames);
+        let optional_buffersize = self.buffersize;
+        let optional_period = self.period;
         let handle = thread::Builder::new()
             .name("AlsaPlayback".to_string())
             .spawn(move || {
@@ -1130,6 +1139,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     &conf_sample_format,
                     &mut buf_manager,
                     false,
+                    optional_buffersize,
+                    optional_period,
                 ) {
                     Ok((pcmdevice, sample_format)) => {
                         match status_channel.send(StatusMessage::PlaybackReady) {
@@ -1202,6 +1213,8 @@ impl CaptureDevice for AlsaCaptureDevice {
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
         );
+        let optional_buffersize = self.buffersize;
+        let optional_period = self.period;
 
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
@@ -1220,6 +1233,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                     &conf_sample_format,
                     &mut buf_manager,
                     true,
+                    optional_buffersize,
+                    optional_period,
                 ) {
                     Ok((pcmdevice, sample_format)) => {
                         match status_channel.send(StatusMessage::CaptureReady) {

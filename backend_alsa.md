@@ -178,6 +178,20 @@ but are supported by very few devices. Therefore these are checked last.
 
 Please also see [Find valid playback and capture parameters](#find-valid-playback-and-capture-parameters).
 
+### User defined buffer and period size
+CamillaDSP sets values for period and buffer sizes automatically.
+However, some devices have very particular requirements,
+and there are rare cases where the default values may not work.
+To work around these issues, and to allow debugging Alsa errors, both period and buffer size
+can be manually specified via the optional `period` and `buffersize` settings.
+These settings are available for both Alsa playback and capture devices.
+Both values are are given in number of frames.
+
+Be aware that the provided values are applied directly without any validation.
+Only use these settings if you are confident in what you're doing.
+Set them to `null` or omit them to use the automatic settings.
+
+
 ### Linking volume control to device volume
 It is possible to let CamillaDSP link its volume and mute controls to controls on the capture device.
 This is mostly useful when capturing from the USB Audio Gadget,
