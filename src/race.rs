@@ -1,4 +1,4 @@
-// RACE, recursive audio crosstalk elimination (check!)
+// RACE, recursive ambiophonic crosstalk eliminator
 
 use crate::audiodevice::AudioChunk;
 use crate::basicfilters::Delay;

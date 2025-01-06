@@ -2250,6 +2250,152 @@ pipeline:
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
 
+### RACE
+The "RACE" processor implements the recursive part of the
+Recursive Ambiophonic Crosstalk Eliminator (RACE) algorithm.
+A RACE processor processes a aingle pair of channels.
+Multiple processors can be used to process additional channel pairs.
+
+Parameters: 
+* `channels`: number of channels, must match the number of channels of the pipeline where the compressor is inserted.
+* `channel_a`: channel number of first channel of the pair.
+* `channel_b`: channel number of second channel of the pair.
+* `attenuation`: attenuation in dB, must be larger than zero. Typical values are 2 - 3 dB.
+* `delay`: delay value, must be larger than zero. Typical values are in the range 0.06 - 0.1 ms
+* `delay_unit`: unit for delay, see the `Delay` filter.
+* `subsample_delay`: enable subsample delay values, see the `Delay` filter.
+
+The RACE algorithm also uses filters to only process a limited range of the audio spectrum.
+These filters are not implemented in the RACE processor itself.
+Instead this processor is meant to be combined with normal CamillaDSP mixers and filters
+to make a complete solution.
+
+Example configuration:
+```yml
+processors:
+  race:
+    type: RACE
+    parameters:
+      channels: 6
+      channel_a: 2
+      channel_b: 3
+      attenuation: 3
+      delay: 0.09
+
+
+mixers:
+  2to6:
+    channels:
+      in: 2
+      out: 6
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 2
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 3
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 4
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 5
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+  6to2:
+    channels:
+      in: 6
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -3
+            inverted: false
+          - channel: 2
+            gain: -3
+            inverted: false
+          - channel: 4
+            gain: -3
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: -3
+            inverted: false
+          - channel: 3
+            gain: -3
+            inverted: false
+          - channel: 5
+            gain: -3
+            inverted: false
+
+
+filters:
+  highpass_lower:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 250
+      order: 4
+  lowpass_lower:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 250
+      order: 4
+  highpass_upper:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 5000
+      order: 4
+  lowpass_upper:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 5000
+      order: 4
+
+
+pipeline:
+  - type: Mixer
+    name: 2to6
+  - type: Filter
+    channels: [0, 1]
+    names:
+      - lowpass_lower
+  - type: Filter
+    channels: [2, 3]
+    names:
+      - highpass_lower
+      - lowpass_upper
+  - type: Filter
+    channels: [4, 5]
+    names:
+      - highpass_upper
+  - type: Processor
+    name: race
+  - type: Mixer
+    name: 6to2
+```
 
 ## Pipeline
 The pipeline section defines the processing steps between input and output.
