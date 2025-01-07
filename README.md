@@ -2252,9 +2252,9 @@ pipeline:
 
 ### RACE
 The "RACE" processor implements the recursive part of the
-Recursive Ambiophonic Crosstalk Eliminator (RACE) algorithm.
+Recursive Ambiophonic Crosstalk Elimination (RACE) algorithm.
 A RACE processor processes a aingle pair of channels.
-Multiple processors can be used to process additional channel pairs.
+Multiple processors can be used to process additional channel pairs if needed.
 
 Parameters: 
 * `channels`: number of channels, must match the number of channels of the pipeline where the compressor is inserted.
@@ -2265,12 +2265,16 @@ Parameters:
 * `delay_unit`: unit for delay, see the `Delay` filter.
 * `subsample_delay`: enable subsample delay values, see the `Delay` filter.
 
-The RACE algorithm also uses filters to only process a limited range of the audio spectrum.
-These filters are not implemented in the RACE processor itself.
-Instead this processor is meant to be combined with normal CamillaDSP mixers and filters
-to make a complete solution.
+The RACE algorithm is normally used with filters,
+to only process a limited range of the audio spectrum.
+![RACE algoriths](race.png)
 
-Example configuration:
+The RACE processor implements the recursive function block
+indicated by the dashed rectangle.
+This processor is meant to be combined with normal CamillaDSP mixers
+and filters to make up the complete solution.
+
+Example configuration implementing RACE with filters:
 ```yml
 processors:
   race:
@@ -2281,7 +2285,6 @@ processors:
       channel_b: 3
       attenuation: 3
       delay: 0.09
-
 
 mixers:
   2to6:
@@ -2347,7 +2350,6 @@ mixers:
             gain: -3
             inverted: false
 
-
 filters:
   highpass_lower:
     type: BiquadCombo
@@ -2373,7 +2375,6 @@ filters:
       type: LinkwitzRileyLowpass
       freq: 5000
       order: 4
-
 
 pipeline:
   - type: Mixer
