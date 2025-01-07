@@ -2252,8 +2252,8 @@ pipeline:
 
 ### RACE
 The "RACE" processor implements the recursive part of the
-Recursive Ambiophonic Crosstalk Elimination (RACE) algorithm.
-A RACE processor processes a aingle pair of channels.
+[Recursive Ambiophonic Crosstalk Elimination (RACE)](http://www.filmaker.com/papers/RGRM-RACE_rev.pdf) algorithm.
+The RACE processor processes a aingle pair of channels.
 Multiple processors can be used to process additional channel pairs if needed.
 
 Parameters: 
