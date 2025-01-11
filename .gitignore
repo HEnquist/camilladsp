@@ -8,3 +8,6 @@ active_config.yml
 camilladsp.log
 configs/
 coeffs/
+.venv
+*.csv
+*.exe

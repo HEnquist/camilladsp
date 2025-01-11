@@ -12,7 +12,7 @@ jobs:
     #container: ubuntu:20.04
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Update package list
         run: sudo apt-get update
@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -117,7 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -149,7 +149,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -168,12 +168,35 @@ jobs:
           asset_name: camilladsp-windows-amd64.zip
           tag: ${{ github.ref }}
 
-  macos:
-    name: macOS
-    runs-on: macos-latest
+  windows7:
+    name: Windows7
+    runs-on: windows-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@1.75.0
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Compress
+        run: powershell Compress-Archive target/release/camilladsp.exe camilladsp.zip
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp.zip
+          asset_name: camilladsp-windows7-amd64.zip
+          tag: ${{ github.ref }}
+  macos:
+    name: macOS Intel
+    runs-on: macos-13
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -194,22 +217,20 @@ jobs:
 
 
   macos_arm:
-    name: macOS aarch64
+    name: macOS Arm
     runs-on: macos-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
 
       - name: Build
-        run: cargo build --release --target aarch64-apple-darwin
+        run: cargo build --release
 
       - name: Compress
-        run: tar -zcvf camilladsp.tar.gz -C target/aarch64-apple-darwin/release camilladsp
+        run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2

@@ -4,6 +4,37 @@ use crate::ProcessingState;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+pub struct DeviceBufferEstimator {
+    update_time: Instant,
+    frames: usize,
+    sample_rate: f32,
+}
+
+impl DeviceBufferEstimator {
+    pub fn new(sample_rate: usize) -> Self {
+        DeviceBufferEstimator {
+            update_time: Instant::now(),
+            frames: 0,
+            sample_rate: sample_rate as f32,
+        }
+    }
+
+    pub fn add(&mut self, frames: usize) {
+        self.update_time = Instant::now();
+        self.frames = frames;
+    }
+
+    pub fn estimate(&self) -> usize {
+        let now = Instant::now();
+        let time_passed = now.duration_since(self.update_time).as_secs_f32();
+        let frames_consumed = (self.sample_rate * time_passed) as usize;
+        if frames_consumed >= self.frames {
+            return 0;
+        }
+        self.frames - frames_consumed
+    }
+}
+
 /// A counter for watching if the signal has been silent
 /// for longer than a given limit.
 pub struct SilenceCounter {

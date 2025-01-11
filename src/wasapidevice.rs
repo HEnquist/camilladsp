@@ -3,23 +3,27 @@ use crate::config;
 use crate::config::{ConfigError, SampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
+use crate::helpers::PIRateController;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Duration;
 use wasapi;
 use wasapi::DeviceCollection;
-use windows::w;
-use windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW;
+
+use audio_thread_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
 
 use crate::CommandMessage;
 use crate::PrcFmt;
+use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
@@ -120,6 +124,41 @@ fn wave_format(
     }
 }
 
+fn get_supported_wave_format(
+    audio_client: &wasapi::AudioClient,
+    sample_format: &SampleFormat,
+    samplerate: usize,
+    channels: usize,
+    sharemode: &wasapi::ShareMode,
+) -> Res<wasapi::WaveFormat> {
+    let wave_format = wave_format(sample_format, samplerate, channels);
+    match sharemode {
+        wasapi::ShareMode::Exclusive => {
+            audio_client.is_supported_exclusive_with_quirks(&wave_format)
+        }
+        wasapi::ShareMode::Shared => match audio_client.is_supported(&wave_format, sharemode) {
+            Ok(None) => {
+                debug!("Device supports format {:?}", wave_format);
+                Ok(wave_format)
+            }
+            Ok(Some(modified)) => {
+                let msg = format!(
+                    "Device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
+                    wave_format, modified
+                );
+                Err(ConfigError::new(&msg).into())
+            }
+            Err(err) => {
+                let msg = format!(
+                    "Device doesn't support format:\n{:#?}\nError: {}",
+                    wave_format, err
+                );
+                Err(ConfigError::new(&msg).into())
+            }
+        },
+    }
+}
+
 fn open_playback(
     devname: &Option<String>,
     samplerate: usize,
@@ -150,39 +189,28 @@ fn open_playback(
     trace!("Found playback device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got playback iaudioclient");
-    let wave_format = wave_format(sample_format, samplerate, channels);
-    match audio_client.is_supported(&wave_format, &sharemode) {
-        Ok(None) => {
-            debug!("Playback device supports format {:?}", wave_format)
-        }
-        Ok(Some(modified)) => {
-            let msg = format!(
-                "Playback device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
-                wave_format, modified
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-        Err(err) => {
-            let msg = format!(
-                "Playback device doesn't support format:\n{:#?}\nError: {}",
-                wave_format, err
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-    };
+    let wave_format = get_supported_wave_format(
+        &audio_client,
+        sample_format,
+        samplerate,
+        channels,
+        &sharemode,
+    )?;
     let (def_time, min_time) = audio_client.get_periods()?;
-    debug!(
-        "playback default period {}, min period {}",
-        def_time, min_time
-    );
+    let aligned_time =
+        audio_client.calculate_aligned_period_near(def_time, Some(128), &wave_format)?;
     audio_client.initialize_client(
         &wave_format,
-        def_time,
+        aligned_time,
         &wasapi::Direction::Render,
         &sharemode,
         false,
     )?;
-    debug!("initialized capture");
+    debug!(
+        "playback default period {}, min period {}, aligned period {}",
+        def_time, min_time, aligned_time
+    );
+    debug!("initialized playback audio client");
     let handle = audio_client.set_get_eventhandle()?;
     let render_client = audio_client.get_audiorenderclient()?;
     debug!("Opened Wasapi playback device {:?}", devname);
@@ -232,26 +260,13 @@ fn open_capture(
     trace!("Found capture device {:?}", devname);
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got capture iaudioclient");
-    let wave_format = wave_format(sample_format, samplerate, channels);
-    match audio_client.is_supported(&wave_format, &sharemode) {
-        Ok(None) => {
-            debug!("Capture device supports format {:?}", wave_format)
-        }
-        Ok(Some(modified)) => {
-            let msg = format!(
-                "Capture device doesn't support format:\n{:#?}\nClosest match is:\n{:#?}",
-                wave_format, modified
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-        Err(err) => {
-            let msg = format!(
-                "Capture device doesn't support format:\n{:#?}\nError: {}",
-                wave_format, err
-            );
-            return Err(ConfigError::new(&msg).into());
-        }
-    };
+    let wave_format = get_supported_wave_format(
+        &audio_client,
+        sample_format,
+        samplerate,
+        channels,
+        &sharemode,
+    )?;
     let (def_time, min_time) = audio_client.get_periods()?;
     debug!(
         "capture default period {}, min period {}",
@@ -264,7 +279,7 @@ fn open_capture(
         &sharemode,
         loopback,
     )?;
-    debug!("initialized capture");
+    debug!("initialized capture audio client");
     let handle = audio_client.set_get_eventhandle()?;
     trace!("capture got event handle");
     let capture_client = audio_client.get_audiocaptureclient()?;
@@ -275,7 +290,7 @@ fn open_capture(
 struct PlaybackSync {
     rx_play: Receiver<PlaybackDeviceMessage>,
     tx_cb: Sender<DisconnectReason>,
-    bufferfill: Arc<AtomicUsize>,
+    bufferfill: Arc<Mutex<countertimer::DeviceBufferEstimator>>,
 }
 
 enum PlaybackDeviceMessage {
@@ -323,15 +338,19 @@ fn playback_loop(
     debug!("Waited for data for {} ms", waited_millis);
 
     // Raise priority
-    let mut task_idx = 0;
-    unsafe {
-        let _ = AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx);
-    }
-    if task_idx > 0 {
-        debug!("Playback thread raised priority, task index: {}", task_idx);
-    } else {
-        warn!("Failed to raise playback thread priority");
-    }
+    let _thread_handle = match promote_current_thread_to_real_time(0, 1) {
+        Ok(h) => {
+            debug!("Playback inner thread has real-time priority.");
+            Some(h)
+        }
+        Err(err) => {
+            warn!(
+                "Playback inner thread could not get real time priority, error: {}",
+                err
+            );
+            None
+        }
+    };
 
     audio_client.start_stream()?;
     let mut running = true;
@@ -351,7 +370,7 @@ fn playback_loop(
             device_time = device_prevtime + buffer_free_frame_count as f64 / samplerate;
         }
         trace!(
-            "Device time counted up by {} s",
+            "Device time counted up by {:.4} s",
             device_time - device_prevtime
         );
         if buffer_free_frame_count > 0
@@ -359,7 +378,7 @@ fn playback_loop(
                 > 1.75 * (buffer_free_frame_count as f64 / samplerate)
         {
             warn!(
-                "Missing event! Resetting stream. Interval {} s, expected {} s",
+                "Missing event! Resetting stream. Interval {:.4} s, expected {:.4} s",
                 device_time - device_prevtime,
                 buffer_free_frame_count as f64 / samplerate
             );
@@ -406,12 +425,13 @@ fn playback_loop(
         }
         render_client.write_to_device_from_deque(
             buffer_free_frame_count as usize,
-            blockalign,
             &mut sample_queue,
             None,
         )?;
         let curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
-        sync.bufferfill.store(curr_buffer_fill, Ordering::Relaxed);
+        if let Ok(mut estimator) = sync.bufferfill.try_lock() {
+            estimator.add(curr_buffer_fill)
+        }
         trace!("write ok");
         //println!("{} bef",prev_inst.elapsed().as_micros());
         if handle.wait_for_event(1000).is_err() {
@@ -462,15 +482,19 @@ fn capture_loop(
     let mut saved_buffer: Option<Vec<u8>> = None;
 
     // Raise priority
-    let mut task_idx = 0;
-    unsafe {
-        let _ = AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task_idx);
-    }
-    if task_idx > 0 {
-        debug!("Capture thread raised priority, task index: {}", task_idx);
-    } else {
-        warn!("Failed to raise capture thread priority");
-    }
+    let _thread_handle = match promote_current_thread_to_real_time(0, 1) {
+        Ok(h) => {
+            debug!("Capture inner thread has real-time priority.");
+            Some(h)
+        }
+        Err(err) => {
+            warn!(
+                "Capture inner thread could not get real time priority, error: {}",
+                err
+            );
+            None
+        }
+    };
     trace!("Starting capture stream");
     audio_client.start_stream()?;
     trace!("Started capture stream");
@@ -527,7 +551,7 @@ fn capture_loop(
                 data.resize(nbr_bytes, 0);
             }
             let (nbr_frames_read, flags) =
-                capture_client.read_from_device(blockalign, &mut data[0..nbr_bytes])?;
+                capture_client.read_from_device(&mut data[0..nbr_bytes])?;
             if nbr_frames_read != available_frames {
                 warn!(
                     "Expected {} frames, got {}",
@@ -555,10 +579,8 @@ fn capture_loop(
                     if data.len() < (nbr_bytes + nbr_bytes_extra) {
                         data.resize(nbr_bytes + nbr_bytes_extra, 0);
                     }
-                    let (nbr_frames_read, flags) = capture_client.read_from_device(
-                        blockalign,
-                        &mut data[nbr_bytes..(nbr_bytes + nbr_bytes_extra)],
-                    )?;
+                    let (nbr_frames_read, flags) = capture_client
+                        .read_from_device(&mut data[nbr_bytes..(nbr_bytes + nbr_bytes_extra)])?;
                     if nbr_frames_read != extra_frames {
                         warn!("Expected {} frames, got {}", extra_frames, nbr_frames_read);
                     }
@@ -620,7 +642,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
             .name("WasapiPlayback".to_string())
             .spawn(move || {
                 // Devices typically request around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = 8 * 1024 / chunksize + 1;
+                let channel_capacity = 8 * 1024 / chunksize + 3;
                 debug!(
                     "Using a playback channel capacity of {} chunks.",
                     channel_capacity
@@ -628,7 +650,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let (tx_state_dev, rx_state_dev) = bounded(0);
                 let (tx_disconnectreason, rx_disconnectreason) = unbounded();
-                let buffer_fill = Arc::new(AtomicUsize::new(0));
+                let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(samplerate)));
                 let buffer_fill_clone = buffer_fill.clone();
                 let mut buffer_avg = countertimer::Averager::new();
                 let mut timer = countertimer::Stopwatch::new();
@@ -636,6 +658,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     rms: vec![0.0; channels],
                     peak: vec![0.0; channels],
                 };
+
+                let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
 
                 trace!("Build output stream");
                 let mut conversion_result;
@@ -707,6 +731,19 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 }
                 debug!("Playback device ready and waiting");
                 barrier.wait();
+                let thread_handle = match promote_current_thread_to_real_time(0, 1) {
+                    Ok(h) => {
+                        debug!("Playback outer thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Playback outer thread could not get real time priority, error: {}",
+                            err
+                        );
+                        None
+                    }
+                };
                 debug!("Playback device starts now!");
                 loop {
                     match rx_state_dev.try_recv() {
@@ -736,46 +773,42 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                     0u8;
                                     channels * chunk.frames * sample_format.bytes_per_sample()
                                 ];
-                            buffer_avg.add_value(buffer_fill.load(Ordering::Relaxed) as f64);
-                            {
-                                if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
-                                    if let Some(av_delay) = buffer_avg.average() {
-                                        let speed = calculate_speed(
-                                            av_delay,
-                                            target_level,
-                                            adjust_period,
-                                            samplerate as u32,
-                                        );
-                                        timer.restart();
-                                        buffer_avg.restart();
-                                        debug!(
-                                            "Current buffer level {:.1}, set capture rate to {:.4}%",
-                                            av_delay,
-                                            100.0 * speed
-                                        );
-                                        status_channel
-                                            .send(StatusMessage::SetSpeed(speed))
-                                            .unwrap_or(());
-                                        playback_status.write().buffer_level =
-                                            av_delay as usize;
-                                    }
+                            buffer_avg.add_value(buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default());
+
+                            if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
+                                if let Some(av_delay) = buffer_avg.average() {
+                                    let speed = rate_controller.next(av_delay);
+                                    timer.restart();
+                                    buffer_avg.restart();
+                                    debug!(
+                                        "Current buffer level {:.1}, set capture rate to {:.4}%",
+                                        av_delay,
+                                        100.0 * speed
+                                    );
+                                    status_channel
+                                        .send(StatusMessage::SetSpeed(speed))
+                                        .unwrap_or(());
+                                    playback_status.write().buffer_level =
+                                        av_delay as usize;
                                 }
-                                conversion_result =
-                                    chunk_to_buffer_rawbytes(&chunk, &mut buf, &sample_format);
-                                chunk.update_stats(&mut chunk_stats);
-                                {
-                                    let mut playback_status = playback_status.write();
-                                    if conversion_result.1 > 0 {
-                                        playback_status.clipped_samples +=
-                                            conversion_result.1;
-                                    }
-                                    playback_status
-                                        .signal_rms
-                                        .add_record_squared(chunk_stats.rms_linear());
-                                    playback_status
-                                        .signal_peak
-                                        .add_record(chunk_stats.peak_linear());
+                            }
+                            conversion_result =
+                                chunk_to_buffer_rawbytes(&chunk, &mut buf, &sample_format);
+                            chunk.update_stats(&mut chunk_stats);
+                            if let Some(mut playback_status) = playback_status.try_write() {
+                                if conversion_result.1 > 0 {
+                                    playback_status.clipped_samples +=
+                                        conversion_result.1;
                                 }
+                                playback_status
+                                    .signal_rms
+                                    .add_record_squared(chunk_stats.rms_linear());
+                                playback_status
+                                    .signal_peak
+                                    .add_record(chunk_stats.peak_linear());
+                            }
+                            else {
+                                xtrace!("playback status blocked, skip rms update");
                             }
                             match tx_dev.send(PlaybackDeviceMessage::Data(buf)) {
                                 Ok(_) => {}
@@ -809,6 +842,16 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             break;
                         }
                     }
+                }
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => {
+                            debug!("Playback outer thread returned to normal priority.")
+                        }
+                        Err(_) => {
+                            warn!("Could not bring the outer playback thread back to normal priority.")
+                        }
+                    };
                 }
                 match tx_dev.send(PlaybackDeviceMessage::Stop) {
                     Ok(_) => {
@@ -892,6 +935,7 @@ impl CaptureDevice for WasapiCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
+        _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let exclusive = self.exclusive;
         let loopback = self.loopback;
@@ -1001,6 +1045,19 @@ impl CaptureDevice for WasapiCaptureDevice {
                     Err(_err) => {}
                 }
                 barrier.wait();
+                let thread_handle = match promote_current_thread_to_real_time(0, 1) {
+                    Ok(h) => {
+                        debug!("Capture outer thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Capture outer thread could not get real time priority, error: {}",
+                            err
+                        );
+                        None
+                    }
+                };
                 debug!("Capture device starts now!");
                 loop {
                     match command_channel.try_recv() {
@@ -1092,23 +1149,25 @@ impl CaptureDevice for WasapiCaptureDevice {
                             *element = data_queue.pop_front().unwrap();
                         }
                         averager.add_value(capture_frames);
-                        {
-                            let capture_status = capture_status.upgradable_read();
+                        if let Some(capture_status) = capture_status.try_upgradable_read() {
                             if averager.larger_than_millis(capture_status.update_interval as u64)
                             {
                                 let samples_per_sec = averager.average();
                                 averager.restart();
                                 let measured_rate_f = samples_per_sec;
-                                debug!(
-                                    "Measured sample rate is {:.1} Hz",
-                                    measured_rate_f
-                                );
-                                let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status); // to write lock
-                                capture_status.measured_samplerate = measured_rate_f as usize;
-                                capture_status.signal_range = value_range as f32;
-                                capture_status.rate_adjust = rate_adjust as f32;
-                                capture_status.state = state;
+                                if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
+                                    capture_status.measured_samplerate = measured_rate_f as usize;
+                                    capture_status.signal_range = value_range as f32;
+                                    capture_status.rate_adjust = rate_adjust as f32;
+                                    capture_status.state = state;
+                                }
+                                else {
+                                    xtrace!("capture status upgrade blocked, skip update");
+                                }
                             }
+                        }
+                        else {
+                            xtrace!("capture status blocked, skip update");
                         }
                         watcher_averager.add_value(capture_frames);
                         if watcher_averager.larger_than_millis(rate_measure_interval)
@@ -1139,11 +1198,12 @@ impl CaptureDevice for WasapiCaptureDevice {
                             &capture_status.read().used_channels,
                         );
                         chunk.update_stats(&mut chunk_stats);
-                        //trace!("Capture rms {:?}, peak {:?}", chunk_stats.rms_db(), chunk_stats.peak_db());
-                        {
-                            let mut capture_status = capture_status.write();
+                        if let Some(mut capture_status) = capture_status.try_write() {
                             capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                             capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                        }
+                        else {
+                            xtrace!("capture status blocked, skip rms update");
                         }
                         value_range = chunk.maxval - chunk.minval;
                         state = silence_counter.update(value_range);
@@ -1173,6 +1233,16 @@ impl CaptureDevice for WasapiCaptureDevice {
                             break;
                         }
                     }
+                }
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => {
+                            debug!("Capture outer thread returned to normal priority.")
+                        }
+                        Err(_) => {
+                            warn!("Could not bring the outer capture thread back to normal priority.")
+                        }
+                    };
                 }
                 stop_signal.store(true, Ordering::Relaxed);
                 debug!("Wait for inner capture thread to exit");

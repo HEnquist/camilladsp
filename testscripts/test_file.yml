@@ -5,17 +5,16 @@ devices:
   target_level: 512
   adjust_period: 10
   playback:
-    type: Raw
+    type: RawFile
     channels: 2
     filename: "result_i32.raw"
     format: S32LE
   capture:
-    type: Raw
+    type: File
     channels: 1
     filename: "spike_i32.raw"
     format: S32LE
     extra_samples: 1
-
 
 mixers:
   splitter:
@@ -34,7 +33,6 @@ mixers:
             gain: 0
             inverted: false
 
-
 filters:
   testlp:
     type: BiquadCombo
@@ -49,18 +47,14 @@ filters:
       freq: 1000
       order: 4
 
-
-
 pipeline:
   - type: Mixer
     name: splitter
   - type: Filter
-    channel: 0
+    channels: [0]
     names:
       - testlp
   - type: Filter
-    channel: 1
+    channels: [1]
     names:
       - testhp
-   
-

@@ -3,7 +3,7 @@ devices:
   samplerate: 44100
   chunksize: 4096
   capture:
-    type: File
+    type: RawFile
     filename: "dummy"
     channels: 2
     format: S16LE
@@ -27,13 +27,13 @@ filters:
   dithereven:
     type: Dither
     parameters:
-      type: Uniform
+      type: Flat
       bits: 8
       amplitude: 1.0
   dithersimple:
     type: Dither
     parameters:
-      type: Simple
+      type: Highpass
       bits: 8
   ditherfancy:
     type: Dither
@@ -53,14 +53,9 @@ filters:
 
 pipeline:
   - type: Filter
-    channel: 0
+    channels: [0, 1]
     names:
       - atten
       - ditherfancy2
-  - type: Filter
-    channel: 1
-    names:
-      - atten
-      - ditherfancy2
-   
+
 

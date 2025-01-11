@@ -1,12 +1,17 @@
 use crate::config::SampleFormat;
-use crate::Res;
+use crate::{CaptureStatus, PlaybackStatus, PrcFmt, Res, StatusMessage};
 use alsa::card::Iter;
-use alsa::ctl::{Ctl, DeviceIter};
+use alsa::ctl::{Ctl, DeviceIter, ElemId, ElemIface, ElemType, ElemValue};
 use alsa::device_name::HintIter;
+use alsa::hctl::{Elem, HCtl};
 use alsa::pcm::{Format, HwParams};
-use alsa::Card;
-use alsa::Direction;
+use alsa::{Card, Direction};
 use alsa_sys;
+use parking_lot::RwLock;
+use std::ffi::CString;
+use std::sync::Arc;
+
+use crate::ProcessingParameters;
 
 const STANDARD_RATES: [u32; 17] = [
     5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
@@ -19,7 +24,46 @@ pub enum SupportedValues {
     Discrete(Vec<u32>),
 }
 
-fn get_card_names(card: &Card, input: bool, names: &mut Vec<(String, String)>) -> Res<()> {
+pub struct CaptureParams {
+    pub channels: usize,
+    pub sample_format: SampleFormat,
+    pub silence_timeout: PrcFmt,
+    pub silence_threshold: PrcFmt,
+    pub chunksize: usize,
+    pub store_bytes_per_sample: usize,
+    pub bytes_per_frame: usize,
+    pub samplerate: usize,
+    pub capture_samplerate: usize,
+    pub async_src: bool,
+    pub capture_status: Arc<RwLock<CaptureStatus>>,
+    pub stop_on_rate_change: bool,
+    pub rate_measure_interval: f32,
+    pub stop_on_inactive: bool,
+    pub link_volume_control: Option<String>,
+    pub link_mute_control: Option<String>,
+    pub linked_volume_value: Option<f32>,
+    pub linked_mute_value: Option<bool>,
+}
+
+pub struct PlaybackParams {
+    pub channels: usize,
+    pub target_level: usize,
+    pub adjust_period: f32,
+    pub adjust_enabled: bool,
+    pub sample_format: SampleFormat,
+    pub playback_status: Arc<RwLock<PlaybackStatus>>,
+    pub bytes_per_frame: usize,
+    pub samplerate: usize,
+    pub chunksize: usize,
+}
+
+pub enum CaptureResult {
+    Normal,
+    Stalled,
+    Done,
+}
+
+pub fn get_card_names(card: &Card, input: bool, names: &mut Vec<(String, String)>) -> Res<()> {
     let dir = if input {
         Direction::Capture
     } else {
@@ -209,6 +253,31 @@ pub fn list_formats(hwp: &HwParams) -> Res<Vec<SampleFormat>> {
     Ok(formats)
 }
 
+pub fn pick_preferred_format(hwp: &HwParams) -> Option<SampleFormat> {
+    // Start with integer formats, in descending quality
+    if hwp.test_format(Format::s32()).is_ok() {
+        return Some(SampleFormat::S32LE);
+    }
+    // The two 24-bit formats are equivalent, the order does not matter
+    if hwp.test_format(Format::S243LE).is_ok() {
+        return Some(SampleFormat::S24LE3);
+    }
+    if hwp.test_format(Format::s24()).is_ok() {
+        return Some(SampleFormat::S24LE);
+    }
+    if hwp.test_format(Format::s16()).is_ok() {
+        return Some(SampleFormat::S16LE);
+    }
+    // float formats are unusual, try these last
+    if hwp.test_format(Format::float()).is_ok() {
+        return Some(SampleFormat::FLOAT32LE);
+    }
+    if hwp.test_format(Format::float64()).is_ok() {
+        return Some(SampleFormat::FLOAT64LE);
+    }
+    None
+}
+
 pub fn list_formats_as_text(hwp: &HwParams) -> String {
     let supported_formats_res = list_formats(hwp);
     if let Ok(formats) = supported_formats_res {
@@ -218,49 +287,345 @@ pub fn list_formats_as_text(hwp: &HwParams) -> String {
     }
 }
 
-pub fn adjust_speed(
-    avg_delay: f64,
-    target_delay: usize,
-    prev_diff: Option<f64>,
-    mut capture_speed: f64,
-) -> (f64, f64) {
-    let latency = avg_delay * capture_speed;
-    let diff = latency - target_delay as f64;
-    match prev_diff {
-        None => (1.0, diff),
-        Some(prev_diff) => {
-            let equality_range = target_delay as f64 / 100.0; // in frames
-            let speed_delta = 1e-5;
-            if diff > 0.0 {
-                if diff > (prev_diff + equality_range) {
-                    // playback latency grows, need to slow down capture more
-                    capture_speed -= 3.0 * speed_delta;
-                } else if is_within(diff, prev_diff, equality_range) {
-                    // positive, not changed from last cycle, need to slow down capture a bit
-                    capture_speed -= speed_delta;
-                }
-            } else if diff < 0.0 {
-                if diff < (prev_diff - equality_range) {
-                    // playback latency sinks, need to speed up capture more
-                    capture_speed += 3.0 * speed_delta;
-                } else if is_within(diff, prev_diff, equality_range) {
-                    // negative, not changed from last cycle, need to speed up capture a bit
-                    capture_speed += speed_delta
-                }
-            }
-            debug!(
-                "Avg. buffer delay: {:.1}, target delay: {:.1}, diff: {}, prev_div: {}, corrected capture rate: {:.4}%",
-                avg_delay,
-                target_delay,
-                diff,
-                prev_diff,
-                100.0 * capture_speed
-            );
-            (capture_speed, diff)
+pub struct ElemData<'a> {
+    element: Elem<'a>,
+    numid: u32,
+}
+
+impl ElemData<'_> {
+    pub fn read_as_int(&self) -> Option<i32> {
+        self.element
+            .read()
+            .ok()
+            .and_then(|elval| elval.get_integer(0))
+    }
+
+    pub fn read_as_bool(&self) -> Option<bool> {
+        self.element
+            .read()
+            .ok()
+            .and_then(|elval| elval.get_boolean(0))
+    }
+
+    pub fn read_volume_in_db(&self, ctl: &Ctl) -> Option<f32> {
+        self.read_as_int().and_then(|intval| {
+            ctl.convert_to_db(&self.element.get_id().unwrap(), intval as i64)
+                .ok()
+                .map(|v| v.to_db())
+        })
+    }
+
+    pub fn write_volume_in_db(&self, ctl: &Ctl, value: f32) {
+        let intval = ctl.convert_from_db(
+            &self.element.get_id().unwrap(),
+            alsa::mixer::MilliBel::from_db(value),
+            alsa::Round::Floor,
+        );
+        if let Ok(val) = intval {
+            self.write_as_int(val as i32);
+        }
+    }
+
+    pub fn write_as_int(&self, value: i32) {
+        let mut elval = ElemValue::new(ElemType::Integer).unwrap();
+        if elval.set_integer(0, value).is_some() {
+            self.element.write(&elval).unwrap_or_default();
+        }
+    }
+
+    pub fn write_as_bool(&self, value: bool) {
+        let mut elval = ElemValue::new(ElemType::Boolean).unwrap();
+        if elval.set_boolean(0, value).is_some() {
+            self.element.write(&elval).unwrap_or_default();
         }
     }
 }
 
-pub fn is_within(value: f64, target: f64, equality_range: f64) -> bool {
-    value <= (target + equality_range) && value >= (target - equality_range)
+#[derive(Default)]
+pub struct CaptureElements<'a> {
+    pub loopback_active: Option<ElemData<'a>>,
+    // pub loopback_rate: Option<ElemData<'a>>,
+    // pub loopback_format: Option<ElemData<'a>>,
+    // pub loopback_channels: Option<ElemData<'a>>,
+    pub gadget_rate: Option<ElemData<'a>>,
+    pub volume: Option<ElemData<'a>>,
+    pub mute: Option<ElemData<'a>>,
+}
+
+pub struct FileDescriptors {
+    pub fds: Vec<alsa::poll::pollfd>,
+    pub nbr_pcm_fds: usize,
+}
+
+#[derive(Debug)]
+pub struct PollResult {
+    pub poll_res: usize,
+    pub pcm: bool,
+    pub ctl: bool,
+}
+
+impl FileDescriptors {
+    pub fn wait(&mut self, timeout: i32) -> alsa::Result<PollResult> {
+        let nbr_ready = alsa::poll::poll(&mut self.fds, timeout)?;
+        trace!("Got {} ready fds", nbr_ready);
+        let mut nbr_found = 0;
+        let mut pcm_res = false;
+        for fd in self.fds.iter().take(self.nbr_pcm_fds) {
+            if fd.revents > 0 {
+                pcm_res = true;
+                nbr_found += 1;
+                if nbr_found == nbr_ready {
+                    // We are done, let's return early
+
+                    return Ok(PollResult {
+                        poll_res: nbr_ready,
+                        pcm: pcm_res,
+                        ctl: false,
+                    });
+                }
+            }
+        }
+        // There were other ready file descriptors than PCM, must be controls
+        Ok(PollResult {
+            poll_res: nbr_ready,
+            pcm: pcm_res,
+            ctl: true,
+        })
+    }
+}
+
+pub fn process_events(
+    ctl: &Ctl,
+    elems: &CaptureElements,
+    status_channel: &crossbeam_channel::Sender<StatusMessage>,
+    params: &mut CaptureParams,
+    processing_params: &Arc<ProcessingParameters>,
+) -> CaptureResult {
+    while let Ok(Some(ev)) = ctl.read() {
+        let nid = ev.get_id().get_numid();
+        debug!("Event from numid {}", nid);
+        let action = get_event_action(nid, elems, ctl, params);
+        match action {
+            EventAction::SourceInactive => {
+                if params.stop_on_inactive {
+                    debug!(
+                        "Stopping, capture device is inactive and stop_on_inactive is set to true"
+                    );
+                    status_channel
+                        .send(StatusMessage::CaptureDone)
+                        .unwrap_or_default();
+                    return CaptureResult::Done;
+                }
+            }
+            EventAction::FormatChange(value) => {
+                debug!("Stopping, capture device sample format changed");
+                status_channel
+                    .send(StatusMessage::CaptureFormatChange(value))
+                    .unwrap_or_default();
+                return CaptureResult::Done;
+            }
+            EventAction::SetVolume(vol) => {
+                debug!("Alsa volume change event, set main fader to {} dB", vol);
+                processing_params.set_target_volume(0, vol);
+                params.linked_volume_value = Some(vol);
+                //status_channel
+                //    .send(StatusMessage::SetVolume(vol))
+                //    .unwrap_or_default();
+            }
+            EventAction::SetMute(mute) => {
+                debug!("Alsa mute change event, set mute state to {}", mute);
+                processing_params.set_mute(0, mute);
+                params.linked_mute_value = Some(mute);
+                //status_channel
+                //    .send(StatusMessage::SetMute(mute))
+                //    .unwrap_or_default();
+            }
+            EventAction::None => {}
+        }
+    }
+    CaptureResult::Normal
+}
+
+pub enum EventAction {
+    None,
+    SetVolume(f32),
+    SetMute(bool),
+    FormatChange(usize),
+    SourceInactive,
+}
+
+pub fn get_event_action(
+    numid: u32,
+    elems: &CaptureElements,
+    ctl: &Ctl,
+    params: &mut CaptureParams,
+) -> EventAction {
+    if let Some(eldata) = &elems.loopback_active {
+        if eldata.numid == numid {
+            let value = eldata.read_as_bool();
+            debug!("Loopback active: {:?}", value);
+            if let Some(active) = value {
+                if active {
+                    return EventAction::None;
+                }
+                return EventAction::SourceInactive;
+            }
+        }
+    }
+    // Include this if the notify functionality of the loopback gets fixed
+    /*
+    if let Some(eldata) = &elems.loopback_rate {
+        if eldata.numid == numid {
+            let value = eldata.read_as_int();
+            debug!("Gadget rate: {:?}", value);
+            if let Some(rate) = value {
+                debug!("Loopback rate: {}", rate);
+                return EventAction::FormatChange(rate);
+            }
+        }
+    }
+    if let Some(eldata) = &elems.loopback_format {
+        if eldata.numid == numid {
+            let value = eldata.read_as_int();
+            debug!("Gadget rate: {:?}", value);
+            if let Some(format) = value {
+                debug!("Loopback format: {}", format);
+                return EventAction::FormatChange(TODO add sample format!);
+            }
+        }
+    }
+    if let Some(eldata) = &elems.loopback_channels {
+        if eldata.numid == numid {
+            debug!("Gadget rate: {:?}", value);
+            if let Some(chans) = value {
+                debug!("Loopback channels: {}", chans);
+                return EventAction::FormatChange(TODO add channels!);
+            }
+        }
+    } */
+    if let Some(eldata) = &elems.volume {
+        if eldata.numid == numid {
+            let vol_db = eldata.read_volume_in_db(ctl);
+            debug!("Mixer volume control: {:?} dB", vol_db);
+            if let Some(vol) = vol_db {
+                params.linked_volume_value = Some(vol);
+                return EventAction::SetVolume(vol);
+            }
+        }
+    }
+    if let Some(eldata) = &elems.mute {
+        if eldata.numid == numid {
+            let active = eldata.read_as_bool();
+            debug!("Mixer switch active: {:?}", active);
+            if let Some(active_val) = active {
+                params.linked_mute_value = Some(!active_val);
+                return EventAction::SetMute(!active_val);
+            }
+        }
+    }
+    if let Some(eldata) = &elems.gadget_rate {
+        if eldata.numid == numid {
+            let value = eldata.read_as_int();
+            debug!("Gadget rate: {:?}", value);
+            if let Some(rate) = value {
+                if rate == 0 {
+                    return EventAction::SourceInactive;
+                }
+                if rate as usize != params.capture_samplerate {
+                    return EventAction::FormatChange(rate as usize);
+                }
+                debug!("Capture device resumed with unchanged sample rate");
+                return EventAction::None;
+            }
+        }
+    }
+    trace!("Ignoring event from control with numid {}", numid);
+    EventAction::None
+}
+
+impl<'a> CaptureElements<'a> {
+    pub fn find_elements(
+        &mut self,
+        h: &'a HCtl,
+        device: u32,
+        subdevice: u32,
+        volume_name: &Option<String>,
+        mute_name: &Option<String>,
+    ) {
+        self.loopback_active = find_elem(
+            h,
+            ElemIface::PCM,
+            Some(device),
+            Some(subdevice),
+            "PCM Slave Active",
+        );
+        // self.loopback_rate = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Rate");
+        // self.loopback_format = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Format");
+        // self.loopback_channels = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Channels");
+        self.gadget_rate = find_elem(
+            h,
+            ElemIface::PCM,
+            Some(device),
+            Some(subdevice),
+            "Capture Rate",
+        );
+        self.volume = volume_name
+            .as_ref()
+            .and_then(|name| find_elem(h, ElemIface::Mixer, None, None, name));
+        self.mute = mute_name
+            .as_ref()
+            .and_then(|name| find_elem(h, ElemIface::Mixer, None, None, name));
+    }
+}
+
+pub fn find_elem<'a>(
+    hctl: &'a HCtl,
+    iface: ElemIface,
+    device: Option<u32>,
+    subdevice: Option<u32>,
+    name: &str,
+) -> Option<ElemData<'a>> {
+    let mut elem_id = ElemId::new(iface);
+    if let Some(dev) = device {
+        elem_id.set_device(dev);
+    }
+    if let Some(subdev) = subdevice {
+        elem_id.set_subdevice(subdev);
+    }
+    elem_id.set_name(&CString::new(name).unwrap());
+    let element = hctl.find_elem(&elem_id);
+    debug!("Look up element with name {}", name);
+    element.map(|e| {
+        let numid = e.get_id().map(|id| id.get_numid()).unwrap_or_default();
+        debug!("Found element with name {} and numid {}", name, numid);
+        ElemData { element: e, numid }
+    })
+}
+
+pub fn sync_linked_controls(
+    processing_params: &Arc<ProcessingParameters>,
+    capture_params: &mut CaptureParams,
+    elements: &mut CaptureElements,
+    ctl: &Option<Ctl>,
+) {
+    if let Some(c) = ctl {
+        if let Some(vol) = capture_params.linked_volume_value {
+            let target_vol = processing_params.target_volume(0);
+            if (vol - target_vol).abs() > 0.1 {
+                debug!("Updating linked volume control to {} dB", target_vol);
+            }
+            if let Some(vol_elem) = &elements.volume {
+                vol_elem.write_volume_in_db(c, target_vol);
+            }
+        }
+        if let Some(mute) = capture_params.linked_mute_value {
+            let target_mute = processing_params.is_mute(0);
+            if mute != target_mute {
+                debug!("Updating linked switch control to {}", !target_mute);
+                if let Some(mute_elem) = &elements.mute {
+                    mute_elem.write_as_bool(!target_mute);
+                }
+            }
+        }
+    }
 }

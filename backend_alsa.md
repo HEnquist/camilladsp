@@ -2,17 +2,27 @@
 
 ## Introduction
 
-ALSA is the low level audio API that is used in the Linux kernel. The ALSA project also maintains various user-space tools and utilities that are installed by default in most Linux distributions.
+ALSA is the low level audio API that is used in the Linux kernel.
+The ALSA project also maintains various user-space tools and utilities
+that are installed by default in most Linux distributions.
 
-This readme only covers some basics of ALSA. For more details, see for example the [ALSA Documentation](#alsa-documentation) and [A close look at ALSA](#a-close-look-at-alsa)
+This readme only covers some basics of ALSA. For more details,
+see for example the [ALSA Documentation](#alsa-documentation) and [A close look at ALSA](#a-close-look-at-alsa)
 
 ### Hardware devices
 
-In the ALSA scheme, a soundcard or dac corresponds to a "card". A card can have one or several inputs and/or outputs, denoted "devices". Finally each device can support one or several streams, called "subdevices". It depends on the driver implementation how the different physical ports of a card is exposed in terms of devices. For example a 4-channel unit may present a single 4-channel device, or two separate 2-channel devices.
+In the ALSA scheme, a soundcard or dac corresponds to a "card".
+A card can have one or several inputs and/or outputs, denoted "devices".
+Finally each device can support one or several streams, called "subdevices".
+It depends on the driver implementation how the different physical ports of a card is exposed in terms of devices.
+For example a 4-channel unit may present a single 4-channel device, or two separate 2-channel devices.
 
 ### PCM devices
 
-An alsa PCM device can be many different things, like a simple alias for a hardware device, or any of the many plugins supported by ALSA. PCM devices are normally defined in the ALSA configuration file see the [ALSA Plugin Documentation](#alsa-plugin-documentation) for a list of the available plugins.
+An alsa PCM device can be many different things, like a simple alias for a hardware device,
+or any of the many plugins supported by ALSA.
+PCM devices are normally defined in the ALSA configuration file.
+See the [ALSA Plugin Documentation](#alsa-plugin-documentation) for a list of the available plugins.
 
 ### Find name of device
 To list all hardware playback devices use the `aplay` command with the `-l` option:
@@ -33,7 +43,9 @@ hdmi:CARD=Generic,DEV=0
 ```
 Capture devices can be found in the same way with `arecord -l` and `arecord -L`.
 
-A hardware device is accessed via the "hw" plugin. The device name is then prefixed by `hw:`. To use the ALC236 hardware device from above, put either `hw:Generic` (to use the name, recommended) or `hw:0` (to use the index) in the CamillaDSP config.
+A hardware device is accessed via the "hw" plugin. The device name is then prefixed by `hw:`.
+To use the ALC236 hardware device from above,
+put either `hw:Generic` (to use the name, recommended) or `hw:0` (to use the index) in the CamillaDSP config.
 
 To instead use the "hdmi" PCM device, it's enough to give the name `hdmi`.
 
@@ -66,12 +78,23 @@ Available formats:
 - S16_LE
 - S32_LE
 ```
-Ignore the error message at the end. The interesting fields are FORMAT, RATE and CHANNELS. In this example the sample formats this device can use are S16_LE and S32_LE (corresponding to S16LE and S32LE in CamillaDSP, see the [table of equivalent formats in the main README](./README.md#equivalent-formats) for the complete list). The sample rate can be either 44.1 or 48 kHz. And it supports only stereo playback (2 channels).
+Ignore the error message at the end. The interesting fields are FORMAT, RATE and CHANNELS.
+In this example the sample formats this device can use are S16_LE and S32_LE (corresponding to S16LE and S32LE in CamillaDSP,
+see the [table of equivalent formats in the main README](./README.md#equivalent-formats) for the complete list).
+The sample rate can be either 44.1 or 48 kHz. And it supports only stereo playback (2 channels).
 
 ### Combinations of parameter values
-Note that all possible combinations of the shown parameters may not be supported by the device. For example many USB DACS only support 24-bit samples up to 96 kHz, so that only 16-bit samples are supported at 192 kHz. For other devices, the number of channels depends on the sample rate. This is common on studio interfaces that support [ADAT](#adat).
+Note that all possible combinations of the shown parameters may not be supported by the device.
+For example many USB DACS only support 24-bit samples up to 96 kHz,
+so that only 16-bit samples are supported at 192 kHz.
+For other devices, the number of channels depends on the sample rate.
+This is common on studio interfaces that support [ADAT](#adat).
 
-CamillaDSP sets first the number of channels. Then it sets sample rate, and finally sample format. Setting a value for a parameter may restrict the allowed values for the ones that have not yet been set. For the USB DAC just mentioned, setting the sample rate to 192 kHz means that only the S16LE sample format is allowed. If the CamillaDSP configuration is set to 192 kHz and S24LE3, then there will be an error when setting the format.
+CamillaDSP sets first the number of channels.
+Then it sets sample rate, and finally sample format.
+Setting a value for a parameter may restrict the allowed values for the ones that have not yet been set.
+For the USB DAC just mentioned, setting the sample rate to 192 kHz means that only the S16LE sample format is allowed.
+If the CamillaDSP configuration is set to 192 kHz and S24LE3, then there will be an error when setting the format.
 
 
 Capture parameters are determined in the same way with `arecord`:
@@ -82,10 +105,13 @@ This outputs the same table as for the aplay example above, but for a capture de
 
 ## Routing all audio through CamillaDSP
 
-To route all audio through CamillaDSP using ALSA, the audio output from any application must be redirected. This can be acheived either by using an [ALSA Loopback device](#alsa-loopback), or the [ALSA CamillaDSP "I/O" plugin](#alsa-camilladsp-"io"-plugin).
+To route all audio through CamillaDSP using ALSA, the audio output from any application must be redirected.
+This can be acheived either by using an [ALSA Loopback device](#alsa-loopback),
+or the [ALSA CamillaDSP "I/O" plugin](#alsa-camilladsp-"io"-plugin).
 
 ### ALSA Loopback
-An ALSA Loopback card can be used. This behaves like a sound card that presents two devices. The sound being send to the playback side on one device can then be captured from the capture side on the other device. 
+An ALSA Loopback card can be used. This behaves like a sound card that presents two devices.
+The sound being send to the playback side on one device can then be captured from the capture side on the other device. 
 To load the kernel module type:
 ```
 sudo modprobe snd-aloop
@@ -103,7 +129,8 @@ The audio can then be captured from card "Loopback", device 0, subdevice 0, by r
 ```
 arecord -D hw:Loopback,0,0 sometrack_copy.wav
 ```
-The first application that opens either side of a Loopback decides the sample rate and format. If `aplay` is started first in this example, this means that `arecord` must use the same sample rate and format. 
+The first application that opens either side of a Loopback decides the sample rate and format.
+If `aplay` is started first in this example, this means that `arecord` must use the same sample rate and format. 
 To change format or rate, both sides of the loopback must first be closed.
 
 When using the ALSA Loopback approach, see the separate repository [camilladsp-config](#camilladsp-config). 
@@ -111,9 +138,13 @@ This contains example configuration files for setting up the entire system, and 
 
 ### ALSA CamillaDSP "I/O" plugin
 
-ALSA can be extended by plugins in user-space. One such plugin that is intended specifically for CamillaDSP is the [ALSA CamillaDSP "I/O" plugin](#alsa-camilladsp-plugin) by scripple.
+ALSA can be extended by plugins in user-space.
+One such plugin that is intended specifically for CamillaDSP
+is the [ALSA CamillaDSP "I/O" plugin](#alsa-camilladsp-plugin) by scripple.
 
-The plugin starts CamillaDSP whenever an application opens the CamillaDSP plugin PCM device. This makes it possible to support automatic switching of the sample rate. See the plugin readme for how to install and configure it.
+The plugin starts CamillaDSP whenever an application opens the CamillaDSP plugin PCM device.
+This makes it possible to support automatic switching of the sample rate.
+See the plugin readme for how to install and configure it.
 
 ## Configuration of devices
 
@@ -123,19 +154,90 @@ This example configuration will be used to explain the various options specific 
     type: Alsa
     channels: 2
     device: "hw:0,1"
-    format: S16LE
+    format: S16LE (*)
+    stop_on_inactive: false (*)
+    follow_volume_control: "PCM Playback Volume" (*)
   playback:
     type: Alsa
     channels: 2
     device: "hw:Generic_1"
-    format: S32LE
+    format: S32LE (*)
 ```
 
 ### Device names
 See [Find name of device](#find-name-of-device) for what to write in the `device` field.
 
 ### Sample rate and format
-Please see [Find valid playback and capture parameters](#find-valid-playback-and-capture-parameters).
+The sample format is optional. If set to `null` or left out,
+the highest quality available format is chosen automatically.
+
+When the format is set automatically, 32-bit integer (`S32LE`) is considered the best,
+followed by 24-bit (`S24LE3` and `S24LE`) and 16-bit integer (`S16LE`).
+The 32-bit (`FLOAT32LE`) and 64-bit (`FLOAT64LE`) float formats are high quality,
+but are supported by very few devices. Therefore these are checked last.
+
+Please also see [Find valid playback and capture parameters](#find-valid-playback-and-capture-parameters).
+
+### Linking volume control to device volume
+It is possible to let CamillaDSP link its volume and mute controls to controls on the capture device.
+This is mostly useful when capturing from the USB Audio Gadget,
+which provides a volume control named `PCM Capture Volume`
+and a mute control called `PCM Capture Switch` that are controlled by the USB host.
+
+This volume control does not alter the signal,
+and can be used to forward the volume setting from a player to CamillaDSP.
+To enable this, set the `link_volume_control` setting to the name of the volume control.
+The corresponding setting for the mute control is `link_mute_control`.
+Any change of the volume or mute then gets applied to the CamillaDSP main volume control.
+The link works in both directions, so that volume and mute changes requested
+over the websocket interface also get sent to the USB host.
+
+The available controls for a device can be listed with `amixer`.
+List controls for card 1:
+```sh
+amixer -c 1 controls
+```
+
+List controls with values and more details:
+```sh
+amixer -c 1 contents
+```
+
+The chosen volume control should be one that does not affect the signal volume,
+otherwise the volume gets applied twice.
+It must also have a scale in decibel, and take a single value (`values=1`).
+
+Example:
+```
+numid=15,iface=MIXER,name='Master Playback Volume'
+  ; type=INTEGER,access=rw---R--,values=1,min=0,max=87,step=0
+  : values=52
+  | dBscale-min=-65.25dB,step=0.75dB,mute=0
+```
+
+The mute control shoule be a _switch_, meaning that is has states `on` and `off`,
+where `on` is not muted and `off` is muted.
+It must also take a single value (`values=1`).
+
+Example:
+```
+numid=6,iface=MIXER,name='PCM Capture Switch'
+  ; type=BOOLEAN,access=rw------,values=1
+  : values=on
+```
+
+### Subscribe to Alsa control events
+The Alsa capture device subscribes to control events from the USB Gadget and Loopback devices.
+For the loopback, it subscribes to events from the `PCM Slave Active` control,
+and for the gadget it subscribes to events from `Capture Rate`.
+Both of these can indicate when playback has stopped.
+If CamillaDSP should stop when that happens, set `stop_on_inactive` to `true`.
+For the loopback, this means that CamillaDSP releases the capture side,
+making it possible for a player application to re-open at another sample rate.
+
+For the gadget, the control can also indicate that the sample rate changed.
+When this happens, the capture can no longer continue and CamillaDSP will stop.
+The new sample rate can then be read by the `GetStopReason` websocket command.
 
 ## Links
 ### ALSA Documentation
@@ -151,4 +253,5 @@ https://github.com/scripple/alsa_cdsp/
 
 ## Notes
 ### ADAT
-ADAT achieves higher sampling rates by multiplexing two or four 44.1/48kHz audio streams into a single one. A device implementing 8 channels over ADAT at 48kHz will therefore provide 4 channels over ADAT at 96kHz and 2 channels over ADAT at 192kHz.
+ADAT achieves higher sampling rates by multiplexing two or four 44.1/48kHz audio streams into a single one.
+A device implementing 8 channels over ADAT at 48kHz will therefore provide 4 channels over ADAT at 96kHz and 2 channels over ADAT at 192kHz.

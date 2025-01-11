@@ -3,7 +3,7 @@ devices:
   samplerate: 44100
   chunksize: 1024
   capture:
-    type: File
+    type: RawFile
     filename: "dummy"
     channels: 2
     format: S16LE
@@ -48,12 +48,9 @@ pipeline:
   - type: Mixer
     name: mono
   - type: Filter
-    channel: 0
+    channels: [0, 1]
     names:
       - lp1
-  - type: Filter
-    channel: 1
-    names:
-      - lp1
+
    
 
