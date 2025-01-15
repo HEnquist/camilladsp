@@ -1,3 +1,9 @@
+## Unreleased
+New features:
+- Add RACE processor.
+Changes:
+- Add microsecond delay unit.
+
 ## v3.0.0
 New features:
 - Optional multithreaded filter processing.
