@@ -1685,8 +1685,8 @@ Allowed ranges:
 - low_boost: 0 to 20
 
 ### Delay
-The delay filter provides a delay in milliseconds, millimetres or samples.
-The `unit` can be `ms`, `mm` or `samples`, and if left out it defaults to `ms`.
+The delay filter provides a delay in milliseconds, microseconds, millimetres or samples.
+The `unit` can be `ms`, `us`, `mm` or `samples`, and if left out it defaults to `ms`.
 When giving the delay in millimetres, the speed of sound of is assumed to be 343 m/s (dry air at 20 degrees Celsius).
 
 If the `subsample` parameter is set to `true`, then it will use use an IIR filter to achieve subsample delay precision.

@@ -1124,6 +1124,8 @@ impl DelayParameters {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum TimeUnit {
+    #[serde(rename = "us")]
+    Microseconds,
     #[serde(rename = "ms")]
     Milliseconds,
     #[serde(rename = "mm")]
