@@ -4,6 +4,8 @@ use crate::audiodevice::AudioChunk;
 use crate::basicfilters::Delay;
 use crate::basicfilters::Gain;
 use crate::config;
+use crate::config::DelayParameters;
+use crate::config::GainParameters;
 use crate::filters::Filter;
 use crate::filters::Processor;
 use crate::PrcFmt;
@@ -23,30 +25,45 @@ pub struct RACE {
     pub samplerate: usize,
 }
 
+fn delay_config(config: &config::RACEParameters, samplerate: usize) -> DelayParameters {
+    // compensate the delay by subtracting one sample period from the delay, clamp at zero
+    let sample_period_in_delay_unit = match config.delay_unit() {
+        config::TimeUnit::Microseconds => 1000000.0 / samplerate as PrcFmt,
+        config::TimeUnit::Milliseconds => 1000.0 / samplerate as PrcFmt,
+        config::TimeUnit::Millimetres => 343.0 * 1000.0 / samplerate as PrcFmt,
+        config::TimeUnit::Samples => 1.0,
+    };
+    let compensated_delay = (config.delay - sample_period_in_delay_unit).max(0.0);
+
+    config::DelayParameters {
+        delay: compensated_delay,
+        unit: config.delay_unit,
+        subsample: config.subsample_delay,
+    }
+}
+
+fn gain_config(config: &config::RACEParameters) -> GainParameters {
+    config::GainParameters {
+        gain: -config.attenuation,
+        scale: Some(config::GainScale::Decibel),
+        inverted: Some(true),
+        mute: Some(false),
+    }
+}
+
 impl RACE {
     /// Creates a RACE processor from a config struct
     pub fn from_config(name: &str, config: config::RACEParameters, samplerate: usize) -> Self {
         let name = name.to_string();
         let channels = config.channels;
 
-        //debug!("Creating compressor '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
-        //        name, channels, process_channels, monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain(), config.soft_clip(), clip_limit);
-
-        // TODO subtract one sample period from the delay, clamp at zero
-        let delayconf = config::DelayParameters {
-            delay: config.delay,
-            unit: config.delay_unit,
-            subsample: config.subsample_delay,
-        };
+        debug!("Creating RACE '{}', channels: {}, channel_a: {}, channel_b: {}, delay: {} {:?}, subsample: {}, attenuation: {}",
+                name, channels, config.channel_a, config.channel_b, config.delay, config.delay_unit(), config.subsample_delay(), config.attenuation);
+        let delayconf = delay_config(&config, samplerate);
         let delay_a = Delay::from_config("Delay A", samplerate, delayconf.clone());
         let delay_b = Delay::from_config("Delay B", samplerate, delayconf);
 
-        let gainconfig = config::GainParameters {
-            gain: -config.attenuation,
-            scale: Some(config::GainScale::Decibel),
-            inverted: Some(true),
-            mute: Some(false),
-        };
+        let gainconfig = gain_config(&config);
         let gain = Gain::from_config("Gain", gainconfig);
 
         // sort channel numbers
@@ -102,12 +119,7 @@ impl Processor for RACE {
         {
             self.channels = config.channels;
 
-            // TODO subtract one sample period from the delay, clamp at zero
-            let delayparams = config::DelayParameters {
-                delay: config.delay,
-                unit: config.delay_unit,
-                subsample: config.subsample_delay,
-            };
+            let delayparams = delay_config(&config, self.samplerate);
             let delayconf = config::Filter::Delay {
                 parameters: delayparams,
                 description: None,
@@ -115,12 +127,7 @@ impl Processor for RACE {
             self.delay_a.update_parameters(delayconf.clone());
             self.delay_b.update_parameters(delayconf);
 
-            let gainparams = config::GainParameters {
-                gain: -config.attenuation,
-                scale: Some(config::GainScale::Decibel),
-                inverted: Some(true),
-                mute: Some(false),
-            };
+            let gainparams = gain_config(&config);
             let gainconfig = config::Filter::Gain {
                 description: None,
                 parameters: gainparams,
@@ -131,8 +138,8 @@ impl Processor for RACE {
             self.channel_a = config.channel_a.min(config.channel_b);
             self.channel_b = config.channel_a.max(config.channel_b);
 
-            //debug!("Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
-            //    self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain(), config.soft_clip(), clip_limit);
+            debug!("Updating RACE '{}', channels: {}, channel_a: {}, channel_b: {}, delay: {} {:?}, subsample: {}, attenuation: {}",
+                self.name, self.channels, config.channel_a, config.channel_b, config.delay, config.delay_unit(), config.subsample_delay(), config.attenuation);
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
