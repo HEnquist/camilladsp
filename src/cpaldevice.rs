@@ -381,7 +381,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         playback_status.signal_peak.add_record(chunk_stats.peak_linear());
                                     }
                                     buffer_avg.add_value(
-                                        (buffer_fill.load(Ordering::Relaxed) / channels_clone)
+                                        (buffer_fill.load(Ordering::Relaxed) / channels_clone + channel.len() * chunksize_clone)
                                             as f64,
                                     );
                                     if adjust
