@@ -29,7 +29,6 @@ use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::env;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
@@ -124,15 +123,15 @@ fn run(
             return Ok(ExitState::Exit);
         }
     };
-    let (tx_pb, rx_pb) = mpsc::sync_channel(active_config.devices.queuelimit());
-    let (tx_cap, rx_cap) = mpsc::sync_channel(active_config.devices.queuelimit());
+    let (tx_pb, rx_pb) = crossbeam_channel::bounded(active_config.devices.queuelimit());
+    let (tx_cap, rx_cap) = crossbeam_channel::bounded(active_config.devices.queuelimit());
 
     let (tx_status, rx_status) = crossbeam_channel::unbounded();
     let tx_status_pb = tx_status.clone();
     let tx_status_cap = tx_status;
 
-    let (tx_command_cap, rx_command_cap) = mpsc::channel();
-    let (tx_pipeconf, rx_pipeconf) = mpsc::channel();
+    let (tx_command_cap, rx_command_cap) = crossbeam_channel::unbounded();
+    let (tx_pipeconf, rx_pipeconf) = crossbeam_channel::unbounded();
 
     let barrier = Arc::new(Barrier::new(4));
     let barrier_pb = barrier.clone();
@@ -1060,7 +1059,7 @@ fn main_process() -> i32 {
 
     #[cfg(feature = "websocket")]
     {
-        let (tx_state, rx_state) = mpsc::sync_channel(1);
+        let (tx_state, rx_state) = crossbeam_channel::bounded(1);
 
         let processing_params_clone = processing_params.clone();
         let active_config_path_clone = active_config_path.clone();
