@@ -10,7 +10,6 @@ use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -619,7 +618,7 @@ fn capture_loop(
 impl PlaybackDevice for WasapiPlaybackDevice {
     fn start(
         &mut self,
-        channel: mpsc::Receiver<AudioMessage>,
+        channel: crossbeam_channel::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -773,7 +772,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                     0u8;
                                     channels * chunk.frames * sample_format.bytes_per_sample()
                                 ];
-                            buffer_avg.add_value(buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default());
+                            let buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
+                            buffer_avg.add_value(buffer_fill + (channel.len() * chunksize) as f64);
 
                             if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
                                 if let Some(av_delay) = buffer_avg.average() {
@@ -930,10 +930,10 @@ fn nbr_capture_frames(
 impl CaptureDevice for WasapiCaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::SyncSender<AudioMessage>,
+        channel: crossbeam_channel::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
-        command_channel: mpsc::Receiver<CommandMessage>,
+        command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
@@ -1083,8 +1083,8 @@ impl CaptureDevice for WasapiCaptureDevice {
                                 }
                             }
                         },
-                        Err(mpsc::TryRecvError::Empty) => {}
-                        Err(mpsc::TryRecvError::Disconnected) => {
+                        Err(crossbeam_channel::TryRecvError::Empty) => {}
+                        Err(crossbeam_channel::TryRecvError::Disconnected) => {
                             error!("Command channel was closed");
                             break;
                         }
