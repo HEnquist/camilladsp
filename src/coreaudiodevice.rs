@@ -370,7 +370,7 @@ enum PlaybackDeviceMessage {
 impl PlaybackDevice for CoreaudioPlaybackDevice {
     fn start(
         &mut self,
-        channel: mpsc::Receiver<AudioMessage>,
+        channel: crossbeam_channel::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -533,7 +533,8 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
-                            buffer_avg.add_value(buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default());
+                            let estimated_buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
+                            buffer_avg.add_value(estimated_buffer_fill + (channel.len() * chunksize) as f64);
                             if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
                                 if let Some(av_delay) = buffer_avg.average() {
                                     let speed = rate_controller.next(av_delay);
@@ -650,10 +651,10 @@ fn nbr_capture_frames(
 impl CaptureDevice for CoreaudioCaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::SyncSender<AudioMessage>,
+        channel: crossbeam_channel::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
-        command_channel: mpsc::Receiver<CommandMessage>,
+        command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
@@ -856,8 +857,8 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                                 }
                             }
                         },
-                        Err(mpsc::TryRecvError::Empty) => {}
-                        Err(mpsc::TryRecvError::Disconnected) => {
+                        Err(crossbeam_channel::TryRecvError::Empty) => {}
+                        Err(crossbeam_channel::TryRecvError::Disconnected) => {
                             error!("Command channel was closed");
                             break;
                         }

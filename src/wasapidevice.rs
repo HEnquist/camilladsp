@@ -772,8 +772,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                     0u8;
                                     channels * chunk.frames * sample_format.bytes_per_sample()
                                 ];
-                            let buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
-                            buffer_avg.add_value(buffer_fill + (channel.len() * chunksize) as f64);
+                            let estimated_buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
+                            buffer_avg.add_value(estimated_buffer_fill + (channel.len() * chunksize) as f64);
 
                             if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
                                 if let Some(av_delay) = buffer_avg.average() {
