@@ -298,6 +298,7 @@ enum PlaybackDeviceMessage {
 }
 
 // Playback loop, play samples received from channel
+#[allow(clippy::too_many_arguments)]
 fn playback_loop(
     audio_client: wasapi::AudioClient,
     render_client: wasapi::AudioRenderClient,
@@ -306,6 +307,7 @@ fn playback_loop(
     chunksize: usize,
     samplerate: f64,
     sync: PlaybackSync,
+    target_level: usize,
 ) -> Res<()> {
     let mut buffer_free_frame_count = audio_client.get_bufferframecount()?;
     let mut sample_queue: VecDeque<u8> = VecDeque::with_capacity(
@@ -352,7 +354,8 @@ fn playback_loop(
     };
 
     audio_client.start_stream()?;
-    let mut running = true;
+    let mut running = false;
+    let mut starting = true;
     let mut pos = 0;
     let mut device_prevtime = 0.0;
     let device_freq = clock.get_frequency()? as f64;
@@ -392,12 +395,20 @@ fn playback_loop(
             match sync.rx_play.try_recv() {
                 Ok(PlaybackDeviceMessage::Data(chunk)) => {
                     trace!("Received chunk.");
-                    for element in chunk.iter() {
-                        sample_queue.push_back(*element);
-                    }
                     if !running {
                         running = true;
-                        info!("Restarting playback after buffer underrun.");
+                        if starting {
+                            starting = false;
+                        } else {
+                            warn!("Restarting playback after buffer underrun.");
+                        }
+                        debug!("Inserting {target_level} silent frames to reach target delay.");
+                        for _ in 0..(blockalign * target_level) {
+                            sample_queue.push_back(0);
+                        }
+                    }
+                    for element in chunk.iter() {
+                        sample_queue.push_back(*element);
                     }
                 }
                 Ok(PlaybackDeviceMessage::Stop) => {
@@ -699,6 +710,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             chunksize,
                             samplerate as f64,
                             sync,
+                            target_level,
                         );
                         if let Err(err) = result {
                             let msg = format!("Playback failed with error: {}", err);
@@ -973,6 +985,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                     tx_dev_free.send(data).unwrap();
                 }
                 let (tx_state_dev, rx_state_dev) = bounded(0);
+                let (tx_start_inner, rx_start_inner) = bounded(0);
                 let (tx_disconnectreason, rx_disconnectreason) = unbounded();
 
                 trace!("Build input stream.");
@@ -1000,6 +1013,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             tx_filled: tx_dev,
                             rx_empty: rx_dev_free,
                         };
+                        let _rx_res = rx_start_inner.recv();
                         let result = capture_loop(audio_client, capture_client, handle, channels, tx_disconnectreason, blockalign as usize, stop_signal_inner);
                         if let Err(err) = result {
                             let msg = format!("Capture failed with error: {}", err);
@@ -1058,6 +1072,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         None
                     }
                 };
+                let _send_res = tx_start_inner.send(());
                 debug!("Capture device starts now!");
                 loop {
                     match command_channel.try_recv() {
