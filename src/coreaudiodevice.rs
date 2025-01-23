@@ -410,7 +410,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 trace!("Build output stream");
                 let mut conversion_result;
                 let mut sample_queue: VecDeque<u8> =
-                    VecDeque::with_capacity(16 * chunksize * blockalign);
+                    VecDeque::with_capacity((16 * chunksize  + target_level) * blockalign);
 
                 let (mut audio_unit, device_id) = match open_coreaudio_playback(
                     &devname,
@@ -431,7 +431,8 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
 
                 type Args = render_callback::Args<data::InterleavedBytes<f32>>;
 
-                let mut running = true;
+                let mut running = false;
+                let mut starting = true;
 
                 let callback_res = audio_unit.set_render_callback(move |args: Args| {
                     let Args {
@@ -443,12 +444,21 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         match rx_dev.try_recv() {
                             Ok(PlaybackDeviceMessage::Data(chunk)) => {
                                 trace!("got chunk");
-                                for element in chunk.iter() {
-                                    sample_queue.push_back(*element);
-                                }
                                 if !running {
                                     running = true;
-                                    info!("Restarting playback after buffer underrun");
+                                    if starting {
+                                        starting = false;
+                                    }
+                                    else {
+                                        warn!("Restarting playback after buffer underrun.");
+                                    }
+                                    debug!("Inserting {target_level} silent frames to reach target delay.");
+                                    for _ in 0..(blockalign * target_level) {
+                                        sample_queue.push_back(0);
+                                    }
+                                }
+                                for element in chunk.iter() {
+                                    sample_queue.push_back(*element);
                                 }
                             }
                             Err(_) => {
@@ -457,7 +467,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 }
                                 if running {
                                     running = false;
-                                    warn!("Playback interrupted, no data available");
+                                    warn!("Playback interrupted, no data available.");
                                 }
                             }
                         }
