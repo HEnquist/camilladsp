@@ -67,7 +67,10 @@ fn take_ownership(device_id: AudioDeviceID) -> Res<pid_t> {
 }
 
 fn release_ownership(device_id: AudioDeviceID) -> Res<()> {
-    trace!("Releasing any device ownership for device id {}.", device_id);
+    trace!(
+        "Releasing any device ownership for device id {}.",
+        device_id
+    );
     let device_owner_pid = match get_hogging_pid(device_id) {
         Ok(pid) => pid,
         Err(CoreAudioError::AudioCodec(AudioCodecError::UnknownProperty)) => return Ok(()),
@@ -196,7 +199,10 @@ fn open_coreaudio_playback(
     exclusive: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if let Some(name) = devname {
-        trace!("Available playback devices: {:?}.", list_device_names(false));
+        trace!(
+            "Available playback devices: {:?}.",
+            list_device_names(false)
+        );
         match get_device_id_from_name_and_scope(name, false) {
             Some(dev) => dev,
             None => {
@@ -333,8 +339,9 @@ fn open_coreaudio_capture(
         );
         if let Some(phys_asbd) = find_matching_physical_format(device_id, physical_stream_format) {
             debug!("Set phys capture stream format.");
-            set_device_physical_stream_format(device_id, phys_asbd)
-                .map_err(|_| ConfigError::new("Failed to find matching physical capture format."))?;
+            set_device_physical_stream_format(device_id, phys_asbd).map_err(|_| {
+                ConfigError::new("Failed to find matching physical capture format.")
+            })?;
         } else {
             let msg = "Failed to find matching physical capture format.";
             return Err(ConfigError::new(msg).into());
