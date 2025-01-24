@@ -311,7 +311,8 @@ fn playback_loop(
 ) -> Res<()> {
     let mut buffer_free_frame_count = audio_client.get_bufferframecount()?;
     let mut sample_queue: VecDeque<u8> = VecDeque::with_capacity(
-        4 * blockalign * (chunksize + 2 * buffer_free_frame_count as usize),
+        4 * blockalign * (chunksize + 2 * buffer_free_frame_count as usize)
+            + target_level * blockalign,
     );
 
     let tx_cb = sync.tx_cb;
