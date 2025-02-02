@@ -140,8 +140,7 @@ pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
             if input_channels.contains(&source.channel) {
                 let msg = format!(
                     "Input channel {} is listed mote than once for destination channel {}",
-                    source.channel,
-                    mapping.dest,
+                    source.channel, mapping.dest,
                 );
                 return Err(config::ConfigError::new(&msg).into());
             }
