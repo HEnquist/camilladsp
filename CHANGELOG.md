@@ -2,9 +2,10 @@
 New features:
 - Add RACE processor.
 - Add option for custom log filtering.
-- Allow larger buffer target levels.
 Changes:
 - Add microsecond delay unit.
+- Allow larger buffer target levels.
+- Change mixer config rules to not allow duplicated channels.
 
 ## v3.0.0
 New features:
