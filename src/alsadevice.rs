@@ -10,18 +10,18 @@ use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::poll::Descriptors;
 use alsa::{Direction, ValueOr, PCM};
 use alsa_sys;
+use audio_thread_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
+use crossbeam_channel;
 use nix::errno::Errno;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::ffi::CString;
 use std::fmt::Debug;
-use std::sync::{mpsc, Arc, Barrier};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
-
-use audio_thread_priority::{
-    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
-};
 
 use crate::alsadevice_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
@@ -73,13 +73,13 @@ pub struct AlsaCaptureDevice {
 }
 
 struct CaptureChannels {
-    audio: mpsc::SyncSender<AudioMessage>,
+    audio: crossbeam_channel::Sender<AudioMessage>,
     status: crossbeam_channel::Sender<StatusMessage>,
-    command: mpsc::Receiver<CommandMessage>,
+    command: crossbeam_channel::Receiver<CommandMessage>,
 }
 
 struct PlaybackChannels {
-    audio: mpsc::Receiver<AudioMessage>,
+    audio: crossbeam_channel::Receiver<AudioMessage>,
     status: crossbeam_channel::Sender<StatusMessage>,
 }
 
@@ -520,14 +520,20 @@ fn playback_loop_bytes(
         match msg {
             Ok(AudioMessage::Audio(chunk)) => {
                 // measure delay only on running non-stalled device
-                let delay_at_chunk_recvd = if !device_stalled
+                let avail_at_chunk_recvd = if !device_stalled
                     && pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32
                 {
-                    pcmdevice.status().ok().map(|status| status.get_delay())
+                    pcmdevice.avail().ok()
                 } else {
                     None
                 };
-                //trace!("PB: Delay at chunk rcvd: {:?}", delay_at_chunk_recvd);
+                let waiting_chunks_in_channel = channels.audio.len();
+                trace!(
+                    "Avail frames in buffer: {:?}, waiting chunks in channel: {}",
+                    avail_at_chunk_recvd,
+                    waiting_chunks_in_channel
+                );
+                //trace!("PB: Avail at chunk rcvd: {:?}", avail_at_chunk_recvd);
 
                 conversion_result =
                     chunk_to_buffer_rawbytes(&chunk, &mut buffer, &params.sample_format);
@@ -602,10 +608,11 @@ fn playback_loop_bytes(
                     } else {
                         xtrace!("playback status blocked, skip update");
                     }
-                    if let Some(delay) = delay_at_chunk_recvd {
-                        if delay != 0 {
-                            buffer_avg.add_value(delay as f64);
-                        }
+                    if let Some(avail) = avail_at_chunk_recvd {
+                        let delay = buf_manager.current_delay(avail);
+                        buffer_avg.add_value(
+                            delay as f64 + (params.chunksize * waiting_chunks_in_channel) as f64,
+                        );
                     }
                     if timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
                         if let Some(avg_delay) = buffer_avg.average() {
@@ -694,7 +701,7 @@ fn playback_loop_bytes(
     }
 }
 
-fn drain_check_eos(audio: &mpsc::Receiver<AudioMessage>) -> Option<AudioMessage> {
+fn drain_check_eos(audio: &crossbeam_channel::Receiver<AudioMessage>) -> Option<AudioMessage> {
     let mut eos: Option<AudioMessage> = None;
     while let Some(msg) = audio.try_iter().next() {
         if let AudioMessage::EndOfStream = msg {
@@ -874,8 +881,8 @@ fn capture_loop_bytes(
                     }
                 }
             }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 error!("Command channel was closed");
                 break;
             }
@@ -1102,7 +1109,7 @@ fn nbr_capture_bytes_and_frames(
 impl PlaybackDevice for AlsaPlaybackDevice {
     fn start(
         &mut self,
-        channel: mpsc::Receiver<AudioMessage>,
+        channel: crossbeam_channel::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -1176,10 +1183,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
 impl CaptureDevice for AlsaCaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::SyncSender<AudioMessage>,
+        channel: crossbeam_channel::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
-        command_channel: mpsc::Receiver<CommandMessage>,
+        command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
         processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {

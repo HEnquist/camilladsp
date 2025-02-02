@@ -10,7 +10,6 @@ use std::fs::File;
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -37,7 +36,7 @@ pub struct SharedData {
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
     pub processing_params: Arc<ProcessingParameters>,
     pub processing_status: Arc<RwLock<ProcessingStatus>>,
-    pub state_change_notify: mpsc::SyncSender<()>,
+    pub state_change_notify: crossbeam_channel::Sender<()>,
     pub state_file_path: Option<String>,
     pub unsaved_state_change: Arc<AtomicBool>,
 }
