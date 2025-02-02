@@ -552,7 +552,7 @@ impl<'a> Dither<'a> {
     }
 }
 
-impl<'a> Filter for Dither<'a> {
+impl Filter for Dither<'_> {
     fn name(&self) -> &str {
         &self.name
     }

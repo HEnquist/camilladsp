@@ -28,7 +28,6 @@ use rubato::{
 };
 use std::error;
 use std::fmt;
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
@@ -222,7 +221,7 @@ pub fn rms_and_peak(data: &[PrcFmt]) -> (PrcFmt, PrcFmt) {
 pub trait PlaybackDevice {
     fn start(
         &mut self,
-        channel: mpsc::Receiver<AudioMessage>,
+        channel: crossbeam_channel::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -233,10 +232,10 @@ pub trait PlaybackDevice {
 pub trait CaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::SyncSender<AudioMessage>,
+        channel: crossbeam_channel::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
-        command_channel: mpsc::Receiver<CommandMessage>,
+        command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
         processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>>;

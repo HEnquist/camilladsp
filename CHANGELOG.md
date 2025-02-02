@@ -1,3 +1,11 @@
+## v4.0.0
+New features:
+- Add RACE processor.
+- Add option for custom log filtering.
+- Allow larger buffer target levels.
+Changes:
+- Add microsecond delay unit.
+
 ## v3.0.0
 New features:
 - Optional multithreaded filter processing.
