@@ -454,6 +454,26 @@ pub fn start_server(parameters: ServerParameters, shared_data: SharedData) {
         let ws_result = TcpListener::bind(format!("{address}:{port}"));
         if let Ok(server) = ws_result {
             for stream in server.incoming() {
+                match &stream {
+                    Ok(s) => {
+                        let local_addr = s
+                            .local_addr()
+                            .map(|a| a.to_string())
+                            .unwrap_or("unknown".to_string());
+                        let peer_addr = s
+                            .peer_addr()
+                            .map(|a| a.to_string())
+                            .unwrap_or("unknown".to_string());
+                        debug!(
+                            "Accepted new incoming connection on {} from {}.",
+                            local_addr, peer_addr
+                        );
+                    }
+                    Err(err) => {
+                        debug!("Ignoring incoming connection with error: {}", err);
+                        continue;
+                    }
+                };
                 let shared_data_inst = shared_data.clone();
                 let now = Instant::now();
                 let local_data = LocalData {
