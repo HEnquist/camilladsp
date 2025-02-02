@@ -76,10 +76,11 @@ fn custom_colored_logger_format(
     let level = record.level();
     write!(
         w,
-        "{} {:<5} [{}:{}] {}",
+        "{} {:<5} [{}] <{}:{}> {}",
         now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
         flexi_logger::style(level).paint(level.to_string()),
-        record.file().unwrap_or("<unnamed>"),
+        record.module_path().unwrap_or("*unknown module*"),
+        record.file().unwrap_or("*unknown file*"),
         record.line().unwrap_or(0),
         &record.args()
     )
@@ -93,10 +94,11 @@ pub fn custom_logger_format(
 ) -> Result<(), std::io::Error> {
     write!(
         w,
-        "{} {:<5} [{}:{}] {}",
+        "{} {:<5} [{}] <{}:{}> {}",
         now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
         record.level(),
-        record.file().unwrap_or("<unnamed>"),
+        record.module_path().unwrap_or("*unknown module*"),
+        record.file().unwrap_or("*unknown file*"),
         record.line().unwrap_or(0),
         &record.args()
     )
@@ -542,6 +544,15 @@ fn main_process() -> i32 {
                 .action(ArgAction::Set),
         )
         .arg(
+            Arg::new("custom_log_spec")
+                .help("Custom logger specification")
+                .long("custom_log_spec")
+                .value_name("LOG_SPEC")
+                .display_order(104)
+                .value_parser(clap::value_parser!(String))
+                .action(ArgAction::Set),
+        )
+        .arg(
             Arg::new("gain")
                 .help("Initial gain in dB for main volume control")
                 .short('g')
@@ -739,6 +750,9 @@ fn main_process() -> i32 {
     if let Some(level) = matches.get_one::<String>("loglevel") {
         loglevel = level;
     }
+    if let Some(spec) = matches.get_one::<String>("custom_log_spec") {
+        loglevel = spec;
+    }
 
     let logger = if let Some(logfile) = matches.get_one::<String>("logfile") {
         let mut path = PathBuf::from(logfile);
@@ -748,7 +762,7 @@ fn main_process() -> i32 {
             path = fullpath;
         }
         let mut logger = flexi_logger::Logger::try_with_str(loglevel)
-            .unwrap()
+            .expect("The provided logger specification is invalid")
             .format(custom_logger_format)
             .log_to_file(flexi_logger::FileSpec::try_from(path).unwrap())
             .write_mode(flexi_logger::WriteMode::Async);
@@ -770,7 +784,7 @@ fn main_process() -> i32 {
         logger.start().unwrap()
     } else {
         flexi_logger::Logger::try_with_str(loglevel)
-            .unwrap()
+            .expect("The provided logger specification is invalid")
             .format(custom_colored_logger_format)
             .set_palette("196;208;-;27;8".to_string())
             .log_to_stderr()

@@ -1,3 +1,7 @@
+## v4.0.0
+New features:
+- Add option for custom log filtering.
+
 ## v3.0.0
 New features:
 - Optional multithreaded filter processing.

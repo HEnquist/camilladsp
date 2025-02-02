@@ -495,6 +495,18 @@ Alternatively, the log level can be changed with the verbosity flag.
 By passing the verbosity flag once, `-v`, `debug` messages are enabled.
 If it's given twice, `-vv`, it also prints `trace` messages.
 
+The option `custom_log_spec` can be used to define custom filters for the logs.
+When provided, this option overrides what is given by `-v` and `--loglevel`.
+Using this option, the log level can be set to different values for different modules.
+Example, set the base log level to `info`, but increase it to `trace` for the
+Wasapi backend (which is the `camillalib::wasapidevice` module):
+```
+--custom_log_spec="info, camillalib::wasapidevice=trace
+```
+Module names are shown in square brackets in the log messages.
+See the [flexi-logger documentation](https://docs.rs/flexi_logger/latest/flexi_logger/struct.LogSpecification.html)
+for more info on how to write the logger specification.
+
 The log messages are normally written to the terminal via stderr,
 but they can instead be written to a file by giving the `--logfile` option.
 The argument should be the path to the logfile.
