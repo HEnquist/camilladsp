@@ -1,6 +1,7 @@
-## Unreleased
+## v4.0.0
 New features:
 - Add RACE processor.
+- Add option for custom log filtering.
 Changes:
 - Add microsecond delay unit.
 
