@@ -495,6 +495,18 @@ Alternatively, the log level can be changed with the verbosity flag.
 By passing the verbosity flag once, `-v`, `debug` messages are enabled.
 If it's given twice, `-vv`, it also prints `trace` messages.
 
+The option `custom_log_spec` can be used to define custom filters for the logs.
+When provided, this option overrides what is given by `-v` and `--loglevel`.
+Using this option, the log level can be set to different values for different modules.
+Example, set the base log level to `info`, but increase it to `trace` for the
+Wasapi backend (which is the `camillalib::wasapidevice` module):
+```
+--custom_log_spec="info, camillalib::wasapidevice=trace
+```
+Module names are shown in square brackets in the log messages.
+See the [flexi-logger documentation](https://docs.rs/flexi_logger/latest/flexi_logger/struct.LogSpecification.html)
+for more info on how to write the logger specification.
+
 The log messages are normally written to the terminal via stderr,
 but they can instead be written to a file by giving the `--logfile` option.
 The argument should be the path to the logfile.
@@ -1685,8 +1697,8 @@ Allowed ranges:
 - low_boost: 0 to 20
 
 ### Delay
-The delay filter provides a delay in milliseconds, millimetres or samples.
-The `unit` can be `ms`, `mm` or `samples`, and if left out it defaults to `ms`.
+The delay filter provides a delay in milliseconds, microseconds, millimetres or samples.
+The `unit` can be `ms`, `us`, `mm` or `samples`, and if left out it defaults to `ms`.
 When giving the delay in millimetres, the speed of sound of is assumed to be 343 m/s (dry air at 20 degrees Celsius).
 
 If the `subsample` parameter is set to `true`, then it will use use an IIR filter to achieve subsample delay precision.
@@ -2250,6 +2262,153 @@ pipeline:
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
 
+### RACE
+The "RACE" processor implements the recursive part of the
+[Recursive Ambiophonic Crosstalk Elimination (RACE)](http://www.filmaker.com/papers/RGRM-RACE_rev.pdf) algorithm.
+The RACE processor processes a aingle pair of channels.
+Multiple processors can be used to process additional channel pairs if needed.
+
+Parameters: 
+* `channels`: number of channels, must match the number of channels of the pipeline where the compressor is inserted.
+* `channel_a`: channel number of first channel of the pair.
+* `channel_b`: channel number of second channel of the pair.
+* `attenuation`: attenuation in dB, must be larger than zero. Typical values are 2 - 3 dB.
+* `delay`: delay value, must be larger than zero. Typical values are in the range 0.06 - 0.1 ms
+* `delay_unit`: unit for delay, see the `Delay` filter.
+* `subsample_delay`: enable subsample delay values, see the `Delay` filter.
+
+The RACE algorithm is normally used with filters,
+to only process a limited range of the audio spectrum.
+![RACE algoriths](race.png)
+
+The RACE processor implements the recursive function block
+indicated by the dashed rectangle.
+This processor is meant to be combined with normal CamillaDSP mixers
+and filters to make up the complete solution.
+
+Example configuration implementing RACE with filters:
+```yml
+processors:
+  race:
+    type: RACE
+    parameters:
+      channels: 6
+      channel_a: 2
+      channel_b: 3
+      attenuation: 3
+      delay: 0.09
+
+mixers:
+  2to6:
+    channels:
+      in: 2
+      out: 6
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 2
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 3
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 4
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 5
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+  6to2:
+    channels:
+      in: 6
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -3
+            inverted: false
+          - channel: 2
+            gain: -3
+            inverted: false
+          - channel: 4
+            gain: -3
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: -3
+            inverted: false
+          - channel: 3
+            gain: -3
+            inverted: false
+          - channel: 5
+            gain: -3
+            inverted: false
+
+filters:
+  highpass_lower:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 250
+      order: 4
+  lowpass_lower:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 250
+      order: 4
+  highpass_upper:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 5000
+      order: 4
+  lowpass_upper:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 5000
+      order: 4
+
+pipeline:
+  - type: Mixer
+    name: 2to6
+  - type: Filter
+    channels: [0, 1]
+    names:
+      - lowpass_lower
+  - type: Filter
+    channels: [2, 3]
+    names:
+      - highpass_lower
+      - lowpass_upper
+  - type: Filter
+    channels: [4, 5]
+    names:
+      - highpass_upper
+  - type: Processor
+    name: race
+  - type: Mixer
+    name: 6to2
+```
 
 ## Pipeline
 The pipeline section defines the processing steps between input and output.

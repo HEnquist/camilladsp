@@ -289,6 +289,10 @@ impl Gain {
         let linear = conf.scale() == config::GainScale::Linear;
         Gain::new(name, gain, inverted, mute, linear)
     }
+
+    pub fn process_single(&self, value: PrcFmt) -> PrcFmt {
+        value * self.gain
+    }
 }
 
 impl Filter for Gain {
@@ -362,12 +366,21 @@ impl Delay {
 
     pub fn from_config(name: &str, samplerate: usize, conf: config::DelayParameters) -> Self {
         let delay_samples = match conf.unit() {
+            config::TimeUnit::Microseconds => conf.delay / 1000000.0 * (samplerate as PrcFmt),
             config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (samplerate as PrcFmt),
             config::TimeUnit::Millimetres => conf.delay / 1000.0 * (samplerate as PrcFmt) / 343.0,
             config::TimeUnit::Samples => conf.delay,
         };
 
         Self::new(name, samplerate, delay_samples, conf.subsample())
+    }
+
+    pub fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
+        let mut value = self.queue.push(input).unwrap();
+        if let Some(bq) = &mut self.biquad {
+            value = bq.process_single(value);
+        }
+        value
     }
 }
 
