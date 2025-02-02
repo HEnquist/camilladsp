@@ -455,9 +455,6 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         match rx_dev.try_recv() {
                             Ok(PlaybackDeviceMessage::Data(bytes)) => {
                                 trace!("Received a chunk.");
-                                for element in device_consumer.pop_iter().take(bytes) {
-                                    sample_queue.push_back(element);
-                                }
                                 if !running {
                                     running = true;
                                     if starting {
@@ -471,8 +468,8 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                         sample_queue.push_back(0);
                                     }
                                 }
-                                for element in chunk.iter() {
-                                    sample_queue.push_back(*element);
+                                for element in device_consumer.pop_iter().take(bytes) {
+                                    sample_queue.push_back(element);
                                 }
                             }
                             Err(_) => {
