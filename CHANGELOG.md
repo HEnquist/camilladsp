@@ -2,6 +2,7 @@
 New features:
 - Add RACE processor.
 - Add option for custom log filtering.
+- Allow larger buffer target levels.
 Changes:
 - Add microsecond delay unit.
 

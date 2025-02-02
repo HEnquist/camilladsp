@@ -1857,12 +1857,12 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "linux")]
     let target_level_limit = if matches!(conf.devices.playback, PlaybackDevice::Alsa { .. }) {
-        4 * conf.devices.chunksize
+        (4 + conf.devices.queuelimit()) * conf.devices.chunksize
     } else {
-        2 * conf.devices.chunksize
+        (2 + conf.devices.queuelimit()) * conf.devices.chunksize
     };
     #[cfg(not(target_os = "linux"))]
-    let target_level_limit = 2 * conf.devices.chunksize;
+    let target_level_limit = (2 + conf.devices.queuelimit()) * conf.devices.chunksize;
 
     if conf.devices.target_level() > target_level_limit {
         let msg = format!("target_level cannot be larger than {}", target_level_limit);
