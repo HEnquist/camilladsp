@@ -7,6 +7,7 @@ use crate::helpers::PIRateController;
 use crossbeam_channel::{bounded, TryRecvError, TrySendError};
 use dispatch::Semaphore;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use ringbuf::{traits::*, HeapRb};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::ffi::CStr;
@@ -370,7 +371,7 @@ fn open_coreaudio_capture(
 }
 
 enum PlaybackDeviceMessage {
-    Data(Vec<u8>),
+    Data(usize),
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
@@ -419,6 +420,9 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 let mut sample_queue: VecDeque<u8> =
                     VecDeque::with_capacity((16 * chunksize  + target_level) * blockalign);
 
+                let ringbuffer = HeapRb::<u8>::new(blockalign * ( 2 * chunksize + 2048 ));
+                let (mut device_producer, mut device_consumer) = ringbuffer.split();
+
                 let (mut audio_unit, device_id) = match open_coreaudio_playback(
                     &devname,
                     samplerate,
@@ -449,7 +453,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     while sample_queue.len() < (blockalign * num_frames) {
                         trace!("playback loop needs more samples, reading from channel");
                         match rx_dev.try_recv() {
-                            Ok(PlaybackDeviceMessage::Data(chunk)) => {
+                            Ok(PlaybackDeviceMessage::Data(bytes)) => {
                                 trace!("Received a chunk.");
                                 if !running {
                                     running = true;
@@ -464,8 +468,8 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                         sample_queue.push_back(0);
                                     }
                                 }
-                                for element in chunk.iter() {
-                                    sample_queue.push_back(*element);
+                                for element in device_consumer.pop_iter().take(bytes) {
+                                    sample_queue.push_back(element);
                                 }
                             }
                             Err(_) => {
@@ -511,6 +515,14 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     Ok(()) => {}
                     Err(_err) => {}
                 }
+
+                let mut buf = vec![
+                                0u8;
+                                channels
+                                    * chunksize
+                                    * SampleFormat::FLOAT32LE.bytes_per_sample()
+                            ];
+
                 debug!("Playback device ready and waiting.");
                 barrier.wait();
                 debug!("Playback device starts now!");
@@ -581,12 +593,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 }
                             }
                             chunk.update_stats(&mut chunk_stats);
-                            let mut buf = vec![
-                                0u8;
-                                channels
-                                    * chunk.frames
-                                    * SampleFormat::FLOAT32LE.bytes_per_sample()
-                            ];
+
                             conversion_result = chunk_to_buffer_rawbytes(
                                 &chunk,
                                 &mut buf,
@@ -606,7 +613,8 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             else {
                                 xtrace!("Playback status blocked, skipping rms update.");
                             }
-                            match tx_dev.send(PlaybackDeviceMessage::Data(buf)) {
+                            let bytes = device_producer.push_slice(&buf[0..conversion_result.0]);
+                            match tx_dev.send(PlaybackDeviceMessage::Data(bytes)) {
                                 Ok(_) => {}
                                 Err(err) => {
                                     error!("Playback device channel error: {err}.");
@@ -704,18 +712,17 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let callback_frames = 512;
                 // TODO check if always 512!
                 //trace!("Estimated playback callback period to {} frames", callback_frames);
-                let channel_capacity = 8*chunksize/callback_frames + 1;
+                let channel_capacity = 16*chunksize/callback_frames + 10;
+
                 debug!("Using a capture channel capacity of {channel_capacity} buffers.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
-                let (tx_dev_free, rx_dev_free) = bounded(channel_capacity+2);
-                for _ in 0..(channel_capacity+2) {
-                    let data = vec![0u8; 4*callback_frames*blockalign];
-                    tx_dev_free.send(data).unwrap();
-                }
 
                 // Semaphore used to wake up the waiting capture thread from the callback.
                 let semaphore = Semaphore::new(0);
                 let device_sph = semaphore.clone();
+
+                let ringbuffer = HeapRb::<u8>::new(blockalign * ( 2 * chunksize + 2 * callback_frames ));
+                let (mut device_producer, mut device_consumer) = ringbuffer.split();
 
                 trace!("Build input stream.");
                 let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels, &sample_format) {
@@ -733,33 +740,26 @@ impl CaptureDevice for CoreaudioCaptureDevice {
 
                 type Args = render_callback::Args<data::InterleavedBytes<f32>>;
 
-                // Vec used to store the saved buffer between callback iterations. 
-                let mut saved_buffer: Vec<Vec<u8>> = Vec::new();
-
                 let callback_res = audio_unit.set_input_callback(move |args: Args| {
                     let Args {
                         num_frames, data, ..
                     } = args;
                     trace!("Capture call, read {num_frames} frames.");
-                    let mut new_data = match saved_buffer.len() {
-                        0 => rx_dev_free.recv().unwrap(),
-                        _ => saved_buffer.pop().unwrap(),
-                    };
-                    let length_bytes = data.buffer.len();
-                    if length_bytes > new_data.len() {
-                        debug!("Buffer is too small, resizing from {} to {}.", new_data.len(), length_bytes);
-                        new_data.resize(length_bytes, 0);
+
+                    let pushed_bytes = device_producer.push_slice(data.buffer);
+                    if pushed_bytes < data.buffer.len() {
+                        debug!(
+                            "Capture ring buffer is full, dropped {} out of {} bytes.",
+                            data.buffer.len() - pushed_bytes,
+                            data.buffer.len()
+                        );
                     }
-                    for (databyte, bufferbyte) in data.buffer.iter().zip(new_data.iter_mut()) {
-                        *bufferbyte = *databyte;
-                    }
-                    match tx_dev.try_send((chunk_counter, length_bytes, new_data)) {
+                    match tx_dev.try_send((chunk_counter, pushed_bytes)) {
                         Ok(()) => {
                             device_sph.signal();
                         },
-                        Err(TrySendError::Full((nbr, length_bytes, buf))) => {
+                        Err(TrySendError::Full((nbr, length_bytes))) => {
                             debug!("Dropping captured chunk {nbr} with len {length_bytes}.");
-                            saved_buffer.push(buf);
                         }
                         Err(_) => {
                             error!("Error sending, channel disconnected");
@@ -788,7 +788,6 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     warn!("Unable to register capture device alive listener, error: {err}.");
                 }
 
-                let chunksize_samples = channels * chunksize;
                 let mut capture_frames = chunksize;
                 capture_frames = nbr_capture_frames(
                     &resampler,
@@ -813,7 +812,6 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                 let mut state = ProcessingState::Running;
                 let blockalign = 4*channels;
-                let mut data_queue: VecDeque<u8> = VecDeque::with_capacity(4 * blockalign * chunksize_samples );
                 // TODO check if this ever needs to be resized
                 let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                 let mut expected_chunk_nbr = 0;
@@ -908,22 +906,17 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     );
                     let capture_bytes = blockalign * capture_frames;
                     let mut tries = 0;
-                    while data_queue.len() < (blockalign * capture_frames) && tries < 50 {
+                    while device_consumer.occupied_len() < (blockalign * capture_frames) && tries < 50 {
                         trace!("Capture device needs more samples to make chunk, reading from channel.");
                         let _ = semaphore.wait_timeout(Duration::from_millis(20));
                         match rx_dev.try_recv() {
-                            Ok((chunk_nbr, length_bytes, data)) => {
+                            Ok((chunk_nbr, length_bytes)) => {
                                 trace!("Received chunk, length {length_bytes} bytes.");
                                 expected_chunk_nbr += 1;
                                 if chunk_nbr > expected_chunk_nbr {
                                     warn!("Samples were dropped, missing {} buffers.", chunk_nbr-expected_chunk_nbr);
                                     expected_chunk_nbr = chunk_nbr;
                                 }
-                                for element in data.iter().take(length_bytes) {
-                                    data_queue.push_back(*element);
-                                }
-                                // Return the buffer to the queue
-                                tx_dev_free.send(data).unwrap();
                             }
                             Err(TryRecvError::Empty) => {
                                 trace!("No new data from inner capture thread, try {tries} of 50.");
@@ -937,7 +930,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         }
                         tries += 1;
                     }
-                    if data_queue.len() < (blockalign * capture_frames) {
+                    if device_consumer.occupied_len() < (blockalign * capture_frames) {
                         if let Some(mut capture_status) = capture_status.try_write() {
                             capture_status.measured_samplerate = 0;
                             capture_status.signal_range = 0.0;
@@ -954,9 +947,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         }
                         continue;
                     }
-                    for element in data_buffer.iter_mut().take(capture_bytes) {
-                        *element = data_queue.pop_front().unwrap();
-                    }
+                    device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
                     let mut chunk = buffer_to_chunk_rawbytes(
                         &data_buffer[0..capture_bytes],
                         channels,
@@ -964,7 +955,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         capture_bytes,
                         &capture_status.read().used_channels,
                     );
-                    averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
+                    averager.add_value(capture_frames + device_consumer.occupied_len()/blockalign - prev_len/blockalign);
                     if let Some(capture_status) = capture_status.try_upgradable_read() {
                         if averager.larger_than_millis(capture_status.update_interval as u64)
                         {
@@ -989,7 +980,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     else {
                         xtrace!("Capture status blocked, skip update.");
                     }
-                    watcher_averager.add_value(capture_frames + data_queue.len()/blockalign - prev_len/blockalign);
+                    watcher_averager.add_value(capture_frames + device_consumer.occupied_len()/blockalign - prev_len/blockalign);
                     if watcher_averager.larger_than_millis(rate_measure_interval)
                     {
                         let samples_per_sec = watcher_averager.average();
@@ -1010,7 +1001,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             }
                         }
                     }
-                    prev_len = data_queue.len();
+                    prev_len = device_consumer.occupied_len();
                     chunk.update_stats(&mut chunk_stats);
                     if let Some(mut capture_status) = capture_status.try_write() {
                         capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());

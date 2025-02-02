@@ -1,6 +1,8 @@
-use circular_queue::CircularQueue;
 use rand::{rngs::SmallRng, SeedableRng};
 use rand_distr::{Distribution, Triangular, Uniform};
+use ringbuf::storage::Heap;
+use ringbuf::traits::*;
+use ringbuf::LocalRb;
 
 use crate::{config, filters::Filter, NewValue, PrcFmt, Res};
 
@@ -14,17 +16,16 @@ pub struct Dither<'a> {
     shaper: Option<NoiseShaper<'a>>,
 }
 
-#[derive(Clone, Debug)]
 pub struct NoiseShaper<'a> {
     // optimization: lifetime allows taking coefficients
     // from an array instead of allocating a `Vec`.
     filter: &'a [PrcFmt],
-    buffer: CircularQueue<PrcFmt>,
+    buffer: LocalRb<Heap<PrcFmt>>,
 }
 
 impl<'a> NoiseShaper<'a> {
     pub fn new(filter: &'a [PrcFmt]) -> Self {
-        let buffer = CircularQueue::with_capacity(filter.len());
+        let buffer = LocalRb::new(filter.len());
         Self { filter, buffer }
     }
 
@@ -438,7 +439,7 @@ impl<'a> NoiseShaper<'a> {
 
     pub fn process(&mut self, scaled: PrcFmt, dither: PrcFmt) -> PrcFmt {
         let mut filt_buf = 0.0;
-        for (item, coeff) in self.buffer.iter().zip(self.filter) {
+        for (item, coeff) in self.buffer.iter().zip(self.filter.iter().rev()) {
             filt_buf += coeff * item;
         }
 
@@ -446,7 +447,7 @@ impl<'a> NoiseShaper<'a> {
         let result = scaled_plus_err + dither;
         let result_r = result.round(); // away from zero
 
-        self.buffer.push(scaled_plus_err - result_r);
+        self.buffer.push_overwrite(scaled_plus_err - result_r);
 
         result_r
     }
