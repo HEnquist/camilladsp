@@ -118,6 +118,11 @@ fn play_buffer(
         // This sleep applies for the first chunk and in combination with the threshold=1 (i.e. start at first write)
         // and the next chunk generates the initial target delay.
         buf_manager.sleep_for_target_delay(millis_per_frame);
+    } else if playback_state == alsa_sys::SND_PCM_STATE_PAUSED as i32 {
+        // Some devices report paused state for a short while when starting.
+        // There doesn't seem to be any problem with this,
+        // log on debug level to avoid needless warnings.
+        debug!("PB: device is in paused state.");
     } else if playback_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
         warn!(
             "PB: device is in an unexpected state: {}",
