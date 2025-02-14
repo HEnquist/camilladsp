@@ -1012,17 +1012,26 @@ A parameter marked (*) in any example is optional. If they are left out from the
   * If asynchronous resampling is enabled, the adjustment can be done by tuning the resampling ratio.
     Then `resampler` must be set to one of the "Async" types. This is supported for all capture devices.
 
-  With Alsa capture devices, the first option is used whenever it's available.
-  If not, and when not using an Alsa capture device, then the second option is used.
+  The first option is used whenever it's available.
+  If not, then the second option is used if the config has an asynchronous resampler.
+  If neither is available, then rate adjust is disabled.
 
 * `target_level` (optional, defaults to the `chunksize` value)
 
-  The value is the number of samples that should be left in the buffer of the playback device
-  when the next chunk arrives. Only applies when `enable_rate_adjust` is set to `true`.
-  It will take some experimentation to find the right number.
+  The value is the number of samples that should be left
+  in the buffer of the playback device when the next chunk arrives.
+  When processing starts, the playback device will delay its startup
+  in order to get the initial buffer level near this value.
+  See also `enable_rate_adjust` which should be set to `true`to allow matching 
+  capture and playback rates in order to keep the buffer level at the target value.
+  
+  It may take some experimentation to find the optimal number.
   If it's too small there will be buffer underruns from time to time,
   and making it too large might lead to a longer input-output delay than what is acceptable.
-  Suitable values are in the range 1/2 to 1 times the `chunksize`.
+  A suitable starting point is to use the `chunksize` value.
+  Usable values cover a large range, from very small values like 30 on lightly loaded systems
+  with tight latency requirements,
+  to a maximum of `(2 + queuelimit) * chunksize` for mimimal underrun risk when latency is not a concern.
 
 * `adjust_period` (optional, defaults to 10)
 
