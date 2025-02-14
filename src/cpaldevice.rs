@@ -14,7 +14,6 @@ use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time;
@@ -201,7 +200,7 @@ where
 impl PlaybackDevice for CpalPlaybackDevice {
     fn start(
         &mut self,
-        channel: mpsc::Receiver<AudioMessage>,
+        channel: crossbeam_channel::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -235,7 +234,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         }
                         let scalefactor = PrcFmt::coerce(2.0).powi(bits_per_sample - 1);
 
-                        let (tx_dev, rx_dev) = mpsc::sync_channel(1);
+                        let (tx_dev, rx_dev) = crossbeam_channel::bounded(1);
                         let buffer_fill = Arc::new(AtomicUsize::new(0));
                         let buffer_fill_clone = buffer_fill.clone();
                         let mut buffer_avg = countertimer::Averager::new();
@@ -382,7 +381,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         playback_status.signal_peak.add_record(chunk_stats.peak_linear());
                                     }
                                     buffer_avg.add_value(
-                                        (buffer_fill.load(Ordering::Relaxed) / channels_clone)
+                                        (buffer_fill.load(Ordering::Relaxed) / channels_clone + channel.len() * chunksize_clone)
                                             as f64,
                                     );
                                     if adjust
@@ -468,10 +467,10 @@ where
 impl CaptureDevice for CpalCaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::SyncSender<AudioMessage>,
+        channel: crossbeam_channel::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
-        command_channel: mpsc::Receiver<CommandMessage>,
+        command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
@@ -506,8 +505,8 @@ impl CaptureDevice for CpalCaptureDevice {
                             Err(_err) => {}
                         }
                         let scalefactor = PrcFmt::coerce(2.0).powi(bits_per_sample - 1);
-                        let (tx_dev_i, rx_dev_i) = mpsc::sync_channel(1);
-                        let (tx_dev_f, rx_dev_f) = mpsc::sync_channel(1);
+                        let (tx_dev_i, rx_dev_i) = crossbeam_channel::bounded(1);
+                        let (tx_dev_f, rx_dev_f) = crossbeam_channel::bounded(1);
                         let stream = match sample_format {
                             SampleFormat::S16LE => {
                                 trace!("Build i16 input stream");
@@ -593,8 +592,8 @@ impl CaptureDevice for CpalCaptureDevice {
                                         }
                                     }
                                 }
-                                Err(mpsc::TryRecvError::Empty) => {}
-                                Err(mpsc::TryRecvError::Disconnected) => {
+                                Err(crossbeam_channel::TryRecvError::Empty) => {}
+                                Err(crossbeam_channel::TryRecvError::Disconnected) => {
                                     error!("Command channel was closed");
                                     break;
                                 }

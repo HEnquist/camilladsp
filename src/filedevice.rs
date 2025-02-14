@@ -11,7 +11,6 @@ use std::fs::OpenOptions;
 use std::io::{stdin, stdout, Write};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
@@ -74,9 +73,9 @@ pub struct FileCaptureDevice {
 }
 
 struct CaptureChannels {
-    audio: mpsc::SyncSender<AudioMessage>,
+    audio: crossbeam_channel::Sender<AudioMessage>,
     status: crossbeam_channel::Sender<StatusMessage>,
-    command: mpsc::Receiver<CommandMessage>,
+    command: crossbeam_channel::Receiver<CommandMessage>,
 }
 
 struct CaptureParams {
@@ -111,7 +110,7 @@ pub trait Reader {
 impl PlaybackDevice for FilePlaybackDevice {
     fn start(
         &mut self,
-        channel: mpsc::Receiver<AudioMessage>,
+        channel: crossbeam_channel::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -321,8 +320,8 @@ fn capture_loop(
                     }
                 }
             }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 error!("Command channel was closed");
                 break;
             }
@@ -541,10 +540,10 @@ fn capture_loop(
 impl CaptureDevice for FileCaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::SyncSender<AudioMessage>,
+        channel: crossbeam_channel::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
-        command_channel: mpsc::Receiver<CommandMessage>,
+        command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
@@ -685,7 +684,7 @@ fn send_silence(
     samples: usize,
     channels: usize,
     chunksize: usize,
-    audio_channel: &mpsc::SyncSender<AudioMessage>,
+    audio_channel: &crossbeam_channel::Sender<AudioMessage>,
     resampler: &mut Option<Box<dyn VecResampler<PrcFmt>>>,
 ) {
     let mut samples_left = samples;

@@ -29,7 +29,6 @@ use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::env;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
@@ -76,10 +75,11 @@ fn custom_colored_logger_format(
     let level = record.level();
     write!(
         w,
-        "{} {:<5} [{}:{}] {}",
+        "{} {:<5} [{}] <{}:{}> {}",
         now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
         flexi_logger::style(level).paint(level.to_string()),
-        record.file().unwrap_or("<unnamed>"),
+        record.module_path().unwrap_or("*unknown module*"),
+        record.file().unwrap_or("*unknown file*"),
         record.line().unwrap_or(0),
         &record.args()
     )
@@ -93,10 +93,11 @@ pub fn custom_logger_format(
 ) -> Result<(), std::io::Error> {
     write!(
         w,
-        "{} {:<5} [{}:{}] {}",
+        "{} {:<5} [{}] <{}:{}> {}",
         now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
         record.level(),
-        record.file().unwrap_or("<unnamed>"),
+        record.module_path().unwrap_or("*unknown module*"),
+        record.file().unwrap_or("*unknown file*"),
         record.line().unwrap_or(0),
         &record.args()
     )
@@ -124,15 +125,15 @@ fn run(
             return Ok(ExitState::Exit);
         }
     };
-    let (tx_pb, rx_pb) = mpsc::sync_channel(active_config.devices.queuelimit());
-    let (tx_cap, rx_cap) = mpsc::sync_channel(active_config.devices.queuelimit());
+    let (tx_pb, rx_pb) = crossbeam_channel::bounded(active_config.devices.queuelimit());
+    let (tx_cap, rx_cap) = crossbeam_channel::bounded(active_config.devices.queuelimit());
 
     let (tx_status, rx_status) = crossbeam_channel::unbounded();
     let tx_status_pb = tx_status.clone();
     let tx_status_cap = tx_status;
 
-    let (tx_command_cap, rx_command_cap) = mpsc::channel();
-    let (tx_pipeconf, rx_pipeconf) = mpsc::channel();
+    let (tx_command_cap, rx_command_cap) = crossbeam_channel::unbounded();
+    let (tx_pipeconf, rx_pipeconf) = crossbeam_channel::unbounded();
 
     let barrier = Arc::new(Barrier::new(4));
     let barrier_pb = barrier.clone();
@@ -542,6 +543,15 @@ fn main_process() -> i32 {
                 .action(ArgAction::Set),
         )
         .arg(
+            Arg::new("custom_log_spec")
+                .help("Custom logger specification")
+                .long("custom_log_spec")
+                .value_name("LOG_SPEC")
+                .display_order(104)
+                .value_parser(clap::value_parser!(String))
+                .action(ArgAction::Set),
+        )
+        .arg(
             Arg::new("gain")
                 .help("Initial gain in dB for main volume control")
                 .short('g')
@@ -739,6 +749,9 @@ fn main_process() -> i32 {
     if let Some(level) = matches.get_one::<String>("loglevel") {
         loglevel = level;
     }
+    if let Some(spec) = matches.get_one::<String>("custom_log_spec") {
+        loglevel = spec;
+    }
 
     let logger = if let Some(logfile) = matches.get_one::<String>("logfile") {
         let mut path = PathBuf::from(logfile);
@@ -748,7 +761,7 @@ fn main_process() -> i32 {
             path = fullpath;
         }
         let mut logger = flexi_logger::Logger::try_with_str(loglevel)
-            .unwrap()
+            .expect("The provided logger specification is invalid")
             .format(custom_logger_format)
             .log_to_file(flexi_logger::FileSpec::try_from(path).unwrap())
             .write_mode(flexi_logger::WriteMode::Async);
@@ -770,7 +783,7 @@ fn main_process() -> i32 {
         logger.start().unwrap()
     } else {
         flexi_logger::Logger::try_with_str(loglevel)
-            .unwrap()
+            .expect("The provided logger specification is invalid")
             .format(custom_colored_logger_format)
             .set_palette("196;208;-;27;8".to_string())
             .log_to_stderr()
@@ -1060,7 +1073,7 @@ fn main_process() -> i32 {
 
     #[cfg(feature = "websocket")]
     {
-        let (tx_state, rx_state) = mpsc::sync_channel(1);
+        let (tx_state, rx_state) = crossbeam_channel::bounded(1);
 
         let processing_params_clone = processing_params.clone();
         let active_config_path_clone = active_config_path.clone();

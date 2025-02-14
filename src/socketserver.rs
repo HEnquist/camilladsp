@@ -10,7 +10,6 @@ use std::fs::File;
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -37,7 +36,7 @@ pub struct SharedData {
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
     pub processing_params: Arc<ProcessingParameters>,
     pub processing_status: Arc<RwLock<ProcessingStatus>>,
-    pub state_change_notify: mpsc::SyncSender<()>,
+    pub state_change_notify: crossbeam_channel::Sender<()>,
     pub state_file_path: Option<String>,
     pub unsaved_state_change: Arc<AtomicBool>,
 }
@@ -455,6 +454,26 @@ pub fn start_server(parameters: ServerParameters, shared_data: SharedData) {
         let ws_result = TcpListener::bind(format!("{address}:{port}"));
         if let Ok(server) = ws_result {
             for stream in server.incoming() {
+                match &stream {
+                    Ok(s) => {
+                        let local_addr = s
+                            .local_addr()
+                            .map(|a| a.to_string())
+                            .unwrap_or("unknown".to_string());
+                        let peer_addr = s
+                            .peer_addr()
+                            .map(|a| a.to_string())
+                            .unwrap_or("unknown".to_string());
+                        debug!(
+                            "Accepted new incoming connection on {} from {}.",
+                            local_addr, peer_addr
+                        );
+                    }
+                    Err(err) => {
+                        debug!("Ignoring incoming connection with error: {}", err);
+                        continue;
+                    }
+                };
                 let shared_data_inst = shared_data.clone();
                 let now = Instant::now();
                 let local_data = LocalData {
@@ -1093,7 +1112,7 @@ fn handle_command(
         }
         WsCommand::GetConfig => Some(WsReply::GetConfig {
             result: WsResult::Ok,
-            value: serde_yaml::to_string(&*shared_data_inst.active_config.lock()).unwrap(),
+            value: serde_yml::to_string(&*shared_data_inst.active_config.lock()).unwrap(),
         }),
         WsCommand::GetConfigTitle => {
             let optional_config = shared_data_inst.active_config.lock();
@@ -1121,7 +1140,7 @@ fn handle_command(
         }
         WsCommand::GetPreviousConfig => Some(WsReply::GetPreviousConfig {
             result: WsResult::Ok,
-            value: serde_yaml::to_string(&*shared_data_inst.previous_config.lock()).unwrap(),
+            value: serde_yml::to_string(&*shared_data_inst.previous_config.lock()).unwrap(),
         }),
         WsCommand::GetConfigJson => Some(WsReply::GetConfigJson {
             result: WsResult::Ok,
@@ -1167,7 +1186,7 @@ fn handle_command(
             }
         },
         WsCommand::SetConfig(config_yml) => {
-            match serde_yaml::from_str::<config::Configuration>(&config_yml) {
+            match serde_yml::from_str::<config::Configuration>(&config_yml) {
                 Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => {
                         match shared_data_inst
@@ -1247,10 +1266,10 @@ fn handle_command(
             }
         }
         WsCommand::ReadConfig(config_yml) => {
-            match serde_yaml::from_str::<config::Configuration>(&config_yml) {
+            match serde_yml::from_str::<config::Configuration>(&config_yml) {
                 Ok(conf) => Some(WsReply::ReadConfig {
                     result: WsResult::Ok,
-                    value: serde_yaml::to_string(&conf).unwrap(),
+                    value: serde_yml::to_string(&conf).unwrap(),
                 }),
                 Err(error) => {
                     error!("Error reading config: {}", error);
@@ -1264,7 +1283,7 @@ fn handle_command(
         WsCommand::ReadConfigFile(path) => match config::load_config(&path) {
             Ok(conf) => Some(WsReply::ReadConfigFile {
                 result: WsResult::Ok,
-                value: serde_yaml::to_string(&conf).unwrap(),
+                value: serde_yml::to_string(&conf).unwrap(),
             }),
             Err(error) => {
                 error!("Error reading config file: {}", error);
@@ -1275,11 +1294,11 @@ fn handle_command(
             }
         },
         WsCommand::ValidateConfig(config_yml) => {
-            match serde_yaml::from_str::<config::Configuration>(&config_yml) {
+            match serde_yml::from_str::<config::Configuration>(&config_yml) {
                 Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => Some(WsReply::ValidateConfig {
                         result: WsResult::Ok,
-                        value: serde_yaml::to_string(&conf).unwrap(),
+                        value: serde_yml::to_string(&conf).unwrap(),
                     }),
                     Err(error) => {
                         error!("Config error: {}", error);

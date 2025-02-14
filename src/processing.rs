@@ -5,16 +5,15 @@ use crate::ProcessingParameters;
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
 pub fn run_processing(
     conf_proc: config::Configuration,
     barrier_proc: Arc<Barrier>,
-    tx_pb: mpsc::SyncSender<AudioMessage>,
-    rx_cap: mpsc::Receiver<AudioMessage>,
-    rx_pipeconf: mpsc::Receiver<(config::ConfigChange, config::Configuration)>,
+    tx_pb: crossbeam_channel::Sender<AudioMessage>,
+    rx_cap: crossbeam_channel::Receiver<AudioMessage>,
+    rx_pipeconf: crossbeam_channel::Receiver<(config::ConfigChange, config::Configuration)>,
     processing_params: Arc<ProcessingParameters>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
