@@ -135,7 +135,7 @@ fn get_supported_wave_format(
     let wave_format = wave_format(sample_format, samplerate, channels);
     match sharemode {
         wasapi::ShareMode::Exclusive => {
-            audio_client.is_supported_exclusive_with_quirks(&wave_format)
+            Ok(audio_client.is_supported_exclusive_with_quirks(&wave_format)?)
         }
         wasapi::ShareMode::Shared => match audio_client.is_supported(&wave_format, sharemode) {
             Ok(None) => {
