@@ -1112,7 +1112,7 @@ fn handle_command(
         }
         WsCommand::GetConfig => Some(WsReply::GetConfig {
             result: WsResult::Ok,
-            value: serde_yaml::to_string(&*shared_data_inst.active_config.lock()).unwrap(),
+            value: serde_yml::to_string(&*shared_data_inst.active_config.lock()).unwrap(),
         }),
         WsCommand::GetConfigTitle => {
             let optional_config = shared_data_inst.active_config.lock();
@@ -1140,7 +1140,7 @@ fn handle_command(
         }
         WsCommand::GetPreviousConfig => Some(WsReply::GetPreviousConfig {
             result: WsResult::Ok,
-            value: serde_yaml::to_string(&*shared_data_inst.previous_config.lock()).unwrap(),
+            value: serde_yml::to_string(&*shared_data_inst.previous_config.lock()).unwrap(),
         }),
         WsCommand::GetConfigJson => Some(WsReply::GetConfigJson {
             result: WsResult::Ok,
@@ -1186,7 +1186,7 @@ fn handle_command(
             }
         },
         WsCommand::SetConfig(config_yml) => {
-            match serde_yaml::from_str::<config::Configuration>(&config_yml) {
+            match serde_yml::from_str::<config::Configuration>(&config_yml) {
                 Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => {
                         match shared_data_inst
@@ -1266,10 +1266,10 @@ fn handle_command(
             }
         }
         WsCommand::ReadConfig(config_yml) => {
-            match serde_yaml::from_str::<config::Configuration>(&config_yml) {
+            match serde_yml::from_str::<config::Configuration>(&config_yml) {
                 Ok(conf) => Some(WsReply::ReadConfig {
                     result: WsResult::Ok,
-                    value: serde_yaml::to_string(&conf).unwrap(),
+                    value: serde_yml::to_string(&conf).unwrap(),
                 }),
                 Err(error) => {
                     error!("Error reading config: {}", error);
@@ -1283,7 +1283,7 @@ fn handle_command(
         WsCommand::ReadConfigFile(path) => match config::load_config(&path) {
             Ok(conf) => Some(WsReply::ReadConfigFile {
                 result: WsResult::Ok,
-                value: serde_yaml::to_string(&conf).unwrap(),
+                value: serde_yml::to_string(&conf).unwrap(),
             }),
             Err(error) => {
                 error!("Error reading config file: {}", error);
@@ -1294,11 +1294,11 @@ fn handle_command(
             }
         },
         WsCommand::ValidateConfig(config_yml) => {
-            match serde_yaml::from_str::<config::Configuration>(&config_yml) {
+            match serde_yml::from_str::<config::Configuration>(&config_yml) {
                 Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => Some(WsReply::ValidateConfig {
                         result: WsResult::Ok,
-                        value: serde_yaml::to_string(&conf).unwrap(),
+                        value: serde_yml::to_string(&conf).unwrap(),
                     }),
                     Err(error) => {
                         error!("Config error: {}", error);

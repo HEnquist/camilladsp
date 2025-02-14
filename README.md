@@ -219,7 +219,7 @@ These are the key dependencies for CamillaDSP.
 * https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
 * https://crates.io/crates/rustfft - FFT used for FIR filters
 * https://crates.io/crates/rubato - Sample rate conversion
-* https://crates.io/crates/serde_yaml - Config file reading
+* https://crates.io/crates/serde_yml - Config file reading
 * https://crates.io/crates/tungstenite - Websocket server
 
 

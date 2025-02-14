@@ -46,7 +46,7 @@ windows = {version = "0.59.0", features = ["Win32_System_Threading", "Win32_Foun
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.8"
+serde_yml = "0.0.12"
 serde_json = "1.0"
 serde_with = "1.11"
 realfft = "3.4.0"
