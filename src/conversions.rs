@@ -8,6 +8,10 @@ use rawsample::{SampleReader, SampleWriter};
 #[cfg(feature = "cpal-backend")]
 use std::collections::VecDeque;
 use std::io::Cursor;
+use audioadapter::{Adapter, AdapterMut};
+use audioadapter::number_to_float::InterleavedNumbers;
+use audioadapter::sample::{I16LE, I24LE, I32LE, F32LE, F64LE};
+
 
 pub fn map_formats(sampleformat: &SampleFormat) -> rawsample::SampleFormat {
     match sampleformat {
@@ -38,28 +42,32 @@ pub fn chunk_to_buffer_rawbytes(
     buf: &mut [u8],
     sampleformat: &SampleFormat,
 ) -> (usize, usize) {
-    //let _num_samples = chunk.channels * chunk.frames;
-    //let data_bytes_per_sample = bits as usize / 8;
-    let rawformat = map_formats(sampleformat);
-    let mut cursor = Cursor::new(buf);
+    let frames = chunk.frames;
+    let channels = chunk.channels;
+    let mut adapter: Box<dyn AdapterMut<PrcFmt>> = match sampleformat {
+        SampleFormat::S16LE => Box::new(InterleavedNumbers::<&mut [I16LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames).unwrap()),
+        SampleFormat::S24LE3 => Box::new(InterleavedNumbers::<&mut [I24LE<3>], PrcFmt>::new_from_bytes_mut(buf, channels, frames).unwrap()),
+        SampleFormat::S24LE => Box::new(InterleavedNumbers::<&mut [I24LE<4>], PrcFmt>::new_from_bytes_mut(buf, channels, frames).unwrap()),
+        SampleFormat::S32LE => Box::new(InterleavedNumbers::<&mut [I32LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames).unwrap()),
+        SampleFormat::FLOAT32LE => Box::new(InterleavedNumbers::<&mut [F32LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames).unwrap()),
+        SampleFormat::FLOAT64LE => Box::new(InterleavedNumbers::<&mut [F64LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames).unwrap()),
+    };
     let mut clipped = 0;
-    let mut peak = 0.0;
+    let mut peak: PrcFmt = 0.0;
     let num_valid_bytes = chunk.valid_frames * chunk.channels * sampleformat.bytes_per_sample();
-    let mut nextframe = vec![0.0; chunk.channels];
-    for frame in 0..chunk.frames {
-        //for chan in 0..chunk.channels {
-        for (chan, value) in nextframe.iter_mut().enumerate() {
-            let float_val = if chunk.waveforms[chan].is_empty() {
-                0.0
-            } else {
-                chunk.waveforms[chan][frame]
-            };
-            if float_val.abs() > peak {
-                peak = float_val.abs();
+    for chan in 0..channels {
+        if chunk.waveforms[chan].is_empty() {
+            adapter.fill_channel_with(chan, &0.0);
+        } else {
+            let (nbr, clp) = adapter.write_from_slice_to_channel(chan, 0, &chunk.waveforms[chan]);
+            clipped += clp;
+            if clp > 0 && nbr > 0 {
+                let pk = chunk.waveforms[chan].iter().map(|x| x.abs()).fold(0.0, f64::max);
+                if pk > peak {
+                    peak = pk;
+                }
             }
-            *value = float_val;
         }
-        clipped += PrcFmt::write_samples(&nextframe, &mut cursor, &rawformat).unwrap();
     }
     xtrace!("Convert, nbr clipped: {}, peak: {}", clipped, peak);
     if clipped > 0 {
@@ -83,30 +91,36 @@ pub fn buffer_to_chunk_rawbytes(
 ) -> AudioChunk {
     let num_frames = buffer.len() / sampleformat.bytes_per_sample() / channels;
     let num_valid_frames = valid_bytes / sampleformat.bytes_per_sample() / channels;
-    let rawformat = map_formats(sampleformat);
     let mut maxvalue: PrcFmt = 0.0;
     let mut minvalue: PrcFmt = 0.0;
-    let mut slice: &[u8] = buffer;
     let mut wfs = Vec::with_capacity(channels);
-    for used in used_channels.iter() {
+    let adapter: Box<dyn Adapter<PrcFmt>> = match sampleformat {
+        SampleFormat::S16LE => Box::new(InterleavedNumbers::<&[I16LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames).unwrap()),
+        SampleFormat::S24LE3 => Box::new(InterleavedNumbers::<&[I24LE<3>], PrcFmt>::new_from_bytes(buffer, channels, num_frames).unwrap()),
+        SampleFormat::S24LE => Box::new(InterleavedNumbers::<&[I24LE<4>], PrcFmt>::new_from_bytes(buffer, channels, num_frames).unwrap()),
+        SampleFormat::S32LE => Box::new(InterleavedNumbers::<&[I32LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames).unwrap()),
+        SampleFormat::FLOAT32LE => Box::new(InterleavedNumbers::<&[F32LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames).unwrap()),
+        SampleFormat::FLOAT64LE => Box::new(InterleavedNumbers::<&[F64LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames).unwrap()),
+    };
+    for (ch, used) in used_channels.iter().enumerate() {
         if *used {
-            wfs.push(Vec::with_capacity(num_frames));
-        } else {
-            wfs.push(Vec::new());
-        }
-    }
-    let mut nextframe = vec![0.0; channels];
-    for _frame in 0..num_frames {
-        PrcFmt::read_samples(&mut slice, &mut nextframe, &rawformat).unwrap();
-        for ((wf, value), used) in wfs.iter_mut().zip(&nextframe).zip(used_channels) {
-            if *used {
-                if *value > maxvalue {
-                    maxvalue = *value;
-                } else if *value < minvalue {
-                    minvalue = *value;
+            let mut wf = vec![0.0; num_frames];
+            let nbr = adapter.write_from_channel_to_slice(ch, 0, &mut wf[0..num_valid_frames]);
+            if nbr > 0 {
+                let (mavx, minv) = wf.iter().fold((0.0, 0.0), |(max, min), x| {
+                    (f64::max(max, *x), f64::min(min, *x))
+                });
+                if mavx > maxvalue {
+                    maxvalue = mavx;
                 }
-                wf.push(*value);
+                if minv < minvalue {
+                    minvalue = minv;
+                }
             }
+            wfs.push(wf);
+        }
+        else {
+            wfs.push(Vec::new());
         }
     }
     AudioChunk::new(wfs, maxvalue, minvalue, num_frames, num_valid_frames)
