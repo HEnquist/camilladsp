@@ -60,7 +60,7 @@ pub fn chunk_to_buffer_rawbytes(
                 let pk = chunk.waveforms[chan]
                     .iter()
                     .map(|x| x.abs())
-                    .fold(0.0, f64::max);
+                    .fold(0.0, PrcFmt::max);
                 if pk > peak {
                     peak = pk;
                 }
@@ -124,7 +124,7 @@ pub fn buffer_to_chunk_rawbytes(
             let nbr = adapter.write_from_channel_to_slice(ch, 0, &mut wf[0..num_valid_frames]);
             if nbr > 0 {
                 let (mavx, minv) = wf.iter().fold((0.0, 0.0), |(max, min), x| {
-                    (f64::max(max, *x), f64::min(min, *x))
+                    (PrcFmt::max(max, *x), PrcFmt::min(min, *x))
                 });
                 if mavx > maxvalue {
                     maxvalue = mavx;
