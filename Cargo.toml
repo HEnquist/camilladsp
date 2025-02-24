@@ -68,9 +68,6 @@ libpulse-simple-binding = { version = "2.0", optional = true }
 rubato = "0.16.1"
 #rubato = { git = "https://github.com/HEnquist/rubato", branch = "optional_fft" }
 cpal = { version = "0.13.3", optional = true }
-#rawsample = { path = "../../rust/rawsample" }
-#rawsample = { git = "https://github.com/HEnquist/rawsample", branch = "main" }
-rawsample = "0.2.0"
 parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
 crossbeam-channel = "0.5"
 rayon = "1.10.0"

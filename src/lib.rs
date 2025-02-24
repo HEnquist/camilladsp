@@ -24,7 +24,6 @@ extern crate num_complex;
 extern crate num_traits;
 extern crate rand;
 extern crate rand_distr;
-extern crate rawsample;
 extern crate realfft;
 extern crate rubato;
 extern crate serde;
