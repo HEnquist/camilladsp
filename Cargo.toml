@@ -85,5 +85,9 @@ criterion = "0.3"
 name = "filters"
 harness = false
 
+[[bench]]
+name = "conversions"
+harness = false
+
 [profile.release]
 codegen-units = 1
