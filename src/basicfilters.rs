@@ -327,21 +327,55 @@ impl Filter for Gain {
     }
 }
 
+fn build_subsample_biquad(delay: PrcFmt, samplerate: usize) -> (usize, Option<Biquad>) {
+    // delay is less than 0.1 samples, ignore
+    if delay < 0.1 {
+        debug!("Delay too small, ignoring");
+        return (0, None);
+    }
+    // delay is less than 1.1 samples, use first order allpass
+    if delay < 1.1 {
+        let coeff = (1.0 - delay) / (1.0 + delay);
+        debug!("Using first order allpass for delay of {} samples", delay);
+        // 1st order Thiran allpass
+        let bqcoeffs = BiquadCoefficients::new(coeff, 0.0, coeff, 1.0, 0.0);
+        return (0, Some(Biquad::new("subsample", samplerate, bqcoeffs)));
+    }
+
+    // delay is large enough to use a second order allpass
+    let mut samples = delay.floor();
+    let mut fraction = delay - samples;
+    // adjust fraction and samples to keep fraction between 1.1 and 2.1
+    samples -= 1.0;
+    fraction += 1.0;
+    if fraction < 1.1 {
+        samples -= 1.0;
+        fraction += 1.0;
+    }
+    // 2nd order Thiran allpass
+    let coeff1 = 2.0 * (2.0 - fraction) / (1.0 + fraction);
+    let coeff2 = (2.0 - fraction) / (2.0 + fraction) * (1.0 - fraction) / (1.0 + fraction);
+    let bqcoeffs = BiquadCoefficients::new(coeff1, coeff2, coeff2, coeff1, 1.0);
+    (
+        samples as usize,
+        Some(Biquad::new("subsample", samplerate, bqcoeffs)),
+    )
+}
+
 impl Delay {
     /// Creates a delay filter with delay in samples
     pub fn new(name: &str, samplerate: usize, delay: PrcFmt, subsample: bool) -> Self {
         let name = name.to_string();
 
         let (integerdelay, biquad) = if subsample {
-            let samples = delay.floor();
-            let fraction = delay - samples;
-            let bqcoeffs = BiquadCoefficients::new(1.0 - fraction, 0.0, 1.0 - fraction, 1.0, 0.0);
-            let bq = Biquad::new("subsample", samplerate, bqcoeffs);
+            let (samples, bq) = build_subsample_biquad(delay, samplerate);
             debug!(
                 "Building delay filter '{}' with delay {} + {} samples",
-                name, samples, fraction
+                name,
+                samples,
+                delay - samples as PrcFmt
             );
-            (samples as usize, Some(bq))
+            (samples as usize, bq)
         } else {
             let samples = delay.round() as usize;
             debug!(

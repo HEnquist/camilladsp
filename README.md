@@ -1715,7 +1715,8 @@ The `unit` can be `ms`, `us`, `mm` or `samples`, and if left out it defaults to 
 When giving the delay in millimetres, the speed of sound of is assumed to be 343 m/s (dry air at 20 degrees Celsius).
 
 If the `subsample` parameter is set to `true`, then it will use use an IIR filter to achieve subsample delay precision.
-If set to `false`, the value will instead be rounded to the nearest number of full samples.
+Note this is an approximation that is accurate at lower frequencies, up to about `samplerate / 4`.
+If set to `false`, the delay value will instead be rounded to the nearest number of full samples.
 This is a little faster and should be used if subsample precision is not required.
 
 
