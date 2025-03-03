@@ -106,7 +106,7 @@ impl Filter for FftConv {
 
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        // Copy to inut buffer and clear overlap area
+        // Copy to input buffer and clear overlap area
         self.input_buf[0..self.npoints].copy_from_slice(waveform);
         for item in self
             .input_buf

@@ -61,7 +61,6 @@ impl Filter for Limiter {
         &self.name
     }
 
-    /// Apply a Compressor to an AudioChunk, modifying it in-place.
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
         self.apply_clip(waveform);
         Ok(())
