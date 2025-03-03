@@ -4,7 +4,6 @@ use crate::biquad;
 use crate::biquadcombo;
 use crate::compressor;
 use crate::config;
-use crate::conversions;
 use crate::diffeq;
 use crate::dither;
 use crate::fftconv;
@@ -13,11 +12,13 @@ use crate::loudness;
 use crate::mixer;
 use crate::noisegate;
 use crate::race;
-use rawsample::SampleReader;
+use audioadapter::number_to_float::InterleavedNumbers;
+use audioadapter::sample::{F32LE, F64LE, I16LE, I24LE, I32LE};
+use audioadapter::Adapter;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
-use std::io::{BufRead, Seek, SeekFrom};
+use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -116,15 +117,43 @@ pub fn read_coeff_file(
         // All other formats
         _ => {
             file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
-            let rawformat = conversions::map_file_formats(format);
-            let mut nextvalue = vec![0.0; 1];
-            let nbr_coeffs = read_bytes_lines / format.bytes_per_sample();
-            while let Ok(1) = PrcFmt::read_samples(&mut file, &mut nextvalue, &rawformat) {
-                coefficients.push(nextvalue[0]);
-                if coefficients.len() >= nbr_coeffs {
-                    break;
-                }
+            let mut data = Vec::new();
+            let mut nbr_bytes = file.read_to_end(&mut data)?;
+            println!("Nbr bytes: {}", nbr_bytes);
+            if read_bytes_lines > 0 {
+                nbr_bytes = nbr_bytes.min(read_bytes_lines);
             }
+            let nbr_coeffs = nbr_bytes / format.bytes_per_sample();
+            let adapter: Box<dyn Adapter<PrcFmt>> = match format {
+                config::FileFormat::S16LE => Box::new(
+                    InterleavedNumbers::<&[I16LE], PrcFmt>::new_from_bytes(&data, 1, nbr_coeffs)
+                        .unwrap(),
+                ),
+                config::FileFormat::S24LE3 => Box::new(
+                    InterleavedNumbers::<&[I24LE<3>], PrcFmt>::new_from_bytes(&data, 1, nbr_coeffs)
+                        .unwrap(),
+                ),
+                config::FileFormat::S24LE => Box::new(
+                    InterleavedNumbers::<&[I24LE<4>], PrcFmt>::new_from_bytes(&data, 1, nbr_coeffs)
+                        .unwrap(),
+                ),
+                config::FileFormat::S32LE => Box::new(
+                    InterleavedNumbers::<&[I32LE], PrcFmt>::new_from_bytes(&data, 1, nbr_coeffs)
+                        .unwrap(),
+                ),
+                config::FileFormat::FLOAT32LE => Box::new(
+                    InterleavedNumbers::<&[F32LE], PrcFmt>::new_from_bytes(&data, 1, nbr_coeffs)
+                        .unwrap(),
+                ),
+                config::FileFormat::FLOAT64LE => Box::new(
+                    InterleavedNumbers::<&[F64LE], PrcFmt>::new_from_bytes(&data, 1, nbr_coeffs)
+                        .unwrap(),
+                ),
+                config::FileFormat::TEXT => unreachable!(),
+            };
+            println!("Nbr coeffs: {}", nbr_coeffs);
+            coefficients.resize(nbr_coeffs, 0.0);
+            adapter.write_from_channel_to_slice(0, 0, &mut coefficients);
         }
     }
     debug!(

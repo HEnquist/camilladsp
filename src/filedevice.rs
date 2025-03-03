@@ -338,7 +338,6 @@ fn capture_loop(
             bytes_to_capture,
             &mut buf,
         );
-        //let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         let read_res = file.read(&mut buf[0..bytes_to_capture_tmp]);
         match (read_res, capture_done) {
             (Ok(ReadResult::EndOfFile(bytes)), _) | (Ok(ReadResult::Complete(bytes)), true) => {
