@@ -23,7 +23,7 @@ pub struct Gain {
 pub struct Delay {
     pub name: String,
     samplerate: usize,
-    queue: LocalRb<Heap<PrcFmt>>,
+    queue: Option<LocalRb<Heap<PrcFmt>>>,
     biquad: Option<Biquad>,
 }
 
@@ -394,12 +394,15 @@ impl Delay {
             (samples, None)
         };
 
-        // for super-small delays, store at least a single sample
-        let integerdelay = integerdelay.max(1);
-        let mut queue = LocalRb::new(integerdelay);
-        for _ in 0..integerdelay {
-            let _ = queue.try_push(0.0);
-        }
+        let queue = if integerdelay > 0 {
+            let mut q = LocalRb::new(integerdelay);
+            for _ in 0..integerdelay {
+                let _ = q.try_push(0.0);
+            }
+            Some(q)
+        } else {
+            None
+        };
 
         Self {
             name,
@@ -421,7 +424,11 @@ impl Delay {
     }
 
     pub fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
-        let mut value = self.queue.push_overwrite(input).unwrap();
+        let mut value = if let Some(q) = &mut self.queue {
+            q.push_overwrite(input).unwrap()
+        } else {
+            input
+        };
         if let Some(bq) = &mut self.biquad {
             value = bq.process_single(value);
         }
@@ -435,9 +442,11 @@ impl Filter for Delay {
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        for item in waveform.iter_mut() {
-            // this returns the item that was popped while pushing
-            *item = self.queue.push_overwrite(*item).unwrap();
+        if let Some(q) = &mut self.queue {
+            for item in waveform.iter_mut() {
+                // this returns the item that was popped while pushing
+                *item = q.push_overwrite(*item).unwrap();
+            }
         }
         if let Some(bq) = &mut self.biquad {
             bq.process_waveform(waveform)?;
@@ -537,7 +546,7 @@ mod tests {
     #[test]
     fn delay_supersmall() {
         let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let waveform_delayed = vec![0.0, 0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0];
+        let waveform_delayed = waveform.clone();
         let mut delay = Delay::new("test", 44100, 0.1, false);
         delay.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_delayed);
@@ -558,20 +567,20 @@ mod tests {
     #[test]
     fn delay_fraction() {
         let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let waveform_delayed = vec![
+        let expected_waveform = vec![
             0.0,
-            0.0,
-            -0.15,
-            -0.15500000000000003,
-            1.0465,
-            -0.31395,
-            0.094185,
-            -0.0282555,
-            0.008476649999999999,
-            -0.0025429949999999997,
+            0.01051051051051051,
+            -0.13446780113446782,
+            -0.2476751025299573,
+            1.0522122611990257,
+            -0.23903133046978262,
+            0.07523664949897024,
+            -0.021743938066703532,
+            0.006413537427714274,
+            -0.001882310318672015,
         ];
         let mut delay = Delay::new("test", 44100, 1.7, true);
         delay.process_waveform(&mut waveform).unwrap();
-        assert!(compare_waveforms(waveform, waveform_delayed, 1.0e-6));
+        assert!(compare_waveforms(waveform, expected_waveform, 1.0e-6));
     }
 }
