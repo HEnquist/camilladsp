@@ -11,7 +11,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
 use cpal::{BufferSize, ChannelCount, HostId, SampleRate, StreamConfig};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
-use rubato::VecResampler;
+use rubato::Resampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
@@ -436,7 +436,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
 }
 
 fn nbr_capture_samples(
-    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
+    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
     capture_samples: usize,
     channels: usize,
 ) -> usize {

@@ -8,7 +8,7 @@ use crossbeam_channel::{bounded, TryRecvError, TrySendError};
 use dispatch::Semaphore;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{traits::*, HeapRb};
-use rubato::VecResampler;
+use rubato::Resampler;
 use std::collections::VecDeque;
 use std::ffi::CStr;
 use std::mem;
@@ -660,7 +660,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
 }
 
 fn nbr_capture_frames(
-    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
+    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
     capture_frames: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {

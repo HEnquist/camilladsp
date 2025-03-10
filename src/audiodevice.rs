@@ -23,9 +23,10 @@ use crate::pulsedevice;
 use crate::wasapidevice;
 use parking_lot::RwLock;
 use rubato::{
-    calculate_cutoff, FastFixedOut, FftFixedOut, PolynomialDegree, SincFixedOut,
-    SincInterpolationParameters, SincInterpolationType, VecResampler, WindowFunction,
+    calculate_cutoff, Async, Fft, FixedAsync, FixedSync, PolynomialDegree, Resampler,
+    SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
+
 use std::error;
 use std::fmt;
 use std::sync::{Arc, Barrier};
@@ -470,7 +471,7 @@ pub fn new_resampler(
     samplerate: usize,
     capture_samplerate: usize,
     chunksize: usize,
-) -> Option<Box<dyn VecResampler<PrcFmt>>> {
+) -> Option<Box<dyn Resampler<PrcFmt>>> {
     match &resampler_conf {
         Some(config::Resampler::AsyncSinc(parameters)) => {
             let sinc_params = new_async_sinc_parameters(parameters);
@@ -479,12 +480,13 @@ pub fn new_resampler(
                 sinc_params
             );
             Some(Box::new(
-                SincFixedOut::<PrcFmt>::new(
+                Async::<PrcFmt>::new_sinc(
                     samplerate as f64 / capture_samplerate as f64,
                     1.1,
                     sinc_params,
                     chunksize,
                     num_channels,
+                    FixedAsync::Output,
                 )
                 .unwrap(),
             ))
@@ -497,19 +499,27 @@ pub fn new_resampler(
                 config::AsyncPolyInterpolation::Septic => PolynomialDegree::Septic,
             };
             Some(Box::new(
-                FastFixedOut::<PrcFmt>::new(
+                Async::<PrcFmt>::new_poly(
                     samplerate as f64 / capture_samplerate as f64,
                     1.1,
                     degree,
                     chunksize,
                     num_channels,
+                    FixedAsync::Output,
                 )
                 .unwrap(),
             ))
         }
         Some(config::Resampler::Synchronous) => Some(Box::new(
-            FftFixedOut::<PrcFmt>::new(capture_samplerate, samplerate, chunksize, 2, num_channels)
-                .unwrap(),
+            Fft::<PrcFmt>::new(
+                capture_samplerate,
+                samplerate,
+                chunksize,
+                2,
+                num_channels,
+                FixedSync::Output,
+            )
+            .unwrap(),
         )),
         None => None,
     }

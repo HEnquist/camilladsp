@@ -9,7 +9,7 @@ use crate::config::SampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
-use rubato::VecResampler;
+use rubato::Resampler;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -240,7 +240,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
 }
 
 fn nbr_capture_bytes(
-    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
+    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
     capture_bytes: usize,
     channels: usize,
     store_bytes_per_sample: usize,

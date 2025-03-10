@@ -16,7 +16,7 @@ use audio_thread_priority::{
 use crossbeam_channel;
 use nix::errno::Errno;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
-use rubato::VecResampler;
+use rubato::Resampler;
 use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::{Arc, Barrier};
@@ -721,7 +721,7 @@ fn capture_loop_bytes(
     channels: CaptureChannels,
     pcmdevice: &alsa::PCM,
     mut params: CaptureParams,
-    mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
+    mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
     buf_manager: &mut CaptureBufferManager,
     processing_params: &Arc<ProcessingParameters>,
 ) {
@@ -1090,7 +1090,7 @@ fn update_avail_min(
 fn nbr_capture_bytes_and_frames(
     capture_bytes: usize,
     capture_frames: Frames,
-    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
+    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
     params: &CaptureParams,
     buf: &mut Vec<u8>,
 ) -> (usize, Frames) {

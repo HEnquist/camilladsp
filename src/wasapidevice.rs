@@ -4,11 +4,12 @@ use crate::config::{ConfigError, SampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::helpers::PIRateController;
+use audioadapter::direct::SparseSequentialSliceOfVecs;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::wrap::caching::Caching;
 use ringbuf::{traits::*, HeapRb};
-use rubato::VecResampler;
+use rubato::Resampler;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -939,7 +940,7 @@ fn send_error_or_captureformatchange(
 }
 
 fn nbr_capture_frames(
-    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
+    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
     capture_frames: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
@@ -1228,7 +1229,27 @@ impl CaptureDevice for WasapiCaptureDevice {
                         if state == ProcessingState::Running {
                             if let Some(resampl) = &mut resampler {
                                 chunk.update_channel_mask(&mut channel_mask);
-                                let new_waves = resampl.process(&chunk.waveforms, Some(&channel_mask)).unwrap();
+                                let mut new_waves = Vec::with_capacity(channels);
+                                for wave in &chunk.waveforms {
+                                    if !wave.is_empty() {
+                                        new_waves.push(vec![0.0; chunksize]);
+                                    }
+                                    else {
+                                        new_waves.push(Vec::with_capacity(0));
+                                    }
+                                }
+                                let adapter_in = SparseSequentialSliceOfVecs::new(&chunk.waveforms, channels, chunk.frames, &channel_mask).unwrap();
+                                let mut adapter_out = SparseSequentialSliceOfVecs::new_mut(&mut new_waves, channels, chunksize, &channel_mask).unwrap();
+                                // create earlier and reuse
+                                let indexing = rubato::Indexing {
+                                    input_offset: 0,
+                                    output_offset: 0,
+                                    partial_len: None,
+                                    active_channels_mask: Some(channel_mask.clone()),
+                                };
+                                resampl
+                                    .process_into_buffer(&adapter_in, &mut adapter_out, Some(&indexing))
+                                    .unwrap();
                                 let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
                                 if chunk_frames == 0 {
                                     chunk_frames = chunksize;
