@@ -6,12 +6,12 @@ use crate::conversions::{
 };
 use crate::countertimer;
 use crate::helpers::PIRateController;
+use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use cpal;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
 use cpal::{BufferSize, ChannelCount, HostId, SampleRate, StreamConfig};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
-use rubato::Resampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
@@ -436,7 +436,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
 }
 
 fn nbr_capture_samples(
-    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
+    resampler: &Option<ChunkResampler>,
     capture_samples: usize,
     channels: usize,
 ) -> usize {
@@ -444,10 +444,10 @@ fn nbr_capture_samples(
         #[cfg(feature = "debug")]
         trace!(
             "Resampler needs {} frames, will read {} samples",
-            resampl.input_frames_next(),
-            resampl.input_frames_next() * channels,
+            resampl.resampler.input_frames_next(),
+            resampl.resampler.input_frames_next() * channels,
         );
-        resampl.input_frames_next() * channels
+        resampl.resampler.input_frames_next() * channels
     } else {
         capture_samples
     }
@@ -568,7 +568,6 @@ impl CaptureDevice for CpalCaptureDevice {
                         let mut rate_adjust = 0.0;
                         let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                         let mut state = ProcessingState::Running;
-                        let mut channel_mask = vec![true; channels];
                         loop {
                             match command_channel.try_recv() {
                                 Ok(CommandMessage::Exit) => {
@@ -583,7 +582,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                     if let Some(resampl) = &mut resampler {
                                         debug!("Adjusting resampler rate to {}", speed);
                                         if async_src {
-                                            if resampl.set_resample_ratio_relative(speed, true).is_err() {
+                                            if resampl.resampler.set_resample_ratio_relative(speed, true).is_err() {
                                                 debug!("Failed to set resampling speed to {}", speed);
                                             }
                                         }
@@ -699,15 +698,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
-                                    chunk.update_channel_mask(&mut channel_mask);
-                                    let new_waves = resampl.process(&chunk.waveforms, Some(&channel_mask)).unwrap();
-                                    let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
-                                    if chunk_frames == 0 {
-                                        chunk_frames = chunksize;
-                                    }
-                                    chunk.frames = chunk_frames;
-                                    chunk.valid_frames = chunk.frames;
-                                    chunk.waveforms = new_waves;
+                                    resampl.resample_chunk(&mut chunk, chunksize, channels);
                                 }
                                 let msg = AudioMessage::Audio(chunk);
                                 if channel.send(msg).is_err() {
