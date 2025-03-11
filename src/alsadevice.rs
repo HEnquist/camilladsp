@@ -16,7 +16,6 @@ use audio_thread_priority::{
 use crossbeam_channel;
 use nix::errno::Errno;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
-use rubato::Resampler;
 use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::{Arc, Barrier};
@@ -33,6 +32,7 @@ use crate::alsadevice_utils::{
     PlaybackParams,
 };
 use crate::helpers::PIRateController;
+use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingState;
@@ -721,7 +721,7 @@ fn capture_loop_bytes(
     channels: CaptureChannels,
     pcmdevice: &alsa::PCM,
     mut params: CaptureParams,
-    mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
+    mut resampler: Option<ChunkResampler>,
     buf_manager: &mut CaptureBufferManager,
     processing_params: &Arc<ProcessingParameters>,
 ) {
@@ -839,7 +839,6 @@ fn capture_loop_bytes(
         rms: vec![0.0; params.channels],
         peak: vec![0.0; params.channels],
     };
-    let mut channel_mask = vec![true; params.channels];
     let thread_handle = match promote_current_thread_to_real_time(
         params.chunksize as u32,
         params.samplerate as u32,
@@ -879,7 +878,11 @@ fn capture_loop_bytes(
                 } else if let Some(resampl) = &mut resampler {
                     if params.async_src {
                         debug!("Setting async resampler speed to {}", speed);
-                        if resampl.set_resample_ratio_relative(speed, true).is_err() {
+                        if resampl
+                            .resampler
+                            .set_resample_ratio_relative(speed, true)
+                            .is_err()
+                        {
                             debug!("Failed to set resampling speed to {}", speed);
                         }
                     } else {
@@ -1037,17 +1040,7 @@ fn capture_loop_bytes(
         }
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
-                chunk.update_channel_mask(&mut channel_mask);
-                let new_waves = resampl
-                    .process(&chunk.waveforms, Some(&channel_mask))
-                    .unwrap();
-                let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
-                if chunk_frames == 0 {
-                    chunk_frames = params.chunksize;
-                }
-                chunk.frames = chunk_frames;
-                chunk.valid_frames = chunk.frames;
-                chunk.waveforms = new_waves;
+                resampl.resample_chunk(&mut chunk, params.chunksize, params.channels);
             }
             let msg = AudioMessage::Audio(chunk);
             if channels.audio.send(msg).is_err() {
@@ -1090,13 +1083,13 @@ fn update_avail_min(
 fn nbr_capture_bytes_and_frames(
     capture_bytes: usize,
     capture_frames: Frames,
-    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
+    resampler: &Option<ChunkResampler>,
     params: &CaptureParams,
     buf: &mut Vec<u8>,
 ) -> (usize, Frames) {
     let (capture_bytes_new, capture_frames_new) = if let Some(resampl) = &resampler {
         xtrace!("Resampler needs {} frames", resampl.input_frames_next());
-        let frames = resampl.input_frames_next();
+        let frames = resampl.resampler.input_frames_next();
         (
             frames * params.channels * params.store_bytes_per_sample,
             frames as Frames,
