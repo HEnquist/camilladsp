@@ -15,10 +15,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 
-use audioadapter::direct::InterleavedSlice;
-use audioadapter::direct::{SequentialSliceOfVecs, SparseSequentialSliceOfVecs};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
-use rubato::Resampler;
 
 #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
 use crate::filedevice_bluez;
@@ -26,6 +23,7 @@ use crate::filedevice_bluez;
 use crate::filereader::BlockingReader;
 #[cfg(target_os = "linux")]
 use crate::filereader_nonblock::NonBlockingReader;
+use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use crate::wavtools::{find_data_in_wav, write_wav_header};
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -223,13 +221,13 @@ impl PlaybackDevice for FilePlaybackDevice {
 }
 
 fn nbr_capture_bytes(
-    resampler: &Option<Box<dyn Resampler<PrcFmt>>>,
+    resampler: &Option<ChunkResampler>,
     capture_bytes: usize,
     channels: usize,
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        resampl.input_frames_next() * channels * store_bytes_per_sample
+        resampl.resampler.input_frames_next() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }
@@ -261,7 +259,7 @@ fn capture_loop(
     mut file: Box<dyn Reader>,
     params: CaptureParams,
     msg_channels: CaptureChannels,
-    mut resampler: Option<Box<dyn Resampler<PrcFmt>>>,
+    mut resampler: Option<ChunkResampler>,
 ) {
     debug!("preparing captureloop");
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
@@ -297,7 +295,6 @@ fn capture_loop(
     let mut state = ProcessingState::Running;
     let mut prev_state = ProcessingState::Running;
     let mut stalled = false;
-    let mut channel_mask = vec![true; params.channels];
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -314,7 +311,11 @@ fn capture_loop(
                 rate_adjust = speed;
                 if let Some(resampl) = &mut resampler {
                     if params.async_src {
-                        if resampl.set_resample_ratio_relative(speed, true).is_err() {
+                        if resampl
+                            .resampler
+                            .set_resample_ratio_relative(speed, true)
+                            .is_err()
+                        {
                             debug!("Failed to set resampling speed to {}", speed);
                         }
                     } else {
@@ -505,47 +506,7 @@ fn capture_loop(
         state = silence_counter.update(value_range);
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
-                chunk.update_channel_mask(&mut channel_mask);
-                let mut new_waves = Vec::with_capacity(params.channels);
-                for wave in &chunk.waveforms {
-                    if !wave.is_empty() {
-                        new_waves.push(vec![0.0; params.chunksize]);
-                    } else {
-                        new_waves.push(Vec::with_capacity(0));
-                    }
-                }
-                let adapter_in = SparseSequentialSliceOfVecs::new(
-                    &chunk.waveforms,
-                    params.channels,
-                    chunk.frames,
-                    &channel_mask,
-                )
-                .unwrap();
-                let mut adapter_out = SparseSequentialSliceOfVecs::new_mut(
-                    &mut new_waves,
-                    params.channels,
-                    params.chunksize,
-                    &channel_mask,
-                )
-                .unwrap();
-                // create earlier and reuse
-                let indexing = rubato::Indexing {
-                    input_offset: 0,
-                    output_offset: 0,
-                    partial_len: None,
-                    active_channels_mask: Some(channel_mask.clone()),
-                };
-                resampl
-                    .process_into_buffer(&adapter_in, &mut adapter_out, Some(&indexing))
-                    .unwrap();
-                let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
-                if chunk_frames == 0 {
-                    chunk_frames = params.chunksize;
-                }
-                chunk.frames = chunk_frames;
-                chunk.valid_frames =
-                    (chunk.frames as f32 * (bytes_read as f32 / bytes_to_capture as f32)) as usize;
-                chunk.waveforms = new_waves;
+                resampl.resample_chunk(&mut chunk, params.chunksize, params.channels);
             }
             let msg = AudioMessage::Audio(chunk);
             if msg_channels.audio.send(msg).is_err() {
@@ -715,7 +676,7 @@ fn send_silence(
     channels: usize,
     chunksize: usize,
     audio_channel: &crossbeam_channel::Sender<AudioMessage>,
-    resampler: &mut Option<Box<dyn Resampler<PrcFmt>>>,
+    resampler: &mut Option<ChunkResampler>,
 ) {
     let mut samples_left = samples;
     while samples_left > 0 {
@@ -725,25 +686,7 @@ fn send_silence(
             samples_left
         };
         let waveforms = if let Some(resamp) = resampler {
-            let mut new_waves = Vec::with_capacity(channels);
-            for _ in 0..channels {
-                new_waves.push(vec![0.0; chunksize]);
-            }
-            let dummy_data = Vec::new();
-            let adapter_in = InterleavedSlice::new(&dummy_data, channels, 0).unwrap();
-            let mut adapter_out =
-                SequentialSliceOfVecs::new_mut(&mut new_waves, channels, chunksize).unwrap();
-            // create earlier and reuse
-            let indexing = rubato::Indexing {
-                input_offset: 0,
-                output_offset: 0,
-                partial_len: Some(0),
-                active_channels_mask: None,
-            };
-            resamp
-                .process_into_buffer(&adapter_in, &mut adapter_out, Some(&indexing))
-                .unwrap();
-            new_waves
+            resamp.pump_silence(channels, chunksize)
         } else {
             vec![vec![0.0; chunksize]; channels]
         };

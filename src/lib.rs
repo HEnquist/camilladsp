@@ -138,6 +138,7 @@ pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;
 pub mod race;
+pub mod resampling;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
 pub mod statefile;
