@@ -1088,7 +1088,7 @@ fn nbr_capture_bytes_and_frames(
     buf: &mut Vec<u8>,
 ) -> (usize, Frames) {
     let (capture_bytes_new, capture_frames_new) = if let Some(resampl) = &resampler {
-        xtrace!("Resampler needs {} frames", resampl.input_frames_next());
+        xtrace!("Resampler needs {} frames", resampl.resampler.input_frames_next());
         let frames = resampl.resampler.input_frames_next();
         (
             frames * params.channels * params.store_bytes_per_sample,
