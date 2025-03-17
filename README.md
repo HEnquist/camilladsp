@@ -1711,16 +1711,23 @@ Allowed ranges:
 
 ### Delay
 The delay filter provides a delay in milliseconds, microseconds, millimetres or samples.
+The delay value must be positive or zero.
+
 The `unit` can be `ms`, `us`, `mm` or `samples`, and if left out it defaults to `ms`.
 When giving the delay in millimetres, the speed of sound of is assumed to be 343 m/s (dry air at 20 degrees Celsius).
 
-If the `subsample` parameter is set to `true`, then it will use use an IIR filter to achieve subsample delay precision.
-Note this is an approximation that is accurate at lower frequencies, up to about `samplerate / 4`.
-If set to `false`, the delay value will instead be rounded to the nearest number of full samples.
-This is a little faster and should be used if subsample precision is not required.
+When `subsample` is set to `false`, the provided delay value is rounded to the nearest number of full samples.
+This is the default, and recommended for most applications.
+For example, at 44.1 kHz, one sample corresponds to 22.68 us. A delay of 0.7 ms then corresponds to 30.86 samples.
+This gets rounded to the nearest integer, 31, and the resulting delay is about 0.703 ms.
+This is then implemented by a delay line.
 
-
-The delay value must be positive or zero.
+Subsample delay precision can be achieved by setting the `subsample` parameter to `true`.
+In this mode it will also use use an IIR allpass filter in addition to the delay line.
+Using the same 0.7 ms example, the delay line is used to give a delay of 29 samples.
+A second order allpass filter is then used to give the remaining delay of 1.86 samples.
+Note that the allpass filter is an approximation that gives accurate delays at lower frequencies,
+up to about `samplerate / 4`.
 
 Example Delay filter:
 ```
