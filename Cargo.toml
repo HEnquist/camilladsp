@@ -73,7 +73,7 @@ crossbeam-channel = "0.5"
 rayon = "1.10.0"
 audio_thread_priority = { version = "0.32.0", default-features = false }
 ringbuf = "0.4.7"
-audioadapter = { version = "0.3.0", default-features = false, features = ["std"] }
+audioadapter = { version = "0.4.0", default-features = false, features = ["std"] }
 
 [build-dependencies]
 version_check = "0.9"
