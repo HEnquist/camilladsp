@@ -1,3 +1,7 @@
+## v3.0.1
+Bugfixes:
+- Make sure that Alsa playback device resumes after pause.
+
 ## v3.0.0
 New features:
 - Optional multithreaded filter processing.
