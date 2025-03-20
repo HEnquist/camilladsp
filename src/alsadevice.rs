@@ -118,6 +118,11 @@ fn play_buffer(
         // This sleep applies for the first chunk and in combination with the threshold=1 (i.e. start at first write)
         // and the next chunk generates the initial target delay.
         buf_manager.sleep_for_target_delay(millis_per_frame);
+    } else if playback_state == alsa_sys::SND_PCM_STATE_PAUSED as i32 {
+        debug!("PB: Device is in paused state, unpausing.");
+        if let Err(err) = pcmdevice.pause(false) {
+            warn!("Error unpausing playback device {:?}", err);
+        }
     } else if playback_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
         warn!(
             "PB: device is in an unexpected state: {}",
@@ -645,6 +650,7 @@ fn playback_loop_bytes(
             Ok(AudioMessage::Pause) => {
                 trace!("PB: Pause message received");
                 if can_pause && !pcm_paused {
+                    debug!("Pausing playback device");
                     let pause_res = pcmdevice.pause(true);
                     trace!("pcm_pause result {:?}", pause_res);
                     if pause_res.is_ok() {
