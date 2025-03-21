@@ -8,6 +8,10 @@ Changes:
 - Change mixer config rules to not allow duplicated channels.
 - Improved accuracy of subsample delay.
 
+## v3.0.1
+Bugfixes:
+- Make sure that Alsa playback device resumes after pause.
+
 ## v3.0.0
 New features:
 - Optional multithreaded filter processing.
