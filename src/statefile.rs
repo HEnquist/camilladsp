@@ -34,7 +34,7 @@ pub fn load_state(filename: &str) -> Option<State> {
             return None;
         }
     };
-    let state: State = match serde_yaml::from_str(&contents) {
+    let state: State = match serde_yml::from_str(&contents) {
         Ok(st) => st,
         Err(err) => {
             warn!("Invalid statefile, ignoring! Error:\n{err}");
@@ -69,7 +69,7 @@ pub fn save_state_to_file(filename: &str, state: &State) -> bool {
         .open(filename)
     {
         Ok(f) => {
-            if let Err(writeerr) = serde_yaml::to_writer(&f, &state) {
+            if let Err(writeerr) = serde_yml::to_writer(&f, &state) {
                 error!(
                     "Unable to write to statefile '{}', error: {}",
                     filename, writeerr

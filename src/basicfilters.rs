@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use circular_queue::CircularQueue;
+use ringbuf::storage::Heap;
+use ringbuf::traits::*;
+use ringbuf::LocalRb;
 
 use crate::audiodevice::AudioChunk;
 use crate::biquad::{Biquad, BiquadCoefficients};
@@ -21,7 +23,7 @@ pub struct Gain {
 pub struct Delay {
     pub name: String,
     samplerate: usize,
-    queue: CircularQueue<PrcFmt>,
+    queue: Option<LocalRb<Heap<PrcFmt>>>,
     biquad: Option<Biquad>,
 }
 
@@ -289,6 +291,10 @@ impl Gain {
         let linear = conf.scale() == config::GainScale::Linear;
         Gain::new(name, gain, inverted, mute, linear)
     }
+
+    pub fn process_single(&self, value: PrcFmt) -> PrcFmt {
+        value * self.gain
+    }
 }
 
 impl Filter for Gain {
@@ -321,21 +327,64 @@ impl Filter for Gain {
     }
 }
 
+fn build_subsample_biquad(delay: PrcFmt, samplerate: usize) -> (usize, Option<Biquad>) {
+    // delay is less than 0.1 samples, ignore
+    if delay < 0.1 {
+        debug!("Delay too small, ignoring");
+        return (0, None);
+    }
+    // delay is less than 1.1 samples, use first order allpass
+    if delay < 1.1 {
+        let coeff = (1.0 - delay) / (1.0 + delay);
+        debug!(
+            "Using first order allpass for delay of {:.2} samples",
+            delay
+        );
+        // 1st order Thiran allpass
+        let bqcoeffs = BiquadCoefficients::new(coeff, 0.0, coeff, 1.0, 0.0);
+        trace!("Coefficients: {:?}", bqcoeffs);
+        return (0, Some(Biquad::new("subsample", samplerate, bqcoeffs)));
+    }
+
+    // delay is large enough to use a second order allpass
+    let mut samples = delay.floor();
+    let mut fraction = delay - samples;
+    // adjust fraction and samples to keep fraction between 1.1 and 2.1
+    samples -= 1.0;
+    fraction += 1.0;
+    if fraction < 1.1 {
+        samples -= 1.0;
+        fraction += 1.0;
+    }
+    // 2nd order Thiran allpass
+    debug!(
+        "Using second order allpass for delay of {} + {:.2} samples",
+        samples, fraction
+    );
+    let coeff1 = 2.0 * (2.0 - fraction) / (1.0 + fraction);
+    let coeff2 = (2.0 - fraction) / (2.0 + fraction) * (1.0 - fraction) / (1.0 + fraction);
+    let bqcoeffs = BiquadCoefficients::new(coeff1, coeff2, coeff2, coeff1, 1.0);
+    trace!("Coefficients: {:?}", bqcoeffs);
+    (
+        samples as usize,
+        Some(Biquad::new("subsample", samplerate, bqcoeffs)),
+    )
+}
+
 impl Delay {
     /// Creates a delay filter with delay in samples
     pub fn new(name: &str, samplerate: usize, delay: PrcFmt, subsample: bool) -> Self {
         let name = name.to_string();
 
         let (integerdelay, biquad) = if subsample {
-            let samples = delay.floor();
-            let fraction = delay - samples;
-            let bqcoeffs = BiquadCoefficients::new(1.0 - fraction, 0.0, 1.0 - fraction, 1.0, 0.0);
-            let bq = Biquad::new("subsample", samplerate, bqcoeffs);
+            let (samples, bq) = build_subsample_biquad(delay, samplerate);
             debug!(
-                "Building delay filter '{}' with delay {} + {} samples",
-                name, samples, fraction
+                "Building delay filter '{}' with delay {} + {:.2} samples",
+                name,
+                samples,
+                delay - samples as PrcFmt
             );
-            (samples as usize, Some(bq))
+            (samples, bq)
         } else {
             let samples = delay.round() as usize;
             debug!(
@@ -345,12 +394,15 @@ impl Delay {
             (samples, None)
         };
 
-        // for super-small delays, store at least a single sample
-        let integerdelay = integerdelay.max(1);
-        let mut queue = CircularQueue::with_capacity(integerdelay);
-        for _ in 0..integerdelay {
-            queue.push(0.0);
-        }
+        let queue = if integerdelay > 0 {
+            let mut q = LocalRb::new(integerdelay);
+            for _ in 0..integerdelay {
+                let _ = q.try_push(0.0);
+            }
+            Some(q)
+        } else {
+            None
+        };
 
         Self {
             name,
@@ -362,12 +414,25 @@ impl Delay {
 
     pub fn from_config(name: &str, samplerate: usize, conf: config::DelayParameters) -> Self {
         let delay_samples = match conf.unit() {
+            config::TimeUnit::Microseconds => conf.delay / 1000000.0 * (samplerate as PrcFmt),
             config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (samplerate as PrcFmt),
             config::TimeUnit::Millimetres => conf.delay / 1000.0 * (samplerate as PrcFmt) / 343.0,
             config::TimeUnit::Samples => conf.delay,
         };
 
         Self::new(name, samplerate, delay_samples, conf.subsample())
+    }
+
+    pub fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
+        let mut value = if let Some(q) = &mut self.queue {
+            q.push_overwrite(input).unwrap()
+        } else {
+            input
+        };
+        if let Some(bq) = &mut self.biquad {
+            value = bq.process_single(value);
+        }
+        value
     }
 }
 
@@ -377,9 +442,11 @@ impl Filter for Delay {
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        for item in waveform.iter_mut() {
-            // this returns the item that was popped while pushing
-            *item = self.queue.push(*item).unwrap();
+        if let Some(q) = &mut self.queue {
+            for item in waveform.iter_mut() {
+                // this returns the item that was popped while pushing
+                *item = q.push_overwrite(*item).unwrap();
+            }
         }
         if let Some(bq) = &mut self.biquad {
             bq.process_waveform(waveform)?;
@@ -479,7 +546,7 @@ mod tests {
     #[test]
     fn delay_supersmall() {
         let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let waveform_delayed = vec![0.0, 0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0];
+        let waveform_delayed = waveform.clone();
         let mut delay = Delay::new("test", 44100, 0.1, false);
         delay.process_waveform(&mut waveform).unwrap();
         assert_eq!(waveform, waveform_delayed);
@@ -500,20 +567,20 @@ mod tests {
     #[test]
     fn delay_fraction() {
         let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let waveform_delayed = vec![
+        let expected_waveform = vec![
             0.0,
-            0.0,
-            -0.15,
-            -0.15500000000000003,
-            1.0465,
-            -0.31395,
-            0.094185,
-            -0.0282555,
-            0.008476649999999999,
-            -0.0025429949999999997,
+            0.01051051051051051,
+            -0.13446780113446782,
+            -0.2476751025299573,
+            1.0522122611990257,
+            -0.23903133046978262,
+            0.07523664949897024,
+            -0.021743938066703532,
+            0.006413537427714274,
+            -0.001882310318672015,
         ];
         let mut delay = Delay::new("test", 44100, 1.7, true);
         delay.process_waveform(&mut waveform).unwrap();
-        assert!(compare_waveforms(waveform, waveform_delayed, 1.0e-6));
+        assert!(compare_waveforms(waveform, expected_waveform, 1.0e-6));
     }
 }
