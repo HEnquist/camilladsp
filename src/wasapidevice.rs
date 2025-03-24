@@ -10,7 +10,6 @@ use ringbuf::wrap::caching::Caching;
 use ringbuf::{traits::*, HeapRb};
 use rubato::VecResampler;
 use std::collections::VecDeque;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
@@ -328,11 +327,11 @@ fn playback_loop(
         };
         tx_cb.send(simplereason).unwrap_or(());
     });
-    let callbacks_rc = Rc::new(callbacks);
-    let callbacks_weak = Rc::downgrade(&callbacks_rc);
+    let callbacks_rc = Arc::new(callbacks);
+    let callbacks_weak = Arc::downgrade(&callbacks_rc);
     let sessioncontrol = audio_client.get_audiosessioncontrol()?;
     let clock = audio_client.get_audioclock()?;
-    sessioncontrol.register_session_notification(callbacks_weak)?;
+    let _registration = sessioncontrol.register_session_notification(callbacks_weak)?;
 
     let mut waited_millis = 0;
     trace!("Waiting for data to start playback, will time out after one second.");
@@ -485,11 +484,11 @@ fn capture_loop(
         tx_disconnectreason.send(simplereason).unwrap_or(());
     });
 
-    let callbacks_rc = Rc::new(callbacks);
-    let callbacks_weak = Rc::downgrade(&callbacks_rc);
+    let callbacks_rc = Arc::new(callbacks);
+    let callbacks_weak = Arc::downgrade(&callbacks_rc);
 
     let sessioncontrol = audio_client.get_audiosessioncontrol()?;
-    sessioncontrol.register_session_notification(callbacks_weak)?;
+    let _registration = sessioncontrol.register_session_notification(callbacks_weak)?;
 
     let mut inactive = false;
 
