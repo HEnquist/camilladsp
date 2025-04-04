@@ -2,7 +2,6 @@ use crate::audiodevice::*;
 use crate::config;
 
 use std::f64::consts::PI;
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
@@ -101,9 +100,9 @@ pub struct GeneratorDevice {
 }
 
 struct CaptureChannels {
-    audio: mpsc::SyncSender<AudioMessage>,
+    audio: crossbeam_channel::Sender<AudioMessage>,
     status: crossbeam_channel::Sender<StatusMessage>,
-    command: mpsc::Receiver<CommandMessage>,
+    command: crossbeam_channel::Receiver<CommandMessage>,
 }
 
 struct GeneratorParams {
@@ -158,8 +157,8 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
             Ok(CommandMessage::SetSpeed { .. }) => {
                 warn!("Signal generator does not support rate adjust. Ignoring request.");
             }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 error!("Command channel was closed");
                 break;
             }
@@ -199,10 +198,10 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
 impl CaptureDevice for GeneratorDevice {
     fn start(
         &mut self,
-        channel: mpsc::SyncSender<AudioMessage>,
+        channel: crossbeam_channel::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
-        command_channel: mpsc::Receiver<CommandMessage>,
+        command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {

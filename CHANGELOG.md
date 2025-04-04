@@ -1,3 +1,13 @@
+## v4.0.0
+New features:
+- Add RACE processor.
+- Add option for custom log filtering.
+Changes:
+- Add microsecond delay unit.
+- Allow larger buffer target levels.
+- Change mixer config rules to not allow duplicated channels.
+- Improved accuracy of subsample delay.
+
 ## v3.0.1
 Bugfixes:
 - Make sure that Alsa playback device resumes after pause.

@@ -10,7 +10,6 @@ use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rubato::VecResampler;
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -132,7 +131,7 @@ fn open_pulse(
 impl PlaybackDevice for PulsePlaybackDevice {
     fn start(
         &mut self,
-        channel: mpsc::Receiver<AudioMessage>,
+        channel: crossbeam_channel::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -257,10 +256,10 @@ fn nbr_capture_bytes(
 impl CaptureDevice for PulseCaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::SyncSender<AudioMessage>,
+        channel: crossbeam_channel::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
-        command_channel: mpsc::Receiver<CommandMessage>,
+        command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
@@ -341,8 +340,8 @@ impl CaptureDevice for PulseCaptureDevice {
                                         }
                                     }
                                 }
-                                Err(mpsc::TryRecvError::Empty) => {}
-                                Err(mpsc::TryRecvError::Disconnected) => {
+                                Err(crossbeam_channel::TryRecvError::Empty) => {}
+                                Err(crossbeam_channel::TryRecvError::Disconnected) => {
                                     error!("Command channel was closed");
                                     break;
                                 }

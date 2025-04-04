@@ -24,7 +24,6 @@ extern crate num_complex;
 extern crate num_traits;
 extern crate rand;
 extern crate rand_distr;
-extern crate rawsample;
 extern crate realfft;
 extern crate rubato;
 extern crate serde;
@@ -138,6 +137,7 @@ pub mod noisegate;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;
+pub mod race;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
 pub mod statefile;

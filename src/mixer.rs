@@ -108,6 +108,8 @@ impl Mixer {
 pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
     let chan_in = mixer_config.channels.r#in;
     let chan_out = mixer_config.channels.out;
+    let mut output_channels: Vec<usize> = Vec::with_capacity(chan_out);
+    let mut input_channels: Vec<usize> = Vec::with_capacity(chan_in);
     for mapping in mixer_config.mapping.iter() {
         if mapping.dest >= chan_out {
             let msg = format!(
@@ -117,12 +119,28 @@ pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
             );
             return Err(config::ConfigError::new(&msg).into());
         }
+        if output_channels.contains(&mapping.dest) {
+            let msg = format!(
+                "There is more than one mapping for destination channel {}",
+                mapping.dest,
+            );
+            return Err(config::ConfigError::new(&msg).into());
+        }
+        output_channels.push(mapping.dest);
+        input_channels.clear();
         for source in mapping.sources.iter() {
             if source.channel >= chan_in {
                 let msg = format!(
                     "Invalid source channel {}, max is {}.",
                     source.channel,
                     chan_in - 1
+                );
+                return Err(config::ConfigError::new(&msg).into());
+            }
+            if input_channels.contains(&source.channel) {
+                let msg = format!(
+                    "Input channel {} is listed mote than once for destination channel {}",
+                    source.channel, mapping.dest,
                 );
                 return Err(config::ConfigError::new(&msg).into());
             }

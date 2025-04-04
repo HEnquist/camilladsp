@@ -1,10 +1,31 @@
-# CamillaDSP v3.0
+# CamillaDSP
 ![CI test and lint](https://github.com/HEnquist/camilladsp/workflows/CI%20test%20and%20lint/badge.svg)
+CamillaDSP is a powerful and flexible audio processing tool, designed for applications like active crossovers,
+room correction, and advanced audio filtering.
 
-A tool to create audio processing pipelines for applications such as active crossovers or room correction.
-It is written in Rust to benefit from the safety and elegant handling of threading that this language provides.
+The CamillaDSP project encompasses:
 
-Supported platforms: Linux, macOS, Windows.
+*   **CamillaDSP (the engine):** The core DSP engine, written in Rust, responsible for real-time audio processing.
+    It's a command-line application that runs on Linux, macOS, and Windows.
+    It can be used stand-alone, or together with the GUI and other related projects.
+    The CamillaDSP engine is the topic of this readme.
+*   **CamillaDSP (the ecosystem):** A broader family of related projects, including:
+    *   **[CamillaGUI](https://github.com/HEnquist/camillagui-backend):**
+        A user-friendly web-based interface for configuring and controlling the CamillaDSP engine.
+    *   **[camilladsp-setupscripts](https://github.com/HEnquist/camilladsp-setupscripts):**
+        Automated setup scripts.
+    *   **[pyCamillaDSP](https://github.com/HEnquist/pycamilladsp):**
+        A Python library for interacting with the CamillaDSP engine via its websocket interface.
+    *   **[pyCamillaDSP-plot](https://github.com/HEnquist/pycamilladsp-plot):**
+        A Python library for visualizing CamillaDSP configurations and filter responses.
+    *   **[camilladsp-config](https://github.com/HEnquist/camilladsp-config):**
+        A repository of example configurations and scripts for common use cases.
+    *   **[camilladsp-controller](https://github.com/HEnquist/camilladsp-controller):**
+        A controller for automatic sample rate switching.
+
+# CamillaDSP engine v4.0
+
+The CamillaDSP engine is a command-line application that runs on Linux, macOS, and Windows.
 
 Audio data is captured from a capture device and sent to a playback device.
 Alsa, PulseAudio, Jack, Wasapi and CoreAudio are currently supported for both capture and playback.
@@ -219,7 +240,7 @@ These are the key dependencies for CamillaDSP.
 * https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
 * https://crates.io/crates/rustfft - FFT used for FIR filters
 * https://crates.io/crates/rubato - Sample rate conversion
-* https://crates.io/crates/serde_yaml - Config file reading
+* https://crates.io/crates/serde_yml - Config file reading
 * https://crates.io/crates/tungstenite - Websocket server
 
 
@@ -253,6 +274,7 @@ The following configurations are provided:
 | `camilladsp-macos-amd64.tar.gz` | macOS on 64-bit Intel CPU | CoreAudio |
 | `camilladsp-macos-aarch64.tar.gz` | macOS on Apple silicon | CoreAudio |
 | `camilladsp-windows-amd64.zip` | Windows on 64-bit Intel or AMD CPU | Wasapi |
+| `camilladsp-windows7-amd64.zip` | Same as above, but built with an older rust version to support Windows 7 | Wasapi |
 
 All builds include the Websocket server.
 
@@ -277,7 +299,10 @@ xattr -d com.apple.quarantine /path/to/camilladsp
 
 # Building
 
-Use recent stable versions of rustc and cargo. The minimum rustc version is 1.61.0.
+__Note: This section describes how to compile CamillaDSP from source. 
+Only do this if you for some reason cannot use any of the pre-built binaries (see [Installing](#installing)).__
+
+Use recent stable versions of rustc and cargo. The minimum rustc version is 1.74.
 
 The recommended way to install rustc and cargo is by using the "rustup" tool.
 This tool works on all supported platforms (Linux, macOS and Windows). Get it here: https://rustup.rs/
@@ -494,6 +519,18 @@ Setting this to for example `warn` will print messages of level `warn` and above
 Alternatively, the log level can be changed with the verbosity flag.
 By passing the verbosity flag once, `-v`, `debug` messages are enabled.
 If it's given twice, `-vv`, it also prints `trace` messages.
+
+The option `custom_log_spec` can be used to define custom filters for the logs.
+When provided, this option overrides what is given by `-v` and `--loglevel`.
+Using this option, the log level can be set to different values for different modules.
+Example, set the base log level to `info`, but increase it to `trace` for the
+Wasapi backend (which is the `camillalib::wasapidevice` module):
+```
+--custom_log_spec="info, camillalib::wasapidevice=trace
+```
+Module names are shown in square brackets in the log messages.
+See the [flexi-logger documentation](https://docs.rs/flexi_logger/latest/flexi_logger/struct.LogSpecification.html)
+for more info on how to write the logger specification.
 
 The log messages are normally written to the terminal via stderr,
 but they can instead be written to a file by giving the `--logfile` option.
@@ -1000,17 +1037,26 @@ A parameter marked (*) in any example is optional. If they are left out from the
   * If asynchronous resampling is enabled, the adjustment can be done by tuning the resampling ratio.
     Then `resampler` must be set to one of the "Async" types. This is supported for all capture devices.
 
-  With Alsa capture devices, the first option is used whenever it's available.
-  If not, and when not using an Alsa capture device, then the second option is used.
+  The first option is used whenever it's available.
+  If not, then the second option is used if the config has an asynchronous resampler.
+  If neither is available, then rate adjust is disabled.
 
 * `target_level` (optional, defaults to the `chunksize` value)
 
-  The value is the number of samples that should be left in the buffer of the playback device
-  when the next chunk arrives. Only applies when `enable_rate_adjust` is set to `true`.
-  It will take some experimentation to find the right number.
+  The value is the number of samples that should be left
+  in the buffer of the playback device when the next chunk arrives.
+  When processing starts, the playback device will delay its startup
+  in order to get the initial buffer level near this value.
+  See also `enable_rate_adjust` which should be set to `true`to allow matching 
+  capture and playback rates in order to keep the buffer level at the target value.
+  
+  It may take some experimentation to find the optimal number.
   If it's too small there will be buffer underruns from time to time,
   and making it too large might lead to a longer input-output delay than what is acceptable.
-  Suitable values are in the range 1/2 to 1 times the `chunksize`.
+  A suitable starting point is to use the `chunksize` value.
+  Usable values cover a large range, from very small values like 30 on lightly loaded systems
+  with tight latency requirements,
+  to a maximum of `(2 + queuelimit) * chunksize` for mimimal underrun risk when latency is not a concern.
 
 * `adjust_period` (optional, defaults to 10)
 
@@ -1685,16 +1731,24 @@ Allowed ranges:
 - low_boost: 0 to 20
 
 ### Delay
-The delay filter provides a delay in milliseconds, millimetres or samples.
-The `unit` can be `ms`, `mm` or `samples`, and if left out it defaults to `ms`.
+The delay filter provides a delay in milliseconds, microseconds, millimetres or samples.
+The delay value must be positive or zero.
+
+The `unit` can be `ms`, `us`, `mm` or `samples`, and if left out it defaults to `ms`.
 When giving the delay in millimetres, the speed of sound of is assumed to be 343 m/s (dry air at 20 degrees Celsius).
 
-If the `subsample` parameter is set to `true`, then it will use use an IIR filter to achieve subsample delay precision.
-If set to `false`, the value will instead be rounded to the nearest number of full samples.
-This is a little faster and should be used if subsample precision is not required.
+When `subsample` is set to `false`, the provided delay value is rounded to the nearest number of full samples.
+This is the default, and recommended for most applications.
+For example, at 44.1 kHz, one sample corresponds to 22.68 us. A delay of 0.7 ms then corresponds to 30.86 samples.
+This gets rounded to the nearest integer, 31, and the resulting delay is about 0.703 ms.
+This is then implemented by a delay line.
 
-
-The delay value must be positive or zero.
+Subsample delay precision can be achieved by setting the `subsample` parameter to `true`.
+In this mode it will also use use an IIR allpass filter in addition to the delay line.
+Using the same 0.7 ms example, the delay line is used to give a delay of 29 samples.
+A second order allpass filter is then used to give the remaining delay of 1.86 samples.
+Note that the allpass filter is an approximation that gives accurate delays at lower frequencies,
+up to about `samplerate / 4`.
 
 Example Delay filter:
 ```
@@ -2250,6 +2304,153 @@ pipeline:
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
 
+### RACE
+The "RACE" processor implements the recursive part of the
+[Recursive Ambiophonic Crosstalk Elimination (RACE)](http://www.filmaker.com/papers/RGRM-RACE_rev.pdf) algorithm.
+The RACE processor processes a aingle pair of channels.
+Multiple processors can be used to process additional channel pairs if needed.
+
+Parameters: 
+* `channels`: number of channels, must match the number of channels of the pipeline where the compressor is inserted.
+* `channel_a`: channel number of first channel of the pair.
+* `channel_b`: channel number of second channel of the pair.
+* `attenuation`: attenuation in dB, must be larger than zero. Typical values are 2 - 3 dB.
+* `delay`: delay value, must be larger than zero. Typical values are in the range 0.06 - 0.1 ms
+* `delay_unit`: unit for delay, see the `Delay` filter.
+* `subsample_delay`: enable subsample delay values, see the `Delay` filter.
+
+The RACE algorithm is normally used with filters,
+to only process a limited range of the audio spectrum.
+![RACE algoriths](race.png)
+
+The RACE processor implements the recursive function block
+indicated by the dashed rectangle.
+This processor is meant to be combined with normal CamillaDSP mixers
+and filters to make up the complete solution.
+
+Example configuration implementing RACE with filters:
+```yml
+processors:
+  race:
+    type: RACE
+    parameters:
+      channels: 6
+      channel_a: 2
+      channel_b: 3
+      attenuation: 3
+      delay: 0.09
+
+mixers:
+  2to6:
+    channels:
+      in: 2
+      out: 6
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 2
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 3
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 4
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 5
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+  6to2:
+    channels:
+      in: 6
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -3
+            inverted: false
+          - channel: 2
+            gain: -3
+            inverted: false
+          - channel: 4
+            gain: -3
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: -3
+            inverted: false
+          - channel: 3
+            gain: -3
+            inverted: false
+          - channel: 5
+            gain: -3
+            inverted: false
+
+filters:
+  highpass_lower:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 250
+      order: 4
+  lowpass_lower:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 250
+      order: 4
+  highpass_upper:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 5000
+      order: 4
+  lowpass_upper:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 5000
+      order: 4
+
+pipeline:
+  - type: Mixer
+    name: 2to6
+  - type: Filter
+    channels: [0, 1]
+    names:
+      - lowpass_lower
+  - type: Filter
+    channels: [2, 3]
+    names:
+      - highpass_lower
+      - lowpass_upper
+  - type: Filter
+    channels: [4, 5]
+    names:
+      - highpass_upper
+  - type: Processor
+    name: race
+  - type: Mixer
+    name: 6to2
+```
 
 ## Pipeline
 The pipeline section defines the processing steps between input and output.
