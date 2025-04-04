@@ -7,7 +7,8 @@ The CamillaDSP project encompasses:
 
 *   **CamillaDSP (the engine):** The core DSP engine, written in Rust, responsible for real-time audio processing.
     It's a command-line application that runs on Linux, macOS, and Windows.
-    This is the topic of this readme.
+    It can be used stand-alone, or together with the GUI and other related projects.
+    The CamillaDSP engine is the topic of this readme.
 *   **CamillaDSP (the ecosystem):** A broader family of related projects, including:
     *   **[CamillaGUI](https://github.com/HEnquist/camillagui-backend):**
         A user-friendly web-based interface for configuring and controlling the CamillaDSP engine.
