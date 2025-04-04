@@ -458,6 +458,7 @@ struct CaptureChannels {
 }
 
 // Capture loop, capture samples and send in chunks of "chunksize" frames to channel
+#[allow(clippy::too_many_arguments)]
 fn capture_loop(
     audio_client: wasapi::AudioClient,
     capture_client: wasapi::AudioCaptureClient,
@@ -542,7 +543,10 @@ fn capture_loop(
             } else {
                 no_frames_counter += 1;
                 if no_frames_counter > 10 {
-                    debug!("No new frames from device in the last {} iterations", no_frames_counter);
+                    debug!(
+                        "No new frames from device in the last {} iterations",
+                        no_frames_counter
+                    );
                     if !inactive {
                         warn!("No data received, pausing stream.");
                         inactive = true;
@@ -582,9 +586,7 @@ fn capture_loop(
 
         // If no available frames, just skip the rest of this loop iteration
         if available_frames > 0 {
-
-            let (nbr_frames_read, flags) =
-                capture_client.read_from_device(&mut data[..])?;
+            let (nbr_frames_read, flags) = capture_client.read_from_device(&mut data[..])?;
             if nbr_frames_read < available_frames {
                 warn!(
                     "Expected {} frames, got {}.",
