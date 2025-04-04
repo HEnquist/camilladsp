@@ -84,12 +84,14 @@ This example configuration will be used to explain the various options specific 
     format: FLOAT32LE
     exclusive: false (*)
     loopback: false (*)
+    polling: false (*)
   playback:
     type: Wasapi
     channels: 2
     device: "SPDIF Interface (FX-AUDIO-DAC-X6)" (*)
     format: S24LE3
     exclusive: true (*)
+    polling: false (*)
 ```
 The parameters marked (*) are optional.
 
@@ -113,6 +115,16 @@ The parameters shown are for shared mode, more sample rates and sample formats w
 Set `exclusive` to `true` to enable exclusive mode.
 Setting it to `false` or leaving it out means that shared mode will be used.
 Playback and capture are independent, they do not need to use the same mode.
+
+### Polling or event driven timing
+Event driven timing is more efficient and is normally less prone to glitches in the audio,
+especially when running at low latency.
+However, some devices do not support event driven timing in exclusive mode.
+Others devices have issues, for example devices using the default Windows USB audio driver
+may produce severe stutter on playback when using even driven timing in exclusive mode.
+For these devices, the timing can be switched to polling by setting `polling` to `true`.
+Setting `polling` to `false` or leaving it out will use event driven timing,
+which is the recommended mode in most cases.
 
 ### Loopback capture
 Setting `loopback` to `true` enables loopback capture.

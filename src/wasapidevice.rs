@@ -10,7 +10,6 @@ use ringbuf::wrap::caching::Caching;
 use ringbuf::{traits::*, HeapRb};
 use rubato::VecResampler;
 use std::collections::VecDeque;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
@@ -46,6 +45,7 @@ pub struct WasapiPlaybackDevice {
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
+    pub polling: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +63,7 @@ pub struct WasapiCaptureDevice {
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
+    pub polling: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -166,16 +167,21 @@ fn open_playback(
     channels: usize,
     sample_format: &SampleFormat,
     exclusive: bool,
+    polling: bool,
 ) -> Res<(
     wasapi::Device,
     wasapi::AudioClient,
     wasapi::AudioRenderClient,
-    wasapi::Handle,
+    Option<wasapi::Handle>,
     wasapi::WaveFormat,
 )> {
     let sharemode = match exclusive {
         true => wasapi::ShareMode::Exclusive,
         false => wasapi::ShareMode::Shared,
+    };
+    let timing = match polling {
+        true => wasapi::TimingMode::Polling,
+        false => wasapi::TimingMode::Events,
     };
     let device = if let Some(name) = devname {
         let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
@@ -205,6 +211,7 @@ fn open_playback(
         aligned_time,
         &wasapi::Direction::Render,
         &sharemode,
+        &timing,
         false,
     )?;
     debug!(
@@ -212,7 +219,11 @@ fn open_playback(
         def_time, min_time, aligned_time
     );
     debug!("Initialized playback audio client.");
-    let handle = audio_client.set_get_eventhandle()?;
+    let handle = if !polling {
+        Some(audio_client.set_get_eventhandle()?)
+    } else {
+        None
+    };
     let render_client = audio_client.get_audiorenderclient()?;
     debug!("Opened Wasapi playback device {:?}.", devname);
     Ok((device, audio_client, render_client, handle, wave_format))
@@ -225,16 +236,21 @@ fn open_capture(
     sample_format: &SampleFormat,
     exclusive: bool,
     loopback: bool,
+    polling: bool,
 ) -> Res<(
     wasapi::Device,
     wasapi::AudioClient,
     wasapi::AudioCaptureClient,
-    wasapi::Handle,
+    Option<wasapi::Handle>,
     wasapi::WaveFormat,
 )> {
     let sharemode = match exclusive {
         true => wasapi::ShareMode::Exclusive,
         false => wasapi::ShareMode::Shared,
+    };
+    let timing = match polling {
+        true => wasapi::TimingMode::Polling,
+        false => wasapi::TimingMode::Events,
     };
     let device = if let Some(name) = devname {
         if !loopback {
@@ -278,10 +294,15 @@ fn open_capture(
         def_time,
         &wasapi::Direction::Capture,
         &sharemode,
+        &timing,
         loopback,
     )?;
     debug!("Initialized capture audio client.");
-    let handle = audio_client.set_get_eventhandle()?;
+    let handle = if !polling {
+        Some(audio_client.set_get_eventhandle()?)
+    } else {
+        None
+    };
     trace!("Capture got event handle.");
     let capture_client = audio_client.get_audiocaptureclient()?;
     debug!("Opened Wasapi capture device {:?}.", devname);
@@ -304,7 +325,7 @@ enum PlaybackDeviceMessage {
 fn playback_loop(
     audio_client: wasapi::AudioClient,
     render_client: wasapi::AudioRenderClient,
-    handle: wasapi::Handle,
+    handle: Option<wasapi::Handle>,
     blockalign: usize,
     chunksize: usize,
     samplerate: f64,
@@ -328,11 +349,9 @@ fn playback_loop(
         };
         tx_cb.send(simplereason).unwrap_or(());
     });
-    let callbacks_rc = Rc::new(callbacks);
-    let callbacks_weak = Rc::downgrade(&callbacks_rc);
+
     let sessioncontrol = audio_client.get_audiosessioncontrol()?;
-    let clock = audio_client.get_audioclock()?;
-    sessioncontrol.register_session_notification(callbacks_weak)?;
+    let _notifications = sessioncontrol.register_session_notification(callbacks)?;
 
     let mut waited_millis = 0;
     trace!("Waiting for data to start playback, will time out after one second.");
@@ -360,39 +379,12 @@ fn playback_loop(
     audio_client.start_stream()?;
     let mut running = false;
     let mut starting = true;
-    let mut pos = 0;
-    let mut device_prevtime = 0.0;
-    let device_freq = clock.get_frequency()? as f64;
+    let buffer_frames = audio_client.get_bufferframecount().unwrap();
+    let poll_delay =
+        std::time::Duration::from_millis(500 * buffer_frames as u64 / samplerate as u64);
     loop {
         buffer_free_frame_count = audio_client.get_available_space_in_frames()?;
         trace!("New buffer frame count {}.", buffer_free_frame_count);
-        let mut device_time = pos as f64 / device_freq;
-        if device_time == 0.0 && device_prevtime > 0.0 {
-            debug!("Failed to get accurate device time, skipping check for missing events.");
-            // A zero value means that the device position read was delayed due to some
-            // other high priority event, and an accurate reading could not be taken.
-            // To avoid needless resets of the stream, set the position to the expected value,
-            // calculated as the previous value plus the expected increment.
-            device_time = device_prevtime + buffer_free_frame_count as f64 / samplerate;
-        }
-        trace!(
-            "Device time counted up by {:.4} s.",
-            device_time - device_prevtime
-        );
-        if buffer_free_frame_count > 0
-            && (device_time - device_prevtime)
-                > 1.75 * (buffer_free_frame_count as f64 / samplerate)
-        {
-            warn!(
-                "Missing event! Resetting stream. Interval {:.4} s, expected {:.4} s.",
-                device_time - device_prevtime,
-                buffer_free_frame_count as f64 / samplerate
-            );
-            audio_client.stop_stream()?;
-            audio_client.reset_stream()?;
-            audio_client.start_stream()?;
-        }
-        device_prevtime = device_time;
 
         while sample_queue.len() < (blockalign * buffer_free_frame_count as usize) {
             trace!("Playback loop needs more samples, reading from channel.");
@@ -448,13 +440,15 @@ fn playback_loop(
         }
         trace!("Write ok.");
         //println!("{} bef",prev_inst.elapsed().as_micros());
-        if handle.wait_for_event(1000).is_err() {
-            error!("Error on playback, stopping stream");
-            audio_client.stop_stream()?;
-            return Err(DeviceError::new("Error on playback").into());
+        if let Some(ref h) = handle {
+            if h.wait_for_event(1000).is_err() {
+                error!("Error on playback, stopping stream");
+                audio_client.stop_stream()?;
+                return Err(DeviceError::new("Error on playback").into());
+            }
+        } else {
+            thread::sleep(poll_delay);
         }
-
-        pos = clock.get_position()?.0;
     }
 }
 
@@ -467,11 +461,12 @@ struct CaptureChannels {
 fn capture_loop(
     audio_client: wasapi::AudioClient,
     capture_client: wasapi::AudioCaptureClient,
-    handle: wasapi::Handle,
+    handle: Option<wasapi::Handle>,
     mut channels: CaptureChannels,
     tx_disconnectreason: Sender<DisconnectReason>,
     blockalign: usize,
     stop_signal: Arc<AtomicBool>,
+    samplerate: usize,
 ) -> Res<()> {
     let mut chunk_nbr: u64 = 0;
 
@@ -485,15 +480,16 @@ fn capture_loop(
         tx_disconnectreason.send(simplereason).unwrap_or(());
     });
 
-    let callbacks_rc = Rc::new(callbacks);
-    let callbacks_weak = Rc::downgrade(&callbacks_rc);
-
     let sessioncontrol = audio_client.get_audiosessioncontrol()?;
-    sessioncontrol.register_session_notification(callbacks_weak)?;
+    let _notifications = sessioncontrol.register_session_notification(callbacks)?;
 
     let mut inactive = false;
 
     let mut data = vec![0u8; 8 * blockalign * 1024];
+    let buffer_frames = audio_client.get_bufferframecount().unwrap();
+    let poll_delay =
+        std::time::Duration::from_millis(200 * buffer_frames as u64 / samplerate as u64);
+    let mut no_frames_counter = 0;
 
     // Raise priority
     let _thread_handle = match promote_current_thread_to_real_time(0, 1) {
@@ -519,22 +515,50 @@ fn capture_loop(
             audio_client.stop_stream()?;
             return Ok(());
         }
-        if handle.wait_for_event(250).is_err() {
-            debug!("Timeout on capture event.");
-            if !inactive {
-                warn!("No data received, pausing stream.");
-                inactive = true;
+        if let Some(ref h) = handle {
+            if h.wait_for_event(250).is_err() {
+                debug!("Timeout on capture event.");
+                if !inactive {
+                    warn!("No data received, pausing stream.");
+                    inactive = true;
+                }
+                match channels.tx_filled.try_send((chunk_nbr, 0)) {
+                    Ok(()) | Err(TrySendError::Full(_)) => {}
+                    Err(TrySendError::Disconnected(_)) => {
+                        error!("Error sending, channel disconnected.");
+                        audio_client.stop_stream()?;
+                        return Err(DeviceError::new("Channel disconnected.").into());
+                    }
+                }
+                chunk_nbr += 1;
+                continue;
             }
-            match channels.tx_filled.try_send((chunk_nbr, 0)) {
-                Ok(()) | Err(TrySendError::Full(_)) => {}
-                Err(TrySendError::Disconnected(_)) => {
-                    error!("Error sending, channel disconnected.");
-                    audio_client.stop_stream()?;
-                    return Err(DeviceError::new("Channel disconnected.").into());
+        } else {
+            thread::sleep(poll_delay);
+            let frames_ready = audio_client.get_current_padding()?;
+            trace!("capture, nbr frames ready: {}", frames_ready);
+            if frames_ready > 0 {
+                no_frames_counter = 0;
+            } else {
+                no_frames_counter += 1;
+                if no_frames_counter > 10 {
+                    debug!("No new frames from device in the last {} iterations", no_frames_counter);
+                    if !inactive {
+                        warn!("No data received, pausing stream.");
+                        inactive = true;
+                    }
+                    match channels.tx_filled.try_send((chunk_nbr, 0)) {
+                        Ok(()) | Err(TrySendError::Full(_)) => {}
+                        Err(TrySendError::Disconnected(_)) => {
+                            error!("Error sending, channel disconnected.");
+                            audio_client.stop_stream()?;
+                            return Err(DeviceError::new("Channel disconnected.").into());
+                        }
+                    }
+                    chunk_nbr += 1;
+                    continue;
                 }
             }
-            chunk_nbr += 1;
-            continue;
         }
 
         if inactive {
@@ -543,23 +567,31 @@ fn capture_loop(
         }
         let available_frames = match capture_client.get_next_nbr_frames()? {
             Some(frames) => frames,
-            None => audio_client.get_bufferframecount()?,
+            None => {
+                if handle.is_some() {
+                    // event driven mode, always gives a full buffer
+                    audio_client.get_bufferframecount()?
+                } else {
+                    // polling mode, padding gives a snapshot, may have increased once we get the buffer
+                    audio_client.get_current_padding()?
+                }
+            }
         };
 
         trace!("Available frames from capture dev: {}.", available_frames);
 
         // If no available frames, just skip the rest of this loop iteration
         if available_frames > 0 {
-            let nbr_bytes = available_frames as usize * blockalign;
 
             let (nbr_frames_read, flags) =
-                capture_client.read_from_device(&mut data[0..nbr_bytes])?;
-            if nbr_frames_read != available_frames {
+                capture_client.read_from_device(&mut data[..])?;
+            if nbr_frames_read < available_frames {
                 warn!(
                     "Expected {} frames, got {}.",
                     available_frames, nbr_frames_read
                 );
             }
+            let nbr_bytes = nbr_frames_read as usize * blockalign;
             if flags.silent {
                 debug!("Captured a buffer marked as silent.");
                 data.iter_mut().take(nbr_bytes).for_each(|val| *val = 0);
@@ -635,6 +667,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let exclusive = self.exclusive;
+        let polling = self.polling;
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
@@ -687,6 +720,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                 channels,
                                 &sample_format_dev,
                                 exclusive,
+                                polling,
                             ) {
                                 Ok((_device, audio_client, render_client, handle, wave_format)) => {
                                     tx_state_dev.send(DeviceState::Ok).unwrap_or(());
@@ -963,6 +997,7 @@ impl CaptureDevice for WasapiCaptureDevice {
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let exclusive = self.exclusive;
+        let polling = self.polling;
         let loopback = self.loopback;
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -1008,7 +1043,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                     .name("WasapiCaptureInner".to_string())
                     .spawn(move || {
                         let (_device, audio_client, capture_client, handle, wave_format) =
-                        match open_capture(&devname, capture_samplerate, channels, &sample_format_dev, exclusive, loopback) {
+                        match open_capture(&devname, capture_samplerate, channels, &sample_format_dev, exclusive, loopback, polling) {
                             Ok((_device, audio_client, capture_client, handle, wave_format)) => {
                                 tx_state_dev.send(DeviceState::Ok).unwrap_or(());
                                 (_device, audio_client, capture_client, handle, wave_format)
@@ -1026,7 +1061,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             ringbuf: device_producer,
                         };
                         let _rx_res = rx_start_inner.recv();
-                        let result = capture_loop(audio_client, capture_client, handle, channels, tx_disconnectreason, blockalign as usize, stop_signal_inner);
+                        let result = capture_loop(audio_client, capture_client, handle, channels, tx_disconnectreason, blockalign as usize, stop_signal_inner, capture_samplerate);
                         if let Err(err) = result {
                             let msg = format!("Capture failed with error: {}", err);
                             //error!("{}", msg);

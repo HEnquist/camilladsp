@@ -410,6 +410,8 @@ pub struct CaptureDeviceWasapi {
     #[serde(default)]
     loopback: Option<bool>,
     #[serde(default)]
+    polling: Option<bool>,
+    #[serde(default)]
     pub labels: Option<Vec<Option<String>>>,
 }
 
@@ -421,6 +423,10 @@ impl CaptureDeviceWasapi {
 
     pub fn is_loopback(&self) -> bool {
         self.loopback.unwrap_or_default()
+    }
+
+    pub fn is_polling(&self) -> bool {
+        self.polling.unwrap_or_default()
     }
 }
 
@@ -537,12 +543,18 @@ pub struct PlaybackDeviceWasapi {
     pub format: SampleFormat,
     #[serde(default)]
     exclusive: Option<bool>,
+    #[serde(default)]
+    polling: Option<bool>,
 }
 
 #[cfg(target_os = "windows")]
 impl PlaybackDeviceWasapi {
     pub fn is_exclusive(&self) -> bool {
         self.exclusive.unwrap_or_default()
+    }
+
+    pub fn is_polling(&self) -> bool {
+        self.polling.unwrap_or_default()
     }
 }
 
