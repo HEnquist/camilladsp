@@ -389,7 +389,10 @@ fn playback_loop(
     }
     loop {
         buffer_free_frame_count = audio_client.get_available_space_in_frames()?;
-        trace!("Playback, new buffer frame count {}.", buffer_free_frame_count);
+        trace!(
+            "Playback, new buffer frame count {}.",
+            buffer_free_frame_count
+        );
 
         while sample_queue.len() < (blockalign * buffer_free_frame_count as usize) {
             trace!("Playback loop needs more samples, reading from channel.");
@@ -1031,7 +1034,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         chunksize,
                 );
                 // Devices typically give around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = 16*chunksize/1024 + 10;
+                let channel_capacity = chunksize + 10;
                 debug!("Using a capture channel capacity of {} buffers.", channel_capacity);
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
 
