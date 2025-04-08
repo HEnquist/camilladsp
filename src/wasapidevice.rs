@@ -16,6 +16,7 @@ use std::thread;
 use std::time::Duration;
 use wasapi;
 use wasapi::DeviceCollection;
+use wasapi::StreamMode;
 
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -179,10 +180,6 @@ fn open_playback(
         true => wasapi::ShareMode::Exclusive,
         false => wasapi::ShareMode::Shared,
     };
-    let timing = match polling {
-        true => wasapi::TimingMode::Polling,
-        false => wasapi::TimingMode::Events,
-    };
     let device = if let Some(name) = devname {
         let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
         debug!(
@@ -206,14 +203,25 @@ fn open_playback(
     let (def_time, min_time) = audio_client.get_device_period()?;
     let aligned_time =
         audio_client.calculate_aligned_period_near(def_time, Some(128), &wave_format)?;
-    audio_client.initialize_client(
-        &wave_format,
-        aligned_time,
-        &wasapi::Direction::Render,
-        &sharemode,
-        &timing,
-        false,
-    )?;
+    let mode = match (polling, exclusive) {
+        (false, false) => StreamMode::EventsShared {
+            autoconvert: false,
+            buffer_duration_hns: 8 * def_time,
+        },
+        (false, true) => StreamMode::EventsExclusive {
+            period_hns: aligned_time,
+        },
+        (true, false) => StreamMode::PollingShared {
+            autoconvert: false,
+            buffer_duration_hns: 8 * def_time,
+        },
+        (true, true) => StreamMode::PollingExclusive {
+            period_hns: aligned_time,
+            buffer_duration_hns: 8 * aligned_time,
+        },
+    };
+    debug!("Playback stream mode: {:?}", mode);
+    audio_client.initialize_client(&wave_format, &wasapi::Direction::Render, &mode)?;
     debug!(
         "Playback default period {}, min period {}, aligned period {}.",
         def_time, min_time, aligned_time
@@ -247,10 +255,6 @@ fn open_capture(
     let sharemode = match exclusive {
         true => wasapi::ShareMode::Exclusive,
         false => wasapi::ShareMode::Shared,
-    };
-    let timing = match polling {
-        true => wasapi::TimingMode::Polling,
-        false => wasapi::TimingMode::Events,
     };
     let device = if let Some(name) = devname {
         if !loopback {
@@ -289,14 +293,27 @@ fn open_capture(
         "Capture default period {}, min period {}.",
         def_time, min_time
     );
-    audio_client.initialize_client(
-        &wave_format,
-        def_time,
-        &wasapi::Direction::Capture,
-        &sharemode,
-        &timing,
-        loopback,
-    )?;
+    let aligned_time =
+        audio_client.calculate_aligned_period_near(def_time, Some(128), &wave_format)?;
+    let mode = match (polling, exclusive) {
+        (false, false) => StreamMode::EventsShared {
+            autoconvert: false,
+            buffer_duration_hns: 8 * def_time,
+        },
+        (false, true) => StreamMode::EventsExclusive {
+            period_hns: aligned_time,
+        },
+        (true, false) => StreamMode::PollingShared {
+            autoconvert: false,
+            buffer_duration_hns: 8 * def_time,
+        },
+        (true, true) => StreamMode::PollingExclusive {
+            period_hns: aligned_time,
+            buffer_duration_hns: 8 * aligned_time,
+        },
+    };
+    debug!("Capture stream mode: {:?}", mode);
+    audio_client.initialize_client(&wave_format, &wasapi::Direction::Capture, &mode)?;
     debug!("Initialized capture audio client.");
     let handle = if !polling {
         Some(audio_client.set_get_eventhandle()?)
@@ -378,9 +395,9 @@ fn playback_loop(
     audio_client.start_stream()?;
     let mut running = false;
     let mut starting = true;
-    //let buffer_frames = audio_client.get_bufferframecount().unwrap();
     let (device_period_hns, _) = audio_client.get_device_period()?;
-    let poll_delay = std::time::Duration::from_micros(device_period_hns as u64 / 20);
+    // set poll delay to one device period, may be shorter than needed
+    let poll_delay = std::time::Duration::from_micros(device_period_hns as u64 / 10);
     if handle.is_none() {
         debug!(
             "Playback uses polling mode, delay is {} us.",
@@ -494,7 +511,8 @@ fn capture_loop(
 
     let mut data = vec![0u8; 8 * blockalign * 1024];
     let (default_delay_hns, _) = audio_client.get_device_period()?;
-    let poll_delay = std::time::Duration::from_micros((default_delay_hns / 20) as u64);
+    // set poll delay to one device period, may be shorter than needed
+    let poll_delay = std::time::Duration::from_micros(default_delay_hns as u64 / 10);
     if handle.is_none() {
         debug!(
             "Capture uses polling mode, delay is {} us.",
@@ -605,7 +623,7 @@ fn capture_loop(
                 let (nbr_frames_read, flags) =
                     capture_client.read_from_device(&mut data[nbr_bytes..])?;
                 if nbr_frames_read < available_frames {
-                    warn!(
+                    debug!(
                         "Expected {} frames, got {}.",
                         available_frames, nbr_frames_read
                     );
@@ -619,9 +637,13 @@ fn capture_loop(
                         .for_each(|val| *val = 0);
                 }
                 nbr_bytes += nbr_bytes_loop;
-                if audio_client.get_sharemode() == Some(wasapi::ShareMode::Exclusive) {
+                if audio_client.get_sharemode() == Some(wasapi::ShareMode::Exclusive)
+                    && audio_client.get_timing_mode() == Some(wasapi::TimingMode::Events)
+                {
                     break;
                 }
+
+                // Shared mode, is there another packet available?
                 if let Some(next_frames) = capture_client.get_next_packet_size()? {
                     if next_frames == 0 {
                         break;
@@ -631,6 +653,18 @@ fn capture_loop(
                             next_frames
                         );
                         available_frames = next_frames;
+                    }
+                }
+                // Exclusive with polling, are there more frames in the buffer?
+                else if let Ok(padding) = audio_client.get_current_padding() {
+                    if padding == 0 {
+                        break;
+                    } else {
+                        trace!(
+                            "Capture, more frames available, current padding is {} frames.",
+                            padding
+                        );
+                        available_frames = padding;
                     }
                 }
             }
