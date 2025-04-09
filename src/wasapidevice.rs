@@ -1068,7 +1068,12 @@ impl CaptureDevice for WasapiCaptureDevice {
                         chunksize,
                 );
                 // Devices typically give around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = chunksize + 10;
+                let channel_capacity = if let Some(resamp) = &resampler {
+                    let max_input_frames = resamp.input_frames_max();
+                    32*(chunksize + max_input_frames)/1024 + 10
+                } else {
+                    32*chunksize/1024 + 10
+                };
                 debug!("Using a capture channel capacity of {} buffers.", channel_capacity);
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
 
