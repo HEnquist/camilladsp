@@ -174,6 +174,13 @@ pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
 }
 
 pub fn recycle_vec(mut vector: Vec<PrcFmt>) {
+    {
+        let stash = BUFFERSTASH.read();
+        if stash.len() == stash.capacity() {
+            trace!("Stash is full, dropping a vector");
+            return;
+        }
+    }
     trace!("Recycling a vector");
     for elem in vector.iter_mut() {
         *elem = 0.0;
