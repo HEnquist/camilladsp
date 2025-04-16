@@ -595,7 +595,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             chunk.update_stats(&mut chunk_stats);
 
                             conversion_result = chunk_to_buffer_rawbytes(
-                                &chunk,
+                                chunk,
                                 &mut buf,
                                 &SampleFormat::FLOAT32LE,
                             );

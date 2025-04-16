@@ -520,7 +520,7 @@ impl Pipeline {
         for mut step in &mut self.steps {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {
-                    chunk = mix.process_chunk(&chunk);
+                    chunk = mix.process_chunk(chunk);
                 }
                 PipelineStep::FilterStep(flt) => {
                     flt.process_chunk(&mut chunk).unwrap();

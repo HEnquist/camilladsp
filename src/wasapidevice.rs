@@ -809,9 +809,9 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                         av_delay as usize;
                                 }
                             }
-                            conversion_result =
-                                chunk_to_buffer_rawbytes(&chunk, &mut buf, &sample_format);
                             chunk.update_stats(&mut chunk_stats);
+                            conversion_result =
+                                chunk_to_buffer_rawbytes(chunk, &mut buf, &sample_format);
                             if let Some(mut playback_status) = playback_status.try_write() {
                                 if conversion_result.1 > 0 {
                                     playback_status.clipped_samples +=

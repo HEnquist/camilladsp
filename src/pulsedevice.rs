@@ -170,8 +170,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
+                                    chunk.update_stats(&mut chunk_stats);
                                     conversion_result = chunk_to_buffer_rawbytes(
-                                        &chunk,
+                                        chunk,
                                         &mut buffer,
                                         &sample_format,
                                     );
@@ -195,7 +196,6 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                                 .unwrap();
                                         }
                                     };
-                                    chunk.update_stats(&mut chunk_stats);
                                     {
                                         let mut playback_status = playback_status.write();
                                         if conversion_result.1 > 0 {

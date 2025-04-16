@@ -39,6 +39,7 @@ extern crate wasapi;
 #[macro_use]
 extern crate log;
 
+use audiodevice::AudioChunk;
 use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 use std::error;
@@ -144,6 +145,54 @@ pub mod statefile;
 #[cfg(target_os = "windows")]
 pub mod wasapidevice;
 pub mod wavtools;
+
+lazy_static! {
+    pub static ref BUFFERSTASH: RwLock<Vec<Vec<PrcFmt>>> = RwLock::new(Vec::with_capacity(1024));
+}
+
+pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
+    let vec_option = {
+        let mut stash = BUFFERSTASH.write();
+        trace!(
+            "Try to get a vector from the stash, nbr avaliable: {}",
+            stash.len()
+        );
+        stash.pop()
+    };
+    if let Some(mut vector) = vec_option {
+        if capacity != vector.len() {
+            if capacity > vector.capacity() {
+                debug!("The stashed vector has insufficient capacity, allocating more space");
+            }
+            vector.resize(capacity, 0.0);
+        }
+        vector
+    } else {
+        debug!("Stash is empty, allocating a new vector");
+        vec![0.0; capacity]
+    }
+}
+
+pub fn recycle_vec(mut vector: Vec<PrcFmt>) {
+    {
+        let stash = BUFFERSTASH.read();
+        if stash.len() == stash.capacity() {
+            trace!("Stash is full, dropping a vector");
+            return;
+        }
+    }
+    trace!("Recycling a vector");
+    for elem in vector.iter_mut() {
+        *elem = 0.0;
+    }
+    BUFFERSTASH.write().push(vector);
+}
+
+pub fn recycle_chunk(chunk: AudioChunk) {
+    for vector in chunk.waveforms {
+        recycle_vec(vector);
+    }
+}
 
 pub enum StatusMessage {
     PlaybackReady,
