@@ -539,9 +539,9 @@ fn playback_loop_bytes(
                     waiting_chunks_in_channel
                 );
                 //trace!("PB: Avail at chunk rcvd: {:?}", avail_at_chunk_recvd);
-
+                chunk.update_stats(&mut chunk_stats);
                 conversion_result =
-                    chunk_to_buffer_rawbytes(&chunk, &mut buffer, &params.sample_format);
+                    chunk_to_buffer_rawbytes(chunk, &mut buffer, &params.sample_format);
 
                 let playback_res = play_buffer(
                     &buffer,
@@ -599,7 +599,6 @@ fn playback_loop_bytes(
                 };
                 if !device_stalled {
                     // updates only for non-stalled device
-                    chunk.update_stats(&mut chunk_stats);
                     if let Some(mut playback_status) = params.playback_status.try_write() {
                         if conversion_result.1 > 0 {
                             playback_status.clipped_samples += conversion_result.1;
