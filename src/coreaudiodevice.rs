@@ -712,7 +712,12 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let callback_frames = 512;
                 // TODO check if always 512!
                 //trace!("Estimated playback callback period to {} frames", callback_frames);
-                let channel_capacity = 16*chunksize/callback_frames + 10;
+                let channel_capacity = if let Some(resamp) = &resampler {
+                    let max_input_frames = resamp.input_frames_max();
+                    32*(chunksize + max_input_frames)/callback_frames + 10
+                } else {
+                    32*chunksize/callback_frames + 10
+                };
 
                 debug!("Using a capture channel capacity of {channel_capacity} buffers.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);

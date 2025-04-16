@@ -1180,7 +1180,7 @@ fn main_process() -> i32 {
 
         match exitstatus {
             Err(e) => {
-                error!("({}) {}", e.to_string(), e);
+                error!("{}", e);
                 if !wait {
                     return EXIT_PROCESSING_ERROR;
                 }
