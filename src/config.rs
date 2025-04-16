@@ -2,6 +2,7 @@ use crate::compressor;
 use crate::filters;
 use crate::mixer;
 use crate::noisegate;
+use crate::race;
 use crate::wavtools::{find_data_in_wav_stream, WavParams};
 use parking_lot::RwLock;
 use serde::{de, Deserialize, Serialize};
@@ -409,6 +410,8 @@ pub struct CaptureDeviceWasapi {
     #[serde(default)]
     loopback: Option<bool>,
     #[serde(default)]
+    polling: Option<bool>,
+    #[serde(default)]
     pub labels: Option<Vec<Option<String>>>,
 }
 
@@ -420,6 +423,10 @@ impl CaptureDeviceWasapi {
 
     pub fn is_loopback(&self) -> bool {
         self.loopback.unwrap_or_default()
+    }
+
+    pub fn is_polling(&self) -> bool {
+        self.polling.unwrap_or_default()
     }
 }
 
@@ -536,12 +543,18 @@ pub struct PlaybackDeviceWasapi {
     pub format: SampleFormat,
     #[serde(default)]
     exclusive: Option<bool>,
+    #[serde(default)]
+    polling: Option<bool>,
 }
 
 #[cfg(target_os = "windows")]
 impl PlaybackDeviceWasapi {
     pub fn is_exclusive(&self) -> bool {
         self.exclusive.unwrap_or_default()
+    }
+
+    pub fn is_polling(&self) -> bool {
+        self.polling.unwrap_or_default()
     }
 }
 
@@ -1123,6 +1136,8 @@ impl DelayParameters {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum TimeUnit {
+    #[serde(rename = "us")]
+    Microseconds,
     #[serde(rename = "ms")]
     Milliseconds,
     #[serde(rename = "mm")]
@@ -1259,6 +1274,11 @@ pub enum Processor {
         description: Option<String>,
         parameters: NoiseGateParameters,
     },
+    RACE {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: RACEParameters,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1320,6 +1340,30 @@ impl NoiseGateParameters {
 
     pub fn process_channels(&self) -> Vec<usize> {
         self.process_channels.clone().unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RACEParameters {
+    pub channels: usize,
+    pub channel_a: usize,
+    pub channel_b: usize,
+    pub delay: PrcFmt,
+    #[serde(default)]
+    pub subsample_delay: Option<bool>,
+    #[serde(default)]
+    pub delay_unit: Option<TimeUnit>,
+    pub attenuation: PrcFmt,
+}
+
+impl RACEParameters {
+    pub fn subsample_delay(&self) -> bool {
+        self.subsample_delay.unwrap_or_default()
+    }
+
+    pub fn delay_unit(&self) -> TimeUnit {
+        self.delay_unit.unwrap_or(TimeUnit::Milliseconds)
     }
 }
 
@@ -1446,7 +1490,7 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
             return Err(ConfigError::new(&msg).into());
         }
     };
-    let configuration: Configuration = match serde_yaml::from_str(&contents) {
+    let configuration: Configuration = match serde_yml::from_str(&contents) {
         Ok(config) => config,
         Err(err) => {
             let msg = format!("Invalid config file!\n{err}");
@@ -1825,12 +1869,12 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "linux")]
     let target_level_limit = if matches!(conf.devices.playback, PlaybackDevice::Alsa { .. }) {
-        4 * conf.devices.chunksize
+        (4 + conf.devices.queuelimit()) * conf.devices.chunksize
     } else {
-        2 * conf.devices.chunksize
+        (2 + conf.devices.queuelimit()) * conf.devices.chunksize
     };
     #[cfg(not(target_os = "linux"))]
-    let target_level_limit = 2 * conf.devices.chunksize;
+    let target_level_limit = (2 + conf.devices.queuelimit()) * conf.devices.chunksize;
 
     if conf.devices.target_level() > target_level_limit {
         let msg = format!("target_level cannot be larger than {}", target_level_limit);
@@ -2086,6 +2130,26 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                             Err(err) => {
                                                 let msg = format!(
                                                     "Invalid noise gate '{}'. Reason: {}",
+                                                    step.name, err
+                                                );
+                                                return Err(ConfigError::new(&msg).into());
+                                            }
+                                        }
+                                    }
+                                    Processor::RACE { parameters, .. } => {
+                                        let channels = parameters.channels;
+                                        if channels != num_channels {
+                                            let msg = format!(
+                                                "RACE processor '{}' has wrong number of channels. Expected {}, found {}.",
+                                                step.name, num_channels, channels
+                                            );
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
+                                        match race::validate_race(parameters) {
+                                            Ok(_) => {}
+                                            Err(err) => {
+                                                let msg = format!(
+                                                    "Invalid RACE processor '{}'. Reason: {}",
                                                     step.name, err
                                                 );
                                                 return Err(ConfigError::new(&msg).into());

@@ -1,5 +1,7 @@
 use crate::audiodevice::AudioChunk;
 use crate::config;
+use crate::recycle_chunk;
+use crate::vec_from_stash;
 use crate::PrcFmt;
 use crate::Res;
 
@@ -85,10 +87,11 @@ impl Mixer {
     }
 
     /// Apply a Mixer to an AudioChunk, yielding a new AudioChunk with a possibly different number of channels.
-    pub fn process_chunk(&mut self, input: &AudioChunk) -> AudioChunk {
+    pub fn process_chunk(&mut self, input: AudioChunk) -> AudioChunk {
         let mut waveforms = Vec::<Vec<PrcFmt>>::with_capacity(self.channels_out);
         for out_chan in 0..self.channels_out {
-            waveforms.push(vec![0.0; input.frames]);
+            let v = vec_from_stash(input.frames);
+            waveforms.push(v);
             for source in 0..self.mapping[out_chan].len() {
                 let source_chan = self.mapping[out_chan][source].channel;
                 if !input.waveforms[source_chan].is_empty() {
@@ -100,7 +103,9 @@ impl Mixer {
             }
         }
 
-        AudioChunk::from(input, waveforms)
+        let new_chunk = AudioChunk::from(&input, waveforms);
+        recycle_chunk(input);
+        new_chunk
     }
 }
 
@@ -108,6 +113,8 @@ impl Mixer {
 pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
     let chan_in = mixer_config.channels.r#in;
     let chan_out = mixer_config.channels.out;
+    let mut output_channels: Vec<usize> = Vec::with_capacity(chan_out);
+    let mut input_channels: Vec<usize> = Vec::with_capacity(chan_in);
     for mapping in mixer_config.mapping.iter() {
         if mapping.dest >= chan_out {
             let msg = format!(
@@ -117,12 +124,28 @@ pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
             );
             return Err(config::ConfigError::new(&msg).into());
         }
+        if output_channels.contains(&mapping.dest) {
+            let msg = format!(
+                "There is more than one mapping for destination channel {}",
+                mapping.dest,
+            );
+            return Err(config::ConfigError::new(&msg).into());
+        }
+        output_channels.push(mapping.dest);
+        input_channels.clear();
         for source in mapping.sources.iter() {
             if source.channel >= chan_in {
                 let msg = format!(
                     "Invalid source channel {}, max is {}.",
                     source.channel,
                     chan_in - 1
+                );
+                return Err(config::ConfigError::new(&msg).into());
+            }
+            if input_channels.contains(&source.channel) {
+                let msg = format!(
+                    "Input channel {} is listed mote than once for destination channel {}",
+                    source.channel, mapping.dest,
                 );
                 return Err(config::ConfigError::new(&msg).into());
             }

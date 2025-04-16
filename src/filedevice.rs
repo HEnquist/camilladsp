@@ -11,7 +11,6 @@ use std::fs::OpenOptions;
 use std::io::{stdin, stdout, Write};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
@@ -74,9 +73,9 @@ pub struct FileCaptureDevice {
 }
 
 struct CaptureChannels {
-    audio: mpsc::SyncSender<AudioMessage>,
+    audio: crossbeam_channel::Sender<AudioMessage>,
     status: crossbeam_channel::Sender<StatusMessage>,
-    command: mpsc::Receiver<CommandMessage>,
+    command: crossbeam_channel::Receiver<CommandMessage>,
 }
 
 struct CaptureParams {
@@ -111,7 +110,7 @@ pub trait Reader {
 impl PlaybackDevice for FilePlaybackDevice {
     fn start(
         &mut self,
-        channel: mpsc::Receiver<AudioMessage>,
+        channel: crossbeam_channel::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -158,8 +157,9 @@ impl PlaybackDevice for FilePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
+                                    chunk.update_stats(&mut chunk_stats);
                                     let (valid_bytes, nbr_clipped) = chunk_to_buffer_rawbytes(
-                                        &chunk,
+                                        chunk,
                                         &mut buffer,
                                         &sample_format,
                                     );
@@ -172,7 +172,6 @@ impl PlaybackDevice for FilePlaybackDevice {
                                                 .unwrap_or(());
                                         }
                                     };
-                                    chunk.update_stats(&mut chunk_stats);
                                     if let Some(mut playback_status) = playback_status.try_write() {
                                         if nbr_clipped > 0 {
                                             playback_status.clipped_samples += nbr_clipped;
@@ -321,8 +320,8 @@ fn capture_loop(
                     }
                 }
             }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 error!("Command channel was closed");
                 break;
             }
@@ -339,7 +338,6 @@ fn capture_loop(
             bytes_to_capture,
             &mut buf,
         );
-        //let read_res = read_retry(&mut file, &mut buf[0..capture_bytes_temp]);
         let read_res = file.read(&mut buf[0..bytes_to_capture_tmp]);
         match (read_res, capture_done) {
             (Ok(ReadResult::EndOfFile(bytes)), _) | (Ok(ReadResult::Complete(bytes)), true) => {
@@ -541,10 +539,10 @@ fn capture_loop(
 impl CaptureDevice for FileCaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::SyncSender<AudioMessage>,
+        channel: crossbeam_channel::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
-        command_channel: mpsc::Receiver<CommandMessage>,
+        command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
@@ -685,7 +683,7 @@ fn send_silence(
     samples: usize,
     channels: usize,
     chunksize: usize,
-    audio_channel: &mpsc::SyncSender<AudioMessage>,
+    audio_channel: &crossbeam_channel::Sender<AudioMessage>,
     resampler: &mut Option<Box<dyn VecResampler<PrcFmt>>>,
 ) {
     let mut samples_left = samples;
