@@ -334,7 +334,7 @@ mod tests {
         let waveforms = vec![vec![0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 2];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &sampleformat);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &sampleformat);
         let expected = vec![0xCC, 0x0C];
         assert_eq!(buffer, expected);
     }
@@ -345,7 +345,7 @@ mod tests {
         let waveforms = vec![vec![0.1, -0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 2, 2);
         let mut buffer = vec![0u8; 6];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &sampleformat);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &sampleformat);
         let expected = vec![0xCC, 0xCC, 0x0C, 0x33, 0x33, 0xF3];
         assert_eq!(buffer, expected);
     }
@@ -356,7 +356,7 @@ mod tests {
         let waveforms = vec![vec![0.1, -0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 2, 2);
         let mut buffer = vec![0u8; 8];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &sampleformat);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &sampleformat);
         let expected = vec![0xCC, 0xCC, 0x0C, 0x00, 0x33, 0x33, 0xF3, 0x00];
         assert_eq!(buffer, expected);
     }
@@ -408,7 +408,7 @@ mod tests {
         let waveforms = vec![vec![0.1, 0.1], Vec::new()];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 2, 2);
         let mut buffer = vec![0u8; 12];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::S24LE3);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S24LE3);
         let expected = vec![
             0xCC, 0xCC, 0x0C, 0x00, 0x00, 0x00, 0xCC, 0xCC, 0x0C, 0x00, 0x00, 0x00,
         ];
@@ -417,7 +417,7 @@ mod tests {
         let waveforms = vec![Vec::new(), vec![0.1, 0.1]];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 2, 2);
         let mut buffer = vec![0u8; 12];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::S24LE3);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S24LE3);
         let expected = vec![
             0x00, 0x00, 0x00, 0xCC, 0xCC, 0x0C, 0x00, 0x00, 0x00, 0xCC, 0xCC, 0x0C,
         ];
@@ -429,7 +429,7 @@ mod tests {
         let waveforms = vec![vec![0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 4];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::S32LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S32LE);
         #[cfg(feature = "32bit")]
         let expected = vec![0xD0, 0xCC, 0xCC, 0x0C];
         #[cfg(not(feature = "32bit"))]
@@ -442,7 +442,7 @@ mod tests {
         let waveforms = vec![vec![0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 4];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::FLOAT32LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::FLOAT32LE);
         let expected = vec![0xCD, 0xCC, 0xCC, 0x3D];
         assert_eq!(buffer, expected);
     }
@@ -452,7 +452,7 @@ mod tests {
         let waveforms = vec![vec![0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 8];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::FLOAT64LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::FLOAT64LE);
         #[cfg(feature = "32bit")]
         let expected = vec![0x00, 0x00, 0x00, 0xA0, 0x99, 0x99, 0xB9, 0x3F];
         #[cfg(not(feature = "32bit"))]
@@ -465,7 +465,7 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 2];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::S16LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S16LE);
         let chunk2 =
             buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S16LE, buffer.len(), &[true; 1]);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
@@ -476,7 +476,7 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::S24LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S24LE);
         let chunk2 =
             buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S24LE, buffer.len(), &[true; 1]);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
@@ -487,7 +487,7 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 3];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::S24LE3);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S24LE3);
         let chunk2 =
             buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S24LE3, buffer.len(), &[true; 1]);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
@@ -498,7 +498,7 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::S32LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S32LE);
         let chunk2 =
             buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S32LE, buffer.len(), &[true; 1]);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
@@ -509,7 +509,7 @@ mod tests {
         let waveforms = vec![vec![-1.0, 0.0, 32767.0 / 32768.0]; 1];
         let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 2];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::S16LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S16LE);
         let chunk2 =
             buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S16LE, buffer.len(), &[true; 1]);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
@@ -520,7 +520,7 @@ mod tests {
         let waveforms = vec![vec![-1.0, 0.0, 8388607.0 / 8388608.0]; 1];
         let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::S24LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S24LE);
         let chunk2 =
             buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S24LE, buffer.len(), &[true; 1]);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
@@ -531,7 +531,7 @@ mod tests {
         let waveforms = vec![vec![-1.0, 0.0, 2147483647.0 / 2147483648.0]; 1];
         let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::S32LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S32LE);
         let chunk2 =
             buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S32LE, buffer.len(), &[true; 1]);
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
@@ -542,7 +542,7 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::FLOAT32LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::FLOAT32LE);
         let chunk2 = buffer_to_chunk_rawbytes(
             &buffer,
             1,
@@ -558,7 +558,7 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 8];
-        chunk_to_buffer_rawbytes(&chunk, &mut buffer, &SampleFormat::FLOAT64LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::FLOAT64LE);
         let chunk2 = buffer_to_chunk_rawbytes(
             &buffer,
             1,
