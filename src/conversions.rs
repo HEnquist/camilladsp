@@ -1,6 +1,6 @@
-use crate::audiodevice::*;
 use crate::config::SampleFormat;
 use crate::PrcFmt;
+use crate::{audiodevice::*, recycle_chunk, vec_from_stash};
 use audioadapter::number_to_float::InterleavedNumbers;
 use audioadapter::sample::{F32LE, F64LE, I16LE, I24LE, I32LE};
 use audioadapter::{Adapter, AdapterMut};
@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 
 /// Convert an AudioChunk to an interleaved buffer of u8.
 pub fn chunk_to_buffer_rawbytes(
-    chunk: &AudioChunk,
+    chunk: AudioChunk,
     buf: &mut [u8],
     sampleformat: &SampleFormat,
 ) -> (usize, usize) {
@@ -76,6 +76,7 @@ pub fn chunk_to_buffer_rawbytes(
             peak * 100.0
         );
     }
+    recycle_chunk(chunk);
     (num_valid_bytes, clipped)
 }
 
@@ -120,7 +121,7 @@ pub fn buffer_to_chunk_rawbytes(
     };
     for (ch, used) in used_channels.iter().enumerate() {
         if *used {
-            let mut wf = vec![0.0; num_frames];
+            let mut wf = vec_from_stash(num_frames);
             let nbr = adapter.write_from_channel_to_slice(ch, 0, &mut wf[0..num_valid_frames]);
             if nbr > 0 {
                 let (mavx, minv) = wf.iter().fold((0.0, 0.0), |(max, min), x| {
@@ -135,7 +136,7 @@ pub fn buffer_to_chunk_rawbytes(
             }
             wfs.push(wf);
         } else {
-            wfs.push(Vec::new());
+            wfs.push(vec_from_stash(0));
         }
     }
     AudioChunk::new(wfs, maxvalue, minvalue, num_frames, num_valid_frames)
