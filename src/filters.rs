@@ -117,36 +117,40 @@ pub fn read_coeff_file(
         _ => {
             file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
             let nbr_coeffs = read_bytes_lines / format.bytes_per_sample();
+            let limit = if nbr_coeffs > 0 {
+                Some(nbr_coeffs)
+            } else {
+                None
+            };
 
             match *format {
                 config::FileFormat::S16LE => {
-                    file.read_converted_to_end::<I16LE, PrcFmt>(&mut coefficients)?;
+                    file.read_converted_to_limit_or_end::<I16LE, PrcFmt>(&mut coefficients, limit)?;
                 }
                 config::FileFormat::S24LE3 => {
-                    file.read_converted_to_end::<I24LE<3>, PrcFmt>(&mut coefficients)?;
+                    file.read_converted_to_limit_or_end::<I24LE<3>, PrcFmt>(
+                        &mut coefficients,
+                        limit,
+                    )?;
                 }
                 config::FileFormat::S24LE => {
-                    file.read_converted_to_end::<I24LE<4>, PrcFmt>(&mut coefficients)?;
+                    file.read_converted_to_limit_or_end::<I24LE<4>, PrcFmt>(
+                        &mut coefficients,
+                        limit,
+                    )?;
                 }
                 config::FileFormat::S32LE => {
-                    file.read_converted_to_end::<I32LE, PrcFmt>(&mut coefficients)?;
+                    file.read_converted_to_limit_or_end::<I32LE, PrcFmt>(&mut coefficients, limit)?;
                 }
                 config::FileFormat::FLOAT32LE => {
-                    file.read_converted_to_end::<F32LE, PrcFmt>(&mut coefficients)?;
+                    file.read_converted_to_limit_or_end::<F32LE, PrcFmt>(&mut coefficients, limit)?;
                 }
                 config::FileFormat::FLOAT64LE => {
-                    file.read_converted_to_end::<F64LE, PrcFmt>(&mut coefficients)?;
+                    file.read_converted_to_limit_or_end::<F64LE, PrcFmt>(&mut coefficients, limit)?;
                 }
                 config::FileFormat::TEXT => unreachable!(),
             }
             debug!("Read {} coeffs from file", coefficients.len());
-            if coefficients.len() > nbr_coeffs {
-                debug!(
-                    "Read more coefficients thatn needed, trimming to {}",
-                    nbr_coeffs
-                );
-                coefficients.resize(nbr_coeffs, 0.0);
-            }
         }
     }
     debug!(
@@ -516,7 +520,7 @@ impl Pipeline {
         for mut step in &mut self.steps {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {
-                    chunk = mix.process_chunk(&chunk);
+                    chunk = mix.process_chunk(chunk);
                 }
                 PipelineStep::FilterStep(flt) => {
                     flt.process_chunk(&mut chunk).unwrap();

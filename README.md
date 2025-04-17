@@ -1,10 +1,31 @@
-# CamillaDSP v3.0
+# CamillaDSP
 ![CI test and lint](https://github.com/HEnquist/camilladsp/workflows/CI%20test%20and%20lint/badge.svg)
+CamillaDSP is a powerful and flexible audio processing tool, designed for applications like active crossovers,
+room correction, and advanced audio filtering.
 
-A tool to create audio processing pipelines for applications such as active crossovers or room correction.
-It is written in Rust to benefit from the safety and elegant handling of threading that this language provides.
+The CamillaDSP project encompasses:
 
-Supported platforms: Linux, macOS, Windows.
+*   **CamillaDSP (the engine):** The core DSP engine, written in Rust, responsible for real-time audio processing.
+    It's a command-line application that runs on Linux, macOS, and Windows.
+    It can be used stand-alone, or together with the GUI and other related projects.
+    The CamillaDSP engine is the topic of this readme.
+*   **CamillaDSP (the ecosystem):** A broader family of related projects, including:
+    *   **[CamillaGUI](https://github.com/HEnquist/camillagui-backend):**
+        A user-friendly web-based interface for configuring and controlling the CamillaDSP engine.
+    *   **[camilladsp-setupscripts](https://github.com/HEnquist/camilladsp-setupscripts):**
+        Automated setup scripts.
+    *   **[pyCamillaDSP](https://github.com/HEnquist/pycamilladsp):**
+        A Python library for interacting with the CamillaDSP engine via its websocket interface.
+    *   **[pyCamillaDSP-plot](https://github.com/HEnquist/pycamilladsp-plot):**
+        A Python library for visualizing CamillaDSP configurations and filter responses.
+    *   **[camilladsp-config](https://github.com/HEnquist/camilladsp-config):**
+        A repository of example configurations and scripts for common use cases.
+    *   **[camilladsp-controller](https://github.com/HEnquist/camilladsp-controller):**
+        A controller for automatic sample rate switching.
+
+# CamillaDSP engine v4.0
+
+The CamillaDSP engine is a command-line application that runs on Linux, macOS, and Windows.
 
 Audio data is captured from a capture device and sent to a playback device.
 Alsa, PulseAudio, Jack, Wasapi and CoreAudio are currently supported for both capture and playback.

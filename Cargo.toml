@@ -40,8 +40,8 @@ dispatch = "0.2.0"
 
 [target.'cfg(target_os="windows")'.dependencies]
 #wasapi = { path = "../../rust/wasapi" }
-#wasapi = { git = "https://github.com/HEnquist/wasapi-rs", branch = "win041" }
-wasapi = "0.16.0"
+#wasapi = { git = "https://github.com/HEnquist/wasapi-rs", branch = "stream_mode_enum" }
+wasapi = "0.17.0"
 windows = {version = "0.59.0", features = ["Win32_System_Threading", "Win32_Foundation"] }
 
 [dependencies]
@@ -73,7 +73,7 @@ crossbeam-channel = "0.5"
 rayon = "1.10.0"
 audio_thread_priority = { version = "0.32.0", default-features = false }
 ringbuf = "0.4.7"
-audioadapter = { version = "0.3.0", default-features = false, features = ["std"] }
+audioadapter = { version = "0.4.0", default-features = false, features = ["std"] }
 
 [build-dependencies]
 version_check = "0.9"

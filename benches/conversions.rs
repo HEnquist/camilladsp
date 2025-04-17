@@ -1,4 +1,5 @@
 extern crate criterion;
+use camillalib::{recycle_chunk, vec_from_stash};
 use criterion::{criterion_group, criterion_main, Criterion};
 extern crate camillalib;
 
@@ -11,7 +12,10 @@ fn bench_to_chunk_small(c: &mut Criterion) {
     let data = vec![0u8; datalen];
     let mask = vec![true, true];
     c.bench_function("to_chunk_small", |b| {
-        b.iter(|| buffer_to_chunk_rawbytes(&data, 2, &SampleFormat::S32LE, datalen, &mask))
+        b.iter(|| {
+            let chunk = buffer_to_chunk_rawbytes(&data, 2, &SampleFormat::S32LE, datalen, &mask);
+            recycle_chunk(chunk);
+        })
     });
 }
 
@@ -20,31 +24,44 @@ fn bench_to_chunk_large(c: &mut Criterion) {
     let data = vec![0u8; datalen];
     let mask = vec![true, true];
     c.bench_function("to_chunk_large", |b| {
-        b.iter(|| buffer_to_chunk_rawbytes(&data, 2, &SampleFormat::S32LE, datalen, &mask))
+        b.iter(|| {
+            let chunk = buffer_to_chunk_rawbytes(&data, 2, &SampleFormat::S32LE, datalen, &mask);
+            recycle_chunk(chunk);
+        })
     });
 }
 
 fn bench_to_bytes_large(c: &mut Criterion) {
     let mask = vec![true, true];
     let num_frames = 4096;
-    let wfs = vec![vec![0.0; num_frames]; mask.len()];
-    let chunk = AudioChunk::new(wfs, 0.0, 0.0, num_frames, num_frames);
     let datalen = 2 * 4 * num_frames;
     let mut data = vec![0u8; datalen];
     c.bench_function("to_bytes_large", |b| {
-        b.iter(|| chunk_to_buffer_rawbytes(&chunk, &mut data, &SampleFormat::S32LE))
+        b.iter(|| {
+            let mut wfs = Vec::with_capacity(mask.len());
+            for _chan in 0..mask.len() {
+                wfs.push(vec_from_stash(num_frames));
+            }
+            let chunk = AudioChunk::new(wfs, 0.0, 0.0, num_frames, num_frames);
+            chunk_to_buffer_rawbytes(chunk, &mut data, &SampleFormat::S32LE)
+        })
     });
 }
 
 fn bench_to_bytes_small(c: &mut Criterion) {
     let mask = vec![true, true];
     let num_frames = 64;
-    let wfs = vec![vec![0.0; num_frames]; mask.len()];
-    let chunk = AudioChunk::new(wfs, 0.0, 0.0, num_frames, num_frames);
     let datalen = 2 * 4 * num_frames;
     let mut data = vec![0u8; datalen];
     c.bench_function("to_bytes_small", |b| {
-        b.iter(|| chunk_to_buffer_rawbytes(&chunk, &mut data, &SampleFormat::S32LE))
+        b.iter(|| {
+            let mut wfs = Vec::with_capacity(mask.len());
+            for _chan in 0..mask.len() {
+                wfs.push(vec_from_stash(num_frames));
+            }
+            let chunk = AudioChunk::new(wfs, 0.0, 0.0, num_frames, num_frames);
+            chunk_to_buffer_rawbytes(chunk, &mut data, &SampleFormat::S32LE)
+        })
     });
 }
 

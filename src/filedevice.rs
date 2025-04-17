@@ -157,8 +157,9 @@ impl PlaybackDevice for FilePlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
+                                    chunk.update_stats(&mut chunk_stats);
                                     let (valid_bytes, nbr_clipped) = chunk_to_buffer_rawbytes(
-                                        &chunk,
+                                        chunk,
                                         &mut buffer,
                                         &sample_format,
                                     );
@@ -171,7 +172,6 @@ impl PlaybackDevice for FilePlaybackDevice {
                                                 .unwrap_or(());
                                         }
                                     };
-                                    chunk.update_stats(&mut chunk_stats);
                                     if let Some(mut playback_status) = playback_status.try_write() {
                                         if nbr_clipped > 0 {
                                             playback_status.clipped_samples += nbr_clipped;
