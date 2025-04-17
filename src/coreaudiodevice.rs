@@ -710,7 +710,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 // TODO check if always 512!
                 //trace!("Estimated playback callback period to {} frames", callback_frames);
                 let channel_capacity = if let Some(resamp) = &resampler {
-                    let max_input_frames = resamp.input_frames_max();
+                    let max_input_frames = resamp.resampler.input_frames_max();
                     32*(chunksize + max_input_frames)/callback_frames + 10
                 } else {
                     32*chunksize/callback_frames + 10
