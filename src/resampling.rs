@@ -236,9 +236,8 @@ impl ChunkResampler {
             chunk.valid_frames = chunksize;
         }
         chunk.frames = chunksize;
-        // swap old and new
-        std::mem::swap(&mut new_waves, &mut chunk.waveforms);
-        recycle_container(new_waves);
+        let old_waves = std::mem::replace(&mut chunk.waveforms, new_waves);
+        recycle_container(old_waves);
     }
 
     pub fn pump_silence(&mut self, channels: usize, chunksize: usize) -> Vec<Vec<PrcFmt>> {
