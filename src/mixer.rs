@@ -1,5 +1,6 @@
 use crate::audiodevice::AudioChunk;
 use crate::config;
+use crate::container_from_stash;
 use crate::recycle_chunk;
 use crate::vec_from_stash;
 use crate::PrcFmt;
@@ -88,7 +89,7 @@ impl Mixer {
 
     /// Apply a Mixer to an AudioChunk, yielding a new AudioChunk with a possibly different number of channels.
     pub fn process_chunk(&mut self, input: AudioChunk) -> AudioChunk {
-        let mut waveforms = Vec::<Vec<PrcFmt>>::with_capacity(self.channels_out);
+        let mut waveforms = container_from_stash(self.channels_out);
         for out_chan in 0..self.channels_out {
             let v = vec_from_stash(input.frames);
             waveforms.push(v);

@@ -1,5 +1,7 @@
 use crate::audiodevice::AudioChunk;
 use crate::config;
+use crate::recycle_container;
+use crate::vec_from_stash;
 use crate::PrcFmt;
 use audioadapter::direct::{InterleavedSlice, SequentialSliceOfVecs, SparseSequentialSliceOfVecs};
 use rubato::{
@@ -206,9 +208,9 @@ impl ChunkResampler {
         let mut new_waves = Vec::with_capacity(channels);
         for wave in &chunk.waveforms {
             if !wave.is_empty() {
-                new_waves.push(vec![0.0; chunksize]);
+                new_waves.push(vec_from_stash(chunksize));
             } else {
-                new_waves.push(Vec::with_capacity(0));
+                new_waves.push(vec_from_stash(0));
             }
         }
         let adapter_in = SparseSequentialSliceOfVecs::new(
@@ -234,7 +236,9 @@ impl ChunkResampler {
             chunk.valid_frames = chunksize;
         }
         chunk.frames = chunksize;
-        chunk.waveforms = new_waves;
+        // swap old and new
+        std::mem::swap(&mut new_waves, &mut chunk.waveforms);
+        recycle_container(new_waves);
     }
 
     pub fn pump_silence(&mut self, channels: usize, chunksize: usize) -> Vec<Vec<PrcFmt>> {
