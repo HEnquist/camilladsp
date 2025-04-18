@@ -139,6 +139,7 @@ pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;
 pub mod race;
+pub mod resampling;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
 pub mod statefile;
@@ -148,6 +149,8 @@ pub mod wavtools;
 
 lazy_static! {
     pub static ref BUFFERSTASH: RwLock<Vec<Vec<PrcFmt>>> = RwLock::new(Vec::with_capacity(1024));
+    pub static ref CONTAINERSTASH: RwLock<Vec<Vec<Vec<PrcFmt>>>> =
+        RwLock::new(Vec::with_capacity(128));
 }
 
 pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
@@ -173,6 +176,27 @@ pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
     }
 }
 
+pub fn container_from_stash(capacity: usize) -> Vec<Vec<PrcFmt>> {
+    let vec_option = {
+        let mut stash = CONTAINERSTASH.write();
+        trace!(
+            "Try to get a vector container from the stash, nbr avaliable: {}",
+            stash.len()
+        );
+        stash.pop()
+    };
+    if let Some(mut vector) = vec_option {
+        if capacity < vector.capacity() {
+            debug!("The stashed container vector has insufficient capacity, allocating more space");
+            vector.reserve_exact(capacity);
+        }
+        vector
+    } else {
+        debug!("Stash is empty, allocating a new container vector");
+        Vec::with_capacity(capacity)
+    }
+}
+
 pub fn recycle_vec(mut vector: Vec<PrcFmt>) {
     {
         let stash = BUFFERSTASH.read();
@@ -188,10 +212,23 @@ pub fn recycle_vec(mut vector: Vec<PrcFmt>) {
     BUFFERSTASH.write().push(vector);
 }
 
-pub fn recycle_chunk(chunk: AudioChunk) {
-    for vector in chunk.waveforms {
+pub fn recycle_container(mut container: Vec<Vec<PrcFmt>>) {
+    trace!("Recycling a container of vectors");
+    for vector in container.drain(..) {
         recycle_vec(vector);
     }
+    {
+        let stash = CONTAINERSTASH.read();
+        if stash.len() == stash.capacity() {
+            trace!("Stash is full, dropping a container");
+            return;
+        }
+    }
+    CONTAINERSTASH.write().push(container);
+}
+
+pub fn recycle_chunk(chunk: AudioChunk) {
+    recycle_container(chunk.waveforms);
 }
 
 pub enum StatusMessage {

@@ -4,11 +4,11 @@ use crate::config::{ConfigError, SampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::helpers::PIRateController;
+use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use crossbeam_channel::{bounded, TryRecvError, TrySendError};
 use dispatch::Semaphore;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{traits::*, HeapRb};
-use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::ffi::CStr;
 use std::mem;
@@ -659,14 +659,11 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
     }
 }
 
-fn nbr_capture_frames(
-    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
-    capture_frames: usize,
-) -> usize {
+fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize) -> usize {
     if let Some(resampl) = &resampler {
         #[cfg(feature = "debug")]
         trace!("Resampler needs {} frames.", resampl.input_frames_next());
-        resampl.input_frames_next()
+        resampl.resampler.input_frames_next()
     } else {
         capture_frames
     }
@@ -713,7 +710,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 // TODO check if always 512!
                 //trace!("Estimated playback callback period to {} frames", callback_frames);
                 let channel_capacity = if let Some(resamp) = &resampler {
-                    let max_input_frames = resamp.input_frames_max();
+                    let max_input_frames = resamp.resampler.input_frames_max();
                     32*(chunksize + max_input_frames)/callback_frames + 10
                 } else {
                     32*chunksize/callback_frames + 10
@@ -821,7 +818,6 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                 let mut expected_chunk_nbr = 0;
                 let mut prev_len = 0;
-                let mut channel_mask = vec![true; channels];
                 debug!("Capture device ready and waiting.");
                 match status_channel.send(StatusMessage::CaptureReady) {
                     Ok(()) => {}
@@ -868,7 +864,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             else if let Some(resampl) = &mut resampler {
                                 debug!("Adjusting resampler rate to {speed}.");
                                 if async_src {
-                                    if resampl.set_resample_ratio_relative(speed, true).is_err() {
+                                    if resampl.resampler.set_resample_ratio_relative(speed, true).is_err() {
                                         debug!("Failed to set resampling speed to {speed}.");
                                     }
                                 }
@@ -1019,15 +1015,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     state = silence_counter.update(value_range);
                     if state == ProcessingState::Running {
                         if let Some(resampl) = &mut resampler {
-                            chunk.update_channel_mask(&mut channel_mask);
-                            let new_waves = resampl.process(&chunk.waveforms, Some(&channel_mask)).unwrap();
-                            let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
-                            if chunk_frames == 0 {
-                                chunk_frames = chunksize;
-                            }
-                            chunk.frames = chunk_frames;
-                            chunk.valid_frames = chunk.frames;
-                            chunk.waveforms = new_waves;
+                            resampl.resample_chunk(&mut chunk, chunksize, channels);
                         }
                         let msg = AudioMessage::Audio(chunk);
                         if channel.send(msg).is_err() {

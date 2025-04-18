@@ -1,6 +1,6 @@
 use crate::config::SampleFormat;
-use crate::PrcFmt;
 use crate::{audiodevice::*, recycle_chunk, vec_from_stash};
+use crate::{container_from_stash, PrcFmt};
 use audioadapter::number_to_float::InterleavedNumbers;
 use audioadapter::sample::{F32LE, F64LE, I16LE, I24LE, I32LE};
 use audioadapter::{Adapter, AdapterMut};
@@ -92,7 +92,7 @@ pub fn buffer_to_chunk_rawbytes(
     let num_valid_frames = valid_bytes / sampleformat.bytes_per_sample() / channels;
     let mut maxvalue: PrcFmt = 0.0;
     let mut minvalue: PrcFmt = 0.0;
-    let mut wfs = Vec::with_capacity(channels);
+    let mut wfs = container_from_stash(channels);
     let adapter: Box<dyn Adapter<PrcFmt>> = match sampleformat {
         SampleFormat::S16LE => Box::new(
             InterleavedNumbers::<&[I16LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)

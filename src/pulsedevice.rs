@@ -8,8 +8,8 @@ use crate::config;
 use crate::config::SampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
+use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
-use rubato::VecResampler;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -104,10 +104,10 @@ fn open_pulse(
     };
     //assert!(spec.is_valid());
     let attr = pulse::def::BufferAttr {
-        maxlength: std::u32::MAX,
-        tlength: std::u32::MAX,
+        maxlength: u32::MAX,
+        tlength: u32::MAX,
         prebuf: bytes_per_sample as u32,
-        minreq: std::u32::MAX,
+        minreq: u32::MAX,
         fragsize: bytes_per_sample as u32,
     };
 
@@ -240,13 +240,13 @@ impl PlaybackDevice for PulsePlaybackDevice {
 }
 
 fn nbr_capture_bytes(
-    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
+    resampler: &Option<ChunkResampler>,
     capture_bytes: usize,
     channels: usize,
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        resampl.input_frames_next() * channels * store_bytes_per_sample
+        resampl.resampler.input_frames_next() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }
@@ -316,7 +316,6 @@ impl CaptureDevice for PulseCaptureDevice {
                         let mut state = ProcessingState::Running;
                         let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
                         let bytes_per_frame = channels * store_bytes_per_sample;
-                        let mut channel_mask = vec![true; channels];
                         let mut last_instant = Instant::now();
                         loop {
                             match command_channel.try_recv() {
@@ -331,7 +330,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                     rate_adjust = speed;
                                     if let Some(resampl) = &mut resampler {
                                         if async_src {
-                                            if resampl.set_resample_ratio_relative(speed, true).is_err() {
+                                            if resampl.resampler.set_resample_ratio_relative(speed, true).is_err() {
                                                 debug!("Failed to set resampling speed to {}", speed);
                                             }
                                         }
@@ -396,15 +395,7 @@ impl CaptureDevice for PulseCaptureDevice {
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
                                 if let Some(resampl) = &mut resampler {
-                                    chunk.update_channel_mask(&mut channel_mask);
-                                    let new_waves = resampl.process(&chunk.waveforms, Some(&channel_mask)).unwrap();
-                                    let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
-                                    if chunk_frames == 0 {
-                                        chunk_frames = chunksize;
-                                    }
-                                    chunk.frames = chunk_frames;
-                                    chunk.valid_frames = chunk.frames;
-                                    chunk.waveforms = new_waves;
+                                    resampl.resample_chunk(&mut chunk, chunksize, channels);
                                 }
                                 let msg = AudioMessage::Audio(chunk);
                                 if channel.send(msg).is_err() {

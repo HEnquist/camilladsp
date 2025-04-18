@@ -8,7 +8,6 @@ use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TryS
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::wrap::caching::Caching;
 use ringbuf::{traits::*, HeapRb};
-use rubato::VecResampler;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -22,6 +21,7 @@ use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 
+use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingParameters;
@@ -29,7 +29,6 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus};
-
 enum DeviceState {
     Ok,
     Error(String),
@@ -1016,14 +1015,11 @@ fn send_error_or_captureformatchange(
     }
 }
 
-fn nbr_capture_frames(
-    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
-    capture_frames: usize,
-) -> usize {
+fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize) -> usize {
     if let Some(resampl) = &resampler {
         #[cfg(feature = "debug")]
         trace!("Resampler needs {} frames.", resampl.input_frames_next());
-        resampl.input_frames_next()
+        resampl.resampler.input_frames_next()
     } else {
         capture_frames
     }
@@ -1069,7 +1065,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 );
                 // Devices typically give around 1000 frames per buffer, set a reasonable capacity for the channel
                 let channel_capacity = if let Some(resamp) = &resampler {
-                    let max_input_frames = resamp.input_frames_max();
+                    let max_input_frames = resamp.resampler.input_frames_max();
                     32*(chunksize + max_input_frames)/1024 + 10
                 } else {
                     32*chunksize/1024 + 10
@@ -1146,7 +1142,6 @@ impl CaptureDevice for WasapiCaptureDevice {
                 // TODO check if this ever needs to be resized
                 let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                 let mut expected_chunk_nbr = 0;
-                let mut channel_mask = vec![true; channels];
                 debug!("Capture device ready and waiting.");
                 match status_channel.send(StatusMessage::CaptureReady) {
                     Ok(()) => {}
@@ -1183,7 +1178,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             if let Some(resampl) = &mut resampler {
                                 debug!("Adjusting resampler rate to {}.", speed);
                                 if async_src {
-                                    if resampl.set_resample_ratio_relative(speed, true).is_err() {
+                                    if resampl.resampler.set_resample_ratio_relative(speed, true).is_err() {
                                         debug!("Failed to set resampling speed to {}.", speed);
                                     }
                                 }
@@ -1311,15 +1306,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         state = silence_counter.update(value_range);
                         if state == ProcessingState::Running {
                             if let Some(resampl) = &mut resampler {
-                                chunk.update_channel_mask(&mut channel_mask);
-                                let new_waves = resampl.process(&chunk.waveforms, Some(&channel_mask)).unwrap();
-                                let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
-                                if chunk_frames == 0 {
-                                    chunk_frames = chunksize;
-                                }
-                                chunk.frames = chunk_frames;
-                                chunk.valid_frames = chunk.frames;
-                                chunk.waveforms = new_waves;
+                                resampl.resample_chunk(&mut chunk, chunksize, channels);
                             }
                             let msg = AudioMessage::Audio(chunk);
                             if channel.send(msg).is_err() {
