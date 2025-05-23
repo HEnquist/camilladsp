@@ -742,6 +742,13 @@ This will list all devices, and the null-sink should be included like this:
 This device can be set as the default output in the Gnome sound settings, meaning all desktop audio will use it.
 The audio sent to this device can then be captured from the monitor output named "MySink.monitor" using the PulseAudio backend.
 
+To configure Pipewire so that this null-sink is loaded on startup, create the file `/usr/share/pipewire/pipewire-pulse.conf.d/camilladsp-sink.conf` containing:
+```
+pulse.cmd = [
+    { cmd = "load-module" args = "module-null-sink sink_name=MySink object.linger=1 media.class=Audio/Sink" flags = [ ] }
+]
+```
+
 Pipewire can also be configured to output to an ALSA Loopback.
 This is done by adding an ALSA sink in the Pipewire configuration.
 This sink then becomes available as an output device in the Gnome sound settings.
