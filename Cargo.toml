@@ -49,7 +49,7 @@ windows = {version = "0.61.0", features = ["Win32_System_Threading", "Win32_Foun
 serde = { version = "1.0", features = ["derive"] }
 serde_yml = "0.0.12"
 serde_json = "1.0"
-serde_with = "1.11"
+serde_with = "3.12"
 realfft = "3.4.0"
 #realfft = { git = "https://github.com/HEnquist/realfft", branch = "better_errors" }
 num-complex = "0.4"
@@ -80,7 +80,7 @@ audioadapter = { version = "0.4.0", default-features = false, features = ["std"]
 version_check = "0.9"
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = "0.6"
 
 [[bench]]
 name = "filters"
