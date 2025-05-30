@@ -658,7 +658,7 @@ pub trait Ditherer {
 // randomness. Must be cached not only to increase performance, but more
 // importantly: keep state and not repeat the same sequences.
 fn create_rng() -> SmallRng {
-    SmallRng::from_entropy()
+    SmallRng::from_os_rng()
 }
 
 // Spectrally-white triangular-pdf (TPDF) dither.
@@ -718,7 +718,7 @@ impl Ditherer for HighpassDitherer {
         let amplitude = amplitude / 2.0;
         Self {
             cached_rng: create_rng(),
-            distribution: Uniform::new_inclusive(-amplitude, amplitude),
+            distribution: Uniform::new_inclusive(-amplitude, amplitude).unwrap(),
             previous_sample: 0.0,
         }
     }

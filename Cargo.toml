@@ -55,8 +55,8 @@ realfft = "3.4.0"
 num-complex = "0.4"
 num-traits = "0.2"
 signal-hook = "0.3.8"
-rand = { version = "0.8.3", default-features = false, features = ["small_rng", "std"] }
-rand_distr = "0.4.3"
+rand = { version = "0.9.1", default-features = false, features = ["small_rng", "std"] }
+rand_distr = "0.5.1"
 clap = { version = "4.5.4", features = ["cargo"] }
 lazy_static = "1.4.0"
 log = "0.4.14"
