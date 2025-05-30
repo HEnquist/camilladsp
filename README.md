@@ -37,36 +37,32 @@ A filter can be applied to any number of channels. All processing is done in chu
 A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
 The full configuration is given in a YAML file.
 
+# License
+
+CamillaDSP is free software; you can redistribute it and/or modify it
+under the terms of either of the following licenses:
+
+1) the GNU General Public License version 3,
+   available at [www.gnu.org](https://www.gnu.org/licenses/gpl-3.0.en.html)
+   or [LICENSE_GPLv3.txt](LICENSE_GPLv3.txt).
+2) the Mozilla Public License Version 2.0,
+   available at [www.mozilla.org](https://www.mozilla.org/en-US/MPL/),
+   or [LICENSE_MPL2.0.txt](LICENSE_MPL2.0.txt).
+
+
 # Disclaimer
 
-CamillaDSP is distributed under the [GNU GENERAL PUBLIC LICENSE Version 3](LICENSE.txt).
+__The software is provided "as is" without any warranty.
+You use it entirely at your own risk, and the creators/distributors
+are not responsible for any damages that might result from its use or failure.__
 
-This includes the following disclaimer:
->  15. Disclaimer of Warranty.
->
->  THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY
->APPLICABLE LAW.  EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT
->HOLDERS AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS" WITHOUT WARRANTY
->OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
->THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
->PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
->IS WITH YOU.  SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF
->ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
->
->  16. Limitation of Liability.
->
->  IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
->WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
->THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY
->GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE
->USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED TO LOSS OF
->DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD
->PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER PROGRAMS),
->EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
->SUCH DAMAGES.
+For more details, please see the GNU General Public License Version 3.0:
+- §15. Disclaimer of Warranty
+- §16. Limitation of Liability
 
-In short this means that the user is responsible for any damage resulting from using this program.
-It does not matter if the damage is caused by incorrect usage or a bug in the software.
+and the Mozilla Public License Version 2.0:
+- §6. Disclaimer of Warranty
+- §7. Limitation of Liability
 
 # Table of Contents
 **[Introduction](#introduction)**
@@ -741,6 +737,13 @@ This will list all devices, and the null-sink should be included like this:
 ```
 This device can be set as the default output in the Gnome sound settings, meaning all desktop audio will use it.
 The audio sent to this device can then be captured from the monitor output named "MySink.monitor" using the PulseAudio backend.
+
+To configure Pipewire so that this null-sink is loaded on startup, create the file `/usr/share/pipewire/pipewire-pulse.conf.d/camilladsp-sink.conf` containing:
+```
+pulse.cmd = [
+    { cmd = "load-module" args = "module-null-sink sink_name=MySink object.linger=1 media.class=Audio/Sink" flags = [ ] }
+]
+```
 
 Pipewire can also be configured to output to an ALSA Loopback.
 This is done by adding an ALSA sink in the Pipewire configuration.
