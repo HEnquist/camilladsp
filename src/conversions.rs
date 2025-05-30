@@ -17,9 +17,9 @@
 use crate::config::SampleFormat;
 use crate::{audiodevice::*, recycle_chunk, vec_from_stash};
 use crate::{container_from_stash, PrcFmt};
-use audioadapter::number_to_float::InterleavedNumbers;
-use audioadapter::sample::{F32LE, F64LE, I16LE, I24LE, I32LE};
 use audioadapter::{Adapter, AdapterMut};
+use audioadapter_buffers::number_to_float::InterleavedNumbers;
+use audioadapter_sample::sample::{F32LE, F64LE, I16LE, I24LE, I32LE};
 #[cfg(feature = "cpal-backend")]
 use num_traits;
 #[cfg(feature = "cpal-backend")]
