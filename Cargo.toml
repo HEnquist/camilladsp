@@ -5,6 +5,7 @@ authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2021"
 description = "A flexible tool for processing audio"
 rust-version = "1.74"
+license = "GPL-3.0-only OR MPL-2.0"
 
 [features]
 default = ["websocket"]
