@@ -17,7 +17,6 @@
 use std::io;
 use std::io::Read;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::Arc;
 use zbus::blocking::Connection;
 use zbus::zvariant::OwnedFd;
 use zbus::Message;
@@ -27,12 +26,12 @@ use crate::filereader_nonblock::NonBlockingReader;
 pub struct WrappedBluezFd {
     pipe_fd: zbus::zvariant::OwnedFd,
     _ctrl_fd: zbus::zvariant::OwnedFd,
-    _msg: Arc<Message>,
+    _msg: Message,
 }
 
 impl WrappedBluezFd {
-    fn new_from_open_message(r: Arc<Message>) -> WrappedBluezFd {
-        let (pipe_fd, ctrl_fd): (OwnedFd, OwnedFd) = r.body().unwrap();
+    fn new_from_open_message(r: Message) -> WrappedBluezFd {
+        let (pipe_fd, ctrl_fd): (OwnedFd, OwnedFd) = r.body().deserialize().unwrap();
         WrappedBluezFd {
             pipe_fd,
             _ctrl_fd: ctrl_fd,
@@ -43,7 +42,7 @@ impl WrappedBluezFd {
 
 impl Read for WrappedBluezFd {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        nix::unistd::read(self.pipe_fd.as_raw_fd(), buf).map_err(io::Error::from)
+        nix::unistd::read(&self.pipe_fd, buf).map_err(io::Error::from)
     }
 }
 
