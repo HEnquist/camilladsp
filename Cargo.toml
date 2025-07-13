@@ -66,7 +66,7 @@ tungstenite = { version = "0.26.1", optional = true }
 native-tls = { version = "0.2.7", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-rubato = { version = "1.0.0-preview.1", path = "../rubato" }
+rubato = { version = "1.0.0-preview.2", path = "../rubato" }
 #rubato = "{ git = "https://github.com/HEnquist/rubato", branch = "adapter_v2" }"
 cpal = { version = "0.13.3", optional = true }
 parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
@@ -74,7 +74,7 @@ crossbeam-channel = "0.5"
 rayon = "1.10.0"
 audio_thread_priority = { version = "0.32.0", default-features = false }
 ringbuf = "0.4.7"
-audioadapter = { version = "1.0.0", default-features = false, features = ["std"], path = "../audioadapter-rs" }
+audioadapter = { version = "1.0.0", default-features = false, path = "../audioadapter-rs" }
 audioadapter-sample = { version = "1.0.0", path = "../audioadapter-sample-rs" }
 audioadapter-buffers = { version = "1.0.0", path = "../audioadapter-buffers-rs" }
 
