@@ -227,6 +227,8 @@ Commands for reading and changing the active configuration.
 - `SetConfigFilePath` : Change config file name given as a string, not applied until `Reload` is called.
 - `SetConfig:` : Provide a new config as a yaml string. Applied directly.
 - `SetConfigJson` : Provide a new config as a JSON string. Applied directly.
+- `PatchConfig` : Apply a patch to the current config. A patch consists of a partial config that only
+  contains the fields that should be changed. If the updated config is valid, it is applied directly.
 - `Reload` : Reload current config file (same as SIGHUP).
 
 
