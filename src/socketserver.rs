@@ -156,10 +156,13 @@ enum WsCommand {
 #[derive(Debug, Eq, PartialEq, Serialize)]
 enum WsResult {
     Ok,
-    Error,
-    InvalidValue,
-    TooManyRequests,
-    InvalidRequest,
+    ShutdownInProgressError,
+    RateLimitExceededError,
+    InvalidFaderError,
+    ConfigValidationError(String),
+    ConfigReadError(String),
+    InvalidValueError(String),
+    InvalidRequestError(String),
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -623,40 +626,40 @@ fn handle_command(
                                         result: WsResult::Ok,
                                     }),
                                     Err(TrySendError::Full(_)) => {
-                                        error!("Error sending reload message, too many requests");
+                                        debug!("Error sending reload message, too many requests");
                                         Some(WsReply::Reload {
-                                            result: WsResult::TooManyRequests,
+                                            result: WsResult::RateLimitExceededError,
                                         })
                                     }
                                     Err(TrySendError::Disconnected(_)) => {
-                                        error!("Error sending reload message, channel was disconnected");
+                                        debug!("Error sending reload message, channel was disconnected");
                                         Some(WsReply::Reload {
-                                            result: WsResult::Error,
+                                            result: WsResult::ShutdownInProgressError,
                                         })
                                     }
                                 }
                             }
                             Err(err) => {
-                                error!("Invalid config file!");
-                                error!("{}", err);
+                                debug!("Invalid config file: {}", err);
                                 Some(WsReply::Reload {
-                                    result: WsResult::InvalidValue,
+                                    result: WsResult::ConfigReadError(err.to_string()),
                                 })
                             }
                         }
                     }
                     Err(err) => {
-                        error!("Config file error:");
-                        error!("{}", err);
+                        debug!("Config file validation error: {}", err);
                         Some(WsReply::Reload {
-                            result: WsResult::InvalidValue,
+                            result: WsResult::ConfigValidationError(err.to_string()),
                         })
                     }
                 },
                 None => {
                     warn!("Config path not given, cannot reload");
                     Some(WsReply::Reload {
-                        result: WsResult::InvalidRequest,
+                        result: WsResult::InvalidRequestError(
+                            "Config path not given, cannot reload".to_string(),
+                        ),
                     })
                 }
             }
@@ -910,7 +913,9 @@ fn handle_command(
             };
             if maxvol < minvol {
                 return Some(WsReply::AdjustVolume {
-                    result: WsResult::InvalidValue,
+                    result: WsResult::InvalidValueError(
+                        "Max volume must be bigger than min volume".to_string(),
+                    ),
                     value: tempvol,
                 });
             }
@@ -989,7 +994,7 @@ fn handle_command(
         WsCommand::GetFaderVolume(ctrl) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::GetFaderVolume {
-                    result: WsResult::InvalidRequest,
+                    result: WsResult::InvalidFaderError,
                     value: (ctrl, ProcessingParameters::DEFAULT_VOLUME),
                 });
             }
@@ -1001,7 +1006,7 @@ fn handle_command(
         WsCommand::SetFaderVolume(ctrl, nbr) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::SetFaderVolume {
-                    result: WsResult::InvalidRequest,
+                    result: WsResult::InvalidFaderError,
                 });
             }
             let new_vol = clamped_volume(nbr);
@@ -1022,7 +1027,7 @@ fn handle_command(
         WsCommand::SetFaderExternalVolume(ctrl, nbr) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::SetFaderExternalVolume {
-                    result: WsResult::InvalidRequest,
+                    result: WsResult::InvalidFaderError,
                 });
             }
             let new_vol = clamped_volume(nbr);
@@ -1050,14 +1055,16 @@ fn handle_command(
             };
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::AdjustFaderVolume {
-                    result: WsResult::InvalidRequest,
+                    result: WsResult::InvalidFaderError,
                     value: (ctrl, volchange),
                 });
             }
             let mut tempvol = shared_data_inst.processing_params.target_volume(ctrl);
             if maxvol < minvol {
                 return Some(WsReply::AdjustFaderVolume {
-                    result: WsResult::InvalidValue,
+                    result: WsResult::InvalidValueError(
+                        "Max volume must be bigger than min volume".to_string(),
+                    ),
                     value: (ctrl, tempvol),
                 });
             }
@@ -1088,7 +1095,7 @@ fn handle_command(
         WsCommand::GetFaderMute(ctrl) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::GetFaderMute {
-                    result: WsResult::InvalidRequest,
+                    result: WsResult::InvalidFaderError,
                     value: (ctrl, ProcessingParameters::DEFAULT_MUTE),
                 });
             }
@@ -1100,7 +1107,7 @@ fn handle_command(
         WsCommand::SetFaderMute(ctrl, mute) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::SetFaderMute {
-                    result: WsResult::InvalidRequest,
+                    result: WsResult::InvalidFaderError,
                 });
             }
             shared_data_inst.processing_params.set_mute(ctrl, mute);
@@ -1118,7 +1125,7 @@ fn handle_command(
         WsCommand::ToggleFaderMute(ctrl) => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::ToggleFaderMute {
-                    result: WsResult::InvalidRequest,
+                    result: WsResult::InvalidFaderError,
                     value: (ctrl, ProcessingParameters::DEFAULT_MUTE),
                 });
             }
@@ -1204,9 +1211,9 @@ fn handle_command(
                 })
             }
             Err(error) => {
-                error!("Error setting config name: {}", error);
+                debug!("Error setting config name: {}", error);
                 Some(WsReply::SetConfigFilePath {
-                    result: WsResult::InvalidValue,
+                    result: WsResult::InvalidValueError(error.to_string()),
                 })
             }
         },
@@ -1222,30 +1229,30 @@ fn handle_command(
                                 result: WsResult::Ok,
                             }),
                             Err(TrySendError::Full(_)) => {
-                                error!("Error sending new config, too many requests");
+                                debug!("Error sending new config, too many requests");
                                 Some(WsReply::SetConfig {
-                                    result: WsResult::TooManyRequests,
+                                    result: WsResult::RateLimitExceededError,
                                 })
                             }
                             Err(TrySendError::Disconnected(_)) => {
-                                error!("Error sending new config, channel was disconnected");
+                                debug!("Error sending new config, channel was disconnected");
                                 Some(WsReply::SetConfig {
-                                    result: WsResult::Error,
+                                    result: WsResult::ShutdownInProgressError,
                                 })
                             }
                         }
                     }
                     Err(error) => {
-                        error!("Error validating config: {}", error);
+                        debug!("Error validating config: {}", error);
                         Some(WsReply::SetConfig {
-                            result: WsResult::InvalidValue,
+                            result: WsResult::ConfigValidationError(error.to_string()),
                         })
                     }
                 },
                 Err(error) => {
-                    error!("Error parsing yaml: {}", error);
+                    debug!("Error parsing yaml: {}", error);
                     Some(WsReply::SetConfig {
-                        result: WsResult::InvalidValue,
+                        result: WsResult::ConfigReadError(error.to_string()),
                     })
                 }
             }
@@ -1262,30 +1269,30 @@ fn handle_command(
                                 result: WsResult::Ok,
                             }),
                             Err(TrySendError::Full(_)) => {
-                                error!("Error sending new config, too many requests");
+                                debug!("Error sending new config, too many requests");
                                 Some(WsReply::SetConfigJson {
-                                    result: WsResult::TooManyRequests,
+                                    result: WsResult::RateLimitExceededError,
                                 })
                             }
                             Err(TrySendError::Disconnected(_)) => {
-                                error!("Error sending new config, channel was disconnected");
+                                debug!("Error sending new config, channel was disconnected");
                                 Some(WsReply::SetConfigJson {
-                                    result: WsResult::Error,
+                                    result: WsResult::ShutdownInProgressError,
                                 })
                             }
                         }
                     }
                     Err(error) => {
-                        error!("Error validating config: {}", error);
+                        debug!("Error validating config: {}", error);
                         Some(WsReply::SetConfigJson {
-                            result: WsResult::InvalidValue,
+                            result: WsResult::ConfigValidationError(error.to_string()),
                         })
                     }
                 },
                 Err(error) => {
-                    error!("Error parsing json: {}", error);
+                    debug!("Error parsing json: {}", error);
                     Some(WsReply::SetConfigJson {
-                        result: WsResult::InvalidValue,
+                        result: WsResult::ConfigReadError(error.to_string()),
                     })
                 }
             }
@@ -1294,9 +1301,9 @@ fn handle_command(
             let mut conf_as_value =
                 serde_json::to_value(&*shared_data_inst.active_config.lock()).unwrap();
             if conf_as_value.is_null() {
-                error!("No active config to patch");
+                debug!("No active config to patch");
                 return Some(WsReply::PatchConfig {
-                    result: WsResult::InvalidRequest,
+                    result: WsResult::InvalidRequestError("No active config to patch".to_string()),
                 });
             }
             merge(&mut conf_as_value, &value);
@@ -1312,30 +1319,30 @@ fn handle_command(
                                 result: WsResult::Ok,
                             }),
                             Err(TrySendError::Full(_)) => {
-                                error!("Error patching config, too many requests");
+                                debug!("Error patching config, too many requests");
                                 Some(WsReply::PatchConfig {
-                                    result: WsResult::TooManyRequests,
+                                    result: WsResult::RateLimitExceededError,
                                 })
                             }
                             Err(TrySendError::Disconnected(_)) => {
-                                error!("Error patching config, channel was disconnected");
+                                debug!("Error patching config, channel was disconnected");
                                 Some(WsReply::PatchConfig {
-                                    result: WsResult::Error,
+                                    result: WsResult::ShutdownInProgressError,
                                 })
                             }
                         }
                     }
                     Err(error) => {
-                        error!("Error validating patched config: {}", error);
+                        debug!("Error validating patched config: {}", error);
                         Some(WsReply::PatchConfig {
-                            result: WsResult::InvalidValue,
+                            result: WsResult::ConfigValidationError(error.to_string()),
                         })
                     }
                 },
                 Err(error) => {
-                    error!("Error parsing patched config: {}", error);
+                    debug!("Error parsing patched config: {}", error);
                     Some(WsReply::PatchConfig {
-                        result: WsResult::InvalidValue,
+                        result: WsResult::ConfigReadError(error.to_string()),
                     })
                 }
             }
@@ -1347,9 +1354,9 @@ fn handle_command(
                     value: serde_yml::to_string(&conf).unwrap(),
                 }),
                 Err(error) => {
-                    error!("Error reading config: {}", error);
+                    debug!("Error reading config: {}", error);
                     Some(WsReply::ReadConfig {
-                        result: WsResult::InvalidValue,
+                        result: WsResult::ConfigReadError(error.to_string()),
                         value: error.to_string(),
                     })
                 }
@@ -1361,9 +1368,9 @@ fn handle_command(
                 value: serde_yml::to_string(&conf).unwrap(),
             }),
             Err(error) => {
-                error!("Error reading config file: {}", error);
+                debug!("Error reading config file: {}", error);
                 Some(WsReply::ReadConfigFile {
-                    result: WsResult::InvalidValue,
+                    result: WsResult::ConfigReadError(error.to_string()),
                     value: error.to_string(),
                 })
             }
@@ -1376,17 +1383,17 @@ fn handle_command(
                         value: serde_yml::to_string(&conf).unwrap(),
                     }),
                     Err(error) => {
-                        error!("Config error: {}", error);
+                        debug!("Config error: {}", error);
                         Some(WsReply::ValidateConfig {
-                            result: WsResult::InvalidValue,
+                            result: WsResult::ConfigValidationError(error.to_string()),
                             value: error.to_string(),
                         })
                     }
                 },
                 Err(error) => {
-                    error!("Config error: {}", error);
+                    debug!("Config error: {}", error);
                     Some(WsReply::ValidateConfig {
-                        result: WsResult::InvalidValue,
+                        result: WsResult::ConfigReadError(error.to_string()),
                         value: error.to_string(),
                     })
                 }
@@ -1401,15 +1408,15 @@ fn handle_command(
                     result: WsResult::Ok,
                 }),
                 Err(TrySendError::Full(_)) => {
-                    error!("Error sending stop message, too many requests");
+                    debug!("Error sending stop message, too many requests");
                     Some(WsReply::Stop {
-                        result: WsResult::TooManyRequests,
+                        result: WsResult::RateLimitExceededError,
                     })
                 }
                 Err(TrySendError::Disconnected(_)) => {
-                    error!("Error sending stop message, channel was disconnected");
+                    debug!("Error sending stop message, channel was disconnected");
                     Some(WsReply::Stop {
-                        result: WsResult::Error,
+                        result: WsResult::ShutdownInProgressError,
                     })
                 }
             }
@@ -1423,15 +1430,15 @@ fn handle_command(
                     result: WsResult::Ok,
                 }),
                 Err(TrySendError::Full(_)) => {
-                    error!("Error sending exit message, too many requests");
+                    debug!("Error sending exit message, too many requests");
                     Some(WsReply::Exit {
-                        result: WsResult::TooManyRequests,
+                        result: WsResult::RateLimitExceededError,
                     })
                 }
                 Err(TrySendError::Disconnected(_)) => {
-                    error!("Error sending exit message, channel was disconnected");
+                    debug!("Error sending exit message, channel was disconnected");
                     Some(WsReply::Exit {
-                        result: WsResult::Error,
+                        result: WsResult::ShutdownInProgressError,
                     })
                 }
             }
