@@ -132,8 +132,7 @@ fn look_up_extended_format(
     let subformat = &data[24..40];
     let subformat_guid = Guid::from_slice(subformat.try_into().unwrap());
     trace!(
-        "Found extended wav fmt chunk: subformatcode: {:?}, cb_size: {}, channel_mask: {}, valid bits per sample: {}",
-        subformat_guid, cb_size, channel_mask, valid_bits_per_sample
+        "Found extended wav fmt chunk: subformatcode: {subformat_guid:?}, cb_size: {cb_size}, channel_mask: {channel_mask}, valid bits per sample: {valid_bits_per_sample}"
     );
     match (
         subformat_guid,
@@ -155,8 +154,7 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
     let f = File::open(filename)?;
     find_data_in_wav_stream(f).map_err(|err| {
         ConfigError::new(&format!(
-            "Unable to parse wav file '{}', error: {}",
-            filename, err
+            "Unable to parse wav file '{filename}', error: {err}"
         ))
         .into()
     })
@@ -194,7 +192,7 @@ pub fn find_data_in_wav_stream(mut f: impl Read + Seek) -> Res<WavParams> {
         file.seek(SeekFrom::Start(next_chunk_location))?;
         file.read_exact(&mut buffer)?;
         let chunk_length = read_u32(&buffer, 4);
-        trace!("Analyzing wav chunk of length: {}", chunk_length);
+        trace!("Analyzing wav chunk of length: {chunk_length}");
         let is_data = compare_4cc(&buffer, DATA);
         let is_fmt = compare_4cc(&buffer, FMT);
         if is_fmt && (chunk_length == 16 || chunk_length == 18 || chunk_length == 40) {
@@ -210,23 +208,18 @@ pub fn find_data_in_wav_stream(mut f: impl Read + Seek) -> Res<WavParams> {
             sample_format =
                 look_up_format(&data, formatcode, bits, bytes_per_sample, chunk_length)?;
             trace!(
-                "Found wav fmt chunk: formatcode: {}, channels: {}, samplerate: {}, bits: {}, bytes_per_frame: {}",
-                formatcode, channels, sample_rate, bits, bytes_per_frame
+                "Found wav fmt chunk: formatcode: {formatcode}, channels: {channels}, samplerate: {sample_rate}, bits: {bits}, bytes_per_frame: {bytes_per_frame}"
             );
         } else if is_data {
             found_data = true;
             data_offset = next_chunk_location + 8;
             data_length = chunk_length;
-            trace!(
-                "Found wav data chunk, start: {}, length: {}",
-                data_offset,
-                data_length
-            )
+            trace!("Found wav data chunk, start: {data_offset}, length: {data_length}")
         }
         next_chunk_location += 8 + chunk_length as u64;
     }
     if found_data && found_fmt {
-        trace!("Wav file with parameters: format: {:?},  samplerate: {}, channels: {}, data_length: {}, data_offset: {}", sample_format, sample_rate, channels, data_length, data_offset);
+        trace!("Wav file with parameters: format: {sample_format:?},  samplerate: {sample_rate}, channels: {channels}, data_length: {data_length}, data_offset: {data_offset}");
         return Ok(WavParams {
             sample_format,
             sample_rate: sample_rate as usize,

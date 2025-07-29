@@ -232,7 +232,7 @@ impl FilterGroup {
         let mut filters = Vec::<Box<dyn Filter + Send>>::new();
         for name in names {
             let filter_cfg = filter_configs[name].clone();
-            trace!("Create filter {} with config {:?}", name, filter_cfg);
+            trace!("Create filter {name} with config {filter_cfg:?}");
             let filter: Box<dyn Filter + Send> =
                 match filter_cfg {
                     config::Filter::Conv { parameters, .. } => Box::new(

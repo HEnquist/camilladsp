@@ -189,13 +189,7 @@ impl PIRateController {
         let proportional = self.k_p * rel_err;
         let integral = self.k_i * self.accumulated;
         let mut output = proportional + integral;
-        trace!(
-            "Rate controller, error: {}, output: {}, P: {}, I: {}",
-            err,
-            output,
-            proportional,
-            integral
-        );
+        trace!("Rate controller, error: {err}, output: {output}, P: {proportional}, I: {integral}");
         output = output.clamp(-0.005, 0.005);
         1.0 - output
     }

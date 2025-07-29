@@ -212,7 +212,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                     break;
                                 }
                                 Err(err) => {
-                                    error!("Message channel error: {}", err);
+                                    error!("Message channel error: {err}");
                                     status_channel
                                         .send(StatusMessage::PlaybackError(err.to_string()))
                                         .unwrap_or(());
@@ -225,7 +225,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                         let send_result =
                             status_channel.send(StatusMessage::PlaybackError(err.to_string()));
                         if send_result.is_err() {
-                            error!("Playback error: {}", err);
+                            error!("Playback error: {err}");
                         }
                         barrier.wait();
                     }
@@ -329,7 +329,7 @@ fn capture_loop(
                 if let Some(resampl) = &mut resampler {
                     if params.async_src {
                         if resampl.set_resample_ratio_relative(speed, true).is_err() {
-                            debug!("Failed to set resampling speed to {}", speed);
+                            debug!("Failed to set resampling speed to {speed}");
                         }
                     } else {
                         warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
@@ -363,10 +363,7 @@ fn capture_loop(
                     for item in buf.iter_mut().take(bytes_to_capture).skip(bytes) {
                         *item = 0;
                     }
-                    debug!(
-                        "End of file, read only {} of {} bytes",
-                        bytes, bytes_to_capture
-                    );
+                    debug!("End of file, read only {bytes} of {bytes_to_capture} bytes");
                     let missing =
                         ((bytes_to_capture - bytes) as f32 * params.resampling_ratio) as usize;
                     if extra_bytes_left > missing {
@@ -403,10 +400,7 @@ fn capture_loop(
                     for item in buf.iter_mut().take(bytes_to_capture).skip(bytes) {
                         *item = 0;
                     }
-                    debug!(
-                        "Timed out after reading {} of {} bytes",
-                        bytes, bytes_to_capture
-                    );
+                    debug!("Timed out after reading {bytes} of {bytes_to_capture} bytes");
                     let missing =
                         ((bytes_to_capture - bytes) as f32 * params.resampling_ratio) as usize;
                     if extra_bytes_left > missing {
@@ -432,7 +426,7 @@ fn capture_loop(
                 }
             }
             (Ok(ReadResult::Complete(bytes)), false) => {
-                trace!("successfully read {} bytes", bytes);
+                trace!("successfully read {bytes} bytes");
                 if stalled {
                     debug!("Leaving stalled state, resuming processing");
                     stalled = false;
@@ -449,7 +443,7 @@ fn capture_loop(
                         averager.restart();
                         let measured_rate_f = bytes_per_sec
                             / (params.channels * params.store_bytes_per_sample) as f64;
-                        trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
+                        trace!("Measured sample rate is {measured_rate_f:.1} Hz");
                         if let Ok(mut capture_status) =
                             RwLockUpgradableReadGuard::try_upgrade(capture_status)
                         {
@@ -472,10 +466,7 @@ fn capture_loop(
                         bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
                     let changed = valuewatcher.check_value(measured_rate_f as f32);
                     if changed {
-                        warn!(
-                            "sample rate change detected, last rate was {} Hz",
-                            measured_rate_f
-                        );
+                        warn!("sample rate change detected, last rate was {measured_rate_f} Hz");
                         if params.stop_on_rate_change {
                             let msg = AudioMessage::EndOfStream;
                             msg_channels.audio.send(msg).unwrap_or(());
@@ -486,7 +477,7 @@ fn capture_loop(
                             break;
                         }
                     }
-                    trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
+                    trace!("Measured sample rate is {measured_rate_f:.1} Hz");
                 }
             }
             (Err(err), _) => {
@@ -672,7 +663,7 @@ impl CaptureDevice for FileCaptureDevice {
                             command: command_channel,
                         };
                         if skip_bytes > 0 {
-                            debug!("skipping the first {} bytes", skip_bytes);
+                            debug!("skipping the first {skip_bytes} bytes");
                             let mut tempbuf = vec![0u8; skip_bytes];
                             let _ = file.read(&mut tempbuf);
                         }
@@ -684,7 +675,7 @@ impl CaptureDevice for FileCaptureDevice {
                         let send_result =
                             status_channel.send(StatusMessage::CaptureError(err.to_string()));
                         if send_result.is_err() {
-                            error!("Capture error: {}", err);
+                            error!("Capture error: {err}");
                         }
                         barrier.wait();
                     }
@@ -717,7 +708,7 @@ fn send_silence(
         // Take a shortcut and set maxval = minval = 0 because we are anyway very near the end.
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunksize, chunk_samples);
         let msg = AudioMessage::Audio(chunk);
-        debug!("Sending extra chunk of {} frames", chunk_samples);
+        debug!("Sending extra chunk of {chunk_samples} frames");
         audio_channel.send(msg).unwrap_or(());
         samples_left -= chunk_samples;
     }

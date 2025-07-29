@@ -491,10 +491,7 @@ pub fn new_resampler(
     match &resampler_conf {
         Some(config::Resampler::AsyncSinc(parameters)) => {
             let sinc_params = new_async_sinc_parameters(parameters);
-            debug!(
-                "Creating asynchronous resampler with parameters: {:?}",
-                sinc_params
-            );
+            debug!("Creating asynchronous resampler with parameters: {sinc_params:?}");
             Some(Box::new(
                 SincFixedOut::<PrcFmt>::new(
                     samplerate as f64 / capture_samplerate as f64,
