@@ -90,8 +90,10 @@ enum WsCommand {
     SetConfig(String),
     SetConfigJson(String),
     PatchConfig(serde_json::Value),
+    SetConfigValue(String, serde_json::Value),
     Reload,
     GetConfig,
+    GetConfigValue(String),
     GetConfigTitle,
     GetConfigDescription,
     GetPreviousConfig,
@@ -199,12 +201,19 @@ enum WsReply {
     PatchConfig {
         result: WsResult,
     },
+    SetConfigValue {
+        result: WsResult,
+    },
     Reload {
         result: WsResult,
     },
     GetConfig {
         result: WsResult,
         value: String,
+    },
+    GetConfigValue {
+        result: WsResult,
+        value: serde_json::Value,
     },
     GetConfigTitle {
         result: WsResult,
@@ -1146,6 +1155,24 @@ fn handle_command(
             result: WsResult::Ok,
             value: serde_yml::to_string(&*shared_data_inst.active_config.lock()).unwrap(),
         }),
+        WsCommand::GetConfigValue(pointer) => {
+            let conf_as_value =
+                serde_json::to_value(&*shared_data_inst.active_config.lock()).unwrap();
+            let value = conf_as_value.pointer(&pointer);
+            match value {
+                Some(v) => Some(WsReply::GetConfigValue {
+                    result: WsResult::Ok,
+                    value: v.clone(),
+                }),
+                None => Some(WsReply::GetConfigValue {
+                    result: WsResult::InvalidRequestError(format!(
+                        "The path '{}' does not exit in the config",
+                        pointer
+                    )),
+                    value: serde_json::Value::Null,
+                }),
+            }
+        }
         WsCommand::GetConfigTitle => {
             let optional_config = shared_data_inst.active_config.lock();
             let value = if let Some(config) = &*optional_config {
@@ -1342,6 +1369,65 @@ fn handle_command(
                 Err(error) => {
                     debug!("Error parsing patched config: {}", error);
                     Some(WsReply::PatchConfig {
+                        result: WsResult::ConfigReadError(error.to_string()),
+                    })
+                }
+            }
+        }
+        WsCommand::SetConfigValue(pointer, value) => {
+            let mut conf_as_value =
+                serde_json::to_value(&*shared_data_inst.active_config.lock()).unwrap();
+            if conf_as_value.is_null() {
+                debug!("No active config to patch");
+                return Some(WsReply::SetConfigValue {
+                    result: WsResult::InvalidRequestError("No active config to modify".to_string()),
+                });
+            }
+            let maybe_config_value = conf_as_value.pointer_mut(&pointer);
+            if let Some(config_value) = maybe_config_value {
+                *config_value = value;
+            } else {
+                return Some(WsReply::SetConfigValue {
+                    result: WsResult::InvalidRequestError(
+                        "The active config does not contain the path '{}'".to_string(),
+                    ),
+                });
+            }
+            let updated_conf = serde_json::from_value::<config::Configuration>(conf_as_value);
+            match updated_conf {
+                Ok(mut conf) => match config::validate_config(&mut conf, None) {
+                    Ok(()) => {
+                        match shared_data_inst
+                            .command_sender
+                            .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                        {
+                            Ok(()) => Some(WsReply::SetConfigValue {
+                                result: WsResult::Ok,
+                            }),
+                            Err(TrySendError::Full(_)) => {
+                                debug!("Error patching config, too many requests");
+                                Some(WsReply::SetConfigValue {
+                                    result: WsResult::RateLimitExceededError,
+                                })
+                            }
+                            Err(TrySendError::Disconnected(_)) => {
+                                debug!("Error patching config, channel was disconnected");
+                                Some(WsReply::SetConfigValue {
+                                    result: WsResult::ShutdownInProgressError,
+                                })
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        debug!("Error validating patched config: {}", error);
+                        Some(WsReply::SetConfigValue {
+                            result: WsResult::ConfigValidationError(error.to_string()),
+                        })
+                    }
+                },
+                Err(error) => {
+                    debug!("Error parsing patched config: {}", error);
+                    Some(WsReply::SetConfigValue {
                         result: WsResult::ConfigReadError(error.to_string()),
                     })
                 }

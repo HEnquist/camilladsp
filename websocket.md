@@ -252,6 +252,9 @@ Commands for reading and changing the active configuration.
 - `SetConfigJson` : Provide a new config as a JSON string. Applied directly.
 - `PatchConfig` : Apply a patch to the current config. A patch consists of a partial config that only
   contains the fields that should be changed. If the updated config is valid, it is applied directly.
+- `GetConfigValue` : Read a value from the active config. The value to read is selected using a json pointer,
+  see [RFC6901](https://datatracker.ietf.org/doc/html/rfc6901).
+- `SetConfigValue` : Set a value in the active config, see `GetConfigValue`.
 - `Reload` : Reload current config file (same as SIGHUP).
 
 
