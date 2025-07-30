@@ -1165,8 +1165,7 @@ fn handle_command(
                 }),
                 None => Some(WsReply::GetConfigValue {
                     result: WsResult::InvalidRequestError(format!(
-                        "The path '{}' does not exit in the config",
-                        pointer
+                        "The path '{pointer}' does not exit in the config"
                     )),
                     value: serde_json::Value::Null,
                 }),
@@ -1418,14 +1417,14 @@ fn handle_command(
                         }
                     }
                     Err(error) => {
-                        debug!("Error validating patched config: {}", error);
+                        debug!("Error validating patched config: {error}");
                         Some(WsReply::SetConfigValue {
                             result: WsResult::ConfigValidationError(error.to_string()),
                         })
                     }
                 },
                 Err(error) => {
-                    debug!("Error parsing patched config: {}", error);
+                    debug!("Error parsing patched config: {error}");
                     Some(WsReply::SetConfigValue {
                         result: WsResult::ConfigReadError(error.to_string()),
                     })
