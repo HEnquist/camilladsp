@@ -502,12 +502,11 @@ pub fn start_server(parameters: ServerParameters, shared_data: SharedData) {
                             .map(|a| a.to_string())
                             .unwrap_or("unknown".to_string());
                         debug!(
-                            "Accepted new incoming connection on {} from {}.",
-                            local_addr, peer_addr
+                            "Accepted new incoming connection on {local_addr} from {peer_addr}."
                         );
                     }
                     Err(err) => {
-                        debug!("Ignoring incoming connection with error: {}", err);
+                        debug!("Ignoring incoming connection with error: {err}");
                         continue;
                     }
                 };
@@ -540,7 +539,7 @@ pub fn start_server(parameters: ServerParameters, shared_data: SharedData) {
                 });
             }
         } else if let Err(err) = ws_result {
-            error!("Failed to start websocket server: {}", err);
+            error!("Failed to start websocket server: {err}");
         }
     });
 }
@@ -649,7 +648,7 @@ fn handle_command(
                                 }
                             }
                             Err(err) => {
-                                debug!("Invalid config file: {}", err);
+                                debug!("Invalid config file: {err}");
                                 Some(WsReply::Reload {
                                     result: WsResult::ConfigReadError(err.to_string()),
                                 })
@@ -657,7 +656,7 @@ fn handle_command(
                         }
                     }
                     Err(err) => {
-                        debug!("Config file validation error: {}", err);
+                        debug!("Config file validation error: {err}");
                         Some(WsReply::Reload {
                             result: WsResult::ConfigValidationError(err.to_string()),
                         })
@@ -931,11 +930,11 @@ fn handle_command(
             tempvol += volchange;
             if tempvol < minvol {
                 tempvol = minvol;
-                warn!("Clamped volume at {} dB", minvol)
+                warn!("Clamped volume at {minvol} dB")
             }
             if tempvol > maxvol {
                 tempvol = maxvol;
-                warn!("Clamped volume at {} dB", maxvol)
+                warn!("Clamped volume at {maxvol} dB")
             }
 
             shared_data_inst
@@ -1080,11 +1079,11 @@ fn handle_command(
             tempvol += volchange;
             if tempvol < minvol {
                 tempvol = minvol;
-                warn!("Clamped volume at {} dB", minvol)
+                warn!("Clamped volume at {minvol} dB")
             }
             if tempvol > maxvol {
                 tempvol = maxvol;
-                warn!("Clamped volume at {} dB", maxvol)
+                warn!("Clamped volume at {maxvol} dB")
             }
             shared_data_inst
                 .processing_params
@@ -1238,7 +1237,7 @@ fn handle_command(
                 })
             }
             Err(error) => {
-                debug!("Error setting config name: {}", error);
+                debug!("Error setting config name: {error}");
                 Some(WsReply::SetConfigFilePath {
                     result: WsResult::InvalidValueError(error.to_string()),
                 })
@@ -1270,14 +1269,14 @@ fn handle_command(
                         }
                     }
                     Err(error) => {
-                        debug!("Error validating config: {}", error);
+                        debug!("Error validating config: {error}");
                         Some(WsReply::SetConfig {
                             result: WsResult::ConfigValidationError(error.to_string()),
                         })
                     }
                 },
                 Err(error) => {
-                    debug!("Error parsing yaml: {}", error);
+                    debug!("Error parsing yaml: {error}");
                     Some(WsReply::SetConfig {
                         result: WsResult::ConfigReadError(error.to_string()),
                     })
@@ -1310,14 +1309,14 @@ fn handle_command(
                         }
                     }
                     Err(error) => {
-                        debug!("Error validating config: {}", error);
+                        debug!("Error validating config: {error}");
                         Some(WsReply::SetConfigJson {
                             result: WsResult::ConfigValidationError(error.to_string()),
                         })
                     }
                 },
                 Err(error) => {
-                    debug!("Error parsing json: {}", error);
+                    debug!("Error parsing json: {error}");
                     Some(WsReply::SetConfigJson {
                         result: WsResult::ConfigReadError(error.to_string()),
                     })
@@ -1360,14 +1359,14 @@ fn handle_command(
                         }
                     }
                     Err(error) => {
-                        debug!("Error validating patched config: {}", error);
+                        debug!("Error validating patched config: {error}");
                         Some(WsReply::PatchConfig {
                             result: WsResult::ConfigValidationError(error.to_string()),
                         })
                     }
                 },
                 Err(error) => {
-                    debug!("Error parsing patched config: {}", error);
+                    debug!("Error parsing patched config: {error}");
                     Some(WsReply::PatchConfig {
                         result: WsResult::ConfigReadError(error.to_string()),
                     })
@@ -1440,7 +1439,7 @@ fn handle_command(
                     value: serde_yml::to_string(&conf).unwrap(),
                 }),
                 Err(error) => {
-                    debug!("Error reading config: {}", error);
+                    debug!("Error reading config: {error}");
                     Some(WsReply::ReadConfig {
                         result: WsResult::ConfigReadError(error.to_string()),
                         value: error.to_string(),
@@ -1454,7 +1453,7 @@ fn handle_command(
                 value: serde_yml::to_string(&conf).unwrap(),
             }),
             Err(error) => {
-                debug!("Error reading config file: {}", error);
+                debug!("Error reading config file: {error}");
                 Some(WsReply::ReadConfigFile {
                     result: WsResult::ConfigReadError(error.to_string()),
                     value: error.to_string(),
@@ -1469,7 +1468,7 @@ fn handle_command(
                         value: serde_yml::to_string(&conf).unwrap(),
                     }),
                     Err(error) => {
-                        debug!("Config error: {}", error);
+                        debug!("Config error: {error}");
                         Some(WsReply::ValidateConfig {
                             result: WsResult::ConfigValidationError(error.to_string()),
                             value: error.to_string(),
@@ -1477,7 +1476,7 @@ fn handle_command(
                     }
                 },
                 Err(error) => {
-                    debug!("Config error: {}", error);
+                    debug!("Config error: {error}");
                     Some(WsReply::ValidateConfig {
                         result: WsResult::ConfigReadError(error.to_string()),
                         value: error.to_string(),

@@ -352,13 +352,10 @@ fn build_subsample_biquad(delay: PrcFmt, samplerate: usize) -> (usize, Option<Bi
     // delay is less than 1.1 samples, use first order allpass
     if delay < 1.1 {
         let coeff = (1.0 - delay) / (1.0 + delay);
-        debug!(
-            "Using first order allpass for delay of {:.2} samples",
-            delay
-        );
+        debug!("Using first order allpass for delay of {delay:.2} samples");
         // 1st order Thiran allpass
         let bqcoeffs = BiquadCoefficients::new(coeff, 0.0, coeff, 1.0, 0.0);
-        trace!("Coefficients: {:?}", bqcoeffs);
+        trace!("Coefficients: {bqcoeffs:?}");
         return (0, Some(Biquad::new("subsample", samplerate, bqcoeffs)));
     }
 
@@ -373,14 +370,11 @@ fn build_subsample_biquad(delay: PrcFmt, samplerate: usize) -> (usize, Option<Bi
         fraction += 1.0;
     }
     // 2nd order Thiran allpass
-    debug!(
-        "Using second order allpass for delay of {} + {:.2} samples",
-        samples, fraction
-    );
+    debug!("Using second order allpass for delay of {samples} + {fraction:.2} samples");
     let coeff1 = 2.0 * (2.0 - fraction) / (1.0 + fraction);
     let coeff2 = (2.0 - fraction) / (2.0 + fraction) * (1.0 - fraction) / (1.0 + fraction);
     let bqcoeffs = BiquadCoefficients::new(coeff1, coeff2, coeff2, coeff1, 1.0);
-    trace!("Coefficients: {:?}", bqcoeffs);
+    trace!("Coefficients: {bqcoeffs:?}");
     (
         samples as usize,
         Some(Biquad::new("subsample", samplerate, bqcoeffs)),
@@ -403,10 +397,7 @@ impl Delay {
             (samples, bq)
         } else {
             let samples = delay.round() as usize;
-            debug!(
-                "Building delay filter '{}' with delay {} samples",
-                name, samples
-            );
+            debug!("Building delay filter '{name}' with delay {samples} samples");
             (samples, None)
         };
 

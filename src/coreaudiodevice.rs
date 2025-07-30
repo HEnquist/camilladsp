@@ -95,10 +95,7 @@ fn take_ownership(device_id: AudioDeviceID) -> Res<pid_t> {
 }
 
 fn release_ownership(device_id: AudioDeviceID) -> Res<()> {
-    trace!(
-        "Releasing any device ownership for device id {}.",
-        device_id
-    );
+    trace!("Releasing any device ownership for device id {device_id}.");
     let device_owner_pid = match get_hogging_pid(device_id) {
         Ok(pid) => pid,
         Err(CoreAudioError::AudioCodec(AudioCodecError::UnknownProperty)) => return Ok(()),
@@ -247,7 +244,7 @@ fn open_coreaudio_playback(
             }
         }
     };
-    trace!("Playback device id: {}.", device_id);
+    trace!("Playback device id: {device_id}.");
 
     let mut audio_unit = audio_unit_from_device_id(device_id, false)
         .map_err(|e| ConfigError::new(&format!("{e}")))?;
@@ -571,8 +568,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     }
                     Err(err) => {
                         warn!(
-                            "Playback thread could not get real time priority, error: {}.",
-                            err
+                            "Playback thread could not get real time priority, error: {err}."
                         );
                         None
                     }
@@ -871,8 +867,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     }
                     Err(err) => {
                         warn!(
-                            "Capture thread could not get real time priority, error: {}.",
-                            err
+                            "Capture thread could not get real time priority, error: {err}."
                         );
                         None
                     }
@@ -995,8 +990,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             averager.restart();
                             let measured_rate_f = samples_per_sec;
                             debug!(
-                                "Measured sample rate is {:.1} Hz.",
-                                measured_rate_f
+                                "Measured sample rate is {measured_rate_f:.1} Hz."
                             );
                             if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
                                 capture_status.measured_samplerate = measured_rate_f as usize;
@@ -1019,8 +1013,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         watcher_averager.restart();
                         let measured_rate_f = samples_per_sec;
                         debug!(
-                            "Rate watcher, measured sample rate is {:.1} Hz.",
-                            measured_rate_f
+                            "Rate watcher, measured sample rate is {measured_rate_f:.1} Hz."
                         );
                         let changed = valuewatcher.check_value(measured_rate_f as f32);
                         if changed {
@@ -1246,10 +1239,7 @@ fn get_clock_source_names_and_ids(device_id: AudioDeviceID) -> (Vec<String>, Vec
             ids.push(*id)
         }
     }
-    debug!(
-        "Available capture device clock source ids: {:?}, names: {:?}.",
-        ids, names
-    );
+    debug!("Available capture device clock source ids: {ids:?}, names: {names:?}.");
     (names, ids)
 }
 

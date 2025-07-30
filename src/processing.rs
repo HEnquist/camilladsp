@@ -42,9 +42,8 @@ pub fn run_processing(
             .unwrap_or_default();
         if nbr_threads > hw_threads && multithreaded {
             warn!(
-                "Requested {} worker threads. For optimal performance, this number should not \
-                exceed the available CPU cores, which is {}.",
-                nbr_threads, hw_threads
+                "Requested {nbr_threads} worker threads. For optimal performance, this number should not \
+                exceed the available CPU cores, which is {hw_threads}."
             );
         }
         if hw_threads == 1 && multithreaded {
@@ -68,10 +67,7 @@ pub fn run_processing(
                     Some(h)
                 }
                 Err(err) => {
-                    warn!(
-                        "Processing thread could not get real time priority, error: {}",
-                        err
-                    );
+                    warn!("Processing thread could not get real time priority, error: {err}");
                     None
                 }
             };
@@ -109,7 +105,7 @@ pub fn run_processing(
                     });
                 }
                 Err(err) => {
-                    warn!("Failed to build thread pool, error: {}", err);
+                    warn!("Failed to build thread pool, error: {err}");
                 }
             };
         }
@@ -144,7 +140,7 @@ pub fn run_processing(
                     }
                 }
                 Err(err) => {
-                    error!("Message channel error: {}", err);
+                    error!("Message channel error: {err}");
                     let msg = AudioMessage::EndOfStream;
                     if tx_pb.send(msg).is_err() {
                         info!("Playback thread has already stopped.");
@@ -166,10 +162,7 @@ pub fn run_processing(
                         mixers,
                         processors,
                     } => {
-                        debug!(
-                            "Updating parameters of filters: {:?}, mixers: {:?}.",
-                            filters, mixers
-                        );
+                        debug!("Updating parameters of filters: {filters:?}, mixers: {mixers:?}.");
                         pipeline.update_parameters(new_config, &filters, &mixers, &processors);
                     }
                     config::ConfigChange::Devices => {
