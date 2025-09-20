@@ -1536,7 +1536,7 @@ fn apply_overrides(configuration: &mut Configuration) {
         let cfg_chunksize = configuration.devices.chunksize;
 
         if configuration.devices.resampler.is_none() {
-            debug!("Apply override for samplerate: {}", rate);
+            debug!("Apply override for samplerate: {rate}");
             configuration.devices.samplerate = rate;
             let scaled_chunksize = if rate > cfg_rate {
                 cfg_chunksize * (rate as f32 / cfg_rate as f32).round() as usize
@@ -1544,8 +1544,7 @@ fn apply_overrides(configuration: &mut Configuration) {
                 cfg_chunksize / (cfg_rate as f32 / rate as f32).round() as usize
             };
             debug!(
-                "Samplerate changed, adjusting chunksize: {} -> {}",
-                cfg_chunksize, scaled_chunksize
+                "Samplerate changed, adjusting chunksize: {cfg_chunksize} -> {scaled_chunksize}"
             );
             configuration.devices.chunksize = scaled_chunksize;
             #[allow(unreachable_patterns)]
@@ -1571,7 +1570,7 @@ fn apply_overrides(configuration: &mut Configuration) {
                 _ => {}
             }
         } else {
-            debug!("Apply override for capture_samplerate: {}", rate);
+            debug!("Apply override for capture_samplerate: {rate}");
             configuration.devices.capture_samplerate = Some(rate);
             if rate == cfg_rate && !configuration.devices.rate_adjust() {
                 debug!("Disabling unneccesary 1:1 resampling");
@@ -1580,7 +1579,7 @@ fn apply_overrides(configuration: &mut Configuration) {
         }
     }
     if let Some(extra) = overrides.extra_samples {
-        debug!("Apply override for extra_samples: {}", extra);
+        debug!("Apply override for extra_samples: {extra}");
         #[allow(unreachable_patterns)]
         match &mut configuration.devices.capture {
             CaptureDevice::RawFile(dev) => {
@@ -1593,7 +1592,7 @@ fn apply_overrides(configuration: &mut Configuration) {
         }
     }
     if let Some(chans) = overrides.channels {
-        debug!("Apply override for capture channels: {}", chans);
+        debug!("Apply override for capture channels: {chans}");
         match &mut configuration.devices.capture {
             CaptureDevice::RawFile(dev) => {
                 dev.channels = chans;
@@ -1641,7 +1640,7 @@ fn apply_overrides(configuration: &mut Configuration) {
         }
     }
     if let Some(fmt) = overrides.sample_format {
-        debug!("Apply override for capture sample format: {}", fmt);
+        debug!("Apply override for capture sample format: {fmt}");
         match &mut configuration.devices.capture {
             CaptureDevice::RawFile(dev) => {
                 dev.format = fmt;
@@ -1769,19 +1768,16 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
 fn check_and_replace_relative_path(path_str: &mut String, config_path: &Path) {
     let path = PathBuf::from(path_str.to_owned());
     if path.is_absolute() {
-        trace!("{} is absolute, no change", path_str);
+        trace!("{path_str} is absolute, no change");
     } else {
-        debug!("{} is relative", path_str);
+        debug!("{path_str} is relative");
         let mut in_config_dir = config_path.to_path_buf();
         in_config_dir.push(&path_str);
         if in_config_dir.exists() {
-            debug!("Using {} found relative to config file dir", path_str);
+            debug!("Using {path_str} found relative to config file dir");
             *path_str = in_config_dir.to_string_lossy().into();
         } else {
-            trace!(
-                "{} not found relative to config file dir, not changing path",
-                path_str
-            );
+            trace!("{path_str} not found relative to config file dir, not changing path");
         }
     }
 }
@@ -1893,7 +1889,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     let target_level_limit = (2 + conf.devices.queuelimit()) * conf.devices.chunksize;
 
     if conf.devices.target_level() > target_level_limit {
-        let msg = format!("target_level cannot be larger than {}", target_level_limit);
+        let msg = format!("target_level cannot be larger than {target_level_limit}");
         return Err(ConfigError::new(&msg).into());
     }
     if let Some(period) = conf.devices.adjust_period {
@@ -2071,7 +2067,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                         if let Some(channels) = &step.channels {
                             for channel in channels {
                                 if *channel >= num_channels {
-                                    let msg = format!("Use of non existing channel {}", channel);
+                                    let msg = format!("Use of non existing channel {channel}");
                                     return Err(ConfigError::new(&msg).into());
                                 }
                             }

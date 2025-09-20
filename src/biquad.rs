@@ -62,7 +62,7 @@ impl BiquadCoefficients {
         let b0n = b0 / a0;
         let b1n = b1 / a0;
         let b2n = b2 / a0;
-        debug!("a1={} a2={} b0={} b1={} b2={}", a1n, a2n, b0n, b1n, b2n);
+        debug!("a1={a1n} a2={a2n} b0={b0n} b1={b1n} b2={b2n}");
         BiquadCoefficients {
             a1: a1n,
             a2: a2n,

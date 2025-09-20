@@ -39,8 +39,7 @@ pub trait DeviceBufferManager {
         if frames_needed < 4.0 * min_period as f32 {
             frames_needed = 4.0 * min_period as f32;
             debug!(
-                "Minimum period is {} frames, buffer size is minimum {} frames",
-                min_period, frames_needed
+                "Minimum period is {min_period} frames, buffer size is minimum {frames_needed} frames"
             );
         }
         2.0f32.powi(frames_needed.log2().ceil() as i32) as Frames
@@ -57,8 +56,7 @@ pub trait DeviceBufferManager {
         if frames_needed < 4.0 * min_period as f32 {
             frames_needed = 4.0 * min_period as f32;
             debug!(
-                "Minimum period is {} frames, alternate buffer size is minimum {} frames",
-                min_period, frames_needed
+                "Minimum period is {min_period} frames, alternate buffer size is minimum {frames_needed} frames"
             );
         }
         3 * 2.0f32.powi((frames_needed / 3.0).log2().ceil() as i32) as Frames
@@ -70,15 +68,14 @@ pub trait DeviceBufferManager {
         let buffer_frames = self.calculate_buffer_size(min_period);
         let alt_buffer_frames = self.calculate_buffer_size_alt(min_period);
         let data = self.data_mut();
-        debug!("Setting buffer size to {} frames", buffer_frames);
+        debug!("Setting buffer size to {buffer_frames} frames");
         match hwp.set_buffer_size_near(buffer_frames) {
             Ok(frames) => {
                 data.bufsize = frames;
             }
             Err(_) => {
                 debug!(
-                    "Device did not accept a buffer size of {} frames, trying again with {}",
-                    buffer_frames, alt_buffer_frames
+                    "Device did not accept a buffer size of {buffer_frames} frames, trying again with {alt_buffer_frames}"
                 );
                 data.bufsize = hwp.set_buffer_size_near(alt_buffer_frames)?;
             }
@@ -91,7 +88,7 @@ pub trait DeviceBufferManager {
     fn apply_period_size(&mut self, hwp: &HwParams) -> Res<()> {
         let data = self.data_mut();
         let period_frames = data.bufsize / 8;
-        debug!("Setting period size to {} frames", period_frames);
+        debug!("Setting period size to {period_frames} frames");
         match hwp.set_period_size_near(period_frames, alsa::ValueOr::Nearest) {
             Ok(frames) => {
                 data.period = frames;
@@ -100,8 +97,7 @@ pub trait DeviceBufferManager {
                 let alt_period_frames =
                     3 * 2.0f32.powi((period_frames as f32 / 2.0).log2().ceil() as i32) as Frames;
                 debug!(
-                    "Device did not accept a period size of {} frames, trying again with {}",
-                    period_frames, alt_period_frames
+                    "Device did not accept a period size of {period_frames} frames, trying again with {alt_period_frames}"
                 );
                 data.period =
                     hwp.set_period_size_near(alt_period_frames, alsa::ValueOr::Nearest)?;
@@ -118,7 +114,7 @@ pub trait DeviceBufferManager {
         if data.io_size > data.bufsize {
             let msg = format!("Trying to set avail_min to {}, must be smaller than or equal to device buffer size of {}",
                 data.io_size, data.bufsize);
-            error!("{}", msg);
+            error!("{msg}");
             return Err(config::ConfigError::new(&msg).into());
         }
         data.avail_min = data.io_size;

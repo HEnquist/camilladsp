@@ -53,6 +53,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yml = "0.0.12"
 serde_json = "1.0"
 serde_with = "3.12"
+json-patch = "4.0.0"
 realfft = "3.4.0"
 #realfft = { git = "https://github.com/HEnquist/realfft", branch = "better_errors" }
 num-complex = "0.4"

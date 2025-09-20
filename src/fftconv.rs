@@ -63,7 +63,7 @@ impl FftConv {
         let mut coeffs_padded = vec![vec![0.0; 2 * data_length]; nsegments];
         let mut coeffs_f = vec![vec![Complex::zero(); data_length + 1]; nsegments];
 
-        debug!("Conv {} is using {} segments", name, nsegments);
+        debug!("Conv {name} is using {nsegments} segments");
 
         for (n, coeff) in coeffs.iter().enumerate() {
             coeffs_padded[n / data_length][n % data_length] = coeff / (2 * data_length) as PrcFmt;
@@ -214,7 +214,7 @@ impl Filter for FftConv {
             let mut coeffs_f = vec![vec![Complex::zero(); self.npoints + 1]; nsegments];
             let mut coeffs_padded = vec![vec![0.0; 2 * self.npoints]; nsegments];
 
-            debug!("conv using {} segments", nsegments);
+            debug!("conv using {nsegments} segments");
 
             for (n, coeff) in coeffs.iter().enumerate() {
                 coeffs_padded[n / self.npoints][n % self.npoints] =
