@@ -177,7 +177,7 @@ fn run(
         .unwrap();
 
     let used_channels = config::used_capture_channels(&active_config);
-    debug!("Using channels {:?}", used_channels);
+    debug!("Using channels {used_channels:?}");
     {
         let mut capture_status = status_structs.capture.write();
         capture_status.state = ProcessingState::Starting;
@@ -224,7 +224,7 @@ fn run(
                                 active_config = *new_conf;
                                 *shared_configs.active.lock() = Some(active_config.clone());
                                 let used_channels = config::used_capture_channels(&active_config);
-                                debug!("Using channels {:?}", used_channels);
+                                debug!("Using channels {used_channels:?}");
                                 status_structs.capture.write().used_channels = used_channels;
                                 debug!("Sent changes to pipeline");
                             }
@@ -307,7 +307,7 @@ fn run(
                             }
                         }
                         StatusMessage::PlaybackError(message) => {
-                            error!("Playback error: {}", message);
+                            error!("Playback error: {message}");
                             if tx_command_cap.send(CommandMessage::Exit).is_err() {
                                 debug!("Capture thread has already exited");
                             }
@@ -328,7 +328,7 @@ fn run(
                             return Ok(ExitState::Restart);
                         }
                         StatusMessage::CaptureError(message) => {
-                            error!("Capture error: {}", message);
+                            error!("Capture error: {message}");
                             if is_starting {
                                 debug!("Error while starting, release barrier");
                                 barrier.wait();
@@ -416,16 +416,16 @@ fn run(
                             }
                         }
                         StatusMessage::SetVolume(vol) => {
-                            debug!("SetVolume message to  {} dB received", vol);
+                            debug!("SetVolume message to  {vol} dB received");
                             status_structs.processing.set_target_volume(0, vol);
                         }
                         StatusMessage::SetMute(mute) => {
-                            debug!("SetMute message to {} received", mute);
+                            debug!("SetMute message to {mute} received");
                             status_structs.processing.set_mute(0, mute);
                         }
                     },
                     Err(err) => {
-                        warn!("Capture, Playback and Processing threads have exited: {}", err);
+                        warn!("Capture, Playback and Processing threads have exited: {err}");
                         status_structs.status.write().stop_reason = StopReason::UnknownError(
                             "Capture, Playback and Processing threads have exited".to_string(),
                         );
@@ -919,7 +919,7 @@ fn main_process() -> i32 {
     debug!("Initial mute: {initial_mutes:?}");
     debug!("Initial volume: {initial_volumes:?}");
 
-    debug!("Read config file {:?}", configname);
+    debug!("Read config file {configname:?}");
 
     if matches.get_flag("check") {
         match config::load_validate_config(&configname.unwrap()) {
@@ -951,7 +951,7 @@ fn main_process() -> i32 {
         if state.is_none() || state.map(|s| s != state_to_save).unwrap_or(false) {
             statefile::save_state_to_file(fname, &state_to_save);
         } else {
-            debug!("No change to state from {}, not overwriting.", fname);
+            debug!("No change to state from {fname}, not overwriting.");
         }
     }
 
@@ -965,7 +965,7 @@ fn main_process() -> i32 {
                     .unwrap();
             }
             Err(err) => {
-                error!("{}", err);
+                error!("{err}");
                 debug!("Exiting due to config error");
                 return EXIT_BAD_CONFIG;
             }
@@ -986,7 +986,7 @@ fn main_process() -> i32 {
         let mut signals = SignalsInfo::<SignalOnly>::new(&sigs).unwrap();
         let mut exit_requested = false;
         for info in &mut signals {
-            debug!("Received signal: {}", info);
+            debug!("Received signal: {info}");
             match info {
                 SIGHUP => {
                     let path = (*active_path_thread.lock()).clone();
@@ -997,11 +997,11 @@ fn main_process() -> i32 {
                                 if let Err(e) = tx_command_thread
                                     .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
                                 {
-                                    error!("Error sending reload message: {}", e);
+                                    error!("Error sending reload message: {e}");
                                 }
                             }
                             Err(err) => {
-                                error!("Config error during reload: {}", err);
+                                error!("Config error during reload: {err}");
                             }
                         };
                     } else {
@@ -1010,7 +1010,7 @@ fn main_process() -> i32 {
                 }
                 SIGUSR1 => {
                     if let Err(e) = tx_command_thread.try_send(ControllerMessage::Stop) {
-                        error!("Error sending stop message: {}", e);
+                        error!("Error sending stop message: {e}");
                     }
                 }
                 _ => {
@@ -1022,7 +1022,7 @@ fn main_process() -> i32 {
                     info!("Shutting down");
                     exit_requested = true;
                     if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
-                        error!("Error sending exit message: {}", e);
+                        error!("Error sending exit message: {e}");
                     }
                 }
             };
@@ -1047,7 +1047,7 @@ fn main_process() -> i32 {
                 info!("Shutting down");
                 exit_requested = true;
                 if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
-                    error!("Error sending exit message: {}", e);
+                    error!("Error sending exit message: {e}");
                 }
             }
             thread::sleep(DELAY);
@@ -1179,7 +1179,7 @@ fn main_process() -> i32 {
                     return EXIT_OK;
                 }
                 Err(e) => {
-                    warn!("Error recv from cmd queue {}", e);
+                    warn!("Error recv from cmd queue {e}");
                     return EXIT_OK;
                 }
             }
@@ -1192,11 +1192,11 @@ fn main_process() -> i32 {
 
         debug!("Config ready, start processing");
         let exitstatus = run(shared_configs, status_structs.clone(), rx_command.clone());
-        debug!("Processing ended with status {:?}", exitstatus);
+        debug!("Processing ended with status {exitstatus:?}");
 
         match exitstatus {
             Err(e) => {
-                error!("{}", e);
+                error!("{e}");
                 if !wait {
                     return EXIT_PROCESSING_ERROR;
                 }

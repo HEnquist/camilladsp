@@ -312,6 +312,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         }
                                     },
                                     move |err| error!("an error occurred on stream: {}", err),
+                                    None
                                 );
                                 trace!("i16 output stream ready");
                                 stream
@@ -367,6 +368,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         }
                                     },
                                     move |err| error!("an error occurred on stream: {}", err),
+                                    None
                                 );
                                 trace!("f32 output stream ready");
                                 stream
@@ -534,7 +536,8 @@ impl CaptureDevice for CpalCaptureDevice {
                                         let buffer_copy = Vec::from(buffer);
                                         tx_dev_i.send(buffer_copy).unwrap();
                                     },
-                                    move |err| error!("an error occurred on stream: {}", err)
+                                    move |err| error!("an error occurred on stream: {}", err),
+                                    None
                                 );
                                 trace!("i16 input stream ready");
                                 stream
@@ -549,7 +552,8 @@ impl CaptureDevice for CpalCaptureDevice {
                                         let buffer_copy = Vec::from(buffer);
                                         tx_dev_f.send(buffer_copy).unwrap();
                                     },
-                                    move |err| error!("an error occurred on stream: {}", err)
+                                    move |err| error!("an error occurred on stream: {}", err),
+                                    None
                                 );
                                 trace!("f32 input stream ready");
                                 stream

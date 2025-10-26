@@ -270,7 +270,6 @@ The following configurations are provided:
 | `camilladsp-macos-amd64.tar.gz` | macOS on 64-bit Intel CPU | CoreAudio |
 | `camilladsp-macos-aarch64.tar.gz` | macOS on Apple silicon | CoreAudio |
 | `camilladsp-windows-amd64.zip` | Windows on 64-bit Intel or AMD CPU | Wasapi |
-| `camilladsp-windows7-amd64.zip` | Same as above, but built with an older rust version to support Windows 7 | Wasapi |
 
 All builds include the Websocket server.
 

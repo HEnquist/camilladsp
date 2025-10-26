@@ -1,10 +1,16 @@
 # Controlling via websocket
 
-If the websocket server is enabled with the `-p` option, CamillaDSP will listen to incoming websocket connections on the specified port.
+If the websocket server is enabled with the `-p` option,
+CamillaDSP will listen to incoming websocket connections on the specified port.
 
-If additionally the "wait" flag is given, it will wait for a config to be uploaded via the websocket server before starting the processing.
+If additionally the "wait" flag is given, it will wait for a config to be uploaded
+via the websocket server before starting the processing.
 
-By default the websocket server binds to the address 127.0.0.1, which means it's only accessible locally (on the same machine). If it should be also available to remote machines, give the IP address of the interface where it should be available with the `-a` option. Giving 0.0.0.0 will bind to all interfaces.
+By default the websocket server binds to the address 127.0.0.1,
+which means it's only accessible locally (on the same machine).
+If it should be also available to remote machines, give the IP address
+of the interface where it should be available with the `-a` option.
+Giving 0.0.0.0 will bind to all interfaces.
 
 
 ## Command syntax
@@ -17,7 +23,9 @@ For commands that take an argument, they are instead given as a key and a value:
 {"SetUpdateInterval": 500}
 ```
 
-The return values are also JSON (in string format). The commands that don't return a value return a structure containing the command name and the result, which is either Ok or Error:
+The return values are also JSON (in string format).
+The commands that don't return a value return a structure containing the command name and the result,
+which is either Ok or Error:
 ```json
 {
   "SetUpdateInterval": {
@@ -38,14 +46,18 @@ The commands that return a value also include a "value" field:
 
 ## String formatting, notably for NodeJS etc
 
-All commands and responses are sent as the string text representation of a JSON object. Your system/language may automatically do the "stringify" / "parse" processes automaticaly for you, many won't. 
+All commands and responses are sent as the string text representation of a JSON object.
+Your system/language may automatically do the "stringify" / "parse" processes automaticaly for you, many won't. 
 
 IE if you are using NodeJS/javascript then simply wrap your JSON object with JSON.stringify() before sending. 
 ``` 
 ws.send(JSON.stringify({"SetUpdateInterval": 1000}))
 ```
 
-Likewise on receiving the value from the websocket server, the JSON **will be in string format**. Complicating it further, if you're using the defacto 'ws' NodeJS library, it's likely received as a buffer array that you need to convert to string first. Either way, you'll need to parse the text with the JSON.parse function.
+Likewise on receiving the value from the websocket server, the JSON **will be in string format**.
+Complicating it further, if you're using the defacto 'ws' NodeJS library,
+it's likely received as a buffer array that you need to convert to string first.
+Either way, you'll need to parse the text with the JSON.parse function.
 ```
 ws.on('message', function message(data) {
     // data is buffer array
@@ -66,14 +78,17 @@ ws.on('message', function message(data) {
 *Wrapping the parse with a try/catch is good practice to avoid crashes with improperly formatted JSON etc.*
 
 ## All commands
-The available commands are listed below. All commands return the result, and for the ones that return a value are this described here.
+The available commands are listed below. All commands return the result,
+and for the ones that return a value are this described here.
 
 ### General
 - `GetVersion` : read the CamillaDSP version.
   * returns the version as a string, like `1.2.3`.
 - `GetSupportedDeviceTypes` : read which playback and capture device types are supported. 
-  * return a list containing two lists of strings (for playback and capture), like `[['File', 'Stdout', 'Alsa'], ['File', 'Stdin', 'Alsa']]`.
-- `Stop` : stop processing and wait for a new config to be uploaded either with `SetConfig` or with `SetConfigFilePath`+`Reload`.
+  * return a list containing two lists of strings (for playback and capture),
+    like `[['File', 'Stdout', 'Alsa'], ['File', 'Stdin', 'Alsa']]`.
+- `Stop` : stop processing and wait for a new config to be uploaded
+  either with `SetConfig` or with `SetConfigFilePath`+`Reload`.
 - `Exit` : stop processing and exit.
 
 ### Websocket server settings
@@ -101,7 +116,8 @@ Commands for reading and changing settings for the websocket server.
   * "PlaybackFormatChange": the sample rate or format of the playback device changed.
 - `GetCaptureRate` : get the measured sample rate of the capture device.
   * return the value as an integer
-- `GetSignalRange` : get the range of values in the last chunk. A value of 2.0 means full level (signal swings from -1.0 to +1.0)
+- `GetSignalRange` : get the range of values in the last chunk.
+  A value of 2.0 means full level (signal swings from -1.0 to +1.0)
   * returns the value as a float
 - `GetRateAdjust` : get the adjustment factor applied to the asynchronous resampler.
   * returns the value as a float
@@ -115,7 +131,8 @@ Commands for reading and changing settings for the websocket server.
 - `GetStateFileUpdated` : check if all changes have been saved to the state file.
 
 #### Commands for reading signal RMS and peak. 
-These commands all return a vector of floats, with one value per channel. The values are the channel levels in dB, where 0 dB means full level.
+These commands all return a vector of floats, with one value per channel.
+The values are the channel levels in dB, where 0 dB means full level.
 
 Get the peak or RMS value in the last chunk on the capture or playback side.
 - `GetCaptureSignalPeak`
@@ -130,14 +147,18 @@ and returns the values measured during the last n.nn seconds.
 - `GetPlaybackSignalPeakSince`
 - `GetPlaybackSignalRmsSince`
 
-Get the peak or RMS value measured since the last call to the same command from the same client. The first time a client calls this command it returns the values measured since the client connected.
-If the command is repeated very quickly, it may happen that there is no new data. The response is then an empty vector.
+Get the peak or RMS value measured since the last call to the same command from the same client.
+The first time a client calls this command it returns the values measured since the client connected.
+If the command is repeated very quickly, it may happen that there is no new data.
+The response is then an empty vector.
 - `GetCaptureSignalPeakSinceLast`
 - `GetCaptureSignalRmsSinceLast`
 - `GetPlaybackSignalPeakSinceLast`
 - `GetPlaybackSignalRmsSinceLast`
 
-Combined commands for reading several levels with a single request. These commands provide the same data as calling all the four commands in each of the groups above. The values are returned as a json object with keys `playback_peak`, `playback_rms`, `capture_peak` and `capture_rms`.
+Combined commands for reading several levels with a single request.
+These commands provide the same data as calling all the four commands in each of the groups above. 
+The values are returned as a json object with keys `playback_peak`, `playback_rms`, `capture_peak` and `capture_rms`.
 - `GetSignalLevels`
 - `GetSignalLevelsSince`
 - `GetSignalLevelsSinceLast`
@@ -184,7 +205,9 @@ All commands take the fader number as the first parameter.
 
 - `SetFaderVolume` : Set the volume control to the given value in dB. Clamped to the range -150 to +50 dB.
 
-- `SetFaderExternalVolume` : Special command for setting the volume when a Loudness filter is being combined with an external volume control (without a Volume filter). Clamped to the range -150 to +50 dB.
+- `SetFaderExternalVolume` : Special command for setting the volume when a Loudness filter
+  is being combined with an external volume control (without a Volume filter).
+  Clamped to the range -150 to +50 dB.
 
 - `AdjustFaderVolume` : Change the volume setting by the given number of dB, positive or negative.
   The resulting volume is clamped to the range -150 to +50 dB.
@@ -227,6 +250,11 @@ Commands for reading and changing the active configuration.
 - `SetConfigFilePath` : Change config file name given as a string, not applied until `Reload` is called.
 - `SetConfig:` : Provide a new config as a yaml string. Applied directly.
 - `SetConfigJson` : Provide a new config as a JSON string. Applied directly.
+- `PatchConfig` : Apply a patch to the current config. A patch consists of a partial config that only
+  contains the fields that should be changed. If the updated config is valid, it is applied directly.
+- `GetConfigValue` : Read a value from the active config. The value to read is selected using a json pointer,
+  see [RFC6901](https://datatracker.ietf.org/doc/html/rfc6901).
+- `SetConfigValue` : Set a value in the active config, see `GetConfigValue`.
 - `Reload` : Reload current config file (same as SIGHUP).
 
 
@@ -234,7 +262,8 @@ Commands for reading and changing the active configuration.
 
 These commands are used to check the syntax and contents of configurations. They do not affect the active configuration.
 - `ReadConfig` : read the provided config (as a yaml string) and check it for yaml syntax errors.
-  * If the config is ok, it returns the config with all optional fields filled with their default values. If there are problems, the status will be Error and the return value an error message.
+  * If the config is ok, it returns the config with all optional fields filled with their default values.
+    If there are problems, the status will be Error and the return value an error message.
 - `ReadConfigFile` : same as ReadConfig but reads the config from the file at the given path.
 - `ValidateConfig`: same as ReadConfig but performs more extensive checks to ensure the configuration can be applied.
 
@@ -246,7 +275,8 @@ They accept a backend name as input, and return a list of names.
 - `GetAvailableCaptureDevices` : get a list of available capture devices. 
 - `GetAvailablePlaybackDevices` : get a list of available playback devices. 
 
-Each element in the returned list consists of one string for the device identifier, and one optional string for the name.
+Each element in the returned list consists of one string for the device identifier,
+and one optional string for the name.
 Some backends use the name as identifier, they then return `null` as name.
 
 The currently supported backend names are `Alsa`, `CoreAudio` and `Wasapi`.
@@ -267,16 +297,50 @@ Example entries for Alsa:
 ]
 ```
 
+## Error responses
+If a command succeeds, CamillaDSP will reply with the string `Ok` in the `result` field.
+If not, this field will instead contain an error.
+
+The possible errors are:
+- `ShutdownInProgressError`: CamillaDSP is shutting down and unable to handle the request.
+- `RateLimitExceededError`: Too many requests were sent in a short time.
+- `InvalidFaderError`: The request tried to modify a fader that does not exist,
+- `ConfigValidationError`: The config could be read but contains some error.
+  The response includes a message describing the error.
+- `ConfigReadError`: The config could not be read.
+  The reason can be that the file does not exist, or that it contains some error.
+  The response includes a message describing the error.
+- `InvalidValueError`: The request tried to change a parameter to an invalid value.
+  The response includes a message describing the error.
+- `InvalidRequestError`: The request was invalid.
+  The response includes a message describing the error.
+
+### Simple error
+Simple errors do not contain any message. They are returned as just a string.
+Example:
+```json
+"result": "InvalidFaderError"
+```
+
+### Error with message
+If the error has a message, it is instead returned as a a json object with one key and one value.
+Example:
+```json
+"result": {"ConfigValidationError": "Description of the error"}
+``` 
+
 ## Controlling from Python using pyCamillaDSP
 
-The recommended way of controlling CamillaDSP with Python is by using the [pyCamillaDSP library](https://github.com/HEnquist/pycamilladsp).
+The recommended way of controlling CamillaDSP with Python is by using the
+[pyCamillaDSP library](https://github.com/HEnquist/pycamilladsp).
 
 Please see the readme in that library for instructions.
 
 
 ## Controlling directly using Python
 
-You need the websocket_client module installed for this to work. The package is called `python-websocket-client` on Fedora and `python3-websocket` on Debian/Ubuntu.
+You need the websocket_client module installed for this to work.
+The package is called `python-websocket-client` on Fedora and `python3-websocket` on Debian/Ubuntu.
 
 First start CamillaDSP with the -p option:
 ```
@@ -350,9 +414,12 @@ In [14]: print(ws.recv())
 ```
 
 ## Secure websocket, wss://
-By compiling with the optional feature `secure-websocket`, the websocket server also supports loading an identity from a .pfx file. 
-This is enabled by providing the two optional parameters "cert" and "pass", where "cert" is the path to the .pfx-file containing the identity, and "pass" is the password for the file.
-How to properly generate the identity is outside the scope of this readme, but for simple tests a self-signed certificate can be used.
+By compiling with the optional feature `secure-websocket`,
+the websocket server also supports loading an identity from a .pfx file. 
+This is enabled by providing the two optional parameters "cert" and "pass",
+where "cert" is the path to the .pfx-file containing the identity, and "pass" is the password for the file.
+How to properly generate the identity is outside the scope of this readme,
+but for simple tests a self-signed certificate can be used.
 
 ### Generate self-signed identity
 First generate rsa keys: 
@@ -375,4 +442,5 @@ import ssl
 ws = websocket.WebSocket(sslopt={"cert_reqs": ssl.CERT_NONE})
 ws.connect("wss://localhost:1234") 
 ```
-Note the "wss" instead of "ws" in the address. Since the certificate is self.signed, we need to use ssl.CERT_NONE for the connection to be accepted.
+Note the "wss" instead of "ws" in the address. Since the certificate is self.signed,
+we need to use ssl.CERT_NONE for the connection to be accepted.

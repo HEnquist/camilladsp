@@ -26,10 +26,9 @@ use dispatch::Semaphore;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{traits::*, HeapRb};
 use std::collections::VecDeque;
-use std::ffi::CStr;
 use std::mem;
-use std::os::raw::{c_char, c_void};
-use std::ptr::{null, null_mut};
+use std::os::raw::c_void;
+use std::ptr::{null, null_mut, NonNull};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
@@ -47,7 +46,19 @@ use coreaudio::audio_unit::{AudioUnit, Element, Scope, StreamFormat};
 use coreaudio::error::AudioCodecError;
 use coreaudio::error::Error as CoreAudioError;
 
-use coreaudio::sys::*;
+use libc::pid_t;
+use objc2_audio_toolbox::{kAudioCodecUnknownPropertyError, kAudioUnitProperty_StreamFormat};
+use objc2_core_audio::{
+    kAudioDevicePropertyClockSource, kAudioDevicePropertyClockSourceNameForIDCFString,
+    kAudioDevicePropertyClockSources, kAudioDevicePropertyStereoPan,
+    kAudioDevicePropertyStreamConfiguration, kAudioHardwareNoError,
+    kAudioObjectPropertyElementMain, kAudioObjectPropertyElementWildcard,
+    kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput,
+    kAudioObjectPropertyScopeOutput, AudioDeviceID, AudioObjectGetPropertyData,
+    AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress, AudioObjectSetPropertyData,
+};
+use objc2_core_audio_types::{AudioBuffer, AudioValueTranslation};
+use objc2_core_foundation::CFString;
 
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -84,10 +95,7 @@ fn take_ownership(device_id: AudioDeviceID) -> Res<pid_t> {
 }
 
 fn release_ownership(device_id: AudioDeviceID) -> Res<()> {
-    trace!(
-        "Releasing any device ownership for device id {}.",
-        device_id
-    );
+    trace!("Releasing any device ownership for device id {device_id}.");
     let device_owner_pid = match get_hogging_pid(device_id) {
         Ok(pid) => pid,
         Err(CoreAudioError::AudioCodec(AudioCodecError::UnknownProperty)) => return Ok(()),
@@ -193,13 +201,13 @@ fn device_supports_scope(device_id: u32, input: bool) -> bool {
     let status = unsafe {
         AudioObjectGetPropertyDataSize(
             device_id,
-            &property_address as *const _,
+            NonNull::from(&property_address),
             0,
             null(),
-            &data_size as *const _ as *mut _,
+            NonNull::from(&data_size),
         )
     };
-    if status != kAudioHardwareNoError as i32 {
+    if status != kAudioHardwareNoError {
         return false;
     }
     // This gives the length of the buffer list, there is no need to read the actual list.
@@ -236,7 +244,7 @@ fn open_coreaudio_playback(
             }
         }
     };
-    trace!("Playback device id: {}.", device_id);
+    trace!("Playback device id: {device_id}.");
 
     let mut audio_unit = audio_unit_from_device_id(device_id, false)
         .map_err(|e| ConfigError::new(&format!("{e}")))?;
@@ -560,8 +568,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     }
                     Err(err) => {
                         warn!(
-                            "Playback thread could not get real time priority, error: {}.",
-                            err
+                            "Playback thread could not get real time priority, error: {err}."
                         );
                         None
                     }
@@ -856,8 +863,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     }
                     Err(err) => {
                         warn!(
-                            "Capture thread could not get real time priority, error: {}.",
-                            err
+                            "Capture thread could not get real time priority, error: {err}."
                         );
                         None
                     }
@@ -980,8 +986,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             averager.restart();
                             let measured_rate_f = samples_per_sec;
                             debug!(
-                                "Measured sample rate is {:.1} Hz.",
-                                measured_rate_f
+                                "Measured sample rate is {measured_rate_f:.1} Hz."
                             );
                             if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
                                 capture_status.measured_samplerate = measured_rate_f as usize;
@@ -1004,8 +1009,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         watcher_averager.restart();
                         let measured_rate_f = samples_per_sec;
                         debug!(
-                            "Rate watcher, measured sample rate is {:.1} Hz.",
-                            measured_rate_f
+                            "Rate watcher, measured sample rate is {measured_rate_f:.1} Hz."
                         );
                         let changed = valuewatcher.check_value(measured_rate_f as f32);
                         if changed {
@@ -1106,11 +1110,11 @@ fn set_pitch(device_id: AudioDeviceID, pitch: f32) {
     let status = unsafe {
         AudioObjectSetPropertyData(
             device_id,
-            &property_address as *const _,
+            NonNull::from(&property_address),
             0,
             null(),
             data_size,
-            &pan as *const _ as *mut _,
+            NonNull::from(&pan).cast(),
         )
     };
     if status != 0 {
@@ -1129,11 +1133,11 @@ fn set_clock_source_index(device_id: AudioDeviceID, index: u32) -> bool {
     let status = unsafe {
         AudioObjectSetPropertyData(
             device_id,
-            &property_address as *const _,
+            NonNull::from(&property_address),
             0,
             null(),
             data_size,
-            &index as *const _ as *mut _,
+            NonNull::from(&index).cast(),
         )
     };
     if status != 0 {
@@ -1184,13 +1188,13 @@ fn get_clock_source_names_and_ids(device_id: AudioDeviceID) -> (Vec<String>, Vec
     let status = unsafe {
         AudioObjectGetPropertyDataSize(
             device_id,
-            &property_address as *const _,
+            NonNull::from(&property_address),
             0,
             null(),
-            &data_size as *const _ as *mut _,
+            NonNull::from(&data_size),
         )
     };
-    if status as u32 == kAudioCodecUnknownPropertyError {
+    if status == kAudioCodecUnknownPropertyError {
         info!("The capture device has no clock source control.");
         return (names, ids);
     }
@@ -1205,11 +1209,11 @@ fn get_clock_source_names_and_ids(device_id: AudioDeviceID) -> (Vec<String>, Vec
         let status = unsafe {
             AudioObjectGetPropertyData(
                 device_id,
-                &property_address as *const _,
+                NonNull::from(&property_address),
                 0,
                 null(),
-                &data_size as *const _ as *mut _,
-                sources.as_mut_ptr() as *mut _ as *mut _,
+                NonNull::from(&data_size),
+                NonNull::new(sources.as_mut_ptr()).unwrap().cast(),
             )
         };
         if status != 0 {
@@ -1223,10 +1227,7 @@ fn get_clock_source_names_and_ids(device_id: AudioDeviceID) -> (Vec<String>, Vec
             ids.push(*id)
         }
     }
-    debug!(
-        "Available capture device clock source ids: {:?}, names: {:?}.",
-        ids, names
-    );
+    debug!("Available capture device clock source ids: {ids:?}, names: {names:?}.");
     (names, ids)
 }
 
@@ -1238,34 +1239,28 @@ fn get_item_name(device_id: AudioDeviceID, index: u32) -> String {
         mElement: kAudioObjectPropertyElementMain,
     };
     let mut index: u32 = index;
-    let mut device_name: CFStringRef = null_mut();
+    let mut device_name: *mut CFString = null_mut();
     let data_out = AudioValueTranslation {
-        mInputData: &mut index as *mut u32 as *mut c_void,
+        mInputData: NonNull::from(&mut index).cast(),
         mInputDataSize: mem::size_of::<u32>() as u32,
-        mOutputData: &mut device_name as *mut CFStringRef as *mut c_void,
-        mOutputDataSize: mem::size_of::<CFStringRef>() as u32,
+        mOutputData: NonNull::from(&mut device_name).cast(),
+        mOutputDataSize: mem::size_of::<&CFString>() as u32,
     };
     let data_size = mem::size_of::<AudioValueTranslation>() as u32;
-    let c_str = unsafe {
-        let status = AudioObjectGetPropertyData(
+    let status = unsafe {
+        AudioObjectGetPropertyData(
             device_id,
-            &property_address as *const _,
+            NonNull::from(&property_address),
             4,
             &index as *const _ as *const c_void,
-            &data_size as *const _ as *mut _,
-            &data_out as *const _ as *mut _,
-        );
-        if status != 0 {
-            return "(unknown)".to_owned();
-        }
-        let c_string: *const c_char =
-            CFStringGetCStringPtr(device_name as CFStringRef, kCFStringEncodingUTF8);
-        if c_string.is_null() {
-            return "(unknown)".to_owned();
-        }
-        CStr::from_ptr(c_string as *mut _)
+            NonNull::from(&data_size),
+            NonNull::from(&data_out).cast(),
+        )
     };
-    c_str.to_string_lossy().into_owned()
+    if status != 0 || device_name.is_null() {
+        return "(unknown)".to_owned();
+    }
+    unsafe { device_name.as_ref().unwrap().to_string() }
 }
 
 fn configure_pitch_control(device_id: AudioDeviceID) -> bool {

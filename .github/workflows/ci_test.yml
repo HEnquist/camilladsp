@@ -126,7 +126,7 @@ jobs:
         env: 
           LD_LIBRARY_PATH: /usr/lib/arm-linux-gnueabihf
 
-  check_test_windows:
+  check_test_and_lint_windows:
     name: Check and test Windows
     runs-on: windows-latest
     steps:
@@ -135,6 +135,8 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Run cargo check
         run: cargo check --no-default-features
@@ -142,21 +144,11 @@ jobs:
       - name: Run cargo test
         run: cargo test --no-default-features
 
-  check_test_windows7:
-    name: Check and test Windows7 (rustc 1.75)
-    runs-on: windows-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.75.0
-
-      - name: Run cargo check
-        run: cargo check --no-default-features
-
-      - name: Run cargo test
-        run: cargo test --no-default-features
+      - name: Run cargo clippy
+        run: cargo clippy -- -D warnings
 
   check_test_macos:
     name: Check and test macOS Intel
@@ -174,7 +166,7 @@ jobs:
       - name: Run cargo test
         run: cargo test --no-default-features
 
-  check_macos_arm:
+  check_test_and_lint_macos_arm:
     name: Check and test macOS Arm
     runs-on: macos-latest
     steps:
@@ -183,12 +175,20 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Run cargo check
         run: cargo check --no-default-features
 
       - name: Run cargo test
         run: cargo test --no-default-features
+
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Run cargo clippy
+        run: cargo clippy -- -D warnings
 
 
 

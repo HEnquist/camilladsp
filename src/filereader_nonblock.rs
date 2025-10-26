@@ -26,7 +26,7 @@ use std::time::Duration;
 use crate::filedevice::{ReadResult, Reader};
 
 pub struct NonBlockingReader<'a, R: 'a> {
-    poll: nix::poll::PollFd<'a>,
+    poll: [nix::poll::PollFd<'a>; 1],
     signals: nix::sys::signal::SigSet,
     timeout: Option<nix::sys::time::TimeSpec>,
     timelimit: time::Duration,
@@ -43,7 +43,7 @@ impl<'a, R: Read + AsRawFd + 'a> NonBlockingReader<'a, R> {
         let timelimit = time::Duration::from_millis(timeout_millis);
         let timeout = nix::sys::time::TimeSpec::from_duration(timelimit);
         NonBlockingReader {
-            poll,
+            poll: [poll],
             signals,
             timeout: Some(timeout),
             timelimit,
@@ -58,7 +58,7 @@ impl<'a, R: Read + AsRawFd + 'a> Reader for NonBlockingReader<'a, R> {
         let mut bytes_read = 0;
         let start = time::Instant::now();
         loop {
-            let res = nix::poll::ppoll(&mut [self.poll], self.timeout, Some(self.signals))?;
+            let res = nix::poll::ppoll(&mut self.poll, self.timeout, Some(self.signals))?;
             //println!("loop...");
             if res == 0 {
                 return Ok(ReadResult::Timeout(bytes_read));

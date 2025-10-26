@@ -30,60 +30,64 @@ path = "src/bin.rs"
 [target.'cfg(target_os="linux")'.dependencies]
 alsa = "0.9.0"
 alsa-sys = "0.3.1"
-nix = { version = "0.28", features = ["poll", "signal"] }
-zbus = { version = "3.0.0", optional = true }
+nix = { version = "0.30", features = ["poll", "signal"] }
+zbus = { version = "5.7.0", optional = true }
 
 [target.'cfg(target_os="macos")'.dependencies]
-#coreaudio-rs = { path = "../coreaudio-rs" }
-#coreaudio-rs = { git = "https://github.com/HEnquist/coreaudio-rs", tag="v0.11.1-rc1" }
-coreaudio-rs = "0.11.1"
+coreaudio-rs = "0.13.0"
+objc2-core-audio = "0.3.1"
+objc2-core-audio-types = "0.3.1"
+objc2-core-foundation = "0.3.1"
+objc2-audio-toolbox = "0.3.1"
 dispatch = "0.2.0"
+libc = "0.2.172"
 
 [target.'cfg(target_os="windows")'.dependencies]
 #wasapi = { path = "../../rust/wasapi" }
 #wasapi = { git = "https://github.com/HEnquist/wasapi-rs", branch = "stream_mode_enum" }
-wasapi = "0.17.0"
-windows = {version = "0.59.0", features = ["Win32_System_Threading", "Win32_Foundation"] }
+wasapi = "0.18.0"
+windows = {version = "0.61.0", features = ["Win32_System_Threading", "Win32_Foundation"] }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_yml = "0.0.12"
 serde_json = "1.0"
-serde_with = "1.11"
+serde_with = "3.12"
+json-patch = "4.0.0"
 realfft = "3.4.0"
 #realfft = { git = "https://github.com/HEnquist/realfft", branch = "better_errors" }
 num-complex = "0.4"
 num-traits = "0.2"
 signal-hook = "0.3.8"
-rand = { version = "0.8.3", default-features = false, features = ["small_rng", "std"] }
-rand_distr = "0.4.3"
+rand = { version = "0.9.1", default-features = false, features = ["small_rng", "std", "os_rng"] }
+rand_distr = "0.5.1"
 clap = { version = "4.5.4", features = ["cargo"] }
 lazy_static = "1.4.0"
 log = "0.4.14"
-flexi_logger = { version = "0.29.8", features = ["async", "colors"] }
+flexi_logger = { version = "0.30.2", features = ["async", "colors"] }
 chrono = "0.4"
 tungstenite = { version = "0.26.1", optional = true }
 native-tls = { version = "0.2.7", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-rubato = { version = "1.0.0-preview.2", path = "../rubato" }
-#rubato = "{ git = "https://github.com/HEnquist/rubato", branch = "adapter_v2" }"
-cpal = { version = "0.13.3", optional = true }
+rubato = "1.0.0-preview.1"
+#rubato = { git = "https://github.com/HEnquist/rubato", branch = "optional_fft" }
+cpal = { version = "0.16.0", optional = true }
 parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
 crossbeam-channel = "0.5"
 rayon = "1.10.0"
-audio_thread_priority = { version = "0.32.0", default-features = false }
+audio_thread_priority = { version = "0.33.0", default-features = false }
 ringbuf = "0.4.7"
-audioadapter = { version = "1.0.0", default-features = false, path = "../audioadapter-rs" }
-audioadapter-sample = { version = "1.0.0", path = "../audioadapter-sample-rs" }
-audioadapter-buffers = { version = "1.0.0", path = "../audioadapter-buffers-rs" }
+audioadapter = { version = "1.0.0", default-features = false }
+audioadapter-sample = { version = "1.0.0" }
+audioadapter-buffers = { version = "1.0.0" }
 
 
 [build-dependencies]
 version_check = "0.9"
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = "0.6"
 
 [[bench]]
 name = "filters"

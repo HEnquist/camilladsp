@@ -76,7 +76,7 @@ pub fn save_state(
 }
 
 pub fn save_state_to_file(filename: &str, state: &State) -> bool {
-    debug!("Saving state to {}", filename);
+    debug!("Saving state to {filename}");
     match std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -85,23 +85,17 @@ pub fn save_state_to_file(filename: &str, state: &State) -> bool {
     {
         Ok(f) => {
             if let Err(writeerr) = serde_yml::to_writer(&f, &state) {
-                error!(
-                    "Unable to write to statefile '{}', error: {}",
-                    filename, writeerr
-                );
+                error!("Unable to write to statefile '{filename}', error: {writeerr}");
                 return false;
             }
             if let Err(syncerr) = &f.sync_all() {
-                error!(
-                    "Unable to commit statefile '{}' data to disk, error: {}",
-                    filename, syncerr
-                );
+                error!("Unable to commit statefile '{filename}' data to disk, error: {syncerr}");
                 return false;
             }
             true
         }
         Err(openerr) => {
-            error!("Unable to open statefile {}, error: {}", filename, openerr);
+            error!("Unable to open statefile {filename}, error: {openerr}");
             false
         }
     }

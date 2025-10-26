@@ -70,7 +70,7 @@ pub fn chunk_to_buffer_rawbytes(
         if chunk.waveforms[chan].is_empty() {
             adapter.fill_channel_with(chan, &0.0);
         } else {
-            let (nbr, clp) = adapter.write_from_slice_to_channel(chan, 0, &chunk.waveforms[chan]);
+            let (nbr, clp) = adapter.copy_from_slice_to_channel(chan, 0, &chunk.waveforms[chan]);
             clipped += clp;
             if clp > 0 && nbr > 0 {
                 let pk = chunk.waveforms[chan]
@@ -138,7 +138,7 @@ pub fn buffer_to_chunk_rawbytes(
     for (ch, used) in used_channels.iter().enumerate() {
         if *used {
             let mut wf = vec_from_stash(num_frames);
-            let nbr = adapter.write_from_channel_to_slice(ch, 0, &mut wf[0..num_valid_frames]);
+            let nbr = adapter.copy_from_channel_to_slice(ch, 0, &mut wf[0..num_valid_frames]);
             if nbr > 0 {
                 let (mavx, minv) = wf.iter().fold((0.0, 0.0), |(max, min), x| {
                     (PrcFmt::max(max, *x), PrcFmt::min(min, *x))

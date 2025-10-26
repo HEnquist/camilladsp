@@ -106,11 +106,11 @@ pub fn get_card_names(card: &Card, input: bool, names: &mut Vec<(String, String)
         for subdev in 0..subdevs {
             let pcm_info = ctl.pcm_info(device as u32, subdev, dir)?;
             // Build the full device id
-            let subdevice_id = format!("hw:{},{},{}", card_id, device, subdev).to_string();
+            let subdevice_id = format!("hw:{card_id},{device},{subdev}").to_string();
 
             // Get subdevice name and build a descriptive device name
             let subdev_name = pcm_info.get_subdevice_name()?;
-            let name = format!("{}, {}, {}", card_name, pcm_name, subdev_name).to_string();
+            let name = format!("{card_name}, {pcm_name}, {subdev_name}").to_string();
 
             //println!("{} - {}", subdevice_id, name);
             names.push((subdevice_id, name))
@@ -384,7 +384,7 @@ pub struct PollResult {
 impl FileDescriptors {
     pub fn wait(&mut self, timeout: i32) -> alsa::Result<PollResult> {
         let nbr_ready = alsa::poll::poll(&mut self.fds, timeout)?;
-        trace!("Got {} ready fds", nbr_ready);
+        trace!("Got {nbr_ready} ready fds");
         let mut nbr_found = 0;
         let mut pcm_res = false;
         for fd in self.fds.iter().take(self.nbr_pcm_fds) {
@@ -420,7 +420,7 @@ pub fn process_events(
 ) -> CaptureResult {
     while let Ok(Some(ev)) = ctl.read() {
         let nid = ev.get_id().get_numid();
-        debug!("Event from numid {}", nid);
+        debug!("Event from numid {nid}");
         let action = get_event_action(nid, elems, ctl, params);
         match action {
             EventAction::SourceInactive => {
@@ -442,7 +442,7 @@ pub fn process_events(
                 return CaptureResult::Done;
             }
             EventAction::SetVolume(vol) => {
-                debug!("Alsa volume change event, set main fader to {} dB", vol);
+                debug!("Alsa volume change event, set main fader to {vol} dB");
                 processing_params.set_target_volume(0, vol);
                 params.linked_volume_value = Some(vol);
                 //status_channel
@@ -450,7 +450,7 @@ pub fn process_events(
                 //    .unwrap_or_default();
             }
             EventAction::SetMute(mute) => {
-                debug!("Alsa mute change event, set mute state to {}", mute);
+                debug!("Alsa mute change event, set mute state to {mute}");
                 processing_params.set_mute(0, mute);
                 params.linked_mute_value = Some(mute);
                 //status_channel
@@ -480,7 +480,7 @@ pub fn get_event_action(
     if let Some(eldata) = &elems.loopback_active {
         if eldata.numid == numid {
             let value = eldata.read_as_bool();
-            debug!("Loopback active: {:?}", value);
+            debug!("Loopback active: {value:?}");
             if let Some(active) = value {
                 if active {
                     return EventAction::None;
@@ -523,7 +523,7 @@ pub fn get_event_action(
     if let Some(eldata) = &elems.volume {
         if eldata.numid == numid {
             let vol_db = eldata.read_volume_in_db(ctl);
-            debug!("Mixer volume control: {:?} dB", vol_db);
+            debug!("Mixer volume control: {vol_db:?} dB");
             if let Some(vol) = vol_db {
                 params.linked_volume_value = Some(vol);
                 return EventAction::SetVolume(vol);
@@ -533,7 +533,7 @@ pub fn get_event_action(
     if let Some(eldata) = &elems.mute {
         if eldata.numid == numid {
             let active = eldata.read_as_bool();
-            debug!("Mixer switch active: {:?}", active);
+            debug!("Mixer switch active: {active:?}");
             if let Some(active_val) = active {
                 params.linked_mute_value = Some(!active_val);
                 return EventAction::SetMute(!active_val);
@@ -543,7 +543,7 @@ pub fn get_event_action(
     if let Some(eldata) = &elems.gadget_rate {
         if eldata.numid == numid {
             let value = eldata.read_as_int();
-            debug!("Gadget rate: {:?}", value);
+            debug!("Gadget rate: {value:?}");
             if let Some(rate) = value {
                 if rate == 0 {
                     return EventAction::SourceInactive;
@@ -556,7 +556,7 @@ pub fn get_event_action(
             }
         }
     }
-    trace!("Ignoring event from control with numid {}", numid);
+    trace!("Ignoring event from control with numid {numid}");
     EventAction::None
 }
 
@@ -611,10 +611,10 @@ pub fn find_elem<'a>(
     }
     elem_id.set_name(&CString::new(name).unwrap());
     let element = hctl.find_elem(&elem_id);
-    debug!("Look up element with name {}", name);
+    debug!("Look up element with name {name}");
     element.map(|e| {
         let numid = e.get_id().map(|id| id.get_numid()).unwrap_or_default();
-        debug!("Found element with name {} and numid {}", name, numid);
+        debug!("Found element with name {name} and numid {numid}");
         ElemData { element: e, numid }
     })
 }
@@ -629,7 +629,7 @@ pub fn sync_linked_controls(
         if let Some(vol) = capture_params.linked_volume_value {
             let target_vol = processing_params.target_volume(0);
             if (vol - target_vol).abs() > 0.1 {
-                debug!("Updating linked volume control to {} dB", target_vol);
+                debug!("Updating linked volume control to {target_vol} dB");
             }
             if let Some(vol_elem) = &elements.volume {
                 vol_elem.write_volume_in_db(c, target_vol);

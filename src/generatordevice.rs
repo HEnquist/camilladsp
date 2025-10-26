@@ -95,8 +95,8 @@ struct NoiseGenerator {
 
 impl NoiseGenerator {
     fn new(amplitude: PrcFmt) -> Self {
-        let rng = SmallRng::from_entropy();
-        let distribution = Uniform::new_inclusive(-amplitude, amplitude);
+        let rng = SmallRng::from_os_rng();
+        let distribution = Uniform::new_inclusive(-amplitude, amplitude).unwrap();
         NoiseGenerator { rng, distribution }
     }
 }

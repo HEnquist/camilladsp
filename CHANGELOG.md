@@ -3,6 +3,7 @@ New features:
 - Add RACE processor.
 - Add option for custom log filtering.
 - Support polling mode for WASAPI.
+- Websocket commands for reading and writing partial configs.
 Changes:
 - Add microsecond delay unit.
 - Allow larger buffer target levels.
