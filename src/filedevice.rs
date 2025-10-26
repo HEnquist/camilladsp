@@ -32,7 +32,6 @@ use std::thread;
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
-use rubato::VecResampler;
 
 #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
 use crate::filedevice_bluez;
@@ -40,6 +39,7 @@ use crate::filedevice_bluez;
 use crate::filereader::BlockingReader;
 #[cfg(target_os = "linux")]
 use crate::filereader_nonblock::NonBlockingReader;
+use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use crate::wavtools::{find_data_in_wav, write_wav_header};
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -237,13 +237,13 @@ impl PlaybackDevice for FilePlaybackDevice {
 }
 
 fn nbr_capture_bytes(
-    resampler: &Option<Box<dyn VecResampler<PrcFmt>>>,
+    resampler: &Option<ChunkResampler>,
     capture_bytes: usize,
     channels: usize,
     store_bytes_per_sample: usize,
 ) -> usize {
     if let Some(resampl) = &resampler {
-        resampl.input_frames_next() * channels * store_bytes_per_sample
+        resampl.resampler.input_frames_next() * channels * store_bytes_per_sample
     } else {
         capture_bytes
     }
@@ -275,7 +275,7 @@ fn capture_loop(
     mut file: Box<dyn Reader>,
     params: CaptureParams,
     msg_channels: CaptureChannels,
-    mut resampler: Option<Box<dyn VecResampler<PrcFmt>>>,
+    mut resampler: Option<ChunkResampler>,
 ) {
     debug!("preparing captureloop");
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
@@ -311,7 +311,6 @@ fn capture_loop(
     let mut state = ProcessingState::Running;
     let mut prev_state = ProcessingState::Running;
     let mut stalled = false;
-    let mut channel_mask = vec![true; params.channels];
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -328,7 +327,11 @@ fn capture_loop(
                 rate_adjust = speed;
                 if let Some(resampl) = &mut resampler {
                     if params.async_src {
-                        if resampl.set_resample_ratio_relative(speed, true).is_err() {
+                        if resampl
+                            .resampler
+                            .set_resample_ratio_relative(speed, true)
+                            .is_err()
+                        {
                             debug!("Failed to set resampling speed to {speed}");
                         }
                     } else {
@@ -493,7 +496,7 @@ fn capture_loop(
             params.channels,
             &params.sample_format,
             bytes_read,
-            &params.capture_status.read().used_channels,
+            &params.capture_status.read().used_channels, //channel_mask??
         );
         chunk.update_stats(&mut chunk_stats);
         if let Some(mut capture_status) = params.capture_status.try_write() {
@@ -510,18 +513,7 @@ fn capture_loop(
         state = silence_counter.update(value_range);
         if state == ProcessingState::Running {
             if let Some(resampl) = &mut resampler {
-                chunk.update_channel_mask(&mut channel_mask);
-                let new_waves = resampl
-                    .process(&chunk.waveforms, Some(&channel_mask))
-                    .unwrap();
-                let mut chunk_frames = new_waves.iter().map(|w| w.len()).max().unwrap();
-                if chunk_frames == 0 {
-                    chunk_frames = params.chunksize;
-                }
-                chunk.frames = chunk_frames;
-                chunk.valid_frames =
-                    (chunk.frames as f32 * (bytes_read as f32 / bytes_to_capture as f32)) as usize;
-                chunk.waveforms = new_waves;
+                resampl.resample_chunk(&mut chunk, params.chunksize, params.channels);
             }
             let msg = AudioMessage::Audio(chunk);
             if msg_channels.audio.send(msg).is_err() {
@@ -691,7 +683,7 @@ fn send_silence(
     channels: usize,
     chunksize: usize,
     audio_channel: &crossbeam_channel::Sender<AudioMessage>,
-    resampler: &mut Option<Box<dyn VecResampler<PrcFmt>>>,
+    resampler: &mut Option<ChunkResampler>,
 ) {
     let mut samples_left = samples;
     while samples_left > 0 {
@@ -701,7 +693,7 @@ fn send_silence(
             samples_left
         };
         let waveforms = if let Some(resamp) = resampler {
-            resamp.process_partial(None, None).unwrap()
+            resamp.pump_silence(channels, chunksize)
         } else {
             vec![vec![0.0; chunksize]; channels]
         };

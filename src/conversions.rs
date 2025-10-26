@@ -15,11 +15,11 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::config::SampleFormat;
-use crate::PrcFmt;
 use crate::{audiodevice::*, recycle_chunk, vec_from_stash};
-use audioadapter::number_to_float::InterleavedNumbers;
-use audioadapter::sample::{F32LE, F64LE, I16LE, I24LE, I32LE};
+use crate::{container_from_stash, PrcFmt};
 use audioadapter::{Adapter, AdapterMut};
+use audioadapter_buffers::number_to_float::InterleavedNumbers;
+use audioadapter_sample::sample::{F32LE, F64LE, I16LE, I24LE, I32LE};
 #[cfg(feature = "cpal-backend")]
 use num_traits;
 #[cfg(feature = "cpal-backend")]
@@ -70,7 +70,7 @@ pub fn chunk_to_buffer_rawbytes(
         if chunk.waveforms[chan].is_empty() {
             adapter.fill_channel_with(chan, &0.0);
         } else {
-            let (nbr, clp) = adapter.write_from_slice_to_channel(chan, 0, &chunk.waveforms[chan]);
+            let (nbr, clp) = adapter.copy_from_slice_to_channel(chan, 0, &chunk.waveforms[chan]);
             clipped += clp;
             if clp > 0 && nbr > 0 {
                 let pk = chunk.waveforms[chan]
@@ -108,7 +108,7 @@ pub fn buffer_to_chunk_rawbytes(
     let num_valid_frames = valid_bytes / sampleformat.bytes_per_sample() / channels;
     let mut maxvalue: PrcFmt = 0.0;
     let mut minvalue: PrcFmt = 0.0;
-    let mut wfs = Vec::with_capacity(channels);
+    let mut wfs = container_from_stash(channels);
     let adapter: Box<dyn Adapter<PrcFmt>> = match sampleformat {
         SampleFormat::S16LE => Box::new(
             InterleavedNumbers::<&[I16LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
@@ -138,7 +138,7 @@ pub fn buffer_to_chunk_rawbytes(
     for (ch, used) in used_channels.iter().enumerate() {
         if *used {
             let mut wf = vec_from_stash(num_frames);
-            let nbr = adapter.write_from_channel_to_slice(ch, 0, &mut wf[0..num_valid_frames]);
+            let nbr = adapter.copy_from_channel_to_slice(ch, 0, &mut wf[0..num_valid_frames]);
             if nbr > 0 {
                 let (mavx, minv) = wf.iter().fold((0.0, 0.0), |(max, min), x| {
                     (PrcFmt::max(max, *x), PrcFmt::min(min, *x))
