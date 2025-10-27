@@ -122,6 +122,7 @@ enum WsCommand {
     GetSignalLevelsSinceLast,
     GetSignalPeaksSinceStart,
     ResetSignalPeaksSinceStart,
+    GetChannelLabels,
     GetCaptureRate,
     GetUpdateInterval,
     SetUpdateInterval(usize),
@@ -165,6 +166,12 @@ enum WsResult {
     ConfigReadError(String),
     InvalidValueError(String),
     InvalidRequestError(String),
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+struct ChannelLabels {
+    playback: Option<Vec<Option<String>>>,
+    capture: Option<Vec<Option<String>>>,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -325,6 +332,10 @@ enum WsReply {
     },
     ResetSignalPeaksSinceStart {
         result: WsResult,
+    },
+    GetChannelLabels {
+        result: WsResult,
+        value: ChannelLabels,
     },
     GetCaptureRate {
         result: WsResult,
@@ -827,6 +838,16 @@ fn handle_command(
                 result: WsResult::Ok,
             };
             Some(result)
+        }
+        WsCommand::GetChannelLabels => {
+            let optional_config = shared_data_inst.active_config.lock();
+            Some(WsReply::GetChannelLabels {
+                result: WsResult::Ok,
+                value: ChannelLabels {
+                    playback: config::playback_channel_labels(&optional_config),
+                    capture: config::capture_channel_labels(&optional_config),
+                },
+            })
         }
         WsCommand::GetVersion => Some(WsReply::GetVersion {
             result: WsResult::Ok,

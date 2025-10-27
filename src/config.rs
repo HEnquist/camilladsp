@@ -302,6 +302,36 @@ impl CaptureDevice {
             CaptureDevice::SignalGenerator { channels, .. } => *channels,
         }
     }
+
+    pub fn labels(&self) -> Option<Vec<Option<String>>> {
+        match self {
+            #[cfg(target_os = "linux")]
+            CaptureDevice::Alsa { labels, .. } => labels.clone(),
+            #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
+            CaptureDevice::Bluez(dev) => dev.labels.clone(),
+            #[cfg(feature = "pulse-backend")]
+            CaptureDevice::Pulse { labels, .. } => labels.clone(),
+            CaptureDevice::RawFile(dev) => dev.labels.clone(),
+            CaptureDevice::WavFile(dev) => dev.labels.clone(),
+            CaptureDevice::Stdin(dev) => dev.labels.clone(),
+            #[cfg(target_os = "macos")]
+            CaptureDevice::CoreAudio(dev) => dev.labels.clone(),
+            #[cfg(target_os = "windows")]
+            CaptureDevice::Wasapi(dev) => dev.labels.clone(),
+            #[cfg(all(
+                feature = "cpal-backend",
+                feature = "jack-backend",
+                any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd"
+                )
+            ))]
+            CaptureDevice::Jack { labels, .. } => labels.clone(),
+            CaptureDevice::SignalGenerator { labels, .. } => labels.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -2204,4 +2234,31 @@ pub fn used_capture_channels(conf: &Configuration) -> Vec<bool> {
     }
     let capture_channels = conf.devices.capture.channels();
     vec![true; capture_channels]
+}
+
+pub fn capture_channel_labels(config: &Option<Configuration>) -> Option<Vec<Option<String>>> {
+    if let Some(conf) = config {
+        conf.devices.capture.labels()
+    } else {
+        None
+    }
+}
+
+pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Option<String>>> {
+    if let Some(conf) = config {
+        if let Some(pipeline) = &conf.pipeline {
+            for step in pipeline.iter().rev() {
+                if let PipelineStep::Mixer(mixerstep) = step {
+                    if let Some(mixers) = &conf.mixers {
+                        if let Some(mixer) = mixers.get(&mixerstep.name) {
+                            return mixer.labels.clone();
+                        }
+                    }
+                }
+            }
+        }
+        conf.devices.capture.labels()
+    } else {
+        None
+    }
 }

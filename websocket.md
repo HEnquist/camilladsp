@@ -130,7 +130,7 @@ Commands for reading and changing settings for the websocket server.
 - `GetStateFilePath` : get the current state file path, returns null if no state file is used.
 - `GetStateFileUpdated` : check if all changes have been saved to the state file.
 
-#### Commands for reading signal RMS and peak. 
+#### Commands for reading signal RMS and peak.
 These commands all return a vector of floats, with one value per channel.
 The values are the channel levels in dB, where 0 dB means full level.
 
@@ -167,6 +167,11 @@ Get the peak since start.
 - `GetSignalPeaksSinceStart` : Get the playback and capture peak level since processing started.
   The values are returned as a json object with keys `playback` and `capture`.
 - `ResetSignalPeaksSinceStart` : Reset the peak values. Note that this resets the peak for all clients.
+
+The configuration may include labels for the channels.
+These are intended for display, for example in VU meters, and are not used by CamillaDSP itself.
+- `GetChannelLabels` : Get the playback and capture channel labels.
+  The labels are returned as a json object with keys `playback` and `capture`.
 
 
 ### Volume control
