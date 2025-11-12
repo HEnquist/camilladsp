@@ -1965,6 +1965,11 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                 "The Wasapi capture backend does not support FLOAT64LE sample format",
             )
             .into());
+        } else if dev.format == BinarySampleFormat::S24LE4RJ {
+            return Err(ConfigError::new(
+                "The Wasapi capture backend does not support S24LE4RJ sample format",
+            )
+            .into());
         }
     }
     #[cfg(target_os = "windows")]
@@ -1990,6 +1995,11 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         if dev.format == BinarySampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The Wasapi playback backend does not support FLOAT64LE sample format",
+            )
+            .into());
+        } else if dev.format == BinarySampleFormat::S24LE4RJ {
+            return Err(ConfigError::new(
+                "The Wasapi playback backend does not support S24LE4RJ sample format",
             )
             .into());
         }

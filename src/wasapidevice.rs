@@ -121,7 +121,7 @@ fn wave_format(
         BinarySampleFormat::S16LE => {
             wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        BinarySampleFormat::S24LE4RJ => {
+        BinarySampleFormat::S24LE4LJ => {
             wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
         BinarySampleFormat::S24LE3 => {
