@@ -16,7 +16,7 @@
 
 use crate::audiodevice::*;
 use crate::config;
-use crate::config::{ConfigError, SampleFormat};
+use crate::config::{BinarySampleFormat, ConfigError};
 use crate::conversions::{
     chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
 };
@@ -66,7 +66,7 @@ pub struct CpalPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
+    pub sample_format: BinarySampleFormat,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -81,7 +81,7 @@ pub struct CpalCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
+    pub sample_format: BinarySampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
@@ -93,8 +93,8 @@ fn open_cpal_playback(
     devname: &str,
     samplerate: usize,
     channels: usize,
-    sample_format: &SampleFormat,
-) -> Res<(Device, StreamConfig, cpal::SampleFormat)> {
+    sample_format: &BinarySampleFormat,
+) -> Res<(Device, StreamConfig, cpal::BinarySampleFormat)> {
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
@@ -132,8 +132,8 @@ fn open_cpal_playback(
         }
     };
     let cpal_format = match sample_format {
-        SampleFormat::S16LE => cpal::SampleFormat::I16,
-        SampleFormat::FLOAT32LE => cpal::SampleFormat::F32,
+        BinarySampleFormat::S16LE => cpal::BinarySampleFormat::I16,
+        BinarySampleFormat::FLOAT32LE => cpal::BinarySampleFormat::F32,
         _ => panic!("Unsupported sample format"),
     };
     let stream_config = StreamConfig {
@@ -150,8 +150,8 @@ fn open_cpal_capture(
     devname: &str,
     samplerate: usize,
     channels: usize,
-    sample_format: &SampleFormat,
-) -> Res<(Device, StreamConfig, cpal::SampleFormat)> {
+    sample_format: &BinarySampleFormat,
+) -> Res<(Device, StreamConfig, cpal::BinarySampleFormat)> {
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
@@ -190,8 +190,8 @@ fn open_cpal_capture(
     };
 
     let cpal_format = match sample_format {
-        SampleFormat::S16LE => cpal::SampleFormat::I16,
-        SampleFormat::FLOAT32LE => cpal::SampleFormat::F32,
+        BinarySampleFormat::S16LE => cpal::BinarySampleFormat::I16,
+        BinarySampleFormat::FLOAT32LE => cpal::BinarySampleFormat::F32,
         _ => panic!("Unsupported sample format"),
     };
     let stream_config = StreamConfig {
@@ -260,7 +260,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
 
                         let stream = match sample_format {
-                            SampleFormat::S16LE => {
+                            BinarySampleFormat::S16LE => {
                                 trace!("Build i16 output stream");
                                 let mut clipped = 0;
                                 let mut running = true;
@@ -317,7 +317,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                 trace!("i16 output stream ready");
                                 stream
                             }
-                            SampleFormat::FLOAT32LE => {
+                            BinarySampleFormat::FLOAT32LE => {
                                 trace!("Build f32 output stream");
                                 let mut clipped = 0;
                                 let mut running = true;
@@ -526,7 +526,7 @@ impl CaptureDevice for CpalCaptureDevice {
                         let (tx_dev_i, rx_dev_i) = crossbeam_channel::bounded(1);
                         let (tx_dev_f, rx_dev_f) = crossbeam_channel::bounded(1);
                         let stream = match sample_format {
-                            SampleFormat::S16LE => {
+                            BinarySampleFormat::S16LE => {
                                 trace!("Build i16 input stream");
                                 let stream = device.build_input_stream(
                                     &stream_config,
@@ -542,7 +542,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 trace!("i16 input stream ready");
                                 stream
                             },
-                            SampleFormat::FLOAT32LE => {
+                            BinarySampleFormat::FLOAT32LE => {
                                 trace!("Build f32 input stream");
                                 let stream = device.build_input_stream(
                                     &stream_config,
@@ -624,7 +624,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             );
 
                             let mut chunk = match sample_format {
-                                SampleFormat::S16LE => {
+                                BinarySampleFormat::S16LE => {
                                     while sample_queue_i.len() < capture_samples {
                                         //trace!("Read message to fill capture buffer");
                                         match rx_dev_i.recv() {
@@ -645,7 +645,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                         scalefactor,
                                     )
                                 },
-                                SampleFormat::FLOAT32LE => {
+                                BinarySampleFormat::FLOAT32LE => {
                                     while sample_queue_f.len() < capture_samples {
                                         //trace!("Read message to fill capture buffer");
                                         match rx_dev_f.recv() {

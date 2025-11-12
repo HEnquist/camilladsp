@@ -16,7 +16,7 @@
 
 use crate::audiodevice::*;
 use crate::config;
-use crate::config::SampleFormat;
+use crate::config::BinarySampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 
@@ -53,7 +53,7 @@ pub struct FilePlaybackDevice {
     pub chunksize: usize,
     pub samplerate: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
+    pub sample_format: BinarySampleFormat,
     pub wav_header: bool,
 }
 
@@ -78,7 +78,7 @@ pub struct FileCaptureDevice {
     pub capture_samplerate: usize,
     pub resampler_config: Option<config::Resampler>,
     pub channels: usize,
-    pub sample_format: Option<SampleFormat>,
+    pub sample_format: Option<BinarySampleFormat>,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub extra_samples: usize,
@@ -96,7 +96,7 @@ struct CaptureChannels {
 
 struct CaptureParams {
     channels: usize,
-    sample_format: SampleFormat,
+    sample_format: BinarySampleFormat,
     store_bytes_per_sample: usize,
     extra_bytes: usize,
     buffer_bytes: usize,

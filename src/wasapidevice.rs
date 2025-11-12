@@ -16,7 +16,7 @@
 
 use crate::audiodevice::*;
 use crate::config;
-use crate::config::{ConfigError, SampleFormat};
+use crate::config::{BinarySampleFormat, ConfigError};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::helpers::PIRateController;
@@ -57,7 +57,7 @@ pub struct WasapiPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
+    pub sample_format: BinarySampleFormat,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -74,7 +74,7 @@ pub struct WasapiCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
+    pub sample_format: BinarySampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
@@ -113,24 +113,24 @@ fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<Str
 }
 
 fn wave_format(
-    sample_format: &SampleFormat,
+    sample_format: &BinarySampleFormat,
     samplerate: usize,
     channels: usize,
 ) -> wasapi::WaveFormat {
     match sample_format {
-        SampleFormat::S16LE => {
+        BinarySampleFormat::S16LE => {
             wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        SampleFormat::S24LE => {
+        BinarySampleFormat::S24LE4RJ => {
             wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        SampleFormat::S24LE3 => {
+        BinarySampleFormat::S24LE3 => {
             wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        SampleFormat::S32LE => {
+        BinarySampleFormat::S32LE => {
             wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        SampleFormat::FLOAT32LE => wasapi::WaveFormat::new(
+        BinarySampleFormat::FLOAT32LE => wasapi::WaveFormat::new(
             32,
             32,
             &wasapi::SampleType::Float,
@@ -144,7 +144,7 @@ fn wave_format(
 
 fn get_supported_wave_format(
     audio_client: &wasapi::AudioClient,
-    sample_format: &SampleFormat,
+    sample_format: &BinarySampleFormat,
     samplerate: usize,
     channels: usize,
     sharemode: &wasapi::ShareMode,
@@ -177,7 +177,7 @@ fn open_playback(
     devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &SampleFormat,
+    sample_format: &BinarySampleFormat,
     exclusive: bool,
     polling: bool,
 ) -> Res<(
@@ -251,7 +251,7 @@ fn open_capture(
     devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &SampleFormat,
+    sample_format: &BinarySampleFormat,
     exclusive: bool,
     loopback: bool,
     polling: bool,

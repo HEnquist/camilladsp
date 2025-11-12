@@ -17,7 +17,7 @@
 extern crate alsa;
 extern crate nix;
 use crate::audiodevice::*;
-use crate::config::{Resampler, SampleFormat};
+use crate::config::{BinarySampleFormat, Resampler};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use alsa::ctl::{Ctl, ElemId, ElemIface, ElemType, ElemValue};
@@ -65,7 +65,7 @@ pub struct AlsaPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: Option<SampleFormat>,
+    pub sample_format: Option<BinarySampleFormat>,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -78,7 +78,7 @@ pub struct AlsaCaptureDevice {
     pub resampler_config: Option<Resampler>,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: Option<SampleFormat>,
+    pub sample_format: Option<BinarySampleFormat>,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
@@ -363,10 +363,10 @@ fn open_pcm(
     devname: String,
     samplerate: u32,
     channels: u32,
-    sample_format: &Option<SampleFormat>,
+    sample_format: &Option<BinarySampleFormat>,
     buf_manager: &mut dyn DeviceBufferManager,
     capture: bool,
-) -> Res<(alsa::PCM, SampleFormat)> {
+) -> Res<(alsa::PCM, BinarySampleFormat)> {
     let direction = if capture { "Capture" } else { "Playback" };
     debug!(
         "Available {} devices: {:?}",
@@ -409,12 +409,12 @@ fn open_pcm(
         };
         debug!("{direction}: setting format to {chosen_format}");
         match chosen_format {
-            SampleFormat::S16LE => hwp.set_format(Format::s16())?,
-            SampleFormat::S24LE => hwp.set_format(Format::s24())?,
-            SampleFormat::S24LE3 => hwp.set_format(Format::s24_3())?,
-            SampleFormat::S32LE => hwp.set_format(Format::s32())?,
-            SampleFormat::FLOAT32LE => hwp.set_format(Format::float())?,
-            SampleFormat::FLOAT64LE => hwp.set_format(Format::float64())?,
+            BinarySampleFormat::S16LE => hwp.set_format(Format::s16())?,
+            BinarySampleFormat::S24LE => hwp.set_format(Format::s24())?,
+            BinarySampleFormat::S24LE3 => hwp.set_format(Format::s24_3())?,
+            BinarySampleFormat::S32LE => hwp.set_format(Format::s32())?,
+            BinarySampleFormat::FLOAT32LE => hwp.set_format(Format::float())?,
+            BinarySampleFormat::FLOAT64LE => hwp.set_format(Format::float64())?,
         }
 
         // Set access mode, buffersize and periods

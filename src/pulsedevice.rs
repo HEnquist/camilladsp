@@ -21,7 +21,7 @@ use pulse::stream::Direction;
 
 use crate::audiodevice::*;
 use crate::config;
-use crate::config::SampleFormat;
+use crate::config::BinarySampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
@@ -72,7 +72,7 @@ pub struct PulsePlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
+    pub sample_format: BinarySampleFormat,
 }
 
 pub struct PulseCaptureDevice {
@@ -82,7 +82,7 @@ pub struct PulseCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: SampleFormat,
+    pub sample_format: BinarySampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
 }
@@ -92,7 +92,7 @@ fn open_pulse(
     devname: String,
     samplerate: u32,
     channels: u8,
-    sample_format: &SampleFormat,
+    sample_format: &BinarySampleFormat,
     capture: bool,
 ) -> Res<Simple> {
     // Open the device
@@ -103,11 +103,11 @@ fn open_pulse(
     };
 
     let pulse_format = match sample_format {
-        SampleFormat::S16LE => sample::Format::S16le,
-        SampleFormat::S24LE => sample::Format::S24_32le,
-        SampleFormat::S24LE3 => sample::Format::S24le,
-        SampleFormat::S32LE => sample::Format::S32le,
-        SampleFormat::FLOAT32LE => sample::Format::F32le,
+        BinarySampleFormat::S16LE => sample::Format::S16le,
+        BinarySampleFormat::S24LE => sample::Format::S24_32le,
+        BinarySampleFormat::S24LE3 => sample::Format::S24le,
+        BinarySampleFormat::S32LE => sample::Format::S32le,
+        BinarySampleFormat::FLOAT32LE => sample::Format::F32le,
         _ => panic!("invalid format"),
     };
 

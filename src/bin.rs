@@ -837,7 +837,7 @@ fn main_process() -> i32 {
         overrides.channels = matches.get_one::<usize>("channels").copied();
         overrides.sample_format = matches
             .get_one::<String>("format")
-            .map(|s| config::SampleFormat::from_name(s).unwrap());
+            .map(|s| config::BinarySampleFormat::from_name(s).unwrap());
     }
 
     let statefilename: Option<String> = matches.get_one::<String>("statefile").cloned();

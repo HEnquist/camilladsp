@@ -38,7 +38,7 @@ type Res<T> = Result<T, Box<dyn error::Error>>;
 #[derive(Clone)]
 pub struct Overrides {
     pub samplerate: Option<usize>,
-    pub sample_format: Option<SampleFormat>,
+    pub sample_format: Option<BinarySampleFormat>,
     pub extra_samples: Option<usize>,
     pub channels: Option<usize>,
 }
@@ -80,60 +80,29 @@ impl ConfigError {
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub enum SampleFormat {
+// Similar to BinarySampleFormat, but also includes TEXT
+pub enum FileSampleFormat {
+    TEXT,
     S16LE,
-    S24LE,
+    S24LE4RJ,
+    S24LE4LJ,
     S24LE3,
     S32LE,
     FLOAT32LE,
     FLOAT64LE,
 }
 
-impl SampleFormat {
-    pub fn bits_per_sample(&self) -> usize {
-        match self {
-            SampleFormat::S16LE => 16,
-            SampleFormat::S24LE => 24,
-            SampleFormat::S24LE3 => 24,
-            SampleFormat::S32LE => 32,
-            SampleFormat::FLOAT32LE => 32,
-            SampleFormat::FLOAT64LE => 64,
-        }
-    }
-
-    pub fn bytes_per_sample(&self) -> usize {
-        match self {
-            SampleFormat::S16LE => 2,
-            SampleFormat::S24LE => 4,
-            SampleFormat::S24LE3 => 3,
-            SampleFormat::S32LE => 4,
-            SampleFormat::FLOAT32LE => 4,
-            SampleFormat::FLOAT64LE => 8,
-        }
-    }
-
-    pub fn from_name(label: &str) -> Option<SampleFormat> {
-        match label {
-            "FLOAT32LE" => Some(SampleFormat::FLOAT32LE),
-            "FLOAT64LE" => Some(SampleFormat::FLOAT64LE),
-            "S16LE" => Some(SampleFormat::S16LE),
-            "S24LE" => Some(SampleFormat::S24LE),
-            "S24LE3" => Some(SampleFormat::S24LE3),
-            "S32LE" => Some(SampleFormat::S32LE),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for SampleFormat {
+impl fmt::Display for FileSampleFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let formatstr = match self {
-            SampleFormat::FLOAT32LE => "FLOAT32LE",
-            SampleFormat::FLOAT64LE => "FLOAT64LE",
-            SampleFormat::S16LE => "S16LE",
-            SampleFormat::S24LE => "S24LE",
-            SampleFormat::S24LE3 => "S24LE3",
-            SampleFormat::S32LE => "S32LE",
+            FileSampleFormat::FLOAT32LE => "FLOAT32LE",
+            FileSampleFormat::FLOAT64LE => "FLOAT64LE",
+            FileSampleFormat::S16LE => "S16LE",
+            FileSampleFormat::S24LE4RJ => "S24LE4RJ",
+            FileSampleFormat::S24LE4LJ => "S24LE4LJ",
+            FileSampleFormat::S24LE3 => "S24LE3",
+            FileSampleFormat::S32LE => "S32LE",
+            FileSampleFormat::TEXT => "TEXT",
         };
         write!(f, "{formatstr}")
     }
@@ -142,51 +111,92 @@ impl fmt::Display for SampleFormat {
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
-// Similar to SampleFormat, but also includes TEXT
-pub enum FileFormat {
-    TEXT,
+pub enum BinarySampleFormat {
     S16LE,
-    S24LE,
+    S24LE4RJ,
+    S24LE4LJ,
     S24LE3,
     S32LE,
     FLOAT32LE,
     FLOAT64LE,
 }
 
-impl FileFormat {
+impl BinarySampleFormat {
     pub fn bits_per_sample(&self) -> usize {
         match self {
-            FileFormat::S16LE => 16,
-            FileFormat::S24LE => 24,
-            FileFormat::S24LE3 => 24,
-            FileFormat::S32LE => 32,
-            FileFormat::FLOAT32LE => 32,
-            FileFormat::FLOAT64LE => 64,
-            FileFormat::TEXT => 0,
+            BinarySampleFormat::S16LE => 16,
+            BinarySampleFormat::S24LE4RJ => 24,
+            BinarySampleFormat::S24LE4LJ => 24,
+            BinarySampleFormat::S24LE3 => 24,
+            BinarySampleFormat::S32LE => 32,
+            BinarySampleFormat::FLOAT32LE => 32,
+            BinarySampleFormat::FLOAT64LE => 64,
         }
     }
 
     pub fn bytes_per_sample(&self) -> usize {
         match self {
-            FileFormat::S16LE => 2,
-            FileFormat::S24LE => 4,
-            FileFormat::S24LE3 => 3,
-            FileFormat::S32LE => 4,
-            FileFormat::FLOAT32LE => 4,
-            FileFormat::FLOAT64LE => 8,
-            FileFormat::TEXT => 0,
+            BinarySampleFormat::S16LE => 2,
+            BinarySampleFormat::S24LE4RJ => 4,
+            BinarySampleFormat::S24LE4LJ => 4,
+            BinarySampleFormat::S24LE3 => 3,
+            BinarySampleFormat::S32LE => 4,
+            BinarySampleFormat::FLOAT32LE => 4,
+            BinarySampleFormat::FLOAT64LE => 8,
         }
     }
 
-    pub fn from_sample_format(sample_format: &SampleFormat) -> Self {
+    pub fn from_file_sample_format(sample_format: &FileSampleFormat) -> Self {
         match sample_format {
-            SampleFormat::S16LE => FileFormat::S16LE,
-            SampleFormat::S24LE => FileFormat::S24LE,
-            SampleFormat::S24LE3 => FileFormat::S24LE3,
-            SampleFormat::S32LE => FileFormat::S32LE,
-            SampleFormat::FLOAT32LE => FileFormat::FLOAT32LE,
-            SampleFormat::FLOAT64LE => FileFormat::FLOAT64LE,
+            FileSampleFormat::S16LE => Self::S16LE,
+            FileSampleFormat::S24LE4RJ => Self::S24LE4RJ,
+            FileSampleFormat::S24LE4LJ => Self::S24LE4LJ,
+            FileSampleFormat::S24LE3 => Self::S24LE3,
+            FileSampleFormat::S32LE => Self::S32LE,
+            FileSampleFormat::FLOAT32LE => Self::FLOAT32LE,
+            FileSampleFormat::FLOAT64LE => Self::FLOAT64LE,
+            FileSampleFormat::TEXT => unreachable!(),
         }
+    }
+
+    pub fn to_file_sample_format(&self) -> FileSampleFormat {
+        match self {
+            Self::S16LE => FileSampleFormat::S16LE,
+            Self::S24LE4RJ => FileSampleFormat::S24LE4RJ,
+            Self::S24LE4LJ => FileSampleFormat::S24LE4LJ,
+            Self::S24LE3 => FileSampleFormat::S24LE3,
+            Self::S32LE => FileSampleFormat::S32LE,
+            Self::FLOAT32LE => FileSampleFormat::FLOAT32LE,
+            Self::FLOAT64LE => FileSampleFormat::FLOAT64LE,
+        }
+    }
+
+    pub fn from_name(label: &str) -> Option<BinarySampleFormat> {
+        match label {
+            "FLOAT32LE" => Some(Self::FLOAT32LE),
+            "FLOAT64LE" => Some(Self::FLOAT64LE),
+            "S16LE" => Some(Self::S16LE),
+            "S24LE4RJ" => Some(Self::S24LE4RJ),
+            "S24LE4LJ" => Some(Self::S24LE4LJ),
+            "S24LE3" => Some(Self::S24LE3),
+            "S32LE" => Some(Self::S32LE),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for BinarySampleFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let formatstr = match self {
+            BinarySampleFormat::FLOAT32LE => "FLOAT32LE",
+            BinarySampleFormat::FLOAT64LE => "FLOAT64LE",
+            BinarySampleFormat::S16LE => "S16LE",
+            BinarySampleFormat::S24LE4RJ => "S24LE4RJ",
+            BinarySampleFormat::S24LE4LJ => "S24LE4LJ",
+            BinarySampleFormat::S24LE3 => "S24LE3",
+            BinarySampleFormat::S32LE => "S32LE",
+        };
+        write!(f, "{formatstr}")
     }
 }
 
@@ -210,7 +220,7 @@ pub enum CaptureDevice {
         channels: usize,
         device: String,
         #[serde(default)]
-        format: Option<SampleFormat>,
+        format: Option<BinarySampleFormat>,
         #[serde(default)]
         stop_on_inactive: Option<bool>,
         #[serde(default)]
@@ -229,7 +239,7 @@ pub enum CaptureDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
-        format: SampleFormat,
+        format: BinarySampleFormat,
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
     },
@@ -340,7 +350,7 @@ pub struct CaptureDeviceRawFile {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
     pub filename: String,
-    pub format: SampleFormat,
+    pub format: BinarySampleFormat,
     #[serde(default)]
     pub extra_samples: Option<usize>,
     #[serde(default)]
@@ -397,7 +407,7 @@ impl CaptureDeviceWavFile {
 pub struct CaptureDeviceStdin {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
-    pub format: SampleFormat,
+    pub format: BinarySampleFormat,
     #[serde(default)]
     pub extra_samples: Option<usize>,
     #[serde(default)]
@@ -430,7 +440,7 @@ pub struct CaptureDeviceBluez {
     pub dbus_path: String,
     // TODO: sample format, sample rate and channel count should be determined
     // from D-Bus properties
-    pub format: SampleFormat,
+    pub format: BinarySampleFormat,
     pub channels: usize,
     #[serde(default)]
     pub labels: Option<Vec<Option<String>>>,
@@ -450,7 +460,7 @@ pub struct CaptureDeviceWasapi {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
     pub device: Option<String>,
-    pub format: SampleFormat,
+    pub format: BinarySampleFormat,
     #[serde(default)]
     exclusive: Option<bool>,
     #[serde(default)]
@@ -484,7 +494,7 @@ pub struct CaptureDeviceCA {
     pub channels: usize,
     pub device: Option<String>,
     #[serde(default)]
-    pub format: Option<SampleFormat>,
+    pub format: Option<BinarySampleFormat>,
     #[serde(default)]
     pub labels: Option<Vec<Option<String>>>,
 }
@@ -500,7 +510,7 @@ pub enum PlaybackDevice {
         channels: usize,
         device: String,
         #[serde(default)]
-        format: Option<SampleFormat>,
+        format: Option<BinarySampleFormat>,
     },
     #[cfg(feature = "pulse-backend")]
     #[serde(alias = "PULSE", alias = "pulse")]
@@ -508,14 +518,14 @@ pub enum PlaybackDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
-        format: SampleFormat,
+        format: BinarySampleFormat,
     },
     #[serde(alias = "FILE", alias = "file")]
     File {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         filename: String,
-        format: SampleFormat,
+        format: BinarySampleFormat,
         #[serde(default)]
         wav_header: Option<bool>,
     },
@@ -523,7 +533,7 @@ pub enum PlaybackDevice {
     Stdout {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
-        format: SampleFormat,
+        format: BinarySampleFormat,
         #[serde(default)]
         wav_header: Option<bool>,
     },
@@ -586,7 +596,7 @@ pub struct PlaybackDeviceWasapi {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
     pub device: Option<String>,
-    pub format: SampleFormat,
+    pub format: BinarySampleFormat,
     #[serde(default)]
     exclusive: Option<bool>,
     #[serde(default)]
@@ -612,7 +622,7 @@ pub struct PlaybackDeviceCA {
     pub channels: usize,
     pub device: Option<String>,
     #[serde(default)]
-    pub format: Option<SampleFormat>,
+    pub format: Option<BinarySampleFormat>,
     #[serde(default)]
     exclusive: Option<bool>,
 }
@@ -854,7 +864,7 @@ pub enum ConvParameters {
 pub struct ConvParametersRaw {
     pub filename: String,
     #[serde(default)]
-    format: Option<FileFormat>,
+    format: Option<FileSampleFormat>,
     #[serde(default)]
     skip_bytes_lines: Option<usize>,
     #[serde(default)]
@@ -862,8 +872,8 @@ pub struct ConvParametersRaw {
 }
 
 impl ConvParametersRaw {
-    pub fn format(&self) -> FileFormat {
-        self.format.unwrap_or(FileFormat::TEXT)
+    pub fn format(&self) -> FileSampleFormat {
+        self.format.unwrap_or(FileSampleFormat::TEXT)
     }
 
     pub fn skip_bytes_lines(&self) -> usize {
@@ -1950,7 +1960,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
-        if dev.format == SampleFormat::FLOAT64LE {
+        if dev.format == BinarySampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The Wasapi capture backend does not support FLOAT64LE sample format",
             )
@@ -1959,7 +1969,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
-        if dev.format != SampleFormat::FLOAT32LE && !dev.is_exclusive() {
+        if dev.format != BinarySampleFormat::FLOAT32LE && !dev.is_exclusive() {
             return Err(ConfigError::new(
                 "Wasapi shared mode capture must use FLOAT32LE sample format",
             )
@@ -1977,7 +1987,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {
-        if dev.format == SampleFormat::FLOAT64LE {
+        if dev.format == BinarySampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The Wasapi playback backend does not support FLOAT64LE sample format",
             )
@@ -1986,7 +1996,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {
-        if dev.format != SampleFormat::FLOAT32LE && !dev.is_exclusive() {
+        if dev.format != BinarySampleFormat::FLOAT32LE && !dev.is_exclusive() {
             return Err(ConfigError::new(
                 "Wasapi shared mode playback must use FLOAT32LE sample format",
             )
@@ -1995,7 +2005,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(feature = "pulse-backend")]
     if let CaptureDevice::Pulse { format, .. } = &conf.devices.capture {
-        if *format == SampleFormat::FLOAT64LE {
+        if *format == BinarySampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The PulseAudio capture backend does not support FLOAT64LE sample format",
             )
@@ -2004,7 +2014,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(feature = "pulse-backend")]
     if let PlaybackDevice::Pulse { format, .. } = &conf.devices.playback {
-        if *format == SampleFormat::FLOAT64LE {
+        if *format == BinarySampleFormat::FLOAT64LE {
             return Err(ConfigError::new(
                 "The PulseAudio playback backend does not support FLOAT64LE sample format",
             )
@@ -2013,7 +2023,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "macos")]
     if let CaptureDevice::CoreAudio(dev) = &conf.devices.capture {
-        if dev.format == Some(SampleFormat::FLOAT64LE) {
+        if dev.format == Some(BinarySampleFormat::FLOAT64LE) {
             return Err(ConfigError::new(
                 "The CoreAudio capture backend does not support FLOAT64LE sample format",
             )
@@ -2022,7 +2032,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "macos")]
     if let PlaybackDevice::CoreAudio(dev) = &conf.devices.playback {
-        if dev.format == Some(SampleFormat::FLOAT64LE) {
+        if dev.format == Some(BinarySampleFormat::FLOAT64LE) {
             return Err(ConfigError::new(
                 "The CoreAudio playback backend does not support FLOAT64LE sample format",
             )

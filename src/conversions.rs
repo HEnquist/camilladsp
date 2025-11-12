@@ -14,12 +14,12 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::config::SampleFormat;
+use crate::config::BinarySampleFormat;
 use crate::{audiodevice::*, recycle_chunk, vec_from_stash};
 use crate::{container_from_stash, PrcFmt};
 use audioadapter::{Adapter, AdapterMut};
 use audioadapter_buffers::number_to_float::InterleavedNumbers;
-use audioadapter_sample::sample::{F32LE, F64LE, I16LE, I24LE, I32LE};
+use audioadapter_sample::sample::{F32_LE, F64_LE, I16_LE, I24_4LJ_LE, I24_4RJ_LE, I24_LE, I32_LE};
 #[cfg(feature = "cpal-backend")]
 use num_traits;
 #[cfg(feature = "cpal-backend")]
@@ -29,43 +29,47 @@ use std::collections::VecDeque;
 pub fn chunk_to_buffer_rawbytes(
     chunk: AudioChunk,
     buf: &mut [u8],
-    sampleformat: &SampleFormat,
+    sample_format: &BinarySampleFormat,
 ) -> (usize, usize) {
     let frames = chunk.frames;
     let channels = chunk.channels;
-    let mut adapter: Box<dyn AdapterMut<PrcFmt>> = match sampleformat {
-        SampleFormat::S16LE => Box::new(
-            InterleavedNumbers::<&mut [I16LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
+    let mut adapter: Box<dyn AdapterMut<PrcFmt>> = match *sample_format {
+        BinarySampleFormat::S16LE => Box::new(
+            InterleavedNumbers::<&mut [I16_LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
                 .unwrap(),
         ),
-        SampleFormat::S24LE3 => Box::new(
-            InterleavedNumbers::<&mut [I24LE<3>], PrcFmt>::new_from_bytes_mut(
+        BinarySampleFormat::S24LE3 => Box::new(
+            InterleavedNumbers::<&mut [I24_LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
+                .unwrap(),
+        ),
+        BinarySampleFormat::S24LE4RJ => Box::new(
+            InterleavedNumbers::<&mut [I24_4RJ_LE], PrcFmt>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
         ),
-        SampleFormat::S24LE => Box::new(
-            InterleavedNumbers::<&mut [I24LE<4>], PrcFmt>::new_from_bytes_mut(
+        BinarySampleFormat::S24LE4LJ => Box::new(
+            InterleavedNumbers::<&mut [I24_4LJ_LE], PrcFmt>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
         ),
-        SampleFormat::S32LE => Box::new(
-            InterleavedNumbers::<&mut [I32LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
+        BinarySampleFormat::S32LE => Box::new(
+            InterleavedNumbers::<&mut [I32_LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
                 .unwrap(),
         ),
-        SampleFormat::FLOAT32LE => Box::new(
-            InterleavedNumbers::<&mut [F32LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
+        BinarySampleFormat::FLOAT32LE => Box::new(
+            InterleavedNumbers::<&mut [F32_LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
                 .unwrap(),
         ),
-        SampleFormat::FLOAT64LE => Box::new(
-            InterleavedNumbers::<&mut [F64LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
+        BinarySampleFormat::FLOAT64LE => Box::new(
+            InterleavedNumbers::<&mut [F64_LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
                 .unwrap(),
         ),
     };
     let mut clipped = 0;
     let mut peak: PrcFmt = 0.0;
-    let num_valid_bytes = chunk.valid_frames * chunk.channels * sampleformat.bytes_per_sample();
+    let num_valid_bytes = chunk.valid_frames * chunk.channels * sample_format.bytes_per_sample();
     for chan in 0..channels {
         if chunk.waveforms[chan].is_empty() {
             adapter.fill_channel_with(chan, &0.0);
@@ -100,38 +104,46 @@ pub fn chunk_to_buffer_rawbytes(
 pub fn buffer_to_chunk_rawbytes(
     buffer: &[u8],
     channels: usize,
-    sampleformat: &SampleFormat,
+    sample_format: &BinarySampleFormat,
     valid_bytes: usize,
     used_channels: &[bool],
 ) -> AudioChunk {
-    let num_frames = buffer.len() / sampleformat.bytes_per_sample() / channels;
-    let num_valid_frames = valid_bytes / sampleformat.bytes_per_sample() / channels;
+    let num_frames = buffer.len() / sample_format.bytes_per_sample() / channels;
+    let num_valid_frames = valid_bytes / sample_format.bytes_per_sample() / channels;
     let mut maxvalue: PrcFmt = 0.0;
     let mut minvalue: PrcFmt = 0.0;
     let mut wfs = container_from_stash(channels);
-    let adapter: Box<dyn Adapter<PrcFmt>> = match sampleformat {
-        SampleFormat::S16LE => Box::new(
-            InterleavedNumbers::<&[I16LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
+    let adapter: Box<dyn Adapter<PrcFmt>> = match *sample_format {
+        BinarySampleFormat::S16LE => Box::new(
+            InterleavedNumbers::<&[I16_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
                 .unwrap(),
         ),
-        SampleFormat::S24LE3 => Box::new(
-            InterleavedNumbers::<&[I24LE<3>], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
+        BinarySampleFormat::S24LE3 => Box::new(
+            InterleavedNumbers::<&[I24_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
                 .unwrap(),
         ),
-        SampleFormat::S24LE => Box::new(
-            InterleavedNumbers::<&[I24LE<4>], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
+        BinarySampleFormat::S24LE4RJ => Box::new(
+            InterleavedNumbers::<&[I24_4RJ_LE], PrcFmt>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
+        ),
+        BinarySampleFormat::S24LE4LJ => Box::new(
+            InterleavedNumbers::<&[I24_4LJ_LE], PrcFmt>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
+        ),
+        BinarySampleFormat::S32LE => Box::new(
+            InterleavedNumbers::<&[I32_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
                 .unwrap(),
         ),
-        SampleFormat::S32LE => Box::new(
-            InterleavedNumbers::<&[I32LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
+        BinarySampleFormat::FLOAT32LE => Box::new(
+            InterleavedNumbers::<&[F32_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
                 .unwrap(),
         ),
-        SampleFormat::FLOAT32LE => Box::new(
-            InterleavedNumbers::<&[F32LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
-        ),
-        SampleFormat::FLOAT64LE => Box::new(
-            InterleavedNumbers::<&[F64LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
+        BinarySampleFormat::FLOAT64LE => Box::new(
+            InterleavedNumbers::<&[F64_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
                 .unwrap(),
         ),
     };
@@ -333,7 +345,7 @@ pub fn queue_to_chunk_float<T: num_traits::cast::AsPrimitive<PrcFmt>>(
 #[cfg(test)]
 mod tests {
     use crate::audiodevice::AudioChunk;
-    use crate::config::SampleFormat;
+    use crate::config::BinarySampleFormat;
     use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
     #[cfg(feature = "cpal-backend")]
     use crate::conversions::{
@@ -346,33 +358,33 @@ mod tests {
 
     #[test]
     fn to_buffer_int16() {
-        let sampleformat = SampleFormat::S16LE;
+        let BinarySampleFormat = BinarySampleFormat::S16LE;
         let waveforms = vec![vec![0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 2];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &sampleformat);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat);
         let expected = vec![0xCC, 0x0C];
         assert_eq!(buffer, expected);
     }
 
     #[test]
     fn to_buffer_int24_3() {
-        let sampleformat = SampleFormat::S24LE3;
+        let BinarySampleFormat = BinarySampleFormat::S24LE3;
         let waveforms = vec![vec![0.1, -0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 2, 2);
         let mut buffer = vec![0u8; 6];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &sampleformat);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat);
         let expected = vec![0xCC, 0xCC, 0x0C, 0x33, 0x33, 0xF3];
         assert_eq!(buffer, expected);
     }
 
     #[test]
     fn to_buffer_int24_4() {
-        let sampleformat = SampleFormat::S24LE;
+        let BinarySampleFormat = BinarySampleFormat::S24LE;
         let waveforms = vec![vec![0.1, -0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 2, 2);
         let mut buffer = vec![0u8; 8];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &sampleformat);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat);
         let expected = vec![0xCC, 0xCC, 0x0C, 0x00, 0x33, 0x33, 0xF3, 0x00];
         assert_eq!(buffer, expected);
     }
@@ -382,8 +394,13 @@ mod tests {
         let waveforms = vec![vec![0.1, -0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 2, 2);
         let buffer = vec![0xCC, 0xCC, 0x0C, 0x34, 0x33, 0xF3];
-        let chunk2 =
-            buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S24LE3, buffer.len(), &[true; 1]);
+        let chunk2 = buffer_to_chunk_rawbytes(
+            &buffer,
+            1,
+            &BinarySampleFormat::S24LE3,
+            buffer.len(),
+            &[true; 1],
+        );
         assert!(
             (chunk.waveforms[0][0] - chunk2.waveforms[0][0]).abs() < 1.0e-6,
             "{} != {}",
@@ -403,8 +420,13 @@ mod tests {
         let waveforms = vec![vec![0.1, -0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 2, 2);
         let buffer = vec![0xCC, 0xCC, 0x0C, 0x00, 0x34, 0x33, 0xF3, 0x00];
-        let chunk2 =
-            buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S24LE, buffer.len(), &[true; 1]);
+        let chunk2 = buffer_to_chunk_rawbytes(
+            &buffer,
+            1,
+            &BinarySampleFormat::S24LE,
+            buffer.len(),
+            &[true; 1],
+        );
         assert!(
             (chunk.waveforms[0][0] - chunk2.waveforms[0][0]).abs() < 1.0e-6,
             "{} != {}",
@@ -424,7 +446,7 @@ mod tests {
         let waveforms = vec![vec![0.1, 0.1], Vec::new()];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 2, 2);
         let mut buffer = vec![0u8; 12];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S24LE3);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S24LE3);
         let expected = vec![
             0xCC, 0xCC, 0x0C, 0x00, 0x00, 0x00, 0xCC, 0xCC, 0x0C, 0x00, 0x00, 0x00,
         ];
@@ -433,7 +455,7 @@ mod tests {
         let waveforms = vec![Vec::new(), vec![0.1, 0.1]];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 2, 2);
         let mut buffer = vec![0u8; 12];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S24LE3);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S24LE3);
         let expected = vec![
             0x00, 0x00, 0x00, 0xCC, 0xCC, 0x0C, 0x00, 0x00, 0x00, 0xCC, 0xCC, 0x0C,
         ];
@@ -445,7 +467,7 @@ mod tests {
         let waveforms = vec![vec![0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 4];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S32LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S32LE);
         #[cfg(feature = "32bit")]
         let expected = vec![0xD0, 0xCC, 0xCC, 0x0C];
         #[cfg(not(feature = "32bit"))]
@@ -458,7 +480,7 @@ mod tests {
         let waveforms = vec![vec![0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 4];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::FLOAT32LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::FLOAT32LE);
         let expected = vec![0xCD, 0xCC, 0xCC, 0x3D];
         assert_eq!(buffer, expected);
     }
@@ -468,7 +490,7 @@ mod tests {
         let waveforms = vec![vec![0.1]; 1];
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 8];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::FLOAT64LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::FLOAT64LE);
         #[cfg(feature = "32bit")]
         let expected = vec![0x00, 0x00, 0x00, 0xA0, 0x99, 0x99, 0xB9, 0x3F];
         #[cfg(not(feature = "32bit"))]
@@ -481,9 +503,14 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 2];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S16LE);
-        let chunk2 =
-            buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S16LE, buffer.len(), &[true; 1]);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S16LE);
+        let chunk2 = buffer_to_chunk_rawbytes(
+            &buffer,
+            1,
+            &BinarySampleFormat::S16LE,
+            buffer.len(),
+            &[true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -492,9 +519,14 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S24LE);
-        let chunk2 =
-            buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S24LE, buffer.len(), &[true; 1]);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S24LE4RJ);
+        let chunk2 = buffer_to_chunk_rawbytes(
+            &buffer,
+            1,
+            &BinarySampleFormat::S24LE4RJ,
+            buffer.len(),
+            &[true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -503,9 +535,14 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 3];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S24LE3);
-        let chunk2 =
-            buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S24LE3, buffer.len(), &[true; 1]);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S24LE3);
+        let chunk2 = buffer_to_chunk_rawbytes(
+            &buffer,
+            1,
+            &BinarySampleFormat::S24LE3,
+            buffer.len(),
+            &[true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -514,9 +551,14 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S32LE);
-        let chunk2 =
-            buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S32LE, buffer.len(), &[true; 1]);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S32LE);
+        let chunk2 = buffer_to_chunk_rawbytes(
+            &buffer,
+            1,
+            &BinarySampleFormat::S32LE,
+            buffer.len(),
+            &[true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -525,9 +567,14 @@ mod tests {
         let waveforms = vec![vec![-1.0, 0.0, 32767.0 / 32768.0]; 1];
         let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 2];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S16LE);
-        let chunk2 =
-            buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S16LE, buffer.len(), &[true; 1]);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S16LE);
+        let chunk2 = buffer_to_chunk_rawbytes(
+            &buffer,
+            1,
+            &BinarySampleFormat::S16LE,
+            buffer.len(),
+            &[true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -536,9 +583,14 @@ mod tests {
         let waveforms = vec![vec![-1.0, 0.0, 8388607.0 / 8388608.0]; 1];
         let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S24LE);
-        let chunk2 =
-            buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S24LE, buffer.len(), &[true; 1]);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S24LE);
+        let chunk2 = buffer_to_chunk_rawbytes(
+            &buffer,
+            1,
+            &BinarySampleFormat::S24LE,
+            buffer.len(),
+            &[true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -547,9 +599,14 @@ mod tests {
         let waveforms = vec![vec![-1.0, 0.0, 2147483647.0 / 2147483648.0]; 1];
         let chunk = AudioChunk::new(vec![vec![-2.0, 0.0, 2.0]; 1], 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::S32LE);
-        let chunk2 =
-            buffer_to_chunk_rawbytes(&buffer, 1, &SampleFormat::S32LE, buffer.len(), &[true; 1]);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S32LE);
+        let chunk2 = buffer_to_chunk_rawbytes(
+            &buffer,
+            1,
+            &BinarySampleFormat::S32LE,
+            buffer.len(),
+            &[true; 1],
+        );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
 
@@ -558,11 +615,11 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 4];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::FLOAT32LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::FLOAT32LE);
         let chunk2 = buffer_to_chunk_rawbytes(
             &buffer,
             1,
-            &SampleFormat::FLOAT32LE,
+            &BinarySampleFormat::FLOAT32LE,
             buffer.len(),
             &[true; 1],
         );
@@ -574,11 +631,11 @@ mod tests {
         let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
         let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
         let mut buffer = vec![0u8; 3 * 8];
-        chunk_to_buffer_rawbytes(chunk, &mut buffer, &SampleFormat::FLOAT64LE);
+        chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::FLOAT64LE);
         let chunk2 = buffer_to_chunk_rawbytes(
             &buffer,
             1,
-            &SampleFormat::FLOAT64LE,
+            &BinarySampleFormat::FLOAT64LE,
             buffer.len(),
             &[true; 1],
         );
