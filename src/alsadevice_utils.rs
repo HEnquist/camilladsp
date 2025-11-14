@@ -14,7 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::config::BinarySampleFormat;
+use crate::config::{AlsaSampleFormat, BinarySampleFormat};
 use crate::{CaptureStatus, PlaybackStatus, PrcFmt, Res, StatusMessage};
 use alsa::card::Iter;
 use alsa::ctl::{Ctl, DeviceIter, ElemId, ElemIface, ElemType, ElemValue};
@@ -245,52 +245,52 @@ pub fn list_channels_as_text(hwp: &HwParams) -> String {
     }
 }
 
-pub fn list_formats(hwp: &HwParams) -> Res<Vec<BinarySampleFormat>> {
+pub fn list_formats(hwp: &HwParams) -> Res<Vec<AlsaSampleFormat>> {
     let mut formats = Vec::with_capacity(6);
     // Let's just check the formats supported by CamillaDSP
     if hwp.test_format(Format::s16()).is_ok() {
-        formats.push(BinarySampleFormat::I16_LE);
+        formats.push(AlsaSampleFormat::I16_LE);
     }
     if hwp.test_format(Format::s24()).is_ok() {
-        formats.push(BinarySampleFormat::S24LE);
+        formats.push(AlsaSampleFormat::I24_4_LE);
     }
     if hwp.test_format(Format::S243LE).is_ok() {
-        formats.push(BinarySampleFormat::I24_3_LE);
+        formats.push(AlsaSampleFormat::I24_3_LE);
     }
     if hwp.test_format(Format::s32()).is_ok() {
-        formats.push(BinarySampleFormat::I32_LE);
+        formats.push(AlsaSampleFormat::I32_LE);
     }
     if hwp.test_format(Format::float()).is_ok() {
-        formats.push(BinarySampleFormat::F32_LE);
+        formats.push(AlsaSampleFormat::F32_LE);
     }
     if hwp.test_format(Format::float64()).is_ok() {
-        formats.push(BinarySampleFormat::F64_LE);
+        formats.push(AlsaSampleFormat::F64_LE);
     }
     formats.shrink_to_fit();
     Ok(formats)
 }
 
-pub fn pick_preferred_format(hwp: &HwParams) -> Option<BinarySampleFormat> {
+pub fn pick_preferred_format(hwp: &HwParams) -> Option<AlsaSampleFormat> {
     // Start with integer formats, in descending quality
     if hwp.test_format(Format::s32()).is_ok() {
-        return Some(BinarySampleFormat::I32_LE);
+        return Some(AlsaSampleFormat::I32_LE);
     }
     // The two 24-bit formats are equivalent, the order does not matter
     if hwp.test_format(Format::S243LE).is_ok() {
-        return Some(BinarySampleFormat::I24_3_LE);
+        return Some(AlsaSampleFormat::I24_3_LE);
     }
     if hwp.test_format(Format::s24()).is_ok() {
-        return Some(BinarySampleFormat::S24LE);
+        return Some(AlsaSampleFormat::I24_4_LE);
     }
     if hwp.test_format(Format::s16()).is_ok() {
-        return Some(BinarySampleFormat::I16_LE);
+        return Some(AlsaSampleFormat::I16_LE);
     }
     // float formats are unusual, try these last
     if hwp.test_format(Format::float()).is_ok() {
-        return Some(BinarySampleFormat::F32_LE);
+        return Some(AlsaSampleFormat::F32_LE);
     }
     if hwp.test_format(Format::float64()).is_ok() {
-        return Some(BinarySampleFormat::F64_LE);
+        return Some(AlsaSampleFormat::F64_LE);
     }
     None
 }

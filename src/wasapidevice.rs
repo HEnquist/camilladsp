@@ -16,7 +16,7 @@
 
 use crate::audiodevice::*;
 use crate::config;
-use crate::config::{WasapiSampleFormat, ConfigError};
+use crate::config::{ConfigError, WasapiSampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::helpers::PIRateController;

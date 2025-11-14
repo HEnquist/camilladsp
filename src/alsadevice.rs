@@ -17,7 +17,7 @@
 extern crate alsa;
 extern crate nix;
 use crate::audiodevice::*;
-use crate::config::{BinarySampleFormat, Resampler};
+use crate::config::{AlsaSampleFormat, Resampler};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use alsa::ctl::{Ctl, ElemId, ElemIface, ElemType, ElemValue};
@@ -65,7 +65,7 @@ pub struct AlsaPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: Option<BinarySampleFormat>,
+    pub sample_format: Option<AlsaSampleFormat>,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -78,7 +78,7 @@ pub struct AlsaCaptureDevice {
     pub resampler_config: Option<Resampler>,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: Option<BinarySampleFormat>,
+    pub sample_format: Option<AlsaSampleFormat>,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
@@ -363,10 +363,10 @@ fn open_pcm(
     devname: String,
     samplerate: u32,
     channels: u32,
-    sample_format: &Option<BinarySampleFormat>,
+    sample_format: &Option<AlsaSampleFormat>,
     buf_manager: &mut dyn DeviceBufferManager,
     capture: bool,
-) -> Res<(alsa::PCM, BinarySampleFormat)> {
+) -> Res<(alsa::PCM, AlsaSampleFormat)> {
     let direction = if capture { "Capture" } else { "Playback" };
     debug!(
         "Available {} devices: {:?}",
@@ -403,18 +403,18 @@ fn open_pcm(
             None => {
                 let preferred = pick_preferred_format(&hwp)
                     .ok_or(DeviceError::new("Unable to find a supported sample format"))?;
-                debug!("{direction}: Picked sample format {preferred}");
+                debug!("{direction}: Picked sample format {preferred:?}");
                 preferred
             }
         };
-        debug!("{direction}: setting format to {chosen_format}");
+        debug!("{direction}: setting format to {chosen_format:?}");
         match chosen_format {
-            BinarySampleFormat::I16_LE => hwp.set_format(Format::s16())?,
-            BinarySampleFormat::S24LE => hwp.set_format(Format::s24())?,
-            BinarySampleFormat::I24_3_LE => hwp.set_format(Format::s24_3())?,
-            BinarySampleFormat::I32_LE => hwp.set_format(Format::s32())?,
-            BinarySampleFormat::F32_LE => hwp.set_format(Format::float())?,
-            BinarySampleFormat::F64_LE => hwp.set_format(Format::float64())?,
+            AlsaSampleFormat::I16_LE => hwp.set_format(Format::s16())?,
+            AlsaSampleFormat::I24_4_LE => hwp.set_format(Format::s24())?,
+            AlsaSampleFormat::I24_3_LE => hwp.set_format(Format::s24_3())?,
+            AlsaSampleFormat::I32_LE => hwp.set_format(Format::s32())?,
+            AlsaSampleFormat::F32_LE => hwp.set_format(Format::float())?,
+            AlsaSampleFormat::F64_LE => hwp.set_format(Format::float64())?,
         }
 
         // Set access mode, buffersize and periods
@@ -1129,7 +1129,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let bytes_per_sample = sample_format.bytes_per_sample();
+                        let binary_format = sample_format.to_binary_format();
+                        let bytes_per_sample = binary_format.bytes_per_sample();
                         barrier.wait();
                         debug!("Starting playback loop");
                         let pb_params = PlaybackParams {
@@ -1137,7 +1138,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             target_level,
                             adjust_period,
                             adjust_enabled,
-                            sample_format,
+                            sample_format: binary_format,
                             playback_status,
                             bytes_per_frame: channels * bytes_per_sample,
                             samplerate,
@@ -1219,12 +1220,13 @@ impl CaptureDevice for AlsaCaptureDevice {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let store_bytes_per_sample = sample_format.bytes_per_sample();
+                        let binary_format = sample_format.to_binary_format();
+                        let store_bytes_per_sample = binary_format.bytes_per_sample();
                         barrier.wait();
                         debug!("Starting captureloop");
                         let cap_params = CaptureParams {
                             channels,
-                            sample_format,
+                            sample_format: binary_format,
                             silence_timeout,
                             silence_threshold,
                             chunksize,

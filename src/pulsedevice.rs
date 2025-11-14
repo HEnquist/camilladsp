@@ -21,7 +21,7 @@ use pulse::stream::Direction;
 
 use crate::audiodevice::*;
 use crate::config;
-use crate::config::BinarySampleFormat;
+use crate::config::PulseSampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
@@ -72,7 +72,7 @@ pub struct PulsePlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: BinarySampleFormat,
+    pub sample_format: PulseSampleFormat,
 }
 
 pub struct PulseCaptureDevice {
@@ -82,7 +82,7 @@ pub struct PulseCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: BinarySampleFormat,
+    pub sample_format: PulseSampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
 }
@@ -92,7 +92,7 @@ fn open_pulse(
     devname: String,
     samplerate: u32,
     channels: u8,
-    sample_format: &BinarySampleFormat,
+    sample_format: &PulseSampleFormat,
     capture: bool,
 ) -> Res<Simple> {
     // Open the device
@@ -103,15 +103,15 @@ fn open_pulse(
     };
 
     let pulse_format = match sample_format {
-        BinarySampleFormat::I16_LE => sample::Format::I16_LE,
-        BinarySampleFormat::S24LE => sample::Format::S24_32le,
-        BinarySampleFormat::I24_3_LE => sample::Format::S24le,
-        BinarySampleFormat::I32_LE => sample::Format::I32_LE,
-        BinarySampleFormat::F32_LE => sample::Format::F32le,
-        _ => panic!("invalid format"),
+        PulseSampleFormat::I16_LE => sample::Format::S16le,
+        PulseSampleFormat::I24_4_LE => sample::Format::S24_32le,
+        PulseSampleFormat::I24_3_LE => sample::Format::S24le,
+        PulseSampleFormat::I32_LE => sample::Format::S32le,
+        PulseSampleFormat::F32_LE => sample::Format::F32le,
     };
 
-    let bytes_per_sample = sample_format.bytes_per_sample();
+    let binary_format = sample_format.to_binary_format();
+    let bytes_per_sample = binary_format.bytes_per_sample();
 
     let spec = sample::Spec {
         format: pulse_format,
@@ -156,8 +156,9 @@ impl PlaybackDevice for PulsePlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let store_bytes_per_sample = self.sample_format.bytes_per_sample();
         let sample_format = self.sample_format;
+        let binary_format = sample_format.to_binary_format();
+        let store_bytes_per_sample = binary_format.bytes_per_sample();
         let handle = thread::Builder::new()
             .name("PulsePlayback".to_string())
             .spawn(move || {
@@ -190,7 +191,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                     conversion_result = chunk_to_buffer_rawbytes(
                                         chunk,
                                         &mut buffer,
-                                        &sample_format,
+                                        &binary_format,
                                     );
                                     sleep_until_next(
                                         &last_instant,
@@ -284,7 +285,9 @@ impl CaptureDevice for PulseCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let store_bytes_per_sample = self.sample_format.bytes_per_sample();
+        let sample_format = self.sample_format;
+        let binary_format = sample_format.to_binary_format();
+        let store_bytes_per_sample = binary_format.bytes_per_sample();
         let buffer_bytes = 2.0f32.powf(
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
                 .log2()
@@ -293,7 +296,7 @@ impl CaptureDevice for PulseCaptureDevice {
             * 2
             * channels
             * store_bytes_per_sample;
-        let sample_format = self.sample_format;
+
         let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
@@ -400,7 +403,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                         .unwrap();
                                 }
                             };
-                            let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &sample_format, capture_bytes, &capture_status.read().used_channels);
+                            let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &binary_format, capture_bytes, &capture_status.read().used_channels);
                             chunk.update_stats(&mut chunk_stats);
                             {
                                 let mut capture_status = capture_status.write();
