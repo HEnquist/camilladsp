@@ -249,22 +249,22 @@ pub fn list_formats(hwp: &HwParams) -> Res<Vec<BinarySampleFormat>> {
     let mut formats = Vec::with_capacity(6);
     // Let's just check the formats supported by CamillaDSP
     if hwp.test_format(Format::s16()).is_ok() {
-        formats.push(BinarySampleFormat::S16LE);
+        formats.push(BinarySampleFormat::I16_LE);
     }
     if hwp.test_format(Format::s24()).is_ok() {
         formats.push(BinarySampleFormat::S24LE);
     }
     if hwp.test_format(Format::S243LE).is_ok() {
-        formats.push(BinarySampleFormat::S24LE3);
+        formats.push(BinarySampleFormat::I24_3_LE);
     }
     if hwp.test_format(Format::s32()).is_ok() {
-        formats.push(BinarySampleFormat::S32LE);
+        formats.push(BinarySampleFormat::I32_LE);
     }
     if hwp.test_format(Format::float()).is_ok() {
-        formats.push(BinarySampleFormat::FLOAT32LE);
+        formats.push(BinarySampleFormat::F32_LE);
     }
     if hwp.test_format(Format::float64()).is_ok() {
-        formats.push(BinarySampleFormat::FLOAT64LE);
+        formats.push(BinarySampleFormat::F64_LE);
     }
     formats.shrink_to_fit();
     Ok(formats)
@@ -273,24 +273,24 @@ pub fn list_formats(hwp: &HwParams) -> Res<Vec<BinarySampleFormat>> {
 pub fn pick_preferred_format(hwp: &HwParams) -> Option<BinarySampleFormat> {
     // Start with integer formats, in descending quality
     if hwp.test_format(Format::s32()).is_ok() {
-        return Some(BinarySampleFormat::S32LE);
+        return Some(BinarySampleFormat::I32_LE);
     }
     // The two 24-bit formats are equivalent, the order does not matter
     if hwp.test_format(Format::S243LE).is_ok() {
-        return Some(BinarySampleFormat::S24LE3);
+        return Some(BinarySampleFormat::I24_3_LE);
     }
     if hwp.test_format(Format::s24()).is_ok() {
         return Some(BinarySampleFormat::S24LE);
     }
     if hwp.test_format(Format::s16()).is_ok() {
-        return Some(BinarySampleFormat::S16LE);
+        return Some(BinarySampleFormat::I16_LE);
     }
     // float formats are unusual, try these last
     if hwp.test_format(Format::float()).is_ok() {
-        return Some(BinarySampleFormat::FLOAT32LE);
+        return Some(BinarySampleFormat::F32_LE);
     }
     if hwp.test_format(Format::float64()).is_ok() {
-        return Some(BinarySampleFormat::FLOAT64LE);
+        return Some(BinarySampleFormat::F64_LE);
     }
     None
 }

@@ -69,7 +69,7 @@ This example configuration will be used to explain the various options specific 
     type: CoreAudio
     channels: 2
     device: "Soundflower (2ch)" (*)
-    format: S32LE (*)
+    format: I32_LE (*)
   playback:
     type: CoreAudio
     channels: 2
@@ -101,14 +101,14 @@ It then searches the list until it finds a suitable one.
 The criteria is that it must have the right sample rate, the right number of bits,
 and the right number type (float or integer).
 There exact representation of the given format isn't used.
-This means that S24LE and S24LE3 are equivalent, and the "LE" ending that means
+This means that S24LE and I24_3_LE are equivalent, and the "LE" ending that means
 little-endian for other backends is ignored.
 
 This table shows the mapping between the format setting in "Audio MIDI Setup" and the CamillaDSP `format`:
-- 16-bit Integer: S16LE
-- 24-bit Integer: S24LE or S24LE3
-- 32-bit Integer: S32LE
-- 32-bit Float: FLOAT32LE
+- 16-bit Integer: I16_LE
+- 24-bit Integer: S24LE or I24_3_LE
+- 32-bit Integer: I32_LE
+- 32-bit Float: F32_LE
 
 If `format` is set to `null` or left out, then CamillaDSP will leave the sample format unchanged, and only switch the sample rate.
 

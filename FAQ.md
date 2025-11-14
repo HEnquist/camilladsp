@@ -31,7 +31,7 @@
   There are two 24-bit formats, and it's very important to pick the right one. Both use three bytes to store each sample, but they are packed in different ways.
   - S24LE: This format stores each 24-bit sample using 32 bits (4 bytes). The 24-bit data is stored in the lower three bytes, and the highest byte is padding.
     
-  - S24LE3: Here only the three data bytes are stored, without any padding.
+  - I24_3_LE: Here only the three data bytes are stored, without any padding.
 
   Let's make up three samples and write them as bytes in hex. We use little-endian byte order, hence the first byte is the least significant. 
   
@@ -43,7 +43,7 @@
 
   Stored as S24LE: `0xA1, 0xA2, 0xA3, 0x00, 0xB1, 0xB2, 0xB3, 0x00, 0xC1, 0xC2, 0xC3, 0x00` 
 
-  Stored as S24LE3: `0xA1, 0xA2, 0xA3, 0xB1, 0xB2, 0xB3, 0xC1, 0xC2, 0xC3` 
+  Stored as I24_3_LE: `0xA1, 0xA2, 0xA3, 0xB1, 0xB2, 0xB3, 0xC1, 0xC2, 0xC3` 
 
   Note the extra padding bytes (`0x00`) in S24LE. This scheme means that the samples get an "easier" alignment in memory, while wasting some space. In practice, this format isn't used much.
 

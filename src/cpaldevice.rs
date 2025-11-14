@@ -132,8 +132,8 @@ fn open_cpal_playback(
         }
     };
     let cpal_format = match sample_format {
-        BinarySampleFormat::S16LE => cpal::BinarySampleFormat::I16,
-        BinarySampleFormat::FLOAT32LE => cpal::BinarySampleFormat::F32,
+        BinarySampleFormat::I16_LE => cpal::BinarySampleFormat::I16,
+        BinarySampleFormat::F32_LE => cpal::BinarySampleFormat::F32,
         _ => panic!("Unsupported sample format"),
     };
     let stream_config = StreamConfig {
@@ -190,8 +190,8 @@ fn open_cpal_capture(
     };
 
     let cpal_format = match sample_format {
-        BinarySampleFormat::S16LE => cpal::BinarySampleFormat::I16,
-        BinarySampleFormat::FLOAT32LE => cpal::BinarySampleFormat::F32,
+        BinarySampleFormat::I16_LE => cpal::BinarySampleFormat::I16,
+        BinarySampleFormat::F32_LE => cpal::BinarySampleFormat::F32,
         _ => panic!("Unsupported sample format"),
     };
     let stream_config = StreamConfig {
@@ -260,7 +260,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
 
                         let stream = match sample_format {
-                            BinarySampleFormat::S16LE => {
+                            BinarySampleFormat::I16_LE => {
                                 trace!("Build i16 output stream");
                                 let mut clipped = 0;
                                 let mut running = true;
@@ -317,7 +317,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                 trace!("i16 output stream ready");
                                 stream
                             }
-                            BinarySampleFormat::FLOAT32LE => {
+                            BinarySampleFormat::F32_LE => {
                                 trace!("Build f32 output stream");
                                 let mut clipped = 0;
                                 let mut running = true;
@@ -526,7 +526,7 @@ impl CaptureDevice for CpalCaptureDevice {
                         let (tx_dev_i, rx_dev_i) = crossbeam_channel::bounded(1);
                         let (tx_dev_f, rx_dev_f) = crossbeam_channel::bounded(1);
                         let stream = match sample_format {
-                            BinarySampleFormat::S16LE => {
+                            BinarySampleFormat::I16_LE => {
                                 trace!("Build i16 input stream");
                                 let stream = device.build_input_stream(
                                     &stream_config,
@@ -542,7 +542,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 trace!("i16 input stream ready");
                                 stream
                             },
-                            BinarySampleFormat::FLOAT32LE => {
+                            BinarySampleFormat::F32_LE => {
                                 trace!("Build f32 input stream");
                                 let stream = device.build_input_stream(
                                     &stream_config,
@@ -624,7 +624,7 @@ impl CaptureDevice for CpalCaptureDevice {
                             );
 
                             let mut chunk = match sample_format {
-                                BinarySampleFormat::S16LE => {
+                                BinarySampleFormat::I16_LE => {
                                     while sample_queue_i.len() < capture_samples {
                                         //trace!("Read message to fill capture buffer");
                                         match rx_dev_i.recv() {
@@ -645,7 +645,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                         scalefactor,
                                     )
                                 },
-                                BinarySampleFormat::FLOAT32LE => {
+                                BinarySampleFormat::F32_LE => {
                                     while sample_queue_f.len() < capture_samples {
                                         //trace!("Read message to fill capture buffer");
                                         match rx_dev_f.recv() {

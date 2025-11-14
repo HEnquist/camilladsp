@@ -258,12 +258,12 @@ fn open_coreaudio_playback(
 
     if let Some(sfmt) = sample_format {
         let phys_format = match *sfmt {
-            BinarySampleFormat::S16LE => coreaudio::audio_unit::BinarySampleFormat::I16,
-            BinarySampleFormat::S24LE | BinarySampleFormat::S24LE3 => {
+            BinarySampleFormat::I16_LE => coreaudio::audio_unit::BinarySampleFormat::I16,
+            BinarySampleFormat::S24LE | BinarySampleFormat::I24_3_LE => {
                 coreaudio::audio_unit::BinarySampleFormat::I24
             }
-            BinarySampleFormat::S32LE => coreaudio::audio_unit::BinarySampleFormat::I32,
-            BinarySampleFormat::FLOAT32LE => coreaudio::audio_unit::BinarySampleFormat::F32,
+            BinarySampleFormat::I32_LE => coreaudio::audio_unit::BinarySampleFormat::I32,
+            BinarySampleFormat::F32_LE => coreaudio::audio_unit::BinarySampleFormat::F32,
             _ => {
                 let msg = format!("Sample format '{sfmt}' not supported!");
                 return Err(ConfigError::new(&msg).into());
@@ -343,12 +343,12 @@ fn open_coreaudio_capture(
 
     if let Some(sfmt) = sample_format {
         let phys_format = match *sfmt {
-            BinarySampleFormat::S16LE => coreaudio::audio_unit::BinarySampleFormat::I16,
-            BinarySampleFormat::S24LE | BinarySampleFormat::S24LE3 => {
+            BinarySampleFormat::I16_LE => coreaudio::audio_unit::BinarySampleFormat::I16,
+            BinarySampleFormat::S24LE | BinarySampleFormat::I24_3_LE => {
                 coreaudio::audio_unit::BinarySampleFormat::I24
             }
-            BinarySampleFormat::S32LE => coreaudio::audio_unit::BinarySampleFormat::I32,
-            BinarySampleFormat::FLOAT32LE => coreaudio::audio_unit::BinarySampleFormat::F32,
+            BinarySampleFormat::I32_LE => coreaudio::audio_unit::BinarySampleFormat::I32,
+            BinarySampleFormat::F32_LE => coreaudio::audio_unit::BinarySampleFormat::F32,
             _ => {
                 let msg = format!("Sample format '{sfmt}' not supported!");
                 return Err(ConfigError::new(&msg).into());
@@ -548,7 +548,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 0u8;
                                 channels
                                     * chunksize
-                                    * BinarySampleFormat::FLOAT32LE.bytes_per_sample()
+                                    * BinarySampleFormat::F32_LE.bytes_per_sample()
                             ];
 
                 debug!("Playback device ready and waiting.");
@@ -624,7 +624,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             conversion_result = chunk_to_buffer_rawbytes(
                                 chunk,
                                 &mut buf,
-                                &BinarySampleFormat::FLOAT32LE,
+                                &BinarySampleFormat::F32_LE,
                             );
                             if let Some(mut playback_status) = playback_status.try_write() {
                                 if conversion_result.1 > 0 {
@@ -978,7 +978,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     let mut chunk = buffer_to_chunk_rawbytes(
                         &data_buffer[0..capture_bytes],
                         channels,
-                        &BinarySampleFormat::FLOAT32LE,
+                        &BinarySampleFormat::F32_LE,
                         capture_bytes,
                         &capture_status.read().used_channels,
                     );

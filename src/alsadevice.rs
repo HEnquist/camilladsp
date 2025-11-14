@@ -409,12 +409,12 @@ fn open_pcm(
         };
         debug!("{direction}: setting format to {chosen_format}");
         match chosen_format {
-            BinarySampleFormat::S16LE => hwp.set_format(Format::s16())?,
+            BinarySampleFormat::I16_LE => hwp.set_format(Format::s16())?,
             BinarySampleFormat::S24LE => hwp.set_format(Format::s24())?,
-            BinarySampleFormat::S24LE3 => hwp.set_format(Format::s24_3())?,
-            BinarySampleFormat::S32LE => hwp.set_format(Format::s32())?,
-            BinarySampleFormat::FLOAT32LE => hwp.set_format(Format::float())?,
-            BinarySampleFormat::FLOAT64LE => hwp.set_format(Format::float64())?,
+            BinarySampleFormat::I24_3_LE => hwp.set_format(Format::s24_3())?,
+            BinarySampleFormat::I32_LE => hwp.set_format(Format::s32())?,
+            BinarySampleFormat::F32_LE => hwp.set_format(Format::float())?,
+            BinarySampleFormat::F64_LE => hwp.set_format(Format::float64())?,
         }
 
         // Set access mode, buffersize and periods

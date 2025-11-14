@@ -1,4 +1,4 @@
-# run example: python fft_file.py result_i32.raw S32LE 44100 2
+# run example: python fft_file.py result_i32.raw I32_LE 44100 2
 
 import numpy as np
 import numpy.fft as fft
@@ -21,15 +21,15 @@ except:
 if datafmt == "text":
     with open(fname) as f:
         values = [float(row[0]) for row in csv.reader(f)]
-elif datafmt == "FLOAT64LE":
+elif datafmt == "F64_LE":
     values = np.fromfile(fname, dtype=float)
-elif datafmt == "FLOAT32LE":
+elif datafmt == "F32_LE":
     values = np.fromfile(fname, dtype=np.float32)
-elif datafmt == "S16LE":
+elif datafmt == "I16_LE":
     values = np.fromfile(fname, dtype=np.int16)/(2**15-1)
 elif datafmt == "S24LE":
     values = np.fromfile(fname, dtype=np.int32)/(2**23-1)
-elif datafmt == "S32LE":
+elif datafmt == "I32_LE":
     values = np.fromfile(fname, dtype=np.int32)/(2**31-1)
 elif datafmt == "S64LE":
     values = np.fromfile(fname, dtype=np.int64)/(2**31-1)

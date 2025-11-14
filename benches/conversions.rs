@@ -14,7 +14,7 @@ fn bench_to_chunk_small(c: &mut Criterion) {
     c.bench_function("to_chunk_small", |b| {
         b.iter(|| {
             let chunk =
-                buffer_to_chunk_rawbytes(&data, 2, &BinarySampleFormat::S32LE, datalen, &mask);
+                buffer_to_chunk_rawbytes(&data, 2, &BinarySampleFormat::I32_LE, datalen, &mask);
             recycle_chunk(chunk);
         })
     });
@@ -27,7 +27,7 @@ fn bench_to_chunk_large(c: &mut Criterion) {
     c.bench_function("to_chunk_large", |b| {
         b.iter(|| {
             let chunk =
-                buffer_to_chunk_rawbytes(&data, 2, &BinarySampleFormat::S32LE, datalen, &mask);
+                buffer_to_chunk_rawbytes(&data, 2, &BinarySampleFormat::I32_LE, datalen, &mask);
             recycle_chunk(chunk);
         })
     });
@@ -45,7 +45,7 @@ fn bench_to_bytes_large(c: &mut Criterion) {
                 wfs.push(vec_from_stash(num_frames));
             }
             let chunk = AudioChunk::new(wfs, 0.0, 0.0, num_frames, num_frames);
-            chunk_to_buffer_rawbytes(chunk, &mut data, &BinarySampleFormat::S32LE)
+            chunk_to_buffer_rawbytes(chunk, &mut data, &BinarySampleFormat::I32_LE)
         })
     });
 }
@@ -62,7 +62,7 @@ fn bench_to_bytes_small(c: &mut Criterion) {
                 wfs.push(vec_from_stash(num_frames));
             }
             let chunk = AudioChunk::new(wfs, 0.0, 0.0, num_frames, num_frames);
-            chunk_to_buffer_rawbytes(chunk, &mut data, &BinarySampleFormat::S32LE)
+            chunk_to_buffer_rawbytes(chunk, &mut data, &BinarySampleFormat::I32_LE)
         })
     });
 }

@@ -8,9 +8,9 @@ devices:
     type: Pulse
     channels: 2
     device: "MySink.monitor"
-    format: S16LE
+    format: I16_LE
   playback:
     type: File
     channels: 2
     filename: "/home/henrik/test.raw"
-    format: S16LE
+    format: I16_LE

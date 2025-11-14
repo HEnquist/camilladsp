@@ -79,7 +79,7 @@ Available formats:
 - S32_LE
 ```
 Ignore the error message at the end. The interesting fields are FORMAT, RATE and CHANNELS.
-In this example the sample formats this device can use are S16_LE and S32_LE (corresponding to S16LE and S32LE in CamillaDSP,
+In this example the sample formats this device can use are S16_LE and S32_LE (corresponding to I16_LE and I32_LE in CamillaDSP,
 see the [table of equivalent formats in the main README](./README.md#equivalent-formats) for the complete list).
 The sample rate can be either 44.1 or 48 kHz. And it supports only stereo playback (2 channels).
 
@@ -93,8 +93,8 @@ This is common on studio interfaces that support [ADAT](#adat).
 CamillaDSP sets first the number of channels.
 Then it sets sample rate, and finally sample format.
 Setting a value for a parameter may restrict the allowed values for the ones that have not yet been set.
-For the USB DAC just mentioned, setting the sample rate to 192 kHz means that only the S16LE sample format is allowed.
-If the CamillaDSP configuration is set to 192 kHz and S24LE3, then there will be an error when setting the format.
+For the USB DAC just mentioned, setting the sample rate to 192 kHz means that only the I16_LE sample format is allowed.
+If the CamillaDSP configuration is set to 192 kHz and I24_3_LE, then there will be an error when setting the format.
 
 
 Capture parameters are determined in the same way with `arecord`:
@@ -154,14 +154,14 @@ This example configuration will be used to explain the various options specific 
     type: Alsa
     channels: 2
     device: "hw:0,1"
-    format: S16LE (*)
+    format: I16_LE (*)
     stop_on_inactive: false (*)
     follow_volume_control: "PCM Playback Volume" (*)
   playback:
     type: Alsa
     channels: 2
     device: "hw:Generic_1"
-    format: S32LE (*)
+    format: I32_LE (*)
 ```
 
 ### Device names
@@ -171,9 +171,9 @@ See [Find name of device](#find-name-of-device) for what to write in the `device
 The sample format is optional. If set to `null` or left out,
 the highest quality available format is chosen automatically.
 
-When the format is set automatically, 32-bit integer (`S32LE`) is considered the best,
-followed by 24-bit (`S24LE3` and `S24LE`) and 16-bit integer (`S16LE`).
-The 32-bit (`FLOAT32LE`) and 64-bit (`FLOAT64LE`) float formats are high quality,
+When the format is set automatically, 32-bit integer (`I32_LE`) is considered the best,
+followed by 24-bit (`I24_3_LE` and `S24LE`) and 16-bit integer (`I16_LE`).
+The 32-bit (`F32_LE`) and 64-bit (`F64_LE`) float formats are high quality,
 but are supported by very few devices. Therefore these are checked last.
 
 Please also see [Find valid playback and capture parameters](#find-valid-playback-and-capture-parameters).

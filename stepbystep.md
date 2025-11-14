@@ -24,12 +24,12 @@ devices:
     type: Alsa
     channels: 2
     device: "hw:Loopback,0,0"
-    format: S32LE
+    format: I32_LE
   playback:
     type: Alsa
     channels: 4
     device: "hw:Generic_1"
-    format: S32LE
+    format: I32_LE
 ```
 
 ## Mixer
@@ -296,12 +296,12 @@ devices:
     type: Alsa
     channels: 2
     device: "hw:Loopback,0,0"
-    format: S32LE
+    format: I32_LE
   playback:
     type: Alsa
     channels: 4
     device: "hw:Generic_1"
-    format: S32LE
+    format: I32_LE
 
 mixers:
   to4chan:

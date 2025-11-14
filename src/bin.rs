@@ -687,12 +687,13 @@ fn main_process() -> i32 {
                 .display_order(410)
                 .action(ArgAction::Set)
                 .value_parser([
-                    "S16LE",
-                    "S24LE",
-                    "S24LE3",
-                    "S32LE",
-                    "FLOAT32LE",
-                    "FLOAT64LE",
+                    "I16_LE",
+                    "I24_3_LE",
+                    "I24_4_LJ_LE",
+                    "I24_4_RJ_LE",
+                    "I32_LE",
+                    "F32_LE",
+                    "F64_LE",
                 ])
                 .help("Override sample format of capture device in config"),
         );

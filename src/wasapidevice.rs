@@ -16,7 +16,7 @@
 
 use crate::audiodevice::*;
 use crate::config;
-use crate::config::{BinarySampleFormat, ConfigError};
+use crate::config::{WasapiSampleFormat, ConfigError};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::helpers::PIRateController;
@@ -57,7 +57,7 @@ pub struct WasapiPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: BinarySampleFormat,
+    pub sample_format: WasapiSampleFormat,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -74,7 +74,7 @@ pub struct WasapiCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: BinarySampleFormat,
+    pub sample_format: WasapiSampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
@@ -113,24 +113,24 @@ fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<Str
 }
 
 fn wave_format(
-    sample_format: &BinarySampleFormat,
+    sample_format: &WasapiSampleFormat,
     samplerate: usize,
     channels: usize,
 ) -> wasapi::WaveFormat {
     match sample_format {
-        BinarySampleFormat::S16LE => {
+        WasapiSampleFormat::S16 => {
             wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        BinarySampleFormat::S24LE4LJ => {
+        WasapiSampleFormat::S24_4 => {
             wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        BinarySampleFormat::S24LE3 => {
+        WasapiSampleFormat::S24_3 => {
             wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        BinarySampleFormat::S32LE => {
+        WasapiSampleFormat::S32 => {
             wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        BinarySampleFormat::FLOAT32LE => wasapi::WaveFormat::new(
+        WasapiSampleFormat::FLOAT32 => wasapi::WaveFormat::new(
             32,
             32,
             &wasapi::SampleType::Float,
@@ -138,13 +138,12 @@ fn wave_format(
             channels,
             None,
         ),
-        _ => panic!("Unsupported sample format"),
     }
 }
 
 fn get_supported_wave_format(
     audio_client: &wasapi::AudioClient,
-    sample_format: &BinarySampleFormat,
+    sample_format: &WasapiSampleFormat,
     samplerate: usize,
     channels: usize,
     sharemode: &wasapi::ShareMode,
@@ -177,7 +176,7 @@ fn open_playback(
     devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &BinarySampleFormat,
+    sample_format: &WasapiSampleFormat,
     exclusive: bool,
     polling: bool,
 ) -> Res<(
@@ -251,7 +250,7 @@ fn open_capture(
     devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &BinarySampleFormat,
+    sample_format: &WasapiSampleFormat,
     exclusive: bool,
     loopback: bool,
     polling: bool,
@@ -734,12 +733,14 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     peak: vec![0.0; channels],
                 };
 
+                let binary_format = sample_format.to_binary_format();
+
                 let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
 
                 trace!("Build output stream.");
                 let mut conversion_result;
 
-                let ringbuffer = HeapRb::<u8>::new(channels * sample_format.bytes_per_sample() * ( 2 * chunksize + 2048 ));
+                let ringbuffer = HeapRb::<u8>::new(channels * binary_format.bytes_per_sample() * ( 2 * chunksize + 2048 ));
                 let (mut device_producer, device_consumer) = ringbuffer.split();
 
                 // wasapi device loop
@@ -827,7 +828,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 let mut buf =
                     vec![
                         0u8;
-                        channels * chunksize * sample_format.bytes_per_sample()
+                        channels * chunksize * binary_format.bytes_per_sample()
                     ];
 
                 debug!("Playback device starts now!");
@@ -876,7 +877,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             }
                             chunk.update_stats(&mut chunk_stats);
                             conversion_result =
-                                chunk_to_buffer_rawbytes(chunk, &mut buf, &sample_format);
+                                chunk_to_buffer_rawbytes(chunk, &mut buf, &binary_format);
                             if let Some(mut playback_status) = playback_status.try_write() {
                                 if conversion_result.1 > 0 {
                                     playback_status.clipped_samples +=
@@ -1032,8 +1033,8 @@ impl CaptureDevice for WasapiCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let bytes_per_sample = self.sample_format.bytes_per_sample();
-        let sample_format = self.sample_format;
+        let binary_format = self.sample_format.to_binary_format();
+        let bytes_per_sample = binary_format.bytes_per_sample();
         let sample_format_dev = self.sample_format;
         let resampler_conf = self.resampler_config;
         let async_src = resampler_is_async(&resampler_conf);
@@ -1276,7 +1277,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         let mut chunk = buffer_to_chunk_rawbytes(
                             &data_buffer[0..capture_bytes],
                             channels,
-                            &sample_format,
+                            &binary_format,
                             capture_bytes,
                             &capture_status.read().used_channels,
                         );

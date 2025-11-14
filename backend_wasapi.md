@@ -20,7 +20,7 @@ In shared mode, these points apply for the CamillaDSP configuration:
   Then open the "Advanced" tab and select the desired format under "Default Format". 
   Pick the desired sample rate, and the largest number of bits available.
 - [Loopback](#loopback-capture) capture mode is available.
-- The sample format is always 32-bit float (`FLOAT32LE`). 
+- The sample format is always 32-bit float (`F32_LE`). 
 
 
 ### Exclusive mode
@@ -35,7 +35,7 @@ In exclusive mode, these points apply for the CamillaDSP configuration:
 - CamillaDSP is able to control the sample rate of the devices. 
 - The sample format must be one that the device driver can accept. 
   This usually matches the hardware capabilities of the device. 
-  For example a 24-bit USB dac is likely to accept the `S16LE` and `S24LE3` formats. 
+  For example a 24-bit USB dac is likely to accept the `I16_LE` and `I24_3_LE` formats. 
   Other formats may be supported depending on driver support.
   Note that all sample formats may not be available at all sample rates. 
   A USB device might support both 16 and 24 bits at up to 96 kHz, but only 16 bits above that.
@@ -81,7 +81,7 @@ This example configuration will be used to explain the various options specific 
     type: Wasapi
     channels: 2
     device: "CABLE Output (VB-Audio Virtual Cable)" (*)
-    format: FLOAT32LE
+    format: F32_LE
     exclusive: false (*)
     loopback: false (*)
     polling: false (*)
@@ -89,7 +89,7 @@ This example configuration will be used to explain the various options specific 
     type: Wasapi
     channels: 2
     device: "SPDIF Interface (FX-AUDIO-DAC-X6)" (*)
-    format: S24LE3
+    format: I24_3_LE
     exclusive: true (*)
     polling: false (*)
 ```

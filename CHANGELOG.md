@@ -194,7 +194,7 @@ Bugfixes:
 - Check for mixer parameter changes when reloading config.
 - Token substutution and overrides also work via websocket.
 - Don't exit on SIGHUP when waiting for a config.
-- Fix handling of negative values when reading filter coeffs in S24LE3 format.
+- Fix handling of negative values when reading filter coeffs in I24_3_LE format.
 - Gain filters react to mute setting on reload.
 - Fix noise in output when resampling and muting all channels in mixer.
 - Fix handling of negative values for input and output in S24LE format.
@@ -282,7 +282,7 @@ Bugfixes:
 ## 0.1.0
 New features:
 - Support for asynchronous resampling in all backends.
-- Added S24LE3 format (corresponds to Alsa S24_3LE)
+- Added I24_3_LE format (corresponds to Alsa S24_3LE)
 - File capture device can skip a number of bytes at the beginning of a file and then read a limited number of bytes
 
 Other:

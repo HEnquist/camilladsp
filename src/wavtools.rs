@@ -106,12 +106,12 @@ fn look_up_format(
     chunk_length: u32,
 ) -> Res<BinarySampleFormat> {
     match (formatcode, bits, bytes_per_sample) {
-        (1, 16, 2) => Ok(BinarySampleFormat::S16LE),
-        (1, 24, 3) => Ok(BinarySampleFormat::S24LE3),
-        (1, 24, 4) => Ok(BinarySampleFormat::S24LE4LJ),
-        (1, 32, 4) => Ok(BinarySampleFormat::S32LE),
-        (3, 32, 4) => Ok(BinarySampleFormat::FLOAT32LE),
-        (3, 64, 8) => Ok(BinarySampleFormat::FLOAT64LE),
+        (1, 16, 2) => Ok(BinarySampleFormat::I16_LE),
+        (1, 24, 3) => Ok(BinarySampleFormat::I24_3_LE),
+        (1, 24, 4) => Ok(BinarySampleFormat::I24_4_LJ_LE),
+        (1, 32, 4) => Ok(BinarySampleFormat::I32_LE),
+        (3, 32, 4) => Ok(BinarySampleFormat::F32_LE),
+        (3, 64, 8) => Ok(BinarySampleFormat::F64_LE),
         (0xFFFE, _, _) => look_up_extended_format(data, bits, bytes_per_sample, chunk_length),
         (_, _, _) => Err(ConfigError::new("Unsupported wav format").into()),
     }
@@ -140,12 +140,12 @@ fn look_up_extended_format(
         bytes_per_sample,
         valid_bits_per_sample,
     ) {
-        (SUBTYPE_PCM, 16, 2, 16) => Ok(BinarySampleFormat::S16LE),
-        (SUBTYPE_PCM, 24, 3, 24) => Ok(BinarySampleFormat::S24LE3),
-        (SUBTYPE_PCM, 24, 4, 24) => Ok(BinarySampleFormat::S24LE4LJ),
-        (SUBTYPE_PCM, 32, 4, 32) => Ok(BinarySampleFormat::S32LE),
-        (SUBTYPE_FLOAT, 32, 4, 32) => Ok(BinarySampleFormat::FLOAT32LE),
-        (SUBTYPE_FLOAT, 64, 8, 64) => Ok(BinarySampleFormat::FLOAT64LE),
+        (SUBTYPE_PCM, 16, 2, 16) => Ok(BinarySampleFormat::I16_LE),
+        (SUBTYPE_PCM, 24, 3, 24) => Ok(BinarySampleFormat::I24_3_LE),
+        (SUBTYPE_PCM, 24, 4, 24) => Ok(BinarySampleFormat::I24_4_LJ_LE),
+        (SUBTYPE_PCM, 32, 4, 32) => Ok(BinarySampleFormat::I32_LE),
+        (SUBTYPE_FLOAT, 32, 4, 32) => Ok(BinarySampleFormat::F32_LE),
+        (SUBTYPE_FLOAT, 64, 8, 64) => Ok(BinarySampleFormat::F64_LE),
         (_, _, _, _) => Err(ConfigError::new("Unsupported extended wav format").into()),
     }
 }
@@ -181,7 +181,7 @@ pub fn find_data_in_wav_stream(mut f: impl Read + Seek) -> Res<WavParams> {
     let mut buffer = [0; 8];
 
     // Dummy values until we have found the real ones
-    let mut sample_format = BinarySampleFormat::S16LE;
+    let mut sample_format = BinarySampleFormat::I16_LE;
     let mut sample_rate = 0;
     let mut channels = 0;
     let mut data_offset = 0;
@@ -246,12 +246,12 @@ pub fn write_wav_header(
     dest.write_all(WAVE)?;
 
     let (formatcode, bits_per_sample, bytes_per_sample) = match sample_format {
-        BinarySampleFormat::S16LE => (1, 16, 2),
-        BinarySampleFormat::S24LE3 => (1, 24, 3),
-        BinarySampleFormat::S24LE4LJ => (1, 24, 4),
-        BinarySampleFormat::S32LE => (1, 32, 4),
-        BinarySampleFormat::FLOAT32LE => (3, 32, 4),
-        BinarySampleFormat::FLOAT64LE => (3, 64, 8),
+        BinarySampleFormat::I16_LE => (1, 16, 2),
+        BinarySampleFormat::I24_3_LE => (1, 24, 3),
+        BinarySampleFormat::I24_4_LJ_LE => (1, 24, 4),
+        BinarySampleFormat::I32_LE => (1, 32, 4),
+        BinarySampleFormat::F32_LE => (3, 32, 4),
+        BinarySampleFormat::F64_LE => (3, 64, 8),
         _ => (0, 0, 0),
     };
 
@@ -293,7 +293,7 @@ mod tests {
     pub fn test_analyze_wav() {
         let info = find_data_in_wav("testdata/int32.wav").unwrap();
         println!("{info:?}");
-        assert_eq!(info.sample_format, BinarySampleFormat::S32LE);
+        assert_eq!(info.sample_format, BinarySampleFormat::I32_LE);
         assert_eq!(info.data_offset, 44);
         assert_eq!(info.data_length, 20);
         assert_eq!(info.channels, 1);
@@ -304,7 +304,7 @@ mod tests {
     pub fn test_analyze_wavex() {
         let info = find_data_in_wav("testdata/f32_ex.wav").unwrap();
         println!("{info:?}");
-        assert_eq!(info.sample_format, BinarySampleFormat::FLOAT32LE);
+        assert_eq!(info.sample_format, BinarySampleFormat::F32_LE);
         assert_eq!(info.data_offset, 104);
         assert_eq!(info.data_length, 20);
         assert_eq!(info.channels, 1);
@@ -315,9 +315,9 @@ mod tests {
     fn write_and_read_wav() {
         let bytes = vec![0_u8; 1000];
         let mut buffer = Cursor::new(bytes);
-        write_wav_header(&mut buffer, 2, BinarySampleFormat::S32LE, 44100).unwrap();
+        write_wav_header(&mut buffer, 2, BinarySampleFormat::I32_LE, 44100).unwrap();
         let info = find_data_in_wav_stream(buffer).unwrap();
-        assert_eq!(info.sample_format, BinarySampleFormat::S32LE);
+        assert_eq!(info.sample_format, BinarySampleFormat::I32_LE);
         assert_eq!(info.data_offset, 44);
         assert_eq!(info.channels, 2);
         assert_eq!(info.sample_rate, 44100);
