@@ -630,7 +630,7 @@ pub struct CaptureDeviceWasapi {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
     pub device: Option<String>,
-    pub format: WasapiSampleFormat,
+    pub format: Option<WasapiSampleFormat>,
     #[serde(default)]
     exclusive: Option<bool>,
     #[serde(default)]
@@ -766,7 +766,8 @@ pub struct PlaybackDeviceWasapi {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
     pub device: Option<String>,
-    pub format: WasapiSampleFormat,
+    #[serde(default)]
+    pub format: Option<WasapiSampleFormat>,
     #[serde(default)]
     exclusive: Option<bool>,
     #[serde(default)]
@@ -1887,7 +1888,7 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             CaptureDevice::Wasapi(dev) => {
                 let mapped_format = WasapiSampleFormat::from_binary_format(&fmt);
                 if let Some(mapped) = mapped_format {
-                    dev.format = mapped;
+                    dev.format = Some(mapped);
                 } else {
                     let msg =
                         format!("Wasapi does not have a sample format corresponding to {fmt}");
@@ -2146,10 +2147,13 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
-        if dev.format != WasapiSampleFormat::F32 && !dev.is_exclusive() {
-            return Err(
-                ConfigError::new("Wasapi shared mode capture must use F32 sample format").into(),
-            );
+        if let Some(format) = dev.format {
+            if format != WasapiSampleFormat::F32 && !dev.is_exclusive() {
+                return Err(ConfigError::new(
+                    "Wasapi shared mode capture must use F32 sample format",
+                )
+                .into());
+            }
         }
     }
     #[cfg(target_os = "windows")]
@@ -2163,10 +2167,13 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {
-        if dev.format != WasapiSampleFormat::F32 && !dev.is_exclusive() {
-            return Err(
-                ConfigError::new("Wasapi shared mode playback must use F32 sample format").into(),
-            );
+        if let Some(format) = dev.format {
+            if format != WasapiSampleFormat::F32 && !dev.is_exclusive() {
+                return Err(ConfigError::new(
+                    "Wasapi shared mode playback must use F32 sample format",
+                )
+                .into());
+            }
         }
     }
     if let PlaybackDevice::File {

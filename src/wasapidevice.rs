@@ -57,7 +57,7 @@ pub struct WasapiPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: WasapiSampleFormat,
+    pub sample_format: Option<WasapiSampleFormat>,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -74,7 +74,7 @@ pub struct WasapiCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: WasapiSampleFormat,
+    pub sample_format: Option<WasapiSampleFormat>,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
@@ -172,11 +172,85 @@ fn get_supported_wave_format(
     }
 }
 
-fn open_playback(
+fn get_device_id_and_format(
     devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &WasapiSampleFormat,
+    requested_format: &Option<WasapiSampleFormat>,
+    exclusive: bool,
+    direction: &wasapi::Direction,
+    loopback: bool,
+) -> Res<(String, WasapiSampleFormat, wasapi::WaveFormat)> {
+    let sharemode = match exclusive {
+        true => wasapi::ShareMode::Exclusive,
+        false => wasapi::ShareMode::Shared,
+    };
+    let (adjusted_direction, direction_name) = if loopback {
+        (
+            wasapi::Direction::Render,
+            "Render (loopback capture)".to_string(),
+        )
+    } else {
+        (*direction, direction.to_string())
+    };
+    let device = if let Some(name) = devname {
+        let collection = wasapi::DeviceCollection::new(&adjusted_direction)?;
+        debug!(
+            "Available {} devices: {:?}.",
+            direction_name,
+            list_device_names_in_collection(&collection)
+        );
+        collection.get_device_with_name(name)?
+    } else {
+        wasapi::get_default_device(&adjusted_direction)?
+    };
+    trace!("Found {direction_name} device {devname:?}.");
+    let dev_id = device.get_id()?;
+    let audio_client = device.get_iaudioclient()?;
+    trace!("Got {direction_name} iaudioclient.");
+    let mut temp_format = *requested_format;
+    if temp_format.is_none() && !exclusive {
+        // no need to test, must be F32
+        temp_format = Some(WasapiSampleFormat::F32);
+    }
+    if let Some(sample_format) = &temp_format {
+        let wave_format = get_supported_wave_format(
+            &audio_client,
+            sample_format,
+            samplerate,
+            channels,
+            &sharemode,
+        )?;
+        return Ok((dev_id, *sample_format, wave_format));
+    }
+    debug!("Probing for a supported {direction_name} sample format.");
+    for sample_format in [
+        WasapiSampleFormat::I32,
+        WasapiSampleFormat::I24_3,
+        WasapiSampleFormat::I24_4,
+        WasapiSampleFormat::I16,
+        WasapiSampleFormat::F32,
+    ] {
+        trace!("Testing sample format {sample_format:?}.");
+        let maybe_wave_format = get_supported_wave_format(
+            &audio_client,
+            &sample_format,
+            samplerate,
+            channels,
+            &sharemode,
+        );
+        if let Ok(wave_format) = maybe_wave_format {
+            debug!("Found supported {direction_name} sample format {sample_format:?}");
+            return Ok((dev_id, sample_format, wave_format));
+        }
+    }
+    let msg = format!("Unable to find a supported sample format for {direction_name} with {channels} channels at {samplerate} Hz.");
+    Err(ConfigError::new(&msg).into())
+}
+
+fn open_playback(
+    devname: &Option<String>,
+    wave_format: &wasapi::WaveFormat,
     exclusive: bool,
     polling: bool,
 ) -> Res<(
@@ -184,12 +258,7 @@ fn open_playback(
     wasapi::AudioClient,
     wasapi::AudioRenderClient,
     Option<wasapi::Handle>,
-    wasapi::WaveFormat,
 )> {
-    let sharemode = match exclusive {
-        true => wasapi::ShareMode::Exclusive,
-        false => wasapi::ShareMode::Shared,
-    };
     let device = if let Some(name) = devname {
         let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
         debug!(
@@ -203,16 +272,9 @@ fn open_playback(
     trace!("Found playback device {devname:?}.");
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got playback iaudioclient.");
-    let wave_format = get_supported_wave_format(
-        &audio_client,
-        sample_format,
-        samplerate,
-        channels,
-        &sharemode,
-    )?;
     let (def_time, min_time) = audio_client.get_device_period()?;
     let aligned_time =
-        audio_client.calculate_aligned_period_near(def_time, Some(128), &wave_format)?;
+        audio_client.calculate_aligned_period_near(def_time, Some(128), wave_format)?;
     let mode = match (polling, exclusive) {
         (false, false) => StreamMode::EventsShared {
             autoconvert: false,
@@ -231,7 +293,7 @@ fn open_playback(
         },
     };
     debug!("Playback stream mode: {mode:?}");
-    audio_client.initialize_client(&wave_format, &wasapi::Direction::Render, &mode)?;
+    audio_client.initialize_client(wave_format, &wasapi::Direction::Render, &mode)?;
     debug!(
         "Playback default period {def_time}, min period {min_time}, aligned period {aligned_time}."
     );
@@ -243,14 +305,12 @@ fn open_playback(
     };
     let render_client = audio_client.get_audiorenderclient()?;
     debug!("Opened Wasapi playback device {devname:?}.");
-    Ok((device, audio_client, render_client, handle, wave_format))
+    Ok((device, audio_client, render_client, handle))
 }
 
 fn open_capture(
     devname: &Option<String>,
-    samplerate: usize,
-    channels: usize,
-    sample_format: &WasapiSampleFormat,
+    wave_format: &wasapi::WaveFormat,
     exclusive: bool,
     loopback: bool,
     polling: bool,
@@ -259,12 +319,7 @@ fn open_capture(
     wasapi::AudioClient,
     wasapi::AudioCaptureClient,
     Option<wasapi::Handle>,
-    wasapi::WaveFormat,
 )> {
-    let sharemode = match exclusive {
-        true => wasapi::ShareMode::Exclusive,
-        false => wasapi::ShareMode::Shared,
-    };
     let device = if let Some(name) = devname {
         if !loopback {
             let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Capture)?;
@@ -290,17 +345,10 @@ fn open_capture(
     trace!("Found capture device {devname:?}.");
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got capture iaudioclient.");
-    let wave_format = get_supported_wave_format(
-        &audio_client,
-        sample_format,
-        samplerate,
-        channels,
-        &sharemode,
-    )?;
     let (def_time, min_time) = audio_client.get_device_period()?;
     debug!("Capture default period {def_time}, min period {min_time}.");
     let aligned_time =
-        audio_client.calculate_aligned_period_near(def_time, Some(128), &wave_format)?;
+        audio_client.calculate_aligned_period_near(def_time, Some(128), wave_format)?;
     let mode = match (polling, exclusive) {
         (false, false) => StreamMode::EventsShared {
             autoconvert: false,
@@ -319,7 +367,7 @@ fn open_capture(
         },
     };
     debug!("Capture stream mode: {mode:?}");
-    audio_client.initialize_client(&wave_format, &wasapi::Direction::Capture, &mode)?;
+    audio_client.initialize_client(wave_format, &wasapi::Direction::Capture, &mode)?;
     debug!("Initialized capture audio client.");
     let handle = if !polling {
         Some(audio_client.set_get_eventhandle()?)
@@ -329,7 +377,7 @@ fn open_capture(
     trace!("Capture got event handle.");
     let capture_client = audio_client.get_audiocaptureclient()?;
     debug!("Opened Wasapi capture device {devname:?}.");
-    Ok((device, audio_client, capture_client, handle, wave_format))
+    Ok((device, audio_client, capture_client, handle))
 }
 
 struct PlaybackSync {
@@ -711,8 +759,15 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
-        let sample_format = self.sample_format;
-        let sample_format_dev = self.sample_format;
+        let (_device_id, sample_format, wave_format) = get_device_id_and_format(
+            &devname,
+            samplerate,
+            channels,
+            &self.sample_format,
+            exclusive,
+            &wasapi::Direction::Render,
+            false,
+        )?;
         let handle = thread::Builder::new()
             .name("WasapiPlayback".to_string())
             .spawn(move || {
@@ -747,18 +802,16 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 let innerhandle = thread::Builder::new()
                     .name("WasapiPlaybackInner".to_string())
                     .spawn(move || {
-                        let (_device, audio_client, render_client, handle, wave_format) =
+                        let (_device, audio_client, render_client, handle) =
                             match open_playback(
                                 &devname,
-                                samplerate,
-                                channels,
-                                &sample_format_dev,
+                                &wave_format,
                                 exclusive,
                                 polling,
                             ) {
-                                Ok((_device, audio_client, render_client, handle, wave_format)) => {
+                                Ok((_device, audio_client, render_client, handle)) => {
                                     tx_state_dev.send(DeviceState::Ok).unwrap_or(());
-                                    (_device, audio_client, render_client, handle, wave_format)
+                                    (_device, audio_client, render_client, handle)
                                 }
                                 Err(err) => {
                                     let msg = format!("Playback error: {err}");
@@ -1033,9 +1086,17 @@ impl CaptureDevice for WasapiCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let binary_format = self.sample_format.to_binary_format();
+        let (_device_id, sample_format, wave_format) = get_device_id_and_format(
+            &devname,
+            samplerate,
+            channels,
+            &self.sample_format,
+            exclusive,
+            &wasapi::Direction::Capture,
+            loopback,
+        )?;
+        let binary_format = sample_format.to_binary_format();
         let bytes_per_sample = binary_format.bytes_per_sample();
-        let sample_format_dev = self.sample_format;
         let resampler_conf = self.resampler_config;
         let async_src = resampler_is_async(&resampler_conf);
         let silence_timeout = self.silence_timeout;
@@ -1076,11 +1137,11 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let innerhandle = thread::Builder::new()
                     .name("WasapiCaptureInner".to_string())
                     .spawn(move || {
-                        let (_device, audio_client, capture_client, handle, wave_format) =
-                        match open_capture(&devname, capture_samplerate, channels, &sample_format_dev, exclusive, loopback, polling) {
-                            Ok((_device, audio_client, capture_client, handle, wave_format)) => {
+                        let (_device, audio_client, capture_client, handle) =
+                        match open_capture(&devname, &wave_format, exclusive, loopback, polling) {
+                            Ok((_device, audio_client, capture_client, handle)) => {
                                 tx_state_dev.send(DeviceState::Ok).unwrap_or(());
-                                (_device, audio_client, capture_client, handle, wave_format)
+                                (_device, audio_client, capture_client, handle)
                             },
                             Err(err) => {
                                 error!("Failed to open capture device, error: {err}");
