@@ -2146,11 +2146,10 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
-        if dev.format != WasapiSampleFormat::FLOAT32 && !dev.is_exclusive() {
-            return Err(ConfigError::new(
-                "Wasapi shared mode capture must use FLOAT32 sample format",
-            )
-            .into());
+        if dev.format != WasapiSampleFormat::F32 && !dev.is_exclusive() {
+            return Err(
+                ConfigError::new("Wasapi shared mode capture must use F32 sample format").into(),
+            );
         }
     }
     #[cfg(target_os = "windows")]
@@ -2164,11 +2163,10 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(target_os = "windows")]
     if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {
-        if dev.format != WasapiSampleFormat::FLOAT32 && !dev.is_exclusive() {
-            return Err(ConfigError::new(
-                "Wasapi shared mode playback must use FLOAT32 sample format",
-            )
-            .into());
+        if dev.format != WasapiSampleFormat::F32 && !dev.is_exclusive() {
+            return Err(
+                ConfigError::new("Wasapi shared mode playback must use F32 sample format").into(),
+            );
         }
     }
     if let PlaybackDevice::File {

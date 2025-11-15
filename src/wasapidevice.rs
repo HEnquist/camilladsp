@@ -118,19 +118,19 @@ fn wave_format(
     channels: usize,
 ) -> wasapi::WaveFormat {
     match sample_format {
-        WasapiSampleFormat::S16 => {
+        WasapiSampleFormat::I16 => {
             wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        WasapiSampleFormat::S24_4 => {
+        WasapiSampleFormat::I24_4 => {
             wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        WasapiSampleFormat::S24_3 => {
+        WasapiSampleFormat::I24_3 => {
             wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        WasapiSampleFormat::S32 => {
+        WasapiSampleFormat::I32 => {
             wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        WasapiSampleFormat::FLOAT32 => wasapi::WaveFormat::new(
+        WasapiSampleFormat::F32 => wasapi::WaveFormat::new(
             32,
             32,
             &wasapi::SampleType::Float,
