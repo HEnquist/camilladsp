@@ -19,7 +19,7 @@ For example a 4-channel unit may present a single 4-channel device, or two separ
 
 ### PCM devices
 
-An alsa PCM device can be many different things, like a simple alias for a hardware device,
+An ALSA PCM device can be many different things, like a simple alias for a hardware device,
 or any of the many plugins supported by ALSA.
 PCM devices are normally defined in the ALSA configuration file.
 See the [ALSA Plugin Documentation](#alsa-plugin-documentation) for a list of the available plugins.
@@ -80,7 +80,7 @@ Available formats:
 ```
 Ignore the error message at the end. The interesting fields are FORMAT, RATE and CHANNELS.
 In this example the sample formats this device can use are S16_LE and S32_LE (corresponding to I16_LE and I32_LE in CamillaDSP,
-see the [table of equivalent formats in the main README](./README.md#equivalent-formats) for the complete list).
+see the [list of sample formats](#sample-formats) for the complete list).
 The sample rate can be either 44.1 or 48 kHz. And it supports only stereo playback (2 channels).
 
 ### Combinations of parameter values
@@ -102,6 +102,22 @@ Capture parameters are determined in the same way with `arecord`:
 > arecord -D hw:Generic /dev/null --dump-hw-params
 ```
 This outputs the same table as for the aplay example above, but for a capture device. 
+
+### Sample formats
+The choices for sample formats for ALSA devices are:
+| CamillaDSP format | ALSA format | Description |
+| --- | --- | --- |
+| I16_LE | S16_LE |16-bit signed integer, little endian |
+| I24_3_LE | S24_3LE | 24-bit signed integer, stored as 3 bytes per sample, little endian |
+| I24_4_LE | S24_LE  | 24-bit signed integer, stored as 4 bytes per sample where most significant byte is unused padding, little endian |
+| I32_LE | S32_LE |32-bit signed integer, little endian |
+| F32_LE | FLOAT_LE |32-bit floating point, little endian |
+| F64_LE | FLOAT64_LE |64-bit floating point, little endian |
+
+
+This is a subset of the many formats supported by ALSA,
+and covers the vast majority of audio devices.
+
 
 ## Routing all audio through CamillaDSP
 
@@ -172,7 +188,7 @@ The sample format is optional. If set to `null` or left out,
 the highest quality available format is chosen automatically.
 
 When the format is set automatically, 32-bit integer (`I32_LE`) is considered the best,
-followed by 24-bit (`I24_3_LE` and `S24LE`) and 16-bit integer (`I16_LE`).
+followed by 24-bit (`I24_3_LE` and `I24_4_LE`) and 16-bit integer (`I16_LE`).
 The 32-bit (`F32_LE`) and 64-bit (`F64_LE`) float formats are high quality,
 but are supported by very few devices. Therefore these are checked last.
 
