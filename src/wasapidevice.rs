@@ -94,9 +94,14 @@ pub fn list_device_names(input: bool) -> Vec<(String, String)> {
     } else {
         wasapi::Direction::Render
     };
-    let collection = wasapi::DeviceCollection::new(&direction);
-    let names = collection
-        .map(|coll| list_device_names_in_collection(&coll).unwrap_or_default())
+    let enumerator = wasapi::DeviceEnumerator::new();
+
+    let names = enumerator
+        .map(|en| {
+            en.get_device_collection(&direction)
+                .map(|coll| list_device_names_in_collection(&coll).unwrap_or_default())
+                .unwrap_or_default()
+        })
         .unwrap_or_default();
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
@@ -193,8 +198,9 @@ fn get_device_id_and_format(
     } else {
         (*direction, direction.to_string())
     };
+    let enumerator = wasapi::DeviceEnumerator::new()?;
     let device = if let Some(name) = devname {
-        let collection = wasapi::DeviceCollection::new(&adjusted_direction)?;
+        let collection = enumerator.get_device_collection(&adjusted_direction)?;
         debug!(
             "Available {} devices: {:?}.",
             direction_name,
@@ -202,7 +208,7 @@ fn get_device_id_and_format(
         );
         collection.get_device_with_name(name)?
     } else {
-        wasapi::get_default_device(&adjusted_direction)?
+        enumerator.get_default_device(&adjusted_direction)?
     };
     trace!("Found {direction_name} device {devname:?}.");
     let dev_id = device.get_id()?;
@@ -249,7 +255,7 @@ fn get_device_id_and_format(
 }
 
 fn open_playback(
-    devname: &Option<String>,
+    dev_id: &str,
     wave_format: &wasapi::WaveFormat,
     exclusive: bool,
     polling: bool,
@@ -259,17 +265,8 @@ fn open_playback(
     wasapi::AudioRenderClient,
     Option<wasapi::Handle>,
 )> {
-    let device = if let Some(name) = devname {
-        let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
-        debug!(
-            "Available playback devices: {:?}.",
-            list_device_names_in_collection(&collection)
-        );
-        collection.get_device_with_name(name)?
-    } else {
-        wasapi::get_default_device(&wasapi::Direction::Render)?
-    };
-    trace!("Found playback device {devname:?}.");
+    let enumerator = wasapi::DeviceEnumerator::new()?;
+    let device = enumerator.get_device(dev_id)?;
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got playback iaudioclient.");
     let (def_time, min_time) = audio_client.get_device_period()?;
@@ -304,15 +301,17 @@ fn open_playback(
         None
     };
     let render_client = audio_client.get_audiorenderclient()?;
-    debug!("Opened Wasapi playback device {devname:?}.");
+    debug!(
+        "Opened Wasapi playback device {:?}.",
+        device.get_friendlyname()
+    );
     Ok((device, audio_client, render_client, handle))
 }
 
 fn open_capture(
-    devname: &Option<String>,
+    dev_id: &str,
     wave_format: &wasapi::WaveFormat,
     exclusive: bool,
-    loopback: bool,
     polling: bool,
 ) -> Res<(
     wasapi::Device,
@@ -320,29 +319,9 @@ fn open_capture(
     wasapi::AudioCaptureClient,
     Option<wasapi::Handle>,
 )> {
-    let device = if let Some(name) = devname {
-        if !loopback {
-            let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Capture)?;
-            debug!(
-                "Available capture devices: {:?}.",
-                list_device_names_in_collection(&collection)
-            );
-            collection.get_device_with_name(name)?
-        } else {
-            let collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render)?;
-            debug!(
-                "Available loopback capture (i.e. playback) devices: {:?}.",
-                list_device_names_in_collection(&collection)
-            );
-            collection.get_device_with_name(name)?
-        }
-    } else if !loopback {
-        wasapi::get_default_device(&wasapi::Direction::Capture)?
-    } else {
-        wasapi::get_default_device(&wasapi::Direction::Render)?
-    };
+    let enumerator = wasapi::DeviceEnumerator::new()?;
+    let device = enumerator.get_device(dev_id)?;
 
-    trace!("Found capture device {devname:?}.");
     let mut audio_client = device.get_iaudioclient()?;
     trace!("Got capture iaudioclient.");
     let (def_time, min_time) = audio_client.get_device_period()?;
@@ -376,7 +355,10 @@ fn open_capture(
     };
     trace!("Capture got event handle.");
     let capture_client = audio_client.get_audiocaptureclient()?;
-    debug!("Opened Wasapi capture device {devname:?}.");
+    debug!(
+        "Opened Wasapi capture device {:?}.",
+        device.get_friendlyname()
+    );
     Ok((device, audio_client, capture_client, handle))
 }
 
@@ -664,13 +646,13 @@ fn capture_loop(
             // loop to make sure we have read all available packets
             let mut nbr_bytes = 0;
             loop {
-                let (nbr_frames_read, flags) =
+                let (nbr_frames_read, bufferinfo) =
                     capture_client.read_from_device(&mut data[nbr_bytes..])?;
                 if nbr_frames_read < available_frames {
                     debug!("Expected {available_frames} frames, got {nbr_frames_read}.");
                 }
                 let nbr_bytes_loop = nbr_frames_read as usize * blockalign;
-                if flags.silent {
+                if bufferinfo.flags.silent {
                     debug!("Captured a buffer marked as silent.");
                     data.iter_mut()
                         .skip(nbr_bytes)
@@ -759,7 +741,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
-        let (_device_id, sample_format, wave_format) = get_device_id_and_format(
+        let (device_id, sample_format, wave_format) = get_device_id_and_format(
             &devname,
             samplerate,
             channels,
@@ -804,7 +786,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     .spawn(move || {
                         let (_device, audio_client, render_client, handle) =
                             match open_playback(
-                                &devname,
+                                &device_id,
                                 &wave_format,
                                 exclusive,
                                 polling,
@@ -1086,7 +1068,7 @@ impl CaptureDevice for WasapiCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let (_device_id, sample_format, wave_format) = get_device_id_and_format(
+        let (device_id, sample_format, wave_format) = get_device_id_and_format(
             &devname,
             samplerate,
             channels,
@@ -1138,7 +1120,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                     .name("WasapiCaptureInner".to_string())
                     .spawn(move || {
                         let (_device, audio_client, capture_client, handle) =
-                        match open_capture(&devname, &wave_format, exclusive, loopback, polling) {
+                        match open_capture(&device_id, &wave_format, exclusive, polling) {
                             Ok((_device, audio_client, capture_client, handle)) => {
                                 tx_state_dev.send(DeviceState::Ok).unwrap_or(());
                                 (_device, audio_client, capture_client, handle)
