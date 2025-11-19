@@ -16,7 +16,7 @@
 
 use crate::audiodevice::*;
 use crate::config;
-use crate::config::{BinarySampleFormat, ConfigError};
+use crate::config::{BinarySampleFormat, ConfigError, CoreAudioSampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::helpers::PIRateController;
@@ -144,7 +144,7 @@ pub struct CoreaudioPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: Option<BinarySampleFormat>,
+    pub sample_format: Option<CoreAudioSampleFormat>,
     pub exclusive: bool,
     pub target_level: usize,
     pub adjust_period: f32,
@@ -159,7 +159,7 @@ pub struct CoreaudioCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: Option<BinarySampleFormat>,
+    pub sample_format: Option<CoreAudioSampleFormat>,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
@@ -220,7 +220,7 @@ fn open_coreaudio_playback(
     devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &Option<BinarySampleFormat>,
+    sample_format: &Option<CoreAudioSampleFormat>,
     exclusive: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if let Some(name) = devname {
@@ -258,16 +258,10 @@ fn open_coreaudio_playback(
 
     if let Some(sfmt) = sample_format {
         let phys_format = match *sfmt {
-            BinarySampleFormat::I16_LE => coreaudio::audio_unit::BinarySampleFormat::I16,
-            BinarySampleFormat::S24LE | BinarySampleFormat::I24_3_LE => {
-                coreaudio::audio_unit::BinarySampleFormat::I24
-            }
-            BinarySampleFormat::I32_LE => coreaudio::audio_unit::BinarySampleFormat::I32,
-            BinarySampleFormat::F32_LE => coreaudio::audio_unit::BinarySampleFormat::F32,
-            _ => {
-                let msg = format!("Sample format '{sfmt}' not supported!");
-                return Err(ConfigError::new(&msg).into());
-            }
+            CoreAudioSampleFormat::I16 => coreaudio::audio_unit::SampleFormat::I16,
+            CoreAudioSampleFormat::I24 => coreaudio::audio_unit::SampleFormat::I24,
+            CoreAudioSampleFormat::I32 => coreaudio::audio_unit::SampleFormat::I32,
+            CoreAudioSampleFormat::F32 => coreaudio::audio_unit::SampleFormat::F32,
         };
 
         let physical_stream_format = StreamFormat {
@@ -298,7 +292,7 @@ fn open_coreaudio_playback(
 
     let stream_format = StreamFormat {
         sample_rate: samplerate as f64,
-        sample_format: coreaudio::audio_unit::BinarySampleFormat::F32,
+        sample_format: coreaudio::audio_unit::SampleFormat::F32,
         flags: LinearPcmFlags::IS_FLOAT | LinearPcmFlags::IS_PACKED,
         channels: channels as u32,
     };
@@ -317,7 +311,7 @@ fn open_coreaudio_capture(
     devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &Option<BinarySampleFormat>,
+    sample_format: &Option<CoreAudioSampleFormat>,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if let Some(name) = devname {
         debug!("Available capture devices: {:?}.", list_device_names(true));
@@ -343,16 +337,10 @@ fn open_coreaudio_capture(
 
     if let Some(sfmt) = sample_format {
         let phys_format = match *sfmt {
-            BinarySampleFormat::I16_LE => coreaudio::audio_unit::BinarySampleFormat::I16,
-            BinarySampleFormat::S24LE | BinarySampleFormat::I24_3_LE => {
-                coreaudio::audio_unit::BinarySampleFormat::I24
-            }
-            BinarySampleFormat::I32_LE => coreaudio::audio_unit::BinarySampleFormat::I32,
-            BinarySampleFormat::F32_LE => coreaudio::audio_unit::BinarySampleFormat::F32,
-            _ => {
-                let msg = format!("Sample format '{sfmt}' not supported!");
-                return Err(ConfigError::new(&msg).into());
-            }
+            CoreAudioSampleFormat::I16 => coreaudio::audio_unit::SampleFormat::I16,
+            CoreAudioSampleFormat::I24 => coreaudio::audio_unit::SampleFormat::I24,
+            CoreAudioSampleFormat::I32 => coreaudio::audio_unit::SampleFormat::I32,
+            CoreAudioSampleFormat::F32 => coreaudio::audio_unit::SampleFormat::F32,
         };
 
         let physical_stream_format = StreamFormat {
@@ -383,7 +371,7 @@ fn open_coreaudio_capture(
     debug!("Set capture stream format.");
     let stream_format = StreamFormat {
         sample_rate: samplerate as f64,
-        sample_format: coreaudio::audio_unit::BinarySampleFormat::F32,
+        sample_format: coreaudio::audio_unit::SampleFormat::F32,
         flags: LinearPcmFlags::IS_FLOAT | LinearPcmFlags::IS_PACKED,
         channels: channels as u32,
     };

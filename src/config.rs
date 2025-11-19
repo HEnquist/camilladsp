@@ -1882,7 +1882,14 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             }
             #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => {
-                dev.format = Some(fmt);
+                let mapped_format = CoreAudioSampleFormat::from_binary_format(&fmt);
+                if let Some(mapped) = mapped_format {
+                    dev.format = Some(mapped);
+                } else {
+                    let msg =
+                        format!("CoreAudio does not have a sample format corresponding to {fmt}");
+                    return Err(ConfigError::new(&msg).into());
+                }
             }
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => {
