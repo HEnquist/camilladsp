@@ -1002,6 +1002,7 @@ fn capture_loop_bytes(
             &params.sample_format,
             capture_bytes,
             &params.capture_status.read().used_channels,
+            false,
         );
         chunk.update_stats(&mut chunk_stats);
         if let Some(mut capture_status) = params.capture_status.try_write() {

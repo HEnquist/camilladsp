@@ -497,6 +497,7 @@ fn capture_loop(
             &params.sample_format,
             bytes_read,
             &params.capture_status.read().used_channels, //channel_mask??
+            true,
         );
         chunk.update_stats(&mut chunk_stats);
         if let Some(mut capture_status) = params.capture_status.try_write() {

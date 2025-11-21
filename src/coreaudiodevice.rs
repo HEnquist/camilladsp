@@ -969,6 +969,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         &BinarySampleFormat::F32_LE,
                         capture_bytes,
                         &capture_status.read().used_channels,
+                        false,
                     );
                     averager.add_value(capture_frames + device_consumer.occupied_len()/blockalign - prev_len/blockalign);
                     if let Some(capture_status) = capture_status.try_upgradable_read() {

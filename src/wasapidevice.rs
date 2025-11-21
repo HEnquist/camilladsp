@@ -1323,6 +1323,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             &binary_format,
                             capture_bytes,
                             &capture_status.read().used_channels,
+                            false,
                         );
                         chunk.update_stats(&mut chunk_stats);
                         if let Some(mut capture_status) = capture_status.try_write() {

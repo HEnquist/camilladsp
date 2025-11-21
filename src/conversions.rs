@@ -107,6 +107,7 @@ pub fn buffer_to_chunk_rawbytes(
     sample_format: &BinarySampleFormat,
     valid_bytes: usize,
     used_channels: &[bool],
+    check_for_nan: bool,
 ) -> AudioChunk {
     let num_frames = buffer.len() / sample_format.bytes_per_sample() / channels;
     let num_valid_frames = valid_bytes / sample_format.bytes_per_sample() / channels;
@@ -152,9 +153,31 @@ pub fn buffer_to_chunk_rawbytes(
             let mut wf = vec_from_stash(num_frames);
             let nbr = adapter.copy_from_channel_to_slice(ch, 0, &mut wf[0..num_valid_frames]);
             if nbr > 0 {
-                let (mavx, minv) = wf.iter().fold((0.0, 0.0), |(max, min), x| {
-                    (PrcFmt::max(max, *x), PrcFmt::min(min, *x))
-                });
+                let (mavx, minv) = if check_for_nan
+                    && (*sample_format == BinarySampleFormat::F32_LE
+                        || *sample_format == BinarySampleFormat::F64_LE)
+                {
+                    let mut maxv = 0.0;
+                    let mut minv = 0.0;
+                    let mut invalid_values = 0;
+                    for value in wf.iter_mut() {
+                        if !value.is_finite() {
+                            invalid_values += 1;
+                            *value = 0.0;
+                        }
+                        if *value > maxv {
+                            maxv = *value;
+                        } else if *value < minv {
+                            minv = *value;
+                        }
+                    }
+                    warn!("Ignored {invalid_values} infinite or NaN values in channel {ch}");
+                    (maxv, minv)
+                } else {
+                    wf.iter().fold((0.0, 0.0), |(max, min), x| {
+                        (PrcFmt::max(max, *x), PrcFmt::min(min, *x))
+                    })
+                };
                 if mavx > maxvalue {
                     maxvalue = mavx;
                 }
@@ -400,6 +423,7 @@ mod tests {
             &BinarySampleFormat::I24_3_LE,
             buffer.len(),
             &[true; 1],
+            false,
         );
         assert!(
             (chunk.waveforms[0][0] - chunk2.waveforms[0][0]).abs() < 1.0e-6,
@@ -426,6 +450,7 @@ mod tests {
             &BinarySampleFormat::I24_4_RJ_LE,
             buffer.len(),
             &[true; 1],
+            false,
         );
         assert!(
             (chunk.waveforms[0][0] - chunk2.waveforms[0][0]).abs() < 1.0e-6,
@@ -510,6 +535,7 @@ mod tests {
             &BinarySampleFormat::I16_LE,
             buffer.len(),
             &[true; 1],
+            false,
         );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
@@ -526,6 +552,7 @@ mod tests {
             &BinarySampleFormat::I24_4_RJ_LE,
             buffer.len(),
             &[true; 1],
+            false,
         );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
@@ -542,6 +569,7 @@ mod tests {
             &BinarySampleFormat::I24_3_LE,
             buffer.len(),
             &[true; 1],
+            false,
         );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
@@ -558,6 +586,7 @@ mod tests {
             &BinarySampleFormat::I32_LE,
             buffer.len(),
             &[true; 1],
+            false,
         );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
@@ -574,6 +603,7 @@ mod tests {
             &BinarySampleFormat::I16_LE,
             buffer.len(),
             &[true; 1],
+            false,
         );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
@@ -590,6 +620,7 @@ mod tests {
             &BinarySampleFormat::I24_4_RJ_LE,
             buffer.len(),
             &[true; 1],
+            false,
         );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
@@ -606,6 +637,7 @@ mod tests {
             &BinarySampleFormat::I32_LE,
             buffer.len(),
             &[true; 1],
+            false,
         );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
@@ -622,6 +654,7 @@ mod tests {
             &BinarySampleFormat::F32_LE,
             buffer.len(),
             &[true; 1],
+            false,
         );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }
@@ -638,6 +671,7 @@ mod tests {
             &BinarySampleFormat::F64_LE,
             buffer.len(),
             &[true; 1],
+            false,
         );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
     }

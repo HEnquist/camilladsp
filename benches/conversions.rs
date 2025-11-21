@@ -13,8 +13,14 @@ fn bench_to_chunk_small(c: &mut Criterion) {
     let mask = vec![true, true];
     c.bench_function("to_chunk_small", |b| {
         b.iter(|| {
-            let chunk =
-                buffer_to_chunk_rawbytes(&data, 2, &BinarySampleFormat::I32_LE, datalen, &mask);
+            let chunk = buffer_to_chunk_rawbytes(
+                &data,
+                2,
+                &BinarySampleFormat::I32_LE,
+                datalen,
+                &mask,
+                false,
+            );
             recycle_chunk(chunk);
         })
     });
@@ -26,8 +32,14 @@ fn bench_to_chunk_large(c: &mut Criterion) {
     let mask = vec![true, true];
     c.bench_function("to_chunk_large", |b| {
         b.iter(|| {
-            let chunk =
-                buffer_to_chunk_rawbytes(&data, 2, &BinarySampleFormat::I32_LE, datalen, &mask);
+            let chunk = buffer_to_chunk_rawbytes(
+                &data,
+                2,
+                &BinarySampleFormat::I32_LE,
+                datalen,
+                &mask,
+                false,
+            );
             recycle_chunk(chunk);
         })
     });

@@ -403,7 +403,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                         .unwrap();
                                 }
                             };
-                            let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &binary_format, capture_bytes, &capture_status.read().used_channels);
+                            let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &binary_format, capture_bytes, &capture_status.read().used_channels, false);
                             chunk.update_stats(&mut chunk_stats);
                             {
                                 let mut capture_status = capture_status.write();
