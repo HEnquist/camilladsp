@@ -171,7 +171,9 @@ pub fn buffer_to_chunk_rawbytes(
                             minv = *value;
                         }
                     }
-                    warn!("Ignored {invalid_values} infinite or NaN values in channel {ch}");
+                    if invalid_values > 0 {
+                        warn!("Ignored {invalid_values} infinite or NaN values in channel {ch}");
+                    }
                     (maxv, minv)
                 } else {
                     wf.iter().fold((0.0, 0.0), |(max, min), x| {
