@@ -16,7 +16,7 @@
 
 use crate::audiodevice::*;
 use crate::config;
-use crate::config::{ConfigError, WasapiSampleFormat};
+use crate::config::{BinarySampleFormat, ConfigError, WasapiSampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::helpers::PIRateController;
@@ -117,25 +117,25 @@ fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<Str
     Ok(names)
 }
 
-fn wave_format(
-    sample_format: &WasapiSampleFormat,
+fn build_wave_format(
+    sample_format: &BinarySampleFormat,
     samplerate: usize,
     channels: usize,
 ) -> wasapi::WaveFormat {
     match sample_format {
-        WasapiSampleFormat::I16 => {
+        BinarySampleFormat::I16_LE => {
             wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        WasapiSampleFormat::I24_4 => {
+        BinarySampleFormat::I24_4_LJ_LE => {
             wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        WasapiSampleFormat::I24_3 => {
+        BinarySampleFormat::I24_3_LE => {
             wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        WasapiSampleFormat::I32 => {
+        BinarySampleFormat::I32_LE => {
             wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        WasapiSampleFormat::F32 => wasapi::WaveFormat::new(
+        BinarySampleFormat::F32_LE => wasapi::WaveFormat::new(
             32,
             32,
             &wasapi::SampleType::Float,
@@ -143,6 +143,7 @@ fn wave_format(
             channels,
             None,
         ),
+        _ => unreachable!(),
     }
 }
 
@@ -152,28 +153,67 @@ fn get_supported_wave_format(
     samplerate: usize,
     channels: usize,
     sharemode: &wasapi::ShareMode,
-) -> Res<wasapi::WaveFormat> {
-    let wave_format = wave_format(sample_format, samplerate, channels);
+) -> Res<(wasapi::WaveFormat, BinarySampleFormat)> {
     match sharemode {
-        wasapi::ShareMode::Exclusive => {
-            Ok(audio_client.is_supported_exclusive_with_quirks(&wave_format)?)
-        }
-        wasapi::ShareMode::Shared => match audio_client.is_supported(&wave_format, sharemode) {
-            Ok(None) => {
-                debug!("Device supports format {wave_format:?}.");
-                Ok(wave_format)
+        wasapi::ShareMode::Exclusive => match sample_format {
+            WasapiSampleFormat::I16 => {
+                let wave_format =
+                    build_wave_format(&BinarySampleFormat::I16_LE, samplerate, channels);
+                Ok((
+                    audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
+                    BinarySampleFormat::I16_LE,
+                ))
             }
-            Ok(Some(modified)) => {
-                let msg = format!(
-                    "Device doesn't support format:\n{wave_format:#?}\nClosest match is:\n{modified:#?}"
-                );
-                Err(ConfigError::new(&msg).into())
+            WasapiSampleFormat::I32 => {
+                let wave_format =
+                    build_wave_format(&BinarySampleFormat::I32_LE, samplerate, channels);
+                Ok((
+                    audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
+                    BinarySampleFormat::I32_LE,
+                ))
             }
-            Err(err) => {
-                let msg = format!("Device doesn't support format:\n{wave_format:#?}\nError: {err}");
-                Err(ConfigError::new(&msg).into())
+            WasapiSampleFormat::F32 => {
+                let wave_format =
+                    build_wave_format(&BinarySampleFormat::F32_LE, samplerate, channels);
+                Ok((
+                    audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
+                    BinarySampleFormat::F32_LE,
+                ))
+            }
+            WasapiSampleFormat::I24 => {
+                let wave_format =
+                    build_wave_format(&BinarySampleFormat::I24_3_LE, samplerate, channels);
+                if let Ok(wavefmt) = audio_client.is_supported_exclusive_with_quirks(&wave_format) {
+                    return Ok((wavefmt, BinarySampleFormat::I24_3_LE));
+                }
+                let wave_format =
+                    build_wave_format(&BinarySampleFormat::I24_4_LJ_LE, samplerate, channels);
+                Ok((
+                    audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
+                    BinarySampleFormat::I24_4_LJ_LE,
+                ))
             }
         },
+        wasapi::ShareMode::Shared => {
+            let wave_format = build_wave_format(&BinarySampleFormat::F32_LE, samplerate, channels);
+            match audio_client.is_supported(&wave_format, sharemode) {
+                Ok(None) => {
+                    debug!("Device supports format {wave_format:?}.");
+                    Ok((wave_format, BinarySampleFormat::F32_LE))
+                }
+                Ok(Some(modified)) => {
+                    let msg = format!(
+                    "Device doesn't support format:\n{wave_format:#?}\nClosest match is:\n{modified:#?}"
+                );
+                    Err(ConfigError::new(&msg).into())
+                }
+                Err(err) => {
+                    let msg =
+                        format!("Device doesn't support format:\n{wave_format:#?}\nError: {err}");
+                    Err(ConfigError::new(&msg).into())
+                }
+            }
+        }
     }
 }
 
@@ -185,7 +225,7 @@ fn get_device_id_and_format(
     exclusive: bool,
     direction: &wasapi::Direction,
     loopback: bool,
-) -> Res<(String, WasapiSampleFormat, wasapi::WaveFormat)> {
+) -> Res<(String, BinarySampleFormat, wasapi::WaveFormat)> {
     let sharemode = match exclusive {
         true => wasapi::ShareMode::Exclusive,
         false => wasapi::ShareMode::Shared,
@@ -220,20 +260,19 @@ fn get_device_id_and_format(
         temp_format = Some(WasapiSampleFormat::F32);
     }
     if let Some(sample_format) = &temp_format {
-        let wave_format = get_supported_wave_format(
+        let (wave_format, binary_format) = get_supported_wave_format(
             &audio_client,
             sample_format,
             samplerate,
             channels,
             &sharemode,
         )?;
-        return Ok((dev_id, *sample_format, wave_format));
+        return Ok((dev_id, binary_format, wave_format));
     }
     debug!("Probing for a supported {direction_name} sample format.");
     for sample_format in [
         WasapiSampleFormat::I32,
-        WasapiSampleFormat::I24_3,
-        WasapiSampleFormat::I24_4,
+        WasapiSampleFormat::I24,
         WasapiSampleFormat::I16,
         WasapiSampleFormat::F32,
     ] {
@@ -245,9 +284,9 @@ fn get_device_id_and_format(
             channels,
             &sharemode,
         );
-        if let Ok(wave_format) = maybe_wave_format {
+        if let Ok((wave_format, binary_format)) = maybe_wave_format {
             debug!("Found supported {direction_name} sample format {sample_format:?}");
-            return Ok((dev_id, sample_format, wave_format));
+            return Ok((dev_id, binary_format, wave_format));
         }
     }
     let msg = format!("Unable to find a supported sample format for {direction_name} with {channels} channels at {samplerate} Hz.");
@@ -741,7 +780,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
-        let (device_id, sample_format, wave_format) = get_device_id_and_format(
+        let (device_id, binary_format, wave_format) = get_device_id_and_format(
             &devname,
             samplerate,
             channels,
@@ -769,8 +808,6 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     rms: vec![0.0; channels],
                     peak: vec![0.0; channels],
                 };
-
-                let binary_format = sample_format.to_binary_format();
 
                 let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
 
@@ -1068,7 +1105,7 @@ impl CaptureDevice for WasapiCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let (device_id, sample_format, wave_format) = get_device_id_and_format(
+        let (device_id, binary_format, wave_format) = get_device_id_and_format(
             &devname,
             samplerate,
             channels,
@@ -1077,7 +1114,6 @@ impl CaptureDevice for WasapiCaptureDevice {
             &wasapi::Direction::Capture,
             loopback,
         )?;
-        let binary_format = sample_format.to_binary_format();
         let bytes_per_sample = binary_format.bytes_per_sample();
         let resampler_conf = self.resampler_config;
         let async_src = resampler_is_async(&resampler_conf);

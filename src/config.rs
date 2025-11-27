@@ -215,8 +215,7 @@ impl fmt::Display for BinarySampleFormat {
 #[serde(deny_unknown_fields)]
 pub enum WasapiSampleFormat {
     I16,
-    I24_3,
-    I24_4,
+    I24,
     I32,
     F32,
 }
@@ -228,23 +227,12 @@ impl WasapiSampleFormat {
     pub fn from_binary_format(format: &BinarySampleFormat) -> Option<Self> {
         match format {
             BinarySampleFormat::I16_LE => Some(Self::I16),
-            BinarySampleFormat::I24_3_LE => Some(Self::I24_3),
-            BinarySampleFormat::I24_4_LJ_LE => Some(Self::I24_4),
-            BinarySampleFormat::I24_4_RJ_LE => Some(Self::I24_4),
+            BinarySampleFormat::I24_3_LE => Some(Self::I24),
+            BinarySampleFormat::I24_4_LJ_LE => Some(Self::I24),
+            BinarySampleFormat::I24_4_RJ_LE => Some(Self::I24),
             BinarySampleFormat::I32_LE => Some(Self::I32),
             BinarySampleFormat::F32_LE => Some(Self::F32),
             _ => None,
-        }
-    }
-
-    // Map the wasapi format to the corresponding binary format
-    pub fn to_binary_format(&self) -> BinarySampleFormat {
-        match self {
-            Self::I16 => BinarySampleFormat::I16_LE,
-            Self::I24_3 => BinarySampleFormat::I24_3_LE,
-            Self::I24_4 => BinarySampleFormat::I24_4_LJ_LE,
-            Self::I32 => BinarySampleFormat::I32_LE,
-            Self::F32 => BinarySampleFormat::F32_LE,
         }
     }
 }
