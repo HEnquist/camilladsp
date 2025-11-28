@@ -258,9 +258,9 @@ fn open_coreaudio_playback(
 
     if let Some(sfmt) = sample_format {
         let phys_format = match *sfmt {
-            CoreAudioSampleFormat::I16 => coreaudio::audio_unit::SampleFormat::I16,
-            CoreAudioSampleFormat::I24 => coreaudio::audio_unit::SampleFormat::I24,
-            CoreAudioSampleFormat::I32 => coreaudio::audio_unit::SampleFormat::I32,
+            CoreAudioSampleFormat::S16 => coreaudio::audio_unit::SampleFormat::I16,
+            CoreAudioSampleFormat::S24 => coreaudio::audio_unit::SampleFormat::I24,
+            CoreAudioSampleFormat::S32 => coreaudio::audio_unit::SampleFormat::I32,
             CoreAudioSampleFormat::F32 => coreaudio::audio_unit::SampleFormat::F32,
         };
 
@@ -337,9 +337,9 @@ fn open_coreaudio_capture(
 
     if let Some(sfmt) = sample_format {
         let phys_format = match *sfmt {
-            CoreAudioSampleFormat::I16 => coreaudio::audio_unit::SampleFormat::I16,
-            CoreAudioSampleFormat::I24 => coreaudio::audio_unit::SampleFormat::I24,
-            CoreAudioSampleFormat::I32 => coreaudio::audio_unit::SampleFormat::I32,
+            CoreAudioSampleFormat::S16 => coreaudio::audio_unit::SampleFormat::S16,
+            CoreAudioSampleFormat::S24 => coreaudio::audio_unit::SampleFormat::S24,
+            CoreAudioSampleFormat::S32 => coreaudio::audio_unit::SampleFormat::S32,
             CoreAudioSampleFormat::F32 => coreaudio::audio_unit::SampleFormat::F32,
         };
 

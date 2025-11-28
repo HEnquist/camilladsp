@@ -496,7 +496,7 @@ Options:
   -e, --extra_samples <EXTRA_SAMPLES>  Override number of extra samples in config
   -n, --channels <CHANNELS>            Override number of channels of capture device in config
   -r, --samplerate <SAMPLERATE>        Override samplerate in config
-  -f, --format <FORMAT>                Override sample format of capture device in config [possible values: I16_LE, I24_3_LE, I24_4_LE, I32_LE, F32_LE, F64_LE]
+  -f, --format <FORMAT>                Override sample format of capture device in config [possible values: S16_LE, S24_3_LE, S24_4_LJ_LE, S24_4_RJ_LE, S32_LE, F32_LE, F64_LE]
   -h, --help                           Print help
   -V, --version                        Print version
 ```
@@ -778,7 +778,7 @@ devices:
   enable_rate_adjust: true
   capture:
     type: Bluez
-    format: I16_LE
+    format: S16_LE
     channels: 2
     dbus_path: /org/bluealsa/hci0/dev_A0_B1_C2_D3_E4_F5/a2dpsnk/source
     service: org.bluealsa (*)
@@ -944,13 +944,13 @@ devices:
     type: Pulse
     channels: 2
     device: "MySink.monitor"
-    format: I16_LE
+    format: S16_LE
     labels: ["L", "R"] (*)
   playback:
     type: Alsa
     channels: 2
     device: "hw:Generic_1"
-    format: I32_LE
+    format: S32_LE
 ```
 A parameter marked (*) in any example is optional. If they are left out from the configuration, or set to `null`, their default values will be used.
 
@@ -1158,21 +1158,21 @@ A parameter marked (*) in any example is optional. If they are left out from the
     The available choices for `format` depend on the backend.
 
     For `File`, `Stdin`, `Stdout` `RawFile` and `Bluez`, the choices are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
-    * I16_LE - Signed 16-bit int, stored as two bytes
-    * I24_4_LJ_LE - Signed 24-bit int, stored _padded_ as four bytes, left justified (three bytes of data, the least significant byte is unused padding)
-    * I24_4_RJ_LE - Signed 24-bit int, stored _padded_ as four bytes, right justified (three bytes of data, the most significant byte is unused padding)
-    * I24_3_LE - Signed 24-bit int, stored _packed_ as three bytes (with no padding)
-    * I32_LE - Signed 32-bit int, stored as four bytes
+    * S16_LE - Signed 16-bit int, stored as two bytes
+    * S24_4_LJ_LE - Signed 24-bit int, stored _padded_ as four bytes, left justified (three bytes of data, the least significant byte is unused padding)
+    * S24_4_RJ_LE - Signed 24-bit int, stored _padded_ as four bytes, right justified (three bytes of data, the most significant byte is unused padding)
+    * S24_3_LE - Signed 24-bit int, stored _packed_ as three bytes (with no padding)
+    * S32_LE - Signed 32-bit int, stored as four bytes
     * F32_LE - 32-bit float, stored as four bytes
     * F64_LE - 64-bit float, stored as eight bytes
 
     For [ALSA](./backend_alsa.md), [CoreAudio](./backend_coreaudio.md) and [Wasapi](./backend_wasapi.md), see the respective backend documentation.
 
     For Pulse, the choices are:
-    * I16_LE - Signed 16-bit int
-    * I24_3_LE - Signed 24-bit int, stored _packed_ as three bytes (with no padding)
-    * I24_4_LE - Signed 24-bit int, stored as four bytes
-    * I32_LE - Signed 32-bit int
+    * S16_LE - Signed 16-bit int
+    * S24_3_LE - Signed 24-bit int, stored _packed_ as three bytes (with no padding)
+    * S24_4_LE - Signed 24-bit int, stored as four bytes
+    * S32_LE - Signed 32-bit int
     * F32_LE - 32-bit float
 
     __Note that there are three different 24-bit formats! Make sure to select the correct one.__
@@ -1203,7 +1203,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   This is a _streaming_ header, meaning it contains a dummy value for the file length.
   Most applications ignore this and calculate the correct length from the file size.
   The wav format does not support right justified padded data, and therefore it is not
-  possible to enable the wav-header if the format is `I24_4_RJ_LE`.
+  possible to enable the wav-header if the format is `S24_4_RJ_LE`.
 
   To read from a wav file, use the `WavFile` capture device.
   The samplerate and numnber of channels of the file is used to override the values in the config,
@@ -1216,7 +1216,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
       type: RawFile
       channels: 2
       filename: "/path/to/inputfile.raw"
-      format: I16_LE
+      format: S16_LE
       extra_samples: 123 (*)
       skip_bytes: 0 (*)
       read_bytes: 0 (*)
@@ -1224,7 +1224,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
       type: File
       channels: 2
       filename: "/path/to/outputfile.raw"
-      format: I32_LE
+      format: S32_LE
   ```
 
   Example config for Stdin/Stdout:
@@ -1232,14 +1232,14 @@ A parameter marked (*) in any example is optional. If they are left out from the
     capture:
       type: Stdin
       channels: 2
-      format: I16_LE
+      format: S16_LE
       extra_samples: 123 (*)
       skip_bytes: 0 (*)
       read_bytes: 0 (*)
     playback:
       type: Stdout
       channels: 2
-      format: I32_LE
+      format: S32_LE
   ```
 
   Example config for wav input and output:
@@ -1250,7 +1250,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
     playback:
       type: File
       channels: 2
-      format: I32_LE
+      format: S32_LE
       wav_header: true
       filename: "/path/to/outputfile.wav"
   ```
@@ -1322,12 +1322,12 @@ A parameter marked (*) in any example is optional. If they are left out from the
       type: Pulse
       channels: 2
       device: "MySink.monitor"
-      format: I16_LE
+      format: S16_LE
     playback:
       type: Pulse
       channels: 2
       device: "alsa_output.pci-0000_03_00.6.analog-stereo"
-      format: I32_LE
+      format: S32_LE
   ```
 
   ### Jack
@@ -1865,11 +1865,11 @@ This format is a simple text file with one value per row:
 -0.000012
 ```
 The other possible formats are raw data:
-- I16_LE: signed 16-bit little-endian integers
-- I24_4_RJ_LE: signed 24-bit little-endian integers stored as 32 bits right justified (with the data in the lower 24)
-- I24_4_LJ_LE: signed 24-bit little-endian integers stored as 32 bits left justified (with the data in the upper 24)
-- I24_3_LE: signed 24-bit little-endian integers stored as 24 bits
-- I32_LE: signed 32-bit little-endian integers
+- S16_LE: signed 16-bit little-endian integers
+- S24_4_RJ_LE: signed 24-bit little-endian integers stored as 32 bits right justified (with the data in the lower 24)
+- S24_4_LJ_LE: signed 24-bit little-endian integers stored as 32 bits left justified (with the data in the upper 24)
+- S24_3_LE: signed 24-bit little-endian integers stored as 24 bits
+- S32_LE: signed 32-bit little-endian integers
 - F32_LE: 32-bit little endian float
 - F64_LE: 64-bit little endian float
 

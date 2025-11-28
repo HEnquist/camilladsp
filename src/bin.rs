@@ -687,11 +687,11 @@ fn main_process() -> i32 {
                 .display_order(410)
                 .action(ArgAction::Set)
                 .value_parser([
-                    "I16_LE",
-                    "I24_3_LE",
-                    "I24_4_LJ_LE",
-                    "I24_4_RJ_LE",
-                    "I32_LE",
+                    "S16_LE",
+                    "S24_3_LE",
+                    "S24_4_LJ_LE",
+                    "S24_4_RJ_LE",
+                    "S32_LE",
                     "F32_LE",
                     "F64_LE",
                 ])

@@ -41,7 +41,7 @@ In exclusive mode, these points apply for the CamillaDSP configuration:
 - CamillaDSP is able to control the sample rate of the devices.
 - The sample format must be one that the device driver can accept.
   This usually matches the hardware capabilities of the device.
-  For example a 24-bit USB dac is likely to accept the `I16` and `I24_3` formats.
+  For example a 24-bit USB dac is likely to accept the `S16` and `S24` formats.
   Other formats may be supported depending on driver support.
   Note that all sample formats may not be available at all sample rates.
   A USB device might support both 16 and 24 bits at up to 96 kHz, but only 16 bits above that.
@@ -101,7 +101,7 @@ This example configuration will be used to explain the various options specific 
     type: Wasapi
     channels: 2
     device: "SPDIF Interface (FX-AUDIO-DAC-X6)" (*)
-    format: I24_3 (*)
+    format: S24 (*)
     exclusive: true (*)
     polling: false (*)
 ```
@@ -121,14 +121,6 @@ and the built in audio of a desktop computer can be "Speakers (Realtek(R) Audio)
 
 Specifying `null` or leaving out `device` will give the default capture or playback device.
 
-To help with finding the name of playback and capture devices,
-use the Windows version of "cpal-listdevices" program from here:
-https://github.com/HEnquist/cpal-listdevices/releases
-
-Just download the binary and run it in a terminal. It will list all devices with the names.
-The parameters shown are for shared mode, more sample rates and sample formats
-will likely be available in exclusive mode.
-
 ### Shared or exclusive mode
 Set `exclusive` to `true` to enable exclusive mode.
 Setting it to `false` or leaving it out means that shared mode will be used.
@@ -139,23 +131,15 @@ The sample format is optional. If set to `null` or left out,
 the format is chosen automatically.
 
 The available formats are:
-- 32-bit integer (`I32`)
-- 24-bit integer (`I24_3`)
-- 24-bit integer (`I24_4`)
-- 16-bit integer (`I16`)
+- 32-bit integer (`S32`)
+- 24-bit integer (`S24`)
+- 16-bit integer (`S16`)
 - 32-bit float (`F32`)
-
-Note that there are two 24-bit formats. They are equivalent in terms quality.
-The difference is that `I24_3` is stored as 3 bytes per sample, while `I24_4` is stored in 4,
-where one byte is an unused padding byte.
-Audio devices typically only support one of the 24-bit formats.
-USB devices tend to use `I24_3` for 24-bit samples, while the built-in
-audio codecs of many computers use `I24_4`.
 
 In shared mode, the format is always 32-bit float (`F32`).
 
 In exclusive mode, the highest quality format the device supports is chosen.
-The order of priority is `I32`, `I24_3`, `I24_4`, `I16`, `F32`.
+The order of priority is `S32`, `S24`, `S16`, `F32`.
 
 ### Polling or event driven timing
 Event driven timing is more efficient and is normally less prone to glitches in the audio,

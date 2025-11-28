@@ -249,16 +249,16 @@ pub fn list_formats(hwp: &HwParams) -> Res<Vec<AlsaSampleFormat>> {
     let mut formats = Vec::with_capacity(6);
     // Let's just check the formats supported by CamillaDSP
     if hwp.test_format(Format::s16()).is_ok() {
-        formats.push(AlsaSampleFormat::I16_LE);
+        formats.push(AlsaSampleFormat::S16_LE);
     }
     if hwp.test_format(Format::s24()).is_ok() {
-        formats.push(AlsaSampleFormat::I24_4_LE);
+        formats.push(AlsaSampleFormat::S24_4_LE);
     }
     if hwp.test_format(Format::S243LE).is_ok() {
-        formats.push(AlsaSampleFormat::I24_3_LE);
+        formats.push(AlsaSampleFormat::S24_3_LE);
     }
     if hwp.test_format(Format::s32()).is_ok() {
-        formats.push(AlsaSampleFormat::I32_LE);
+        formats.push(AlsaSampleFormat::S32_LE);
     }
     if hwp.test_format(Format::float()).is_ok() {
         formats.push(AlsaSampleFormat::F32_LE);
@@ -273,17 +273,17 @@ pub fn list_formats(hwp: &HwParams) -> Res<Vec<AlsaSampleFormat>> {
 pub fn pick_preferred_format(hwp: &HwParams) -> Option<AlsaSampleFormat> {
     // Start with integer formats, in descending quality
     if hwp.test_format(Format::s32()).is_ok() {
-        return Some(AlsaSampleFormat::I32_LE);
+        return Some(AlsaSampleFormat::S32_LE);
     }
     // The two 24-bit formats are equivalent, the order does not matter
     if hwp.test_format(Format::S243LE).is_ok() {
-        return Some(AlsaSampleFormat::I24_3_LE);
+        return Some(AlsaSampleFormat::S24_3_LE);
     }
     if hwp.test_format(Format::s24()).is_ok() {
-        return Some(AlsaSampleFormat::I24_4_LE);
+        return Some(AlsaSampleFormat::S24_4_LE);
     }
     if hwp.test_format(Format::s16()).is_ok() {
-        return Some(AlsaSampleFormat::I16_LE);
+        return Some(AlsaSampleFormat::S16_LE);
     }
     // float formats are unusual, try these last
     if hwp.test_format(Format::float()).is_ok() {

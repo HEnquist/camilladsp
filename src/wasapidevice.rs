@@ -123,16 +123,16 @@ fn build_wave_format(
     channels: usize,
 ) -> wasapi::WaveFormat {
     match sample_format {
-        BinarySampleFormat::I16_LE => {
+        BinarySampleFormat::S16_LE => {
             wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        BinarySampleFormat::I24_4_LJ_LE => {
+        BinarySampleFormat::S24_4_LJ_LE => {
             wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        BinarySampleFormat::I24_3_LE => {
+        BinarySampleFormat::S24_3_LE => {
             wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels, None)
         }
-        BinarySampleFormat::I32_LE => {
+        BinarySampleFormat::S32_LE => {
             wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels, None)
         }
         BinarySampleFormat::F32_LE => wasapi::WaveFormat::new(
@@ -156,20 +156,20 @@ fn get_supported_wave_format(
 ) -> Res<(wasapi::WaveFormat, BinarySampleFormat)> {
     match sharemode {
         wasapi::ShareMode::Exclusive => match sample_format {
-            WasapiSampleFormat::I16 => {
+            WasapiSampleFormat::S16 => {
                 let wave_format =
-                    build_wave_format(&BinarySampleFormat::I16_LE, samplerate, channels);
+                    build_wave_format(&BinarySampleFormat::S16_LE, samplerate, channels);
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
-                    BinarySampleFormat::I16_LE,
+                    BinarySampleFormat::S16_LE,
                 ))
             }
-            WasapiSampleFormat::I32 => {
+            WasapiSampleFormat::S32 => {
                 let wave_format =
-                    build_wave_format(&BinarySampleFormat::I32_LE, samplerate, channels);
+                    build_wave_format(&BinarySampleFormat::S32_LE, samplerate, channels);
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
-                    BinarySampleFormat::I32_LE,
+                    BinarySampleFormat::S32_LE,
                 ))
             }
             WasapiSampleFormat::F32 => {
@@ -180,17 +180,17 @@ fn get_supported_wave_format(
                     BinarySampleFormat::F32_LE,
                 ))
             }
-            WasapiSampleFormat::I24 => {
+            WasapiSampleFormat::S24 => {
                 let wave_format =
-                    build_wave_format(&BinarySampleFormat::I24_3_LE, samplerate, channels);
+                    build_wave_format(&BinarySampleFormat::S24_3_LE, samplerate, channels);
                 if let Ok(wavefmt) = audio_client.is_supported_exclusive_with_quirks(&wave_format) {
-                    return Ok((wavefmt, BinarySampleFormat::I24_3_LE));
+                    return Ok((wavefmt, BinarySampleFormat::S24_3_LE));
                 }
                 let wave_format =
-                    build_wave_format(&BinarySampleFormat::I24_4_LJ_LE, samplerate, channels);
+                    build_wave_format(&BinarySampleFormat::S24_4_LJ_LE, samplerate, channels);
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
-                    BinarySampleFormat::I24_4_LJ_LE,
+                    BinarySampleFormat::S24_4_LJ_LE,
                 ))
             }
         },
@@ -271,9 +271,9 @@ fn get_device_id_and_format(
     }
     debug!("Probing for a supported {direction_name} sample format.");
     for sample_format in [
-        WasapiSampleFormat::I32,
-        WasapiSampleFormat::I24,
-        WasapiSampleFormat::I16,
+        WasapiSampleFormat::S32,
+        WasapiSampleFormat::S24,
+        WasapiSampleFormat::S16,
         WasapiSampleFormat::F32,
     ] {
         trace!("Testing sample format {sample_format:?}.");

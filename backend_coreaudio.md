@@ -73,12 +73,12 @@ This example configuration will be used to explain the various options specific 
     type: CoreAudio
     channels: 2
     device: "Soundflower (2ch)" (*)
-    format: I32 (*)
+    format: S32 (*)
   playback:
     type: CoreAudio
     channels: 2
     device: "Built-in Output" (*)
-    format: I24 (*)
+    format: S24 (*)
     exclusive: false (*)
 ```
 The parameters marked (*) are optional.
@@ -109,9 +109,9 @@ To do this, it fetches a list of the supported stream formats for the device.
 It then searches the list until it finds one that matches the desired format.
 
 This table shows the mapping between the format setting in "Audio MIDI Setup" and the CamillaDSP `format`:
-- 16-bit Integer: I16
+- 16-bit Integer: S16
 - 24-bit Integer: S24
-- 32-bit Integer: I32
+- 32-bit Integer: S32
 - 32-bit Float: F32
 
 If `format` is set to `null` or left out, then CamillaDSP will leave the sample format unchanged,

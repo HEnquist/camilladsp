@@ -103,10 +103,10 @@ fn open_pulse(
     };
 
     let pulse_format = match sample_format {
-        PulseSampleFormat::I16_LE => sample::Format::S16le,
-        PulseSampleFormat::I24_4_LE => sample::Format::S24_32le,
-        PulseSampleFormat::I24_3_LE => sample::Format::S24le,
-        PulseSampleFormat::I32_LE => sample::Format::S32le,
+        PulseSampleFormat::S16_LE => sample::Format::S16le,
+        PulseSampleFormat::S24_4_LE => sample::Format::S24_32le,
+        PulseSampleFormat::S24_3_LE => sample::Format::S24le,
+        PulseSampleFormat::S32_LE => sample::Format::S32le,
         PulseSampleFormat::F32_LE => sample::Format::F32le,
     };
 

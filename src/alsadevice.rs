@@ -409,10 +409,10 @@ fn open_pcm(
         };
         debug!("{direction}: setting format to {chosen_format:?}");
         match chosen_format {
-            AlsaSampleFormat::I16_LE => hwp.set_format(Format::s16())?,
-            AlsaSampleFormat::I24_4_LE => hwp.set_format(Format::s24())?,
-            AlsaSampleFormat::I24_3_LE => hwp.set_format(Format::s24_3())?,
-            AlsaSampleFormat::I32_LE => hwp.set_format(Format::s32())?,
+            AlsaSampleFormat::S16_LE => hwp.set_format(Format::s16())?,
+            AlsaSampleFormat::S24_4_LE => hwp.set_format(Format::s24())?,
+            AlsaSampleFormat::S24_3_LE => hwp.set_format(Format::s24_3())?,
+            AlsaSampleFormat::S32_LE => hwp.set_format(Format::s32())?,
             AlsaSampleFormat::F32_LE => hwp.set_format(Format::float())?,
             AlsaSampleFormat::F64_LE => hwp.set_format(Format::float64())?,
         }

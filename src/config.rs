@@ -83,11 +83,11 @@ impl ConfigError {
 // Similar to BinarySampleFormat, but also includes TEXT
 pub enum FileSampleFormat {
     TEXT,
-    I16_LE,
-    I24_4_RJ_LE,
-    I24_4_LJ_LE,
-    I24_3_LE,
-    I32_LE,
+    S16_LE,
+    S24_4_RJ_LE,
+    S24_4_LJ_LE,
+    S24_3_LE,
+    S32_LE,
     F32_LE,
     F64_LE,
 }
@@ -97,11 +97,11 @@ impl fmt::Display for FileSampleFormat {
         let formatstr = match self {
             FileSampleFormat::F32_LE => "F32_LE",
             FileSampleFormat::F64_LE => "F64_LE",
-            FileSampleFormat::I16_LE => "I16_LE",
-            FileSampleFormat::I24_4_RJ_LE => "I24_4_RJ_LE",
-            FileSampleFormat::I24_4_LJ_LE => "I24_4_LJ_LE",
-            FileSampleFormat::I24_3_LE => "I24_3_LE",
-            FileSampleFormat::I32_LE => "I32_LE",
+            FileSampleFormat::S16_LE => "S16_LE",
+            FileSampleFormat::S24_4_RJ_LE => "S24_4_RJ_LE",
+            FileSampleFormat::S24_4_LJ_LE => "S24_4_LJ_LE",
+            FileSampleFormat::S24_3_LE => "S24_3_LE",
+            FileSampleFormat::S32_LE => "S32_LE",
             FileSampleFormat::TEXT => "TEXT",
         };
         write!(f, "{formatstr}")
@@ -113,15 +113,15 @@ impl fmt::Display for FileSampleFormat {
 #[serde(deny_unknown_fields)]
 pub enum BinarySampleFormat {
     /// Signed integer, 16 bits in 2 bytes, little endian
-    I16_LE,
+    S16_LE,
     /// Signed integer, 24 bits in 4 bytes (padded), right justified, little endian
-    I24_4_RJ_LE,
+    S24_4_RJ_LE,
     /// Signed integer, 24 bits in 4 bytes (padded), left justified, little endian
-    I24_4_LJ_LE,
+    S24_4_LJ_LE,
     /// Signed integer, 24 bits in 3 bytes (packed), little endian
-    I24_3_LE,
+    S24_3_LE,
     /// Signed integer, 32 bits in 4 bytes, little endian
-    I32_LE,
+    S32_LE,
     /// Single precision floating point, 32 bits in 4 bytes, little endian
     F32_LE,
     /// Double precision floating point, 64 bits in 8 bytes, little endian
@@ -131,11 +131,11 @@ pub enum BinarySampleFormat {
 impl BinarySampleFormat {
     pub fn bits_per_sample(&self) -> usize {
         match self {
-            BinarySampleFormat::I16_LE => 16,
-            BinarySampleFormat::I24_4_RJ_LE => 24,
-            BinarySampleFormat::I24_4_LJ_LE => 24,
-            BinarySampleFormat::I24_3_LE => 24,
-            BinarySampleFormat::I32_LE => 32,
+            BinarySampleFormat::S16_LE => 16,
+            BinarySampleFormat::S24_4_RJ_LE => 24,
+            BinarySampleFormat::S24_4_LJ_LE => 24,
+            BinarySampleFormat::S24_3_LE => 24,
+            BinarySampleFormat::S32_LE => 32,
             BinarySampleFormat::F32_LE => 32,
             BinarySampleFormat::F64_LE => 64,
         }
@@ -143,11 +143,11 @@ impl BinarySampleFormat {
 
     pub fn bytes_per_sample(&self) -> usize {
         match self {
-            BinarySampleFormat::I16_LE => 2,
-            BinarySampleFormat::I24_4_RJ_LE => 4,
-            BinarySampleFormat::I24_4_LJ_LE => 4,
-            BinarySampleFormat::I24_3_LE => 3,
-            BinarySampleFormat::I32_LE => 4,
+            BinarySampleFormat::S16_LE => 2,
+            BinarySampleFormat::S24_4_RJ_LE => 4,
+            BinarySampleFormat::S24_4_LJ_LE => 4,
+            BinarySampleFormat::S24_3_LE => 3,
+            BinarySampleFormat::S32_LE => 4,
             BinarySampleFormat::F32_LE => 4,
             BinarySampleFormat::F64_LE => 8,
         }
@@ -155,11 +155,11 @@ impl BinarySampleFormat {
 
     pub fn from_file_sample_format(sample_format: &FileSampleFormat) -> Self {
         match sample_format {
-            FileSampleFormat::I16_LE => Self::I16_LE,
-            FileSampleFormat::I24_4_RJ_LE => Self::I24_4_RJ_LE,
-            FileSampleFormat::I24_4_LJ_LE => Self::I24_4_LJ_LE,
-            FileSampleFormat::I24_3_LE => Self::I24_3_LE,
-            FileSampleFormat::I32_LE => Self::I32_LE,
+            FileSampleFormat::S16_LE => Self::S16_LE,
+            FileSampleFormat::S24_4_RJ_LE => Self::S24_4_RJ_LE,
+            FileSampleFormat::S24_4_LJ_LE => Self::S24_4_LJ_LE,
+            FileSampleFormat::S24_3_LE => Self::S24_3_LE,
+            FileSampleFormat::S32_LE => Self::S32_LE,
             FileSampleFormat::F32_LE => Self::F32_LE,
             FileSampleFormat::F64_LE => Self::F64_LE,
             FileSampleFormat::TEXT => unreachable!(),
@@ -168,11 +168,11 @@ impl BinarySampleFormat {
 
     pub fn to_file_sample_format(&self) -> FileSampleFormat {
         match self {
-            Self::I16_LE => FileSampleFormat::I16_LE,
-            Self::I24_4_RJ_LE => FileSampleFormat::I24_4_RJ_LE,
-            Self::I24_4_LJ_LE => FileSampleFormat::I24_4_LJ_LE,
-            Self::I24_3_LE => FileSampleFormat::I24_3_LE,
-            Self::I32_LE => FileSampleFormat::I32_LE,
+            Self::S16_LE => FileSampleFormat::S16_LE,
+            Self::S24_4_RJ_LE => FileSampleFormat::S24_4_RJ_LE,
+            Self::S24_4_LJ_LE => FileSampleFormat::S24_4_LJ_LE,
+            Self::S24_3_LE => FileSampleFormat::S24_3_LE,
+            Self::S32_LE => FileSampleFormat::S32_LE,
             Self::F32_LE => FileSampleFormat::F32_LE,
             Self::F64_LE => FileSampleFormat::F64_LE,
         }
@@ -182,11 +182,11 @@ impl BinarySampleFormat {
         match label {
             "F32_LE" => Some(Self::F32_LE),
             "F64_LE" => Some(Self::F64_LE),
-            "I16_LE" => Some(Self::I16_LE),
-            "I24_4_RJ_LE" => Some(Self::I24_4_RJ_LE),
-            "I24_4_LJ_LE" => Some(Self::I24_4_LJ_LE),
-            "I24_3_LE" => Some(Self::I24_3_LE),
-            "I32_LE" => Some(Self::I32_LE),
+            "S16_LE" => Some(Self::S16_LE),
+            "S24_4_RJ_LE" => Some(Self::S24_4_RJ_LE),
+            "S24_4_LJ_LE" => Some(Self::S24_4_LJ_LE),
+            "S24_3_LE" => Some(Self::S24_3_LE),
+            "S32_LE" => Some(Self::S32_LE),
             _ => None,
         }
     }
@@ -197,11 +197,11 @@ impl fmt::Display for BinarySampleFormat {
         let formatstr = match self {
             BinarySampleFormat::F32_LE => "F32_LE",
             BinarySampleFormat::F64_LE => "F64_LE",
-            BinarySampleFormat::I16_LE => "I16_LE",
-            BinarySampleFormat::I24_4_RJ_LE => "I24_4_RJ_LE",
-            BinarySampleFormat::I24_4_LJ_LE => "I24_4_LJ_LE",
-            BinarySampleFormat::I24_3_LE => "I24_3_LE",
-            BinarySampleFormat::I32_LE => "I32_LE",
+            BinarySampleFormat::S16_LE => "S16_LE",
+            BinarySampleFormat::S24_4_RJ_LE => "S24_4_RJ_LE",
+            BinarySampleFormat::S24_4_LJ_LE => "S24_4_LJ_LE",
+            BinarySampleFormat::S24_3_LE => "S24_3_LE",
+            BinarySampleFormat::S32_LE => "S32_LE",
         };
         write!(f, "{formatstr}")
     }
@@ -214,9 +214,9 @@ impl fmt::Display for BinarySampleFormat {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum WasapiSampleFormat {
-    I16,
-    I24,
-    I32,
+    S16,
+    S24,
+    S32,
     F32,
 }
 
@@ -226,11 +226,11 @@ impl WasapiSampleFormat {
     // Used for overriding config values.
     pub fn from_binary_format(format: &BinarySampleFormat) -> Option<Self> {
         match format {
-            BinarySampleFormat::I16_LE => Some(Self::I16),
-            BinarySampleFormat::I24_3_LE => Some(Self::I24),
-            BinarySampleFormat::I24_4_LJ_LE => Some(Self::I24),
-            BinarySampleFormat::I24_4_RJ_LE => Some(Self::I24),
-            BinarySampleFormat::I32_LE => Some(Self::I32),
+            BinarySampleFormat::S16_LE => Some(Self::S16),
+            BinarySampleFormat::S24_3_LE => Some(Self::S24),
+            BinarySampleFormat::S24_4_LJ_LE => Some(Self::S24),
+            BinarySampleFormat::S24_4_RJ_LE => Some(Self::S24),
+            BinarySampleFormat::S32_LE => Some(Self::S32),
             BinarySampleFormat::F32_LE => Some(Self::F32),
             _ => None,
         }
@@ -242,9 +242,9 @@ impl WasapiSampleFormat {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum CoreAudioSampleFormat {
-    I16,
-    I24,
-    I32,
+    S16,
+    S24,
+    S32,
     F32,
 }
 
@@ -254,11 +254,11 @@ impl CoreAudioSampleFormat {
     // Used for overriding config values.
     pub fn from_binary_format(format: &BinarySampleFormat) -> Option<Self> {
         match format {
-            BinarySampleFormat::I16_LE => Some(Self::I16),
-            BinarySampleFormat::I24_3_LE => Some(Self::I24),
-            BinarySampleFormat::I24_4_LJ_LE => Some(Self::I24),
-            BinarySampleFormat::I24_4_RJ_LE => Some(Self::I24),
-            BinarySampleFormat::I32_LE => Some(Self::I32),
+            BinarySampleFormat::S16_LE => Some(Self::S16),
+            BinarySampleFormat::S24_3_LE => Some(Self::S24),
+            BinarySampleFormat::S24_4_LJ_LE => Some(Self::S24),
+            BinarySampleFormat::S24_4_RJ_LE => Some(Self::S24),
+            BinarySampleFormat::S32_LE => Some(Self::S32),
             BinarySampleFormat::F32_LE => Some(Self::F32),
             _ => None,
         }
@@ -271,13 +271,13 @@ impl CoreAudioSampleFormat {
 #[serde(deny_unknown_fields)]
 pub enum AlsaSampleFormat {
     /// SND_PCM_FORMAT_S16_LE
-    I16_LE,
+    S16_LE,
     ///SND_PCM_FORMAT_S24_3LE
-    I24_3_LE,
+    S24_3_LE,
     /// SND_PCM_FORMAT_S24_LE
-    I24_4_LE,
+    S24_4_LE,
     /// SND_PCM_FORMAT_S32_LE
-    I32_LE,
+    S32_LE,
     /// SND_PCM_FORMAT_FLOAT_LE
     F32_LE,
     /// SND_PCM_FORMAT_FLOAT64_LE
@@ -290,11 +290,11 @@ impl AlsaSampleFormat {
     // Used for overriding config values.
     pub fn from_binary_format(format: &BinarySampleFormat) -> Self {
         match format {
-            BinarySampleFormat::I16_LE => Self::I16_LE,
-            BinarySampleFormat::I24_3_LE => Self::I24_3_LE,
-            BinarySampleFormat::I24_4_RJ_LE => Self::I24_4_LE,
-            BinarySampleFormat::I24_4_LJ_LE => Self::I24_4_LE,
-            BinarySampleFormat::I32_LE => Self::I32_LE,
+            BinarySampleFormat::S16_LE => Self::S16_LE,
+            BinarySampleFormat::S24_3_LE => Self::S24_3_LE,
+            BinarySampleFormat::S24_4_RJ_LE => Self::S24_4_LE,
+            BinarySampleFormat::S24_4_LJ_LE => Self::S24_4_LE,
+            BinarySampleFormat::S32_LE => Self::S32_LE,
             BinarySampleFormat::F32_LE => Self::F32_LE,
             BinarySampleFormat::F64_LE => Self::F64_LE,
         }
@@ -303,10 +303,10 @@ impl AlsaSampleFormat {
     // Map the Alsa format to the corresponding binary format
     pub fn to_binary_format(&self) -> BinarySampleFormat {
         match self {
-            Self::I16_LE => BinarySampleFormat::I16_LE,
-            Self::I24_3_LE => BinarySampleFormat::I24_3_LE,
-            Self::I24_4_LE => BinarySampleFormat::I24_4_RJ_LE,
-            Self::I32_LE => BinarySampleFormat::I32_LE,
+            Self::S16_LE => BinarySampleFormat::S16_LE,
+            Self::S24_3_LE => BinarySampleFormat::S24_3_LE,
+            Self::S24_4_LE => BinarySampleFormat::S24_4_RJ_LE,
+            Self::S32_LE => BinarySampleFormat::S32_LE,
             Self::F32_LE => BinarySampleFormat::F32_LE,
             Self::F64_LE => BinarySampleFormat::F64_LE,
         }
@@ -319,13 +319,13 @@ impl AlsaSampleFormat {
 #[serde(deny_unknown_fields)]
 pub enum PulseSampleFormat {
     /// PA_SAMPLE_S16LE
-    I16_LE,
+    S16_LE,
     /// PA_SAMPLE_S24LE
-    I24_3_LE,
+    S24_3_LE,
     /// PA_SAMPLE_S24_32LE
-    I24_4_LE,
+    S24_4_LE,
     /// PA_SAMPLE_S32LE
-    I32_LE,
+    S32_LE,
     /// PA_SAMPLE_FLOAT32LE
     F32_LE,
 }
@@ -336,11 +336,11 @@ impl PulseSampleFormat {
     // Used for overriding config values.
     pub fn from_binary_format(format: &BinarySampleFormat) -> Option<Self> {
         match format {
-            BinarySampleFormat::I16_LE => Some(Self::I16_LE),
-            BinarySampleFormat::I24_3_LE => Some(Self::I24_3_LE),
-            BinarySampleFormat::I24_4_RJ_LE => Some(Self::I24_4_LE),
-            BinarySampleFormat::I24_4_LJ_LE => Some(Self::I24_4_LE),
-            BinarySampleFormat::I32_LE => Some(Self::I32_LE),
+            BinarySampleFormat::S16_LE => Some(Self::S16_LE),
+            BinarySampleFormat::S24_3_LE => Some(Self::S24_3_LE),
+            BinarySampleFormat::S24_4_RJ_LE => Some(Self::S24_4_LE),
+            BinarySampleFormat::S24_4_LJ_LE => Some(Self::S24_4_LE),
+            BinarySampleFormat::S32_LE => Some(Self::S32_LE),
             BinarySampleFormat::F32_LE => Some(Self::F32_LE),
             _ => None,
         }
@@ -349,10 +349,10 @@ impl PulseSampleFormat {
     // Map the Pulse format to the corresponding binary format
     pub fn to_binary_format(&self) -> BinarySampleFormat {
         match self {
-            Self::I16_LE => BinarySampleFormat::I16_LE,
-            Self::I24_3_LE => BinarySampleFormat::I24_3_LE,
-            Self::I24_4_LE => BinarySampleFormat::I24_4_RJ_LE,
-            Self::I32_LE => BinarySampleFormat::I32_LE,
+            Self::S16_LE => BinarySampleFormat::S16_LE,
+            Self::S24_3_LE => BinarySampleFormat::S24_3_LE,
+            Self::S24_4_LE => BinarySampleFormat::S24_4_RJ_LE,
+            Self::S32_LE => BinarySampleFormat::S32_LE,
             Self::F32_LE => BinarySampleFormat::F32_LE,
         }
     }
@@ -2175,9 +2175,9 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         format, wav_header, ..
     } = &conf.devices.playback
     {
-        if *format == BinarySampleFormat::I24_4_RJ_LE && *wav_header == Some(true) {
+        if *format == BinarySampleFormat::S24_4_RJ_LE && *wav_header == Some(true) {
             return Err(
-                ConfigError::new("Wav files do not support the I24_4_RJ_LE sample format").into(),
+                ConfigError::new("Wav files do not support the S24_4_RJ_LE sample format").into(),
             );
         }
     }
