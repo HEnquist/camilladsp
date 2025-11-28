@@ -21,7 +21,7 @@ use pulse::stream::Direction;
 
 use crate::audiodevice::*;
 use crate::config;
-use crate::config::PulseSampleFormat;
+use crate::config::BinarySampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
@@ -72,7 +72,6 @@ pub struct PulsePlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: PulseSampleFormat,
 }
 
 pub struct PulseCaptureDevice {
@@ -82,19 +81,12 @@ pub struct PulseCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: PulseSampleFormat,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
 }
 
 /// Open a PulseAudio device
-fn open_pulse(
-    devname: String,
-    samplerate: u32,
-    channels: u8,
-    sample_format: &PulseSampleFormat,
-    capture: bool,
-) -> Res<Simple> {
+fn open_pulse(devname: String, samplerate: u32, channels: u8, capture: bool) -> Res<Simple> {
     // Open the device
     let dir = if capture {
         Direction::Record
@@ -102,15 +94,9 @@ fn open_pulse(
         Direction::Playback
     };
 
-    let pulse_format = match sample_format {
-        PulseSampleFormat::S16_LE => sample::Format::S16le,
-        PulseSampleFormat::S24_4_LE => sample::Format::S24_32le,
-        PulseSampleFormat::S24_3_LE => sample::Format::S24le,
-        PulseSampleFormat::S32_LE => sample::Format::S32le,
-        PulseSampleFormat::F32_LE => sample::Format::F32le,
-    };
+    let pulse_format = sample::Format::F32le;
 
-    let binary_format = sample_format.to_binary_format();
+    let binary_format = BinarySampleFormat::F32_LE;
     let bytes_per_sample = binary_format.bytes_per_sample();
 
     let spec = sample::Spec {
@@ -156,19 +142,12 @@ impl PlaybackDevice for PulsePlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let sample_format = self.sample_format;
-        let binary_format = sample_format.to_binary_format();
+        let binary_format = BinarySampleFormat::F32_LE;
         let store_bytes_per_sample = binary_format.bytes_per_sample();
         let handle = thread::Builder::new()
             .name("PulsePlayback".to_string())
-            .spawn(move || {
-                match open_pulse(
-                    devname,
-                    samplerate as u32,
-                    channels as u8,
-                    &sample_format,
-                    false,
-                ) {
+            .spawn(
+                move || match open_pulse(devname, samplerate as u32, channels as u8, false) {
                     Ok(pulsedevice) => {
                         match status_channel.send(StatusMessage::PlaybackReady) {
                             Ok(()) => {}
@@ -249,8 +228,8 @@ impl PlaybackDevice for PulsePlaybackDevice {
                         }
                         barrier.wait();
                     }
-                }
-            })
+                },
+            )
             .unwrap();
         Ok(Box::new(handle))
     }
@@ -285,8 +264,7 @@ impl CaptureDevice for PulseCaptureDevice {
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let sample_format = self.sample_format;
-        let binary_format = sample_format.to_binary_format();
+        let binary_format = BinarySampleFormat::F32_LE;
         let store_bytes_per_sample = binary_format.bytes_per_sample();
         let buffer_bytes = 2.0f32.powf(
             (capture_samplerate as f32 / samplerate as f32 * chunksize as f32)
@@ -315,7 +293,6 @@ impl CaptureDevice for PulseCaptureDevice {
                     devname,
                     capture_samplerate as u32,
                     channels as u8,
-                    &sample_format,
                     true,
                 ) {
                     Ok(pulsedevice) => {

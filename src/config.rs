@@ -313,51 +313,6 @@ impl AlsaSampleFormat {
     }
 }
 
-#[cfg(feature = "pulse-backend")]
-#[allow(non_camel_case_types)]
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub enum PulseSampleFormat {
-    /// PA_SAMPLE_S16LE
-    S16_LE,
-    /// PA_SAMPLE_S24LE
-    S24_3_LE,
-    /// PA_SAMPLE_S24_32LE
-    S24_4_LE,
-    /// PA_SAMPLE_S32LE
-    S32_LE,
-    /// PA_SAMPLE_FLOAT32LE
-    F32_LE,
-}
-
-#[cfg(feature = "pulse-backend")]
-impl PulseSampleFormat {
-    // Map binary format to the a corresponding Pulse format, if possible.
-    // Used for overriding config values.
-    pub fn from_binary_format(format: &BinarySampleFormat) -> Option<Self> {
-        match format {
-            BinarySampleFormat::S16_LE => Some(Self::S16_LE),
-            BinarySampleFormat::S24_3_LE => Some(Self::S24_3_LE),
-            BinarySampleFormat::S24_4_RJ_LE => Some(Self::S24_4_LE),
-            BinarySampleFormat::S24_4_LJ_LE => Some(Self::S24_4_LE),
-            BinarySampleFormat::S32_LE => Some(Self::S32_LE),
-            BinarySampleFormat::F32_LE => Some(Self::F32_LE),
-            _ => None,
-        }
-    }
-
-    // Map the Pulse format to the corresponding binary format
-    pub fn to_binary_format(&self) -> BinarySampleFormat {
-        match self {
-            Self::S16_LE => BinarySampleFormat::S16_LE,
-            Self::S24_3_LE => BinarySampleFormat::S24_3_LE,
-            Self::S24_4_LE => BinarySampleFormat::S24_4_RJ_LE,
-            Self::S32_LE => BinarySampleFormat::S32_LE,
-            Self::F32_LE => BinarySampleFormat::F32_LE,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
@@ -397,7 +352,6 @@ pub enum CaptureDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
-        format: PulseSampleFormat,
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
     },
@@ -676,7 +630,6 @@ pub enum PlaybackDevice {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
         device: String,
-        format: PulseSampleFormat,
     },
     #[serde(alias = "FILE", alias = "file")]
     File {
@@ -1858,15 +1811,8 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                 dev.format = fmt;
             }
             #[cfg(feature = "pulse-backend")]
-            CaptureDevice::Pulse { format, .. } => {
-                let mapped_format = PulseSampleFormat::from_binary_format(&fmt);
-                if let Some(mapped) = mapped_format {
-                    *format = mapped;
-                } else {
-                    let msg =
-                        format!("PulseAudio does not have a sample format corresponding to {fmt}");
-                    return Err(ConfigError::new(&msg).into());
-                }
+            CaptureDevice::Pulse { .. } => {
+                error!("Not possible to override capture format for Pulse, ignoring");
             }
             #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => {

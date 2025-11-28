@@ -944,7 +944,6 @@ devices:
     type: Pulse
     channels: 2
     device: "MySink.monitor"
-    format: S16_LE
     labels: ["L", "R"] (*)
   playback:
     type: Alsa
@@ -1153,7 +1152,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `CoreAudio`).
      For `CoreAudio` and `Wasapi`, `null` will give the default device.
   * `filename` path to the file (for `File`, `RawFile` and `WavFile`)
-  * `format`: sample format (for all except `Jack`).
+  * `format`: sample format (for all except `Jack` and `Pulse`).
 
     The available choices for `format` depend on the backend.
 
@@ -1167,13 +1166,6 @@ A parameter marked (*) in any example is optional. If they are left out from the
     * F64_LE - 64-bit float, stored as eight bytes
 
     For [ALSA](./backend_alsa.md), [CoreAudio](./backend_coreaudio.md) and [Wasapi](./backend_wasapi.md), see the respective backend documentation.
-
-    For Pulse, the choices are:
-    * S16_LE - Signed 16-bit int
-    * S24_3_LE - Signed 24-bit int, stored _packed_ as three bytes (with no padding)
-    * S24_4_LE - Signed 24-bit int, stored as four bytes
-    * S32_LE - Signed 32-bit int
-    * F32_LE - 32-bit float
 
     __Note that there are three different 24-bit formats! Make sure to select the correct one.__
 
@@ -1322,12 +1314,10 @@ A parameter marked (*) in any example is optional. If they are left out from the
       type: Pulse
       channels: 2
       device: "MySink.monitor"
-      format: S16_LE
     playback:
       type: Pulse
       channels: 2
       device: "alsa_output.pci-0000_03_00.6.analog-stereo"
-      format: S32_LE
   ```
 
   ### Jack

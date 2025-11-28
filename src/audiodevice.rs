@@ -273,17 +273,14 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             enable_rate_adjust: conf.rate_adjust(),
         }),
         #[cfg(feature = "pulse-backend")]
-        config::PlaybackDevice::Pulse {
-            channels,
-            device,
-            format,
-        } => Box::new(pulsedevice::PulsePlaybackDevice {
-            devname: device,
-            samplerate: conf.samplerate,
-            chunksize: conf.chunksize,
-            channels,
-            sample_format: format,
-        }),
+        config::PlaybackDevice::Pulse { channels, device } => {
+            Box::new(pulsedevice::PulsePlaybackDevice {
+                devname: device,
+                samplerate: conf.samplerate,
+                chunksize: conf.chunksize,
+                channels,
+            })
+        }
         config::PlaybackDevice::File {
             channels,
             filename,
@@ -428,7 +425,6 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         config::CaptureDevice::Pulse {
             channels,
             ref device,
-            format,
             ..
         } => Box::new(pulsedevice::PulseCaptureDevice {
             devname: device.clone(),
@@ -437,7 +433,6 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
-            sample_format: format,
             silence_threshold: conf.silence_threshold(),
             silence_timeout: conf.silence_timeout(),
         }),
