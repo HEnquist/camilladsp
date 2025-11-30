@@ -25,13 +25,11 @@ elif datafmt == "F64_LE":
     values = np.fromfile(fname, dtype=float)
 elif datafmt == "F32_LE":
     values = np.fromfile(fname, dtype=np.float32)
-elif datafmt == "I16_LE":
+elif datafmt == "S16_LE":
     values = np.fromfile(fname, dtype=np.int16)/(2**15-1)
-elif datafmt == "S24LE":
-    values = np.fromfile(fname, dtype=np.int32)/(2**23-1)
-elif datafmt == "I32_LE":
+elif datafmt == "S32_LE":
     values = np.fromfile(fname, dtype=np.int32)/(2**31-1)
-elif datafmt == "S64LE":
+elif datafmt == "S64_LE":
     values = np.fromfile(fname, dtype=np.int64)/(2**31-1)
 
 all_values = np.reshape(values, (nchannels, -1), order='F')
