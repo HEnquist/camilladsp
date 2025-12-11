@@ -94,7 +94,7 @@ fn open_cpal_playback(
     samplerate: usize,
     channels: usize,
     sample_format: &BinarySampleFormat,
-) -> Res<(Device, StreamConfig, cpal::BinarySampleFormat)> {
+) -> Res<(Device, StreamConfig, cpal::SampleFormat)> {
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
@@ -151,7 +151,7 @@ fn open_cpal_capture(
     samplerate: usize,
     channels: usize,
     sample_format: &BinarySampleFormat,
-) -> Res<(Device, StreamConfig, cpal::BinarySampleFormat)> {
+) -> Res<(Device, StreamConfig, cpal::SampleFormat)> {
     let host_id = match host_cfg {
         #[cfg(target_os = "macos")]
         CpalHost::CoreAudio => HostId::CoreAudio,
