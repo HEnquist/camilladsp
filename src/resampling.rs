@@ -154,7 +154,7 @@ pub fn new_resampler(
                     Async::<PrcFmt>::new_sinc(
                         samplerate as f64 / capture_samplerate as f64,
                         1.1,
-                        sinc_params,
+                        &sinc_params,
                         chunksize,
                         num_channels,
                         FixedAsync::Output,
