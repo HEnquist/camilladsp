@@ -1157,13 +1157,13 @@ A parameter marked (*) in any example is optional. If they are left out from the
     The available choices for `format` depend on the backend.
 
     For `File`, `Stdin`, `Stdout` `RawFile` and `Bluez`, the choices are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
-    * S16_LE - Signed 16-bit int, stored as two bytes
-    * S24_4_LJ_LE - Signed 24-bit int, stored _padded_ as four bytes, left justified (three bytes of data, the least significant byte is unused padding)
-    * S24_4_RJ_LE - Signed 24-bit int, stored _padded_ as four bytes, right justified (three bytes of data, the most significant byte is unused padding)
-    * S24_3_LE - Signed 24-bit int, stored _packed_ as three bytes (with no padding)
-    * S32_LE - Signed 32-bit int, stored as four bytes
-    * F32_LE - 32-bit float, stored as four bytes
-    * F64_LE - 64-bit float, stored as eight bytes
+    - [S16_LE](sample_formats.md#s16_le)
+    - [S24_3_LE](sample_formats.md#s24_3_le)
+    - [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le)
+    - [S24_4_LJ_LE](sample_formats.md#s24_4_lj_le)
+    - [S32_LE](sample_formats.md#s32_le)
+    - [F32_LE](sample_formats.md#f32_le)
+    - [F64_LE](sample_formats.md#f64_le)
 
     For [ALSA](./backend_alsa.md), [CoreAudio](./backend_coreaudio.md) and [Wasapi](./backend_wasapi.md), see the respective backend documentation.
 
@@ -1855,13 +1855,13 @@ This format is a simple text file with one value per row:
 -0.000012
 ```
 The other possible formats are raw data:
-- S16_LE: signed 16-bit little-endian integers
-- S24_4_RJ_LE: signed 24-bit little-endian integers stored as 32 bits right justified (with the data in the lower 24)
-- S24_4_LJ_LE: signed 24-bit little-endian integers stored as 32 bits left justified (with the data in the upper 24)
-- S24_3_LE: signed 24-bit little-endian integers stored as 24 bits
-- S32_LE: signed 32-bit little-endian integers
-- F32_LE: 32-bit little endian float
-- F64_LE: 64-bit little endian float
+- [S16_LE](sample_formats.md#s16_le)
+- [S24_3_LE](sample_formats.md#s24_3_le)
+- [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le)
+- [S24_4_LJ_LE](sample_formats.md#s24_4_lj_le)
+- [S32_LE](sample_formats.md#s32_le)
+- [F32_LE](sample_formats.md#f32_le)
+- [F64_LE](sample_formats.md#f64_le)
 
 
 ### IIR

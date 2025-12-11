@@ -5,10 +5,15 @@ New features:
 - Support polling mode for WASAPI.
 - Websocket commands for reading and writing partial configs.
 Changes:
+- New sample format names on all backends.
+- Removed sample format selection for Pulse backend.
 - Add microsecond delay unit.
 - Allow larger buffer target levels.
 - Change mixer config rules to not allow duplicated channels.
 - Improved accuracy of subsample delay.
+- Windows: Optional automatic sample format selection.
+Bugfixes:
+- Windows: Fix Wasapi exclusive mode for padded 24-bit samples.
 
 ## v3.0.1
 Bugfixes:
@@ -282,7 +287,7 @@ Bugfixes:
 ## 0.1.0
 New features:
 - Support for asynchronous resampling in all backends.
-- Added I24_3_LE format (corresponds to Alsa S24_3LE)
+- Added S24LE3 format (corresponds to Alsa S24_3LE)
 - File capture device can skip a number of bytes at the beginning of a file and then read a limited number of bytes
 
 Other:
