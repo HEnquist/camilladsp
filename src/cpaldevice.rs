@@ -132,8 +132,8 @@ fn open_cpal_playback(
         }
     };
     let cpal_format = match sample_format {
-        BinarySampleFormat::S16_LE => cpal::BinarySampleFormat::I16,
-        BinarySampleFormat::F32_LE => cpal::BinarySampleFormat::F32,
+        BinarySampleFormat::S16_LE => cpal::SampleFormat::I16,
+        BinarySampleFormat::F32_LE => cpal::SampleFormat::F32,
         _ => panic!("Unsupported sample format"),
     };
     let stream_config = StreamConfig {
@@ -190,8 +190,8 @@ fn open_cpal_capture(
     };
 
     let cpal_format = match sample_format {
-        BinarySampleFormat::S16_LE => cpal::BinarySampleFormat::I16,
-        BinarySampleFormat::F32_LE => cpal::BinarySampleFormat::F32,
+        BinarySampleFormat::S16_LE => cpal::SampleFormat::I16,
+        BinarySampleFormat::F32_LE => cpal::SampleFormat::F32,
         _ => panic!("Unsupported sample format"),
     };
     let stream_config = StreamConfig {
