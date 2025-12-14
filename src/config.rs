@@ -112,19 +112,19 @@ impl fmt::Display for FileSampleFormat {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum BinarySampleFormat {
-    /// Signed integer, 16 bits in 2 bytes, little endian
+    /// Signed integer, 16 bits in 2 bytes, little-endian
     S16_LE,
-    /// Signed integer, 24 bits in 4 bytes (padded), right justified, little endian
+    /// Signed integer, 24 bits in 4 bytes (padded), right justified, little-endian
     S24_4_RJ_LE,
-    /// Signed integer, 24 bits in 4 bytes (padded), left justified, little endian
+    /// Signed integer, 24 bits in 4 bytes (padded), left justified, little-endian
     S24_4_LJ_LE,
-    /// Signed integer, 24 bits in 3 bytes (packed), little endian
+    /// Signed integer, 24 bits in 3 bytes (packed), little-endian
     S24_3_LE,
-    /// Signed integer, 32 bits in 4 bytes, little endian
+    /// Signed integer, 32 bits in 4 bytes, little-endian
     S32_LE,
-    /// Single precision floating point, 32 bits in 4 bytes, little endian
+    /// Single precision floating point, 32 bits in 4 bytes, little-endian
     F32_LE,
-    /// Double precision floating point, 64 bits in 8 bytes, little endian
+    /// Double precision floating point, 64 bits in 8 bytes, little-endian
     F64_LE,
 }
 
