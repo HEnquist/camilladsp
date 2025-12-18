@@ -35,6 +35,17 @@ lazy_static! {
     });
 }
 
+// Default node names for PipeWire backend
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+fn default_capture_node_name() -> String {
+    "camilladsp-capture".to_string()
+}
+
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+fn default_playback_node_name() -> String {
+    "camilladsp-playback".to_string()
+}
+
 #[derive(Debug)]
 pub struct ConfigError {
     desc: String,
@@ -244,6 +255,17 @@ pub enum CaptureDevice {
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
     },
+    #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+    #[serde(alias = "PIPEWIRE", alias = "pipewire")]
+    Pipewire {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
+        channels: usize,
+        format: SampleFormat,
+        #[serde(default = "default_capture_node_name")]
+        node_name: String,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
+    },
     SignalGenerator {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
@@ -282,6 +304,8 @@ impl CaptureDevice {
                 )
             ))]
             CaptureDevice::Jack { channels, .. } => *channels,
+            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+            CaptureDevice::Pipewire { channels, .. } => *channels,
             CaptureDevice::SignalGenerator { channels, .. } => *channels,
         }
     }
@@ -496,6 +520,15 @@ pub enum PlaybackDevice {
         channels: usize,
         device: String,
     },
+    #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+    #[serde(alias = "PIPEWIRE", alias = "pipewire")]
+    Pipewire {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
+        channels: usize,
+        format: SampleFormat,
+        #[serde(default = "default_playback_node_name")]
+        node_name: String,
+    },
 }
 
 impl PlaybackDevice {
@@ -522,6 +555,8 @@ impl PlaybackDevice {
                 )
             ))]
             PlaybackDevice::Jack { channels, .. } => *channels,
+            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+            PlaybackDevice::Pipewire { channels, .. } => *channels,
         }
     }
 }
@@ -1575,6 +1610,10 @@ fn apply_overrides(configuration: &mut Configuration) {
             CaptureDevice::Jack { channels, .. } => {
                 *channels = chans;
             }
+            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+            CaptureDevice::Pipewire { channels, .. } => {
+                *channels = chans;
+            }
             CaptureDevice::SignalGenerator { channels, .. } => {
                 *channels = chans;
             }
@@ -1622,6 +1661,10 @@ fn apply_overrides(configuration: &mut Configuration) {
             ))]
             CaptureDevice::Jack { .. } => {
                 error!("Not possible to override capture format for Jack, ignoring");
+            }
+            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+            CaptureDevice::Pipewire { format, .. } => {
+                *format = fmt;
             }
             CaptureDevice::SignalGenerator { .. } => {}
         }

@@ -16,6 +16,8 @@ extern crate dispatch;
 extern crate libpulse_binding as pulse;
 #[cfg(feature = "pulse-backend")]
 extern crate libpulse_simple_binding as psimple;
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+extern crate pipewire;
 #[cfg(feature = "secure-websocket")]
 extern crate native_tls;
 #[cfg(target_os = "linux")]
@@ -138,6 +140,8 @@ pub mod noisegate;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+pub mod pipewiredevice;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
 pub mod statefile;
@@ -400,6 +404,10 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     if cfg!(feature = "jack-backend") {
         playbacktypes.push("Jack".to_owned());
         capturetypes.push("Jack".to_owned());
+    }
+    if cfg!(all(target_os = "linux", feature = "pipewire-backend")) {
+        playbacktypes.push("Pipewire".to_owned());
+        capturetypes.push("Pipewire".to_owned());
     }
     if cfg!(target_os = "macos") {
         playbacktypes.push("CoreAudio".to_owned());
