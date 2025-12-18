@@ -235,6 +235,8 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                 };
 
                 // Node properties for WirePlumber matching
+                // NODE_LATENCY requests PipeWire to use a quantum matching our chunksize
+                let latency_str = format!("{}/{}", chunksize, samplerate);
                 let props = properties! {
                     *pw::keys::MEDIA_TYPE => "Audio",
                     *pw::keys::MEDIA_CATEGORY => "Playback",
@@ -242,6 +244,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                     *pw::keys::APP_NAME => "CamillaDSP",
                     *pw::keys::NODE_NAME => node_name.as_str(),
                     *pw::keys::NODE_DESCRIPTION => "CamillaDSP Playback",
+                    *pw::keys::NODE_LATENCY => latency_str.as_str(),
                 };
 
                 let stream = match Stream::new(&core, "CamillaDSP-Playback", props) {
@@ -523,6 +526,8 @@ impl CaptureDevice for PipewireCaptureDevice {
                 };
 
                 // Node properties for WirePlumber matching
+                // NODE_LATENCY requests PipeWire to use a quantum matching our chunksize
+                let latency_str = format!("{}/{}", chunksize, capture_samplerate);
                 let props = properties! {
                     *pw::keys::MEDIA_TYPE => "Audio",
                     *pw::keys::MEDIA_CATEGORY => "Capture",
@@ -530,6 +535,7 @@ impl CaptureDevice for PipewireCaptureDevice {
                     *pw::keys::APP_NAME => "CamillaDSP",
                     *pw::keys::NODE_NAME => node_name.as_str(),
                     *pw::keys::NODE_DESCRIPTION => "CamillaDSP Capture",
+                    *pw::keys::NODE_LATENCY => latency_str.as_str(),
                 };
 
                 let stream = match Stream::new(&core, "CamillaDSP-Capture", props) {
