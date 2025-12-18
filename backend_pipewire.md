@@ -47,39 +47,47 @@ playback:
 
 CamillaDSP creates nodes that do not auto-connect to any devices. Use WirePlumber rules to connect them to your audio sources and sinks.
 
-### Example WirePlumber rules
+### Example WirePlumber rules (0.5+)
 
-Create a file in `~/.config/wireplumber/main.lua.d/51-camilladsp.lua`:
+WirePlumber 0.5 and later use `.conf` files with SPA-JSON format instead of Lua.
 
-```lua
--- Connect a USB microphone to CamillaDSP capture
-table.insert(alsa_monitor.rules, {
-  matches = {
-    {
-      { "node.name", "equals", "alsa_input.usb-Some_Microphone-00.analog-stereo" },
-    },
-  },
-  apply_properties = {
-    ["target.object"] = "camilladsp-capture",
-  },
-})
+Create `~/.config/wireplumber/wireplumber.conf.d/51-camilladsp.conf`:
 
--- Connect CamillaDSP playback to speakers
-table.insert(alsa_monitor.rules, {
-  matches = {
-    {
-      { "node.name", "equals", "camilladsp-playback" },
-    },
-  },
-  apply_properties = {
-    ["target.object"] = "alsa_output.pci-0000_00_1f.3.analog-stereo",
-  },
-})
+```conf
+monitor.alsa.rules = [
+  # Connect a USB microphone to CamillaDSP capture
+  {
+    matches = [
+      { node.name = "alsa_input.usb-Some_Microphone-00.analog-stereo" }
+    ]
+    actions = {
+      update-props = {
+        target.object = "camilladsp-capture"
+      }
+    }
+  }
+  # Connect CamillaDSP playback to speakers
+  {
+    matches = [
+      { node.name = "camilladsp-playback" }
+    ]
+    actions = {
+      update-props = {
+        target.object = "alsa_output.pci-0000_00_1f.3.analog-stereo"
+      }
+    }
+  }
+]
 ```
 
 Restart WirePlumber after adding rules:
 ```bash
 systemctl --user restart wireplumber
+```
+
+To find the correct node names, use:
+```bash
+wpctl status
 ```
 
 ### Manual connection with pw-link
