@@ -285,7 +285,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                         let mut pw_buffer = match stream.dequeue_buffer() {
                             Some(b) => b,
                             None => {
-                                warn!("PipeWire: no buffer available");
+                                trace!("PipeWire playback: no buffer available");
                                 return;
                             }
                         };
@@ -411,8 +411,20 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                                         .signal_peak
                                         .add_record(chunk_stats.peak_linear());
                                 }
-                                if tx_chunk.send(chunk).is_err() {
-                                    break;
+                                // Use try_send - if buffer is full, drop the frame
+                                // This handles the case where playback isn't connected yet
+                                // (PipeWire won't call process callback if nothing is receiving)
+                                match tx_chunk.try_send(chunk) {
+                                    Ok(()) => {}
+                                    Err(mpsc::TrySendError::Full(_)) => {
+                                        // Buffer full - playback not connected or not consuming
+                                        // Just drop the frame and continue
+                                        trace!("Playback buffer full, dropping frame (playback may not be connected)");
+                                    }
+                                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                                        debug!("Playback tx_chunk disconnected, exiting");
+                                        break;
+                                    }
                                 }
                             }
                             Ok(AudioMessage::Pause) => {
@@ -796,17 +808,31 @@ impl CaptureDevice for PipewireCaptureDevice {
                                     chunk.waveforms = new_waves;
                                 }
                                 let msg = AudioMessage::Audio(chunk);
-                                if channel.send(msg).is_err() {
-                                    info!("Processing thread has already stopped.");
-                                    exit_flag.store(true, Ordering::Relaxed);
-                                    break;
+                                // Use try_send - if buffer is full, drop the frame
+                                match channel.try_send(msg) {
+                                    Ok(()) => {}
+                                    Err(mpsc::TrySendError::Full(_)) => {
+                                        // Processing pipeline is full, drop the frame
+                                        trace!("Capture: processing pipeline full, dropping frame");
+                                    }
+                                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                                        info!("Processing thread has already stopped.");
+                                        exit_flag.store(true, Ordering::Relaxed);
+                                        break;
+                                    }
                                 }
                             } else if state == ProcessingState::Paused {
                                 let msg = AudioMessage::Pause;
-                                if channel.send(msg).is_err() {
-                                    info!("Processing thread has already stopped.");
-                                    exit_flag.store(true, Ordering::Relaxed);
-                                    break;
+                                match channel.try_send(msg) {
+                                    Ok(()) => {}
+                                    Err(mpsc::TrySendError::Full(_)) => {
+                                        trace!("Capture: processing pipeline full, dropping pause message");
+                                    }
+                                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                                        info!("Processing thread has already stopped.");
+                                        exit_flag.store(true, Ordering::Relaxed);
+                                        break;
+                                    }
                                 }
                             }
                         }
