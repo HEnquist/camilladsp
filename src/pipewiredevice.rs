@@ -297,13 +297,14 @@ impl PlaybackDevice for PipewirePlaybackDevice {
 
                         let data = &mut datas[0];
                         let stride = channels * store_bytes_per_sample;
-                        let max_frames = data.chunk().size() as usize / stride;
 
-                        // Get output slice
+                        // Get output slice - data() returns slice sized to maxsize
                         let out_slice = match data.data() {
                             Some(s) => s,
                             None => return,
                         };
+                        let max_bytes = out_slice.len();
+                        let max_frames = max_bytes / stride;
 
                         // Fill from internal buffer
                         let mut buf = buffer_clone.borrow_mut();
@@ -339,6 +340,13 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                                 out_slice[i] = 0;
                             }
                         }
+
+                        // CRITICAL: Tell PipeWire how much data we wrote
+                        // For output streams, we must set chunk offset, size, and stride
+                        let chunk = data.chunk_mut();
+                        *chunk.offset_mut() = 0;
+                        *chunk.size_mut() = bytes_to_write as u32;
+                        *chunk.stride_mut() = stride as i32;
 
                         buffer_fill_clone.store(buf.len() / stride, Ordering::Relaxed);
                     })
