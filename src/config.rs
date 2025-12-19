@@ -35,6 +35,17 @@ use std::path::{Path, PathBuf};
 use crate::PrcFmt;
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
+// Default node names for PipeWire backend
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+fn default_pipewire_capture_node() -> String {
+    "camilladsp-capture".to_string()
+}
+
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+fn default_pipewire_playback_node() -> String {
+    "camilladsp-playback".to_string()
+}
+
 #[derive(Clone)]
 pub struct Overrides {
     pub samplerate: Option<usize>,
@@ -355,6 +366,16 @@ pub enum CaptureDevice {
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
     },
+    #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+    #[serde(alias = "PIPEWIRE", alias = "pipewire")]
+    Pipewire {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
+        channels: usize,
+        #[serde(default = "default_pipewire_capture_node")]
+        node_name: String,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
+    },
     RawFile(CaptureDeviceRawFile),
     WavFile(CaptureDeviceWavFile),
     #[serde(alias = "STDIN", alias = "stdin")]
@@ -401,6 +422,8 @@ impl CaptureDevice {
             CaptureDevice::Bluez(dev) => dev.channels,
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { channels, .. } => *channels,
+            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+            CaptureDevice::Pipewire { channels, .. } => *channels,
             CaptureDevice::RawFile(dev) => dev.channels,
             CaptureDevice::WavFile(dev) => {
                 dev.wav_info().map(|info| info.channels).unwrap_or_default()
@@ -433,6 +456,8 @@ impl CaptureDevice {
             CaptureDevice::Bluez(dev) => dev.labels.clone(),
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { labels, .. } => labels.clone(),
+            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+            CaptureDevice::Pipewire { labels, .. } => labels.clone(),
             CaptureDevice::RawFile(dev) => dev.labels.clone(),
             CaptureDevice::WavFile(dev) => dev.labels.clone(),
             CaptureDevice::Stdin(dev) => dev.labels.clone(),
@@ -631,6 +656,14 @@ pub enum PlaybackDevice {
         channels: usize,
         device: String,
     },
+    #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+    #[serde(alias = "PIPEWIRE", alias = "pipewire")]
+    Pipewire {
+        #[serde(deserialize_with = "validate_nonzero_usize")]
+        channels: usize,
+        #[serde(default = "default_pipewire_playback_node")]
+        node_name: String,
+    },
     #[serde(alias = "FILE", alias = "file")]
     File {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -679,6 +712,8 @@ impl PlaybackDevice {
             PlaybackDevice::Alsa { channels, .. } => *channels,
             #[cfg(feature = "pulse-backend")]
             PlaybackDevice::Pulse { channels, .. } => *channels,
+            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+            PlaybackDevice::Pipewire { channels, .. } => *channels,
             PlaybackDevice::File { channels, .. } => *channels,
             PlaybackDevice::Stdout { channels, .. } => *channels,
             #[cfg(target_os = "macos")]
@@ -1765,6 +1800,10 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             CaptureDevice::Pulse { channels, .. } => {
                 *channels = chans;
             }
+            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+            CaptureDevice::Pipewire { channels, .. } => {
+                *channels = chans;
+            }
             #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => {
                 dev.channels = chans;
@@ -1813,6 +1852,10 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             #[cfg(feature = "pulse-backend")]
             CaptureDevice::Pulse { .. } => {
                 error!("Not possible to override capture format for Pulse, ignoring");
+            }
+            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+            CaptureDevice::Pipewire { .. } => {
+                error!("Not possible to override capture format for Pipewire, ignoring");
             }
             #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => {

@@ -33,6 +33,8 @@ use crate::coreaudiodevice;
 use crate::cpaldevice;
 use crate::filedevice;
 use crate::generatordevice;
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+use crate::pipewiredevice;
 #[cfg(feature = "pulse-backend")]
 use crate::pulsedevice;
 #[cfg(target_os = "windows")]
@@ -281,6 +283,16 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
                 channels,
             })
         }
+        #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+        config::PlaybackDevice::Pipewire {
+            channels,
+            node_name,
+        } => Box::new(pipewiredevice::PipewirePlaybackDevice {
+            node_name,
+            samplerate: conf.samplerate,
+            chunksize: conf.chunksize,
+            channels,
+        }),
         config::PlaybackDevice::File {
             channels,
             filename,
@@ -428,6 +440,21 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             ..
         } => Box::new(pulsedevice::PulseCaptureDevice {
             devname: device.clone(),
+            samplerate: conf.samplerate,
+            resampler_config: conf.resampler,
+            capture_samplerate,
+            chunksize: conf.chunksize,
+            channels,
+            silence_threshold: conf.silence_threshold(),
+            silence_timeout: conf.silence_timeout(),
+        }),
+        #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+        config::CaptureDevice::Pipewire {
+            channels,
+            ref node_name,
+            ..
+        } => Box::new(pipewiredevice::PipewireCaptureDevice {
+            node_name: node_name.clone(),
             samplerate: conf.samplerate,
             resampler_config: conf.resampler,
             capture_samplerate,
