@@ -5,10 +5,15 @@ New features:
 - Support polling mode for WASAPI.
 - Websocket commands for reading and writing partial configs.
 Changes:
+- New sample format names on all backends.
+- Removed sample format selection for Pulse backend.
 - Add microsecond delay unit.
 - Allow larger buffer target levels.
 - Change mixer config rules to not allow duplicated channels.
 - Improved accuracy of subsample delay.
+- Windows: Optional automatic sample format selection.
+Bugfixes:
+- Windows: Fix Wasapi exclusive mode for padded 24-bit samples.
 
 ## v3.0.1
 Bugfixes:
@@ -194,7 +199,7 @@ Bugfixes:
 - Check for mixer parameter changes when reloading config.
 - Token substutution and overrides also work via websocket.
 - Don't exit on SIGHUP when waiting for a config.
-- Fix handling of negative values when reading filter coeffs in S24LE3 format.
+- Fix handling of negative values when reading filter coeffs in I24_3_LE format.
 - Gain filters react to mute setting on reload.
 - Fix noise in output when resampling and muting all channels in mixer.
 - Fix handling of negative values for input and output in S24LE format.

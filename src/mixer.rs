@@ -113,8 +113,12 @@ impl Mixer {
                 let source_chan = self.mapping[out_chan][source].channel;
                 if !input.waveforms[source_chan].is_empty() {
                     let gain = self.mapping[out_chan][source].gain;
-                    for n in 0..input.frames {
-                        waveforms[out_chan][n] += gain * input.waveforms[source_chan][n];
+                    for (out_val, in_val) in waveforms[out_chan]
+                        .iter_mut()
+                        .zip(input.waveforms[source_chan].iter())
+                        .take(input.frames)
+                    {
+                        *out_val += gain * in_val;
                     }
                 }
             }

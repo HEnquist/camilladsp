@@ -42,11 +42,10 @@ objc2-audio-toolbox = "0.3.1"
 dispatch = "0.2.0"
 libc = "0.2.172"
 
-[target.'cfg(target_os="windows")'.dependencies]
-#wasapi = { path = "../../rust/wasapi" }
-#wasapi = { git = "https://github.com/HEnquist/wasapi-rs", branch = "stream_mode_enum" }
-wasapi = "0.18.0"
-windows = {version = "0.61.0", features = ["Win32_System_Threading", "Win32_Foundation"] }
+[target.'cfg(windows)'.dependencies]
+wasapi = "0.22.0"
+# wasapi = { version = "0.22.0", path = "../wasapi-rs" }
+windows = {version = "0.62.0", features = ["Win32_System_Threading", "Win32_Foundation"] }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -70,18 +69,20 @@ tungstenite = { version = "0.26.1", optional = true }
 native-tls = { version = "0.2.7", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-rubato = "1.0.0-preview.1"
-#rubato = { git = "https://github.com/HEnquist/rubato", branch = "optional_fft" }
+#rubato = { version = "1.0.0-preview.2", path = "../rubato" }
+rubato = { git = "https://github.com/HEnquist/rubato", branch = "preview_1.0" }
 cpal = { version = "0.16.0", optional = true }
 parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
 crossbeam-channel = "0.5"
 rayon = "1.10.0"
 audio_thread_priority = { version = "0.33.0", default-features = false }
 ringbuf = "0.4.7"
-audioadapter = { version = "1.0.0", default-features = false }
-audioadapter-sample = { version = "1.0.0" }
-audioadapter-buffers = { version = "1.0.0" }
-
+#audioadapter = { version = "2.0.0", default-features = false, path = "../audioadapter-rs/audioadapter" }
+#audioadapter-sample = { version = "2.0.0", default-features = false,path = "../audioadapter-rs/audioadapter-sample" }
+#audioadapter-buffers = { version = "2.0.0", path = "../audioadapter-rs/audioadapter-buffers" }
+audioadapter = { version = "2.0.0", default-features = false }
+audioadapter-sample = { version = "2.0.0", default-features = false }
+audioadapter-buffers = { version = "2.0.0" }
 
 [build-dependencies]
 version_check = "0.9"

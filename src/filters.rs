@@ -20,6 +20,7 @@ use crate::biquad;
 use crate::biquadcombo;
 use crate::compressor;
 use crate::config;
+use crate::config::BinarySampleFormat;
 use crate::diffeq;
 use crate::dither;
 use crate::fftconv;
@@ -29,7 +30,7 @@ use crate::mixer;
 use crate::noisegate;
 use crate::race;
 use audioadapter_sample::readwrite::ReadSamples;
-use audioadapter_sample::sample::{F32LE, F64LE, I16LE, I24LE, I32LE};
+use audioadapter_sample::sample::{F32_LE, F64_LE, I16_LE, I24_4LJ_LE, I24_4RJ_LE, I24_LE, I32_LE};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -76,7 +77,7 @@ pub fn pad_vector(values: &[PrcFmt], length: usize) -> Vec<PrcFmt> {
 
 pub fn read_coeff_file(
     filename: &str,
-    format: &config::FileFormat,
+    format: &config::FileSampleFormat,
     read_bytes_lines: usize,
     skip_bytes_lines: usize,
 ) -> Res<Vec<PrcFmt>> {
@@ -97,7 +98,7 @@ pub fn read_coeff_file(
 
     match format {
         // Handle TEXT separately
-        config::FileFormat::TEXT => {
+        config::FileSampleFormat::TEXT => {
             for (nbr, line) in file
                 .lines()
                 .skip(skip_bytes_lines)
@@ -131,40 +132,58 @@ pub fn read_coeff_file(
         }
         // All other formats
         _ => {
+            let binary_format = BinarySampleFormat::from_file_sample_format(format);
             file.seek(SeekFrom::Start(skip_bytes_lines as u64))?;
-            let nbr_coeffs = read_bytes_lines / format.bytes_per_sample();
+            let nbr_coeffs = read_bytes_lines / binary_format.bytes_per_sample();
             let limit = if nbr_coeffs > 0 {
                 Some(nbr_coeffs)
             } else {
                 None
             };
 
-            match *format {
-                config::FileFormat::S16LE => {
-                    file.read_converted_to_limit_or_end::<I16LE, PrcFmt>(&mut coefficients, limit)?;
-                }
-                config::FileFormat::S24LE3 => {
-                    file.read_converted_to_limit_or_end::<I24LE<3>, PrcFmt>(
+            match binary_format {
+                config::BinarySampleFormat::S16_LE => {
+                    file.read_converted_to_limit_or_end::<I16_LE, PrcFmt>(
                         &mut coefficients,
                         limit,
                     )?;
                 }
-                config::FileFormat::S24LE => {
-                    file.read_converted_to_limit_or_end::<I24LE<4>, PrcFmt>(
+                config::BinarySampleFormat::S24_3_LE => {
+                    file.read_converted_to_limit_or_end::<I24_LE, PrcFmt>(
                         &mut coefficients,
                         limit,
                     )?;
                 }
-                config::FileFormat::S32LE => {
-                    file.read_converted_to_limit_or_end::<I32LE, PrcFmt>(&mut coefficients, limit)?;
+                config::BinarySampleFormat::S24_4_RJ_LE => {
+                    file.read_converted_to_limit_or_end::<I24_4RJ_LE, PrcFmt>(
+                        &mut coefficients,
+                        limit,
+                    )?;
                 }
-                config::FileFormat::FLOAT32LE => {
-                    file.read_converted_to_limit_or_end::<F32LE, PrcFmt>(&mut coefficients, limit)?;
+                config::BinarySampleFormat::S24_4_LJ_LE => {
+                    file.read_converted_to_limit_or_end::<I24_4LJ_LE, PrcFmt>(
+                        &mut coefficients,
+                        limit,
+                    )?;
                 }
-                config::FileFormat::FLOAT64LE => {
-                    file.read_converted_to_limit_or_end::<F64LE, PrcFmt>(&mut coefficients, limit)?;
+                config::BinarySampleFormat::S32_LE => {
+                    file.read_converted_to_limit_or_end::<I32_LE, PrcFmt>(
+                        &mut coefficients,
+                        limit,
+                    )?;
                 }
-                config::FileFormat::TEXT => unreachable!(),
+                config::BinarySampleFormat::F32_LE => {
+                    file.read_converted_to_limit_or_end::<F32_LE, PrcFmt>(
+                        &mut coefficients,
+                        limit,
+                    )?;
+                }
+                config::BinarySampleFormat::F64_LE => {
+                    file.read_converted_to_limit_or_end::<F64_LE, PrcFmt>(
+                        &mut coefficients,
+                        limit,
+                    )?;
+                }
             }
             debug!("Read {} coeffs from file", coefficients.len());
         }
@@ -190,7 +209,7 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
 
     let alldata = read_coeff_file(
         filename,
-        &config::FileFormat::from_sample_format(&params.sample_format),
+        &params.sample_format.to_file_sample_format(),
         params.data_length,
         params.data_offset,
     )?;
@@ -640,7 +659,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::FileFormat;
+    use crate::config::FileSampleFormat;
     use crate::filters::read_wav;
     use crate::filters::{pad_vector, read_coeff_file};
     use crate::PrcFmt;
@@ -667,14 +686,15 @@ mod tests {
 
     #[test]
     fn read_float32() {
-        let loaded = read_coeff_file("testdata/float32.raw", &FileFormat::FLOAT32LE, 0, 0).unwrap();
+        let loaded =
+            read_coeff_file("testdata/float32.raw", &FileSampleFormat::F32_LE, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
             "{loaded:?} != {expected:?}"
         );
         let loaded =
-            read_coeff_file("testdata/float32.raw", &FileFormat::FLOAT32LE, 12, 4).unwrap();
+            read_coeff_file("testdata/float32.raw", &FileSampleFormat::F32_LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
@@ -684,14 +704,15 @@ mod tests {
 
     #[test]
     fn read_float64() {
-        let loaded = read_coeff_file("testdata/float64.raw", &FileFormat::FLOAT64LE, 0, 0).unwrap();
+        let loaded =
+            read_coeff_file("testdata/float64.raw", &FileSampleFormat::F64_LE, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
             "{loaded:?} != {expected:?}"
         );
         let loaded =
-            read_coeff_file("testdata/float64.raw", &FileFormat::FLOAT64LE, 24, 8).unwrap();
+            read_coeff_file("testdata/float64.raw", &FileSampleFormat::F64_LE, 24, 8).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-15),
@@ -701,13 +722,15 @@ mod tests {
 
     #[test]
     fn read_int16() {
-        let loaded = read_coeff_file("testdata/int16.raw", &FileFormat::S16LE, 0, 0).unwrap();
+        let loaded =
+            read_coeff_file("testdata/int16.raw", &FileSampleFormat::S16_LE, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-4),
             "{loaded:?} != {expected:?}"
         );
-        let loaded = read_coeff_file("testdata/int16.raw", &FileFormat::S16LE, 6, 2).unwrap();
+        let loaded =
+            read_coeff_file("testdata/int16.raw", &FileSampleFormat::S16_LE, 6, 2).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-4),
@@ -717,13 +740,15 @@ mod tests {
 
     #[test]
     fn read_int24() {
-        let loaded = read_coeff_file("testdata/int24.raw", &FileFormat::S24LE, 0, 0).unwrap();
+        let loaded =
+            read_coeff_file("testdata/int24.raw", &FileSampleFormat::S24_4_RJ_LE, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
             "{loaded:?} != {expected:?}"
         );
-        let loaded = read_coeff_file("testdata/int24.raw", &FileFormat::S24LE, 12, 4).unwrap();
+        let loaded =
+            read_coeff_file("testdata/int24.raw", &FileSampleFormat::S24_4_RJ_LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
@@ -732,13 +757,15 @@ mod tests {
     }
     #[test]
     fn read_int24_3() {
-        let loaded = read_coeff_file("testdata/int243.raw", &FileFormat::S24LE3, 0, 0).unwrap();
+        let loaded =
+            read_coeff_file("testdata/int243.raw", &FileSampleFormat::S24_3_LE, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
             "{loaded:?} != {expected:?}"
         );
-        let loaded = read_coeff_file("testdata/int243.raw", &FileFormat::S24LE3, 9, 3).unwrap();
+        let loaded =
+            read_coeff_file("testdata/int243.raw", &FileSampleFormat::S24_3_LE, 9, 3).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-6),
@@ -747,13 +774,15 @@ mod tests {
     }
     #[test]
     fn read_int32() {
-        let loaded = read_coeff_file("testdata/int32.raw", &FileFormat::S32LE, 0, 0).unwrap();
+        let loaded =
+            read_coeff_file("testdata/int32.raw", &FileSampleFormat::S32_LE, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),
             "{loaded:?} != {expected:?}"
         );
-        let loaded = read_coeff_file("testdata/int32.raw", &FileFormat::S32LE, 12, 4).unwrap();
+        let loaded =
+            read_coeff_file("testdata/int32.raw", &FileSampleFormat::S32_LE, 12, 4).unwrap();
         let expected: Vec<PrcFmt> = vec![-0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),
@@ -762,13 +791,14 @@ mod tests {
     }
     #[test]
     fn read_text() {
-        let loaded = read_coeff_file("testdata/text.txt", &FileFormat::TEXT, 0, 0).unwrap();
+        let loaded = read_coeff_file("testdata/text.txt", &FileSampleFormat::TEXT, 0, 0).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),
             "{loaded:?} != {expected:?}"
         );
-        let loaded = read_coeff_file("testdata/text_header.txt", &FileFormat::TEXT, 4, 1).unwrap();
+        let loaded =
+            read_coeff_file("testdata/text_header.txt", &FileSampleFormat::TEXT, 4, 1).unwrap();
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5];
         assert!(
             compare_waveforms(&loaded, &expected, 1e-9),

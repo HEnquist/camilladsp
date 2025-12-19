@@ -5,8 +5,8 @@ devices:
   capture:
     type: Stdin
     channels: 2
-    format: S16LE
+    format: I16_LE
   playback:
     type: Stdout
     channels: 2
-    format: S16LE
+    format: I16_LE

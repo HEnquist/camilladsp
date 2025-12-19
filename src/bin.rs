@@ -687,12 +687,13 @@ fn main_process() -> i32 {
                 .display_order(410)
                 .action(ArgAction::Set)
                 .value_parser([
-                    "S16LE",
-                    "S24LE",
-                    "S24LE3",
-                    "S32LE",
-                    "FLOAT32LE",
-                    "FLOAT64LE",
+                    "S16_LE",
+                    "S24_3_LE",
+                    "S24_4_LJ_LE",
+                    "S24_4_RJ_LE",
+                    "S32_LE",
+                    "F32_LE",
+                    "F64_LE",
                 ])
                 .help("Override sample format of capture device in config"),
         );
@@ -837,7 +838,7 @@ fn main_process() -> i32 {
         overrides.channels = matches.get_one::<usize>("channels").copied();
         overrides.sample_format = matches
             .get_one::<String>("format")
-            .map(|s| config::SampleFormat::from_name(s).unwrap());
+            .map(|s| config::BinarySampleFormat::from_name(s).unwrap());
     }
 
     let statefilename: Option<String> = matches.get_one::<String>("statefile").cloned();

@@ -496,7 +496,7 @@ Options:
   -e, --extra_samples <EXTRA_SAMPLES>  Override number of extra samples in config
   -n, --channels <CHANNELS>            Override number of channels of capture device in config
   -r, --samplerate <SAMPLERATE>        Override samplerate in config
-  -f, --format <FORMAT>                Override sample format of capture device in config [possible values: S16LE, S24LE, S24LE3, S32LE, FLOAT32LE, FLOAT64LE]
+  -f, --format <FORMAT>                Override sample format of capture device in config [possible values: S16_LE, S24_3_LE, S24_4_LJ_LE, S24_4_RJ_LE, S32_LE, F32_LE, F64_LE]
   -h, --help                           Print help
   -V, --version                        Print version
 ```
@@ -679,7 +679,7 @@ It is implemented using the CPAL library, which currently only supports Jack on 
 The Jack server must be running.
 
 Set `device` to "default" for both capture and playback.
-The sample format is fixed at 32-bit float (FLOAT32LE).
+The sample format is fixed at 32-bit float.
 
 The samplerate must match the samplerate configured for the Jack server.
 
@@ -778,7 +778,7 @@ devices:
   enable_rate_adjust: true
   capture:
     type: Bluez
-    format: S16LE
+    format: S16_LE
     channels: 2
     dbus_path: /org/bluealsa/hci0/dev_A0_B1_C2_D3_E4_F5/a2dpsnk/source
     service: org.bluealsa (*)
@@ -944,13 +944,12 @@ devices:
     type: Pulse
     channels: 2
     device: "MySink.monitor"
-    format: S16LE
     labels: ["L", "R"] (*)
   playback:
     type: Alsa
     channels: 2
     device: "hw:Generic_1"
-    format: S32LE
+    format: S32_LE
 ```
 A parameter marked (*) in any example is optional. If they are left out from the configuration, or set to `null`, their default values will be used.
 
@@ -1150,44 +1149,25 @@ A parameter marked (*) in any example is optional. If they are left out from the
     * `Alsa`
     * `Pulse`
   * `channels`: number of channels
-  * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `CoreAudio`). For `CoreAudio` and `Wasapi`, `null` will give the default device.
+  * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `CoreAudio`).
+     For `CoreAudio` and `Wasapi`, `null` will give the default device.
   * `filename` path to the file (for `File`, `RawFile` and `WavFile`)
-  * `format`: sample format (for all except `Jack`).
+  * `format`: sample format (for all except `Jack` and `Pulse`).
 
-    Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
-    * S16LE - Signed 16-bit int, stored as two bytes
-    * S24LE - Signed 24-bit int, stored as four bytes (three bytes of data, one padding byte)
-    * S24LE3 - Signed 24-bit int, stored as three bytes (with no padding)
-    * S32LE - Signed 32-bit int, stored as four bytes
-    * FLOAT32LE - 32-bit float, stored as four bytes
-    * FLOAT64LE - 64-bit float, stored as eight bytes
+    The available choices for `format` depend on the backend.
 
-    __Note that there are two 24-bit formats! Make sure to select the correct one.__
+    For `File`, `Stdin`, `Stdout` `RawFile` and `Bluez`, the choices are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
+    - [S16_LE](sample_formats.md#s16_le)
+    - [S24_3_LE](sample_formats.md#s24_3_le)
+    - [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le)
+    - [S24_4_LJ_LE](sample_formats.md#s24_4_lj_le)
+    - [S32_LE](sample_formats.md#s32_le)
+    - [F32_LE](sample_formats.md#f32_le)
+    - [F64_LE](sample_formats.md#f64_le)
 
-    ### Supported formats
+    For [ALSA](./backend_alsa.md), [CoreAudio](./backend_coreaudio.md) and [Wasapi](./backend_wasapi.md), see the respective backend documentation.
 
-    |            | Alsa | Pulse | Wasapi | CoreAudio | Jack | File/Stdin/Stdout |
-    |------------|:----:|:-----:|:------:|:---------:|:----:|:-----------------:|
-    | S16LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
-    | S24LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
-    | S24LE3     | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
-    | S32LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
-    | FLOAT32LE  | Yes  | Yes   | Yes    | Yes       | Yes  | Yes               |
-    | FLOAT64LE  | Yes  | No    | No     | No        | No   | Yes               |
-
-
-    ### Equivalent formats
-
-    This table shows which formats in the different APIs are equivalent.
-
-    | CamillaDSP | Alsa       | Pulse     |
-    |------------|------------|-----------|
-    | S16LE      | S16_LE     | S16LE     |
-    | S24LE      | S24_LE     | S24_32LE  |
-    | S24LE3     | S24_3LE    | S24LE     |
-    | S32LE      | S32_LE     | S32LE     |
-    | FLOAT32LE  | FLOAT_LE   | FLOAT32LE |
-    | FLOAT64LE  | FLOAT64_LE | -         |
+    __Note that there are three different 24-bit formats! Make sure to select the correct one.__
 
   ### File, RawFile, WavFile, Stdin, Stdout
   The `RawFile` device type reads from a file, while `Stdin` reads from stdin.
@@ -1214,6 +1194,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
   Setting it to `false`, `null`, or leaving it out disables the wav header.
   This is a _streaming_ header, meaning it contains a dummy value for the file length.
   Most applications ignore this and calculate the correct length from the file size.
+  The wav format does not support right justified padded data, and therefore it is not
+  possible to enable the wav-header if the format is `S24_4_RJ_LE`.
 
   To read from a wav file, use the `WavFile` capture device.
   The samplerate and numnber of channels of the file is used to override the values in the config,
@@ -1226,7 +1208,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
       type: RawFile
       channels: 2
       filename: "/path/to/inputfile.raw"
-      format: S16LE
+      format: S16_LE
       extra_samples: 123 (*)
       skip_bytes: 0 (*)
       read_bytes: 0 (*)
@@ -1234,7 +1216,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
       type: File
       channels: 2
       filename: "/path/to/outputfile.raw"
-      format: S32LE
+      format: S32_LE
   ```
 
   Example config for Stdin/Stdout:
@@ -1242,14 +1224,14 @@ A parameter marked (*) in any example is optional. If they are left out from the
     capture:
       type: Stdin
       channels: 2
-      format: S16LE
+      format: S16_LE
       extra_samples: 123 (*)
       skip_bytes: 0 (*)
       read_bytes: 0 (*)
     playback:
       type: Stdout
       channels: 2
-      format: S32LE
+      format: S32_LE
   ```
 
   Example config for wav input and output:
@@ -1260,7 +1242,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
     playback:
       type: File
       channels: 2
-      format: S32LE
+      format: S32_LE
       wav_header: true
       filename: "/path/to/outputfile.wav"
   ```
@@ -1332,16 +1314,14 @@ A parameter marked (*) in any example is optional. If they are left out from the
       type: Pulse
       channels: 2
       device: "MySink.monitor"
-      format: S16LE
     playback:
       type: Pulse
       channels: 2
       device: "alsa_output.pci-0000_03_00.6.analog-stereo"
-      format: S32LE
   ```
 
   ### Jack
-  The `Jack` capture and playback devices do not have a `format` parameter, since they always uses the FLOAT32LE format.
+  The `Jack` capture and playback devices do not have a `format` parameter, since they always uses the F32_LE format.
   It seems that the `device` property should always be set to "default".
   This parameter may be removed in a future version.
 
@@ -1813,7 +1793,7 @@ It allows building fully linear-phase active crossovers with arbitrary slopes.
 It also supports compensating the phase shifts of loudspeakers and existing crossovers.
 In the Impulse Settings box configure the rate to the same as used in CamillaDSP
 and the format to 64 bits IEEE-754 (.dbl).
-This corresponds to raw samples in FLOAT64LE format in CamillaDSP.
+This corresponds to raw samples in F64_LE format in CamillaDSP.
 
 #### Values directly in config file
 
@@ -1875,12 +1855,13 @@ This format is a simple text file with one value per row:
 -0.000012
 ```
 The other possible formats are raw data:
-- S16LE: signed 16-bit little-endian integers
-- S24LE: signed 24-bit little-endian integers stored as 32 bits (with the data in the low 24)
-- S24LE3: signed 24-bit little-endian integers stored as 24 bits
-- S32LE: signed 32-bit little-endian integers
-- FLOAT32LE: 32-bit little endian float
-- FLOAT64LE: 64-bit little endian float
+- [S16_LE](sample_formats.md#s16_le)
+- [S24_3_LE](sample_formats.md#s24_3_le)
+- [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le)
+- [S24_4_LJ_LE](sample_formats.md#s24_4_lj_le)
+- [S32_LE](sample_formats.md#s32_le)
+- [F32_LE](sample_formats.md#f32_le)
+- [F64_LE](sample_formats.md#f64_le)
 
 
 ### IIR

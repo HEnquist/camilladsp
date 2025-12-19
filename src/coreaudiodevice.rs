@@ -16,7 +16,7 @@
 
 use crate::audiodevice::*;
 use crate::config;
-use crate::config::{ConfigError, SampleFormat};
+use crate::config::{BinarySampleFormat, ConfigError, CoreAudioSampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::helpers::PIRateController;
@@ -144,7 +144,7 @@ pub struct CoreaudioPlaybackDevice {
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: Option<SampleFormat>,
+    pub sample_format: Option<CoreAudioSampleFormat>,
     pub exclusive: bool,
     pub target_level: usize,
     pub adjust_period: f32,
@@ -159,7 +159,7 @@ pub struct CoreaudioCaptureDevice {
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub sample_format: Option<SampleFormat>,
+    pub sample_format: Option<CoreAudioSampleFormat>,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
@@ -220,7 +220,7 @@ fn open_coreaudio_playback(
     devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &Option<SampleFormat>,
+    sample_format: &Option<CoreAudioSampleFormat>,
     exclusive: bool,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if let Some(name) = devname {
@@ -258,14 +258,10 @@ fn open_coreaudio_playback(
 
     if let Some(sfmt) = sample_format {
         let phys_format = match *sfmt {
-            SampleFormat::S16LE => coreaudio::audio_unit::SampleFormat::I16,
-            SampleFormat::S24LE | SampleFormat::S24LE3 => coreaudio::audio_unit::SampleFormat::I24,
-            SampleFormat::S32LE => coreaudio::audio_unit::SampleFormat::I32,
-            SampleFormat::FLOAT32LE => coreaudio::audio_unit::SampleFormat::F32,
-            _ => {
-                let msg = format!("Sample format '{sfmt}' not supported!");
-                return Err(ConfigError::new(&msg).into());
-            }
+            CoreAudioSampleFormat::S16 => coreaudio::audio_unit::SampleFormat::I16,
+            CoreAudioSampleFormat::S24 => coreaudio::audio_unit::SampleFormat::I24,
+            CoreAudioSampleFormat::S32 => coreaudio::audio_unit::SampleFormat::I32,
+            CoreAudioSampleFormat::F32 => coreaudio::audio_unit::SampleFormat::F32,
         };
 
         let physical_stream_format = StreamFormat {
@@ -315,7 +311,7 @@ fn open_coreaudio_capture(
     devname: &Option<String>,
     samplerate: usize,
     channels: usize,
-    sample_format: &Option<SampleFormat>,
+    sample_format: &Option<CoreAudioSampleFormat>,
 ) -> Res<(AudioUnit, AudioDeviceID)> {
     let device_id = if let Some(name) = devname {
         debug!("Available capture devices: {:?}.", list_device_names(true));
@@ -341,14 +337,10 @@ fn open_coreaudio_capture(
 
     if let Some(sfmt) = sample_format {
         let phys_format = match *sfmt {
-            SampleFormat::S16LE => coreaudio::audio_unit::SampleFormat::I16,
-            SampleFormat::S24LE | SampleFormat::S24LE3 => coreaudio::audio_unit::SampleFormat::I24,
-            SampleFormat::S32LE => coreaudio::audio_unit::SampleFormat::I32,
-            SampleFormat::FLOAT32LE => coreaudio::audio_unit::SampleFormat::F32,
-            _ => {
-                let msg = format!("Sample format '{sfmt}' not supported!");
-                return Err(ConfigError::new(&msg).into());
-            }
+            CoreAudioSampleFormat::S16 => coreaudio::audio_unit::SampleFormat::I16,
+            CoreAudioSampleFormat::S24 => coreaudio::audio_unit::SampleFormat::I24,
+            CoreAudioSampleFormat::S32 => coreaudio::audio_unit::SampleFormat::I32,
+            CoreAudioSampleFormat::F32 => coreaudio::audio_unit::SampleFormat::F32,
         };
 
         let physical_stream_format = StreamFormat {
@@ -544,7 +536,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 0u8;
                                 channels
                                     * chunksize
-                                    * SampleFormat::FLOAT32LE.bytes_per_sample()
+                                    * BinarySampleFormat::F32_LE.bytes_per_sample()
                             ];
 
                 debug!("Playback device ready and waiting.");
@@ -620,7 +612,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             conversion_result = chunk_to_buffer_rawbytes(
                                 chunk,
                                 &mut buf,
-                                &SampleFormat::FLOAT32LE,
+                                &BinarySampleFormat::F32_LE,
                             );
                             if let Some(mut playback_status) = playback_status.try_write() {
                                 if conversion_result.1 > 0 {
@@ -974,9 +966,10 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     let mut chunk = buffer_to_chunk_rawbytes(
                         &data_buffer[0..capture_bytes],
                         channels,
-                        &SampleFormat::FLOAT32LE,
+                        &BinarySampleFormat::F32_LE,
                         capture_bytes,
                         &capture_status.read().used_channels,
+                        false,
                     );
                     averager.add_value(capture_frames + device_consumer.occupied_len()/blockalign - prev_len/blockalign);
                     if let Some(capture_status) = capture_status.try_upgradable_read() {

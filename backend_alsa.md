@@ -19,7 +19,7 @@ For example a 4-channel unit may present a single 4-channel device, or two separ
 
 ### PCM devices
 
-An alsa PCM device can be many different things, like a simple alias for a hardware device,
+An ALSA PCM device can be many different things, like a simple alias for a hardware device,
 or any of the many plugins supported by ALSA.
 PCM devices are normally defined in the ALSA configuration file.
 See the [ALSA Plugin Documentation](#alsa-plugin-documentation) for a list of the available plugins.
@@ -79,8 +79,9 @@ Available formats:
 - S32_LE
 ```
 Ignore the error message at the end. The interesting fields are FORMAT, RATE and CHANNELS.
-In this example the sample formats this device can use are S16_LE and S32_LE (corresponding to S16LE and S32LE in CamillaDSP,
-see the [table of equivalent formats in the main README](./README.md#equivalent-formats) for the complete list).
+In this example the sample formats this device can use are S16_LE and S32_LE
+(corresponding to the identically named S16_LE and S32_LE formats in CamillaDSP,
+see the [list of sample formats](#sample-formats) for the complete list).
 The sample rate can be either 44.1 or 48 kHz. And it supports only stereo playback (2 channels).
 
 ### Combinations of parameter values
@@ -93,8 +94,8 @@ This is common on studio interfaces that support [ADAT](#adat).
 CamillaDSP sets first the number of channels.
 Then it sets sample rate, and finally sample format.
 Setting a value for a parameter may restrict the allowed values for the ones that have not yet been set.
-For the USB DAC just mentioned, setting the sample rate to 192 kHz means that only the S16LE sample format is allowed.
-If the CamillaDSP configuration is set to 192 kHz and S24LE3, then there will be an error when setting the format.
+For the USB DAC just mentioned, setting the sample rate to 192 kHz means that only the S16_LE sample format is allowed.
+If the CamillaDSP configuration is set to 192 kHz and S24_3_LE, then there will be an error when setting the format.
 
 
 Capture parameters are determined in the same way with `arecord`:
@@ -102,6 +103,43 @@ Capture parameters are determined in the same way with `arecord`:
 > arecord -D hw:Generic /dev/null --dump-hw-params
 ```
 This outputs the same table as for the aplay example above, but for a capture device. 
+
+### Sample formats
+
+See also [the sample format documentation](sample_formats.md).
+
+The choices for sample formats for ALSA devices are:
+| CamillaDSP format | ALSA format name | Description |
+| --- | --- | --- |
+| [S16_LE](sample_formats.md#s16_le) | [S16_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a8b66a29293c62df9d1678c609fab76c0) | 16-bit signed integer, little-endian |
+| [S24_3_LE](sample_formats.md#s24_3_le) | [S24_3LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a76ef58eb516389000bdc678ca69515c3) | 24-bit signed integer, stored packed as 3 bytes per sample, little-endian |
+| [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le) | [S24_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a04b3c3b9ad0106c9619a28b753d8fd18)  | 24-bit signed integer, stored padded to 4 bytes right justified, little-endian |
+| [S32_LE](sample_formats.md#s32_le) | [S32_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8aa99dcea38d9cd8ea3b8a6e9ea85bcc52) | 32-bit signed integer, little-endian |
+| [F32_LE](sample_formats.md#f32_le) | [FLOAT_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a083f32474a84d344e0da496470085c8f) | 32-bit floating point, little-endian |
+| [F64_LE](sample_formats.md#f64_le) | [FLOAT64_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a8e6d82461abbb8be043f8addd23f76c0) | 64-bit floating point, little-endian |
+
+This is a subset of the [many formats supported by ALSA](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#gaa14b7f26877a812acbb39811364177f8),
+and covers the vast majority of audio devices.
+If a device needs a different format, this can often be overcome
+by using an ALSA `plug` to convert the samples. 
+This can be added by giving the device name as `plughw:Name` instead of `hw:Name`.
+
+#### A note on 24-bit devices
+
+Devices supporting 24-bit samples have different requirements
+for how the samples are delivered.
+
+USB devices normally use the packed `S24_3_LE` format.
+
+Devices that require padded samples, for example the HD Audio codecs
+built into many computers, normally require left justified data.
+ALSA does not have a specific format for this.
+Instead these devices use the `S32_LE`
+format and ignore the eight least significant bits.
+
+The padded right justified `S24_4_RJ_LE` format is included for completeness,
+but is used by very few devices.
+
 
 ## Routing all audio through CamillaDSP
 
@@ -154,14 +192,14 @@ This example configuration will be used to explain the various options specific 
     type: Alsa
     channels: 2
     device: "hw:0,1"
-    format: S16LE (*)
+    format: S16_LE (*)
     stop_on_inactive: false (*)
     follow_volume_control: "PCM Playback Volume" (*)
   playback:
     type: Alsa
     channels: 2
     device: "hw:Generic_1"
-    format: S32LE (*)
+    format: S32_LE (*)
 ```
 
 ### Device names
@@ -171,9 +209,9 @@ See [Find name of device](#find-name-of-device) for what to write in the `device
 The sample format is optional. If set to `null` or left out,
 the highest quality available format is chosen automatically.
 
-When the format is set automatically, 32-bit integer (`S32LE`) is considered the best,
-followed by 24-bit (`S24LE3` and `S24LE`) and 16-bit integer (`S16LE`).
-The 32-bit (`FLOAT32LE`) and 64-bit (`FLOAT64LE`) float formats are high quality,
+When the format is set automatically, 32-bit integer (`S32_LE`) is considered the best,
+followed by 24-bit (`S24_3_LE` and `S24_4_RJ_LE`) and 16-bit integer (`S16_LE`).
+The 32-bit (`F32_LE`) and 64-bit (`F64_LE`) float formats are high quality,
 but are supported by very few devices. Therefore these are checked last.
 
 Please also see [Find valid playback and capture parameters](#find-valid-playback-and-capture-parameters).

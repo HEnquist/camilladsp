@@ -8,12 +8,12 @@ devices:
     type: RawFile
     channels: 2
     filename: "result_i32.raw"
-    format: S32LE
+    format: I32_LE
   capture:
     type: File
     channels: 1
     filename: "spike_i32.raw"
-    format: S32LE
+    format: I32_LE
     extra_samples: 1
 
 mixers:

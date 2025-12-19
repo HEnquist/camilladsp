@@ -20,7 +20,7 @@ use std::io::BufReader;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem;
 
-use crate::config::{ConfigError, SampleFormat};
+use crate::config::{BinarySampleFormat, ConfigError};
 use crate::Res;
 
 const RIFF: &[u8] = "RIFF".as_bytes();
@@ -71,7 +71,7 @@ const SUBTYPE_PCM: Guid = Guid {
 
 #[derive(Debug)]
 pub struct WavParams {
-    pub sample_format: SampleFormat,
+    pub sample_format: BinarySampleFormat,
     pub sample_rate: usize,
     pub data_offset: usize,
     pub data_length: usize,
@@ -104,14 +104,14 @@ fn look_up_format(
     bits: u16,
     bytes_per_sample: u16,
     chunk_length: u32,
-) -> Res<SampleFormat> {
+) -> Res<BinarySampleFormat> {
     match (formatcode, bits, bytes_per_sample) {
-        (1, 16, 2) => Ok(SampleFormat::S16LE),
-        (1, 24, 3) => Ok(SampleFormat::S24LE3),
-        (1, 24, 4) => Ok(SampleFormat::S24LE),
-        (1, 32, 4) => Ok(SampleFormat::S32LE),
-        (3, 32, 4) => Ok(SampleFormat::FLOAT32LE),
-        (3, 64, 8) => Ok(SampleFormat::FLOAT64LE),
+        (1, 16, 2) => Ok(BinarySampleFormat::S16_LE),
+        (1, 24, 3) => Ok(BinarySampleFormat::S24_3_LE),
+        (1, 24, 4) => Ok(BinarySampleFormat::S24_4_LJ_LE),
+        (1, 32, 4) => Ok(BinarySampleFormat::S32_LE),
+        (3, 32, 4) => Ok(BinarySampleFormat::F32_LE),
+        (3, 64, 8) => Ok(BinarySampleFormat::F64_LE),
         (0xFFFE, _, _) => look_up_extended_format(data, bits, bytes_per_sample, chunk_length),
         (_, _, _) => Err(ConfigError::new("Unsupported wav format").into()),
     }
@@ -122,7 +122,7 @@ fn look_up_extended_format(
     bits: u16,
     bytes_per_sample: u16,
     chunk_length: u32,
-) -> Res<SampleFormat> {
+) -> Res<BinarySampleFormat> {
     if chunk_length != 40 {
         return Err(ConfigError::new("Invalid extended header").into());
     }
@@ -140,12 +140,12 @@ fn look_up_extended_format(
         bytes_per_sample,
         valid_bits_per_sample,
     ) {
-        (SUBTYPE_PCM, 16, 2, 16) => Ok(SampleFormat::S16LE),
-        (SUBTYPE_PCM, 24, 3, 24) => Ok(SampleFormat::S24LE3),
-        (SUBTYPE_PCM, 24, 4, 24) => Ok(SampleFormat::S24LE),
-        (SUBTYPE_PCM, 32, 4, 32) => Ok(SampleFormat::S32LE),
-        (SUBTYPE_FLOAT, 32, 4, 32) => Ok(SampleFormat::FLOAT32LE),
-        (SUBTYPE_FLOAT, 64, 8, 64) => Ok(SampleFormat::FLOAT64LE),
+        (SUBTYPE_PCM, 16, 2, 16) => Ok(BinarySampleFormat::S16_LE),
+        (SUBTYPE_PCM, 24, 3, 24) => Ok(BinarySampleFormat::S24_3_LE),
+        (SUBTYPE_PCM, 24, 4, 24) => Ok(BinarySampleFormat::S24_4_LJ_LE),
+        (SUBTYPE_PCM, 32, 4, 32) => Ok(BinarySampleFormat::S32_LE),
+        (SUBTYPE_FLOAT, 32, 4, 32) => Ok(BinarySampleFormat::F32_LE),
+        (SUBTYPE_FLOAT, 64, 8, 64) => Ok(BinarySampleFormat::F64_LE),
         (_, _, _, _) => Err(ConfigError::new("Unsupported extended wav format").into()),
     }
 }
@@ -181,7 +181,7 @@ pub fn find_data_in_wav_stream(mut f: impl Read + Seek) -> Res<WavParams> {
     let mut buffer = [0; 8];
 
     // Dummy values until we have found the real ones
-    let mut sample_format = SampleFormat::S16LE;
+    let mut sample_format = BinarySampleFormat::S16_LE;
     let mut sample_rate = 0;
     let mut channels = 0;
     let mut data_offset = 0;
@@ -236,7 +236,7 @@ pub fn find_data_in_wav_stream(mut f: impl Read + Seek) -> Res<WavParams> {
 pub fn write_wav_header(
     dest: &mut impl Write,
     channels: usize,
-    sample_format: SampleFormat,
+    sample_format: BinarySampleFormat,
     samplerate: usize,
 ) -> std::io::Result<()> {
     // Header
@@ -246,12 +246,13 @@ pub fn write_wav_header(
     dest.write_all(WAVE)?;
 
     let (formatcode, bits_per_sample, bytes_per_sample) = match sample_format {
-        SampleFormat::S16LE => (1, 16, 2),
-        SampleFormat::S24LE3 => (1, 24, 3),
-        SampleFormat::S24LE => (1, 24, 4),
-        SampleFormat::S32LE => (1, 32, 4),
-        SampleFormat::FLOAT32LE => (3, 32, 4),
-        SampleFormat::FLOAT64LE => (3, 64, 8),
+        BinarySampleFormat::S16_LE => (1, 16, 2),
+        BinarySampleFormat::S24_3_LE => (1, 24, 3),
+        BinarySampleFormat::S24_4_LJ_LE => (1, 24, 4),
+        BinarySampleFormat::S32_LE => (1, 32, 4),
+        BinarySampleFormat::F32_LE => (3, 32, 4),
+        BinarySampleFormat::F64_LE => (3, 64, 8),
+        _ => (0, 0, 0),
     };
 
     // format block
@@ -285,14 +286,14 @@ mod tests {
     use super::find_data_in_wav;
     use super::find_data_in_wav_stream;
     use super::write_wav_header;
-    use crate::config::SampleFormat;
+    use crate::config::BinarySampleFormat;
     use std::io::Cursor;
 
     #[test]
     pub fn test_analyze_wav() {
         let info = find_data_in_wav("testdata/int32.wav").unwrap();
         println!("{info:?}");
-        assert_eq!(info.sample_format, SampleFormat::S32LE);
+        assert_eq!(info.sample_format, BinarySampleFormat::S32_LE);
         assert_eq!(info.data_offset, 44);
         assert_eq!(info.data_length, 20);
         assert_eq!(info.channels, 1);
@@ -303,7 +304,7 @@ mod tests {
     pub fn test_analyze_wavex() {
         let info = find_data_in_wav("testdata/f32_ex.wav").unwrap();
         println!("{info:?}");
-        assert_eq!(info.sample_format, SampleFormat::FLOAT32LE);
+        assert_eq!(info.sample_format, BinarySampleFormat::F32_LE);
         assert_eq!(info.data_offset, 104);
         assert_eq!(info.data_length, 20);
         assert_eq!(info.channels, 1);
@@ -314,9 +315,9 @@ mod tests {
     fn write_and_read_wav() {
         let bytes = vec![0_u8; 1000];
         let mut buffer = Cursor::new(bytes);
-        write_wav_header(&mut buffer, 2, SampleFormat::S32LE, 44100).unwrap();
+        write_wav_header(&mut buffer, 2, BinarySampleFormat::S32_LE, 44100).unwrap();
         let info = find_data_in_wav_stream(buffer).unwrap();
-        assert_eq!(info.sample_format, SampleFormat::S32LE);
+        assert_eq!(info.sample_format, BinarySampleFormat::S32_LE);
         assert_eq!(info.data_offset, 44);
         assert_eq!(info.channels, 2);
         assert_eq!(info.sample_rate, 44100);
