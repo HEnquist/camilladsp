@@ -247,8 +247,10 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                 let buffer_fill_clone = buffer_fill.clone();
                 let mainloop_clone = mainloop.clone();
 
-                // Channel for receiving audio data in the PipeWire thread
-                let (tx_chunk, rx_chunk) = std::sync::mpsc::sync_channel::<AudioChunk>(2);
+                // Channel for receiving raw audio bytes in the PipeWire thread
+                // We convert AudioChunk -> bytes in the receiver thread to avoid
+                // memory allocations in the realtime process callback
+                let (tx_bytes, rx_bytes) = std::sync::mpsc::sync_channel::<Vec<u8>>(2);
 
                 // Set up stream listener
                 let _listener = stream
@@ -280,21 +282,16 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                             None => return,
                         };
                         let max_bytes = out_slice.len();
-                        let max_frames = max_bytes / stride;
 
                         // Fill from internal buffer
                         let mut buf = buffer_clone.borrow_mut();
 
-                        // Try to receive more chunks if buffer is low
-                        while buf.len() < max_frames * stride {
-                            match rx_chunk.try_recv() {
-                                Ok(chunk) => {
-                                    // Convert chunk to raw bytes and add to buffer
-                                    let mut temp_buf = vec![0u8; chunk.frames * stride];
-                                    chunk_to_buffer_rawbytes(chunk, &mut temp_buf, &binary_format);
-                                    for byte in temp_buf {
-                                        buf.push_back(byte);
-                                    }
+                        // Receive pre-converted raw bytes (conversion done in non-RT thread)
+                        loop {
+                            match rx_bytes.try_recv() {
+                                Ok(raw_bytes) => {
+                                    // Just extend - no allocation or conversion here
+                                    buf.extend(raw_bytes);
                                 }
                                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
                                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -305,17 +302,21 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                             }
                         }
 
-                        // Copy to output
-                        let frames_to_write = (buf.len() / stride).min(max_frames);
-                        let bytes_to_write = frames_to_write * stride;
+                        // Determine how much to write
+                        let available_bytes = buf.len();
+                        let bytes_to_write = available_bytes.min(max_bytes);
 
-                        for i in 0..bytes_to_write {
-                            if let Some(byte) = buf.pop_front() {
-                                out_slice[i] = byte;
-                            } else {
-                                out_slice[i] = 0;
-                            }
+                        if available_bytes == 0 {
+                            trace!("PipeWire playback: buffer empty, outputting silence");
                         }
+
+                        // Make buffer contiguous and copy to output
+                        buf.make_contiguous();
+                        let (front, _) = buf.as_slices();
+                        out_slice[..bytes_to_write].copy_from_slice(&front[..bytes_to_write]);
+
+                        // Remove copied bytes from buffer
+                        drop(buf.drain(..bytes_to_write));
 
                         // CRITICAL: Tell PipeWire how much data we wrote
                         // For output streams, we must set chunk offset, size, and stride
@@ -374,6 +375,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                 let status_channel_clone = status_channel.clone();
                 let playback_status_clone = playback_status.clone();
                 let quitter = MainLoopQuitter::new(&mainloop);
+                let stride = channels * store_bytes_per_sample;
                 let receiver_handle = thread::spawn(move || {
                     let mut chunk_stats = ChunkStats {
                         rms: vec![0.0; channels],
@@ -393,18 +395,20 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                                         .signal_peak
                                         .add_record(chunk_stats.peak_linear());
                                 }
-                                // Use try_send - if buffer is full, drop the frame
-                                // This handles the case where playback isn't connected yet
-                                // (PipeWire won't call process callback if nothing is receiving)
-                                match tx_chunk.try_send(chunk) {
+
+                                // Convert to raw bytes HERE (non-RT thread) instead of in the callback
+                                let chunk_bytes = chunk.frames * stride;
+                                let mut raw_buffer = vec![0u8; chunk_bytes];
+                                chunk_to_buffer_rawbytes(chunk, &mut raw_buffer, &binary_format);
+
+                                // Send raw bytes - if buffer is full, drop the frame
+                                match tx_bytes.try_send(raw_buffer) {
                                     Ok(()) => {}
                                     Err(mpsc::TrySendError::Full(_)) => {
-                                        // Buffer full - playback not connected or not consuming
-                                        // Just drop the frame and continue
-                                        trace!("Playback buffer full, dropping frame (playback may not be connected)");
+                                        trace!("Playback buffer full, dropping frame");
                                     }
                                     Err(mpsc::TrySendError::Disconnected(_)) => {
-                                        debug!("Playback tx_chunk disconnected, exiting");
+                                        debug!("Playback tx_bytes disconnected, exiting");
                                         break;
                                     }
                                 }
