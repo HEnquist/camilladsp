@@ -220,6 +220,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                     *pw::keys::NODE_NAME => node_name.as_str(),
                     *pw::keys::NODE_DESCRIPTION => "CamillaDSP Playback",
                     *pw::keys::NODE_LATENCY => latency_str.as_str(),
+                    *pw::keys::NODE_GROUP => "camilladsp",
                 };
 
                 let stream = match Stream::new(&core, "CamillaDSP-Playback", props) {
@@ -512,6 +513,7 @@ impl CaptureDevice for PipewireCaptureDevice {
                     *pw::keys::NODE_NAME => node_name.as_str(),
                     *pw::keys::NODE_DESCRIPTION => "CamillaDSP Capture",
                     *pw::keys::NODE_LATENCY => latency_str.as_str(),
+                    *pw::keys::NODE_GROUP => "camilladsp",
                 };
 
                 let stream = match Stream::new(&core, "CamillaDSP-Capture", props) {
