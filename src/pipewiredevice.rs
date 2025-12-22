@@ -22,11 +22,10 @@ use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use ringbuf::{traits::*, HeapRb};
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
@@ -237,22 +236,18 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                 };
 
                 // Shared state for callbacks
-                let running = Rc::new(RefCell::new(true));
-                let running_clone = running.clone();
-                let buffer: Rc<RefCell<VecDeque<u8>>> = Rc::new(RefCell::new(
-                    VecDeque::with_capacity(4 * chunksize * channels * store_bytes_per_sample),
-                ));
-                let buffer_clone = buffer.clone();
                 let buffer_fill = Arc::new(AtomicUsize::new(0));
                 let buffer_fill_clone = buffer_fill.clone();
-                let mainloop_clone = mainloop.clone();
 
-                // Channel for receiving raw audio bytes in the PipeWire thread
-                // We convert AudioChunk -> bytes in the receiver thread to avoid
-                // memory allocations in the realtime process callback
-                let (tx_bytes, rx_bytes) = std::sync::mpsc::sync_channel::<Vec<u8>>(2);
+                // Ring buffer for lock-free, allocation-free audio data transfer
+                // The producer (receiver thread) pushes raw bytes, consumer (callback) pops them
+                let ring_size = 4 * chunksize * channels * store_bytes_per_sample;
+                let ringbuffer = HeapRb::<u8>::new(ring_size);
+                let (mut rb_producer, rb_consumer) = ringbuffer.split();
+                let rb_consumer = Rc::new(RefCell::new(rb_consumer));
 
                 // Set up stream listener
+                let rb_consumer_clone = rb_consumer.clone();
                 let _listener = stream
                     .add_local_listener_with_user_data(())
                     .state_changed(move |_, _, old, new| {
@@ -283,40 +278,17 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                         };
                         let max_bytes = out_slice.len();
 
-                        // Fill from internal buffer
-                        let mut buf = buffer_clone.borrow_mut();
-
-                        // Receive pre-converted raw bytes (conversion done in non-RT thread)
-                        loop {
-                            match rx_bytes.try_recv() {
-                                Ok(raw_bytes) => {
-                                    // Just extend - no allocation or conversion here
-                                    buf.extend(raw_bytes);
-                                }
-                                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                                    *running_clone.borrow_mut() = false;
-                                    mainloop_clone.quit();
-                                    return;
-                                }
-                            }
-                        }
-
-                        // Determine how much to write
-                        let available_bytes = buf.len();
+                        // Pop bytes from ring buffer directly into output - no allocations!
+                        let mut consumer = rb_consumer_clone.borrow_mut();
+                        let available_bytes = consumer.occupied_len();
                         let bytes_to_write = available_bytes.min(max_bytes);
 
                         if available_bytes == 0 {
                             trace!("PipeWire playback: buffer empty, outputting silence");
                         }
 
-                        // Make buffer contiguous and copy to output
-                        buf.make_contiguous();
-                        let (front, _) = buf.as_slices();
-                        out_slice[..bytes_to_write].copy_from_slice(&front[..bytes_to_write]);
-
-                        // Remove copied bytes from buffer
-                        drop(buf.drain(..bytes_to_write));
+                        // Pop directly into output slice
+                        consumer.pop_slice(&mut out_slice[..bytes_to_write]);
 
                         // CRITICAL: Tell PipeWire how much data we wrote
                         // For output streams, we must set chunk offset, size, and stride
@@ -325,15 +297,13 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                         *chunk.size_mut() = bytes_to_write as u32;
                         *chunk.stride_mut() = stride as i32;
 
-                        buffer_fill_clone.store(buf.len() / stride, Ordering::Relaxed);
+                        buffer_fill_clone
+                            .store(consumer.occupied_len() / stride, Ordering::Relaxed);
                     })
                     .register();
 
                 // Build format params with channel count and sample rate (F32LE format)
-                let params_buffer = build_audio_params(
-                    samplerate as u32,
-                    channels as u32,
-                );
+                let params_buffer = build_audio_params(samplerate as u32, channels as u32);
 
                 // Convert the buffer to a Pod reference
                 let pod = pw::spa::pod::Pod::from_bytes(&params_buffer)
@@ -344,7 +314,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
 
                 match stream.connect(
                     Direction::Output,
-                    None,  // No target - WirePlumber handles routing
+                    None, // No target - WirePlumber handles routing
                     flags,
                     &mut [pod],
                 ) {
@@ -380,6 +350,8 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                         rms: vec![0.0; channels],
                         peak: vec![0.0; channels],
                     };
+                    // Pre-allocate conversion buffer to avoid repeated allocations
+                    let mut raw_buffer = vec![0u8; chunksize * stride];
 
                     loop {
                         match channel.recv() {
@@ -395,33 +367,40 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                                         .add_record(chunk_stats.peak_linear());
                                 }
 
-                                // Convert to raw bytes HERE (non-RT thread) instead of in the callback
+                                // Convert to raw bytes using pre-allocated buffer
                                 let chunk_bytes = chunk.frames * stride;
-                                let mut raw_buffer = vec![0u8; chunk_bytes];
-                                chunk_to_buffer_rawbytes(chunk, &mut raw_buffer, &binary_format);
+                                if raw_buffer.len() < chunk_bytes {
+                                    raw_buffer.resize(chunk_bytes, 0);
+                                }
+                                chunk_to_buffer_rawbytes(
+                                    chunk,
+                                    &mut raw_buffer[..chunk_bytes],
+                                    &binary_format,
+                                );
 
-                                // Send raw bytes - if buffer is full, drop the frame
-                                match tx_bytes.try_send(raw_buffer) {
-                                    Ok(()) => {}
-                                    Err(mpsc::TrySendError::Full(_)) => {
-                                        trace!("Playback buffer full, dropping frame");
-                                    }
-                                    Err(mpsc::TrySendError::Disconnected(_)) => {
-                                        debug!("Playback tx_bytes disconnected, exiting");
-                                        break;
-                                    }
+                                // Push to ring buffer - if full, data is dropped
+                                let pushed = rb_producer.push_slice(&raw_buffer[..chunk_bytes]);
+                                if pushed < chunk_bytes {
+                                    trace!(
+                                        "Playback ring buffer full, dropped {} bytes",
+                                        chunk_bytes - pushed
+                                    );
                                 }
                             }
                             Ok(AudioMessage::Pause) => {
                                 trace!("Pause message received");
                             }
                             Ok(AudioMessage::EndOfStream) => {
-                                status_channel_clone.send(StatusMessage::PlaybackDone).unwrap();
+                                status_channel_clone
+                                    .send(StatusMessage::PlaybackDone)
+                                    .unwrap();
                                 break;
                             }
                             Err(err) => {
                                 error!("Message channel error: {}", err);
-                                status_channel_clone.send(StatusMessage::PlaybackDone).unwrap();
+                                status_channel_clone
+                                    .send(StatusMessage::PlaybackDone)
+                                    .unwrap();
                                 break;
                             }
                         }
@@ -548,13 +527,18 @@ impl CaptureDevice for PipewireCaptureDevice {
                     }
                 };
 
-                // Channel to send captured audio to main processing
-                let (tx_raw, rx_raw) = std::sync::mpsc::sync_channel::<Vec<u8>>(4);
+                // Ring buffer for lock-free, allocation-free capture data transfer
+                let ring_size = 4 * chunksize * channels * store_bytes_per_sample;
+                let ringbuffer = HeapRb::<u8>::new(ring_size);
+                let (rb_producer, mut rb_consumer) = ringbuffer.split();
+                let rb_producer = Rc::new(RefCell::new(rb_producer));
+
                 let exit_flag = Arc::new(AtomicBool::new(false));
                 let exit_flag_clone = exit_flag.clone();
                 let mainloop_clone = mainloop.clone();
 
                 // Set up stream listener for capture
+                let rb_producer_clone = rb_producer.clone();
                 let _listener = stream
                     .add_local_listener_with_user_data(())
                     .state_changed(move |_, _, old, new| {
@@ -595,10 +579,11 @@ impl CaptureDevice for PipewireCaptureDevice {
                             None => return,
                         };
 
-                        // Send raw bytes to processing thread
-                        let raw_data = in_slice.to_vec();
-                        if tx_raw.try_send(raw_data).is_err() {
-                            trace!("Capture buffer full, dropping frame");
+                        // Push directly to ring buffer - no allocation!
+                        let mut producer = rb_producer_clone.borrow_mut();
+                        let pushed = producer.push_slice(in_slice);
+                        if pushed < size {
+                            trace!("Capture ring buffer full, dropped {} bytes", size - pushed);
                         }
                     })
                     .register();
@@ -707,19 +692,20 @@ impl CaptureDevice for PipewireCaptureDevice {
                             }
                         };
 
-                        // Receive raw audio data from PipeWire callback
-                        let raw_data = match rx_raw.recv_timeout(std::time::Duration::from_millis(100)) {
-                            Ok(data) => data,
-                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                                debug!("Capture channel disconnected");
-                                break;
-                            }
-                        };
+                        // Read from ring buffer into accumulated buffer
+                        let available = rb_consumer.occupied_len();
+                        if available == 0 {
+                            // No data available, sleep briefly and retry
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                            continue;
+                        }
 
-                        // Accumulate data
-                        accumulated_buf.extend_from_slice(&raw_data);
-                        averager.add_value(raw_data.len());
+                        // Pop available data into accumulated buffer
+                        let start_len = accumulated_buf.len();
+                        accumulated_buf.resize(start_len + available, 0);
+                        let popped = rb_consumer.pop_slice(&mut accumulated_buf[start_len..]);
+                        accumulated_buf.truncate(start_len + popped);
+                        averager.add_value(popped);
 
                         // Calculate needed bytes for resampler or direct output
                         let capture_bytes = nbr_capture_bytes(
