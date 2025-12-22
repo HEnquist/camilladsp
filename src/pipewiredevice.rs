@@ -340,8 +340,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                     .expect("Failed to create Pod from params buffer");
 
                 // Connect stream - NO AUTOCONNECT, let WirePlumber handle routing
-                // DRIVER flag ensures process callback is called regularly even when not connected
-                let flags = StreamFlags::RT_PROCESS | StreamFlags::MAP_BUFFERS | StreamFlags::DRIVER;
+                let flags = StreamFlags::RT_PROCESS | StreamFlags::MAP_BUFFERS;
 
                 match stream.connect(
                     Direction::Output,
@@ -615,8 +614,7 @@ impl CaptureDevice for PipewireCaptureDevice {
                     .expect("Failed to create Pod from params buffer");
 
                 // Connect stream - NO AUTOCONNECT, let WirePlumber handle routing
-                // DRIVER flag ensures process callback is called regularly even when not connected
-                let flags = StreamFlags::RT_PROCESS | StreamFlags::MAP_BUFFERS | StreamFlags::DRIVER;
+                let flags = StreamFlags::RT_PROCESS | StreamFlags::MAP_BUFFERS;
 
                 match stream.connect(
                     Direction::Input,
