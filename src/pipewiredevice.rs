@@ -346,6 +346,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                 let playback_status_clone = playback_status.clone();
                 let quitter = MainLoopQuitter::new(&mainloop);
                 let stride = channels * store_bytes_per_sample;
+                let buffer_fill_receiver = buffer_fill.clone();
                 let receiver_handle = thread::spawn(move || {
                     let mut chunk_stats = ChunkStats {
                         rms: vec![0.0; channels],
@@ -353,6 +354,9 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                     };
                     // Pre-allocate conversion buffer to avoid repeated allocations
                     let mut raw_buffer = vec![0u8; chunksize * stride];
+                    // Buffer level tracking
+                    let mut buffer_avg = countertimer::Averager::new();
+                    let mut buffer_level_timer = countertimer::Stopwatch::new();
 
                     loop {
                         match channel.recv() {
@@ -386,6 +390,22 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                                         "Playback ring buffer full, dropped {} bytes",
                                         chunk_bytes - pushed
                                     );
+                                }
+
+                                // Track buffer level
+                                let current_level =
+                                    buffer_fill_receiver.load(Ordering::Relaxed) as f64;
+                                buffer_avg.add_value(current_level);
+
+                                // Log buffer level periodically (every ~3 seconds)
+                                if buffer_level_timer.larger_than_millis(3000) {
+                                    if let Some(avg_level) = buffer_avg.average() {
+                                        debug!("Playback buffer level: {:.1} frames", avg_level);
+                                        playback_status_clone.write().buffer_level =
+                                            avg_level as usize;
+                                    }
+                                    buffer_avg.restart();
+                                    buffer_level_timer.restart();
                                 }
                             }
                             Ok(AudioMessage::Pause) => {
