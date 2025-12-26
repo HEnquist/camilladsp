@@ -787,10 +787,16 @@ impl CaptureDevice for PipewireCaptureDevice {
                             store_bytes_per_sample,
                         );
 
+                        let mut tries = 0;
                         // Wait until ring buffer has enough data for a complete chunk
-                        while rb_consumer.occupied_len() < capture_bytes {
+                        // Abort wait after 50 noticifications if there still is not enough data.
+                        while rb_consumer.occupied_len() < capture_bytes && tries < 50 {
                             // Wait for notification from callback (with timeout)
                             let _ = notify_rx.recv_timeout(std::time::Duration::from_millis(20));
+                            tries += 1;
+                        }
+                        if rb_consumer.occupied_len() < capture_bytes {
+                            continue;
                         }
 
                         // Pop exactly the needed bytes into pre-allocated buffer
@@ -817,8 +823,7 @@ impl CaptureDevice for PipewireCaptureDevice {
                         value_range = chunk.maxval - chunk.minval;
 
                         // Update capture status
-                        {
-                            let capture_status = capture_status_clone.upgradable_read();
+                        if let Some(capture_status) = capture_status_clone.try_upgradable_read() {
                             if averager.larger_than_millis(capture_status.update_interval as u64) {
                                 let bytes_per_sec = averager.average();
                                 averager.restart();
@@ -828,17 +833,26 @@ impl CaptureDevice for PipewireCaptureDevice {
                                     measured_rate_f,
                                     capture_status.signal_rms.last_sqrt(),
                                 );
-                                let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status);
-                                capture_status.measured_samplerate = measured_rate_f as usize;
-                                capture_status.signal_range = value_range as f32;
-                                capture_status.rate_adjust = rate_adjust as f32;
-                                capture_status.state = state;
+                                if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
+                                    capture_status.measured_samplerate = measured_rate_f as usize;
+                                    capture_status.signal_range = value_range as f32;
+                                    capture_status.rate_adjust = rate_adjust as f32;
+                                    capture_status.state = state;
+                                }
+                                else {
+                                    xtrace!("Capture status upgrade blocked, skip update.");
+                                }
                             }
                         }
-                        {
-                            let mut capture_status = capture_status_clone.write();
+                        else {
+                            xtrace!("Capture status blocked, skip update.");
+                        }
+                        if let Some(mut capture_status) = capture_status_clone.try_write() {
                             capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                             capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                        }
+                        else {
+                            xtrace!("Capture status blocked, skip rms update.");
                         }
 
                         state = silence_counter.update(value_range);
