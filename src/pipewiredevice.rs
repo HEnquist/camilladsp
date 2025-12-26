@@ -232,9 +232,9 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                     *pw::keys::MEDIA_CATEGORY => "Playback",
                     *pw::keys::MEDIA_ROLE => "DSP",
                     *pw::keys::APP_NAME => "CamillaDSP",
-                    *pw::keys::NODE_NAME => node_name.as_str(),
+                    *pw::keys::NODE_NAME => node_name,
                     *pw::keys::NODE_DESCRIPTION => "CamillaDSP Playback",
-                    *pw::keys::NODE_LATENCY => latency_str.as_str(),
+                    *pw::keys::NODE_LATENCY => latency_str,
                     *pw::keys::NODE_GROUP => "camilladsp",
                 };
 
@@ -574,9 +574,9 @@ impl CaptureDevice for PipewireCaptureDevice {
                     *pw::keys::MEDIA_CATEGORY => "Capture",
                     *pw::keys::MEDIA_ROLE => "DSP",
                     *pw::keys::APP_NAME => "CamillaDSP",
-                    *pw::keys::NODE_NAME => node_name.as_str(),
+                    *pw::keys::NODE_NAME => node_name,
                     *pw::keys::NODE_DESCRIPTION => "CamillaDSP Capture",
-                    *pw::keys::NODE_LATENCY => latency_str.as_str(),
+                    *pw::keys::NODE_LATENCY => latency_str,
                     *pw::keys::NODE_GROUP => "camilladsp",
                 };
 
@@ -716,8 +716,7 @@ impl CaptureDevice for PipewireCaptureDevice {
                         capture_samplerate,
                         chunksize,
                     );
-                    #[allow(unused_assignments)]
-                    let mut value_range = 0.0;
+                    let mut value_range;
                     let mut rate_adjust = 0.0;
                     let mut state = ProcessingState::Running;
                     let mut chunk_stats = ChunkStats {
@@ -758,6 +757,8 @@ impl CaptureDevice for PipewireCaptureDevice {
                             }
                         };
 
+                        // TODO replace this leep with a channel for notifying when there is new data
+                        // as in the CoreAudio backend.
                         // Read from ring buffer into accumulated buffer
                         let available = rb_consumer.occupied_len();
                         if available == 0 {
@@ -766,6 +767,7 @@ impl CaptureDevice for PipewireCaptureDevice {
                             continue;
                         }
 
+                        // TODO sync with CoreAudio backend, only copy the amount of data for the next chunk.
                         // Pop available data into accumulated buffer
                         let start_len = accumulated_buf.len();
                         accumulated_buf.resize(start_len + available, 0);
@@ -799,6 +801,7 @@ impl CaptureDevice for PipewireCaptureDevice {
                                 false,
                             );
 
+                            // TODO remove this (see above)
                             // Remove processed bytes
                             accumulated_buf.drain(0..capture_bytes);
 
