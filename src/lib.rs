@@ -206,7 +206,7 @@ pub fn container_from_stash(capacity: usize) -> Vec<Vec<PrcFmt>> {
         stash.pop()
     };
     if let Some(mut vector) = vec_option {
-        if capacity < vector.capacity() {
+        if capacity > vector.capacity() {
             debug!("The stashed container vector has insufficient capacity, allocating more space");
             vector.reserve_exact(capacity);
         }
