@@ -35,17 +35,6 @@ use std::path::{Path, PathBuf};
 use crate::PrcFmt;
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
-// Default node names for PipeWire backend
-#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-fn default_pipewire_capture_node() -> String {
-    "camilladsp-capture".to_string()
-}
-
-#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-fn default_pipewire_playback_node() -> String {
-    "camilladsp-playback".to_string()
-}
-
 #[derive(Clone)]
 pub struct Overrides {
     pub samplerate: Option<usize>,
@@ -371,8 +360,8 @@ pub enum CaptureDevice {
     Pipewire {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
-        #[serde(default = "default_pipewire_capture_node")]
-        node_name: String,
+        #[serde(default)]
+        node_name: Option<String>,
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
     },
@@ -661,8 +650,8 @@ pub enum PlaybackDevice {
     Pipewire {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
-        #[serde(default = "default_pipewire_playback_node")]
-        node_name: String,
+        #[serde(default)]
+        node_name: Option<String>,
     },
     #[serde(alias = "FILE", alias = "file")]
     File {

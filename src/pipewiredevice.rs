@@ -90,15 +90,18 @@ impl PipewireError {
 
 /// PipeWire playback device
 pub struct PipewirePlaybackDevice {
-    pub node_name: String,
+    pub node_name: Option<String>,
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
+    pub target_level: usize,
+    pub adjust_period: f32,
+    pub enable_rate_adjust: bool,
 }
 
 /// PipeWire capture device
 pub struct PipewireCaptureDevice {
-    pub node_name: String,
+    pub node_name: Option<String>,
     pub samplerate: usize,
     pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
@@ -158,12 +161,23 @@ impl PlaybackDevice for PipewirePlaybackDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
-        let node_name = self.node_name.clone();
+        let node_name = self
+            .node_name
+            .clone()
+            .unwrap_or("camilladsp-playback".to_string());
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
         let binary_format = BinarySampleFormat::F32_LE;
         let store_bytes_per_sample = binary_format.bytes_per_sample();
+
+        let target_level = if self.target_level > 0 {
+            self.target_level
+        } else {
+            self.chunksize
+        };
+        let adjust_period = self.adjust_period;
+        let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
 
         let handle = thread::Builder::new()
             .name("PipewirePlayback".to_string())
@@ -304,7 +318,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
 
                         // Update buffer level estimator
                         if let Ok(mut estimator) = buffer_fill_clone.try_lock() {
-                            estimator.add(consumer.occupied_len() / stride);
+                            estimator.add(available_bytes / stride);
                         }
                     })
                     .register();
@@ -352,10 +366,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                 let playback_status_clone = playback_status.clone();
                 let quitter = MainLoopQuitter::new(&mainloop);
                 let stride = channels * store_bytes_per_sample;
-                let buffer_fill_receiver = buffer_fill.clone();
                 // Buffer level monitoring parameters (similar to other backends)
-                let adjust_period = 3.0; // seconds
-                let target_level = 2 * chunksize; // frames
                 let receiver_handle = thread::spawn(move || {
                     let mut chunk_stats = ChunkStats {
                         rms: vec![0.0; channels],
@@ -368,18 +379,56 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                     let mut buffer_level_timer = countertimer::Stopwatch::new();
                     let mut rate_controller = PIRateController::new_with_default_gains(
                         samplerate,
-                        adjust_period,
+                        adjust_period as f64,
                         target_level,
                     );
-                    #[allow(unused_variables)]
-                    let rate_adjust_value = 1.0;
+                    let mut rate_adjust_value = 1.0;
+                    let mut conversion_result;
 
                     loop {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
+                                let estimated_buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
+                                buffer_avg.add_value(estimated_buffer_fill + (channel.len() * chunksize) as f64);
+                                if adjust && buffer_level_timer.larger_than_millis((1000.0 * adjust_period) as u64) {
+                                    if let Some(av_delay) = buffer_avg.average() {
+                                        let speed = rate_controller.next(av_delay);
+                                        let changed = (speed - rate_adjust_value).abs() > 0.000_001;
+
+                                        buffer_level_timer.restart();
+                                        buffer_avg.restart();
+                                        if changed {
+                                            debug!(
+                                                "Current buffer level {:.1}, set capture rate to {:.4}%.",
+                                                av_delay,
+                                                100.0 * speed
+                                            );
+                                            status_channel
+                                                .send(StatusMessage::SetSpeed(speed))
+                                                .unwrap_or(());
+                                            rate_adjust_value = speed;
+                                        }
+                                        else {
+                                            debug!(
+                                                "Current buffer level {:.1}, leaving capture rate at {:.4}%.",
+                                                av_delay,
+                                                100.0 * rate_adjust_value
+                                            );
+                                        }
+                                        playback_status.write().buffer_level = av_delay as usize;
+                                    }
+                                }
                                 chunk.update_stats(&mut chunk_stats);
-                                {
-                                    let mut playback_status = playback_status_clone.write();
+
+                                conversion_result = chunk_to_buffer_rawbytes(
+                                    chunk,
+                                    &mut raw_buffer,
+                                    &binary_format,
+                                );
+                                if let Some(mut playback_status) = playback_status_clone.try_write() {
+                                    if conversion_result.1 > 0 {
+                                        playback_status.clipped_samples += conversion_result.1;
+                                    }
                                     playback_status
                                         .signal_rms
                                         .add_record_squared(chunk_stats.rms_linear());
@@ -387,49 +436,17 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                                         .signal_peak
                                         .add_record(chunk_stats.peak_linear());
                                 }
-
-                                // Convert to raw bytes using pre-allocated buffer
-                                let chunk_bytes = chunk.frames * stride;
-                                if raw_buffer.len() < chunk_bytes {
-                                    raw_buffer.resize(chunk_bytes, 0);
+                                else {
+                                    xtrace!("Playback status blocked, skipping rms update.");
                                 }
-                                chunk_to_buffer_rawbytes(
-                                    chunk,
-                                    &mut raw_buffer[..chunk_bytes],
-                                    &binary_format,
-                                );
 
                                 // Push to ring buffer - if full, data is dropped
-                                let pushed = rb_producer.push_slice(&raw_buffer[..chunk_bytes]);
-                                if pushed < chunk_bytes {
-                                    trace!(
+                                let pushed = rb_producer.push_slice(&raw_buffer[..conversion_result.0]);
+                                if pushed < conversion_result.0 {
+                                    warn!(
                                         "Playback ring buffer full, dropped {} bytes",
-                                        chunk_bytes - pushed
+                                        conversion_result.0 - pushed
                                     );
-                                }
-
-                                // Track buffer level using time-based estimation
-                                let estimated_level = buffer_fill_receiver
-                                    .try_lock()
-                                    .map(|b| b.estimate() as f64)
-                                    .unwrap_or_default();
-                                // Include pending chunks in channel
-                                let total_level =
-                                    estimated_level + (channel.len() * chunksize) as f64;
-                                buffer_avg.add_value(total_level);
-
-                                // Log buffer level periodically (based on adjust_period)
-                                if buffer_level_timer
-                                    .larger_than_millis((1000.0 * adjust_period) as u64)
-                                {
-                                    if let Some(avg_level) = buffer_avg.average() {
-                                        let _speed = rate_controller.next(avg_level);
-                                        debug!("Playback buffer level: {:.1} frames", avg_level);
-                                        playback_status_clone.write().buffer_level =
-                                            avg_level as usize;
-                                    }
-                                    buffer_avg.restart();
-                                    buffer_level_timer.restart();
                                 }
                             }
                             Ok(AudioMessage::Pause) => {
@@ -489,7 +506,10 @@ impl CaptureDevice for PipewireCaptureDevice {
         capture_status: Arc<RwLock<CaptureStatus>>,
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
-        let node_name = self.node_name.clone();
+        let node_name = self
+            .node_name
+            .clone()
+            .unwrap_or("camilladsp-capture".to_string());
         let samplerate = self.samplerate;
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
