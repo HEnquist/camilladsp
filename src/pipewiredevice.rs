@@ -607,12 +607,16 @@ impl CaptureDevice for PipewireCaptureDevice {
                 let (rb_producer, mut rb_consumer) = ringbuffer.split();
                 let rb_producer = Rc::new(RefCell::new(rb_producer));
 
+                // Notification channel to wake up processing thread when data is available
+                let (notify_tx, notify_rx) = crossbeam_channel::bounded::<()>(1);
+
                 let exit_flag = Arc::new(AtomicBool::new(false));
                 let exit_flag_clone = exit_flag.clone();
                 let mainloop_clone = mainloop.clone();
 
                 // Set up stream listener for capture
                 let rb_producer_clone = rb_producer.clone();
+                let notify_tx_clone = notify_tx.clone();
                 let _listener = stream
                     .add_local_listener_with_user_data(())
                     .state_changed(move |_, _, old, new| {
@@ -659,6 +663,9 @@ impl CaptureDevice for PipewireCaptureDevice {
                         if pushed < size {
                             trace!("Capture ring buffer full, dropped {} bytes", size - pushed);
                         }
+
+                        // Notify processing thread that data is available
+                        let _ = notify_tx_clone.try_send(());
                     })
                     .register();
 
@@ -733,7 +740,14 @@ impl CaptureDevice for PipewireCaptureDevice {
                     };
                     let mut channel_mask = vec![true; channels];
                     let chunksize_bytes = channels * chunksize * store_bytes_per_sample;
-                    let mut accumulated_buf: Vec<u8> = Vec::with_capacity(chunksize_bytes * 2);
+                    // Pre-allocated buffer for capture data (sized for max resampler input)
+                    let max_capture_bytes = if resampler.is_some() {
+                        // Resampler might need more input frames
+                        4 * chunksize_bytes
+                    } else {
+                        chunksize_bytes
+                    };
+                    let mut data_buffer = vec![0u8; max_capture_bytes];
 
                     loop {
                         // Check for commands
@@ -765,24 +779,6 @@ impl CaptureDevice for PipewireCaptureDevice {
                             }
                         };
 
-                        // TODO replace this leep with a channel for notifying when there is new data
-                        // as in the CoreAudio backend.
-                        // Read from ring buffer into accumulated buffer
-                        let available = rb_consumer.occupied_len();
-                        if available == 0 {
-                            // No data available, sleep briefly and retry
-                            std::thread::sleep(std::time::Duration::from_millis(1));
-                            continue;
-                        }
-
-                        // TODO sync with CoreAudio backend, only copy the amount of data for the next chunk.
-                        // Pop available data into accumulated buffer
-                        let start_len = accumulated_buf.len();
-                        accumulated_buf.resize(start_len + available, 0);
-                        let popped = rb_consumer.pop_slice(&mut accumulated_buf[start_len..]);
-                        accumulated_buf.truncate(start_len + popped);
-                        averager.add_value(popped);
-
                         // Calculate needed bytes for resampler or direct output
                         let capture_bytes = nbr_capture_bytes(
                             &resampler,
@@ -791,82 +787,85 @@ impl CaptureDevice for PipewireCaptureDevice {
                             store_bytes_per_sample,
                         );
 
-                        // Process complete chunks
-                        while accumulated_buf.len() >= capture_bytes {
-                            // Update channel mask from capture status
-                            {
-                                let status = capture_status_clone.read();
-                                channel_mask.copy_from_slice(&status.used_channels);
+                        // Wait until ring buffer has enough data for a complete chunk
+                        while rb_consumer.occupied_len() < capture_bytes {
+                            // Wait for notification from callback (with timeout)
+                            let _ = notify_rx.recv_timeout(std::time::Duration::from_millis(20));
+                        }
+
+                        // Pop exactly the needed bytes into pre-allocated buffer
+                        rb_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
+                        averager.add_value(capture_bytes);
+
+                        // Update channel mask from capture status
+                        {
+                            let status = capture_status_clone.read();
+                            channel_mask.copy_from_slice(&status.used_channels);
+                        }
+
+                        // Convert to audio chunk
+                        let mut chunk = buffer_to_chunk_rawbytes(
+                            &data_buffer[0..capture_bytes],
+                            channels,
+                            &binary_format,
+                            capture_bytes,
+                            &channel_mask,
+                            false,
+                        );
+
+                        chunk.update_stats(&mut chunk_stats);
+                        value_range = chunk.maxval - chunk.minval;
+
+                        // Update capture status
+                        {
+                            let capture_status = capture_status_clone.upgradable_read();
+                            if averager.larger_than_millis(capture_status.update_interval as u64) {
+                                let bytes_per_sec = averager.average();
+                                averager.restart();
+                                let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
+                                trace!(
+                                    "Measured sample rate is {:.1} Hz, signal RMS is {:?}",
+                                    measured_rate_f,
+                                    capture_status.signal_rms.last_sqrt(),
+                                );
+                                let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status);
+                                capture_status.measured_samplerate = measured_rate_f as usize;
+                                capture_status.signal_range = value_range as f32;
+                                capture_status.rate_adjust = rate_adjust as f32;
+                                capture_status.state = state;
                             }
+                        }
+                        {
+                            let mut capture_status = capture_status_clone.write();
+                            capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
+                            capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                        }
 
-                            // Convert to audio chunk
-                            let mut chunk = buffer_to_chunk_rawbytes(
-                                &accumulated_buf[0..capture_bytes],
-                                channels,
-                                &binary_format,
-                                capture_bytes,
-                                &channel_mask,
-                                false,
-                            );
+                        state = silence_counter.update(value_range);
 
-                            // TODO remove this (see above)
-                            // Remove processed bytes
-                            accumulated_buf.drain(0..capture_bytes);
-
-                            chunk.update_stats(&mut chunk_stats);
-                            value_range = chunk.maxval - chunk.minval;
-
-                            // Update capture status
-                            {
-                                let capture_status = capture_status_clone.upgradable_read();
-                                if averager.larger_than_millis(capture_status.update_interval as u64) {
-                                    let bytes_per_sec = averager.average();
-                                    averager.restart();
-                                    let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
-                                    trace!(
-                                        "Measured sample rate is {:.1} Hz, signal RMS is {:?}",
-                                        measured_rate_f,
-                                        capture_status.signal_rms.last_sqrt(),
-                                    );
-                                    let mut capture_status = RwLockUpgradableReadGuard::upgrade(capture_status);
-                                    capture_status.measured_samplerate = measured_rate_f as usize;
-                                    capture_status.signal_range = value_range as f32;
-                                    capture_status.rate_adjust = rate_adjust as f32;
-                                    capture_status.state = state;
-                                }
+                        if state == ProcessingState::Running {
+                            if let Some(resampl) = &mut resampler {
+                                resampl.resample_chunk(&mut chunk, chunksize, channels);
                             }
-                            {
-                                let mut capture_status = capture_status_clone.write();
-                                capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
-                                capture_status.signal_peak.add_record(chunk_stats.peak_linear());
-                            }
-
-                            state = silence_counter.update(value_range);
-
-                            if state == ProcessingState::Running {
-                                if let Some(resampl) = &mut resampler {
-                                    resampl.resample_chunk(&mut chunk, chunksize, channels);
+                            let msg = AudioMessage::Audio(chunk);
+                            // Use try_send to avoid blocking if pipeline is full
+                            match channel.try_send(msg) {
+                                Ok(()) => {}
+                                Err(crossbeam_channel::TrySendError::Full(_)) => {
+                                    trace!("Capture: processing pipeline full, dropping frame");
                                 }
-                                let msg = AudioMessage::Audio(chunk);
-                                // Use try_send to avoid blocking if pipeline is full
-                                match channel.try_send(msg) {
-                                    Ok(()) => {}
-                                    Err(crossbeam_channel::TrySendError::Full(_)) => {
-                                        trace!("Capture: processing pipeline full, dropping frame");
-                                    }
-                                    Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                                        info!("Processing thread has already stopped.");
-                                        exit_flag.store(true, Ordering::Relaxed);
-                                        break;
-                                    }
-                                }
-                            } else if state == ProcessingState::Paused {
-                                let msg = AudioMessage::Pause;
-                                if channel.send(msg).is_err() {
+                                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
                                     info!("Processing thread has already stopped.");
                                     exit_flag.store(true, Ordering::Relaxed);
                                     break;
                                 }
+                            }
+                        } else if state == ProcessingState::Paused {
+                            let msg = AudioMessage::Pause;
+                            if channel.send(msg).is_err() {
+                                info!("Processing thread has already stopped.");
+                                exit_flag.store(true, Ordering::Relaxed);
+                                break;
                             }
                         }
                     }
