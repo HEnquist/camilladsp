@@ -20,13 +20,14 @@ use crate::config;
 use crate::config::BinarySampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
+use crate::helpers::PIRateController;
 use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{traits::*, HeapRb};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 
 use crate::CommandMessage;
@@ -237,7 +238,10 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                 };
 
                 // Shared state for callbacks
-                let buffer_fill = Arc::new(AtomicUsize::new(0));
+                // Use DeviceBufferEstimator to track buffer level with time-based interpolation
+                let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(
+                    samplerate,
+                )));
                 let buffer_fill_clone = buffer_fill.clone();
 
                 // Ring buffer for lock-free, allocation-free audio data transfer
@@ -298,8 +302,10 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                         *chunk.size_mut() = bytes_to_write as u32;
                         *chunk.stride_mut() = stride as i32;
 
-                        buffer_fill_clone
-                            .store(consumer.occupied_len() / stride, Ordering::Relaxed);
+                        // Update buffer level estimator
+                        if let Ok(mut estimator) = buffer_fill_clone.try_lock() {
+                            estimator.add(consumer.occupied_len() / stride);
+                        }
                     })
                     .register();
 
@@ -347,6 +353,9 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                 let quitter = MainLoopQuitter::new(&mainloop);
                 let stride = channels * store_bytes_per_sample;
                 let buffer_fill_receiver = buffer_fill.clone();
+                // Buffer level monitoring parameters (similar to other backends)
+                let adjust_period = 3.0; // seconds
+                let target_level = 2 * chunksize; // frames
                 let receiver_handle = thread::spawn(move || {
                     let mut chunk_stats = ChunkStats {
                         rms: vec![0.0; channels],
@@ -354,9 +363,16 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                     };
                     // Pre-allocate conversion buffer to avoid repeated allocations
                     let mut raw_buffer = vec![0u8; chunksize * stride];
-                    // Buffer level tracking
+                    // Buffer level tracking with time-based estimation
                     let mut buffer_avg = countertimer::Averager::new();
                     let mut buffer_level_timer = countertimer::Stopwatch::new();
+                    let mut rate_controller = PIRateController::new_with_default_gains(
+                        samplerate,
+                        adjust_period,
+                        target_level,
+                    );
+                    #[allow(unused_variables)]
+                    let rate_adjust_value = 1.0;
 
                     loop {
                         match channel.recv() {
@@ -392,14 +408,22 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                                     );
                                 }
 
-                                // Track buffer level
-                                let current_level =
-                                    buffer_fill_receiver.load(Ordering::Relaxed) as f64;
-                                buffer_avg.add_value(current_level);
+                                // Track buffer level using time-based estimation
+                                let estimated_level = buffer_fill_receiver
+                                    .try_lock()
+                                    .map(|b| b.estimate() as f64)
+                                    .unwrap_or_default();
+                                // Include pending chunks in channel
+                                let total_level =
+                                    estimated_level + (channel.len() * chunksize) as f64;
+                                buffer_avg.add_value(total_level);
 
-                                // Log buffer level periodically (every ~3 seconds)
-                                if buffer_level_timer.larger_than_millis(3000) {
+                                // Log buffer level periodically (based on adjust_period)
+                                if buffer_level_timer
+                                    .larger_than_millis((1000.0 * adjust_period) as u64)
+                                {
                                     if let Some(avg_level) = buffer_avg.average() {
+                                        let _speed = rate_controller.next(avg_level);
                                         debug!("Playback buffer level: {:.1} frames", avg_level);
                                         playback_status_clone.write().buffer_level =
                                             avg_level as usize;
