@@ -1,10 +1,18 @@
-//! PipeWire audio backend for CamillaDSP
-//!
-//! This module provides native PipeWire support, creating filter nodes
-//! in the PipeWire graph that can be connected via WirePlumber rules.
-//!
-//! Like PulseAudio, PipeWire uses F32 internally, so we always use F32
-//! format for audio exchange - no format configuration is needed.
+// CamillaDSP - A flexible tool for processing audio
+// Copyright (C) 2025 Henrik Enquist
+//
+// This file is part of CamillaDSP.
+//
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
+//
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use pipewire as pw;
 use pw::spa::param::audio::AudioFormat;
