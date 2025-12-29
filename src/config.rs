@@ -364,6 +364,8 @@ pub enum CaptureDevice {
         node_name: Option<String>,
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
+        #[serde(default)]
+        autoconnect_to: Option<String>,
     },
     RawFile(CaptureDeviceRawFile),
     WavFile(CaptureDeviceWavFile),
@@ -652,6 +654,8 @@ pub enum PlaybackDevice {
         channels: usize,
         #[serde(default)]
         node_name: Option<String>,
+        #[serde(default)]
+        autoconnect_to: Option<String>,
     },
     #[serde(alias = "FILE", alias = "file")]
     File {

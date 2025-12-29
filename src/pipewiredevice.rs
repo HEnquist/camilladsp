@@ -99,6 +99,7 @@ impl PipewireError {
 /// PipeWire playback device
 pub struct PipewirePlaybackDevice {
     pub node_name: Option<String>,
+    pub autoconnect_to: Option<String>,
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
@@ -110,6 +111,7 @@ pub struct PipewirePlaybackDevice {
 /// PipeWire capture device
 pub struct PipewireCaptureDevice {
     pub node_name: Option<String>,
+    pub autoconnect_to: Option<String>,
     pub samplerate: usize,
     pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
@@ -173,6 +175,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
             .node_name
             .clone()
             .unwrap_or("camilladsp-playback".to_string());
+        let autoconnect_to = self.autoconnect_to.clone();
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
@@ -235,7 +238,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                 // Node properties for WirePlumber matching
                 // NODE_LATENCY requests PipeWire to use a quantum matching our chunksize
                 let latency_str = format!("{}/{}", chunksize, samplerate);
-                let props = properties! {
+                let mut props = properties! {
                     *pw::keys::MEDIA_TYPE => "Audio",
                     *pw::keys::MEDIA_CATEGORY => "Playback",
                     *pw::keys::MEDIA_ROLE => "DSP",
@@ -245,6 +248,10 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                     *pw::keys::NODE_LATENCY => latency_str,
                     *pw::keys::NODE_GROUP => "camilladsp",
                 };
+                if let Some(ref target) = autoconnect_to {
+                    // the key PW_KEY_TARGET_OBJECT doesn not (yet?) exist in pw::keys
+                    props.insert("target.object", target.as_str());
+                }
 
                 let stream = match Stream::new(&core, "CamillaDSP-Playback", props) {
                     Ok(s) => s,
@@ -292,6 +299,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
 
                         let datas = pw_buffer.datas_mut();
                         if datas.is_empty() {
+                            xtrace!("PW playback callback with empty data");
                             return;
                         }
 
@@ -304,6 +312,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                             None => return,
                         };
                         let max_bytes = out_slice.len();
+                        xtrace!("PW playback callback with {} bytes", max_bytes);
 
                         // Pop bytes from ring buffer directly into output - no allocations!
                         let mut consumer = rb_consumer_clone.borrow_mut();
@@ -338,12 +347,15 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                 let pod = pw::spa::pod::Pod::from_bytes(&params_buffer)
                     .expect("Failed to create Pod from params buffer");
 
-                // Connect stream - NO AUTOCONNECT, let WirePlumber handle routing
-                let flags = StreamFlags::RT_PROCESS | StreamFlags::MAP_BUFFERS;
+                // Connect stream - set AUTOCONNECT flag if autoconnect_to is set
+                let mut flags = StreamFlags::RT_PROCESS | StreamFlags::MAP_BUFFERS;
+                if autoconnect_to.is_some() {
+                    flags |= StreamFlags::AUTOCONNECT;
+                }
 
                 match stream.connect(
                     Direction::Output,
-                    None, // No target - WirePlumber handles routing
+                    None,
                     flags,
                     &mut [pod],
                 ) {
@@ -393,6 +405,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                     let mut rate_adjust_value = 1.0;
                     let mut conversion_result;
 
+                    let mut running = false;
                     loop {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
@@ -451,10 +464,19 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                                 // Push to ring buffer - if full, data is dropped
                                 let pushed = rb_producer.push_slice(&raw_buffer[..conversion_result.0]);
                                 if pushed < conversion_result.0 {
-                                    warn!(
-                                        "Playback ring buffer full, dropped {} bytes",
-                                        conversion_result.0 - pushed
+                                    trace!(
+                                       "Playback ring buffer full, dropped {} bytes",
+                                       conversion_result.0 - pushed
                                     );
+                                    if running {
+                                        warn!("Playback ring buffer full, dropping audio data");
+                                        running = false;
+                                    }
+                                }
+                                else if !running {
+                                    running = true;
+                                    debug!("PipeWire playback running")
+
                                 }
                             }
                             Ok(AudioMessage::Pause) => {
@@ -518,6 +540,7 @@ impl CaptureDevice for PipewireCaptureDevice {
             .node_name
             .clone()
             .unwrap_or("camilladsp-capture".to_string());
+        let autoconnect_to = self.autoconnect_to.clone();
         let samplerate = self.samplerate;
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
@@ -577,7 +600,7 @@ impl CaptureDevice for PipewireCaptureDevice {
                 // Node properties for WirePlumber matching
                 // NODE_LATENCY requests PipeWire to use a quantum matching our chunksize
                 let latency_str = format!("{}/{}", chunksize, capture_samplerate);
-                let props = properties! {
+                let mut props = properties! {
                     *pw::keys::MEDIA_TYPE => "Audio",
                     *pw::keys::MEDIA_CATEGORY => "Capture",
                     *pw::keys::MEDIA_ROLE => "DSP",
@@ -587,6 +610,10 @@ impl CaptureDevice for PipewireCaptureDevice {
                     *pw::keys::NODE_LATENCY => latency_str,
                     *pw::keys::NODE_GROUP => "camilladsp",
                 };
+                if let Some(ref target) = autoconnect_to {
+                    // the key PW_KEY_TARGET_OBJECT doesn not (yet?) exist in pw::keys
+                    props.insert("target.object", target.as_str());
+                }
 
                 let stream = match Stream::new(&core, "CamillaDSP-Capture", props) {
                     Ok(s) => s,
@@ -646,6 +673,7 @@ impl CaptureDevice for PipewireCaptureDevice {
                         let chunk_data = data.chunk();
                         let offset = chunk_data.offset() as usize;
                         let size = chunk_data.size() as usize;
+                        xtrace!("PW capture callback with data size {} bytes", size);
 
                         if size == 0 {
                             return;
@@ -679,12 +707,15 @@ impl CaptureDevice for PipewireCaptureDevice {
                 let pod = pw::spa::pod::Pod::from_bytes(&params_buffer)
                     .expect("Failed to create Pod from params buffer");
 
-                // Connect stream - NO AUTOCONNECT, let WirePlumber handle routing
-                let flags = StreamFlags::RT_PROCESS | StreamFlags::MAP_BUFFERS;
+                // Connect stream - set AUTOCONNECT flag if autoconnect_to is set
+                let mut flags = StreamFlags::RT_PROCESS | StreamFlags::MAP_BUFFERS;
+                if autoconnect_to.is_some() {
+                    flags |= StreamFlags::AUTOCONNECT;
+                }
 
                 match stream.connect(
                     Direction::Input,
-                    None,  // No target - WirePlumber handles routing
+                    None,
                     flags,
                     &mut [pod],
                 ) {
