@@ -820,7 +820,7 @@ impl CaptureDevice for PipewireCaptureDevice {
 
                         let mut tries = 0;
                         // Wait until ring buffer has enough data for a complete chunk
-                        // Abort wait after 50 noticifications if there still is not enough data.
+                        // Abort wait after 50 notifications if there still is not enough data.
                         while rb_consumer.occupied_len() < capture_bytes && tries < 50 {
                             // Wait for notification from callback (with timeout)
                             let _ = notify_rx.recv_timeout(std::time::Duration::from_millis(20));
