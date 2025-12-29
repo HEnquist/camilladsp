@@ -53,7 +53,7 @@ The `autoconnect_to` parameter takes either a name or a serial number (as a stri
 If given, CamillaDSP will try to connect its capture and/or playback node to the given node.
 This enables basic routing to be set up without any additional tools,
 and is useful when both the source and sink nodes already exist.
-For anything more advances, it is recommended to leave this parameter at the default `null`,
+For anything more advanced, it is recommended to leave this parameter at the default `null`,
 and instead set up routing with WirePlumber rules.
 
 
