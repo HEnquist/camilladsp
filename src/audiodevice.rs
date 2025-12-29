@@ -287,8 +287,10 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
         config::PlaybackDevice::Pipewire {
             channels,
             ref node_name,
+            ref autoconnect_to,
         } => Box::new(pipewiredevice::PipewirePlaybackDevice {
             node_name: node_name.clone(),
+            autoconnect_to: autoconnect_to.clone(),
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
@@ -455,9 +457,11 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         config::CaptureDevice::Pipewire {
             channels,
             ref node_name,
+            ref autoconnect_to,
             ..
         } => Box::new(pipewiredevice::PipewireCaptureDevice {
             node_name: node_name.clone(),
+            autoconnect_to: autoconnect_to.clone(),
             samplerate: conf.samplerate,
             resampler_config: conf.resampler,
             capture_samplerate,

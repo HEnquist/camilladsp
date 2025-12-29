@@ -1,6 +1,8 @@
 # PipeWire backend
 
-The PipeWire backend creates filter nodes in the PipeWire graph. Unlike other backends that connect directly to devices, PipeWire nodes are meant to be connected via WirePlumber rules or tools like Helvum.
+The PipeWire backend creates filter nodes in the PipeWire graph.
+Unlike other backends that connect directly to devices,
+PipeWire nodes are meant to be connected via WirePlumber rules or tools like Helvum.
 
 ## Build requirements
 
@@ -25,6 +27,7 @@ capture:
   type: Pipewire
   channels: 2
   node_name: camilladsp-capture  # optional, this is the default
+  autoconnect_to: null  # optional
 ```
 
 ### Playback device
@@ -33,6 +36,7 @@ playback:
   type: Pipewire
   channels: 2
   node_name: camilladsp-playback  # optional, this is the default
+  autoconnect_to: null  # optional
 ```
 
 ### Parameters
@@ -41,10 +45,22 @@ playback:
 |-----------|-------------|
 | `channels` | Number of audio channels (required) |
 | `node_name` | PipeWire node name for WirePlumber matching (optional, defaults to `camilladsp-capture` or `camilladsp-playback`) |
+| `autoconnect_to`| PipeWire name or serial (as a string) of a node to autoconnect to (optional) |
+
+#### Autoconnect
+
+The `autoconnect_to` parameter takes either a name or a serial number (as a string) of a PipeWire node.
+If given, CamillaDSP will try to connect its capture and/or playback node to the given node.
+This enables basic routing to be set up without any additional tools,
+and is useful when both the source and sink nodes already exist.
+For anything more advances, it is recommended to leave this parameter at the default `null`,
+and instead set up routing with WirePlumber rules.
+
 
 ## WirePlumber routing
 
-CamillaDSP creates nodes that do not auto-connect to any devices. Use WirePlumber rules to connect them to your audio sources and sinks.
+CamillaDSP creates nodes that do not auto-connect to any devices.
+Use WirePlumber rules to connect them to your audio sources and sinks.
 
 ### Example WirePlumber rules (0.5+)
 
@@ -107,7 +123,8 @@ pw-link "camilladsp-playback:output_1" "alsa_output.pci-...:playback_FR"
 
 ### Using Helvum
 
-Helvum is a graphical patchbay for PipeWire. Install it and drag connections between CamillaDSP nodes and your audio devices.
+Helvum is a graphical patchbay for PipeWire.
+Install it and drag connections between CamillaDSP nodes and your audio devices.
 
 ## Monitoring
 
