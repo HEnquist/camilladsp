@@ -26,8 +26,10 @@ Like PulseAudio, PipeWire uses F32 internally, so no sample format configuration
 capture:
   type: Pipewire
   channels: 2
-  node_name: camilladsp-capture  # optional, this is the default
-  autoconnect_to: null  # optional
+  node_name: camilladsp-capture (*)
+  node_description: CamillaDSP Capture (*)
+  node_group_name: camilladsp (*)
+  autoconnect_to: null (*)
 ```
 
 ### Playback device
@@ -35,9 +37,14 @@ capture:
 playback:
   type: Pipewire
   channels: 2
-  node_name: camilladsp-playback  # optional, this is the default
-  autoconnect_to: null  # optional
+  node_name: camilladsp-playback (*)
+  node_description: CamillaDSP Playback (*)
+  node_group_name: camilladsp (*)
+  autoconnect_to: null (*)
 ```
+
+The parameters marked (*) are optional. The values shown above are the defaults.
+These are used if the parameters are set to `null` or left out from the configuration.
 
 ### Parameters
 
@@ -45,21 +52,43 @@ playback:
 |-----------|-------------|
 | `channels` | Number of audio channels (required) |
 | `node_name` | PipeWire node name for WirePlumber matching (optional, defaults to `camilladsp-capture` or `camilladsp-playback`) |
-| `autoconnect_to`| PipeWire name or serial (as a string) of a node to autoconnect to (optional) |
+| `node_description` | PipeWire node description, shown in tools such as Helvum (optional, defaults to `CamillaDSP Capture` or `CamillaDSP Playback`) |
+| `node_group_name` | PipeWire node group name (optional, defaults to `camilladsp`) |
+| `autoconnect_to`| PipeWire name or serial (given as a string with quotes, `"123"`) of a node to autoconnect to (optional) |
+
+#### Node groups
+
+PipeWire nodes can be assigned to *groups*.
+Nodes in the same group are always scheduled by the same driver.
+This ensures that these nodes run in the same graph execution cycle, sharing the same clock and timing.
+Use the same group name for capture and playback.
+Leave at the default value unless more than one CamillaDSP instance is running.
+
 
 #### Autoconnect
 
-The `autoconnect_to` parameter takes either a name or a serial number (as a string) of a PipeWire node.
-If given, CamillaDSP will try to connect its capture and/or playback node to the given node.
+The `autoconnect_to` parameter takes either a name or a serial number of a PipeWire node.
+The property is a string, so serial numbers must be quoted in the yaml file (`autoconnect_to: "123"`).
+If given, CamillaDSP will ask PipeWire to try connect the CamillaDSP capture or playback node to the given node.
 This enables basic routing to be set up without any additional tools,
 and is useful when both the source and sink nodes already exist.
+
 For anything more advanced, it is recommended to leave this parameter at the default `null`,
 and instead set up routing with WirePlumber rules.
+
+Node names can be found with the `pw-cli` command:
+```sh
+pw-cli ls Node
+```
+
+Example of node names for audio playback devices:
+- Intel HD Audio headphone output: `alsa_output.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__Headphones__sink`
+- MOTU M4: `alsa_output.hw_M4_0`
 
 
 ## WirePlumber routing
 
-CamillaDSP creates nodes that do not auto-connect to any devices.
+CamillaDSP by default creates nodes that do not auto-connect to any devices.
 Use WirePlumber rules to connect them to your audio sources and sinks.
 
 ### Example WirePlumber rules (0.5+)

@@ -99,6 +99,8 @@ impl PipewireError {
 /// PipeWire playback device
 pub struct PipewirePlaybackDevice {
     pub node_name: Option<String>,
+    pub node_description: Option<String>,
+    pub node_group_name: Option<String>,
     pub autoconnect_to: Option<String>,
     pub samplerate: usize,
     pub chunksize: usize,
@@ -111,6 +113,8 @@ pub struct PipewirePlaybackDevice {
 /// PipeWire capture device
 pub struct PipewireCaptureDevice {
     pub node_name: Option<String>,
+    pub node_description: Option<String>,
+    pub node_group_name: Option<String>,
     pub autoconnect_to: Option<String>,
     pub samplerate: usize,
     pub resampler_config: Option<config::Resampler>,
@@ -175,6 +179,14 @@ impl PlaybackDevice for PipewirePlaybackDevice {
             .node_name
             .clone()
             .unwrap_or("camilladsp-playback".to_string());
+        let node_description = self
+            .node_description
+            .clone()
+            .unwrap_or("CamillaDSP Playback".to_string());
+        let node_group_name = self
+            .node_group_name
+            .clone()
+            .unwrap_or("camilladsp".to_string());
         let autoconnect_to = self.autoconnect_to.clone();
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
@@ -244,9 +256,9 @@ impl PlaybackDevice for PipewirePlaybackDevice {
                     *pw::keys::MEDIA_ROLE => "DSP",
                     *pw::keys::APP_NAME => "CamillaDSP",
                     *pw::keys::NODE_NAME => node_name,
-                    *pw::keys::NODE_DESCRIPTION => "CamillaDSP Playback",
+                    *pw::keys::NODE_DESCRIPTION => node_description,
                     *pw::keys::NODE_LATENCY => latency_str,
-                    *pw::keys::NODE_GROUP => "camilladsp",
+                    *pw::keys::NODE_GROUP => node_group_name,
                 };
                 if let Some(ref target) = autoconnect_to {
                     // the key PW_KEY_TARGET_OBJECT doesn not (yet?) exist in pw::keys
@@ -540,6 +552,14 @@ impl CaptureDevice for PipewireCaptureDevice {
             .node_name
             .clone()
             .unwrap_or("camilladsp-capture".to_string());
+        let node_description = self
+            .node_description
+            .clone()
+            .unwrap_or("CamillaDSP Capture".to_string());
+        let node_group_name = self
+            .node_group_name
+            .clone()
+            .unwrap_or("camilladsp".to_string());
         let autoconnect_to = self.autoconnect_to.clone();
         let samplerate = self.samplerate;
         let capture_samplerate = self.capture_samplerate;
@@ -606,9 +626,9 @@ impl CaptureDevice for PipewireCaptureDevice {
                     *pw::keys::MEDIA_ROLE => "DSP",
                     *pw::keys::APP_NAME => "CamillaDSP",
                     *pw::keys::NODE_NAME => node_name,
-                    *pw::keys::NODE_DESCRIPTION => "CamillaDSP Capture",
+                    *pw::keys::NODE_DESCRIPTION => node_description,
                     *pw::keys::NODE_LATENCY => latency_str,
-                    *pw::keys::NODE_GROUP => "camilladsp",
+                    *pw::keys::NODE_GROUP => node_group_name,
                 };
                 if let Some(ref target) = autoconnect_to {
                     // the key PW_KEY_TARGET_OBJECT doesn not (yet?) exist in pw::keys
