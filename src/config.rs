@@ -363,6 +363,10 @@ pub enum CaptureDevice {
         #[serde(default)]
         node_name: Option<String>,
         #[serde(default)]
+        node_description: Option<String>,
+        #[serde(default)]
+        node_group_name: Option<String>,
+        #[serde(default)]
         labels: Option<Vec<Option<String>>>,
         #[serde(default)]
         autoconnect_to: Option<String>,
@@ -654,6 +658,10 @@ pub enum PlaybackDevice {
         channels: usize,
         #[serde(default)]
         node_name: Option<String>,
+        #[serde(default)]
+        node_description: Option<String>,
+        #[serde(default)]
+        node_group_name: Option<String>,
         #[serde(default)]
         autoconnect_to: Option<String>,
     },
