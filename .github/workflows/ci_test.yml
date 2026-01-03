@@ -25,6 +25,9 @@ jobs:
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
+      - name: Install PipeWire development files
+        run: sudo apt-get install ibpipewire-0.3-dev -y
+
       - name: Install PulseAudio
         run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
 
@@ -41,7 +44,7 @@ jobs:
         run: cargo check --no-default-features
 
       - name: Run cargo test with all supported backends
-        run: cargo test --features bluez-backend,cpal-backend,jack-backend,pulse-backend,
+        run: cargo test --features bluez-backend,cpal-backend,jack-backend,pulse-backend,pipewire-backend
 
       - name: Run cargo test with all optional features
         run: cargo test --features 32bit,debug,secure-websocket
