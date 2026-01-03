@@ -26,7 +26,7 @@ jobs:
         run: sudo apt-get install libasound2-dev -y
 
       - name: Install PipeWire development files
-        run: sudo apt-get install ibpipewire-0.3-dev -y
+        run: sudo apt-get install libpipewire-0.3-dev -y
 
       - name: Install PulseAudio
         run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y

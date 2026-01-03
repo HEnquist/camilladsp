@@ -26,24 +26,55 @@ jobs:
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
-      - name: Install PulseAudio
-        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
-
       - name: Install OpenSSL
         run: sudo apt-get install openssl libssl-dev -y
-        
-      - name: Build
-        run: cargo build --release --features pulse-backend
+
+      - name: Build with Alsa only
+        run: cargo build --release
 
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
-      - name: Upload binaries to release
+      - name: Upload binary to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
           asset_name: camilladsp-linux-amd64.tar.gz
+          tag: ${{ github.ref }}
+
+      - name: Install PipeWire development files
+        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpipewire-0.3-dev -y
+
+      - name: Build with PipeWire
+        run: cargo build --release --features pipewire-backend
+
+      - name: Compress binary with PipeWire
+        run: tar -zcvf camilladsp-pipewire.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
+
+      - name: Upload binary with PipeWire to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp-pipewire.tar.gz
+          asset_name: camilladsp-linux-pipewire-amd64.tar.gz
+          tag: ${{ github.ref }}
+
+      - name: Install PulseAudio development files
+        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
+
+      - name: Build with PulseAudio
+        run: cargo build --release --features pulse-backend
+
+      - name: Compress binary with PulseAudio
+        run: tar -zcvf camilladsp-pulse.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
+
+      - name: Upload binary with PulseAudio to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp-pulse.tar.gz
+          asset_name: camilladsp-linux-pulseaudio-amd64.tar.gz
           tag: ${{ github.ref }}
 
   arm:
@@ -69,10 +100,10 @@ jobs:
         env:
           RUSTFLAGS: "-C target-feature=+neon"
 
-      - name: Compress
+      - name: Compress binary
         run: tar -zcvf camilladsp.tar.gz -C target/armv7-unknown-linux-gnueabihf/release camilladsp --owner=0 --group=0 --numeric-owner
 
-      - name: Upload binaries to release
+      - name: Upload binary to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
@@ -98,18 +129,46 @@ jobs:
       - name: Build image
         run: docker build -t cross/armv8:v1 --file Dockerfile_armv8 ./
 
-      - name: Build
+      - name: Build with Alsa only
         run: cross build --release --target aarch64-unknown-linux-gnu
 
-      - name: Compress
+      - name: Compress binary with Alsa only
         run: tar -zcvf camilladsp.tar.gz -C target/aarch64-unknown-linux-gnu/release camilladsp --owner=0 --group=0 --numeric-owner
 
-      - name: Upload binaries to release
+      - name: Upload binary to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
           asset_name: camilladsp-linux-aarch64.tar.gz
+          tag: ${{ github.ref }}
+
+      - name: Build with PipeWire
+        run: cross build --release --features pipewire-backend --target aarch64-unknown-linux-gnu
+
+      - name: Compress binary with PipeWire
+        run: tar -zcvf camilladsp-pipewire.tar.gz -C target/aarch64-unknown-linux-gnu/release camilladsp --owner=0 --group=0 --numeric-owner
+
+      - name: Upload binary with PipeWire to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp-pipewire.tar.gz
+          asset_name: camilladsp-linux-pipewire-aarch64.tar.gz
+          tag: ${{ github.ref }}
+
+      - name: Build with PulseAudio
+        run: cross build --release --features pulse-backend --target aarch64-unknown-linux-gnu
+
+      - name: Compress binary with PulseAudio
+        run: tar -zcvf camilladsp-pipewire.tar.gz -C target/aarch64-unknown-linux-gnu/release camilladsp --owner=0 --group=0 --numeric-owner
+
+      - name: Upload binary with PulseAudio to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp-pulseaudio.tar.gz
+          asset_name: camilladsp-linux-pulseaudio-aarch64.tar.gz
           tag: ${{ github.ref }}
 
   armv6:

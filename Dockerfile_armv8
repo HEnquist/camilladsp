@@ -5,4 +5,4 @@ ENV PKG_CONFIG_PATH /usr/lib/aarch64-linux-gnu/pkgconfig/
 
 RUN dpkg --add-architecture arm64 && \
     apt-get update && \
-    apt-get install libasound2-dev:arm64 openssl:arm64 libssl-dev:arm64 -y \
+    apt-get install libasound2-dev:arm64 openssl:arm64 libssl-dev:arm64 libpipewire-0.3-dev:arm64 libpulse0:arm64 libpulse-dev:arm64 -y \
