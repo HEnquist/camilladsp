@@ -38,6 +38,8 @@ extern crate native_tls;
 extern crate nix;
 extern crate num_complex;
 extern crate num_traits;
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+extern crate pipewire;
 extern crate rand;
 extern crate rand_distr;
 extern crate realfft;
@@ -151,6 +153,8 @@ pub mod limiter;
 pub mod loudness;
 pub mod mixer;
 pub mod noisegate;
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+pub mod pipewiredevice;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;
@@ -495,6 +499,10 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     if cfg!(feature = "pulse-backend") {
         playbacktypes.push("Pulse".to_owned());
         capturetypes.push("Pulse".to_owned());
+    }
+    if cfg!(feature = "pipewire-backend") {
+        playbacktypes.push("Pipewire".to_owned());
+        capturetypes.push("Pipewire".to_owned());
     }
     if cfg!(feature = "bluez-backend") {
         capturetypes.push("Bluez".to_owned());

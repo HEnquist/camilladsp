@@ -28,7 +28,7 @@ The CamillaDSP project encompasses:
 The CamillaDSP engine is a command-line application that runs on Linux, macOS, and Windows.
 
 Audio data is captured from a capture device and sent to a playback device.
-Alsa, PulseAudio, Jack, Wasapi and CoreAudio are currently supported for both capture and playback.
+Alsa, PulseAudio, PipeWire, Jack, Wasapi and CoreAudio are currently supported for both capture and playback.
 
 The processing pipeline consists of any number of filters and mixers.
 Mixers are used to route audio between channels and to change the number of channels in the stream.
@@ -353,6 +353,7 @@ If possible, it's recommended to use a pre-built binary on these systems.
 ## Customized build
 All the available options, or "features" are:
 - `pulse-backend`: PulseAudio support.
+- `pipewire-backend`: Native PipeWire support (Linux only).
 - `cpal-backend`: Used for Jack support (automatically enabled when needed).
 - `jack-backend`: Jack support (Linux only).
 - `bluez-backend`: Bluetooth support via BlueALSA (Linux only).
@@ -395,6 +396,11 @@ The `jack-backend` feature requires jack and its development files. To install:
 - Fedora: ```sudo dnf install jack-audio-connection-kit jack-audio-connection-kit-devel```
 - Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
 - Arch:  ```sudo pacman -S jack```
+
+The `pipewire-backend` feature requires PipeWire and its development files. To install:
+- Fedora: ```sudo dnf install pipewire-devel```
+- Debian/Ubuntu etc: ```sudo apt-get install libpipewire-0.3-dev```
+- Arch:  ```sudo pacman -S pipewire```
 
 ## Optimize for your system
 By default Cargo builds for a generic system, meaning the resulting binary might not run as fast as possible on your system.
@@ -713,10 +719,17 @@ pacmd list-sources
 ```
 
 ### Pipewire
-Pipewire implements both the PulseAudio and Jack APIs.
-It is therefore supported both via the Pulse and the Jack backends, and there is no need for a specific Pipewire backend.
 
-Pipewire supports creating null-sink like PulseAudio. Create it with:
+#### Native PipeWire backend
+CamillaDSP has native PipeWire support via the `pipewire-backend` feature.
+This creates filter nodes in the PipeWire graph that can be connected to other nodes using WirePlumber rules or tools like Helvum.
+See [backend_pipewire.md](backend_pipewire.md) for configuration details.
+
+#### Using PipeWire via PulseAudio or Jack compatibility
+PipeWire implements both the PulseAudio and Jack APIs.
+CamillaDSP can therefore also be used with PipeWire via the Pulse and Jack backends.
+
+PipeWire supports creating null-sinks like PulseAudio. Create one with:
 ```
 pactl load-module module-null-sink sink_name=MySink object.linger=1 media.class=Audio/Sink
 ```
