@@ -96,7 +96,7 @@ and the Mozilla Public License Version 2.0:
 - **[Linux](#linux)**
   - **[Alsa](#alsa)**
   - **[PulseAudio](#pulseaudio)**
-  - **[Pipewire](#pipewire)**
+  - **[PipeWire](#pipewire)**
 
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
@@ -722,7 +722,7 @@ pacmd list-sinks
 pacmd list-sources
 ```
 
-### Pipewire
+### PipeWire
 
 #### Native PipeWire backend
 CamillaDSP has native PipeWire support via the `pipewire-backend` feature.
@@ -754,17 +754,17 @@ This will list all devices, and the null-sink should be included like this:
 This device can be set as the default output in the Gnome sound settings, meaning all desktop audio will use it.
 The audio sent to this device can then be captured from the monitor output named "MySink.monitor" using the PulseAudio backend.
 
-To configure Pipewire so that this null-sink is loaded on startup, create the file `/usr/share/pipewire/pipewire-pulse.conf.d/camilladsp-sink.conf` containing:
+To configure PipeWire so that this null-sink is loaded on startup, create the file `/usr/share/pipewire/pipewire-pulse.conf.d/camilladsp-sink.conf` containing:
 ```
 pulse.cmd = [
     { cmd = "load-module" args = "module-null-sink sink_name=MySink object.linger=1 media.class=Audio/Sink" flags = [ ] }
 ]
 ```
 
-Pipewire can also be configured to output to an ALSA Loopback.
-This is done by adding an ALSA sink in the Pipewire configuration.
+PipeWire can also be configured to output to an ALSA Loopback.
+This is done by adding an ALSA sink in the PipeWire configuration.
 This sink then becomes available as an output device in the Gnome sound settings.
-See the "camilladsp-config" repository under [Related projects](#related-projects) for an example Pipewire configuration.
+See the "camilladsp-config" repository under [Related projects](#related-projects) for an example PipeWire configuration.
 
 TODO test with Jack.
 
@@ -777,8 +777,8 @@ BlueALSA is supported on Linux only, and requires building CamillaDSP with the `
 
 #### Prerequisites
 Start by installing `bluez-alsa`.
-Both Pipewire and PulseAudio will interfere with BlueALSA and must be disabled.
-The source device should be paired after disabling Pipewire or PulseAudio and enabling BlueALSA.
+Both PipeWire and PulseAudio will interfere with BlueALSA and must be disabled.
+The source device should be paired after disabling PipeWire or PulseAudio and enabling BlueALSA.
 
 #### Configuration
 

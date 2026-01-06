@@ -72,32 +72,32 @@ impl MainLoopQuitter {
 }
 
 #[derive(Debug)]
-pub struct PipewireError {
+pub struct PipeWireError {
     desc: String,
 }
 
-impl std::fmt::Display for PipewireError {
+impl std::fmt::Display for PipeWireError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.desc)
     }
 }
 
-impl std::error::Error for PipewireError {
+impl std::error::Error for PipeWireError {
     fn description(&self) -> &str {
         &self.desc
     }
 }
 
-impl PipewireError {
+impl PipeWireError {
     pub fn new(desc: &str) -> Self {
-        PipewireError {
+        PipeWireError {
             desc: format!("PipeWire error: {}", desc),
         }
     }
 }
 
 /// PipeWire playback device
-pub struct PipewirePlaybackDevice {
+pub struct PipeWirePlaybackDevice {
     pub node_name: Option<String>,
     pub node_description: Option<String>,
     pub node_group_name: Option<String>,
@@ -111,7 +111,7 @@ pub struct PipewirePlaybackDevice {
 }
 
 /// PipeWire capture device
-pub struct PipewireCaptureDevice {
+pub struct PipeWireCaptureDevice {
     pub node_name: Option<String>,
     pub node_description: Option<String>,
     pub node_group_name: Option<String>,
@@ -167,7 +167,7 @@ fn build_audio_params(samplerate: u32, channels: u32) -> Vec<u8> {
 }
 
 /// Start a playback thread listening for AudioMessages via a channel.
-impl PlaybackDevice for PipewirePlaybackDevice {
+impl PlaybackDevice for PipeWirePlaybackDevice {
     fn start(
         &mut self,
         channel: crossbeam_channel::Receiver<AudioMessage>,
@@ -203,7 +203,7 @@ impl PlaybackDevice for PipewirePlaybackDevice {
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
 
         let handle = thread::Builder::new()
-            .name("PipewirePlayback".to_string())
+            .name("PipeWirePlayback".to_string())
             .spawn(move || {
                 // Initialize PipeWire
                 pw::init();
@@ -538,7 +538,7 @@ fn nbr_capture_bytes(
 }
 
 /// Start a capture thread providing AudioMessages via a channel
-impl CaptureDevice for PipewireCaptureDevice {
+impl CaptureDevice for PipeWireCaptureDevice {
     fn start(
         &mut self,
         channel: crossbeam_channel::Sender<AudioMessage>,
@@ -573,7 +573,7 @@ impl CaptureDevice for PipewireCaptureDevice {
         let silence_threshold = self.silence_threshold;
 
         let handle = thread::Builder::new()
-            .name("PipewireCapture".to_string())
+            .name("PipeWireCapture".to_string())
             .spawn(move || {
                 // Initialize PipeWire
                 pw::init();

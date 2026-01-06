@@ -284,13 +284,13 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             })
         }
         #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-        config::PlaybackDevice::Pipewire {
+        config::PlaybackDevice::PipeWire {
             channels,
             ref node_name,
             ref node_description,
             ref node_group_name,
             ref autoconnect_to,
-        } => Box::new(pipewiredevice::PipewirePlaybackDevice {
+        } => Box::new(pipewiredevice::PipeWirePlaybackDevice {
             node_name: node_name.clone(),
             node_description: node_description.clone(),
             node_group_name: node_group_name.clone(),
@@ -458,14 +458,14 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_timeout: conf.silence_timeout(),
         }),
         #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-        config::CaptureDevice::Pipewire {
+        config::CaptureDevice::PipeWire {
             channels,
             ref node_name,
             ref node_description,
             ref node_group_name,
             ref autoconnect_to,
             ..
-        } => Box::new(pipewiredevice::PipewireCaptureDevice {
+        } => Box::new(pipewiredevice::PipeWireCaptureDevice {
             node_name: node_name.clone(),
             node_description: node_description.clone(),
             node_group_name: node_group_name.clone(),

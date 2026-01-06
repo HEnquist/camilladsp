@@ -501,8 +501,8 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         capturetypes.push("Pulse".to_owned());
     }
     if cfg!(feature = "pipewire-backend") {
-        playbacktypes.push("Pipewire".to_owned());
-        capturetypes.push("Pipewire".to_owned());
+        playbacktypes.push("PipeWire".to_owned());
+        capturetypes.push("PipeWire".to_owned());
     }
     if cfg!(feature = "bluez-backend") {
         capturetypes.push("Bluez".to_owned());

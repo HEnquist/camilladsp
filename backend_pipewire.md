@@ -24,7 +24,7 @@ Like PulseAudio, PipeWire uses F32 internally, so no sample format configuration
 ### Capture device
 ```yaml
 capture:
-  type: Pipewire
+  type: PipeWire
   channels: 2
   node_name: camilladsp-capture (*)
   node_description: CamillaDSP Capture (*)
@@ -35,7 +35,7 @@ capture:
 ### Playback device
 ```yaml
 playback:
-  type: Pipewire
+  type: PipeWire
   channels: 2
   node_name: camilladsp-playback (*)
   node_description: CamillaDSP Playback (*)
@@ -175,11 +175,11 @@ devices:
   samplerate: 48000
   chunksize: 1024
   capture:
-    type: Pipewire
+    type: PipeWire
     channels: 2
     # node_name defaults to camilladsp-capture
   playback:
-    type: Pipewire
+    type: PipeWire
     channels: 4
     # node_name defaults to camilladsp-playback
 
