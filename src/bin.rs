@@ -509,6 +509,7 @@ fn main_process() -> i32 {
                 .help("Check config file and exit")
                 .short('c')
                 .long("check")
+                .display_order(4)
                 .requires("configfile")
                 .action(ArgAction::SetTrue),
         )
@@ -516,6 +517,7 @@ fn main_process() -> i32 {
             Arg::new("verbosity")
                 .help("Increase message verbosity")
                 .short('v')
+                .display_order(100)
                 .action(ArgAction::Count),
         )
         .arg(
@@ -524,7 +526,7 @@ fn main_process() -> i32 {
                 .short('l')
                 .long("loglevel")
                 .value_name("LOGLEVEL")
-                .display_order(100)
+                .display_order(101)
                 .conflicts_with("verbosity")
                 .action(ArgAction::Set)
                 .value_parser(["trace", "debug", "info", "warn", "error", "off"]),
@@ -535,7 +537,7 @@ fn main_process() -> i32 {
                 .short('o')
                 .long("logfile")
                 .value_name("LOGFILE")
-                .display_order(101)
+                .display_order(102)
                 .action(ArgAction::Set),
         )
         .arg(
@@ -543,7 +545,7 @@ fn main_process() -> i32 {
                 .help("Rotate log file when the size in bytes exceeds this value")
                 .long("log_rotate_size")
                 .value_name("ROTATE_SIZE")
-                .display_order(102)
+                .display_order(103)
                 .requires("logfile")
                 .value_parser(clap::value_parser!(u32).range(1000..))
                 .action(ArgAction::Set),
@@ -553,7 +555,7 @@ fn main_process() -> i32 {
                 .help("Number of previous log files to keep")
                 .long("log_keep_nbr")
                 .value_name("KEEP_NBR")
-                .display_order(103)
+                .display_order(104)
                 .requires("log_rotate_size")
                 .value_parser(clap::value_parser!(u32))
                 .action(ArgAction::Set),
@@ -563,7 +565,7 @@ fn main_process() -> i32 {
                 .help("Custom logger specification")
                 .long("custom_log_spec")
                 .value_name("LOG_SPEC")
-                .display_order(104)
+                .display_order(105)
                 .value_parser(clap::value_parser!(String))
                 .action(ArgAction::Set),
         )
@@ -732,6 +734,16 @@ fn main_process() -> i32 {
                 .display_order(200)
                 .help("Wait for config from websocket")
                 .requires("port")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("no_config")
+                .long("no_config")
+                .display_order(299)
+                .help("Ignore config file in statefile and start without")
+                .requires("wait")
+                .requires("statefile")
+                .conflicts_with("configfile")
                 .action(ArgAction::SetTrue),
         );
     #[cfg(feature = "secure-websocket")]
@@ -938,7 +950,12 @@ fn main_process() -> i32 {
 
     if configname.is_none() {
         if let Some(s) = &state {
-            configname.clone_from(&s.config_path)
+            if matches.get_flag("no_config") {
+                debug!("Ignoring config from statefile as per command line argument");
+            } else {
+                debug!("Using config from statefile");
+                configname.clone_from(&s.config_path);
+            }
         }
     }
 
