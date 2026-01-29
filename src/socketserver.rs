@@ -98,8 +98,10 @@ enum WsCommand {
     GetConfigDescription,
     GetPreviousConfig,
     ReadConfig(String),
+    ReadConfigJson(String),
     ReadConfigFile(String),
     ValidateConfig(String),
+    ValidateConfigJson(String),
     GetConfigJson,
     GetConfigFilePath,
     GetStateFilePath,
@@ -218,6 +220,10 @@ enum WsReply {
         result: WsResult,
         value: String,
     },
+    GetConfigJson {
+        result: WsResult,
+        value: String,
+    },
     GetConfigValue {
         result: WsResult,
         value: serde_json::Value,
@@ -238,6 +244,10 @@ enum WsReply {
         result: WsResult,
         value: String,
     },
+    ReadConfigJson {
+        result: WsResult,
+        value: String,
+    },
     ReadConfigFile {
         result: WsResult,
         value: String,
@@ -246,7 +256,7 @@ enum WsReply {
         result: WsResult,
         value: String,
     },
-    GetConfigJson {
+    ValidateConfigJson {
         result: WsResult,
         value: String,
     },
@@ -1467,6 +1477,21 @@ fn handle_command(
                 }
             }
         }
+        WsCommand::ReadConfigJson(config_json) => {
+            match serde_json::from_str::<config::Configuration>(&config_json) {
+                Ok(conf) => Some(WsReply::ReadConfigJson {
+                    result: WsResult::Ok,
+                    value: serde_json::to_string(&conf).unwrap(),
+                }),
+                Err(error) => {
+                    error!("Error reading config: {}", error);
+                    Some(WsReply::ReadConfigJson {
+                        result: WsResult::ConfigReadError(error.to_string()),
+                        value: error.to_string(),
+                    })
+                }
+            }
+        }
         WsCommand::ReadConfigFile(path) => match config::load_config(&path) {
             Ok(conf) => Some(WsReply::ReadConfigFile {
                 result: WsResult::Ok,
@@ -1498,6 +1523,30 @@ fn handle_command(
                 Err(error) => {
                     debug!("Config error: {error}");
                     Some(WsReply::ValidateConfig {
+                        result: WsResult::ConfigReadError(error.to_string()),
+                        value: error.to_string(),
+                    })
+                }
+            }
+        }
+        WsCommand::ValidateConfigJson(config_json) => {
+            match serde_json::from_str::<config::Configuration>(&config_json) {
+                Ok(mut conf) => match config::validate_config(&mut conf, None) {
+                    Ok(()) => Some(WsReply::ValidateConfigJson {
+                        result: WsResult::Ok,
+                        value: serde_json::to_string(&conf).unwrap(),
+                    }),
+                    Err(error) => {
+                        debug!("Config error: {error}");
+                        Some(WsReply::ValidateConfigJson {
+                            result: WsResult::ConfigValidationError(error.to_string()),
+                            value: error.to_string(),
+                        })
+                    }
+                },
+                Err(error) => {
+                    debug!("Config error: {error}");
+                    Some(WsReply::ValidateConfigJson {
                         result: WsResult::ConfigReadError(error.to_string()),
                         value: error.to_string(),
                     })

@@ -269,8 +269,10 @@ These commands are used to check the syntax and contents of configurations. They
 - `ReadConfig` : read the provided config (as a yaml string) and check it for yaml syntax errors.
   * If the config is ok, it returns the config with all optional fields filled with their default values.
     If there are problems, the status will be Error and the return value an error message.
+- `ReadConfigJson` : same as ReadConfig but reads the provided config as a json string.
 - `ReadConfigFile` : same as ReadConfig but reads the config from the file at the given path.
 - `ValidateConfig`: same as ReadConfig but performs more extensive checks to ensure the configuration can be applied.
+- `ValidateConfigJson`: same as ReadConfigJson but performs more extensive checks to ensure the configuration can be applied.
 
 ### Audio device listing
 
