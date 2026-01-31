@@ -138,14 +138,13 @@ pub fn list_pcm_devices(input: bool) -> Vec<(String, String)> {
         Direction::Playback
     };
     for hint in hints {
-        if hint.name.is_some()
+        if let Some(name) = hint.name
             && (hint.direction.is_none()
                 || hint
                     .direction
                     .map(|dir| dir == direction)
                     .unwrap_or_default())
         {
-            let name = hint.name.unwrap();
             let description = hint.desc.unwrap_or(name.clone());
             names.push((name, description))
         }
