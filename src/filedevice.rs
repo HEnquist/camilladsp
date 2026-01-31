@@ -24,7 +24,7 @@ use std::error::Error;
 use std::fs::File;
 #[cfg(target_os = "linux")]
 use std::fs::OpenOptions;
-use std::io::{stdin, stdout, Write};
+use std::io::{Write, stdin, stdout};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::{Arc, Barrier};
@@ -33,19 +33,19 @@ use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 
+use crate::CommandMessage;
+use crate::PrcFmt;
+use crate::ProcessingState;
+use crate::Res;
+use crate::StatusMessage;
 #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
 use crate::filedevice_bluez;
 #[cfg(not(target_os = "linux"))]
 use crate::filereader::BlockingReader;
 #[cfg(target_os = "linux")]
 use crate::filereader_nonblock::NonBlockingReader;
-use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
+use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::wavtools::{find_data_in_wav, write_wav_header};
-use crate::CommandMessage;
-use crate::PrcFmt;
-use crate::ProcessingState;
-use crate::Res;
-use crate::StatusMessage;
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 pub struct FilePlaybackDevice {
@@ -555,7 +555,9 @@ impl CaptureDevice for FileCaptureDevice {
         let mut read_bytes = self.read_bytes;
         let sample_format = match &self.source {
             CaptureSource::Filename(fname) => {
-                if self.sample_format.is_none() {
+                if let Some(sample_format) = self.sample_format {
+                    sample_format
+                } else {
                     // No format was given, try to get from the file.
                     // Only works if the file is in wav format.
                     // Also update channels and read & skip bytes.
@@ -564,8 +566,6 @@ impl CaptureDevice for FileCaptureDevice {
                     read_bytes = wav_info.data_length;
                     channels = wav_info.channels;
                     wav_info.sample_format
-                } else {
-                    self.sample_format.unwrap()
                 }
             }
             _ => self.sample_format.unwrap(),

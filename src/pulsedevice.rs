@@ -24,7 +24,7 @@ use crate::config;
 use crate::config::BinarySampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
-use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
+use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use std::sync::{Arc, Barrier};
 use std::thread;

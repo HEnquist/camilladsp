@@ -14,11 +14,11 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::PrcFmt;
+use crate::Res;
 use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::filters::Processor;
-use crate::PrcFmt;
-use crate::Res;
 
 #[derive(Clone, Debug)]
 pub struct NoiseGate {
@@ -62,8 +62,17 @@ impl NoiseGate {
         let release = (-1.0 / srate / config.release).exp();
         let scratch = vec![0.0; chunksize];
 
-        debug!("Creating noisegate '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, attenuation: {}", 
-                name, channels, process_channels, monitor_channels, attack, release, config.threshold, config.attenuation);
+        debug!(
+            "Creating noisegate '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, attenuation: {}",
+            name,
+            channels,
+            process_channels,
+            monitor_channels,
+            attack,
+            release,
+            config.threshold,
+            config.attenuation
+        );
 
         let factor = (10.0 as PrcFmt).powf(-config.attenuation / 20.0);
 
@@ -170,8 +179,16 @@ impl Processor for NoiseGate {
             self.threshold = config.threshold;
             self.factor = (10.0 as PrcFmt).powf(-config.attenuation / 20.0);
 
-            debug!("Updated noise gate '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, attenuation: {}", 
-                self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.attenuation);
+            debug!(
+                "Updated noise gate '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, attenuation: {}",
+                self.name,
+                self.process_channels,
+                self.monitor_channels,
+                attack,
+                release,
+                config.threshold,
+                config.attenuation
+            );
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");

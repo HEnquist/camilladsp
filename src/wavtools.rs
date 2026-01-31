@@ -20,8 +20,8 @@ use std::io::BufReader;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem;
 
-use crate::config::{BinarySampleFormat, ConfigError};
 use crate::Res;
+use crate::config::{BinarySampleFormat, ConfigError};
 
 const RIFF: &[u8] = "RIFF".as_bytes();
 const WAVE: &[u8] = "WAVE".as_bytes();
@@ -219,7 +219,9 @@ pub fn find_data_in_wav_stream(mut f: impl Read + Seek) -> Res<WavParams> {
         next_chunk_location += 8 + chunk_length as u64;
     }
     if found_data && found_fmt {
-        trace!("Wav file with parameters: format: {sample_format:?},  samplerate: {sample_rate}, channels: {channels}, data_length: {data_length}, data_offset: {data_offset}");
+        trace!(
+            "Wav file with parameters: format: {sample_format:?},  samplerate: {sample_rate}, channels: {channels}, data_length: {data_length}, data_offset: {data_offset}"
+        );
         return Ok(WavParams {
             sample_format,
             sample_rate: sample_rate as usize,

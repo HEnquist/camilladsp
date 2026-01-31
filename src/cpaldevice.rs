@@ -22,10 +22,10 @@ use crate::conversions::{
 };
 use crate::countertimer;
 use crate::helpers::PIRateController;
-use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
+use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use cpal;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, ChannelCount, HostId, SampleRate, StreamConfig};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use std::collections::VecDeque;

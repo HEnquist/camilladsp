@@ -14,10 +14,10 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::config;
-use crate::filters::Filter;
 use crate::PrcFmt;
 use crate::Res;
+use crate::config;
+use crate::filters::Filter;
 
 const CUBEFACTOR: PrcFmt = 1.0 / 6.75; // = 1 / (2 * 1.5^3)
 

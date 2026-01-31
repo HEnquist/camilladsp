@@ -24,7 +24,7 @@ use alsa::ctl::{Ctl, ElemId, ElemIface, ElemType, ElemValue};
 use alsa::hctl::{Elem, HCtl};
 use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::poll::Descriptors;
-use alsa::{Direction, ValueOr, PCM};
+use alsa::{Direction, PCM, ValueOr};
 use alsa_sys;
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -38,22 +38,22 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
-use crate::alsadevice_buffermanager::{
-    CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
-};
-use crate::alsadevice_utils::{
-    find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
-    list_samplerates_as_text, pick_preferred_format, process_events, state_desc,
-    sync_linked_controls, CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors,
-    PlaybackParams,
-};
-use crate::helpers::PIRateController;
-use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
+use crate::alsadevice_buffermanager::{
+    CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
+};
+use crate::alsadevice_utils::{
+    CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams,
+    find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
+    list_samplerates_as_text, pick_preferred_format, process_events, state_desc,
+    sync_linked_controls,
+};
+use crate::helpers::PIRateController;
+use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 lazy_static! {
@@ -798,9 +798,13 @@ fn capture_loop_bytes(
     if element_loopback.is_some() || element_uac2_gadget.is_some() {
         info!("Capture device supports rate adjust");
         if params.samplerate == params.capture_samplerate && resampler.is_some() {
-            warn!("Needless 1:1 sample rate conversion active. Not needed since capture device supports rate adjust");
+            warn!(
+                "Needless 1:1 sample rate conversion active. Not needed since capture device supports rate adjust"
+            );
         } else if params.async_src && resampler.is_some() {
-            warn!("Async resampler is used but not needed since capture device supports rate adjust. Consider switching to Synchronous type to save CPU time.");
+            warn!(
+                "Async resampler is used but not needed since capture device supports rate adjust. Consider switching to Synchronous type to save CPU time."
+            );
         }
     }
 

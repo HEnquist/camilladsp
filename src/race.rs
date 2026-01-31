@@ -16,6 +16,8 @@
 
 // RACE, recursive ambiophonic crosstalk eliminator
 
+use crate::PrcFmt;
+use crate::Res;
 use crate::audiodevice::AudioChunk;
 use crate::basicfilters::Delay;
 use crate::basicfilters::Gain;
@@ -24,8 +26,6 @@ use crate::config::DelayParameters;
 use crate::config::GainParameters;
 use crate::filters::Filter;
 use crate::filters::Processor;
-use crate::PrcFmt;
-use crate::Res;
 
 //#[derive(Debug)]
 pub struct RACE {
@@ -73,8 +73,17 @@ impl RACE {
         let name = name.to_string();
         let channels = config.channels;
 
-        debug!("Creating RACE '{}', channels: {}, channel_a: {}, channel_b: {}, delay: {} {:?}, subsample: {}, attenuation: {}",
-                name, channels, config.channel_a, config.channel_b, config.delay, config.delay_unit(), config.subsample_delay(), config.attenuation);
+        debug!(
+            "Creating RACE '{}', channels: {}, channel_a: {}, channel_b: {}, delay: {} {:?}, subsample: {}, attenuation: {}",
+            name,
+            channels,
+            config.channel_a,
+            config.channel_b,
+            config.delay,
+            config.delay_unit(),
+            config.subsample_delay(),
+            config.attenuation
+        );
         let delayconf = delay_config(&config, samplerate);
         let delay_a = Delay::from_config("Delay A", samplerate, delayconf.clone());
         let delay_b = Delay::from_config("Delay B", samplerate, delayconf);
@@ -154,8 +163,17 @@ impl Processor for RACE {
             self.channel_a = config.channel_a.min(config.channel_b);
             self.channel_b = config.channel_a.max(config.channel_b);
 
-            debug!("Updating RACE '{}', channels: {}, channel_a: {}, channel_b: {}, delay: {} {:?}, subsample: {}, attenuation: {}",
-                self.name, self.channels, config.channel_a, config.channel_b, config.delay, config.delay_unit(), config.subsample_delay(), config.attenuation);
+            debug!(
+                "Updating RACE '{}', channels: {}, channel_a: {}, channel_b: {}, delay: {} {:?}, subsample: {}, attenuation: {}",
+                self.name,
+                self.channels,
+                config.channel_a,
+                config.channel_b,
+                config.delay,
+                config.delay_unit(),
+                config.subsample_delay(),
+                config.attenuation
+            );
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");

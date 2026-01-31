@@ -91,8 +91,7 @@ impl DiffEq {
             if x.is_subnormal() {
                 trace!(
                     "DiffEq filter '{}', flushing subnormal x at index {}",
-                    self.name,
-                    n
+                    self.name, n
                 );
                 *x = 0.0;
             }
@@ -101,8 +100,7 @@ impl DiffEq {
             if y.is_subnormal() {
                 trace!(
                     "DiffEq filter '{}', flushing subnormal y at index {}",
-                    self.name,
-                    n
+                    self.name, n
                 );
                 *y = 0.0;
             }
@@ -143,9 +141,9 @@ pub fn validate_config(_parameters: &config::DiffEqParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::PrcFmt;
     use crate::diffeq::DiffEq;
     use crate::filters::Filter;
-    use crate::PrcFmt;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{left} - {right}");

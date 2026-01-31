@@ -387,14 +387,18 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
 pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     // Use `capture_samplerate` from config if given, and resampling is enabled.
     // Else, use `samplerate`.
-    let capture_samplerate = if conf.capture_samplerate.is_some() && conf.resampler.is_some() {
-        conf.capture_samplerate.unwrap()
+    let capture_samplerate = if let Some(capture_rate) = conf.capture_samplerate
+        && conf.resampler.is_some()
+    {
+        capture_rate
     } else {
         conf.samplerate
     };
     if let Some(cr) = conf.capture_samplerate {
         if cr != conf.samplerate && conf.resampler.is_none() {
-            warn!("Resampling is disabled and capture_samplerate is different than samplerate, ignoring capture_samplerate.");
+            warn!(
+                "Resampling is disabled and capture_samplerate is different than samplerate, ignoring capture_samplerate."
+            );
         }
     }
     let diff_rates = capture_samplerate != conf.samplerate;
@@ -408,13 +412,17 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         && !conf.rate_adjust()
         && matches!(&conf.resampler, Some(config::Resampler::AsyncSinc { .. }))
     {
-        info!("Using AsyncSinc resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time.");
+        info!(
+            "Using AsyncSinc resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time."
+        );
     } else if diff_rates
         && conf.resampler.is_some()
         && !conf.rate_adjust()
         && matches!(&conf.resampler, Some(config::Resampler::AsyncPoly { .. }))
     {
-        info!("Using AsyncPoly resampler for synchronous resampling. Consider switching to \"Synchronous\" to increase resampling quality.");
+        info!(
+            "Using AsyncPoly resampler for synchronous resampling. Consider switching to \"Synchronous\" to increase resampling quality."
+        );
     }
     match conf.capture {
         #[cfg(target_os = "linux")]
@@ -617,7 +625,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
 
 #[cfg(test)]
 mod tests {
-    use crate::audiodevice::{rms_and_peak, AudioChunk, ChunkStats};
+    use crate::audiodevice::{AudioChunk, ChunkStats, rms_and_peak};
 
     #[test]
     fn vec_rms_and_peak() {

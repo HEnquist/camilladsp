@@ -1,12 +1,12 @@
 extern crate criterion;
-use criterion::{criterion_group, criterion_main, Bencher, BenchmarkId, Criterion};
+use criterion::{Bencher, BenchmarkId, Criterion, criterion_group, criterion_main};
 extern crate camillalib;
 
+use camillalib::PrcFmt;
 use camillalib::biquad::{Biquad, BiquadCoefficients};
 use camillalib::diffeq::DiffEq;
 use camillalib::fftconv::FftConv;
 use camillalib::filters::Filter;
-use camillalib::PrcFmt;
 
 /// Bench a single convolution
 fn run_conv(b: &mut Bencher, len: usize, chunksize: usize) {

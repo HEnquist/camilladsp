@@ -14,13 +14,13 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::PrcFmt;
+use crate::Res;
 use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::container_from_stash;
 use crate::recycle_chunk;
 use crate::vec_from_stash;
-use crate::PrcFmt;
-use crate::Res;
 
 #[derive(Clone)]
 pub struct Mixer {

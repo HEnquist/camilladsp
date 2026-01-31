@@ -21,7 +21,7 @@
 
 #[cfg(all(target_arch = "x86_64", not(feature = "32bit")))]
 use std::arch::x86_64::{
-    _mm_add_pd, _mm_load1_pd, _mm_load_sd, _mm_loadh_pd, _mm_mul_pd, _mm_mul_sd, _mm_shuffle_pd,
+    _mm_add_pd, _mm_load_sd, _mm_load1_pd, _mm_loadh_pd, _mm_mul_pd, _mm_mul_sd, _mm_shuffle_pd,
     _mm_storeh_pd, _mm_storel_pd, _mm_sub_pd, _mm_unpacklo_pd,
 };
 
@@ -635,12 +635,12 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 
 #[cfg(test)]
 mod tests {
-    use crate::biquad::{validate_config, Biquad, BiquadCoefficients};
+    use crate::PrcFmt;
+    use crate::biquad::{Biquad, BiquadCoefficients, validate_config};
     use crate::config::{
         BiquadParameters, GeneralNotchParams, NotchWidth, PeakingWidth, ShelfSteepness,
     };
     use crate::filters::Filter;
-    use crate::PrcFmt;
     use num_complex::Complex;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {

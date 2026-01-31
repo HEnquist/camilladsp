@@ -16,9 +16,9 @@
 
 use std::sync::Arc;
 
+use ringbuf::LocalRb;
 use ringbuf::storage::Heap;
 use ringbuf::traits::*;
-use ringbuf::LocalRb;
 
 use crate::audiodevice::AudioChunk;
 use crate::biquad::{Biquad, BiquadCoefficients};
@@ -156,18 +156,14 @@ impl Volume {
             if self.ramptime_in_chunks > 0 {
                 trace!(
                     "starting ramp: {} -> {}, mute: {}",
-                    self.current_volume,
-                    target_volume,
-                    shared_mute
+                    self.current_volume, target_volume, shared_mute
                 );
                 self.ramp_start = self.current_volume;
                 self.ramp_step = 1;
             } else {
                 trace!(
                     "switch volume without ramp: {} -> {}, mute: {}",
-                    self.current_volume,
-                    target_volume,
-                    shared_mute
+                    self.current_volume, target_volume, shared_mute
                 );
                 self.current_volume = if shared_mute {
                     0.0
@@ -505,9 +501,9 @@ pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::PrcFmt;
     use crate::basicfilters::{Delay, Gain};
     use crate::filters::Filter;
-    use crate::PrcFmt;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{left} - {right}");

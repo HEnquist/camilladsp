@@ -2,9 +2,9 @@
 name = "CamillaDSP"
 version = "4.0.0-draft"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
-edition = "2021"
+edition = "2024"
 description = "A flexible tool for processing audio"
-rust-version = "1.74"
+rust-version = "1.85"
 license = "GPL-3.0-only OR MPL-2.0"
 
 [features]

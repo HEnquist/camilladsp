@@ -20,10 +20,10 @@ use crate::config::{BinarySampleFormat, ConfigError, WasapiSampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::helpers::PIRateController;
-use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
+use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded, unbounded};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::wrap::caching::Caching;
-use ringbuf::{traits::*, HeapRb};
+use ringbuf::{HeapRb, traits::*};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -37,13 +37,13 @@ use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 
-use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
+use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus};
 enum DeviceState {
     Ok,
@@ -203,8 +203,8 @@ fn get_supported_wave_format(
                 }
                 Ok(Some(modified)) => {
                     let msg = format!(
-                    "Device doesn't support format:\n{wave_format:#?}\nClosest match is:\n{modified:#?}"
-                );
+                        "Device doesn't support format:\n{wave_format:#?}\nClosest match is:\n{modified:#?}"
+                    );
                     Err(ConfigError::new(&msg).into())
                 }
                 Err(err) => {
@@ -289,7 +289,9 @@ fn get_device_id_and_format(
             return Ok((dev_id, binary_format, wave_format));
         }
     }
-    let msg = format!("Unable to find a supported sample format for {direction_name} with {channels} channels at {samplerate} Hz.");
+    let msg = format!(
+        "Unable to find a supported sample format for {direction_name} with {channels} channels at {samplerate} Hz."
+    );
     Err(ConfigError::new(&msg).into())
 }
 
@@ -492,7 +494,9 @@ fn playback_loop(
                         } else {
                             warn!("Restarting playback after buffer underrun.");
                         }
-                        debug!("Playback, inserting {target_level} silent frames to reach target delay.");
+                        debug!(
+                            "Playback, inserting {target_level} silent frames to reach target delay."
+                        );
                         for _ in 0..(blockalign * target_level) {
                             sample_queue.push_back(0);
                         }

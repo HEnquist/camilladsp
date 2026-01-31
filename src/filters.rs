@@ -659,10 +659,10 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::PrcFmt;
     use crate::config::FileSampleFormat;
     use crate::filters::read_wav;
     use crate::filters::{pad_vector, read_coeff_file};
-    use crate::PrcFmt;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{} - {} = {}", left, right, left - right);

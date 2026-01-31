@@ -14,10 +14,10 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::ProcessingParameters;
 use crate::audiodevice::*;
 use crate::config;
 use crate::filters;
-use crate::ProcessingParameters;
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };

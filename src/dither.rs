@@ -14,13 +14,13 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::{SeedableRng, rngs::SmallRng};
 use rand_distr::{Distribution, Triangular, Uniform};
+use ringbuf::LocalRb;
 use ringbuf::storage::Heap;
 use ringbuf::traits::*;
-use ringbuf::LocalRb;
 
-use crate::{config, filters::Filter, NewValue, PrcFmt, Res};
+use crate::{NewValue, PrcFmt, Res, config, filters::Filter};
 
 // lifetime `'a` to guarantee that `ditherer` and `shaper`
 // will live as long as this `Dither`.
@@ -762,7 +762,7 @@ impl Default for NoopDitherer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{config::DitherParameters, dither::Dither, filters::Filter, PrcFmt};
+    use crate::{PrcFmt, config::DitherParameters, dither::Dither, filters::Filter};
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{left} - {right}");

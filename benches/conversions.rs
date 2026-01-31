@@ -1,6 +1,6 @@
 extern crate criterion;
 use camillalib::{recycle_chunk, vec_from_stash};
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 extern crate camillalib;
 
 use camillalib::audiodevice::AudioChunk;

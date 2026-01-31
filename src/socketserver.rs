@@ -27,22 +27,22 @@ use std::fs::File;
 #[cfg(feature = "secure-websocket")]
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
-use tungstenite::accept;
 use tungstenite::Message;
 use tungstenite::WebSocket;
+use tungstenite::accept;
 
-use crate::helpers::linear_to_db;
 use crate::ProcessingState;
 use crate::Res;
-use crate::{config, ControllerMessage};
+use crate::helpers::linear_to_db;
 use crate::{
-    list_available_devices, list_supported_devices, CaptureStatus, PlaybackStatus,
-    ProcessingParameters, ProcessingStatus, StopReason,
+    CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus, StopReason,
+    list_available_devices, list_supported_devices,
 };
+use crate::{ControllerMessage, config};
 
 #[derive(Debug, Clone)]
 pub struct SharedData {
@@ -643,39 +643,39 @@ fn handle_command(
             let cfg_path = shared_data_inst.active_config_path.lock().clone();
             match cfg_path {
                 Some(path) => match config::load_config(path.as_str()) {
-                    Ok(mut conf) => {
-                        match config::validate_config(&mut conf, Some(path.as_str())) {
-                            Ok(()) => {
-                                debug!("WS: Config file loaded successfully, send to controller");
-                                match shared_data_inst
-                                    .command_sender
-                                    .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
-                                {
-                                    Ok(()) => Some(WsReply::Reload {
-                                        result: WsResult::Ok,
-                                    }),
-                                    Err(TrySendError::Full(_)) => {
-                                        debug!("Error sending reload message, too many requests");
-                                        Some(WsReply::Reload {
-                                            result: WsResult::RateLimitExceededError,
-                                        })
-                                    }
-                                    Err(TrySendError::Disconnected(_)) => {
-                                        debug!("Error sending reload message, channel was disconnected");
-                                        Some(WsReply::Reload {
-                                            result: WsResult::ShutdownInProgressError,
-                                        })
-                                    }
+                    Ok(mut conf) => match config::validate_config(&mut conf, Some(path.as_str())) {
+                        Ok(()) => {
+                            debug!("WS: Config file loaded successfully, send to controller");
+                            match shared_data_inst
+                                .command_sender
+                                .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                            {
+                                Ok(()) => Some(WsReply::Reload {
+                                    result: WsResult::Ok,
+                                }),
+                                Err(TrySendError::Full(_)) => {
+                                    debug!("Error sending reload message, too many requests");
+                                    Some(WsReply::Reload {
+                                        result: WsResult::RateLimitExceededError,
+                                    })
+                                }
+                                Err(TrySendError::Disconnected(_)) => {
+                                    debug!(
+                                        "Error sending reload message, channel was disconnected"
+                                    );
+                                    Some(WsReply::Reload {
+                                        result: WsResult::ShutdownInProgressError,
+                                    })
                                 }
                             }
-                            Err(err) => {
-                                debug!("Invalid config file: {err}");
-                                Some(WsReply::Reload {
-                                    result: WsResult::ConfigReadError(err.to_string()),
-                                })
-                            }
                         }
-                    }
+                        Err(err) => {
+                            debug!("Invalid config file: {err}");
+                            Some(WsReply::Reload {
+                                result: WsResult::ConfigReadError(err.to_string()),
+                            })
+                        }
+                    },
                     Err(err) => {
                         debug!("Config file validation error: {err}");
                         Some(WsReply::Reload {
@@ -1861,7 +1861,7 @@ fn capture_signal_rms(shared_data: &SharedData) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
-    use crate::socketserver::{parse_command, WsCommand};
+    use crate::socketserver::{WsCommand, parse_command};
     use tungstenite::Message;
 
     #[test]

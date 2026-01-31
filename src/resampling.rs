@@ -1,14 +1,14 @@
+use crate::PrcFmt;
 use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::recycle_container;
 use crate::vec_from_stash;
-use crate::PrcFmt;
 use audioadapter_buffers::direct::{
     InterleavedSlice, SequentialSliceOfVecs, SparseSequentialSliceOfVecs,
 };
 use rubato::{
-    calculate_cutoff, Async, Fft, FixedAsync, FixedSync, Indexing, PolynomialDegree, Resampler,
-    SincInterpolationParameters, SincInterpolationType, WindowFunction,
+    Async, Fft, FixedAsync, FixedSync, Indexing, PolynomialDegree, Resampler,
+    SincInterpolationParameters, SincInterpolationType, WindowFunction, calculate_cutoff,
 };
 
 pub struct ChunkResampler {

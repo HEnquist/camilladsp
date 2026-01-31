@@ -17,9 +17,9 @@
 use std::io;
 use std::io::Read;
 use std::os::unix::io::{AsRawFd, RawFd};
+use zbus::Message;
 use zbus::blocking::Connection;
 use zbus::zvariant::OwnedFd;
-use zbus::Message;
 
 use crate::filereader_nonblock::NonBlockingReader;
 

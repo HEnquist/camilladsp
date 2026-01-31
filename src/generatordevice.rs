@@ -23,7 +23,7 @@ use std::thread;
 
 use parking_lot::RwLock;
 
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::{SeedableRng, rngs::SmallRng};
 use rand_distr::{Distribution, Uniform};
 
 use crate::CaptureStatus;

@@ -63,8 +63,8 @@ use serde::Serialize;
 use std::error;
 use std::fmt;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU32, Ordering},
     Arc,
+    atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
 // Logging macros to give extra logs

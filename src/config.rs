@@ -19,9 +19,9 @@ use crate::filters;
 use crate::mixer;
 use crate::noisegate;
 use crate::race;
-use crate::wavtools::{find_data_in_wav_stream, WavParams};
+use crate::wavtools::{WavParams, find_data_in_wav_stream};
 use parking_lot::RwLock;
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de};
 //use serde_with;
 use std::collections::HashMap;
 use std::error;
@@ -1714,7 +1714,10 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                 overrides.channels = Some(wav_info.channels);
                 overrides.sample_format = Some(wav_info.sample_format);
                 overrides.samplerate = Some(wav_info.sample_rate);
-                debug!("Updating overrides with values from wav input file, rate {}, format: {}, channels: {}", wav_info.sample_rate, wav_info.sample_format, wav_info.channels);
+                debug!(
+                    "Updating overrides with values from wav input file, rate {}, format: {}, channels: {}",
+                    wav_info.sample_rate, wav_info.sample_format, wav_info.channels
+                );
             }
         }
         _ => {}

@@ -20,15 +20,15 @@ use crate::config::{BinarySampleFormat, ConfigError, CoreAudioSampleFormat};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::countertimer;
 use crate::helpers::PIRateController;
-use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
-use crossbeam_channel::{bounded, TryRecvError, TrySendError};
+use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
+use crossbeam_channel::{TryRecvError, TrySendError, bounded};
 use dispatch::Semaphore;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
-use ringbuf::{traits::*, HeapRb};
+use ringbuf::{HeapRb, traits::*};
 use std::collections::VecDeque;
 use std::mem;
 use std::os::raw::c_void;
-use std::ptr::{null, null_mut, NonNull};
+use std::ptr::{NonNull, null, null_mut};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
@@ -36,10 +36,10 @@ use std::time::Duration;
 
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
-    audio_unit_from_device_id, find_matching_physical_format, get_audio_device_ids,
-    get_audio_device_supports_scope, get_default_device_id, get_device_name, get_hogging_pid,
-    get_supported_physical_stream_formats, set_device_physical_stream_format,
-    set_device_sample_rate, toggle_hog_mode, AliveListener, RateListener,
+    AliveListener, RateListener, audio_unit_from_device_id, find_matching_physical_format,
+    get_audio_device_ids, get_audio_device_supports_scope, get_default_device_id, get_device_name,
+    get_hogging_pid, get_supported_physical_stream_formats, set_device_physical_stream_format,
+    set_device_sample_rate, toggle_hog_mode,
 };
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{AudioUnit, Element, Scope, StreamFormat};
@@ -49,13 +49,13 @@ use coreaudio::error::Error as CoreAudioError;
 use libc::pid_t;
 use objc2_audio_toolbox::{kAudioCodecUnknownPropertyError, kAudioUnitProperty_StreamFormat};
 use objc2_core_audio::{
-    kAudioDevicePropertyClockSource, kAudioDevicePropertyClockSourceNameForIDCFString,
-    kAudioDevicePropertyClockSources, kAudioDevicePropertyStereoPan,
-    kAudioDevicePropertyStreamConfiguration, kAudioHardwareNoError,
+    AudioDeviceID, AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize,
+    AudioObjectPropertyAddress, AudioObjectSetPropertyData, kAudioDevicePropertyClockSource,
+    kAudioDevicePropertyClockSourceNameForIDCFString, kAudioDevicePropertyClockSources,
+    kAudioDevicePropertyStereoPan, kAudioDevicePropertyStreamConfiguration, kAudioHardwareNoError,
     kAudioObjectPropertyElementMain, kAudioObjectPropertyElementWildcard,
     kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput,
-    kAudioObjectPropertyScopeOutput, AudioDeviceID, AudioObjectGetPropertyData,
-    AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress, AudioObjectSetPropertyData,
+    kAudioObjectPropertyScopeOutput,
 };
 use objc2_core_audio_types::{AudioBuffer, AudioValueTranslation};
 use objc2_core_foundation::CFString;

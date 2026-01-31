@@ -39,7 +39,7 @@ extern crate flexi_logger;
 #[macro_use]
 extern crate log;
 
-use clap::{crate_authors, crate_description, crate_name, crate_version, Arg, ArgAction, Command};
+use clap::{Arg, ArgAction, Command, crate_authors, crate_description, crate_name, crate_version};
 use crossbeam_channel::select;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::env;
@@ -52,14 +52,15 @@ use std::time::Duration;
 use flexi_logger::DeferredNow;
 use log::Record;
 #[cfg(not(windows))]
-use signal_hook::consts::signal::*;
-#[cfg(not(windows))]
 use signal_hook::consts::TERM_SIGNALS;
 #[cfg(not(windows))]
-use signal_hook::iterator::{exfiltrator::SignalOnly, SignalsInfo};
+use signal_hook::consts::signal::*;
+#[cfg(not(windows))]
+use signal_hook::iterator::{SignalsInfo, exfiltrator::SignalOnly};
 
 use camillalib::Res;
 
+use camillalib::ControllerMessage;
 use camillalib::audiodevice;
 use camillalib::config;
 use camillalib::countertimer;
@@ -67,14 +68,13 @@ use camillalib::processing;
 #[cfg(feature = "websocket")]
 use camillalib::socketserver;
 use camillalib::statefile;
-use camillalib::ControllerMessage;
 #[cfg(feature = "websocket")]
 use std::net::IpAddr;
 
 use camillalib::{
-    list_supported_devices, CaptureStatus, CommandMessage, ExitState, PlaybackStatus,
-    ProcessingParameters, ProcessingState, ProcessingStatus, SharedConfigs, StatusMessage,
-    StatusStructs, StopReason,
+    CaptureStatus, CommandMessage, ExitState, PlaybackStatus, ProcessingParameters,
+    ProcessingState, ProcessingStatus, SharedConfigs, StatusMessage, StatusStructs, StopReason,
+    list_supported_devices,
 };
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
@@ -1147,19 +1147,21 @@ fn main_process() -> i32 {
         if let Some(fname) = &statefilename {
             let fname = fname.clone();
 
-            thread::spawn(move || loop {
-                thread::sleep(Duration::from_millis(1000));
-                match rx_state.recv() {
-                    Ok(()) => {
-                        debug!("saving state to {}", &fname);
-                        statefile::save_state(
-                            &fname,
-                            &active_config_path_clone,
-                            &processing_params_clone,
-                            &unsaved_state_changes,
-                        );
+            thread::spawn(move || {
+                loop {
+                    thread::sleep(Duration::from_millis(1000));
+                    match rx_state.recv() {
+                        Ok(()) => {
+                            debug!("saving state to {}", &fname);
+                            statefile::save_state(
+                                &fname,
+                                &active_config_path_clone,
+                                &processing_params_clone,
+                                &unsaved_state_changes,
+                            );
+                        }
+                        Err(_) => break,
                     }
-                    Err(_) => break,
                 }
             });
         }
@@ -1176,7 +1178,9 @@ fn main_process() -> i32 {
             }
             if !wait && !has_commands {
                 if !has_config {
-                    debug!("Wait mode is disabled, there are no queued commands, and no new config. Exiting.");
+                    debug!(
+                        "Wait mode is disabled, there are no queued commands, and no new config. Exiting."
+                    );
                     return EXIT_OK;
                 }
                 debug!("Wait mode is disabled and there are no queued commands, continuing");

@@ -14,12 +14,12 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::PrcFmt;
+use crate::Res;
 use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::filters::Processor;
 use crate::limiter::Limiter;
-use crate::PrcFmt;
-use crate::Res;
 
 #[derive(Clone, Debug)]
 pub struct Compressor {
@@ -69,8 +69,20 @@ impl Compressor {
 
         let scratch = vec![0.0; chunksize];
 
-        debug!("Creating compressor '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}", 
-                name, channels, process_channels, monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain(), config.soft_clip(), clip_limit);
+        debug!(
+            "Creating compressor '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
+            name,
+            channels,
+            process_channels,
+            monitor_channels,
+            attack,
+            release,
+            config.threshold,
+            config.factor,
+            config.makeup_gain(),
+            config.soft_clip(),
+            clip_limit
+        );
         let limiter = if let Some(limit) = config.clip_limit {
             let limitconf = config::LimiterParameters {
                 clip_limit: limit,
@@ -210,8 +222,19 @@ impl Processor for Compressor {
             self.makeup_gain = config.makeup_gain();
             self.limiter = limiter;
 
-            debug!("Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}", 
-                self.name, self.process_channels, self.monitor_channels, attack, release, config.threshold, config.factor, config.makeup_gain(), config.soft_clip(), clip_limit);
+            debug!(
+                "Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
+                self.name,
+                self.process_channels,
+                self.monitor_channels,
+                attack,
+                release,
+                config.threshold,
+                config.factor,
+                config.makeup_gain(),
+                config.soft_clip(),
+                clip_limit
+            );
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");

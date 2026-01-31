@@ -21,8 +21,8 @@ use std::fmt::Debug;
 use std::thread;
 use std::time::Duration;
 
-use crate::config;
 use crate::Res;
+use crate::config;
 
 pub trait DeviceBufferManager {
     // intended for internal use
@@ -112,8 +112,10 @@ pub trait DeviceBufferManager {
         let data = self.data_mut();
         // maximum timing safety - headroom for one io_size only
         if data.io_size > data.bufsize {
-            let msg = format!("Trying to set avail_min to {}, must be smaller than or equal to device buffer size of {}",
-                data.io_size, data.bufsize);
+            let msg = format!(
+                "Trying to set avail_min to {}, must be smaller than or equal to device buffer size of {}",
+                data.io_size, data.bufsize
+            );
             error!("{msg}");
             return Err(config::ConfigError::new(&msg).into());
         }
@@ -228,8 +230,7 @@ impl PlaybackBufferManager {
         let sleep_millis = (self.target_level as f32 * millis_per_frame) as u64;
         trace!(
             "Sleeping for {} frames = {} ms",
-            self.target_level,
-            sleep_millis
+            self.target_level, sleep_millis
         );
         thread::sleep(Duration::from_millis(sleep_millis));
     }
