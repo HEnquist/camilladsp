@@ -364,7 +364,7 @@ filters:
 pipeline:
   - type: Filter
     description: "Pre-mixer filters"
-    channela: [0, 1]
+    channels: [0, 1]
     names:
       - bafflestep
   - type: Mixer
