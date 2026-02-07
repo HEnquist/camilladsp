@@ -71,8 +71,8 @@ tungstenite = { version = "0.26.1", optional = true }
 native-tls = { version = "0.2.7", optional = true }
 libpulse-binding = { version = "2.0", optional = true }
 libpulse-simple-binding = { version = "2.0", optional = true }
-#rubato = { version = "1.0.0-preview.2", path = "../rubato" }
-rubato = { git = "https://github.com/HEnquist/rubato", branch = "preview_1.0" }
+rubato = "1.0"
+#rubato = { git = "https://github.com/HEnquist/rubato", branch = "preview_1.0" }
 cpal = { version = "0.16.0", optional = true }
 parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
 crossbeam-channel = "0.5"
