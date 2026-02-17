@@ -233,9 +233,9 @@ fn run(
                                 if tx_command_cap.send(CommandMessage::Exit).is_err() {
                                     debug!("Capture thread has already exited");
                                 }
-                                trace!("Wait for pb..");
+                                trace!("Wait for playback thread to exit..");
                                 pb_handle.join().unwrap();
-                                trace!("Wait for cap..");
+                                trace!("Wait for capture thread to exit..");
                                 cap_handle.join().unwrap();
                                 *shared_configs.active.lock() = Some(*new_conf);
                                 trace!("All threads stopped, returning");
@@ -251,9 +251,9 @@ fn run(
                         if tx_command_cap.send(CommandMessage::Exit).is_err() {
                             debug!("Capture thread has already exited");
                         }
-                        trace!("Wait for pb..");
+                        trace!("Wait for playback thread to exit..");
                         pb_handle.join().unwrap();
-                        trace!("Wait for cap..");
+                        trace!("Wait for capture thread to exit..");
                         cap_handle.join().unwrap();
                         {
                             let mut active_cfg_shared = shared_configs.active.lock();
@@ -269,9 +269,9 @@ fn run(
                         if tx_command_cap.send(CommandMessage::Exit).is_err() {
                             debug!("Capture thread has already exited");
                         }
-                        trace!("Wait for pb..");
+                        trace!("Wait for playback thread to exit..");
                         pb_handle.join().unwrap();
-                        trace!("Wait for cap..");
+                        trace!("Wait for capture thread to exit..");
                         cap_handle.join().unwrap();
                         *shared_configs.previous.lock() = Some(active_config);
                         trace!("All threads stopped, exiting");
@@ -373,9 +373,9 @@ fn run(
                                 debug!("Error while starting, release barrier");
                                 barrier.wait();
                             }
-                            debug!("Wait for playback thread to exit..");
                             status_structs.status.write().stop_reason =
                                 StopReason::CaptureFormatChange(rate);
+                            debug!("Wait for playback thread to exit..");
                             pb_handle.join().unwrap();
                             {
                                 let mut active_cfg_shared = shared_configs.active.lock();
@@ -400,6 +400,10 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
+                            trace!("Wait for playback thread to exit..");
+                            pb_handle.join().unwrap();
+                            trace!("Wait for capture thread to exit..");
+                            cap_handle.join().unwrap();
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
