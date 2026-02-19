@@ -28,7 +28,7 @@ The CamillaDSP project encompasses:
 The CamillaDSP engine is a command-line application that runs on Linux, macOS, and Windows.
 
 Audio data is captured from a capture device and sent to a playback device.
-Alsa, PulseAudio, PipeWire, Jack, Wasapi and CoreAudio are currently supported for both capture and playback.
+Alsa, PulseAudio, PipeWire, Jack, Wasapi, ASIO and CoreAudio are currently supported for both capture and playback.
 
 The processing pipeline consists of any number of filters and mixers.
 Mixers are used to route audio between channels and to change the number of channels in the stream.
@@ -48,6 +48,17 @@ under the terms of either of the following licenses:
 2) the Mozilla Public License Version 2.0,
    available at [www.mozilla.org](https://www.mozilla.org/en-US/MPL/),
    or [LICENSE_MPL2.0.txt](LICENSE_MPL2.0.txt).
+
+## ASIO backend and license implications
+
+The optional ASIO backend (`asio-backend` feature) depends on the ASIO SDK,
+which is licensed under the GNU General Public License version 3.
+When CamillaDSP is built with the `asio-backend` feature enabled,
+the resulting binary is subject to the GPLv3 license only — the MPL 2.0
+option does not apply to binaries that include ASIO SDK code.
+
+Builds **without** the `asio-backend` feature remain available under
+either GPLv3 or MPL 2.0, at your choice.
 
 
 # Disclaimer
@@ -92,6 +103,7 @@ and the Mozilla Public License Version 2.0:
   - **[Jack](#jack)**
   - **[File or pipe](#file-or-pipe)**
 - **[Windows](#windows)**
+  - **[ASIO](#asio)**
 - **[MacOS (CoreAudio)](#macos-coreaudio)**
 - **[Linux](#linux)**
   - **[Alsa](#alsa)**
@@ -310,6 +322,7 @@ For Windows you also need the "Build Tools for Visual Studio". Get them from her
 
 When building on Linux the Alsa backend is always enabled.
 Similarly, building on Windows always enables the Wasapi backend.
+The optional ASIO backend can be enabled with the `asio-backend` feature (see [Customized build](#customized-build)).
 And building on macOS always enables the CoreAudio backend.
 
 By default both the PulseAudio and Jack backends are disabled, but they can be enabled if desired.
@@ -360,6 +373,7 @@ All the available options, or "features" are:
 - `pipewire-backend`: Native PipeWire support (Linux only).
 - `cpal-backend`: Used for Jack support (automatically enabled when needed).
 - `jack-backend`: Jack support (Linux only).
+- `asio-backend`: ASIO support (Windows only, requires the ASIO SDK).
 - `bluez-backend`: Bluetooth support via BlueALSA (Linux only).
 - `websocket`: Websocket server for control.
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
@@ -698,6 +712,39 @@ CamillaDSP will show up in Jack as "cpal_client_in" and "cpal_client_out".
 
 ## Windows
 See the [separate readme for Wasapi](./backend_wasapi.md).
+
+### ASIO
+The ASIO backend is an optional alternative audio backend for Windows.
+It provides low-latency access to audio devices via ASIO drivers.
+To use it, CamillaDSP must be compiled with the `asio-backend` feature enabled.
+
+Note that the ASIO backend is licensed under GPLv3 only, due to the ASIO SDK license requirements.
+See the [ASIO backend and license implications](#asio-backend-and-license-implications) section for details.
+
+Set the device `type` to `Asio` for both capture and playback.
+The `device` parameter should be set to the name of the ASIO driver to use.
+Available ASIO drivers are listed in the log output at startup (at debug level).
+
+The supported sample formats are:
+- `S16` - 16-bit signed integer
+- `S24` - 24-bit signed integer (in 32-bit container)
+- `S32` - 32-bit signed integer
+- `F32` - 32-bit float
+- `F64` - 64-bit float
+
+Example configuration:
+```yaml
+capture:
+  type: Asio
+  channels: 2
+  device: "My ASIO Driver"
+  format: S32
+playback:
+  type: Asio
+  channels: 2
+  device: "My ASIO Driver"
+  format: S32
+```
 
 ## MacOS (CoreAudio)
 See the [separate readme for CoreAudio](./backend_coreaudio.md).
@@ -1162,12 +1209,14 @@ A parameter marked (*) in any example is optional. If they are left out from the
     * `Bluez` (capture only)
     * `Jack`
     * `Wasapi`
+    * `Asio`
     * `CoreAudio`
     * `Alsa`
     * `Pulse`
   * `channels`: number of channels
-  * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `CoreAudio`).
+  * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `Asio`, `CoreAudio`).
      For `CoreAudio` and `Wasapi`, `null` will give the default device.
+     For `Asio`, use the ASIO driver name (see the log output at debug level for available drivers).
   * `filename` path to the file (for `File`, `RawFile` and `WavFile`)
   * `format`: sample format (for all except `Jack` and `Pulse`).
 
@@ -1182,7 +1231,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
     - [F32_LE](sample_formats.md#f32_le)
     - [F64_LE](sample_formats.md#f64_le)
 
-    For [ALSA](./backend_alsa.md), [CoreAudio](./backend_coreaudio.md) and [Wasapi](./backend_wasapi.md), see the respective backend documentation.
+    For [ALSA](./backend_alsa.md), [CoreAudio](./backend_coreaudio.md), [Wasapi](./backend_wasapi.md) and [ASIO](#asio), see the respective backend documentation.
 
     __Note that there are three different 24-bit formats! Make sure to select the correct one.__
 

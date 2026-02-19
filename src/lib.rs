@@ -124,6 +124,8 @@ pub mod alsadevice;
 pub mod alsadevice_buffermanager;
 #[cfg(target_os = "linux")]
 pub mod alsadevice_utils;
+#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+pub mod asiodevice;
 pub mod audiodevice;
 pub mod basicfilters;
 pub mod biquad;
