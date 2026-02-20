@@ -24,8 +24,9 @@ use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{HeapRb, traits::*};
 
 use asio_sys::bindings::asio_import::{
-    ASIOBufferInfo, ASIOCallbacks, ASIOChannelInfo, ASIOCreateBuffers, ASIODriverInfo,
-    ASIOGetBufferSize, ASIOGetChannelInfo, ASIOGetChannels, ASIOInit, ASIOStart, ASIOStop,
+    ASIOBufferInfo, ASIOCallbacks, ASIOChannelInfo, ASIOCreateBuffers, ASIODisposeBuffers,
+    ASIODriverInfo, ASIOGetBufferSize, ASIOGetChannelInfo, ASIOGetChannels, ASIOExit, ASIOInit,
+    ASIOStart, ASIOStop, can_sample_rate, get_sample_rate, set_sample_rate,
 };
 
 use crate::CommandMessage;
@@ -345,7 +346,7 @@ pub unsafe extern "C" fn buffer_switch_combined(buffer_index: i32, direct_proces
 /// Initialize the shared ASIO driver state.
 /// The first caller loads and initialises the driver. Subsequent callers for the same driver
 /// reuse the existing state. Returns (num_inputs, num_outputs, preferred_buf_size).
-fn init_shared_asio(devname: &str) -> Result<(i32, i32, i32), ConfigError> {
+fn init_shared_asio(devname: &str, samplerate: usize) -> Result<(i32, i32, i32), ConfigError> {
     let (mutex, _condvar) = ASIO_SHARED.get_or_init(|| (Mutex::new(None), Condvar::new()));
     let mut guard = mutex.lock().unwrap();
 
@@ -363,7 +364,7 @@ fn init_shared_asio(devname: &str) -> Result<(i32, i32, i32), ConfigError> {
         ))
     } else {
         // First caller — load and initialise the driver
-        let (num_inputs, num_outputs) = open_asio_device(devname)?;
+        let (num_inputs, num_outputs) = open_asio_device(devname, samplerate)?;
 
         // Query preferred buffer size
         let mut min_buf: i32 = 0;
@@ -516,6 +517,11 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
 
 /// Decrement the active-sides counter. When it reaches zero, stop the ASIO stream
 /// and clear the shared state so a fresh session can be started later.
+///
+/// Both context pointers are nulled before `ASIOStop()` is called so that even a
+/// late-arriving callback (possible on some drivers) sees null and returns harmlessly.
+/// By the time either thread enters cleanup, both have exited their main loops, so
+/// the contexts are only accessed from callbacks.
 fn release_shared_asio() {
     let Some((mutex, _condvar)) = ASIO_SHARED.get() else {
         return;
@@ -523,9 +529,18 @@ fn release_shared_asio() {
     let mut guard = mutex.lock().unwrap();
     if let Some(ref mut shared) = *guard {
         shared.active_count = shared.active_count.saturating_sub(1);
-        if shared.active_count == 0 {
-            debug!("Last ASIO side exiting, stopping stream.");
+        if shared.active_count == 1 {
+            // First side to exit — null both context pointers, then stop the stream.
+            debug!("First ASIO side exiting, stopping stream.");
+            PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+            CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
             let _ = unsafe { ASIOStop() };
+        } else if shared.active_count == 0 {
+            // Last side to exit — dispose buffers and the driver.
+            // The stream was already stopped by the first side.
+            debug!("Last ASIO side exiting, disposing driver.");
+            let _ = unsafe { ASIODisposeBuffers() };
+            let _ = unsafe { ASIOExit() };
             *guard = None; // Reset for next session
         }
     }
@@ -711,9 +726,160 @@ pub fn load_driver_by_name(name: &str) -> Result<(), ConfigError> {
     }
 }
 
-/// Open an ASIO device: load driver, init, query channels.
+/// Force an ASIO sample rate change by running a short dummy stream cycle.
+///
+/// Some ASIO drivers (e.g. Steinberg) only reconfigure the hardware sample rate
+/// after a complete buffer-creation cycle.  This helper performs:
+///   1. Query channels and buffer sizes
+///   2. Create minimal (1-channel) buffers
+///   3. Start the stream briefly
+///   4. Stop, dispose buffers, and exit the driver
+///   5. Re-load and re-initialise the driver
+///   6. Set the rate again and verify
+///
+/// On return the driver is loaded, initialised and running at the requested rate,
+/// ready for `ASIOGetChannels` / `ASIOGetBufferSize` / `ASIOCreateBuffers`.
+fn force_sample_rate_with_dummy_cycle(devname: &str, rate: f64) -> Result<(), ConfigError> {
+    // --- Phase 1: run a dummy stream to force hardware reconfiguration ---
+    let mut num_in: i32 = 0;
+    let mut num_out: i32 = 0;
+    let ch_res = unsafe { ASIOGetChannels(&mut num_in, &mut num_out) };
+    if ch_res != 0 {
+        return Err(ConfigError::new(&format!(
+            "ASIOGetChannels failed during rate-change cycle (error code {ch_res})"
+        )));
+    }
+
+    let mut min_buf: i32 = 0;
+    let mut max_buf: i32 = 0;
+    let mut preferred_buf: i32 = 0;
+    let mut granularity: i32 = 0;
+    let buf_res = unsafe {
+        ASIOGetBufferSize(&mut min_buf, &mut max_buf, &mut preferred_buf, &mut granularity)
+    };
+    if buf_res != 0 {
+        return Err(ConfigError::new(&format!(
+            "ASIOGetBufferSize failed during rate-change cycle (error code {buf_res})"
+        )));
+    }
+
+    // Create a minimal set of buffers (one output channel, or one input if no outputs).
+    let is_input = num_out == 0;
+    let mut dummy_bufs = vec![ASIOBufferInfo {
+        isInput: if is_input { 1 } else { 0 },
+        channelNum: 0,
+        buffers: [ptr::null_mut(), ptr::null_mut()],
+    }];
+
+    /// Dummy callback that does nothing — we just need the stream to run briefly.
+    ///
+    /// # Safety
+    ///
+    /// Called by the ASIO driver from its audio thread.
+    unsafe extern "C" fn dummy_buffer_switch(_double_buffer_index: i32, _direct_process: i32) {}
+
+    /// Dummy message callback for the short-lived dummy stream.
+    ///
+    /// # Safety
+    ///
+    /// Called by the ASIO driver.
+    unsafe extern "C" fn dummy_asio_message(
+        selector: i32,
+        _value: i32,
+        _message: *mut std::ffi::c_void,
+        _opt: *mut f64,
+    ) -> i32 {
+        // kAsioSelectorSupported
+        if selector == 1 {
+            return 1;
+        }
+        0
+    }
+
+    let dummy_callbacks = Box::leak(Box::new(ASIOCallbacks {
+        bufferSwitch: Some(dummy_buffer_switch),
+        sampleRateDidChange: None,
+        asioMessage: Some(dummy_asio_message),
+        bufferSwitchTimeInfo: None,
+    }));
+
+    let create_res = unsafe {
+        ASIOCreateBuffers(
+            dummy_bufs.as_mut_ptr(),
+            1,
+            preferred_buf,
+            dummy_callbacks as *mut ASIOCallbacks,
+        )
+    };
+    if create_res != 0 {
+        // Clean up the leaked callbacks before returning
+        let _ = unsafe { Box::from_raw(dummy_callbacks) };
+        return Err(ConfigError::new(&format!(
+            "ASIOCreateBuffers failed during rate-change cycle (error code {create_res})"
+        )));
+    }
+
+    // Start and immediately stop — just enough to force hardware reconfiguration.
+    let start_res = unsafe { ASIOStart() };
+    if start_res != 0 {
+        let _ = unsafe { ASIODisposeBuffers() };
+        let _ = unsafe { Box::from_raw(dummy_callbacks) };
+        return Err(ConfigError::new(&format!(
+            "ASIOStart failed during rate-change cycle (error code {start_res})"
+        )));
+    }
+    // Give the driver a moment to reconfigure hardware
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let _ = unsafe { ASIOStop() };
+    let _ = unsafe { ASIODisposeBuffers() };
+    let _ = unsafe { Box::from_raw(dummy_callbacks) };
+
+    // --- Phase 2: full teardown and clean re-initialisation ---
+    let _ = unsafe { ASIOExit() };
+    load_driver_by_name(devname)?;
+    let mut driver_info = ASIODriverInfo {
+        asioVersion: 2,
+        driverVersion: 0,
+        name: [0; 32],
+        errorMessage: [0; 124],
+        sysRef: ptr::null_mut(),
+    };
+    let init_res = unsafe { ASIOInit(&mut driver_info) };
+    if init_res != 0 {
+        return Err(ConfigError::new(&format!(
+            "ASIOInit failed after rate-change cycle (error code {init_res})"
+        )));
+    }
+
+    // Set the rate on the fresh driver instance
+    let set_res = unsafe { set_sample_rate(rate) };
+    if set_res != 0 {
+        return Err(ConfigError::new(&format!(
+            "Failed to set sample rate after rate-change cycle (error code {set_res})"
+        )));
+    }
+
+    // Verify the rate
+    let mut verify: f64 = 0.0;
+    if unsafe { get_sample_rate(&mut verify) } == 0 {
+        debug!(
+            "ASIO sample rate after dummy-stream cycle: {verify} Hz (requested {rate} Hz)."
+        );
+        if (verify - rate).abs() > 0.5 {
+            return Err(ConfigError::new(&format!(
+                "ASIO sample rate is {verify} Hz after rate-change cycle, expected {rate} Hz. \
+                 The driver may require the rate to be set via its control panel."
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Open an ASIO device: load driver, init, set sample rate, query channels.
+/// The sample rate is set immediately after ASIOInit, before any other calls,
+/// because some ASIO drivers lock in the rate once channels or buffers are queried.
 /// Returns (num_inputs, num_outputs).
-pub fn open_asio_device(devname: &str) -> Result<(i32, i32), ConfigError> {
+pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), ConfigError> {
     let available = list_device_names();
     debug!("Available ASIO devices: {:?}", available);
     load_driver_by_name(devname)?;
@@ -736,6 +902,59 @@ pub fn open_asio_device(devname: &str) -> Result<(i32, i32), ConfigError> {
             "ASIOInit failed with error code {init_result}"
         )));
     }
+
+    // Log current sample rate before any changes
+    let mut current_rate: f64 = 0.0;
+    if unsafe { get_sample_rate(&mut current_rate) } == 0 {
+        debug!("ASIO current sample rate: {current_rate} Hz");
+    }
+
+    // Log supported sample rates
+    const COMMON_RATES: &[u32] = &[
+        8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000,
+        176400, 192000, 352800, 384000, 705600, 768000,
+    ];
+    let supported: Vec<u32> = COMMON_RATES
+        .iter()
+        .copied()
+        .filter(|&rate| unsafe { can_sample_rate(rate as f64) } == 0)
+        .collect();
+    debug!("ASIO supported sample rates: {:?}", supported);
+
+    // Set the requested sample rate IMMEDIATELY after ASIOInit, before ASIOGetChannels.
+    // Some drivers lock in the rate once channels or buffers are queried.
+    let rate = samplerate as f64;
+    if unsafe { can_sample_rate(rate) } != 0 {
+        return Err(ConfigError::new(&format!(
+            "ASIO device does not support sample rate {samplerate} Hz. Supported rates: {supported:?}"
+        )));
+    }
+
+    // Check if the rate is already correct
+    let already_correct = (current_rate - rate).abs() <= 0.5;
+
+    if already_correct {
+        debug!("ASIO sample rate already at {samplerate} Hz, no change needed.");
+    } else {
+        // Try setting on the current driver instance
+        let set_res = unsafe { set_sample_rate(rate) };
+        if set_res != 0 {
+            return Err(ConfigError::new(&format!(
+                "Failed to set ASIO sample rate to {samplerate} Hz (error code {set_res})"
+            )));
+        }
+
+        // Some ASIO drivers (e.g. Steinberg) don't truly apply the rate change
+        // until a full buffer-creation cycle has been performed.  Force this by
+        // running a brief dummy stream: CreateBuffers → Start → Stop → Dispose,
+        // then tear the driver down and re-initialise cleanly.
+        debug!(
+            "Forcing ASIO rate change to {samplerate} Hz via dummy stream cycle."
+        );
+        force_sample_rate_with_dummy_cycle(devname, rate)?;
+    }
+
+    // Query channels AFTER the sample rate has been set
     let mut num_inputs: i32 = 0;
     let mut num_outputs: i32 = 0;
     let ch_result = unsafe { ASIOGetChannels(&mut num_inputs, &mut num_outputs) };
@@ -859,9 +1078,10 @@ fn create_asio_buffers(
 fn open_asio_playback(
     devname: &str,
     num_channels: usize,
+    samplerate: usize,
     configured_format: &Option<AsioSampleFormat>,
 ) -> Result<(Vec<ASIOBufferInfo>, i32, AsioSampleFormat), ConfigError> {
-    let (_inputs, outputs) = open_asio_device(devname)?;
+    let (_inputs, outputs) = open_asio_device(devname, samplerate)?;
     if num_channels > outputs as usize {
         return Err(ConfigError::new(&format!(
             "Requested {num_channels} output channels but device only has {outputs}"
@@ -877,9 +1097,10 @@ fn open_asio_playback(
 fn open_asio_capture(
     devname: &str,
     num_channels: usize,
+    samplerate: usize,
     configured_format: &Option<AsioSampleFormat>,
 ) -> Result<(Vec<ASIOBufferInfo>, i32, AsioSampleFormat), ConfigError> {
-    let (inputs, _outputs) = open_asio_device(devname)?;
+    let (inputs, _outputs) = open_asio_device(devname, samplerate)?;
     if num_channels > inputs as usize {
         return Err(ConfigError::new(&format!(
             "Requested {num_channels} input channels but device only has {inputs}"
@@ -957,8 +1178,12 @@ impl PlaybackDevice for AsioPlaybackDevice {
             self.chunksize
         };
         let adjust_period = self.adjust_period;
-        let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
+        let mut adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
         let full_duplex = self.full_duplex;
+        if adjust && full_duplex {
+            warn!("Rate adjust is not supported in full-duplex ASIO mode. Disabling rate adjust.");
+            adjust = false;
+        }
 
         let handle = thread::Builder::new()
             .name("AsioPlayback".to_string())
@@ -988,7 +1213,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 // Format is resolved inside; bytes_per_sample depends on it.
                 let setup_result: Result<(usize, BinarySampleFormat, _), String> = if full_duplex {
                     // Full-duplex: shared driver coordination
-                    let (_inputs, outputs, preferred_buf) = match init_shared_asio(&devname) {
+                    let (_inputs, outputs, preferred_buf) = match init_shared_asio(&devname, samplerate) {
                         Ok(result) => result,
                         Err(err) => {
                             let msg = format!("ASIO playback open error: {err}");
@@ -1031,7 +1256,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 } else {
                     // Single-direction: open device (also resolves format)
                     let (_buffer_infos, preferred_buf, resolved_format) =
-                        match open_asio_playback(&devname, channels, &configured_format) {
+                        match open_asio_playback(&devname, channels, samplerate, &configured_format) {
                             Ok(result) => result,
                             Err(err) => {
                                 let msg = format!("ASIO playback open error: {err}");
@@ -1240,13 +1465,26 @@ impl PlaybackDevice for AsioPlaybackDevice {
                                 xtrace!("Playback status blocked, skip rms update.");
                             }
 
+                            // Wait for enough space in the ring buffer before pushing.
+                            // This is essential when the capture side is not rate-limited
+                            // (e.g. signal generator): without this wait the data would
+                            // arrive far faster than the ASIO callback can drain it and
+                            // most of it would be dropped.  The sleep duration is based
+                            // on the time it takes to play back one chunksize.
+                            let bytes_to_write = conversion_result.0;
+                            let sleep_duration = std::time::Duration::from_micros(
+                                (1_000_000 * chunksize / samplerate / 2) as u64
+                            );
+                            while device_producer.vacant_len() < bytes_to_write {
+                                std::thread::sleep(sleep_duration);
+                            }
                             let pushed_bytes =
-                                device_producer.push_slice(&buf[0..conversion_result.0]);
-                            if pushed_bytes < conversion_result.0 {
+                                device_producer.push_slice(&buf[0..bytes_to_write]);
+                            if pushed_bytes < bytes_to_write {
                                 debug!(
                                     "Playback ring buffer is full, dropped {} out of {} bytes.",
-                                    conversion_result.0 - pushed_bytes,
-                                    conversion_result.0
+                                    bytes_to_write - pushed_bytes,
+                                    bytes_to_write
                                 );
                             }
                         }
@@ -1269,15 +1507,23 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     }
                 }
 
-                // Stop ASIO and clean up
+                // Stop ASIO and clean up.
+                // In full-duplex mode, release_shared_asio() must be called BEFORE
+                // nullifying the context, because the last side to exit calls
+                // ASIOStop() which waits for any in-flight callback to finish.
+                // Only after that is it safe to free the context.
                 debug!("Stopping ASIO playback.");
-                PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-                let _ = unsafe { Box::from_raw(ctx_raw) };
                 if full_duplex {
                     release_shared_asio();
                 } else {
+                    PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
                     let _ = unsafe { ASIOStop() };
+                    let _ = unsafe { ASIODisposeBuffers() };
+                    let _ = unsafe { ASIOExit() };
                 }
+                // Harmless if already nulled by release_shared_asio
+                PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                let _ = unsafe { Box::from_raw(ctx_raw) };
             })?;
         Ok(Box::new(handle))
     }
@@ -1335,7 +1581,7 @@ impl CaptureDevice for AsioCaptureDevice {
                 // Format is resolved inside; bytes_per_sample depends on it.
                 let setup_result: Result<(usize, BinarySampleFormat, usize), String> = if full_duplex {
                     // Full-duplex: shared driver coordination
-                    let (inputs, _outputs, preferred_buf) = match init_shared_asio(&devname) {
+                    let (inputs, _outputs, preferred_buf) = match init_shared_asio(&devname, samplerate) {
                         Ok(result) => result,
                         Err(err) => {
                             let msg = format!("ASIO capture open error: {err}");
@@ -1380,7 +1626,7 @@ impl CaptureDevice for AsioCaptureDevice {
                 } else {
                     // Single-direction: open device (also resolves format)
                     let (_buffer_infos, preferred_buf, resolved_format) =
-                        match open_asio_capture(&devname, channels, &configured_format) {
+                        match open_asio_capture(&devname, channels, samplerate, &configured_format) {
                             Ok(result) => result,
                             Err(err) => {
                                 let msg = format!("ASIO capture open error: {err}");
@@ -1733,15 +1979,23 @@ impl CaptureDevice for AsioCaptureDevice {
                     }
                 }
 
-                // Stop ASIO and clean up
+                // Stop ASIO and clean up.
+                // In full-duplex mode, release_shared_asio() must be called BEFORE
+                // nullifying the context, because the last side to exit calls
+                // ASIOStop() which waits for any in-flight callback to finish.
+                // Only after that is it safe to free the context.
                 debug!("Stopping ASIO capture.");
-                CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-                let _ = unsafe { Box::from_raw(ctx_raw) };
                 if full_duplex {
                     release_shared_asio();
                 } else {
+                    CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
                     let _ = unsafe { ASIOStop() };
+                    let _ = unsafe { ASIODisposeBuffers() };
+                    let _ = unsafe { ASIOExit() };
                 }
+                // Harmless if already nulled by release_shared_asio
+                CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                let _ = unsafe { Box::from_raw(ctx_raw) };
                 capture_status.write().state = ProcessingState::Inactive;
             })?;
         Ok(Box::new(handle))
