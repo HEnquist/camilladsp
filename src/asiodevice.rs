@@ -1503,7 +1503,11 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             let sleep_duration = std::time::Duration::from_micros(
                                 (1_000_000 * chunksize / samplerate / 2) as u64
                             );
-                            while device_producer.vacant_len() < bytes_to_write {
+                            let max_retries = 8;
+                            for _ in 0..max_retries {
+                                if device_producer.vacant_len() >= bytes_to_write {
+                                    break;
+                                }
                                 std::thread::sleep(sleep_duration);
                             }
                             let pushed_bytes =
