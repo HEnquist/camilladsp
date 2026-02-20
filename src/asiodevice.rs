@@ -25,7 +25,7 @@ use ringbuf::{HeapRb, traits::*};
 
 use asio_sys::bindings::asio_import::{
     ASIOBufferInfo, ASIOCallbacks, ASIOChannelInfo, ASIOCreateBuffers, ASIODisposeBuffers,
-    ASIODriverInfo, ASIOGetBufferSize, ASIOGetChannelInfo, ASIOGetChannels, ASIOExit, ASIOInit,
+    ASIODriverInfo, ASIOExit, ASIOGetBufferSize, ASIOGetChannelInfo, ASIOGetChannels, ASIOInit,
     ASIOStart, ASIOStop, can_sample_rate, get_sample_rate, set_sample_rate,
 };
 
@@ -722,7 +722,10 @@ pub fn load_driver_by_name(name: &str) -> Result<(), ConfigError> {
     if ok {
         Ok(())
     } else {
-        Err(ConfigError::new("Failed to load ASIO driver"))
+        Err(ConfigError::new(&format!(
+            "Failed to load ASIO driver '{}'",
+            name
+        )))
     }
 }
 
@@ -755,7 +758,12 @@ fn force_sample_rate_with_dummy_cycle(devname: &str, rate: f64) -> Result<(), Co
     let mut preferred_buf: i32 = 0;
     let mut granularity: i32 = 0;
     let buf_res = unsafe {
-        ASIOGetBufferSize(&mut min_buf, &mut max_buf, &mut preferred_buf, &mut granularity)
+        ASIOGetBufferSize(
+            &mut min_buf,
+            &mut max_buf,
+            &mut preferred_buf,
+            &mut granularity,
+        )
     };
     if buf_res != 0 {
         return Err(ConfigError::new(&format!(
@@ -862,9 +870,7 @@ fn force_sample_rate_with_dummy_cycle(devname: &str, rate: f64) -> Result<(), Co
     // Verify the rate
     let mut verify: f64 = 0.0;
     if unsafe { get_sample_rate(&mut verify) } == 0 {
-        debug!(
-            "ASIO sample rate after dummy-stream cycle: {verify} Hz (requested {rate} Hz)."
-        );
+        debug!("ASIO sample rate after dummy-stream cycle: {verify} Hz (requested {rate} Hz).");
         if (verify - rate).abs() > 0.5 {
             return Err(ConfigError::new(&format!(
                 "ASIO sample rate is {verify} Hz after rate-change cycle, expected {rate} Hz. \
@@ -882,7 +888,31 @@ fn force_sample_rate_with_dummy_cycle(devname: &str, rate: f64) -> Result<(), Co
 pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), ConfigError> {
     let available = list_device_names();
     debug!("Available ASIO devices: {:?}", available);
-    load_driver_by_name(devname)?;
+    if load_driver_by_name(devname).is_err() {
+        // Driver load failed — provide a helpful error with available devices.
+        let close_matches: Vec<&str> = available
+            .iter()
+            .filter(|n| {
+                n.to_lowercase().contains(&devname.to_lowercase())
+                    || devname.to_lowercase().contains(&n.to_lowercase())
+            })
+            .map(|s| s.as_str())
+            .collect();
+        let hint = if !close_matches.is_empty() && !available.iter().any(|n| n == devname) {
+            format!(" Did you mean one of: {:?}?", close_matches)
+        } else {
+            String::new()
+        };
+        return Err(ConfigError::new(&format!(
+            "Failed to load ASIO driver '{}'. Available devices: {:?}.{} \
+             If the device is listed, this may be caused by an architecture mismatch \
+             between the driver and the CamillaDSP binary (this binary is {}).",
+            devname,
+            available,
+            hint,
+            std::env::consts::ARCH
+        )));
+    }
     let mut driver_info = ASIODriverInfo {
         asioVersion: 2,
         driverVersion: 0,
@@ -911,8 +941,8 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
 
     // Log supported sample rates
     const COMMON_RATES: &[u32] = &[
-        8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000,
-        176400, 192000, 352800, 384000, 705600, 768000,
+        8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000, 352800,
+        384000, 705600, 768000,
     ];
     let supported: Vec<u32> = COMMON_RATES
         .iter()
@@ -948,9 +978,7 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
         // until a full buffer-creation cycle has been performed.  Force this by
         // running a brief dummy stream: CreateBuffers → Start → Stop → Dispose,
         // then tear the driver down and re-initialise cleanly.
-        debug!(
-            "Forcing ASIO rate change to {samplerate} Hz via dummy stream cycle."
-        );
+        debug!("Forcing ASIO rate change to {samplerate} Hz via dummy stream cycle.");
         force_sample_rate_with_dummy_cycle(devname, rate)?;
     }
 
