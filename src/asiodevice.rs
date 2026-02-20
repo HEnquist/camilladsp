@@ -16,30 +16,30 @@ use std::collections::VecDeque;
 use std::ffi::{CStr, CString};
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier, Condvar, Mutex, OnceLock};
 use std::thread;
 
-use crossbeam_channel::{bounded, TrySendError};
+use crossbeam_channel::{TrySendError, bounded};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{HeapRb, traits::*};
 
 use asio_sys::bindings::asio_import::{
-    ASIOBufferInfo, ASIOCallbacks, ASIOCreateBuffers, ASIODriverInfo, ASIOGetBufferSize,
-    ASIOGetChannels, ASIOInit, ASIOStart, ASIOStop,
+    ASIOBufferInfo, ASIOCallbacks, ASIOChannelInfo, ASIOCreateBuffers, ASIODriverInfo,
+    ASIOGetBufferSize, ASIOGetChannelInfo, ASIOGetChannels, ASIOInit, ASIOStart, ASIOStop,
 };
 
-use crate::audiodevice::*;
-use crate::config::{AsioSampleFormat, BinarySampleFormat, ConfigError};
-use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-use crate::countertimer;
-use crate::helpers::PIRateController;
-use crate::resampling::{new_resampler, resampler_is_async, ChunkResampler};
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
+use crate::audiodevice::*;
+use crate::config::{AsioSampleFormat, BinarySampleFormat, ConfigError};
+use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+use crate::countertimer;
+use crate::helpers::PIRateController;
+use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus};
 
 // ---------------------------------------------------------------------------
@@ -56,6 +56,7 @@ pub struct AsioPlaybackDevice {
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
+    pub full_duplex: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -71,6 +72,7 @@ pub struct AsioCaptureDevice {
     pub silence_timeout: PrcFmt,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
+    pub full_duplex: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -112,11 +114,48 @@ static PLAYBACK_CONTEXT: AtomicPtr<AsioPlaybackContext> = AtomicPtr::new(ptr::nu
 static CAPTURE_CONTEXT: AtomicPtr<AsioCaptureContext> = AtomicPtr::new(ptr::null_mut());
 
 // ---------------------------------------------------------------------------
+// Shared state for full-duplex ASIO coordination
+// ---------------------------------------------------------------------------
+
+/// State shared between playback and capture threads when both use the same ASIO driver.
+struct AsioSharedState {
+    driver_name: String,
+    num_inputs: i32,
+    num_outputs: i32,
+    preferred_buf_size: i32,
+    /// Pending output (playback) buffer registration: (buffer_infos, num_channels).
+    pending_output: Option<(Vec<ASIOBufferInfo>, usize)>,
+    /// Pending input (capture) buffer registration: (buffer_infos, num_channels).
+    pending_input: Option<(Vec<ASIOBufferInfo>, usize)>,
+    /// Whether the ASIO stream has been started.
+    stream_started: bool,
+    /// Number of sides (playback/capture) still active. Last one to exit calls ASIOStop.
+    active_count: u8,
+    /// The original `ASIOBufferInfo` array passed to `ASIOCreateBuffers`.
+    /// The ASIO SDK requires this array to remain valid for the lifetime of the stream.
+    buffer_infos_for_driver: Vec<ASIOBufferInfo>,
+    /// The `ASIOCallbacks` struct passed to `ASIOCreateBuffers`.
+    /// The ASIO SDK requires this struct to remain valid for the lifetime of the stream.
+    callbacks_for_driver: Option<Box<ASIOCallbacks>>,
+}
+
+// SAFETY: AsioSharedState is only accessed under a Mutex lock.
+// The raw pointers in ASIOBufferInfo are transient (used during setup only)
+// and never dereferenced outside of ASIO callback context.
+unsafe impl Send for AsioSharedState {}
+
+static ASIO_SHARED: OnceLock<(Mutex<Option<AsioSharedState>>, Condvar)> = OnceLock::new();
+
+// ---------------------------------------------------------------------------
 // ASIO callbacks  (unsafe extern "C" — called from ASIO driver thread)
 // ---------------------------------------------------------------------------
 
 /// ASIO bufferSwitch callback for playback.
 /// Reads converted audio bytes from the ring buffer and copies them into the ASIO output buffers.
+///
+/// # Safety
+/// Called from the ASIO driver thread. The caller must ensure that `PLAYBACK_CONTEXT`
+/// points to a valid `AsioPlaybackContext` or is null.
 pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_process: i32) {
     let ctx_ptr = PLAYBACK_CONTEXT.load(Ordering::Acquire);
     if ctx_ptr.is_null() {
@@ -188,6 +227,10 @@ pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_proce
 
 /// ASIO bufferSwitch callback for capture.
 /// Reads audio bytes from the ASIO input buffers and pushes them into the ring buffer.
+///
+/// # Safety
+/// Called from the ASIO driver thread. The caller must ensure that `CAPTURE_CONTEXT`
+/// points to a valid `AsioCaptureContext` or is null.
 pub unsafe extern "C" fn buffer_switch_capture(buffer_index: i32, _direct_process: i32) {
     let ctx_ptr = CAPTURE_CONTEXT.load(Ordering::Acquire);
     if ctx_ptr.is_null() {
@@ -234,6 +277,9 @@ pub unsafe extern "C" fn buffer_switch_capture(buffer_index: i32, _direct_proces
 /// ASIO asioMessage callback.
 /// Handles driver queries about supported features.
 /// Returning 0 means "not supported" or "no" for most selectors.
+///
+/// # Safety
+/// Called from the ASIO driver thread. All parameters are provided by the driver.
 pub unsafe extern "C" fn asio_message_callback(
     selector: i32,
     value: i32,
@@ -279,26 +325,383 @@ pub unsafe extern "C" fn asio_message_callback(
     }
 }
 
+/// Combined ASIO bufferSwitch callback for full-duplex mode.
+/// Dispatches to both playback and capture callbacks.
+///
+/// # Safety
+/// Called from the ASIO driver thread. Both `PLAYBACK_CONTEXT` and `CAPTURE_CONTEXT`
+/// must point to valid contexts or be null.
+pub unsafe extern "C" fn buffer_switch_combined(buffer_index: i32, direct_process: i32) {
+    unsafe {
+        buffer_switch_playback(buffer_index, direct_process);
+        buffer_switch_capture(buffer_index, direct_process);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Full-duplex coordination helpers
+// ---------------------------------------------------------------------------
+
+/// Initialize the shared ASIO driver state.
+/// The first caller loads and initialises the driver. Subsequent callers for the same driver
+/// reuse the existing state. Returns (num_inputs, num_outputs, preferred_buf_size).
+fn init_shared_asio(devname: &str) -> Result<(i32, i32, i32), ConfigError> {
+    let (mutex, _condvar) = ASIO_SHARED.get_or_init(|| (Mutex::new(None), Condvar::new()));
+    let mut guard = mutex.lock().unwrap();
+
+    if let Some(ref shared) = *guard {
+        // Driver already loaded by the other side
+        if shared.driver_name != devname {
+            return Err(ConfigError::new(
+                "Different ASIO driver names for capture and playback are not supported",
+            ));
+        }
+        Ok((
+            shared.num_inputs,
+            shared.num_outputs,
+            shared.preferred_buf_size,
+        ))
+    } else {
+        // First caller — load and initialise the driver
+        let (num_inputs, num_outputs) = open_asio_device(devname)?;
+
+        // Query preferred buffer size
+        let mut min_buf: i32 = 0;
+        let mut max_buf: i32 = 0;
+        let mut preferred_buf: i32 = 0;
+        let mut granularity: i32 = 0;
+        let res = unsafe {
+            ASIOGetBufferSize(
+                &mut min_buf,
+                &mut max_buf,
+                &mut preferred_buf,
+                &mut granularity,
+            )
+        };
+        if res != 0 {
+            return Err(ConfigError::new(&format!(
+                "ASIOGetBufferSize failed with error code {res}"
+            )));
+        }
+        debug!(
+            "ASIO buffer sizes: min={min_buf}, max={max_buf}, preferred={preferred_buf}, granularity={granularity}."
+        );
+
+        *guard = Some(AsioSharedState {
+            driver_name: devname.to_string(),
+            num_inputs,
+            num_outputs,
+            preferred_buf_size: preferred_buf,
+            pending_output: None,
+            pending_input: None,
+            stream_started: false,
+            active_count: 0,
+            buffer_infos_for_driver: Vec::new(),
+            callbacks_for_driver: None,
+        });
+
+        Ok((num_inputs, num_outputs, preferred_buf))
+    }
+}
+
+/// Create an `ASIOBufferInfo` array for the given number of channels.
+fn make_buffer_infos(num_channels: usize, is_input: bool) -> Vec<ASIOBufferInfo> {
+    (0..num_channels)
+        .map(|ch| ASIOBufferInfo {
+            isInput: if is_input { 1 } else { 0 },
+            channelNum: ch as i32,
+            buffers: [ptr::null_mut(), ptr::null_mut()],
+        })
+        .collect()
+}
+
+/// Register one side (playback or capture) for full-duplex operation.
+///
+/// When both sides have registered, the second caller creates the combined ASIO buffers,
+/// updates both contexts' `buffer_infos` through the global atomics, and calls `ASIOStart()`.
+/// The first caller blocks on a condvar until this is done.
+fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigError> {
+    let (mutex, condvar) = ASIO_SHARED
+        .get()
+        .expect("ASIO_SHARED must be initialised before register_and_wait");
+    let mut guard = mutex.lock().unwrap();
+
+    // Register our buffer infos
+    {
+        let shared = guard.as_mut().expect("shared state must exist");
+        let infos = make_buffer_infos(num_channels, is_input);
+        if is_input {
+            shared.pending_input = Some((infos, num_channels));
+        } else {
+            shared.pending_output = Some((infos, num_channels));
+        }
+    }
+
+    let both_ready = {
+        let shared = guard.as_ref().unwrap();
+        shared.pending_input.is_some() && shared.pending_output.is_some()
+    };
+
+    if both_ready {
+        // I am the second side to register — do combined buffer creation + start.
+        let shared = guard.as_mut().unwrap();
+        let (out_infos, out_ch) = shared.pending_output.take().unwrap();
+        let (in_infos, in_ch) = shared.pending_input.take().unwrap();
+        let preferred_buf = shared.preferred_buf_size;
+
+        // Build combined array: outputs first, then inputs.
+        let mut combined: Vec<ASIOBufferInfo> = Vec::with_capacity(out_ch + in_ch);
+        combined.extend(out_infos);
+        combined.extend(in_infos);
+        let total_ch = (out_ch + in_ch) as i32;
+
+        // Heap-allocate callbacks so the struct remains at a stable address.
+        // The ASIO SDK requires both the ASIOBufferInfo array and ASIOCallbacks
+        // struct to remain valid for the lifetime of the stream.
+        shared.callbacks_for_driver = Some(Box::new(ASIOCallbacks {
+            bufferSwitch: Some(buffer_switch_combined),
+            sampleRateDidChange: None,
+            asioMessage: Some(asio_message_callback),
+            bufferSwitchTimeInfo: None,
+        }));
+
+        create_asio_buffers(
+            &mut combined,
+            total_ch,
+            preferred_buf,
+            shared.callbacks_for_driver.as_mut().unwrap().as_mut(),
+        )?;
+
+        // Update both contexts' buffer_infos through the global atomics.
+        // Both contexts are guaranteed to be stored before register_and_wait is called.
+        let pb_ctx = PLAYBACK_CONTEXT.load(Ordering::Acquire);
+        if !pb_ctx.is_null() {
+            unsafe {
+                (*pb_ctx).buffer_infos = combined[..out_ch].to_vec();
+            }
+        }
+        let cap_ctx = CAPTURE_CONTEXT.load(Ordering::Acquire);
+        if !cap_ctx.is_null() {
+            unsafe {
+                (*cap_ctx).buffer_infos = combined[out_ch..].to_vec();
+            }
+        }
+
+        // Keep the original buffer_infos array alive for the ASIO driver.
+        shared.buffer_infos_for_driver = combined;
+
+        // Start the stream
+        let start_res = unsafe { ASIOStart() };
+        if start_res != 0 {
+            return Err(ConfigError::new(&format!(
+                "ASIOStart failed with error code {start_res}"
+            )));
+        }
+        debug!("Full-duplex ASIO stream started.");
+
+        shared.stream_started = true;
+        shared.active_count = 2;
+        condvar.notify_all();
+    } else {
+        // I am the first side — wait for the other side to complete setup.
+        debug!("Waiting for other ASIO side to register for full-duplex...");
+        while !guard.as_ref().unwrap().stream_started {
+            guard = condvar.wait(guard).unwrap();
+        }
+        debug!("Full-duplex ASIO setup complete, proceeding.");
+    }
+
+    Ok(())
+}
+
+/// Decrement the active-sides counter. When it reaches zero, stop the ASIO stream
+/// and clear the shared state so a fresh session can be started later.
+fn release_shared_asio() {
+    let Some((mutex, _condvar)) = ASIO_SHARED.get() else {
+        return;
+    };
+    let mut guard = mutex.lock().unwrap();
+    if let Some(ref mut shared) = *guard {
+        shared.active_count = shared.active_count.saturating_sub(1);
+        if shared.active_count == 0 {
+            debug!("Last ASIO side exiting, stopping stream.");
+            let _ = unsafe { ASIOStop() };
+            *guard = None; // Reset for next session
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ASIO low-level helpers
 // ---------------------------------------------------------------------------
 
 /// Resolve ASIO sample format to a BinarySampleFormat.
-fn resolve_binary_format(format: &Option<AsioSampleFormat>) -> BinarySampleFormat {
+fn resolve_binary_format(format: &AsioSampleFormat) -> BinarySampleFormat {
     match format {
-        Some(AsioSampleFormat::S16) => BinarySampleFormat::S16_LE,
-        Some(AsioSampleFormat::S24) => BinarySampleFormat::S24_4_LJ_LE,
-        Some(AsioSampleFormat::S32) => BinarySampleFormat::S32_LE,
-        Some(AsioSampleFormat::F32) => BinarySampleFormat::F32_LE,
-        Some(AsioSampleFormat::F64) => BinarySampleFormat::F64_LE,
-        None => BinarySampleFormat::S32_LE, // default for ASIO
+        AsioSampleFormat::S16_LE => BinarySampleFormat::S16_LE,
+        AsioSampleFormat::S24_4_LE => BinarySampleFormat::S24_4_LJ_LE,
+        AsioSampleFormat::S24_3_LE => BinarySampleFormat::S24_3_LE,
+        AsioSampleFormat::S32_LE => BinarySampleFormat::S32_LE,
+        AsioSampleFormat::F32_LE => BinarySampleFormat::F32_LE,
+        AsioSampleFormat::F64_LE => BinarySampleFormat::F64_LE,
     }
+}
+
+// ---------------------------------------------------------------------------
+// ASIO sample type constants (from ASIO SDK asio.h)
+// ---------------------------------------------------------------------------
+const ASIO_ST_INT16_MSB: i32 = 0;
+const ASIO_ST_INT24_MSB: i32 = 1; // 3 bytes packed
+const ASIO_ST_INT32_MSB: i32 = 2;
+const ASIO_ST_FLOAT32_MSB: i32 = 3;
+const ASIO_ST_FLOAT64_MSB: i32 = 4;
+// 32-bit container MSB variants
+const ASIO_ST_INT32_MSB_16: i32 = 8; // 16-bit in 32-bit
+const ASIO_ST_INT32_MSB_18: i32 = 9;
+const ASIO_ST_INT32_MSB_20: i32 = 10;
+const ASIO_ST_INT32_MSB_24: i32 = 11; // 24-bit in 32-bit
+// LSB (little-endian) variants
+const ASIO_ST_INT16_LSB: i32 = 16;
+const ASIO_ST_INT24_LSB: i32 = 17; // 3 bytes packed
+const ASIO_ST_INT32_LSB: i32 = 18;
+const ASIO_ST_FLOAT32_LSB: i32 = 19;
+const ASIO_ST_FLOAT64_LSB: i32 = 20;
+// 32-bit container LSB variants
+const ASIO_ST_INT32_LSB_16: i32 = 24; // 16-bit in 32-bit
+const ASIO_ST_INT32_LSB_18: i32 = 25;
+const ASIO_ST_INT32_LSB_20: i32 = 26;
+const ASIO_ST_INT32_LSB_24: i32 = 27; // 24-bit in 32-bit
+// DSD formats
+const ASIO_ST_DSD_INT8_LSB_1: i32 = 32;
+const ASIO_ST_DSD_INT8_MSB_1: i32 = 33;
+const ASIO_ST_DSD_INT8_NER8: i32 = 40;
+
+/// Return a human-readable name for an ASIO sample type (from `ASIOChannelInfo::type_`).
+fn asio_sample_type_name(type_id: i32) -> &'static str {
+    match type_id {
+        ASIO_ST_INT16_MSB => "Int16 MSB (big-endian)",
+        ASIO_ST_INT24_MSB => "Int24 MSB (3-byte packed, big-endian)",
+        ASIO_ST_INT32_MSB => "Int32 MSB (big-endian)",
+        ASIO_ST_FLOAT32_MSB => "Float32 MSB (big-endian)",
+        ASIO_ST_FLOAT64_MSB => "Float64 MSB (big-endian)",
+        ASIO_ST_INT32_MSB_16 => "Int32 MSB 16-bit (big-endian)",
+        ASIO_ST_INT32_MSB_18 => "Int32 MSB 18-bit (big-endian)",
+        ASIO_ST_INT32_MSB_20 => "Int32 MSB 20-bit (big-endian)",
+        ASIO_ST_INT32_MSB_24 => "Int32 MSB 24-bit (big-endian)",
+        ASIO_ST_INT16_LSB => "Int16 LSB",
+        ASIO_ST_INT24_LSB => "Int24 LSB (3-byte packed)",
+        ASIO_ST_INT32_LSB => "Int32 LSB",
+        ASIO_ST_FLOAT32_LSB => "Float32 LSB",
+        ASIO_ST_FLOAT64_LSB => "Float64 LSB",
+        ASIO_ST_INT32_LSB_16 => "Int32 LSB 16-bit",
+        ASIO_ST_INT32_LSB_18 => "Int32 LSB 18-bit",
+        ASIO_ST_INT32_LSB_20 => "Int32 LSB 20-bit",
+        ASIO_ST_INT32_LSB_24 => "Int32 LSB 24-bit",
+        ASIO_ST_DSD_INT8_LSB_1 => "DSD Int8 LSB 1",
+        ASIO_ST_DSD_INT8_MSB_1 => "DSD Int8 MSB 1",
+        ASIO_ST_DSD_INT8_NER8 => "DSD Int8 NER8",
+        _ => "Unknown",
+    }
+}
+
+/// Map an ASIO sample type to an `AsioSampleFormat`.
+/// Returns `None` for types that CamillaDSP cannot handle (e.g. big-endian, DSD).
+fn asio_sample_type_to_format(type_id: i32) -> Option<AsioSampleFormat> {
+    match type_id {
+        ASIO_ST_INT16_LSB => Some(AsioSampleFormat::S16_LE),
+        ASIO_ST_INT24_LSB => Some(AsioSampleFormat::S24_3_LE),
+        ASIO_ST_INT32_LSB => Some(AsioSampleFormat::S32_LE),
+        ASIO_ST_INT32_LSB_16 => Some(AsioSampleFormat::S32_LE),
+        ASIO_ST_INT32_LSB_18 => Some(AsioSampleFormat::S32_LE),
+        ASIO_ST_INT32_LSB_20 => Some(AsioSampleFormat::S32_LE),
+        ASIO_ST_INT32_LSB_24 => Some(AsioSampleFormat::S24_4_LE),
+        ASIO_ST_FLOAT32_LSB => Some(AsioSampleFormat::F32_LE),
+        ASIO_ST_FLOAT64_LSB => Some(AsioSampleFormat::F64_LE),
+        _ => None,
+    }
+}
+
+/// Query the native sample format of channel 0 for the given direction.
+/// Must be called after the driver is loaded and initialized.
+fn query_device_format(is_input: bool) -> Result<i32, ConfigError> {
+    let mut channel_info = ASIOChannelInfo {
+        channel: 0,
+        isInput: if is_input { 1 } else { 0 },
+        isActive: 0,
+        channelGroup: 0,
+        type_: 0,
+        name: [0; 32],
+    };
+    let res = unsafe { ASIOGetChannelInfo(&mut channel_info) };
+    if res != 0 {
+        return Err(ConfigError::new(&format!(
+            "ASIOGetChannelInfo failed with error code {res}"
+        )));
+    }
+    let ch_name = unsafe {
+        CStr::from_ptr(channel_info.name.as_ptr())
+            .to_string_lossy()
+            .into_owned()
+    };
+    debug!(
+        "ASIO channel 0 ({}): name='{}', type={} ({})",
+        if is_input { "input" } else { "output" },
+        ch_name,
+        channel_info.type_,
+        asio_sample_type_name(channel_info.type_),
+    );
+    Ok(channel_info.type_)
+}
+
+/// Resolve the sample format to use for a given direction.
+///
+/// ASIO drivers do not perform sample format conversion — the application must
+/// use the device's native format. This function queries the device for its
+/// native sample type and returns the corresponding `AsioSampleFormat`.
+///
+/// If the user specified a format in the config that differs from the native
+/// format, an error is returned. If the format is `None`, auto-detect from the device.
+/// Must be called after the driver is loaded and initialized.
+fn resolve_format(
+    configured: &Option<AsioSampleFormat>,
+    is_input: bool,
+) -> Result<AsioSampleFormat, ConfigError> {
+    let device_type = query_device_format(is_input)?;
+    let device_format = asio_sample_type_to_format(device_type);
+    let direction = if is_input { "capture" } else { "playback" };
+
+    let native_format = match device_format {
+        Some(fmt) => fmt,
+        None => {
+            return Err(ConfigError::new(&format!(
+                "ASIO {direction}: device uses unsupported sample type {} ({})",
+                device_type,
+                asio_sample_type_name(device_type),
+            )));
+        }
+    };
+
+    if let Some(fmt) = configured {
+        if *fmt != native_format {
+            return Err(ConfigError::new(&format!(
+                "ASIO {direction}: configured format {fmt:?} does not match device native format \
+                 {native_format:?} ({}). ASIO drivers do not convert sample formats. \
+                 Please remove the format setting to auto-detect, or set it to {native_format:?}",
+                asio_sample_type_name(device_type),
+            )));
+        }
+        debug!("ASIO {direction}: configured format {fmt:?} matches device native format.");
+    } else {
+        debug!("ASIO {direction}: auto-detected format {native_format:?} from device.");
+    }
+
+    Ok(native_format)
 }
 
 /// Load an ASIO driver by name.
 pub fn load_driver_by_name(name: &str) -> Result<(), ConfigError> {
-    let c_name = CString::new(name)
-        .map_err(|_| ConfigError::new("Invalid device name (contains null)"))?;
+    let c_name =
+        CString::new(name).map_err(|_| ConfigError::new("Invalid device name (contains null)"))?;
     let ok =
         unsafe { asio_sys::bindings::asio_import::load_asio_driver(c_name.as_ptr() as *mut i8) };
     if ok {
@@ -341,9 +744,54 @@ pub fn open_asio_device(devname: &str) -> Result<(i32, i32), ConfigError> {
             "ASIOGetChannels failed with error code {ch_result}"
         )));
     }
-    debug!(
-        "ASIO device opened: {num_inputs} input channels, {num_outputs} output channels."
-    );
+    debug!("ASIO device opened: {num_inputs} input channels, {num_outputs} output channels.");
+
+    // Log per-channel details (name and sample format)
+    for ch in 0..num_inputs {
+        let mut info = ASIOChannelInfo {
+            channel: ch,
+            isInput: 1,
+            isActive: 0,
+            channelGroup: 0,
+            type_: 0,
+            name: [0; 32],
+        };
+        if unsafe { ASIOGetChannelInfo(&mut info) } == 0 {
+            let name = unsafe {
+                CStr::from_ptr(info.name.as_ptr())
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            debug!(
+                "  Input  channel {ch}: name='{name}', format={} ({})",
+                info.type_,
+                asio_sample_type_name(info.type_),
+            );
+        }
+    }
+    for ch in 0..num_outputs {
+        let mut info = ASIOChannelInfo {
+            channel: ch,
+            isInput: 0,
+            isActive: 0,
+            channelGroup: 0,
+            type_: 0,
+            name: [0; 32],
+        };
+        if unsafe { ASIOGetChannelInfo(&mut info) } == 0 {
+            let name = unsafe {
+                CStr::from_ptr(info.name.as_ptr())
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            debug!(
+                "  Output channel {ch}: name='{name}', format={} ({})",
+                info.type_,
+                asio_sample_type_name(info.type_),
+            );
+        }
+    }
+
     Ok((num_inputs, num_outputs))
 }
 
@@ -357,7 +805,12 @@ fn setup_asio_buffers(
     let mut preferred_buf: i32 = 0;
     let mut granularity: i32 = 0;
     let res = unsafe {
-        ASIOGetBufferSize(&mut min_buf, &mut max_buf, &mut preferred_buf, &mut granularity)
+        ASIOGetBufferSize(
+            &mut min_buf,
+            &mut max_buf,
+            &mut preferred_buf,
+            &mut granularity,
+        )
     };
     if res != 0 {
         return Err(ConfigError::new(&format!(
@@ -401,34 +854,40 @@ fn create_asio_buffers(
     Ok(())
 }
 
-/// Open and set up an ASIO device for playback. Returns (buffer_infos, preferred_buf_size).
+/// Open and set up an ASIO device for playback.
+/// Returns (buffer_infos, preferred_buf_size, resolved_format).
 fn open_asio_playback(
     devname: &str,
     num_channels: usize,
-) -> Result<(Vec<ASIOBufferInfo>, i32), ConfigError> {
+    configured_format: &Option<AsioSampleFormat>,
+) -> Result<(Vec<ASIOBufferInfo>, i32, AsioSampleFormat), ConfigError> {
     let (_inputs, outputs) = open_asio_device(devname)?;
     if num_channels > outputs as usize {
         return Err(ConfigError::new(&format!(
             "Requested {num_channels} output channels but device only has {outputs}"
         )));
     }
+    let resolved_format = resolve_format(configured_format, false)?;
     let (buffer_infos, preferred_buf) = setup_asio_buffers(num_channels, false)?;
-    Ok((buffer_infos, preferred_buf))
+    Ok((buffer_infos, preferred_buf, resolved_format))
 }
 
-/// Open and set up an ASIO device for capture. Returns (buffer_infos, preferred_buf_size).
+/// Open and set up an ASIO device for capture.
+/// Returns (buffer_infos, preferred_buf_size, resolved_format).
 fn open_asio_capture(
     devname: &str,
     num_channels: usize,
-) -> Result<(Vec<ASIOBufferInfo>, i32), ConfigError> {
+    configured_format: &Option<AsioSampleFormat>,
+) -> Result<(Vec<ASIOBufferInfo>, i32, AsioSampleFormat), ConfigError> {
     let (inputs, _outputs) = open_asio_device(devname)?;
     if num_channels > inputs as usize {
         return Err(ConfigError::new(&format!(
             "Requested {num_channels} input channels but device only has {inputs}"
         )));
     }
+    let resolved_format = resolve_format(configured_format, true)?;
     let (buffer_infos, preferred_buf) = setup_asio_buffers(num_channels, true)?;
-    Ok((buffer_infos, preferred_buf))
+    Ok((buffer_infos, preferred_buf, resolved_format))
 }
 
 // ---------------------------------------------------------------------------
@@ -447,8 +906,8 @@ pub fn list_device_names() -> Vec<String> {
     };
     let mut names = Vec::new();
     if count > 0 {
-        for i in 0..(count as usize).min(MAX_DRIVERS) {
-            let name = unsafe { CStr::from_ptr(ptrs[i]).to_string_lossy().into_owned() };
+        for ptr in ptrs.iter().take((count as usize).min(MAX_DRIVERS)) {
+            let name = unsafe { CStr::from_ptr(*ptr).to_string_lossy().into_owned() };
             if !name.is_empty() {
                 names.push(name);
             }
@@ -487,15 +946,11 @@ impl PlaybackDevice for AsioPlaybackDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
-        let devname = self
-            .devname
-            .clone()
-            .unwrap_or_default();
+        let devname = self.devname.clone().unwrap_or_default();
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let binary_format = resolve_binary_format(&self.sample_format);
-        let bytes_per_sample = binary_format.bytes_per_sample();
+        let configured_format = self.sample_format;
         let target_level = if self.target_level > 0 {
             self.target_level
         } else {
@@ -503,6 +958,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
+        let full_duplex = self.full_duplex;
 
         let handle = thread::Builder::new()
             .name("AsioPlayback".to_string())
@@ -528,17 +984,74 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     target_level,
                 );
 
-                let ringbuffer = HeapRb::<u8>::new(
-                    channels * bytes_per_sample * (2 * chunksize + 2048),
-                );
-                let (mut device_producer, device_consumer) = ringbuffer.split();
+                // --- Device-specific setup (full-duplex vs single-direction) ---
+                // Format is resolved inside; bytes_per_sample depends on it.
+                let setup_result: Result<(usize, BinarySampleFormat, _), String> = if full_duplex {
+                    // Full-duplex: shared driver coordination
+                    let (_inputs, outputs, preferred_buf) = match init_shared_asio(&devname) {
+                        Ok(result) => result,
+                        Err(err) => {
+                            let msg = format!("ASIO playback open error: {err}");
+                            error!("{msg}");
+                            status_channel
+                                .send(StatusMessage::PlaybackError(msg.clone()))
+                                .unwrap_or(());
+                            barrier.wait();
+                            return;
+                        }
+                    };
+                    if channels > outputs as usize {
+                        let msg = format!(
+                            "Requested {channels} output channels but device only has {outputs}"
+                        );
+                        error!("{msg}");
+                        status_channel
+                            .send(StatusMessage::PlaybackError(msg))
+                            .unwrap_or(());
+                        barrier.wait();
+                        return;
+                    }
+                    // Resolve sample format from device
+                    let resolved_format = match resolve_format(&configured_format, false) {
+                        Ok(fmt) => fmt,
+                        Err(err) => {
+                            let msg = format!("ASIO playback format error: {err}");
+                            error!("{msg}");
+                            status_channel
+                                .send(StatusMessage::PlaybackError(msg))
+                                .unwrap_or(());
+                            barrier.wait();
+                            return;
+                        }
+                    };
+                    let binary_format = resolve_binary_format(&resolved_format);
+                    let bytes_per_sample = binary_format.bytes_per_sample();
+                    let asio_buffer_size = preferred_buf as usize;
+                    Ok((asio_buffer_size, binary_format, bytes_per_sample))
+                } else {
+                    // Single-direction: open device (also resolves format)
+                    let (_buffer_infos, preferred_buf, resolved_format) =
+                        match open_asio_playback(&devname, channels, &configured_format) {
+                            Ok(result) => result,
+                            Err(err) => {
+                                let msg = format!("ASIO playback open error: {err}");
+                                error!("{msg}");
+                                status_channel
+                                    .send(StatusMessage::PlaybackError(msg))
+                                    .unwrap_or(());
+                                barrier.wait();
+                                return;
+                            }
+                        };
+                    let binary_format = resolve_binary_format(&resolved_format);
+                    let bytes_per_sample = binary_format.bytes_per_sample();
+                    let asio_buffer_size = preferred_buf as usize;
+                    Ok((asio_buffer_size, binary_format, bytes_per_sample))
+                };
 
-                // Open ASIO device and set up buffers
-                let (mut buffer_infos, preferred_buf) = match open_asio_playback(&devname, channels)
-                {
+                let (_asio_buffer_size, binary_format, bytes_per_sample) = match setup_result {
                     Ok(result) => result,
-                    Err(err) => {
-                        let msg = format!("ASIO playback open error: {err}");
+                    Err(msg) => {
                         error!("{msg}");
                         status_channel
                             .send(StatusMessage::PlaybackError(msg))
@@ -548,70 +1061,124 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     }
                 };
 
-                let asio_buffer_size = preferred_buf as usize;
+                // Now create ring buffer and context with the resolved bytes_per_sample
+                let ringbuffer = HeapRb::<u8>::new(
+                    channels * bytes_per_sample * (2 * chunksize + 2048),
+                );
+                let (mut device_producer, device_consumer) = ringbuffer.split();
 
-                // Build the callback context
-                let ctx = Box::new(AsioPlaybackContext {
-                    device_consumer,
-                    sample_queue: VecDeque::with_capacity(
-                        (16 * chunksize + target_level) * bytes_per_sample * channels,
-                    ),
-                    buffer_infos: buffer_infos.clone(),
-                    num_channels: channels,
-                    buffer_size: asio_buffer_size,
-                    bytes_per_sample,
-                    target_level,
-                    buffer_fill: buffer_fill_clone,
-                    running: false,
-                    starting: true,
-                });
-                let ctx_raw = Box::into_raw(ctx);
-                PLAYBACK_CONTEXT.store(ctx_raw, Ordering::Release);
+                // --- Create context and start ASIO ---
+                let ctx_raw = if full_duplex {
+                    let buffer_infos = make_buffer_infos(channels, false);
+                    let ctx = Box::new(AsioPlaybackContext {
+                        device_consumer,
+                        sample_queue: VecDeque::with_capacity(
+                            (16 * chunksize + target_level) * bytes_per_sample * channels,
+                        ),
+                        buffer_infos,
+                        num_channels: channels,
+                        buffer_size: _asio_buffer_size,
+                        bytes_per_sample,
+                        target_level,
+                        buffer_fill: buffer_fill_clone,
+                        running: false,
+                        starting: true,
+                    });
+                    let ctx_raw = Box::into_raw(ctx);
+                    PLAYBACK_CONTEXT.store(ctx_raw, Ordering::Release);
 
-                // Register ASIO callbacks and create buffers
-                let mut callbacks = ASIOCallbacks {
-                    bufferSwitch: Some(buffer_switch_playback),
-                    sampleRateDidChange: None,
-                    asioMessage: Some(asio_message_callback),
-                    bufferSwitchTimeInfo: None,
+                    // Register and wait for combined buffer creation + ASIOStart
+                    if let Err(err) = register_and_wait(false, channels) {
+                        let msg = format!("ASIO full-duplex playback setup error: {err}");
+                        error!("{msg}");
+                        status_channel
+                            .send(StatusMessage::PlaybackError(msg))
+                            .unwrap_or(());
+                        PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                        let _ = unsafe { Box::from_raw(ctx_raw) };
+                        barrier.wait();
+                        return;
+                    }
+                    ctx_raw
+                } else {
+                    // Re-open is not needed — the driver is still loaded from open_asio_playback.
+                    // We need the buffer_infos from setup_asio_buffers (already called inside open_asio_playback).
+                    // Re-create buffer_infos for the callback context.
+                    let (mut buffer_infos, preferred_buf) = match setup_asio_buffers(channels, false) {
+                        Ok(result) => result,
+                        Err(err) => {
+                            let msg = format!("ASIO playback buffer setup error: {err}");
+                            error!("{msg}");
+                            status_channel
+                                .send(StatusMessage::PlaybackError(msg))
+                                .unwrap_or(());
+                            barrier.wait();
+                            return;
+                        }
+                    };
+
+                    let ctx = Box::new(AsioPlaybackContext {
+                        device_consumer,
+                        sample_queue: VecDeque::with_capacity(
+                            (16 * chunksize + target_level) * bytes_per_sample * channels,
+                        ),
+                        buffer_infos: buffer_infos.clone(),
+                        num_channels: channels,
+                        buffer_size: preferred_buf as usize,
+                        bytes_per_sample,
+                        target_level,
+                        buffer_fill: buffer_fill_clone,
+                        running: false,
+                        starting: true,
+                    });
+                    let ctx_raw = Box::into_raw(ctx);
+                    PLAYBACK_CONTEXT.store(ctx_raw, Ordering::Release);
+
+                    // Leak the callbacks struct so it remains valid for the ASIO driver.
+                    // The ASIO SDK requires the ASIOCallbacks struct passed to
+                    // ASIOCreateBuffers to remain valid for the lifetime of the stream.
+                    let callbacks = Box::leak(Box::new(ASIOCallbacks {
+                        bufferSwitch: Some(buffer_switch_playback),
+                        sampleRateDidChange: None,
+                        asioMessage: Some(asio_message_callback),
+                        bufferSwitchTimeInfo: None,
+                    }));
+                    if let Err(err) = create_asio_buffers(
+                        &mut buffer_infos,
+                        channels as i32,
+                        preferred_buf,
+                        callbacks,
+                    ) {
+                        let msg = format!("ASIO playback buffer creation error: {err}");
+                        error!("{msg}");
+                        status_channel
+                            .send(StatusMessage::PlaybackError(msg))
+                            .unwrap_or(());
+                        PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                        let _ = unsafe { Box::from_raw(ctx_raw) };
+                        barrier.wait();
+                        return;
+                    }
+
+                    {
+                        let ctx = unsafe { &mut *ctx_raw };
+                        ctx.buffer_infos = buffer_infos;
+                    }
+
+                    let start_res = unsafe { ASIOStart() };
+                    if start_res != 0 {
+                        let msg = format!("ASIOStart failed with error code {start_res}");
+                        error!("{msg}");
+                        status_channel
+                            .send(StatusMessage::PlaybackError(msg))
+                            .unwrap_or(());
+                        PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                        let _ = unsafe { Box::from_raw(ctx_raw) };
+                        barrier.wait();
+                        return;
+                    }
+                    ctx_raw
                 };
-                if let Err(err) = create_asio_buffers(
-                    &mut buffer_infos,
-                    channels as i32,
-                    preferred_buf,
-                    &mut callbacks,
-                ) {
-                    let msg = format!("ASIO playback buffer creation error: {err}");
-                    error!("{msg}");
-                    status_channel
-                        .send(StatusMessage::PlaybackError(msg))
-                        .unwrap_or(());
-                    // Clean up context
-                    PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-                    let _ = unsafe { Box::from_raw(ctx_raw) };
-                    barrier.wait();
-                    return;
-                }
-
-                // Update the context's buffer_infos with the ASIO-filled pointers
-                {
-                    let ctx = unsafe { &mut *ctx_raw };
-                    ctx.buffer_infos = buffer_infos;
-                }
-
-                // Start ASIO stream
-                let start_res = unsafe { ASIOStart() };
-                if start_res != 0 {
-                    let msg = format!("ASIOStart failed with error code {start_res}");
-                    error!("{msg}");
-                    status_channel
-                        .send(StatusMessage::PlaybackError(msg))
-                        .unwrap_or(());
-                    PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-                    let _ = unsafe { Box::from_raw(ctx_raw) };
-                    barrier.wait();
-                    return;
-                }
 
                 match status_channel.send(StatusMessage::PlaybackReady) {
                     Ok(()) => {}
@@ -704,9 +1271,13 @@ impl PlaybackDevice for AsioPlaybackDevice {
 
                 // Stop ASIO and clean up
                 debug!("Stopping ASIO playback.");
-                let _ = unsafe { ASIOStop() };
                 PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
                 let _ = unsafe { Box::from_raw(ctx_raw) };
+                if full_duplex {
+                    release_shared_asio();
+                } else {
+                    let _ = unsafe { ASIOStop() };
+                }
             })?;
         Ok(Box::new(handle))
     }
@@ -726,22 +1297,19 @@ impl CaptureDevice for AsioCaptureDevice {
         capture_status: Arc<RwLock<CaptureStatus>>,
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
-        let devname = self
-            .devname
-            .clone()
-            .unwrap_or_default();
+        let devname = self.devname.clone().unwrap_or_default();
         let samplerate = self.samplerate;
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let binary_format = resolve_binary_format(&self.sample_format);
-        let bytes_per_sample = binary_format.bytes_per_sample();
+        let configured_format = self.sample_format;
         let resampler_conf = self.resampler_config;
         let async_src = resampler_is_async(&resampler_conf);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = (1000.0 * self.rate_measure_interval) as u64;
+        let full_duplex = self.full_duplex;
 
         let handle = thread::Builder::new()
             .name("AsioCapture".to_string())
@@ -763,17 +1331,126 @@ impl CaptureDevice for AsioCaptureDevice {
                 debug!("Using a capture channel capacity of {channel_capacity} buffers.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
 
+                // --- Device-specific setup (full-duplex vs single-direction) ---
+                // Format is resolved inside; bytes_per_sample depends on it.
+                let setup_result: Result<(usize, BinarySampleFormat, usize), String> = if full_duplex {
+                    // Full-duplex: shared driver coordination
+                    let (inputs, _outputs, preferred_buf) = match init_shared_asio(&devname) {
+                        Ok(result) => result,
+                        Err(err) => {
+                            let msg = format!("ASIO capture open error: {err}");
+                            error!("{msg}");
+                            channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                            status_channel
+                                .send(StatusMessage::CaptureError(msg.clone()))
+                                .unwrap_or(());
+                            barrier.wait();
+                            return;
+                        }
+                    };
+                    if channels > inputs as usize {
+                        let msg = format!(
+                            "Requested {channels} input channels but device only has {inputs}"
+                        );
+                        error!("{msg}");
+                        channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                        status_channel
+                            .send(StatusMessage::CaptureError(msg))
+                            .unwrap_or(());
+                        barrier.wait();
+                        return;
+                    }
+                    // Resolve sample format from device
+                    let resolved_format = match resolve_format(&configured_format, true) {
+                        Ok(fmt) => fmt,
+                        Err(err) => {
+                            let msg = format!("ASIO capture format error: {err}");
+                            error!("{msg}");
+                            channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                            status_channel
+                                .send(StatusMessage::CaptureError(msg))
+                                .unwrap_or(());
+                            barrier.wait();
+                            return;
+                        }
+                    };
+                    let binary_format = resolve_binary_format(&resolved_format);
+                    let bytes_per_sample = binary_format.bytes_per_sample();
+                    Ok((preferred_buf as usize, binary_format, bytes_per_sample))
+                } else {
+                    // Single-direction: open device (also resolves format)
+                    let (_buffer_infos, preferred_buf, resolved_format) =
+                        match open_asio_capture(&devname, channels, &configured_format) {
+                            Ok(result) => result,
+                            Err(err) => {
+                                let msg = format!("ASIO capture open error: {err}");
+                                error!("{msg}");
+                                channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                                status_channel
+                                    .send(StatusMessage::CaptureError(msg))
+                                    .unwrap_or(());
+                                barrier.wait();
+                                return;
+                            }
+                        };
+                    let binary_format = resolve_binary_format(&resolved_format);
+                    let bytes_per_sample = binary_format.bytes_per_sample();
+                    Ok((preferred_buf as usize, binary_format, bytes_per_sample))
+                };
+
+                let (asio_buffer_size, binary_format, bytes_per_sample) = match setup_result {
+                    Ok(result) => result,
+                    Err(msg) => {
+                        error!("{msg}");
+                        channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                        status_channel
+                            .send(StatusMessage::CaptureError(msg))
+                            .unwrap_or(());
+                        barrier.wait();
+                        return;
+                    }
+                };
+
                 let blockalign = bytes_per_sample * channels;
                 let ringbuffer =
                     HeapRb::<u8>::new(blockalign * (2 * chunksize + 2048));
                 let (device_producer, mut device_consumer) = ringbuffer.split();
 
-                // Open ASIO device and set up buffers
-                let (mut buffer_infos, preferred_buf) =
-                    match open_asio_capture(&devname, channels) {
+                // --- Create context and start ASIO ---
+                let ctx_raw = if full_duplex {
+                    let buffer_infos = make_buffer_infos(channels, true);
+                    let ctx = Box::new(AsioCaptureContext {
+                        device_producer,
+                        tx_dev,
+                        buffer_infos,
+                        num_channels: channels,
+                        buffer_size: asio_buffer_size,
+                        bytes_per_sample,
+                        chunk_counter: 0,
+                    });
+                    let ctx_raw = Box::into_raw(ctx);
+                    CAPTURE_CONTEXT.store(ctx_raw, Ordering::Release);
+
+                    // Register and wait for combined buffer creation + ASIOStart
+                    if let Err(err) = register_and_wait(true, channels) {
+                        let msg = format!("ASIO full-duplex capture setup error: {err}");
+                        error!("{msg}");
+                        channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                        status_channel
+                            .send(StatusMessage::CaptureError(msg))
+                            .unwrap_or(());
+                        CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                        let _ = unsafe { Box::from_raw(ctx_raw) };
+                        barrier.wait();
+                        return;
+                    }
+                    ctx_raw
+                } else {
+                    // Re-create buffer_infos for the callback context.
+                    let (mut buffer_infos, preferred_buf) = match setup_asio_buffers(channels, true) {
                         Ok(result) => result,
                         Err(err) => {
-                            let msg = format!("ASIO capture open error: {err}");
+                            let msg = format!("ASIO capture buffer setup error: {err}");
                             error!("{msg}");
                             channel.send(AudioMessage::EndOfStream).unwrap_or(());
                             status_channel
@@ -784,64 +1461,65 @@ impl CaptureDevice for AsioCaptureDevice {
                         }
                     };
 
-                // Build capture context
-                let ctx = Box::new(AsioCaptureContext {
-                    device_producer,
-                    tx_dev,
-                    buffer_infos: buffer_infos.clone(),
-                    num_channels: channels,
-                    buffer_size: preferred_buf as usize,
-                    bytes_per_sample,
-                    chunk_counter: 0,
-                });
-                let ctx_raw = Box::into_raw(ctx);
-                CAPTURE_CONTEXT.store(ctx_raw, Ordering::Release);
+                    let ctx = Box::new(AsioCaptureContext {
+                        device_producer,
+                        tx_dev,
+                        buffer_infos: buffer_infos.clone(),
+                        num_channels: channels,
+                        buffer_size: preferred_buf as usize,
+                        bytes_per_sample,
+                        chunk_counter: 0,
+                    });
+                    let ctx_raw = Box::into_raw(ctx);
+                    CAPTURE_CONTEXT.store(ctx_raw, Ordering::Release);
 
-                // Register ASIO callbacks and create buffers
-                let mut callbacks = ASIOCallbacks {
-                    bufferSwitch: Some(buffer_switch_capture),
-                    sampleRateDidChange: None,
-                    asioMessage: Some(asio_message_callback),
-                    bufferSwitchTimeInfo: None,
+                    // Leak the callbacks struct so it remains valid for the ASIO driver.
+                    // The ASIO SDK requires the ASIOCallbacks struct passed to
+                    // ASIOCreateBuffers to remain valid for the lifetime of the stream.
+                    let callbacks = Box::leak(Box::new(ASIOCallbacks {
+                        bufferSwitch: Some(buffer_switch_capture),
+                        sampleRateDidChange: None,
+                        asioMessage: Some(asio_message_callback),
+                        bufferSwitchTimeInfo: None,
+                    }));
+                    if let Err(err) = create_asio_buffers(
+                        &mut buffer_infos,
+                        channels as i32,
+                        preferred_buf,
+                        callbacks,
+                    ) {
+                        let msg = format!("ASIO capture buffer creation error: {err}");
+                        error!("{msg}");
+                        channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                        status_channel
+                            .send(StatusMessage::CaptureError(msg))
+                            .unwrap_or(());
+                        CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                        let _ = unsafe { Box::from_raw(ctx_raw) };
+                        barrier.wait();
+                        return;
+                    }
+
+                    {
+                        let ctx = unsafe { &mut *ctx_raw };
+                        ctx.buffer_infos = buffer_infos;
+                    }
+
+                    let start_res = unsafe { ASIOStart() };
+                    if start_res != 0 {
+                        let msg = format!("ASIOStart failed with error code {start_res}");
+                        error!("{msg}");
+                        channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                        status_channel
+                            .send(StatusMessage::CaptureError(msg))
+                            .unwrap_or(());
+                        CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                        let _ = unsafe { Box::from_raw(ctx_raw) };
+                        barrier.wait();
+                        return;
+                    }
+                    ctx_raw
                 };
-                if let Err(err) = create_asio_buffers(
-                    &mut buffer_infos,
-                    channels as i32,
-                    preferred_buf,
-                    &mut callbacks,
-                ) {
-                    let msg = format!("ASIO capture buffer creation error: {err}");
-                    error!("{msg}");
-                    channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                    status_channel
-                        .send(StatusMessage::CaptureError(msg))
-                        .unwrap_or(());
-                    CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-                    let _ = unsafe { Box::from_raw(ctx_raw) };
-                    barrier.wait();
-                    return;
-                }
-
-                // Update the context's buffer_infos with the ASIO-filled pointers
-                {
-                    let ctx = unsafe { &mut *ctx_raw };
-                    ctx.buffer_infos = buffer_infos;
-                }
-
-                // Start ASIO stream
-                let start_res = unsafe { ASIOStart() };
-                if start_res != 0 {
-                    let msg = format!("ASIOStart failed with error code {start_res}");
-                    error!("{msg}");
-                    channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                    status_channel
-                        .send(StatusMessage::CaptureError(msg))
-                        .unwrap_or(());
-                    CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-                    let _ = unsafe { Box::from_raw(ctx_raw) };
-                    barrier.wait();
-                    return;
-                }
 
                 // Capture monitoring state
                 let mut capture_frames = chunksize;
@@ -1057,9 +1735,13 @@ impl CaptureDevice for AsioCaptureDevice {
 
                 // Stop ASIO and clean up
                 debug!("Stopping ASIO capture.");
-                let _ = unsafe { ASIOStop() };
                 CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
                 let _ = unsafe { Box::from_raw(ctx_raw) };
+                if full_duplex {
+                    release_shared_asio();
+                } else {
+                    let _ = unsafe { ASIOStop() };
+                }
                 capture_status.write().state = ProcessingState::Inactive;
             })?;
         Ok(Box::new(handle))

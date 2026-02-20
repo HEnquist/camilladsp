@@ -726,11 +726,25 @@ The `device` parameter should be set to the name of the ASIO driver to use.
 Available ASIO drivers are listed in the log output at startup (at debug level).
 
 The supported sample formats are:
-- `S16` - 16-bit signed integer
-- `S24` - 24-bit signed integer (in 32-bit container)
-- `S32` - 32-bit signed integer
-- `F32` - 32-bit float
-- `F64` - 64-bit float
+- `S16_LE` - 16-bit signed integer
+- `S24_4_LE` - 24-bit signed integer (in 32-bit container)
+- `S24_3_LE` - 24-bit signed integer (packed 3-byte)
+- `S32_LE` - 32-bit signed integer
+- `F32_LE` - 32-bit float
+- `F64_LE` - 64-bit float
+
+If the `format` parameter is omitted, CamillaDSP will query the device for its native sample format
+and use it automatically. ASIO drivers do not perform sample format conversion, so if a format is
+specified it must match the device's native format. A mismatch will result in an error at startup.
+
+#### Full-duplex limitations
+When both capture and playback use the ASIO backend, CamillaDSP operates them in full-duplex mode
+through a single shared driver instance. This implies:
+- **Same device:** Capture and playback must specify the same ASIO driver name.
+  ASIO only supports one driver loaded at a time.
+- **Same sample rate:** Resampling is not supported in full-duplex ASIO mode.
+  Both directions share the same hardware clock, so `capture_samplerate` must equal `samplerate`
+  and no `resampler` should be configured.
 
 Example configuration:
 ```yaml
@@ -738,12 +752,12 @@ capture:
   type: Asio
   channels: 2
   device: "My ASIO Driver"
-  format: S32
+  format: S32_LE
 playback:
   type: Asio
   channels: 2
   device: "My ASIO Driver"
-  format: S32
+  format: S32_LE
 ```
 
 ## MacOS (CoreAudio)

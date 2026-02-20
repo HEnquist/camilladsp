@@ -238,15 +238,16 @@ impl WasapiSampleFormat {
 }
 
 #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-#[allow(clippy::upper_case_acronyms)]
+#[allow(clippy::upper_case_acronyms, non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum AsioSampleFormat {
-    S16,
-    S24,
-    S32,
-    F32,
-    F64,
+    S16_LE,
+    S24_4_LE,
+    S24_3_LE,
+    S32_LE,
+    F32_LE,
+    F64_LE,
 }
 
 #[cfg(all(target_os = "windows", feature = "asio-backend"))]
@@ -255,13 +256,13 @@ impl AsioSampleFormat {
     // Used for overriding config values.
     pub fn from_binary_format(format: &BinarySampleFormat) -> Option<Self> {
         match format {
-            BinarySampleFormat::S16_LE => Some(Self::S16),
-            BinarySampleFormat::S24_3_LE => Some(Self::S24),
-            BinarySampleFormat::S24_4_LJ_LE => Some(Self::S24),
-            BinarySampleFormat::S24_4_RJ_LE => Some(Self::S24),
-            BinarySampleFormat::S32_LE => Some(Self::S32),
-            BinarySampleFormat::F32_LE => Some(Self::F32),
-            BinarySampleFormat::F64_LE => Some(Self::F64),
+            BinarySampleFormat::S16_LE => Some(Self::S16_LE),
+            BinarySampleFormat::S24_3_LE => Some(Self::S24_3_LE),
+            BinarySampleFormat::S24_4_LJ_LE => Some(Self::S24_4_LE),
+            BinarySampleFormat::S24_4_RJ_LE => Some(Self::S24_4_LE),
+            BinarySampleFormat::S32_LE => Some(Self::S32_LE),
+            BinarySampleFormat::F32_LE => Some(Self::F32_LE),
+            BinarySampleFormat::F64_LE => Some(Self::F64_LE),
         }
     }
 }
@@ -1958,8 +1959,7 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                 if let Some(mapped) = mapped_format {
                     dev.format = Some(mapped);
                 } else {
-                    let msg =
-                        format!("ASIO does not have a sample format corresponding to {fmt}");
+                    let msg = format!("ASIO does not have a sample format corresponding to {fmt}");
                     return Err(ConfigError::new(&msg).into());
                 }
             }
@@ -2242,6 +2242,25 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                 )
                 .into());
             }
+        }
+    }
+    #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+    if let (CaptureDevice::Asio(cap_dev), PlaybackDevice::Asio(pb_dev)) =
+        (&conf.devices.capture, &conf.devices.playback)
+    {
+        if cap_dev.device != pb_dev.device {
+            return Err(ConfigError::new(
+                "ASIO only supports one driver at a time. \
+                 Capture and playback must use the same ASIO device",
+            )
+            .into());
+        }
+        if conf.devices.resampler.is_some() {
+            return Err(ConfigError::new(
+                "Resampling is not supported in full-duplex ASIO mode. \
+                 Both capture and playback share the same driver and sample rate",
+            )
+            .into());
         }
     }
     if let PlaybackDevice::File {

@@ -359,16 +359,24 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             polling: dev.is_polling(),
         }),
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-        config::PlaybackDevice::Asio(ref dev) => Box::new(asiodevice::AsioPlaybackDevice {
-            devname: dev.device.clone(),
-            samplerate: conf.samplerate,
-            chunksize: conf.chunksize,
-            channels: dev.channels,
-            sample_format: dev.format,
-            target_level: conf.target_level(),
-            adjust_period: conf.adjust_period(),
-            enable_rate_adjust: conf.rate_adjust(),
-        }),
+        config::PlaybackDevice::Asio(ref dev) => {
+            let full_duplex = if let config::CaptureDevice::Asio(ref cap_dev) = conf.capture {
+                cap_dev.device == dev.device
+            } else {
+                false
+            };
+            Box::new(asiodevice::AsioPlaybackDevice {
+                devname: dev.device.clone(),
+                samplerate: conf.samplerate,
+                chunksize: conf.chunksize,
+                channels: dev.channels,
+                sample_format: dev.format,
+                target_level: conf.target_level(),
+                adjust_period: conf.adjust_period(),
+                enable_rate_adjust: conf.rate_adjust(),
+                full_duplex,
+            })
+        }
         #[cfg(all(
             feature = "cpal-backend",
             feature = "jack-backend",
@@ -606,19 +614,27 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             polling: dev.is_polling(),
         }),
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-        config::CaptureDevice::Asio(ref dev) => Box::new(asiodevice::AsioCaptureDevice {
-            devname: dev.device.clone(),
-            samplerate: conf.samplerate,
-            capture_samplerate,
-            resampler_config: conf.resampler,
-            chunksize: conf.chunksize,
-            channels: dev.channels,
-            sample_format: dev.format,
-            silence_threshold: conf.silence_threshold(),
-            silence_timeout: conf.silence_timeout(),
-            stop_on_rate_change: conf.stop_on_rate_change(),
-            rate_measure_interval: conf.rate_measure_interval(),
-        }),
+        config::CaptureDevice::Asio(ref dev) => {
+            let full_duplex = if let config::PlaybackDevice::Asio(ref pb_dev) = conf.playback {
+                pb_dev.device == dev.device
+            } else {
+                false
+            };
+            Box::new(asiodevice::AsioCaptureDevice {
+                devname: dev.device.clone(),
+                samplerate: conf.samplerate,
+                capture_samplerate,
+                resampler_config: conf.resampler,
+                chunksize: conf.chunksize,
+                channels: dev.channels,
+                sample_format: dev.format,
+                silence_threshold: conf.silence_threshold(),
+                silence_timeout: conf.silence_timeout(),
+                stop_on_rate_change: conf.stop_on_rate_change(),
+                rate_measure_interval: conf.rate_measure_interval(),
+                full_duplex,
+            })
+        }
         #[cfg(all(
             feature = "cpal-backend",
             feature = "jack-backend",
