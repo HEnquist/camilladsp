@@ -628,7 +628,24 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             else {
                                 xtrace!("Playback status blocked, skipping rms update.");
                             }
-                            let bytes = device_producer.push_slice(&buf[0..conversion_result.0]);
+                            // Wait for enough space in the ring buffer before pushing.
+                            // This is essential when the capture side is not rate-limited
+                            // (e.g. signal generator): without this wait the data would
+                            // arrive far faster than the playback callback can drain it
+                            // and most of it would be dropped.  The sleep duration is
+                            // based on the time it takes to play back one chunksize.
+                            let bytes_to_write = conversion_result.0;
+                            let sleep_duration = std::time::Duration::from_micros(
+                                (1_000_000 * chunksize / samplerate / 2) as u64
+                            );
+                            let max_retries = 8;
+                            for _ in 0..max_retries {
+                                if device_producer.vacant_len() >= bytes_to_write {
+                                    break;
+                                }
+                                std::thread::sleep(sleep_duration);
+                            }
+                            let bytes = device_producer.push_slice(&buf[0..bytes_to_write]);
                             match tx_dev.send(PlaybackDeviceMessage::Data(bytes)) {
                                 Ok(_) => {}
                                 Err(err) => {
