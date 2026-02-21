@@ -532,15 +532,15 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
 // Returns two strings per device, the device name and a readable name.
 // Some backends do not make a diference between these, and return the same name twice.
 pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String)> {
-    match backend {
+    match backend.to_lowercase().as_str() {
         #[cfg(target_os = "linux")]
-        "Alsa" => alsadevice_utils::list_device_names(input),
+        "alsa" => alsadevice_utils::list_device_names(input),
         #[cfg(target_os = "macos")]
-        "CoreAudio" => coreaudiodevice::list_available_devices(input),
+        "coreaudio" => coreaudiodevice::list_available_devices(input),
         #[cfg(target_os = "windows")]
-        "Wasapi" => wasapidevice::list_device_names(input),
+        "wasapi" => wasapidevice::list_device_names(input),
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-        "Asio" => asiodevice::list_available_devices(),
+        "asio" => asiodevice::list_available_devices(),
         _ => Vec::new(),
     }
 }
