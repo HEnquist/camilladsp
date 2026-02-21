@@ -33,6 +33,8 @@ use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
+use crate::container_from_stash;
+use crate::vec_from_stash;
 
 struct SineGenerator {
     time: f64,
@@ -179,15 +181,15 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
                 break;
             }
         };
-        let mut waveform = vec![0.0; params.chunksize];
+        let mut waveform = vec_from_stash(params.chunksize);
         for (sample, value) in waveform.iter_mut().zip(&mut generator) {
             *sample = value;
         }
-        let mut waveforms = Vec::with_capacity(params.channels);
-        waveforms.push(waveform);
+        let mut waveforms = container_from_stash(params.channels);
         for _ in 1..params.channels {
-            waveforms.push(waveforms[0].clone());
+            waveforms.push(waveform.clone());
         }
+        waveforms.insert(0, waveform);
 
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, params.chunksize, params.chunksize);
 

@@ -473,12 +473,28 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                                     xtrace!("Playback status blocked, skipping rms update.");
                                 }
 
-                                // Push to ring buffer - if full, data is dropped
-                                let pushed = rb_producer.push_slice(&raw_buffer[..conversion_result.0]);
-                                if pushed < conversion_result.0 {
+                                // Wait for enough space in the ring buffer before pushing.
+                                // This is essential when the capture side is not rate-limited
+                                // (e.g. signal generator): without this wait the data would
+                                // arrive far faster than the playback callback can drain it
+                                // and most of it would be dropped.  The sleep duration is
+                                // based on the time it takes to play back one chunksize.
+                                let bytes_to_write = conversion_result.0;
+                                let sleep_duration = std::time::Duration::from_micros(
+                                    (1_000_000 * chunksize / samplerate / 2) as u64
+                                );
+                                let max_retries = 8;
+                                for _ in 0..max_retries {
+                                    if rb_producer.vacant_len() >= bytes_to_write {
+                                        break;
+                                    }
+                                    std::thread::sleep(sleep_duration);
+                                }
+                                let pushed = rb_producer.push_slice(&raw_buffer[..bytes_to_write]);
+                                if pushed < bytes_to_write {
                                     trace!(
                                        "Playback ring buffer full, dropped {} bytes",
-                                       conversion_result.0 - pushed
+                                       bytes_to_write - pushed
                                     );
                                     if running {
                                         warn!("Playback ring buffer full, dropping audio data");
