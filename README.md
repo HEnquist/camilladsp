@@ -59,12 +59,8 @@ under the terms of either of the following licenses:
 The optional ASIO backend (`asio-backend` feature) depends on the ASIO SDK,
 which is licensed under the GNU General Public License version 3.
 When CamillaDSP is built with the `asio-backend` feature enabled,
-the resulting binary is subject to the GPLv3 license only — the MPL 2.0
-option does not apply to binaries that include ASIO SDK code.
-
-Builds **without** the `asio-backend` feature remain available under
-either GPLv3 or MPL 2.0, at your choice.
-
+the resulting binary is subject to the GPLv3 license only.
+The MPL 2.0 option does not apply to binaries that include ASIO SDK code.
 
 # Disclaimer
 
@@ -109,7 +105,7 @@ and the Mozilla Public License Version 2.0:
   - **[File or pipe](#file-or-pipe)**
 - **[Windows](#windows)**
   - **[ASIO](#asio)**
-- **[MacOS (CoreAudio)](#macos-coreaudio)**
+- **[macOS (CoreAudio)](#macos-coreaudio)**
 - **[Linux](#linux)**
   - **[ALSA](#alsa)**
   - **[PulseAudio](#pulseaudio)**
@@ -233,9 +229,9 @@ Any x86_64 CPU will likely be sufficient.
 
 Pre-built binaries are provided for 64-bit systems.
 
-### MacOS requirements
+### macOS requirements
 CamillaDSP can run on both Intel and Apple Silicon macs.
-Any reasonably recent version of MacOS should work.
+Any reasonably recent version of macOS should work.
 
 Pre-built binaries are provided for both Intel and Apple Silicon
 
@@ -318,7 +314,7 @@ Trying will result in an error message such as:
 
 The solution is to remove the "quarantine" attribute from the binary using the `xattr` command.
 
-Open a a terminal and run:
+Open a terminal and run:
 
 ```sh
 xattr -d com.apple.quarantine /path/to/camilladsp
@@ -355,8 +351,8 @@ This feature is enabled by default, but can be left out. The feature name is "we
 For usage see the section "Controlling via websocket".
 
 ## Building in Linux with standard features
-These instructions assume that the linux distribution used is one of Fedora, Debian, Ubunty or Arch.
-They should also work also work on distributions closely related to one of these, such as Manjaro (Arch),
+These instructions assume that the Linux distribution used is one of Fedora, Debian, Ubuntu or Arch.
+They should also work on distributions closely related to one of these, such as Manjaro (Arch),
 or Raspberry Pi OS (Debian).
 
 There are many others, including some specialized distributions for example targeting audio playback.
@@ -573,7 +569,7 @@ The argument should be the path to the logfile.
 If this file is not writable, CamillaDSP will panic and exit.
 
 Log rotation can be enabled by the `--log_rotate_size` option.
-This creates a new log file whenever the log fize size exceeds the given size in bytes.
+This creates a new log file whenever the log file size exceeds the given size in bytes.
 When rotation is enabled the current log file gets an added infix of `_rCURRENT`,
 so for example `logfile.log` becomes `logfile_rCURRENT.log`.
 When the file is rotated, the old logs are kept with a timestamp as infix,
@@ -1103,7 +1099,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   and rounded up to the nearest integer.
 
   Using a smaller chunk size (i.e. more segments) reduces latency
-  but makes the convoultion process less efficient and thus needs more processing power.
+  but makes the convolution process less efficient and thus needs more processing power.
   Although a smaller chunk size leads to increased CPU usage for all filters,
   the difference is larger for FIR filters than the other types.
 
@@ -1149,7 +1145,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   in the buffer of the playback device when the next chunk arrives.
   When processing starts, the playback device will delay its startup
   in order to get the initial buffer level near this value.
-  See also `enable_rate_adjust` which should be set to `true`to allow matching 
+  See also `enable_rate_adjust` which should be set to `true` to allow matching 
   capture and playback rates in order to keep the buffer level at the target value.
   
   It may take some experimentation to find the optimal number.
@@ -1158,7 +1154,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   A suitable starting point is to use the `chunksize` value.
   Usable values cover a large range, from very small values like 30 on lightly loaded systems
   with tight latency requirements,
-  to a maximum of `(2 + queuelimit) * chunksize` for mimimal underrun risk when latency is not a concern.
+  to a maximum of `(2 + queuelimit) * chunksize` for minimal underrun risk when latency is not a concern.
 
 * `adjust_period` (optional, defaults to 10)
 
@@ -1301,8 +1297,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
   possible to enable the wav-header if the format is `S24_4_RJ_LE`.
 
   To read from a wav file, use the `WavFile` capture device.
-  The samplerate and numnber of channels of the file is used to override the values in the config,
-  similar to how these values can be [overriden from the command line](#overriding-config-values).
+  The samplerate and number of channels of the file is used to override the values in the config,
+  similar to how these values can be [overridden from the command line](#overriding-config-values).
   Note that `WavFile` only supports reading from files. Reading from a pipe is not supported.
 
   Example config for raw files:
@@ -1921,13 +1917,13 @@ filters:
       type: Dummy
       length: 65536
 ```
-This creates a dummy minumum-phase allpass filter of length `length` (that must be at least 1).
+This creates a dummy minimum-phase allpass filter of length `length` (that must be at least 1).
 The first point has a value of one, and all the rest are zero: `[1.0, 0.0, 0.0, ..., 0.0]`.
 This is intended to provide an easy way to evaluate the CPU load for different filter lengths.
 
 #### Coefficients from Wav-file
 
-Supplying the coefficients as `.wav` file is the most convenient method.
+Supplying the coefficients as a `.wav` file is the most convenient method.
 The `Wav` type takes only one parameter `channel`.
 This is used to select which channel of a multi-channel file to load.
 For a standard stereo file, the left track is channel 0, and the right is channel 1.
@@ -1938,7 +1934,7 @@ The sample rate of the file is ignored.
 
 To load coefficients from a raw file, use the `Raw` type. This is also used to load coefficients from text files.
 Raw files are often saved with a `.dbl`, `.raw`, or `.pcm` ending.
-The lack of a header means that the files doesn't contain any information about data format etc.
+The lack of a header means that the file doesn't contain any information about data format etc.
 CamillaDSP supports loading coefficients from such files that contain a single channel only
 (stereo files are not supported), in all the most common sample formats.
 The `Raw` type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
