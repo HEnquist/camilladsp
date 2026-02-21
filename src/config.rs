@@ -1694,7 +1694,7 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
             return Err(ConfigError::new(&msg).into());
         }
     };
-    let configuration: Configuration = match serde_yml::from_str(&contents) {
+    let configuration: Configuration = match yaml_serde::from_str(&contents) {
         Ok(config) => config,
         Err(err) => {
             let msg = format!("Invalid config file!\n{err}");
