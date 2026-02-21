@@ -14,6 +14,9 @@ Changes:
 - Windows: Optional automatic sample format selection.
 Bugfixes:
 - Windows: Fix Wasapi exclusive mode for padded 24-bit samples.
+- Windows & macOS: Fix audio data loss in playback when using
+  a capture device with no inherent rate limit,
+  such as File and SignalGenerator.
 
 ## v3.0.1
 Bugfixes:
