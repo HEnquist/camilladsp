@@ -28,13 +28,18 @@ The CamillaDSP project encompasses:
 The CamillaDSP engine is a command-line application that runs on Linux, macOS, and Windows.
 
 Audio data is captured from a capture device and sent to a playback device.
-Alsa, PulseAudio, PipeWire, Jack, Wasapi, ASIO and CoreAudio are currently supported for both capture and playback.
+ALSA, PulseAudio, PipeWire, Jack, Wasapi, ASIO and CoreAudio are
+currently supported for both capture and playback.
 
 The processing pipeline consists of any number of filters and mixers.
-Mixers are used to route audio between channels and to change the number of channels in the stream.
-Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT.
-A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples.
-A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
+Mixers are used to route audio between channels and to change
+the number of channels in the stream.
+Filters can be both IIR and FIR. IIR filters are implemented as biquads,
+while FIR use convolution via FFT/IFFT.
+A filter can be applied to any number of channels.
+All processing is done in chunks of a fixed number of samples.
+A small number of samples gives a small in-out latency
+while a larger number is more efficient.
 The full configuration is given in a YAML file.
 
 # License
@@ -106,7 +111,7 @@ and the Mozilla Public License Version 2.0:
   - **[ASIO](#asio)**
 - **[MacOS (CoreAudio)](#macos-coreaudio)**
 - **[Linux](#linux)**
-  - **[Alsa](#alsa)**
+  - **[ALSA](#alsa)**
   - **[PulseAudio](#pulseaudio)**
   - **[PipeWire](#pipewire)**
 
@@ -185,7 +190,7 @@ Once all processing is done, the audio data is posted to the input queue of the 
 ### Playback
 The playback thread simply waits for audio messages to appear in the queue.
 Once a message arrives, the audio data is converted to the right sample format for the device, and written to the playback device.
-The Alsa playback device supports monitoring the buffer level of the playback device.
+The ALSA playback device supports monitoring the buffer level of the playback device.
 This is used to send requests for adjusting the capture speed to the supervisor thread, on a separate message channel.
 
 ### Supervisor
@@ -213,7 +218,8 @@ A few examples, done with CamillaDSP v0.5.0:
   CPU usage just under 100%.
 
 ### Linux requirements
-Both 64 and 32 bit architectures are supported. All platforms supported by the Rustc compiler should work.
+Both 64 and 32 bit architectures are supported.
+All platforms supported by the Rustc compiler should work.
 
 Pre-built binaries are provided for:
 - x86_64 (almost all PCs)
@@ -222,29 +228,39 @@ Pre-built binaries are provided for:
 - aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS)
 
 ### Windows requirements
-An x86_64 CPU and the 64-bit version of Windows is recommended. Any x86_64 CPU will likely be sufficient.
+An x86_64 CPU and the 64-bit version of Windows is recommended.
+Any x86_64 CPU will likely be sufficient.
 
 Pre-built binaries are provided for 64-bit systems.
 
 ### MacOS requirements
-CamillaDSP can run on both Intel and Apple Silicon macs. Any reasonably recent version of MacOS should work.
+CamillaDSP can run on both Intel and Apple Silicon macs.
+Any reasonably recent version of MacOS should work.
 
 Pre-built binaries are provided for both Intel and Apple Silicon
 
 
 ## Usage example: crossover for 2-way speakers
 A crossover must filter all sound being played on the system.
-This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device.
-CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
+This is possible by setting up a virtual loopback device
+and setting this device as the default output device.
+Virtual loopback devices are available for most audio APIs,
+either as built-in features or via third-party solutions.
+CamillaDSP is then configured to capture from the output of this device
+and play the processed audio on the real sound card.
 
 See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
 ## Dependencies
 These are the key dependencies for CamillaDSP.
-* https://crates.io/crates/alsa - Alsa audio backend
-* https://crates.io/crates/clap - Command line argument parsing
-* https://crates.io/crates/cpal - Jack audio backend
+* https://crates.io/crates/alsa - ALSA bindings
+* https://crates.io/crates/coreaudio-rs - CoreAudio bindings
+* https://crates.io/crates/pipewire - PipeWire bindings
+* https://crates.io/crates/asio-sys
+* https://crates.io/crates/wasapi
+* https://crates.io/crates/cpal - Cross platform audio library used to provide Jack support
 * https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend
+* https://crates.io/crates/clap - Command line argument parsing
 * https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
 * https://crates.io/crates/rustfft - FFT used for FIR filters
 * https://crates.io/crates/rubato - Sample rate conversion
@@ -275,14 +291,14 @@ The following configurations are provided:
 
 | Filename | Description | Backends |
 |----------|-------------|----------|
-| `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | Alsa |
-| `camilladsp-linux-pulseaudio-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | Alsa, PulseAudio |
-| `camilladsp-linux-pipewire-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | Alsa, PipeWire |
-| `camilladsp-linux-armv6.tar.gz` | Linux on Armv6 (32-bit), intended for Raspberry Pi 1 and Pi Zero but should also work on others | Alsa |
-| `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon (32-bit), intended for Raspberry Pi 2 and up but should also work on others | Alsa |
-| `camilladsp-linux-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | Alsa |
-| `camilladsp-linux-pulseaudio-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | Alsa, PulseAudio |
-| `camilladsp-linux-pipewire-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | Alsa, PipeWire |
+| `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA |
+| `camilladsp-linux-pulseaudio-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA, PulseAudio |
+| `camilladsp-linux-pipewire-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA, PipeWire |
+| `camilladsp-linux-armv6.tar.gz` | Linux on Armv6 (32-bit), intended for Raspberry Pi 1 and Pi Zero but should also work on others | ALSA |
+| `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon (32-bit), intended for Raspberry Pi 2 and up but should also work on others | ALSA |
+| `camilladsp-linux-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA |
+| `camilladsp-linux-pulseaudio-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA, PulseAudio |
+| `camilladsp-linux-pipewire-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA, PipeWire |
 | `camilladsp-macos-amd64.tar.gz` | macOS on 64-bit Intel CPU | CoreAudio |
 | `camilladsp-macos-aarch64.tar.gz` | macOS on Apple silicon | CoreAudio |
 | `camilladsp-windows-amd64.zip` | Windows on 64-bit Intel or AMD CPU | Wasapi |
@@ -320,7 +336,7 @@ This tool works on all supported platforms (Linux, macOS and Windows). Get it he
 
 For Windows you also need the "Build Tools for Visual Studio". Get them from here: https://aka.ms/buildtools
 
-When building on Linux the Alsa backend is always enabled.
+When building on Linux the ALSA backend is always enabled.
 Similarly, building on Windows always enables the Wasapi backend.
 The optional ASIO backend can be enabled with the `asio-backend` feature (see [Customized build](#customized-build)).
 And building on macOS always enables the CoreAudio backend.
@@ -352,7 +368,7 @@ If possible, it's recommended to use a pre-built binary on these systems.
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
 - - Arch: ```sudo pacman -S cargo pkg-config```
-- Install Alsa dependency:
+- Install ALSA dependency:
 - - Fedora: ```sudo dnf install alsa-lib-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libasound2-dev```
 - - Arch: ```sudo pacman -S alsa-lib```
@@ -718,8 +734,10 @@ The ASIO backend is an optional alternative audio backend for Windows.
 It provides low-latency access to audio devices via ASIO drivers.
 To use it, CamillaDSP must be compiled with the `asio-backend` feature enabled.
 
-Note that the ASIO backend is licensed under GPLv3 only, due to the ASIO SDK license requirements.
-See the [ASIO backend and license implications](#asio-backend-and-license-implications) section for details.
+Note that the ASIO backend is licensed under GPLv3 only,
+due to the ASIO SDK license requirements.
+See the [ASIO backend and license implications](#asio-backend-and-license-implications)
+section for details.
 
 Set the device `type` to `Asio` for both capture and playback.
 The `device` parameter should be set to the name of the ASIO driver to use.
@@ -733,17 +751,21 @@ The supported sample formats are:
 - `F32_LE` - 32-bit float
 - `F64_LE` - 64-bit float
 
-If the `format` parameter is omitted, CamillaDSP will query the device for its native sample format
-and use it automatically. ASIO drivers do not perform sample format conversion, so if a format is
-specified it must match the device's native format. A mismatch will result in an error at startup.
+If the `format` parameter is omitted, CamillaDSP will query the device
+for its native sample format and use it automatically.
+ASIO drivers do not perform sample format conversion,
+so if a format is specified it must match the device's native format.
+A mismatch will result in an error at startup.
 
 #### Full-duplex limitations
-When both capture and playback use the ASIO backend, CamillaDSP operates them in full-duplex mode
+When both capture and playback use the ASIO backend,
+CamillaDSP operates them in full-duplex mode
 through a single shared driver instance. This implies:
 - **Same device:** Capture and playback must specify the same ASIO driver name.
   ASIO only supports one driver loaded at a time.
 - **Same sample rate:** Resampling is not supported in full-duplex ASIO mode.
-  Both directions share the same hardware clock, so `capture_samplerate` must equal `samplerate`
+  Both directions share the same hardware clock,
+  so `capture_samplerate` must equal `samplerate`
   and no `resampler` should be configured.
 
 Example configuration:
@@ -766,7 +788,7 @@ See the [separate readme for CoreAudio](./backend_coreaudio.md).
 ## Linux
 Linux offers several audio APIs that CamillaDSP can use.
 
-### Alsa
+### ALSA
 See the [separate readme for ALSA](./backend_alsa.md).
 
 ### PulseAudio
@@ -1099,17 +1121,18 @@ A parameter marked (*) in any example is optional. If they are left out from the
   The total queue size limit will be `2*chunksize*queuelimit` samples per channel.
 
   The value should only be changed if the capture device can provide data faster
-  than the playback device can play it, like when using the Alsa "cdsp" plugin.
+  than the playback device can play it, like when using the ALSA "cdsp" plugin.
   If this case, set `queuelimit` to a low value like 1.
 
 * `enable_rate_adjust` (optional, defaults to false)
 
   This enables the playback device to control the rate of the capture device,
   in order to avoid buffer underruns or a slowly increasing latency.
-  This is currently supported when using an Alsa, Wasapi or CoreAudio playback device (and any capture device).
+  This is currently supported when using an ALSA, Wasapi, CoreAudio, PipeWire or ASIO
+  playback device (and any capture device).
   Setting the rate can be done in two ways.
   * Some capture devices provide a way to adjust the speed of their virtual sample clock (also called pitch adjust).
-    This is available with the Alsa Loopback and USB Audio gadget devices on Linux,
+    This is available with the ALSA Loopback and USB Audio gadget devices on Linux,
     as well as BlackHole version 0.5.0 and later on macOS.
     When capturing from any of these devices, the adjustment can be done by tuning the virtual sample clock of the device.
     This avoids the need for asynchronous resampling.
@@ -1230,7 +1253,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   * `channels`: number of channels
   * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `Asio`, `CoreAudio`).
      For `CoreAudio` and `Wasapi`, `null` will give the default device.
-     For `Asio`, use the ASIO driver name (see the log output at debug level for available drivers).
+     For `Asio`, use the ASIO driver name.
   * `filename` path to the file (for `File`, `RawFile` and `WavFile`)
   * `format`: sample format (for all except `Jack` and `Pulse`).
 
@@ -2631,7 +2654,7 @@ If using [CamillaGUI](#gui), it is also possible to import the filters into an e
 * https://github.com/phelluy/room_eq_mac_m1 - Room Equalization HowTo with REW and Apple Silicon
 
 ## Projects of general nature which can be useful together with CamillaDSP
-* https://github.com/scripple/alsa_hook_hwparams - Alsa hooks for reacting to sample rate and format changes.
+* https://github.com/scripple/alsa_hook_hwparams - ALSA hooks for reacting to sample rate and format changes.
 * https://github.com/HEnquist/cpal-listdevices - List audio devices with names and supported formats under Windows and macOS.
 
 ## Measurement and filter generation tools

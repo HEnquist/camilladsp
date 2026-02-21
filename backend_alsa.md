@@ -264,8 +264,8 @@ numid=6,iface=MIXER,name='PCM Capture Switch'
   : values=on
 ```
 
-### Subscribe to Alsa control events
-The Alsa capture device subscribes to control events from the USB Gadget and Loopback devices.
+### Subscribe to ALSA control events
+The ALSA capture device subscribes to control events from the USB Gadget and Loopback devices.
 For the loopback, it subscribes to events from the `PCM Slave Active` control,
 and for the gadget it subscribes to events from `Capture Rate`.
 Both of these can indicate when playback has stopped.

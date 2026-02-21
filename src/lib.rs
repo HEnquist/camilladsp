@@ -158,7 +158,7 @@ pub mod noisegate;
 #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
 pub mod pipewiredevice;
 pub mod processing;
-#[cfg(feature = "pulse-backend")]
+#[cfg(all(target_os = "linux", feature = "pulse-backend"))]
 pub mod pulsedevice;
 pub mod race;
 pub mod resampling;
@@ -498,18 +498,18 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         playbacktypes.push("Alsa".to_owned());
         capturetypes.push("Alsa".to_owned());
     }
-    if cfg!(feature = "pulse-backend") {
+    if cfg!(all(target_os = "linux", feature = "pulse-backend")) {
         playbacktypes.push("Pulse".to_owned());
         capturetypes.push("Pulse".to_owned());
     }
-    if cfg!(feature = "pipewire-backend") {
+    if cfg!(all(target_os = "linux", feature = "pipewire-backend")) {
         playbacktypes.push("PipeWire".to_owned());
         capturetypes.push("PipeWire".to_owned());
     }
-    if cfg!(feature = "bluez-backend") {
+    if cfg!(all(target_os = "linux", feature = "bluez-backend")) {
         capturetypes.push("Bluez".to_owned());
     }
-    if cfg!(feature = "jack-backend") {
+    if cfg!(all(target_os = "linux", feature = "jack-backend")) {
         playbacktypes.push("Jack".to_owned());
         capturetypes.push("Jack".to_owned());
     }
@@ -520,6 +520,10 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     if cfg!(target_os = "windows") {
         playbacktypes.push("Wasapi".to_owned());
         capturetypes.push("Wasapi".to_owned());
+    }
+    if cfg!(all(target_os = "windows", feature = "asio-backend")) {
+        playbacktypes.push("Asio".to_owned());
+        capturetypes.push("Asio".to_owned());
     }
     (playbacktypes, capturetypes)
 }
@@ -535,6 +539,8 @@ pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String
         "CoreAudio" => coreaudiodevice::list_available_devices(input),
         #[cfg(target_os = "windows")]
         "Wasapi" => wasapidevice::list_device_names(input),
+        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        "Asio" => asiodevice::list_available_devices(),
         _ => Vec::new(),
     }
 }
