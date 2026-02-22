@@ -94,6 +94,7 @@ pub fn list_device_names(input: bool) -> Vec<(String, String)> {
     } else {
         wasapi::Direction::Render
     };
+    let _ = wasapi::initialize_mta();
     let enumerator = wasapi::DeviceEnumerator::new();
 
     let names = enumerator
@@ -306,6 +307,8 @@ fn open_playback(
     wasapi::AudioRenderClient,
     Option<wasapi::Handle>,
 )> {
+    debug!("Opening Wasapi playback device with dev_id {dev_id}.");
+    let _ = wasapi::initialize_mta();
     let enumerator = wasapi::DeviceEnumerator::new()?;
     let device = enumerator.get_device(dev_id)?;
     let mut audio_client = device.get_iaudioclient()?;
@@ -360,6 +363,7 @@ fn open_capture(
     wasapi::AudioCaptureClient,
     Option<wasapi::Handle>,
 )> {
+    let _ = wasapi::initialize_mta();
     let enumerator = wasapi::DeviceEnumerator::new()?;
     let device = enumerator.get_device(dev_id)?;
 
