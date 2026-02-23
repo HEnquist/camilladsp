@@ -266,7 +266,7 @@ fn get_device_format(
     }
     if let Some(sample_format) = &temp_format {
         let (wave_format, binary_format) = get_supported_wave_format(
-            &audio_client,
+            audio_client,
             sample_format,
             samplerate,
             channels,
@@ -283,7 +283,7 @@ fn get_device_format(
     ] {
         trace!("Testing sample format {sample_format:?}.");
         let maybe_wave_format = get_supported_wave_format(
-            &audio_client,
+            audio_client,
             &sample_format,
             samplerate,
             channels,
