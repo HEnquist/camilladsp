@@ -1368,6 +1368,11 @@ impl CaptureDevice for WasapiCaptureDevice {
                             }
                         }
                     }
+                    // Drain any remaining messages in the rx_dev channel
+                    while let Ok((chunk_nbr, data_bytes)) = rx_dev.try_recv() {
+                        trace!("Capture, drained chunk notification, length {data_bytes} bytes.");
+                        expected_chunk_nbr = chunk_nbr;
+                    }
                     if state != ProcessingState::Stalled {
                         device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
                         averager.add_value(capture_frames);
