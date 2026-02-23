@@ -1986,7 +1986,7 @@ impl CaptureDevice for AsioCaptureDevice {
 
                     // Wait for enough data in the ring buffer
                     while device_consumer.occupied_len() < capture_bytes {
-                        match rx_dev.recv() {
+                        match rx_dev.recv_timeout(std::time::Duration::from_millis(250)) {
                             Ok((chunk_nbr, data_bytes)) => {
                                 trace!(
                                     "Capture, received notification, length {data_bytes} bytes."
@@ -2000,8 +2000,12 @@ impl CaptureDevice for AsioCaptureDevice {
                                     expected_chunk_nbr = chunk_nbr;
                                 }
                             }
-                            Err(err) => {
-                                error!("Capture, channel is closed: {err}.");
+                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                                warn!("Capture, waiting for data timed out.");
+                                break;
+                            }
+                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                                error!("Capture, channel is closed.");
                                 channel
                                     .send(AudioMessage::EndOfStream)
                                     .unwrap_or(());
