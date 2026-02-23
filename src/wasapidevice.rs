@@ -1100,7 +1100,10 @@ fn send_error_or_captureformatchange(
 fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize) -> usize {
     if let Some(resampl) = &resampler {
         #[cfg(feature = "debug")]
-        trace!("Resampler needs {} frames.", resampl.input_frames_next());
+        trace!(
+            "Resampler needs {} frames.",
+            resampl.resampler.input_frames_next()
+        );
         resampl.resampler.input_frames_next()
     } else {
         capture_frames

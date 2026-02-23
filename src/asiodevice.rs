@@ -13,7 +13,7 @@
 // This implementation uses the asio-sys crate to interface with the ASIO driver system.
 
 use std::collections::VecDeque;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::{Arc, Barrier, Condvar, Mutex, OnceLock};
@@ -26,7 +26,7 @@ use ringbuf::{HeapRb, traits::*};
 use asio_sys::bindings::asio_import::{
     ASIOBufferInfo, ASIOCallbacks, ASIOChannelInfo, ASIOCreateBuffers, ASIODisposeBuffers,
     ASIODriverInfo, ASIOExit, ASIOGetBufferSize, ASIOGetChannelInfo, ASIOGetChannels, ASIOInit,
-    ASIOStart, ASIOStop, can_sample_rate, get_sample_rate, set_sample_rate,
+    ASIOStart, ASIOStop, ASIOTime, can_sample_rate, get_sample_rate, set_sample_rate,
 };
 
 use crate::CommandMessage;
@@ -160,11 +160,25 @@ static ASIO_SHARED: OnceLock<(Mutex<Option<AsioSharedState>>, Condvar)> = OnceLo
 pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_process: i32) {
     let ctx_ptr = PLAYBACK_CONTEXT.load(Ordering::Acquire);
     if ctx_ptr.is_null() {
+        xtrace!("ASIO playback callback: null context, returning.");
+        return;
+    }
+    if !(0..=1).contains(&buffer_index) {
+        debug!("ASIO playback callback got invalid buffer index {buffer_index}, ignoring.");
         return;
     }
     let ctx = unsafe { &mut *ctx_ptr };
+    if ctx.buffer_infos.len() < ctx.num_channels {
+        error!(
+            "ASIO playback callback buffer info mismatch: infos={}, channels={}",
+            ctx.buffer_infos.len(),
+            ctx.num_channels
+        );
+        return;
+    }
     let bytes_per_frame = ctx.bytes_per_sample * ctx.num_channels;
     let needed_bytes = ctx.buffer_size * bytes_per_frame;
+    let buffer_index = buffer_index as usize;
 
     // Fill the sample queue from the ring buffer
     while ctx.sample_queue.len() < needed_bytes {
@@ -201,7 +215,7 @@ pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_proce
     for frame in 0..ctx.buffer_size {
         for ch in 0..ctx.num_channels {
             let buffer_info = &ctx.buffer_infos[ch];
-            let out_ptr = buffer_info.buffers[buffer_index as usize];
+            let out_ptr = buffer_info.buffers[buffer_index];
             if !out_ptr.is_null() {
                 let dst = unsafe { (out_ptr as *mut u8).add(frame * ctx.bytes_per_sample) };
                 for byte_idx in 0..ctx.bytes_per_sample {
@@ -210,6 +224,12 @@ pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_proce
                         *dst.add(byte_idx) = sample_byte;
                     }
                 }
+            } else if frame == 0 {
+                xtrace!(
+                    "ASIO playback callback: null output buffer pointer at channel {}, index {}.",
+                    ch,
+                    buffer_index
+                );
             } else {
                 // Discard bytes even if buffer pointer is null
                 for _ in 0..ctx.bytes_per_sample {
@@ -235,24 +255,44 @@ pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_proce
 pub unsafe extern "C" fn buffer_switch_capture(buffer_index: i32, _direct_process: i32) {
     let ctx_ptr = CAPTURE_CONTEXT.load(Ordering::Acquire);
     if ctx_ptr.is_null() {
+        debug!("ASIO capture callback: null context, returning.");
+        return;
+    }
+    if !(0..=1).contains(&buffer_index) {
+        debug!("ASIO capture callback got invalid buffer index {buffer_index}, ignoring.");
         return;
     }
     let ctx = unsafe { &mut *ctx_ptr };
+    if ctx.buffer_infos.len() < ctx.num_channels {
+        error!(
+            "ASIO capture callback buffer info mismatch: infos={}, channels={}",
+            ctx.buffer_infos.len(),
+            ctx.num_channels
+        );
+        return;
+    }
     let bytes_per_frame = ctx.bytes_per_sample * ctx.num_channels;
     let total_bytes = ctx.buffer_size * bytes_per_frame;
+    let buffer_index = buffer_index as usize;
     let mut buf = vec![0u8; total_bytes];
 
     // Read from per-channel ASIO input buffers and interleave into buf
     for frame in 0..ctx.buffer_size {
         for ch in 0..ctx.num_channels {
             let buffer_info = &ctx.buffer_infos[ch];
-            let in_ptr = buffer_info.buffers[buffer_index as usize];
+            let in_ptr = buffer_info.buffers[buffer_index];
             if !in_ptr.is_null() {
                 let src = unsafe { (in_ptr as *const u8).add(frame * ctx.bytes_per_sample) };
                 let offset = (frame * ctx.num_channels + ch) * ctx.bytes_per_sample;
                 for byte_idx in 0..ctx.bytes_per_sample {
                     buf[offset + byte_idx] = unsafe { *src.add(byte_idx) };
                 }
+            } else if frame == 0 {
+                xtrace!(
+                    "ASIO capture callback: null input buffer pointer at channel {}, index {}.",
+                    ch,
+                    buffer_index
+                );
             }
         }
     }
@@ -261,18 +301,75 @@ pub unsafe extern "C" fn buffer_switch_capture(buffer_index: i32, _direct_proces
     let pushed_bytes = ctx.device_producer.push_slice(&buf);
     if pushed_bytes < buf.len() {
         // Ring buffer full — data will be lost
+        xtrace!(
+            "ASIO capture callback: ringbuffer full, dropped {} of {} bytes.",
+            buf.len() - pushed_bytes,
+            buf.len()
+        );
     }
     match ctx.tx_dev.try_send((ctx.chunk_counter, pushed_bytes)) {
         Ok(()) => {}
         Err(TrySendError::Full((nbr, length_bytes))) => {
             // Channel full, drop notification
+            xtrace!(
+                "ASIO capture callback: notify channel full, dropped notification chunk={}, bytes={}",
+                nbr,
+                length_bytes
+            );
             let _ = (nbr, length_bytes);
         }
         Err(_) => {
             // Channel disconnected
+            xtrace!("ASIO capture callback: notification channel disconnected.");
         }
     }
     ctx.chunk_counter += 1;
+}
+
+/// ASIO bufferSwitchTimeInfo callback for playback.
+/// Some drivers call this callback path even when only bufferSwitch is expected.
+///
+/// # Safety
+/// Called from the ASIO driver thread. `params` is provided by the driver.
+pub unsafe extern "C" fn buffer_switch_timeinfo_playback(
+    params: *mut ASIOTime,
+    buffer_index: i32,
+    direct_process: i32,
+) -> *mut ASIOTime {
+    unsafe {
+        buffer_switch_playback(buffer_index, direct_process);
+    }
+    params
+}
+
+/// ASIO bufferSwitchTimeInfo callback for capture.
+///
+/// # Safety
+/// Called from the ASIO driver thread. `params` is provided by the driver.
+pub unsafe extern "C" fn buffer_switch_timeinfo_capture(
+    params: *mut ASIOTime,
+    buffer_index: i32,
+    direct_process: i32,
+) -> *mut ASIOTime {
+    unsafe {
+        buffer_switch_capture(buffer_index, direct_process);
+    }
+    params
+}
+
+/// ASIO bufferSwitchTimeInfo callback for full-duplex mode.
+///
+/// # Safety
+/// Called from the ASIO driver thread. `params` is provided by the driver.
+pub unsafe extern "C" fn buffer_switch_timeinfo_combined(
+    params: *mut ASIOTime,
+    buffer_index: i32,
+    direct_process: i32,
+) -> *mut ASIOTime {
+    unsafe {
+        buffer_switch_combined(buffer_index, direct_process);
+    }
+    params
 }
 
 /// ASIO asioMessage callback.
@@ -305,15 +402,26 @@ pub unsafe extern "C" fn asio_message_callback(
                 K_ASIO_ENGINE_VERSION
                 | K_ASIO_RESYNC_REQUEST
                 | K_ASIO_LATENCIES_CHANGED
-                | K_ASIO_SELECTOR_SUPPORTED => 1, // yes
-                K_ASIO_SUPPORTS_TIME_INFO
-                | K_ASIO_SUPPORTS_TIME_CODE
                 | K_ASIO_RESET_REQUEST
-                | K_ASIO_BUFFER_SIZE_CHANGE => 0, // no
+                | K_ASIO_BUFFER_SIZE_CHANGE
+                | K_ASIO_SUPPORTS_TIME_INFO
+                | K_ASIO_SELECTOR_SUPPORTED => 1, // yes
+                K_ASIO_SUPPORTS_TIME_CODE => 0, // no
                 _ => 0,
             }
         }
         K_ASIO_ENGINE_VERSION => 2, // ASIO 2.0
+        K_ASIO_SUPPORTS_TIME_INFO => 1,
+        K_ASIO_RESET_REQUEST => {
+            warn!("ASIO reset request received. A stream restart may be required by the driver.");
+            1
+        }
+        K_ASIO_BUFFER_SIZE_CHANGE => {
+            warn!(
+                "ASIO buffer size change request received. Dynamic resize is not implemented in this backend."
+            );
+            1
+        }
         K_ASIO_RESYNC_REQUEST => {
             debug!("ASIO resync request received.");
             1
@@ -431,6 +539,10 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
     {
         let shared = guard.as_mut().expect("shared state must exist");
         let infos = make_buffer_infos(num_channels, is_input);
+        trace!(
+            "ASIO register side: is_input={}, num_channels={}, stream_started={}, active_count={}",
+            is_input, num_channels, shared.stream_started, shared.active_count
+        );
         if is_input {
             shared.pending_input = Some((infos, num_channels));
         } else {
@@ -449,6 +561,10 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
         let (out_infos, out_ch) = shared.pending_output.take().unwrap();
         let (in_infos, in_ch) = shared.pending_input.take().unwrap();
         let preferred_buf = shared.preferred_buf_size;
+        trace!(
+            "ASIO both sides ready: out_ch={}, in_ch={}, preferred_buf={}",
+            out_ch, in_ch, preferred_buf
+        );
 
         // Build combined array: outputs first, then inputs.
         let mut combined: Vec<ASIOBufferInfo> = Vec::with_capacity(out_ch + in_ch);
@@ -463,7 +579,7 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
             bufferSwitch: Some(buffer_switch_combined),
             sampleRateDidChange: None,
             asioMessage: Some(asio_message_callback),
-            bufferSwitchTimeInfo: None,
+            bufferSwitchTimeInfo: Some(buffer_switch_timeinfo_combined),
         }));
 
         create_asio_buffers(
@@ -534,13 +650,20 @@ fn release_shared_asio() {
             debug!("First ASIO side exiting, stopping stream.");
             PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
             CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-            let _ = unsafe { ASIOStop() };
+            let stop_res = unsafe { ASIOStop() };
+            let _ = stop_res;
+            trace!("ASIOStop (first side exit) returned {}.", stop_res);
         } else if shared.active_count == 0 {
             // Last side to exit — dispose buffers and the driver.
             // The stream was already stopped by the first side.
             debug!("Last ASIO side exiting, disposing driver.");
-            let _ = unsafe { ASIODisposeBuffers() };
-            let _ = unsafe { ASIOExit() };
+            let dispose_res = unsafe { ASIODisposeBuffers() };
+            let exit_res = unsafe { ASIOExit() };
+            let _ = (dispose_res, exit_res);
+            trace!(
+                "ASIODisposeBuffers (last side exit) returned {}, ASIOExit returned {}.",
+                dispose_res, exit_res
+            );
             *guard = None; // Reset for next session
         }
     }
@@ -560,6 +683,16 @@ fn resolve_binary_format(format: &AsioSampleFormat) -> BinarySampleFormat {
         AsioSampleFormat::F32_LE => BinarySampleFormat::F32_LE,
         AsioSampleFormat::F64_LE => BinarySampleFormat::F64_LE,
     }
+}
+
+/// Convert a fixed-size C char buffer to String without reading past the buffer.
+///
+/// Some ASIO drivers may return char arrays without NUL termination; this helper
+/// safely truncates at the first NUL if present, otherwise uses the full buffer.
+fn fixed_cstr_buf_to_string(buf: &[i8]) -> String {
+    let end = buf.iter().position(|&ch| ch == 0).unwrap_or(buf.len());
+    let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, end) };
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 // ---------------------------------------------------------------------------
@@ -653,11 +786,7 @@ fn query_device_format(is_input: bool) -> Result<i32, ConfigError> {
             "ASIOGetChannelInfo failed with error code {res}"
         )));
     }
-    let ch_name = unsafe {
-        CStr::from_ptr(channel_info.name.as_ptr())
-            .to_string_lossy()
-            .into_owned()
-    };
+    let ch_name = fixed_cstr_buf_to_string(&channel_info.name);
     debug!(
         "ASIO channel 0 ({}): name='{}', type={} ({})",
         if is_input { "input" } else { "output" },
@@ -786,6 +915,22 @@ fn force_sample_rate_with_dummy_cycle(devname: &str, rate: f64) -> Result<(), Co
     /// Called by the ASIO driver from its audio thread.
     unsafe extern "C" fn dummy_buffer_switch(_double_buffer_index: i32, _direct_process: i32) {}
 
+    /// Dummy time-info callback that forwards to the plain dummy callback.
+    ///
+    /// # Safety
+    ///
+    /// Called by the ASIO driver from its audio thread.
+    unsafe extern "C" fn dummy_buffer_switch_time_info(
+        params: *mut ASIOTime,
+        double_buffer_index: i32,
+        direct_process: i32,
+    ) -> *mut ASIOTime {
+        unsafe {
+            dummy_buffer_switch(double_buffer_index, direct_process);
+        }
+        params
+    }
+
     /// Dummy message callback for the short-lived dummy stream.
     ///
     /// # Safety
@@ -808,7 +953,7 @@ fn force_sample_rate_with_dummy_cycle(devname: &str, rate: f64) -> Result<(), Co
         bufferSwitch: Some(dummy_buffer_switch),
         sampleRateDidChange: None,
         asioMessage: Some(dummy_asio_message),
-        bufferSwitchTimeInfo: None,
+        bufferSwitchTimeInfo: Some(dummy_buffer_switch_time_info),
     }));
 
     let create_res = unsafe {
@@ -922,11 +1067,7 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
     };
     let init_result = unsafe { ASIOInit(&mut driver_info) };
     if init_result != 0 {
-        let err_msg = unsafe {
-            CStr::from_ptr(driver_info.errorMessage.as_ptr())
-                .to_string_lossy()
-                .into_owned()
-        };
+        let err_msg = fixed_cstr_buf_to_string(&driver_info.errorMessage);
         error!("ASIOInit error message: {err_msg}");
         return Err(ConfigError::new(&format!(
             "ASIOInit failed with error code {init_result}"
@@ -1004,11 +1145,7 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
             name: [0; 32],
         };
         if unsafe { ASIOGetChannelInfo(&mut info) } == 0 {
-            let name = unsafe {
-                CStr::from_ptr(info.name.as_ptr())
-                    .to_string_lossy()
-                    .into_owned()
-            };
+            let name = fixed_cstr_buf_to_string(&info.name);
             debug!(
                 "  Input  channel {ch}: name='{name}', format={} ({})",
                 info.type_,
@@ -1026,11 +1163,7 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
             name: [0; 32],
         };
         if unsafe { ASIOGetChannelInfo(&mut info) } == 0 {
-            let name = unsafe {
-                CStr::from_ptr(info.name.as_ptr())
-                    .to_string_lossy()
-                    .into_owned()
-            };
+            let name = fixed_cstr_buf_to_string(&info.name);
             debug!(
                 "  Output channel {ch}: name='{name}', format={} ({})",
                 info.type_,
@@ -1085,6 +1218,13 @@ fn create_asio_buffers(
     buffer_size: i32,
     callbacks: &mut ASIOCallbacks,
 ) -> Result<(), ConfigError> {
+    trace!(
+        "Calling ASIOCreateBuffers: infos_ptr={:p}, channels={}, buffer_size={}, callbacks_ptr={:p}",
+        buffer_infos.as_mut_ptr(),
+        num_channels,
+        buffer_size,
+        callbacks as *mut ASIOCallbacks
+    );
     let res = unsafe {
         ASIOCreateBuffers(
             buffer_infos.as_mut_ptr(),
@@ -1093,6 +1233,7 @@ fn create_asio_buffers(
             callbacks,
         )
     };
+    trace!("ASIOCreateBuffers returned {}.", res);
     if res != 0 {
         return Err(ConfigError::new(&format!(
             "ASIOCreateBuffers failed with error code {res}"
@@ -1155,8 +1296,8 @@ pub fn list_device_names() -> Vec<String> {
     };
     let mut names = Vec::new();
     if count > 0 {
-        for ptr in ptrs.iter().take((count as usize).min(MAX_DRIVERS)) {
-            let name = unsafe { CStr::from_ptr(*ptr).to_string_lossy().into_owned() };
+        for buf in buffers.iter().take((count as usize).min(MAX_DRIVERS)) {
+            let name = fixed_cstr_buf_to_string(buf);
             if !name.is_empty() {
                 names.push(name);
             }
@@ -1394,7 +1535,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         bufferSwitch: Some(buffer_switch_playback),
                         sampleRateDidChange: None,
                         asioMessage: Some(asio_message_callback),
-                        bufferSwitchTimeInfo: None,
+                        bufferSwitchTimeInfo: Some(buffer_switch_timeinfo_playback),
                     }));
                     if let Err(err) = create_asio_buffers(
                         &mut buffer_infos,
@@ -1419,6 +1560,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     }
 
                     let start_res = unsafe { ASIOStart() };
+                    trace!("ASIOStart (playback single-direction) returned {}.", start_res);
                     if start_res != 0 {
                         let msg = format!("ASIOStart failed with error code {start_res}");
                         error!("{msg}");
@@ -1549,9 +1691,16 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     release_shared_asio();
                 } else {
                     PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-                    let _ = unsafe { ASIOStop() };
-                    let _ = unsafe { ASIODisposeBuffers() };
-                    let _ = unsafe { ASIOExit() };
+                    let stop_res = unsafe { ASIOStop() };
+                    let dispose_res = unsafe { ASIODisposeBuffers() };
+                    let exit_res = unsafe { ASIOExit() };
+                    let _ = (stop_res, dispose_res, exit_res);
+                    trace!(
+                        "Playback cleanup: ASIOStop={}, ASIODisposeBuffers={}, ASIOExit={}",
+                        stop_res,
+                        dispose_res,
+                        exit_res
+                    );
                 }
                 // Harmless if already nulled by release_shared_asio
                 PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
@@ -1758,7 +1907,7 @@ impl CaptureDevice for AsioCaptureDevice {
                         bufferSwitch: Some(buffer_switch_capture),
                         sampleRateDidChange: None,
                         asioMessage: Some(asio_message_callback),
-                        bufferSwitchTimeInfo: None,
+                        bufferSwitchTimeInfo: Some(buffer_switch_timeinfo_capture),
                     }));
                     if let Err(err) = create_asio_buffers(
                         &mut buffer_infos,
@@ -1784,6 +1933,7 @@ impl CaptureDevice for AsioCaptureDevice {
                     }
 
                     let start_res = unsafe { ASIOStart() };
+                    trace!("ASIOStart (capture single-direction) returned {}.", start_res);
                     if start_res != 0 {
                         let msg = format!("ASIOStart failed with error code {start_res}");
                         error!("{msg}");
@@ -2021,9 +2171,16 @@ impl CaptureDevice for AsioCaptureDevice {
                     release_shared_asio();
                 } else {
                     CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-                    let _ = unsafe { ASIOStop() };
-                    let _ = unsafe { ASIODisposeBuffers() };
-                    let _ = unsafe { ASIOExit() };
+                    let stop_res = unsafe { ASIOStop() };
+                    let dispose_res = unsafe { ASIODisposeBuffers() };
+                    let exit_res = unsafe { ASIOExit() };
+                    let _ = (stop_res, dispose_res, exit_res);
+                    trace!(
+                        "Capture cleanup: ASIOStop={}, ASIODisposeBuffers={}, ASIOExit={}",
+                        stop_res,
+                        dispose_res,
+                        exit_res
+                    );
                 }
                 // Harmless if already nulled by release_shared_asio
                 CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
