@@ -93,6 +93,7 @@ and the Mozilla Public License Version 2.0:
 - **[Customized build](#customized-build)**
 - **[Optimize for your system](#optimize-for-your-system)**
 - **[Building on Windows and macOS](#building-on-windows-and-macos)**
+- **[Building with ASIO backend (Windows)](#building-with-asio-backend-windows)**
 
 **[How to run](#how-to-run)**
 - **[Command line options](#command-line-options)**
@@ -475,6 +476,27 @@ The necessary dependencies can be installed with brew:
 brew install pkg-config
 brew install pulseaudio
 ```
+
+## Building with ASIO backend (Windows)
+To build CamillaDSP with ASIO support, enable the `asio-backend` feature.
+This uses the `asio-sys` crate, which generates bindings via `bindgen`.
+The ASIO SDK is downloaded/extracted automatically during the build,
+so you normally do not need to download it manually.
+
+Before building, ensure `bindgen` requirements are met:
+- Install LLVM/Clang (Clang 9.0+). On Windows with winget:
+  - `winget install LLVM.LLVM`
+- In most setups you do **not** need to set `LIBCLANG_PATH` manually.
+  Keep this as a reference in case `bindgen` cannot find `libclang`:
+  - PowerShell: `$env:LIBCLANG_PATH="C:\\Program Files\\LLVM\\bin"`
+  - cmd.exe: `set LIBCLANG_PATH=C:\Program Files\LLVM\bin`
+
+Reference: [rust-bindgen requirements](https://rust-lang.github.io/rust-bindgen/requirements.html)
+
+Build command:
+- `cargo build --release --features asio-backend`
+
+After a successful build, the binary is available at `target/release/camilladsp.exe`.
 
 
 # How to run
