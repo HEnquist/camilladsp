@@ -3,6 +3,7 @@ use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::recycle_container;
 use crate::vec_from_stash;
+use crate::container_from_stash;
 use audioadapter_buffers::direct::{
     InterleavedSlice, SequentialSliceOfVecs, SparseSequentialSliceOfVecs,
 };
@@ -207,7 +208,7 @@ pub fn new_resampler(
 impl ChunkResampler {
     pub fn resample_chunk(&mut self, chunk: &mut AudioChunk, chunksize: usize, channels: usize) {
         chunk.update_channel_mask(self.indexing.active_channels_mask.as_mut().unwrap());
-        let mut new_waves = Vec::with_capacity(channels);
+        let mut new_waves = container_from_stash(channels);
         for wave in &chunk.waveforms {
             if !wave.is_empty() {
                 new_waves.push(vec_from_stash(chunksize));

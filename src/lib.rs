@@ -169,10 +169,13 @@ pub mod statefile;
 pub mod wasapidevice;
 pub mod wavtools;
 
+const MAX_STASH_SIZE: usize = 1024;
+const MAX_CONTAINER_STASH_SIZE: usize = 128;
+
 lazy_static! {
-    pub static ref BUFFERSTASH: RwLock<Vec<Vec<PrcFmt>>> = RwLock::new(Vec::with_capacity(1024));
+    pub static ref BUFFERSTASH: RwLock<Vec<Vec<PrcFmt>>> = RwLock::new(Vec::with_capacity(MAX_STASH_SIZE));
     pub static ref CONTAINERSTASH: RwLock<Vec<Vec<Vec<PrcFmt>>>> =
-        RwLock::new(Vec::with_capacity(128));
+        RwLock::new(Vec::with_capacity(MAX_CONTAINER_STASH_SIZE));
 }
 
 pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
@@ -187,7 +190,7 @@ pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
     if let Some(mut vector) = vec_option {
         if capacity != vector.len() {
             if capacity > vector.capacity() {
-                debug!("The stashed vector has insufficient capacity, allocating more space");
+                debug!("The stashed vector has insufficient capacity, allocating more space {} -> {}", vector.capacity(), capacity);
             }
             vector.resize(capacity, 0.0);
         }
@@ -209,7 +212,7 @@ pub fn container_from_stash(capacity: usize) -> Vec<Vec<PrcFmt>> {
     };
     if let Some(mut vector) = vec_option {
         if capacity > vector.capacity() {
-            debug!("The stashed container vector has insufficient capacity, allocating more space");
+            debug!("The stashed container vector has insufficient capacity, allocating more space {} -> {}",  vector.capacity(), capacity);
             vector.reserve_exact(capacity);
         }
         vector
@@ -222,7 +225,7 @@ pub fn container_from_stash(capacity: usize) -> Vec<Vec<PrcFmt>> {
 pub fn recycle_vec(mut vector: Vec<PrcFmt>) {
     {
         let stash = BUFFERSTASH.read();
-        if stash.len() == stash.capacity() {
+        if stash.len() >= MAX_STASH_SIZE {
             trace!("Stash is full, dropping a vector");
             return;
         }
@@ -241,7 +244,7 @@ pub fn recycle_container(mut container: Vec<Vec<PrcFmt>>) {
     }
     {
         let stash = CONTAINERSTASH.read();
-        if stash.len() == stash.capacity() {
+        if stash.len() >= MAX_CONTAINER_STASH_SIZE {
             trace!("Stash is full, dropping a container");
             return;
         }
