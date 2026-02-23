@@ -90,6 +90,8 @@ struct AsioPlaybackContext {
     num_channels: usize,
     buffer_size: usize,
     bytes_per_sample: usize,
+    /// Preallocated scratch buffer used when reading from the ring buffer in callback.
+    read_tmp: Vec<u8>,
     target_level: usize,
     /// Estimator for the current buffer fill level.
     buffer_fill: Arc<Mutex<countertimer::DeviceBufferEstimator>>,
@@ -108,6 +110,8 @@ struct AsioCaptureContext {
     num_channels: usize,
     buffer_size: usize,
     bytes_per_sample: usize,
+    /// Preallocated interleaved capture buffer reused by callback.
+    interleaved_tmp: Vec<u8>,
     chunk_counter: u64,
 }
 
@@ -165,6 +169,21 @@ unsafe impl Send for AsioSharedState {}
 
 static ASIO_SHARED: OnceLock<(Mutex<Option<AsioSharedState>>, Condvar)> = OnceLock::new();
 
+fn copy_from_queue_at_offset(queue: &VecDeque<u8>, offset: usize, dst: &mut [u8]) {
+    let (head, tail) = queue.as_slices();
+    if offset < head.len() {
+        let first = (head.len() - offset).min(dst.len());
+        dst[..first].copy_from_slice(&head[offset..offset + first]);
+        if first < dst.len() {
+            let remaining = dst.len() - first;
+            dst[first..].copy_from_slice(&tail[..remaining]);
+        }
+    } else {
+        let tail_offset = offset - head.len();
+        dst.copy_from_slice(&tail[tail_offset..tail_offset + dst.len()]);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ASIO callbacks  (unsafe extern "C" — called from ASIO driver thread)
 // ---------------------------------------------------------------------------
@@ -203,9 +222,11 @@ pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_proce
         let available = ctx.device_consumer.occupied_len();
         if available == 0 {
             // No data — fill remainder with silence
-            for _ in 0..(needed_bytes - ctx.sample_queue.len()) {
-                ctx.sample_queue.push_back(0);
-            }
+            warn!(
+                "ASIO playback callback: underrun, filled {} bytes of silence.",
+                needed_bytes - ctx.sample_queue.len()
+            );
+            ctx.sample_queue.resize(needed_bytes, 0);
             if ctx.running {
                 ctx.running = false;
             }
@@ -217,44 +238,38 @@ pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_proce
             ctx.starting = false;
             // On first startup, start immediately without extra silence prefill.
             // On restart after underrun, keep target_level prefill to rebuild delay.
-            for _ in 0..(prefill_frames * bytes_per_frame) {
-                ctx.sample_queue.push_back(0);
-            }
+            let new_len = ctx.sample_queue.len() + prefill_frames * bytes_per_frame;
+            ctx.sample_queue.resize(new_len, 0);
         }
         let to_read = available.min(needed_bytes.saturating_sub(ctx.sample_queue.len()));
-        let mut tmp = vec![0u8; to_read];
-        ctx.device_consumer.pop_slice(&mut tmp);
-        for b in tmp {
-            ctx.sample_queue.push_back(b);
-        }
+        let tmp = &mut ctx.read_tmp[0..to_read];
+        ctx.device_consumer.pop_slice(tmp);
+        ctx.sample_queue.extend(tmp.iter().copied());
     }
 
     // Copy interleaved data into per-channel ASIO buffers (de-interleave)
+    let mut src_offset = 0usize;
     for frame in 0..ctx.buffer_size {
         for ch in 0..ctx.num_channels {
             let buffer_info = &ctx.buffer_infos[ch];
             let out_ptr = buffer_info.buffers[buffer_index];
             if !out_ptr.is_null() {
                 let dst = unsafe { (out_ptr as *mut u8).add(frame * ctx.bytes_per_sample) };
-                for byte_idx in 0..ctx.bytes_per_sample {
-                    let sample_byte = ctx.sample_queue.pop_front().unwrap_or(0);
-                    unsafe {
-                        *dst.add(byte_idx) = sample_byte;
-                    }
-                }
+                let dst_slice =
+                    unsafe { std::slice::from_raw_parts_mut(dst, ctx.bytes_per_sample) };
+                copy_from_queue_at_offset(&ctx.sample_queue, src_offset, dst_slice);
             } else if frame == 0 {
                 xtrace!(
                     "ASIO playback callback: null output buffer pointer at channel {}, index {}.",
                     ch,
                     buffer_index
                 );
-            } else {
-                // Discard bytes even if buffer pointer is null
-                for _ in 0..ctx.bytes_per_sample {
-                    ctx.sample_queue.pop_front();
-                }
             }
+            src_offset += ctx.bytes_per_sample;
         }
+    }
+    if needed_bytes > 0 {
+        ctx.sample_queue.drain(0..needed_bytes);
     }
 
     // Update buffer fill estimate.
@@ -295,7 +310,15 @@ pub unsafe extern "C" fn buffer_switch_capture(buffer_index: i32, _direct_proces
     let bytes_per_frame = ctx.bytes_per_sample * ctx.num_channels;
     let total_bytes = ctx.buffer_size * bytes_per_frame;
     let buffer_index = buffer_index as usize;
-    let mut buf = vec![0u8; total_bytes];
+    if ctx.interleaved_tmp.len() != total_bytes {
+        error!(
+            "ASIO capture callback buffer size mismatch: scratch={}, expected={}",
+            ctx.interleaved_tmp.len(),
+            total_bytes
+        );
+        return;
+    }
+    let buf = &mut ctx.interleaved_tmp;
 
     // Read from per-channel ASIO input buffers and interleave into buf
     for frame in 0..ctx.buffer_size {
@@ -322,7 +345,7 @@ pub unsafe extern "C" fn buffer_switch_capture(buffer_index: i32, _direct_proces
     let pushed_bytes = ctx.device_producer.push_slice(&buf);
     if pushed_bytes < buf.len() {
         // Ring buffer full — data will be lost
-        xtrace!(
+        warn!(
             "ASIO capture callback: ringbuffer full, dropped {} of {} bytes.",
             buf.len() - pushed_bytes,
             buf.len()
@@ -1453,6 +1476,12 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             "full_duplex setup must provide asio_buffer_size",
                         ),
                         bytes_per_sample,
+                        read_tmp: vec![
+                            0u8;
+                            asio_buffer_size.expect("full_duplex setup must provide asio_buffer_size")
+                                * bytes_per_sample
+                                * channels
+                        ],
                         target_level,
                         buffer_fill: buffer_fill_clone,
                         running: false,
@@ -1497,6 +1526,10 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         num_channels: channels,
                         buffer_size: wrapper_buf_size as usize,
                         bytes_per_sample,
+                        read_tmp: vec![
+                            0u8;
+                            (wrapper_buf_size as usize) * bytes_per_sample * channels
+                        ],
                         target_level,
                         buffer_fill: buffer_fill_clone,
                         running: false,
@@ -1822,6 +1855,12 @@ impl CaptureDevice for AsioCaptureDevice {
                         buffer_size: asio_buffer_size
                             .expect("full_duplex setup must provide asio_buffer_size"),
                         bytes_per_sample,
+                        interleaved_tmp: vec![
+                            0u8;
+                            asio_buffer_size.expect("full_duplex setup must provide asio_buffer_size")
+                                * bytes_per_sample
+                                * channels
+                        ],
                         chunk_counter: 0,
                     });
                     let ctx_raw = Box::into_raw(ctx);
@@ -1863,6 +1902,10 @@ impl CaptureDevice for AsioCaptureDevice {
                         num_channels: channels,
                         buffer_size: wrapper_buf_size as usize,
                         bytes_per_sample,
+                        interleaved_tmp: vec![
+                            0u8;
+                            (wrapper_buf_size as usize) * bytes_per_sample * channels
+                        ],
                         chunk_counter: 0,
                     });
                     let ctx_raw = Box::into_raw(ctx);
