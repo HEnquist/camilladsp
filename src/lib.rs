@@ -171,7 +171,8 @@ const MAX_STASH_SIZE: usize = 1024;
 const MAX_CONTAINER_STASH_SIZE: usize = 128;
 
 lazy_static! {
-    pub static ref BUFFERSTASH: RwLock<Vec<Vec<PrcFmt>>> = RwLock::new(Vec::with_capacity(MAX_STASH_SIZE));
+    pub static ref BUFFERSTASH: RwLock<Vec<Vec<PrcFmt>>> =
+        RwLock::new(Vec::with_capacity(MAX_STASH_SIZE));
     pub static ref CONTAINERSTASH: RwLock<Vec<Vec<Vec<PrcFmt>>>> =
         RwLock::new(Vec::with_capacity(MAX_CONTAINER_STASH_SIZE));
 }
@@ -188,7 +189,11 @@ pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
     if let Some(mut vector) = vec_option {
         if capacity != vector.len() {
             if capacity > vector.capacity() {
-                debug!("The stashed vector has insufficient capacity, allocating more space {} -> {}", vector.capacity(), capacity);
+                debug!(
+                    "The stashed vector has insufficient capacity, allocating more space {} -> {}",
+                    vector.capacity(),
+                    capacity
+                );
             }
             vector.resize(capacity, 0.0);
         }
@@ -210,7 +215,11 @@ pub fn container_from_stash(capacity: usize) -> Vec<Vec<PrcFmt>> {
     };
     if let Some(mut vector) = vec_option {
         if capacity > vector.capacity() {
-            debug!("The stashed container vector has insufficient capacity, allocating more space {} -> {}",  vector.capacity(), capacity);
+            debug!(
+                "The stashed container vector has insufficient capacity, allocating more space {} -> {}",
+                vector.capacity(),
+                capacity
+            );
             vector.reserve_exact(capacity);
         }
         vector
