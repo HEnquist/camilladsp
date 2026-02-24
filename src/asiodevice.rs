@@ -97,7 +97,6 @@ struct AsioPlaybackContext {
     buffer_fill: Arc<Mutex<countertimer::DeviceBufferEstimator>>,
     /// Whether the stream is currently running (receiving data).
     running: bool,
-    starting: bool,
 }
 
 /// Context passed to the ASIO capture callback via a global AtomicPtr.
@@ -168,6 +167,36 @@ struct AsioSharedState {
 unsafe impl Send for AsioSharedState {}
 
 static ASIO_SHARED: OnceLock<(Mutex<Option<AsioSharedState>>, Condvar)> = OnceLock::new();
+static PLAYBACK_CALLBACK_SEEN: OnceLock<(Mutex<bool>, Condvar)> = OnceLock::new();
+
+fn playback_callback_seen_lock() -> &'static (Mutex<bool>, Condvar) {
+    PLAYBACK_CALLBACK_SEEN.get_or_init(|| (Mutex::new(false), Condvar::new()))
+}
+
+fn reset_playback_callback_seen() {
+    let (mutex, _condvar) = playback_callback_seen_lock();
+    let mut seen = mutex.lock().unwrap();
+    *seen = false;
+}
+
+fn mark_playback_callback_seen() {
+    let (mutex, condvar) = playback_callback_seen_lock();
+    let mut seen = mutex.lock().unwrap();
+    if !*seen {
+        *seen = true;
+        condvar.notify_all();
+    }
+}
+
+fn wait_for_playback_callback(timeout: std::time::Duration) -> bool {
+    let (mutex, condvar) = playback_callback_seen_lock();
+    let seen = mutex.lock().unwrap();
+    if *seen {
+        return true;
+    }
+    let (seen, _timeout_res) = condvar.wait_timeout(seen, timeout).unwrap();
+    *seen
+}
 
 fn copy_from_queue_at_offset(queue: &VecDeque<u8>, offset: usize, dst: &mut [u8]) {
     let (head, tail) = queue.as_slices();
@@ -195,6 +224,7 @@ fn copy_from_queue_at_offset(queue: &VecDeque<u8>, offset: usize, dst: &mut [u8]
 /// Called from the ASIO driver thread. The caller must ensure that `PLAYBACK_CONTEXT`
 /// points to a valid `AsioPlaybackContext` or is null.
 pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_process: i32) {
+    xtrace!("ASIO playback callback: buffer_index={}", buffer_index);
     let ctx_ptr = PLAYBACK_CONTEXT.load(Ordering::Acquire);
     if ctx_ptr.is_null() {
         xtrace!("ASIO playback callback: null context, returning.");
@@ -213,6 +243,7 @@ pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_proce
         );
         return;
     }
+    mark_playback_callback_seen();
     let bytes_per_frame = ctx.bytes_per_sample * ctx.num_channels;
     let needed_bytes = ctx.buffer_size * bytes_per_frame;
     let buffer_index = buffer_index as usize;
@@ -234,8 +265,7 @@ pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_proce
         }
         if !ctx.running {
             ctx.running = true;
-            let prefill_frames = if ctx.starting { 0 } else { ctx.target_level };
-            ctx.starting = false;
+            let prefill_frames = ctx.target_level;
             // On first startup, start immediately without extra silence prefill.
             // On restart after underrun, keep target_level prefill to rebuild delay.
             let new_len = ctx.sample_queue.len() + prefill_frames * bytes_per_frame;
@@ -289,6 +319,7 @@ pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_proce
 /// Called from the ASIO driver thread. The caller must ensure that `CAPTURE_CONTEXT`
 /// points to a valid `AsioCaptureContext` or is null.
 pub unsafe extern "C" fn buffer_switch_capture(buffer_index: i32, _direct_process: i32) {
+    xtrace!("ASIO capture callback: buffer_index={}", buffer_index);
     let ctx_ptr = CAPTURE_CONTEXT.load(Ordering::Acquire);
     if ctx_ptr.is_null() {
         debug!("ASIO capture callback: null context, returning.");
@@ -499,6 +530,10 @@ pub unsafe extern "C" fn buffer_switch_combined(buffer_index: i32, direct_proces
 /// The first caller loads and initialises the driver. Subsequent callers for the same driver
 /// reuse the existing state. Returns (num_inputs, num_outputs, preferred_buf_size).
 fn init_shared_asio(devname: &str, samplerate: usize) -> Result<(i32, i32, i32), ConfigError> {
+    trace!(
+        "init_shared_asio: dev='{}', samplerate={}",
+        devname, samplerate
+    );
     let (mutex, _condvar) = ASIO_SHARED.get_or_init(|| (Mutex::new(None), Condvar::new()));
     let mut guard = mutex.lock().unwrap();
 
@@ -509,6 +544,10 @@ fn init_shared_asio(devname: &str, samplerate: usize) -> Result<(i32, i32, i32),
                 "Different ASIO driver names for capture and playback are not supported",
             ));
         }
+        trace!(
+            "init_shared_asio: reusing existing shared state for '{}'",
+            shared.driver_name
+        );
         Ok((
             shared.num_inputs,
             shared.num_outputs,
@@ -574,6 +613,10 @@ fn make_buffer_infos(num_channels: usize, is_input: bool) -> Vec<ASIOBufferInfo>
 /// updates both contexts' `buffer_infos` through the global atomics, and calls `ASIOStart()`.
 /// The first caller blocks on a condvar until this is done.
 fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigError> {
+    trace!(
+        "register_and_wait: is_input={}, num_channels={}",
+        is_input, num_channels
+    );
     let (mutex, condvar) = ASIO_SHARED
         .get()
         .expect("ASIO_SHARED must be initialised before register_and_wait");
@@ -625,6 +668,7 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
             asioMessage: Some(asio_message_callback),
             bufferSwitchTimeInfo: Some(buffer_switch_timeinfo_combined),
         }));
+        trace!("register_and_wait: callbacks registered for combined stream, creating buffers");
 
         create_asio_buffers(
             &mut combined,
@@ -652,6 +696,7 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
         shared.buffer_infos_for_driver = combined;
 
         // Start the stream
+        trace!("register_and_wait: calling ASIOStart (full-duplex)");
         let start_res = unsafe { ASIOStart() };
         if start_res != 0 {
             return Err(ConfigError::new(&format!(
@@ -659,6 +704,7 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
             )));
         }
         debug!("Full-duplex ASIO stream started.");
+        trace!("register_and_wait: ASIOStart returned success");
 
         shared.stream_started = true;
         shared.active_count = 2;
@@ -888,12 +934,14 @@ fn resolve_format(
 
 /// Load an ASIO driver by name.
 pub fn load_driver_by_name(name: &str) -> Result<(), ConfigError> {
+    trace!("load_driver_by_name: loading '{}'", name);
     let host = Asio::new();
     let driver = host.load_driver(name).map_err(|err| {
         ConfigError::new(&format!("Failed to load ASIO driver '{name}': {err:?}"))
     })?;
     let mut guard = wrapper_driver_lock().lock().unwrap();
     let _ = guard.replace(driver);
+    trace!("load_driver_by_name: '{}' loaded", name);
     Ok(())
 }
 
@@ -1060,6 +1108,10 @@ fn force_sample_rate_with_dummy_cycle(devname: &str, rate: f64) -> Result<(), Co
 /// because some ASIO drivers lock in the rate once channels or buffers are queried.
 /// Returns (num_inputs, num_outputs).
 pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), ConfigError> {
+    trace!(
+        "open_asio_device: dev='{}', samplerate={}",
+        devname, samplerate
+    );
     let available = list_device_names();
     debug!("Available ASIO devices: {:?}", available);
     if load_driver_by_name(devname).is_err() {
@@ -1221,6 +1273,10 @@ fn prepare_output_stream_with_wrapper(
     num_channels: usize,
 ) -> Result<(Vec<ASIOBufferInfo>, i32), ConfigError> {
     let driver = loaded_wrapper_driver()?;
+    trace!(
+        "prepare_output_stream_with_wrapper: calling prepare_output_stream for {} channels",
+        num_channels
+    );
     let streams = driver
         .prepare_output_stream(None, num_channels, None)
         .map_err(|err| ConfigError::new(&format!("prepare_output_stream failed: {err:?}")))?;
@@ -1237,6 +1293,10 @@ fn prepare_output_stream_with_wrapper(
             buffers: info.buffers,
         })
         .collect();
+    trace!(
+        "prepare_output_stream_with_wrapper: prepared stream buffer_size={} channels={}",
+        buffer_size, num_channels
+    );
     Ok((buffer_infos, buffer_size))
 }
 
@@ -1244,6 +1304,10 @@ fn prepare_input_stream_with_wrapper(
     num_channels: usize,
 ) -> Result<(Vec<ASIOBufferInfo>, i32), ConfigError> {
     let driver = loaded_wrapper_driver()?;
+    trace!(
+        "prepare_input_stream_with_wrapper: calling prepare_input_stream for {} channels",
+        num_channels
+    );
     let streams = driver
         .prepare_input_stream(None, num_channels, None)
         .map_err(|err| ConfigError::new(&format!("prepare_input_stream failed: {err:?}")))?;
@@ -1260,6 +1324,10 @@ fn prepare_input_stream_with_wrapper(
             buffers: info.buffers,
         })
         .collect();
+    trace!(
+        "prepare_input_stream_with_wrapper: prepared stream buffer_size={} channels={}",
+        buffer_size, num_channels
+    );
     Ok((buffer_infos, buffer_size))
 }
 
@@ -1463,6 +1531,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 let (mut device_producer, device_consumer) = ringbuffer.split();
 
                 // --- Create context and start ASIO ---
+                reset_playback_callback_seen();
                 let ctx_raw = if full_duplex {
                     let buffer_infos = make_buffer_infos(channels, false);
                     let ctx = Box::new(AsioPlaybackContext {
@@ -1485,7 +1554,6 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         target_level,
                         buffer_fill: buffer_fill_clone,
                         running: false,
-                        starting: true,
                     });
                     let ctx_raw = Box::into_raw(ctx);
                     PLAYBACK_CONTEXT.store(ctx_raw, Ordering::Release);
@@ -1533,7 +1601,6 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         target_level,
                         buffer_fill: buffer_fill_clone,
                         running: false,
-                        starting: true,
                     });
                     let ctx_raw = Box::into_raw(ctx);
                     PLAYBACK_CONTEXT.store(ctx_raw, Ordering::Release);
@@ -1553,11 +1620,14 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         }
                     };
 
-                    let _callback_id =
+                    trace!("Playback: registering wrapper callback");
+                    let callback_id =
                         driver.add_callback(|callback_info| unsafe {
                             buffer_switch_playback(callback_info.buffer_index, 0)
                         });
+                    trace!("Playback: callback registered, id={:?}", callback_id);
 
+                    trace!("Playback: calling driver.start()");
                     if let Err(err) = driver.start() {
                         let msg = format!("ASIOStart failed: {err:?}");
                         error!("{msg}");
@@ -1569,6 +1639,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         barrier.wait();
                         return;
                     }
+                        trace!("Playback: driver.start() succeeded");
                     ctx_raw
                 };
 
@@ -1581,6 +1652,12 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     vec![0u8; channels * chunksize * bytes_per_sample];
 
                 debug!("Playback device ready and waiting.");
+                let got_callback =
+                    wait_for_playback_callback(std::time::Duration::from_millis(500));
+                trace!(
+                    "Playback startup callback gate: first_callback_received={}",
+                    got_callback
+                );
                 barrier.wait();
                 debug!("Playback device starts now!");
 
@@ -1689,6 +1766,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 } else {
                     PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
                     let (stop_res, dispose_res) = if let Ok(driver) = loaded_wrapper_driver() {
+                        trace!("Playback: calling driver.stop() + driver.dispose_buffers()");
                         let stop_res = driver.stop().is_ok();
                         let dispose_res = driver.dispose_buffers().is_ok();
                         (stop_res, dispose_res)
@@ -1927,11 +2005,14 @@ impl CaptureDevice for AsioCaptureDevice {
                         }
                     };
 
-                    let _callback_id =
+                    trace!("Capture: registering wrapper callback");
+                    let callback_id =
                         driver.add_callback(|callback_info| unsafe {
                             buffer_switch_capture(callback_info.buffer_index, 0)
                         });
+                    trace!("Capture: callback registered, id={:?}", callback_id);
 
+                    trace!("Capture: calling driver.start()");
                     if let Err(err) = driver.start() {
                         let msg = format!("ASIOStart failed: {err:?}");
                         error!("{msg}");
@@ -1944,6 +2025,7 @@ impl CaptureDevice for AsioCaptureDevice {
                         barrier.wait();
                         return;
                     }
+                        trace!("Capture: driver.start() succeeded");
                     ctx_raw
                 };
 
@@ -2174,6 +2256,7 @@ impl CaptureDevice for AsioCaptureDevice {
                 } else {
                     CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
                     let (stop_res, dispose_res) = if let Ok(driver) = loaded_wrapper_driver() {
+                        trace!("Capture: calling driver.stop() + driver.dispose_buffers()");
                         let stop_res = driver.stop().is_ok();
                         let dispose_res = driver.dispose_buffers().is_ok();
                         (stop_res, dispose_res)
