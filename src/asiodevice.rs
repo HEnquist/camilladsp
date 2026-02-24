@@ -24,10 +24,10 @@ use ringbuf::{HeapRb, traits::*};
 
 use asio_sys::bindings::asio_import::{
     ASIOBufferInfo, ASIOCallbacks, ASIOChannelInfo, ASIOCreateBuffers, ASIODisposeBuffers,
-    ASIOExit, ASIOGetBufferSize, ASIOGetChannelInfo, ASIOGetChannels, ASIOSampleRate, ASIOStart,
-    ASIOStop, ASIOTime,
+    ASIODriverInfo, ASIOExit, ASIOGetBufferSize, ASIOGetChannelInfo, ASIOGetChannels, ASIOInit,
+    ASIOSampleRate, ASIOStart, ASIOStop, ASIOTime, can_sample_rate, get_driver_names,
+    get_sample_rate, load_asio_driver, remove_current_driver, set_sample_rate,
 };
-use asio_sys::{Asio, AsioSampleType, Driver};
 
 use crate::CommandMessage;
 use crate::PrcFmt;
@@ -116,26 +116,9 @@ struct AsioCaptureContext {
 
 static PLAYBACK_CONTEXT: AtomicPtr<AsioPlaybackContext> = AtomicPtr::new(ptr::null_mut());
 static CAPTURE_CONTEXT: AtomicPtr<AsioCaptureContext> = AtomicPtr::new(ptr::null_mut());
-static ASIO_WRAPPER_DRIVER: OnceLock<Mutex<Option<Driver>>> = OnceLock::new();
+static ASIO_DRIVER_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static ASIO_PLAYBACK_RATE_CHANGED: AtomicBool = AtomicBool::new(false);
 static ASIO_CAPTURE_RATE_CHANGED: AtomicBool = AtomicBool::new(false);
-
-fn wrapper_driver_lock() -> &'static Mutex<Option<Driver>> {
-    ASIO_WRAPPER_DRIVER.get_or_init(|| Mutex::new(None))
-}
-
-fn loaded_wrapper_driver() -> Result<Driver, ConfigError> {
-    let guard = wrapper_driver_lock().lock().unwrap();
-    guard
-        .as_ref()
-        .cloned()
-        .ok_or_else(|| ConfigError::new("ASIO driver is not loaded"))
-}
-
-fn drop_wrapper_driver() {
-    let mut guard = wrapper_driver_lock().lock().unwrap();
-    let _ = guard.take();
-}
 
 fn clear_playback_rate_change_event() {
     ASIO_PLAYBACK_RATE_CHANGED.store(false, Ordering::Release);
@@ -179,6 +162,9 @@ struct AsioSharedState {
     pending_input: Option<(Vec<ASIOBufferInfo>, usize)>,
     /// Whether the ASIO stream has been started.
     stream_started: bool,
+    /// Setup error produced by the side that attempted combined startup.
+    /// If set, the other side returns immediately instead of waiting indefinitely.
+    setup_error: Option<String>,
     /// Number of sides (playback/capture) still active. Last one to exit calls ASIOStop.
     active_count: u8,
     /// The original `ASIOBufferInfo` array passed to `ASIOCreateBuffers`.
@@ -621,6 +607,7 @@ fn init_shared_asio(devname: &str, samplerate: usize) -> Result<(i32, i32, i32),
             pending_output: None,
             pending_input: None,
             stream_started: false,
+            setup_error: None,
             active_count: 0,
             buffer_infos_for_driver: Vec::new(),
             callbacks_for_driver: None,
@@ -655,6 +642,12 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
         .get()
         .expect("ASIO_SHARED must be initialised before register_and_wait");
     let mut guard = mutex.lock().unwrap();
+
+    if let Some(existing_error) = guard.as_ref().and_then(|shared| shared.setup_error.clone()) {
+        return Err(ConfigError::new(&format!(
+            "ASIO full-duplex setup aborted: {existing_error}"
+        )));
+    }
 
     // Register our buffer infos
     {
@@ -704,12 +697,17 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
         }));
         trace!("register_and_wait: callbacks registered for combined stream, creating buffers");
 
-        create_asio_buffers(
+        if let Err(err) = create_asio_buffers(
             &mut combined,
             total_ch,
             preferred_buf,
             shared.callbacks_for_driver.as_mut().unwrap().as_mut(),
-        )?;
+        ) {
+            let msg = format!("ASIOCreateBuffers failed in full-duplex setup: {err}");
+            shared.setup_error = Some(msg.clone());
+            condvar.notify_all();
+            return Err(ConfigError::new(&msg));
+        }
 
         // Update both contexts' buffer_infos through the global atomics.
         // Both contexts are guaranteed to be stored before register_and_wait is called.
@@ -733,21 +731,30 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
         trace!("register_and_wait: calling ASIOStart (full-duplex)");
         let start_res = unsafe { ASIOStart() };
         if start_res != 0 {
-            return Err(ConfigError::new(&format!(
-                "ASIOStart failed with error code {start_res}"
-            )));
+            let msg = format!("ASIOStart failed with error code {start_res}");
+            shared.setup_error = Some(msg.clone());
+            condvar.notify_all();
+            return Err(ConfigError::new(&msg));
         }
         debug!("Full-duplex ASIO stream started.");
         trace!("register_and_wait: ASIOStart returned success");
 
         shared.stream_started = true;
+        shared.setup_error = None;
         shared.active_count = 2;
         condvar.notify_all();
     } else {
         // I am the first side — wait for the other side to complete setup.
         debug!("Waiting for other ASIO side to register for full-duplex...");
-        while !guard.as_ref().unwrap().stream_started {
+        while !guard.as_ref().unwrap().stream_started
+            && guard.as_ref().unwrap().setup_error.is_none()
+        {
             guard = condvar.wait(guard).unwrap();
+        }
+        if let Some(setup_error) = guard.as_ref().unwrap().setup_error.clone() {
+            return Err(ConfigError::new(&format!(
+                "ASIO full-duplex setup aborted: {setup_error}"
+            )));
         }
         debug!("Full-duplex ASIO setup complete, proceeding.");
     }
@@ -782,12 +789,11 @@ fn release_shared_asio() {
             // The stream was already stopped by the first side.
             debug!("Last ASIO side exiting, disposing driver.");
             let dispose_res = unsafe { ASIODisposeBuffers() };
-            drop_wrapper_driver();
-            let exit_res = unsafe { ASIOExit() };
-            let _ = (dispose_res, exit_res);
+            teardown_asio_driver();
+            let _ = dispose_res;
             trace!(
-                "ASIODisposeBuffers (last side exit) returned {}, ASIOExit returned {}.",
-                dispose_res, exit_res
+                "ASIODisposeBuffers (last side exit) returned {}.",
+                dispose_res
             );
             *guard = None; // Reset for next session
         }
@@ -894,31 +900,31 @@ fn asio_sample_type_to_format(type_id: i32) -> Option<AsioSampleFormat> {
     }
 }
 
-fn asio_sys_sample_type_to_id(sample_type: AsioSampleType) -> i32 {
-    sample_type as i32
-}
-
 /// Query the native sample format of channel 0 for the given direction.
 /// Must be called after the driver is loaded and initialized.
 fn query_device_format(is_input: bool) -> Result<i32, ConfigError> {
-    let driver = loaded_wrapper_driver()?;
-    let sample_type = if is_input {
-        driver
-            .input_data_type()
-            .map_err(|err| ConfigError::new(&format!("ASIO input_data_type failed: {err:?}")))?
-    } else {
-        driver
-            .output_data_type()
-            .map_err(|err| ConfigError::new(&format!("ASIO output_data_type failed: {err:?}")))?
+    let mut info = ASIOChannelInfo {
+        channel: 0,
+        isInput: if is_input { 1 } else { 0 },
+        isActive: 0,
+        channelGroup: 0,
+        type_: 0,
+        name: [0; 32],
     };
-    let type_id = asio_sys_sample_type_to_id(sample_type);
+    let res = unsafe { ASIOGetChannelInfo(&mut info) };
+    if res != 0 {
+        let direction = if is_input { "input" } else { "output" };
+        return Err(ConfigError::new(&format!(
+            "ASIOGetChannelInfo failed for {direction} channel 0 (error code {res})"
+        )));
+    }
     debug!(
         "ASIO channel 0 ({}): type={} ({})",
         if is_input { "input" } else { "output" },
-        type_id,
-        asio_sample_type_name(type_id),
+        info.type_,
+        asio_sample_type_name(info.type_),
     );
-    Ok(type_id)
+    Ok(info.type_)
 }
 
 /// Resolve the sample format to use for a given direction.
@@ -966,16 +972,53 @@ fn resolve_format(
     Ok(native_format)
 }
 
-/// Load an ASIO driver by name.
+/// Tear down any currently loaded ASIO driver.
+///
+/// Calls ASIOExit + remove_current_driver only if a driver is currently initialized.
+/// Safe to call even if no driver is loaded (returns immediately).
+fn teardown_asio_driver() {
+    if !ASIO_DRIVER_INITIALIZED.swap(false, Ordering::AcqRel) {
+        trace!("teardown_asio_driver: no driver initialized, nothing to do");
+        return;
+    }
+    trace!("teardown_asio_driver: exiting and removing current driver");
+    let exit_res = unsafe { ASIOExit() };
+    unsafe { remove_current_driver() };
+    trace!("teardown_asio_driver: ASIOExit returned {}", exit_res);
+}
+
+/// Load an ASIO driver by name using the raw ASIO SDK bindings.
+///
+/// Any previously loaded driver is torn down first.
+/// On return the driver is loaded and initialised (ASIOInit has been called).
 pub fn load_driver_by_name(name: &str) -> Result<(), ConfigError> {
     trace!("load_driver_by_name: loading '{}'", name);
-    let host = Asio::new();
-    let driver = host.load_driver(name).map_err(|err| {
-        ConfigError::new(&format!("Failed to load ASIO driver '{name}': {err:?}"))
+    // Tear down any previously loaded driver.
+    teardown_asio_driver();
+
+    // Load the new driver via the raw ASIO SDK function.
+    let c_name = std::ffi::CString::new(name).map_err(|_| {
+        ConfigError::new(&format!("ASIO driver name '{name}' contains a null byte"))
     })?;
-    let mut guard = wrapper_driver_lock().lock().unwrap();
-    let _ = guard.replace(driver);
-    trace!("load_driver_by_name: '{}' loaded", name);
+    let loaded = unsafe { load_asio_driver(c_name.as_ptr() as *mut i8) };
+    if !loaded {
+        return Err(ConfigError::new(&format!(
+            "Failed to load ASIO driver '{name}'"
+        )));
+    }
+
+    // Initialise the driver.
+    let mut driver_info = std::mem::MaybeUninit::<ASIODriverInfo>::uninit();
+    let init_res = unsafe { ASIOInit(driver_info.as_mut_ptr()) };
+    if init_res != 0 {
+        // Driver loaded but init failed — remove it.
+        unsafe { remove_current_driver() };
+        return Err(ConfigError::new(&format!(
+            "ASIOInit failed for driver '{name}' (error code {init_res})"
+        )));
+    }
+    ASIO_DRIVER_INITIALIZED.store(true, Ordering::Release);
+    trace!("load_driver_by_name: '{}' loaded and initialised", name);
     Ok(())
 }
 
@@ -1109,24 +1152,26 @@ fn force_sample_rate_with_dummy_cycle(devname: &str, rate: f64) -> Result<(), Co
     let _ = unsafe { Box::from_raw(dummy_callbacks) };
 
     // --- Phase 2: full teardown and clean re-initialisation ---
-    drop_wrapper_driver();
-    let _ = unsafe { ASIOExit() };
+    teardown_asio_driver();
+    std::thread::sleep(std::time::Duration::from_millis(500));
     load_driver_by_name(devname)?;
-    let driver = loaded_wrapper_driver()?;
 
     // Set the rate on the fresh driver instance
-    driver.set_sample_rate(rate).map_err(|err| {
-        ConfigError::new(&format!(
-            "Failed to set sample rate after rate-change cycle: {err:?}"
-        ))
-    })?;
+    let set_res = unsafe { set_sample_rate(rate) };
+    if set_res != 0 {
+        return Err(ConfigError::new(&format!(
+            "Failed to set sample rate after rate-change cycle (error code {set_res})"
+        )));
+    }
 
     // Verify the rate
-    let verify = driver.sample_rate().map_err(|err| {
-        ConfigError::new(&format!(
-            "Failed to read ASIO sample rate after rate-change cycle: {err:?}"
-        ))
-    })?;
+    let mut verify: f64 = 0.0;
+    let verify_res = unsafe { get_sample_rate(&mut verify) };
+    if verify_res != 0 {
+        return Err(ConfigError::new(&format!(
+            "Failed to read ASIO sample rate after rate-change cycle (error code {verify_res})"
+        )));
+    }
     debug!("ASIO sample rate after dummy-stream cycle: {verify} Hz (requested {rate} Hz).");
     if (verify - rate).abs() > 0.5 {
         return Err(ConfigError::new(&format!(
@@ -1173,12 +1218,15 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
             std::env::consts::ARCH
         )));
     }
-    let driver = loaded_wrapper_driver()?;
 
     // Log current sample rate before any changes
-    let current_rate = driver
-        .sample_rate()
-        .map_err(|err| ConfigError::new(&format!("Failed to read ASIO sample rate: {err:?}")))?;
+    let mut current_rate: f64 = 0.0;
+    let rate_res = unsafe { get_sample_rate(&mut current_rate) };
+    if rate_res != 0 {
+        return Err(ConfigError::new(&format!(
+            "Failed to read ASIO sample rate (error code {rate_res})"
+        )));
+    }
     debug!("ASIO current sample rate: {current_rate} Hz");
 
     // Log supported sample rates
@@ -1189,14 +1237,14 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
     let supported: Vec<u32> = COMMON_RATES
         .iter()
         .copied()
-        .filter(|&rate| driver.can_sample_rate(rate as f64).unwrap_or(false))
+        .filter(|&r| unsafe { can_sample_rate(r as f64) } == 0)
         .collect();
     debug!("ASIO supported sample rates: {:?}", supported);
 
     // Set the requested sample rate IMMEDIATELY after ASIOInit, before ASIOGetChannels.
     // Some drivers lock in the rate once channels or buffers are queried.
     let rate = samplerate as f64;
-    if !driver.can_sample_rate(rate).unwrap_or(false) {
+    if unsafe { can_sample_rate(rate) } != 0 {
         return Err(ConfigError::new(&format!(
             "ASIO device does not support sample rate {samplerate} Hz. Supported rates: {supported:?}"
         )));
@@ -1209,26 +1257,38 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
         debug!("ASIO sample rate already at {samplerate} Hz, no change needed.");
     } else {
         // Try setting on the current driver instance
-        driver.set_sample_rate(rate).map_err(|err| {
-            ConfigError::new(&format!(
-                "Failed to set ASIO sample rate to {samplerate} Hz: {err:?}"
-            ))
-        })?;
+        let set_res = unsafe { set_sample_rate(rate) };
+        if set_res != 0 {
+            return Err(ConfigError::new(&format!(
+                "Failed to set ASIO sample rate to {samplerate} Hz (error code {set_res})"
+            )));
+        }
 
         // Some ASIO drivers (e.g. Steinberg) don't truly apply the rate change
         // until a full buffer-creation cycle has been performed.  Force this by
         // running a brief dummy stream: CreateBuffers → Start → Stop → Dispose,
         // then tear the driver down and re-initialise cleanly.
         debug!("Forcing ASIO rate change to {samplerate} Hz via dummy stream cycle.");
-        force_sample_rate_with_dummy_cycle(devname, rate)?;
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        //force_sample_rate_with_dummy_cycle(devname, rate)?;
+
+        // Some drivers report `NoDrivers` on `channels()` right after the dummy cycle
+        // despite successful rate verification. Reload once more here so subsequent
+        // calls are always done on a fresh known-good wrapper handle.
+        //load_driver_by_name(devname)?;
     }
 
-    // Query channels AFTER the sample rate has been set
-    let channels = driver
-        .channels()
-        .map_err(|err| ConfigError::new(&format!("ASIOGetChannels failed: {err:?}")))?;
-    let num_inputs: i32 = channels.ins;
-    let num_outputs: i32 = channels.outs;
+    // Query channels AFTER the sample rate has been set.
+    // Use low-level API here because some drivers may report wrapper-side
+    // `NoDrivers` immediately after rate-change reinitialisation.
+    let mut num_inputs: i32 = 0;
+    let mut num_outputs: i32 = 0;
+    let channels_res = unsafe { ASIOGetChannels(&mut num_inputs, &mut num_outputs) };
+    if channels_res != 0 {
+        return Err(ConfigError::new(&format!(
+            "ASIOGetChannels failed (error code {channels_res})"
+        )));
+    }
     debug!("ASIO device opened: {num_inputs} input channels, {num_outputs} output channels.");
 
     // Log per-channel details (name and sample format)
@@ -1370,7 +1430,21 @@ fn open_asio_capture(
 
 /// List available ASIO driver names.
 pub fn list_device_names() -> Vec<String> {
-    Asio::new().driver_names()
+    const MAX_DRIVERS: usize = 100;
+    const MAX_DRIVER_NAME_LEN: usize = 32;
+
+    let mut driver_names: [[std::os::raw::c_char; MAX_DRIVER_NAME_LEN]; MAX_DRIVERS] =
+        [[0; MAX_DRIVER_NAME_LEN]; MAX_DRIVERS];
+    let mut driver_name_ptrs: [*mut i8; MAX_DRIVERS] = [ptr::null_mut(); MAX_DRIVERS];
+    for (p, name) in driver_name_ptrs.iter_mut().zip(&mut driver_names[..]) {
+        *p = name.as_mut_ptr();
+    }
+
+    let num_drivers =
+        unsafe { get_driver_names(driver_name_ptrs.as_mut_ptr(), MAX_DRIVERS as i32) };
+    (0..num_drivers as usize)
+        .map(|i| fixed_cstr_buf_to_string(&driver_names[i]))
+        .collect()
 }
 
 /// List available ASIO devices as (name, description) pairs.
@@ -1783,13 +1857,13 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     release_shared_asio();
                 } else {
                     PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-                    trace!("Playback: calling ASIOStop() + ASIODisposeBuffers()");
+                    trace!("Playback: calling ASIOStop() + ASIODisposeBuffers() + ASIOExit()");
                     let stop_res = unsafe { ASIOStop() };
                     let dispose_res = unsafe { ASIODisposeBuffers() };
-                    drop_wrapper_driver();
+                    teardown_asio_driver();
                     let _ = (stop_res, dispose_res);
                     trace!(
-                        "Playback cleanup (low-level): stop_res={}, dispose_res={}",
+                        "Playback cleanup: stop_res={}, dispose_res={}",
                         stop_res,
                         dispose_res
                     );
@@ -2290,13 +2364,13 @@ impl CaptureDevice for AsioCaptureDevice {
                     release_shared_asio();
                 } else {
                     CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-                    trace!("Capture: calling ASIOStop() + ASIODisposeBuffers()");
+                    trace!("Capture: calling ASIOStop() + ASIODisposeBuffers() + ASIOExit()");
                     let stop_res = unsafe { ASIOStop() };
                     let dispose_res = unsafe { ASIODisposeBuffers() };
-                    drop_wrapper_driver();
+                    teardown_asio_driver();
                     let _ = (stop_res, dispose_res);
                     trace!(
-                        "Capture cleanup (low-level): stop_res={}, dispose_res={}",
+                        "Capture cleanup: stop_res={}, dispose_res={}",
                         stop_res,
                         dispose_res
                     );
