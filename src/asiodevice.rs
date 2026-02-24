@@ -14,7 +14,7 @@
 
 use std::collections::VecDeque;
 use std::ptr;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Barrier, Condvar, Mutex, OnceLock};
 use std::thread;
 
@@ -24,8 +24,8 @@ use ringbuf::{HeapRb, traits::*};
 
 use asio_sys::bindings::asio_import::{
     ASIOBufferInfo, ASIOCallbacks, ASIOChannelInfo, ASIOCreateBuffers, ASIODisposeBuffers,
-    ASIOExit, ASIOGetBufferSize, ASIOGetChannelInfo, ASIOGetChannels, ASIOStart, ASIOStop,
-    ASIOTime,
+    ASIOExit, ASIOGetBufferSize, ASIOGetChannelInfo, ASIOGetChannels, ASIOSampleRate, ASIOStart,
+    ASIOStop, ASIOTime,
 };
 use asio_sys::{Asio, AsioSampleType, Driver};
 
@@ -117,6 +117,8 @@ struct AsioCaptureContext {
 static PLAYBACK_CONTEXT: AtomicPtr<AsioPlaybackContext> = AtomicPtr::new(ptr::null_mut());
 static CAPTURE_CONTEXT: AtomicPtr<AsioCaptureContext> = AtomicPtr::new(ptr::null_mut());
 static ASIO_WRAPPER_DRIVER: OnceLock<Mutex<Option<Driver>>> = OnceLock::new();
+static ASIO_PLAYBACK_RATE_CHANGED: AtomicBool = AtomicBool::new(false);
+static ASIO_CAPTURE_RATE_CHANGED: AtomicBool = AtomicBool::new(false);
 
 fn wrapper_driver_lock() -> &'static Mutex<Option<Driver>> {
     ASIO_WRAPPER_DRIVER.get_or_init(|| Mutex::new(None))
@@ -133,6 +135,32 @@ fn loaded_wrapper_driver() -> Result<Driver, ConfigError> {
 fn drop_wrapper_driver() {
     let mut guard = wrapper_driver_lock().lock().unwrap();
     let _ = guard.take();
+}
+
+fn clear_playback_rate_change_event() {
+    ASIO_PLAYBACK_RATE_CHANGED.store(false, Ordering::Release);
+}
+
+fn clear_capture_rate_change_event() {
+    ASIO_CAPTURE_RATE_CHANGED.store(false, Ordering::Release);
+}
+
+fn take_playback_rate_change_event() -> bool {
+    ASIO_PLAYBACK_RATE_CHANGED.swap(false, Ordering::AcqRel)
+}
+
+fn take_capture_rate_change_event() -> bool {
+    ASIO_CAPTURE_RATE_CHANGED.swap(false, Ordering::AcqRel)
+}
+
+fn read_current_asio_sample_rate_hz() -> Option<usize> {
+    let mut rate = 0.0f64;
+    let res = unsafe { asio_sys::bindings::asio_import::get_sample_rate(&mut rate) };
+    if res == 0 && rate.is_finite() && rate > 0.0 {
+        Some(rate.round() as usize)
+    } else {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +475,12 @@ pub unsafe extern "C" fn buffer_switch_timeinfo_combined(
     params
 }
 
+pub unsafe extern "C" fn sample_rate_changed_callback(_s_rate: ASIOSampleRate) {
+    ASIO_PLAYBACK_RATE_CHANGED.store(true, Ordering::Release);
+    ASIO_CAPTURE_RATE_CHANGED.store(true, Ordering::Release);
+    warn!("ASIO sampleRateDidChange callback received.");
+}
+
 /// ASIO asioMessage callback.
 /// Handles driver queries about supported features.
 /// Returning 0 means "not supported" or "no" for most selectors.
@@ -664,7 +698,7 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
         // struct to remain valid for the lifetime of the stream.
         shared.callbacks_for_driver = Some(Box::new(ASIOCallbacks {
             bufferSwitch: Some(buffer_switch_combined),
-            sampleRateDidChange: None,
+            sampleRateDidChange: Some(sample_rate_changed_callback),
             asioMessage: Some(asio_message_callback),
             bufferSwitchTimeInfo: Some(buffer_switch_timeinfo_combined),
         }));
@@ -1496,6 +1530,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 let mut _single_playback_callbacks: Option<Box<ASIOCallbacks>> = None;
 
                 // --- Create context and start ASIO ---
+                clear_playback_rate_change_event();
                 reset_playback_callback_seen();
                 let ctx_raw = if full_duplex {
                     let buffer_infos = make_buffer_infos(channels, false);
@@ -1553,7 +1588,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     let mut driver_buffer_infos = make_buffer_infos(channels, false);
                     let mut callbacks_for_driver = Box::new(ASIOCallbacks {
                         bufferSwitch: Some(buffer_switch_playback),
-                        sampleRateDidChange: None,
+                        sampleRateDidChange: Some(sample_rate_changed_callback),
                         asioMessage: Some(asio_message_callback),
                         bufferSwitchTimeInfo: Some(buffer_switch_timeinfo_playback),
                     });
@@ -1632,7 +1667,19 @@ impl PlaybackDevice for AsioPlaybackDevice {
 
                 let mut conversion_result;
                 'deviceloop: loop {
-                    match channel.recv() {
+                    if take_playback_rate_change_event() {
+                        let new_rate = read_current_asio_sample_rate_hz().unwrap_or(0);
+                        warn!(
+                            "Playback sample rate change detected via callback: {} Hz. Stopping playback.",
+                            new_rate
+                        );
+                        status_channel
+                            .send(StatusMessage::PlaybackFormatChange(new_rate))
+                            .unwrap_or(());
+                        break 'deviceloop;
+                    }
+
+                    match channel.recv_timeout(std::time::Duration::from_millis(100)) {
                         Ok(AudioMessage::Audio(chunk)) => {
                             let estimated_buffer_fill = buffer_fill
                                 .try_lock()
@@ -1714,10 +1761,12 @@ impl PlaybackDevice for AsioPlaybackDevice {
                                 .unwrap_or(());
                             break 'deviceloop;
                         }
-                        Err(err) => {
-                            error!("Playback, message channel error: {err}.");
+                        Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                        Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                            let msg = "Playback message channel disconnected".to_string();
+                            error!("{msg}.");
                             status_channel
-                                .send(StatusMessage::PlaybackError(err.to_string()))
+                                .send(StatusMessage::PlaybackError(msg))
                                 .unwrap_or(());
                             break 'deviceloop;
                         }
@@ -1889,6 +1938,7 @@ impl CaptureDevice for AsioCaptureDevice {
                 let mut _single_capture_callbacks: Option<Box<ASIOCallbacks>> = None;
 
                 // --- Create context and start ASIO ---
+                clear_capture_rate_change_event();
                 let ctx_raw = if full_duplex {
                     let buffer_infos = make_buffer_infos(channels, true);
                     let ctx = Box::new(AsioCaptureContext {
@@ -1942,7 +1992,7 @@ impl CaptureDevice for AsioCaptureDevice {
                     let mut driver_buffer_infos = make_buffer_infos(channels, true);
                     let mut callbacks_for_driver = Box::new(ASIOCallbacks {
                         bufferSwitch: Some(buffer_switch_capture),
-                        sampleRateDidChange: None,
+                        sampleRateDidChange: Some(sample_rate_changed_callback),
                         asioMessage: Some(asio_message_callback),
                         bufferSwitchTimeInfo: Some(buffer_switch_timeinfo_capture),
                     });
@@ -2033,6 +2083,21 @@ impl CaptureDevice for AsioCaptureDevice {
                 debug!("Capture device starts now!");
 
                 'deviceloop: loop {
+                    if take_capture_rate_change_event() {
+                        let new_rate = read_current_asio_sample_rate_hz().unwrap_or(0);
+                        warn!(
+                            "Capture sample rate change detected via callback: {} Hz. Stopping capture.",
+                            new_rate
+                        );
+                        channel
+                            .send(AudioMessage::EndOfStream)
+                            .unwrap_or(());
+                        status_channel
+                            .send(StatusMessage::CaptureFormatChange(new_rate))
+                            .unwrap_or(());
+                        break 'deviceloop;
+                    }
+
                     // Handle commands
                     match command_channel.try_recv() {
                         Ok(CommandMessage::Exit) => {
