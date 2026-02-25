@@ -12,7 +12,6 @@
 // ASIO backend for playback and capture.
 // This implementation uses the asio-sys crate to interface with the ASIO driver system.
 
-
 use std::collections::VecDeque;
 use std::ptr;
 
