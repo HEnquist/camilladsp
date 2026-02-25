@@ -175,7 +175,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install LLVM
-        run: winget install LLVM.LLVM
+        run: choco install llvm -y
 
       - name: Run cargo check
         run: cargo check --features asio-backend
