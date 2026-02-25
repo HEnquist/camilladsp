@@ -661,7 +661,7 @@ impl CaptureDeviceWasapi {
 pub struct CaptureDeviceAsio {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
-    pub device: Option<String>,
+    pub device: String,
     #[serde(default)]
     pub format: Option<AsioSampleFormat>,
     #[serde(default)]
@@ -823,7 +823,7 @@ impl PlaybackDeviceWasapi {
 pub struct PlaybackDeviceAsio {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
-    pub device: Option<String>,
+    pub device: String,
     #[serde(default)]
     pub format: Option<AsioSampleFormat>,
 }

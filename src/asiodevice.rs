@@ -67,7 +67,7 @@ use crate::{CaptureStatus, PlaybackStatus};
 
 #[derive(Clone, Debug)]
 pub struct AsioPlaybackDevice {
-    pub devname: Option<String>,
+    pub devname: String,
     pub samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
@@ -80,7 +80,7 @@ pub struct AsioPlaybackDevice {
 
 #[derive(Clone, Debug)]
 pub struct AsioCaptureDevice {
-    pub devname: Option<String>,
+    pub devname: String,
     pub samplerate: usize,
     pub capture_samplerate: usize,
     pub resampler_config: Option<crate::config::Resampler>,
@@ -1240,7 +1240,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
-        let devname = self.devname.clone().unwrap_or_default();
+        let devname = self.devname.clone();
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
@@ -1653,7 +1653,7 @@ impl CaptureDevice for AsioCaptureDevice {
         capture_status: Arc<RwLock<CaptureStatus>>,
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
-        let devname = self.devname.clone().unwrap_or_default();
+        let devname = self.devname.clone();
         let samplerate = self.samplerate;
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
