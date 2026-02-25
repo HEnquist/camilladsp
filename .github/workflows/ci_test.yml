@@ -162,6 +162,27 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy -- -D warnings
 
+  check_and_lint_windows_asio:
+    name: Check and test Windows ASIO
+    runs-on: windows-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install LLVM
+        run: winget install LLVM.LLVM
+
+      - name: Run cargo check
+        run: cargo check --features asio-backend
+
+      - name: Run cargo clippy
+        run: cargo clippy --features asio-backend -- -D warnings
+
   check_test_macos:
     name: Check and test macOS Intel
     runs-on: macos-15-intel
