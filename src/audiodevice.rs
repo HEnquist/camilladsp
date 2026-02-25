@@ -1,5 +1,5 @@
 // CamillaDSP - A flexible tool for processing audio
-// Copyright (C) 2025 Henrik Enquist
+// Copyright (C) 2026 Henrik Enquist
 //
 // This file is part of CamillaDSP.
 //
