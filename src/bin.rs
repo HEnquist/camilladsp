@@ -324,6 +324,7 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
+                            status_structs.capture.write().state = ProcessingState::Inactive;
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -342,6 +343,7 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
+                            status_structs.capture.write().state = ProcessingState::Inactive;
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -364,6 +366,7 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
+                            status_structs.capture.write().state = ProcessingState::Inactive;
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -383,6 +386,7 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
+                            status_structs.capture.write().state = ProcessingState::Inactive;
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
