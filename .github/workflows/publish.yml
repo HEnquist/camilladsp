@@ -2,8 +2,9 @@ name: Publish
 
 on:
   push:
-    tags:
-      - '*'
+  release:
+    types:
+      - created
 
 jobs:
   linux_amd64:
@@ -35,13 +36,20 @@ jobs:
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-linux-amd64
+          path: camilladsp.tar.gz
+
       - name: Upload binary to release
+        if: github.event_name == 'release' && github.event.action == 'created'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
           asset_name: camilladsp-linux-amd64.tar.gz
-          tag: ${{ github.ref }}
+          tag: ${{ github.event.release.tag_name }}
 
       - name: Install PipeWire development files
         run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpipewire-0.3-dev -y
@@ -52,13 +60,20 @@ jobs:
       - name: Compress binary with PipeWire
         run: tar -zcvf camilladsp-pipewire.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
+      - name: Upload binary with PipeWire artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-linux-pipewire-amd64
+          path: camilladsp-pipewire.tar.gz
+
       - name: Upload binary with PipeWire to release
+        if: github.event_name == 'release' && github.event.action == 'created'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp-pipewire.tar.gz
           asset_name: camilladsp-linux-pipewire-amd64.tar.gz
-          tag: ${{ github.ref }}
+          tag: ${{ github.event.release.tag_name }}
 
       - name: Install PulseAudio development files
         run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
@@ -69,13 +84,20 @@ jobs:
       - name: Compress binary with PulseAudio
         run: tar -zcvf camilladsp-pulse.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
+      - name: Upload binary with PulseAudio artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-linux-pulseaudio-amd64
+          path: camilladsp-pulse.tar.gz
+
       - name: Upload binary with PulseAudio to release
+        if: github.event_name == 'release' && github.event.action == 'created'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp-pulse.tar.gz
           asset_name: camilladsp-linux-pulseaudio-amd64.tar.gz
-          tag: ${{ github.ref }}
+          tag: ${{ github.event.release.tag_name }}
 
   linux_aarch64:
     name: Linux aarch64
@@ -106,13 +128,20 @@ jobs:
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-linux-aarch64
+          path: camilladsp.tar.gz
+
       - name: Upload binary to release
+        if: github.event_name == 'release' && github.event.action == 'created'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
           asset_name: camilladsp-linux-aarch64.tar.gz
-          tag: ${{ github.ref }}
+          tag: ${{ github.event.release.tag_name }}
 
       - name: Install PipeWire development files
         run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpipewire-0.3-dev -y
@@ -123,13 +152,20 @@ jobs:
       - name: Compress binary with PipeWire
         run: tar -zcvf camilladsp-pipewire.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
+      - name: Upload binary with PipeWire artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-linux-pipewire-aarch64
+          path: camilladsp-pipewire.tar.gz
+
       - name: Upload binary with PipeWire to release
+        if: github.event_name == 'release' && github.event.action == 'created'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp-pipewire.tar.gz
           asset_name: camilladsp-linux-pipewire-aarch64.tar.gz
-          tag: ${{ github.ref }}
+          tag: ${{ github.event.release.tag_name }}
 
       - name: Install PulseAudio development files
         run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
@@ -140,13 +176,20 @@ jobs:
       - name: Compress binary with PulseAudio
         run: tar -zcvf camilladsp-pulse.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
+      - name: Upload binary with PulseAudio artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-linux-pulseaudio-aarch64
+          path: camilladsp-pulse.tar.gz
+
       - name: Upload binary with PulseAudio to release
+        if: github.event_name == 'release' && github.event.action == 'created'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp-pulse.tar.gz
           asset_name: camilladsp-linux-pulseaudio-aarch64.tar.gz
-          tag: ${{ github.ref }}
+          tag: ${{ github.event.release.tag_name }}
 
   linux_armv7:
     name: Linux armv7
@@ -174,13 +217,20 @@ jobs:
       - name: Compress binary
         run: tar -zcvf camilladsp.tar.gz -C target/armv7-unknown-linux-gnueabihf/release camilladsp --owner=0 --group=0 --numeric-owner
 
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-linux-armv7
+          path: camilladsp.tar.gz
+
       - name: Upload binary to release
+        if: github.event_name == 'release' && github.event.action == 'created'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
           asset_name: camilladsp-linux-armv7.tar.gz
-          tag: ${{ github.ref }}
+          tag: ${{ github.event.release.tag_name }}
 
   linux_armv6:
     name: Linux armv6
@@ -206,13 +256,20 @@ jobs:
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/arm-unknown-linux-gnueabihf/release camilladsp --owner=0 --group=0 --numeric-owner
 
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-linux-armv6
+          path: camilladsp.tar.gz
+
       - name: Upload binaries to release
+        if: github.event_name == 'release' && github.event.action == 'created'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
           asset_name: camilladsp-linux-armv6.tar.gz
-          tag: ${{ github.ref }}
+          tag: ${{ github.event.release.tag_name }}
 
   windows:
     name: Windows
@@ -230,13 +287,41 @@ jobs:
       - name: Compress
         run: powershell Compress-Archive target/release/camilladsp.exe camilladsp.zip
 
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-windows-amd64
+          path: camilladsp.zip
+
       - name: Upload binaries to release
+        if: github.event_name == 'release' && github.event.action == 'created'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.zip
           asset_name: camilladsp-windows-amd64.zip
-          tag: ${{ github.ref }}
+          tag: ${{ github.event.release.tag_name }}
+
+      - name: Build with ASIO backend
+        run: cargo build --release --features asio-backend
+
+      - name: Compress with ASIO backend
+        run: powershell Compress-Archive target/release/camilladsp.exe camilladsp-asio.zip
+
+      - name: Upload binary artifact with ASIO backend
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-windows-amd64-asio
+          path: camilladsp-asio.zip
+
+      - name: Upload binary with ASIO backend to release
+        if: github.event_name == 'release' && github.event.action == 'created'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp-asio.zip
+          asset_name: camilladsp-windows-amd64-asio.zip
+          tag: ${{ github.event.release.tag_name }}
 
   macos:
     name: macOS Intel
@@ -254,13 +339,20 @@ jobs:
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
 
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-macos-amd64
+          path: camilladsp.tar.gz
+
       - name: Upload binaries to release
+        if: github.event_name == 'release' && github.event.action == 'created'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
           asset_name: camilladsp-macos-amd64.tar.gz
-          tag: ${{ github.ref }}
+          tag: ${{ github.event.release.tag_name }}
 
 
   macos_arm:
@@ -279,10 +371,17 @@ jobs:
       - name: Compress
         run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
 
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: camilladsp-macos-aarch64
+          path: camilladsp.tar.gz
+
       - name: Upload binaries to release
+        if: github.event_name == 'release' && github.event.action == 'created'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
           asset_name: camilladsp-macos-aarch64.tar.gz
-          tag: ${{ github.ref }}
+          tag: ${{ github.event.release.tag_name }}
