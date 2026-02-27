@@ -41,6 +41,7 @@ jobs:
         with:
           name: camilladsp-linux-amd64
           path: camilladsp.tar.gz
+          retention-days: 14
 
       - name: Upload binary to release
         if: github.event_name == 'release' && github.event.action == 'created'
@@ -65,6 +66,7 @@ jobs:
         with:
           name: camilladsp-linux-pipewire-amd64
           path: camilladsp-pipewire.tar.gz
+          retention-days: 14
 
       - name: Upload binary with PipeWire to release
         if: github.event_name == 'release' && github.event.action == 'created'
@@ -89,6 +91,7 @@ jobs:
         with:
           name: camilladsp-linux-pulseaudio-amd64
           path: camilladsp-pulse.tar.gz
+          retention-days: 14
 
       - name: Upload binary with PulseAudio to release
         if: github.event_name == 'release' && github.event.action == 'created'
@@ -133,6 +136,7 @@ jobs:
         with:
           name: camilladsp-linux-aarch64
           path: camilladsp.tar.gz
+          retention-days: 14
 
       - name: Upload binary to release
         if: github.event_name == 'release' && github.event.action == 'created'
@@ -157,6 +161,7 @@ jobs:
         with:
           name: camilladsp-linux-pipewire-aarch64
           path: camilladsp-pipewire.tar.gz
+          retention-days: 14
 
       - name: Upload binary with PipeWire to release
         if: github.event_name == 'release' && github.event.action == 'created'
@@ -181,6 +186,7 @@ jobs:
         with:
           name: camilladsp-linux-pulseaudio-aarch64
           path: camilladsp-pulse.tar.gz
+          retention-days: 14
 
       - name: Upload binary with PulseAudio to release
         if: github.event_name == 'release' && github.event.action == 'created'
@@ -222,6 +228,7 @@ jobs:
         with:
           name: camilladsp-linux-armv7
           path: camilladsp.tar.gz
+          retention-days: 14
 
       - name: Upload binary to release
         if: github.event_name == 'release' && github.event.action == 'created'
@@ -261,6 +268,7 @@ jobs:
         with:
           name: camilladsp-linux-armv6
           path: camilladsp.tar.gz
+          retention-days: 14
 
       - name: Upload binaries to release
         if: github.event_name == 'release' && github.event.action == 'created'
@@ -292,6 +300,7 @@ jobs:
         with:
           name: camilladsp-windows-amd64
           path: camilladsp.zip
+          retention-days: 14
 
       - name: Upload binaries to release
         if: github.event_name == 'release' && github.event.action == 'created'
@@ -311,8 +320,9 @@ jobs:
       - name: Upload binary artifact with ASIO backend
         uses: actions/upload-artifact@v4
         with:
-          name: camilladsp-windows-amd64-asio
+          name: camilladsp-windows-asio-amd64
           path: camilladsp-asio.zip
+          retention-days: 14
 
       - name: Upload binary with ASIO backend to release
         if: github.event_name == 'release' && github.event.action == 'created'
@@ -320,7 +330,7 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp-asio.zip
-          asset_name: camilladsp-windows-amd64-asio.zip
+          asset_name: camilladsp-windows-asio-amd64.zip
           tag: ${{ github.event.release.tag_name }}
 
   macos:
@@ -344,6 +354,7 @@ jobs:
         with:
           name: camilladsp-macos-amd64
           path: camilladsp.tar.gz
+          retention-days: 14
 
       - name: Upload binaries to release
         if: github.event_name == 'release' && github.event.action == 'created'
@@ -376,6 +387,7 @@ jobs:
         with:
           name: camilladsp-macos-aarch64
           path: camilladsp.tar.gz
+          retention-days: 14
 
       - name: Upload binaries to release
         if: github.event_name == 'release' && github.event.action == 'created'
