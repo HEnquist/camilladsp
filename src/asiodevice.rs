@@ -1018,7 +1018,9 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
         let err_desc = load_err.to_string();
         let exact_match = available.iter().any(|n| n == devname);
         let hint = if exact_match {
-            String::from(" A driver matching the provided name was found, so the device may be turned off or disconnected.")
+            String::from(
+                " A driver matching the provided name was found, so the device may be turned off or disconnected.",
+            )
         } else {
             String::from(" No driver matching the provided name was found.")
         };
