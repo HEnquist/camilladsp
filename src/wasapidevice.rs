@@ -1212,7 +1212,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                     .name("WasapiCaptureInner".to_string())
                     .spawn(move || {
                         let (_device, audio_client, capture_client, handle, _binary_format, wave_format) =
-                        match open_capture(&devname, samplerate, channels, &sample_format, exclusive, polling, loopback) {
+                        match open_capture(&devname, capture_samplerate, channels, &sample_format, exclusive, polling, loopback) {
                             Ok(result) => {
                                 tx_state_dev.send(DeviceState::Ok(result.4)).unwrap_or(());
                                 result
