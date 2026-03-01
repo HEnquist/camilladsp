@@ -760,6 +760,13 @@ section for details.
 Set the device `type` to `Asio` for both capture and playback.
 The `device` parameter should be set to the name of the ASIO driver to use.
 Available ASIO drivers are listed in the log output at startup (at debug level).
+Note that ASIO exposes drivers rather than actual device availability,
+so drivers for disconnected or powered‑off devices are still included
+in the listing.
+
+Set the `channels` property to the number of channels you want to use.
+The value may be lower than the number of channels the device provides,
+any channels above the specified count are simply ignored.
 
 The supported sample formats are:
 - `S16_LE` - 16-bit signed integer

@@ -1013,30 +1013,27 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
     );
     let available = list_device_names();
     debug!("Available ASIO devices: {:?}", available);
-    if load_driver_by_name(devname).is_err() {
+    if let Err(load_err) = load_driver_by_name(devname) {
         // Driver load failed — provide a helpful error with available devices.
-        let close_matches: Vec<&str> = available
-            .iter()
-            .filter(|n| {
-                n.to_lowercase().contains(&devname.to_lowercase())
-                    || devname.to_lowercase().contains(&n.to_lowercase())
-            })
-            .map(|s| s.as_str())
-            .collect();
-        let hint = if !close_matches.is_empty() && !available.iter().any(|n| n == devname) {
-            format!(" Did you mean one of: {:?}?", close_matches)
+        let err_desc = load_err.to_string();
+        let exact_match = available.iter().any(|n| n == devname);
+        let hint = if exact_match {
+            String::from(" A driver matching the provided name was found, so the device may be turned off or disconnected.")
         } else {
-            String::new()
+            String::from(" No driver matching the provided name was found.")
         };
-        return Err(ConfigError::new(&format!(
-            "Failed to load ASIO driver '{}'. Available devices: {:?}.{} \
-             If the device is listed, this may be caused by an architecture mismatch \
-             between the driver and the CamillaDSP binary (this binary is {}).",
-            devname,
-            available,
-            hint,
-            std::env::consts::ARCH
-        )));
+        let msg = if exact_match {
+            format!(
+                "Failed to load ASIO driver '{}': {}{}",
+                devname, err_desc, hint
+            )
+        } else {
+            format!(
+                "Failed to load ASIO driver '{}': {} Available devices: {:?}.{}",
+                devname, err_desc, available, hint
+            )
+        };
+        return Err(ConfigError::new(&msg));
     }
 
     // Log current sample rate before any changes
