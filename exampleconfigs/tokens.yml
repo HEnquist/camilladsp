@@ -6,12 +6,12 @@ devices:
     type: RawFile
     filename: "dummy"
     channels: 2
-    format: I16_LE
+    format: S16_LE
   playback:
     type: File
     filename: "dummy"
     channels: 2
-    format: I16_LE
+    format: S16_LE
 
 filters:
   filter44100:
