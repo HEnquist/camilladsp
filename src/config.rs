@@ -2126,7 +2126,8 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
                     | (Filter::Dither { .. }, Filter::Dither { .. })
                     | (Filter::DiffEq { .. }, Filter::DiffEq { .. })
                     | (Filter::Volume { .. }, Filter::Volume { .. })
-                    | (Filter::Loudness { .. }, Filter::Loudness { .. }) => {}
+                    | (Filter::Loudness { .. }, Filter::Loudness { .. })
+                    | (Filter::Limiter { .. }, Filter::Limiter { .. }) => {}
                     _ => {
                         // A filter changed type, need to rebuild the pipeline
                         return ConfigChange::Pipeline;

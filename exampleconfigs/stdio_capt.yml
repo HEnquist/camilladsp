@@ -8,8 +8,8 @@ devices:
     type: Pulse
     channels: 2
     device: "MySink.monitor"
-    format: I16_LE
+    format: S16_LE
   playback:
     type: Stdout
     channels: 2
-    format: I16_LE
+    format: S16_LE
