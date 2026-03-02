@@ -41,6 +41,7 @@ extern crate log;
 
 use clap::{Arg, ArgAction, Command, crate_authors, crate_description, crate_name, crate_version};
 use crossbeam_channel::select;
+use git_version::git_version;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::env;
 use std::path::PathBuf;
@@ -81,6 +82,7 @@ const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
 const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
 const EXIT_FORCED: i32 = 103; // Exit was forced by a second SIGINT
 const EXIT_OK: i32 = 0; // All ok
+const GIT_HASH: &str = git_version!(fallback = "unknown");
 
 // Customized version of `colored_opt_format` from flexi_logger.
 fn custom_colored_logger_format(
@@ -483,10 +485,14 @@ fn main_process() -> i32 {
         "License: GPLv3 or MPL-2.0".to_string()
     };
 
+    let version_with_hash: &'static str =
+        Box::leak(format!("{} ({})", crate_version!(), GIT_HASH).into_boxed_str());
+
     let longabout = format!(
-        "{} v{}\n{}\n{}\n\n{}\n\n{}\n\nSupported device types:\n{}\n{}",
+        "{} v{} ({})\n{}\n{}\n\n{}\n\n{}\n\nSupported device types:\n{}\n{}",
         crate_name!(),
         crate_version!(),
+        GIT_HASH,
         crate_authors!(),
         crate_description!(),
         license_notice,
@@ -496,7 +502,7 @@ fn main_process() -> i32 {
     );
 
     let clapapp = Command::new("CamillaDSP")
-        .version(crate_version!())
+        .version(version_with_hash)
         .about(longabout)
         .author(crate_authors!())
         //.setting(AppSettings::ArgRequiredElseHelp)
@@ -835,7 +841,7 @@ fn main_process() -> i32 {
             .start()
             .unwrap()
     };
-    info!("CamillaDSP version {}", crate_version!());
+    info!("CamillaDSP version {} ({})", crate_version!(), GIT_HASH);
     info!(
         "Running on {}, {}",
         std::env::consts::OS,
