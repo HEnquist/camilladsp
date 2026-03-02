@@ -21,4 +21,5 @@ pub mod rate_controller;
 pub mod resampling;
 pub mod ringbuffer;
 pub mod stash;
+pub mod time;
 pub mod wavtools;

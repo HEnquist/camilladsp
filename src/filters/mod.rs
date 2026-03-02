@@ -28,6 +28,8 @@ pub mod dither;
 pub mod fftconv;
 /// Hard-clipping limiter filter.
 pub mod limiter;
+/// Lookahead limiter.
+pub mod lookahead_limiter;
 /// Loudness compensation filter.
 pub mod loudness;
 
@@ -247,6 +249,9 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
             biquadcombo::validate_config(fs, parameters)
         }
         config::Filter::Limiter { parameters, .. } => limiter::validate_config(parameters),
+        config::Filter::LookaheadLimiter { parameters, .. } => {
+            lookahead_limiter::validate_config(parameters)
+        }
     }
 }
 
