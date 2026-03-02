@@ -129,6 +129,7 @@ and the Mozilla Public License Version 2.0:
    - **[IIR](#iir)**
    - **[Dither](#dither)**
    - **[Limiter](#limiter)**
+   - **[Lookahead limiter](#lookahead-limiter)**
    - **[Difference equation](#difference-equation)**
 - **[Processors](#processors)**
    - **[Compressor](#compressor)**
@@ -2376,6 +2377,29 @@ Example:
 Parameters:
   * `soft_clip`: enable soft clipping. Set to `false` to use hard clipping. Optional, defaults to `false`.
   * `clip_limit`: the level in dB to clip at.
+
+### Lookahead Limiter
+The "LookaheadLimiter" filter is a lookahead limiter with smooth attack ramping and exponential release.
+It delays the signal by the attack time, detects peaks in advance and smoothly ramps gain reduction
+to reach the required level exactly when the peak arrives. After the peak passes, the gain
+is restored using an exponential release curve.
+
+Example:
+```
+  example_lookahead_limiter:
+    type: LookaheadLimiter
+    parameters:
+      limit: 0.0 (*)
+      attack: 2.0
+      release: 100.0
+```
+
+Parameters:
+  * `limit`: Maximum output level in dB. Optional, defaults to 0.0 dB.
+  * `attack`: Attack/lookahead time in milliseconds. This determines how far ahead the limiter looks for peaks.
+    Must be greater than 0 and less than or equal to 1000 ms.
+  * `release`: Release time in milliseconds. This controls how quickly the gain reduction is released after a peak.
+    Must be greater than or equal to 0 ms.
 
 ### Difference equation
 The "DiffEq" filter implements a generic difference equation filter with transfer function:

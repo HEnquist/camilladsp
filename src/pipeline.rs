@@ -96,6 +96,13 @@ impl FilterGroup {
                 config::Filter::Limiter { parameters, .. } => {
                     Box::new(filters::limiter::Limiter::from_config(name, parameters))
                 }
+                config::Filter::LookaheadLimiter { parameters, .. } => {
+                    Box::new(filters::lookahead_limiter::LookaheadLimiter::from_config(
+                        name,
+                        parameters,
+                        sample_freq,
+                    ))
+                }
             };
             filters.push(filter);
         }
