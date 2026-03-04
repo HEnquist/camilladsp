@@ -562,7 +562,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
-        _processing_params: Arc<ProcessingParameters>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let node_name = self
             .node_name
@@ -784,6 +784,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     samplerate,
                     capture_samplerate,
                     chunksize,
+                    processing_params.clone(),
                 );
 
                 // Spawn processing thread

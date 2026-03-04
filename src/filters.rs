@@ -46,6 +46,8 @@ use crate::Res;
 
 use crate::wavtools::find_data_in_wav;
 
+const LOAD_WARN_CONSECUTIVE_CHUNKS: usize = 10;
+
 pub trait Filter {
     // Filter a Vec
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()>;
@@ -398,6 +400,7 @@ pub struct Pipeline {
     volume: basicfilters::Volume,
     secs_per_chunk: f32,
     processing_params: Arc<ProcessingParameters>,
+    overloaded_chunks: usize,
 }
 
 impl Pipeline {
@@ -513,6 +516,7 @@ impl Pipeline {
             volume,
             secs_per_chunk,
             processing_params,
+            overloaded_chunks: 0,
         }
     }
 
@@ -572,6 +576,17 @@ impl Pipeline {
         let load = 100.0 * secs_elapsed / self.secs_per_chunk;
         self.processing_params.set_processing_load(load);
         trace!("Processing load: {load}%");
+        if load > 100.0 {
+            self.overloaded_chunks += 1;
+            if self.overloaded_chunks == LOAD_WARN_CONSECUTIVE_CHUNKS {
+                warn!(
+                    "Processing load has been above 100% for {} consecutive chunks (current: {load}%)",
+                    LOAD_WARN_CONSECUTIVE_CHUNKS
+                );
+            }
+        } else {
+            self.overloaded_chunks = 0;
+        }
         chunk
     }
 }

@@ -710,7 +710,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
-        _processing_params: Arc<ProcessingParameters>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -735,6 +735,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         samplerate,
                         capture_samplerate,
                         chunksize,
+                    processing_params.clone(),
                     );
                 // Rough guess of the number of frames per callback. 
                 //let callback_frames = samplerate / 85;

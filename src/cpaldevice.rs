@@ -490,7 +490,7 @@ impl CaptureDevice for CpalCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
-        _processing_params: Arc<ProcessingParameters>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let host_cfg = self.host.clone();
         let devname = self.devname.clone();
@@ -515,6 +515,7 @@ impl CaptureDevice for CpalCaptureDevice {
                         samplerate,
                         capture_samplerate,
                         chunksize,
+                    processing_params.clone(),
                     );
                 match open_cpal_capture(host_cfg, &devname, capture_samplerate, channels, &sample_format) {
                     Ok((device, stream_config, _sample_format)) => {

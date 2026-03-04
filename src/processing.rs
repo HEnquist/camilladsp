@@ -175,6 +175,7 @@ pub fn run_processing(
             };
         }
         processing_params.set_processing_load(0.0);
+        processing_params.set_resampler_load(0.0);
         if let Some(h) = thread_handle {
             match demote_current_thread_from_real_time(h) {
                 Ok(_) => {

@@ -1,4 +1,5 @@
 use crate::PrcFmt;
+use crate::ProcessingParameters;
 use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::container_from_stash;
@@ -11,10 +12,17 @@ use rubato::{
     Async, Fft, FixedAsync, FixedSync, Indexing, PolynomialDegree, Resampler,
     SincInterpolationParameters, SincInterpolationType, WindowFunction, calculate_cutoff,
 };
+use std::sync::Arc;
+use std::time::Instant;
+
+const LOAD_WARN_CONSECUTIVE_CHUNKS: usize = 10;
 
 pub struct ChunkResampler {
     pub resampler: Box<dyn Resampler<PrcFmt>>,
     pub indexing: Indexing,
+    pub secs_per_chunk: f32,
+    pub overloaded_chunks: usize,
+    pub processing_params: Arc<ProcessingParameters>,
 }
 
 pub fn resampler_is_async(conf: &Option<config::Resampler>) -> bool {
@@ -136,7 +144,9 @@ pub fn new_resampler(
     samplerate: usize,
     capture_samplerate: usize,
     chunksize: usize,
+    processing_params: Arc<ProcessingParameters>,
 ) -> Option<ChunkResampler> {
+    let secs_per_chunk = chunksize as f32 / samplerate as f32;
     let indexing = Indexing {
         input_offset: 0,
         output_offset: 0,
@@ -163,6 +173,9 @@ pub fn new_resampler(
                     .unwrap(),
                 ),
                 indexing,
+                secs_per_chunk,
+                overloaded_chunks: 0,
+                processing_params: processing_params.clone(),
             })
         }
         Some(config::Resampler::AsyncPoly { interpolation }) => {
@@ -185,6 +198,9 @@ pub fn new_resampler(
                     .unwrap(),
                 ),
                 indexing,
+                secs_per_chunk,
+                overloaded_chunks: 0,
+                processing_params: processing_params.clone(),
             })
         }
         Some(config::Resampler::Synchronous) => Some(ChunkResampler {
@@ -200,6 +216,9 @@ pub fn new_resampler(
                 .unwrap(),
             ),
             indexing,
+            secs_per_chunk,
+            overloaded_chunks: 0,
+            processing_params: processing_params.clone(),
         }),
         None => None,
     }
@@ -207,6 +226,7 @@ pub fn new_resampler(
 
 impl ChunkResampler {
     pub fn resample_chunk(&mut self, chunk: &mut AudioChunk, chunksize: usize, channels: usize) {
+        let start = Instant::now();
         chunk.update_channel_mask(self.indexing.active_channels_mask.as_mut().unwrap());
         let mut new_waves = container_from_stash(channels);
         for wave in &chunk.waveforms {
@@ -241,6 +261,22 @@ impl ChunkResampler {
         chunk.frames = chunksize;
         let old_waves = std::mem::replace(&mut chunk.waveforms, new_waves);
         recycle_container(old_waves);
+
+        let secs_elapsed = start.elapsed().as_secs_f32();
+        let load = 100.0 * secs_elapsed / self.secs_per_chunk;
+        self.processing_params.set_resampler_load(load);
+        trace!("Resampling load: {load}%");
+        if load > 100.0 {
+            self.overloaded_chunks += 1;
+            if self.overloaded_chunks == LOAD_WARN_CONSECUTIVE_CHUNKS {
+                warn!(
+                    "Resampling load has been above 100% for {} consecutive chunks (current: {load}%)",
+                    LOAD_WARN_CONSECUTIVE_CHUNKS
+                );
+            }
+        } else {
+            self.overloaded_chunks = 0;
+        }
     }
 
     pub fn pump_silence(&mut self, channels: usize, chunksize: usize) -> Vec<Vec<PrcFmt>> {

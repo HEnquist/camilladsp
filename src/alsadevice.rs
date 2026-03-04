@@ -1211,6 +1211,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                     samplerate,
                     capture_samplerate,
                     chunksize,
+                    processing_params.clone(),
                 );
                 match open_pcm(
                     devname,

@@ -153,6 +153,7 @@ enum WsCommand {
     GetAvailableCaptureDevices(String),
     GetAvailablePlaybackDevices(String),
     GetProcessingLoad,
+    GetResamplerLoad,
     Exit,
     Stop,
     None,
@@ -449,6 +450,10 @@ enum WsReply {
         value: Vec<(String, String)>,
     },
     GetProcessingLoad {
+        result: WsResult,
+        value: f32,
+    },
+    GetResamplerLoad {
         result: WsResult,
         value: f32,
     },
@@ -1621,6 +1626,13 @@ fn handle_command(
         WsCommand::GetProcessingLoad => {
             let load = shared_data_inst.processing_params.processing_load();
             Some(WsReply::GetProcessingLoad {
+                result: WsResult::Ok,
+                value: load,
+            })
+        }
+        WsCommand::GetResamplerLoad => {
+            let load = shared_data_inst.processing_params.resampler_load();
+            Some(WsReply::GetResamplerLoad {
                 result: WsResult::Ok,
                 value: load,
             })

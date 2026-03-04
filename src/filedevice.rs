@@ -544,7 +544,7 @@ impl CaptureDevice for FileCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
-        _processing_params: Arc<ProcessingParameters>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let source = self.source.clone();
         let samplerate = self.samplerate;
@@ -595,6 +595,7 @@ impl CaptureDevice for FileCaptureDevice {
                     samplerate,
                     capture_samplerate,
                     chunksize,
+                    processing_params.clone(),
                 );
                 let params = CaptureParams {
                     channels,
