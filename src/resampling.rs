@@ -13,10 +13,13 @@ use rubato::{
 };
 use std::time::Instant;
 
+const LOAD_WARN_CONSECUTIVE_CHUNKS: usize = 10;
+
 pub struct ChunkResampler {
     pub resampler: Box<dyn Resampler<PrcFmt>>,
     pub indexing: Indexing,
     pub secs_per_chunk: f32,
+    pub overloaded_chunks: usize,
 }
 
 pub fn resampler_is_async(conf: &Option<config::Resampler>) -> bool {
@@ -167,6 +170,7 @@ pub fn new_resampler(
                 ),
                 indexing,
                 secs_per_chunk,
+                overloaded_chunks: 0,
             })
         }
         Some(config::Resampler::AsyncPoly { interpolation }) => {
@@ -190,6 +194,7 @@ pub fn new_resampler(
                 ),
                 indexing,
                 secs_per_chunk,
+                overloaded_chunks: 0,
             })
         }
         Some(config::Resampler::Synchronous) => Some(ChunkResampler {
@@ -206,6 +211,7 @@ pub fn new_resampler(
             ),
             indexing,
             secs_per_chunk,
+            overloaded_chunks: 0,
         }),
         None => None,
     }
@@ -252,6 +258,17 @@ impl ChunkResampler {
         let secs_elapsed = start.elapsed().as_secs_f32();
         let load = 100.0 * secs_elapsed / self.secs_per_chunk;
         trace!("Resampling load: {load}%");
+        if load > 100.0 {
+            self.overloaded_chunks += 1;
+            if self.overloaded_chunks == LOAD_WARN_CONSECUTIVE_CHUNKS {
+                warn!(
+                    "Resampling load has been above 100% for {} consecutive chunks (current: {load}%)",
+                    LOAD_WARN_CONSECUTIVE_CHUNKS
+                );
+            }
+        } else {
+            self.overloaded_chunks = 0;
+        }
     }
 
     pub fn pump_silence(&mut self, channels: usize, chunksize: usize) -> Vec<Vec<PrcFmt>> {
