@@ -1650,7 +1650,7 @@ impl CaptureDevice for AsioCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
-        _processing_params: Arc<ProcessingParameters>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -1675,6 +1675,7 @@ impl CaptureDevice for AsioCaptureDevice {
                     samplerate,
                     capture_samplerate,
                     chunksize,
+                    processing_params.clone(),
                 );
 
                 let channel_capacity = if let Some(resamp) = &resampler {
