@@ -1,4 +1,5 @@
 use crate::PrcFmt;
+use crate::ProcessingParameters;
 use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::container_from_stash;
@@ -11,6 +12,7 @@ use rubato::{
     Async, Fft, FixedAsync, FixedSync, Indexing, PolynomialDegree, Resampler,
     SincInterpolationParameters, SincInterpolationType, WindowFunction, calculate_cutoff,
 };
+use std::sync::Arc;
 use std::time::Instant;
 
 const LOAD_WARN_CONSECUTIVE_CHUNKS: usize = 10;
@@ -20,6 +22,7 @@ pub struct ChunkResampler {
     pub indexing: Indexing,
     pub secs_per_chunk: f32,
     pub overloaded_chunks: usize,
+    pub processing_params: Arc<ProcessingParameters>,
 }
 
 pub fn resampler_is_async(conf: &Option<config::Resampler>) -> bool {
@@ -141,6 +144,7 @@ pub fn new_resampler(
     samplerate: usize,
     capture_samplerate: usize,
     chunksize: usize,
+    processing_params: Arc<ProcessingParameters>,
 ) -> Option<ChunkResampler> {
     let secs_per_chunk = chunksize as f32 / samplerate as f32;
     let indexing = Indexing {
@@ -171,6 +175,7 @@ pub fn new_resampler(
                 indexing,
                 secs_per_chunk,
                 overloaded_chunks: 0,
+                processing_params: processing_params.clone(),
             })
         }
         Some(config::Resampler::AsyncPoly { interpolation }) => {
@@ -195,6 +200,7 @@ pub fn new_resampler(
                 indexing,
                 secs_per_chunk,
                 overloaded_chunks: 0,
+                processing_params: processing_params.clone(),
             })
         }
         Some(config::Resampler::Synchronous) => Some(ChunkResampler {
@@ -212,6 +218,7 @@ pub fn new_resampler(
             indexing,
             secs_per_chunk,
             overloaded_chunks: 0,
+            processing_params: processing_params.clone(),
         }),
         None => None,
     }
@@ -257,6 +264,7 @@ impl ChunkResampler {
 
         let secs_elapsed = start.elapsed().as_secs_f32();
         let load = 100.0 * secs_elapsed / self.secs_per_chunk;
+        self.processing_params.set_resampler_load(load);
         trace!("Resampling load: {load}%");
         if load > 100.0 {
             self.overloaded_chunks += 1;

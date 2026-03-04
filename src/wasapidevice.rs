@@ -1159,7 +1159,7 @@ impl CaptureDevice for WasapiCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
-        _processing_params: Arc<ProcessingParameters>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let exclusive = self.exclusive;
         let polling = self.polling;
@@ -1185,6 +1185,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                         samplerate,
                         capture_samplerate,
                         chunksize,
+                    processing_params.clone(),
                 );
                 // Devices typically give around 1000 frames per buffer, set a reasonable capacity for the channel
                 let channel_capacity = if let Some(resamp) = &resampler {

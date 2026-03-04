@@ -217,6 +217,8 @@ fn run(
                             debug!("Dropping config change command since there are more commands in the queue");
                             continue;
                         }
+                        status_structs.processing.set_processing_load(0.0);
+                        status_structs.processing.set_resampler_load(0.0);
                         let comp = config::config_diff(&active_config, &new_conf);
                         match comp {
                             config::ConfigChange::Pipeline
