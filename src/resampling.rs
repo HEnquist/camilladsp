@@ -11,10 +11,12 @@ use rubato::{
     Async, Fft, FixedAsync, FixedSync, Indexing, PolynomialDegree, Resampler,
     SincInterpolationParameters, SincInterpolationType, WindowFunction, calculate_cutoff,
 };
+use std::time::Instant;
 
 pub struct ChunkResampler {
     pub resampler: Box<dyn Resampler<PrcFmt>>,
     pub indexing: Indexing,
+    pub secs_per_chunk: f32,
 }
 
 pub fn resampler_is_async(conf: &Option<config::Resampler>) -> bool {
@@ -137,6 +139,7 @@ pub fn new_resampler(
     capture_samplerate: usize,
     chunksize: usize,
 ) -> Option<ChunkResampler> {
+    let secs_per_chunk = chunksize as f32 / samplerate as f32;
     let indexing = Indexing {
         input_offset: 0,
         output_offset: 0,
@@ -163,6 +166,7 @@ pub fn new_resampler(
                     .unwrap(),
                 ),
                 indexing,
+                secs_per_chunk,
             })
         }
         Some(config::Resampler::AsyncPoly { interpolation }) => {
@@ -185,6 +189,7 @@ pub fn new_resampler(
                     .unwrap(),
                 ),
                 indexing,
+                secs_per_chunk,
             })
         }
         Some(config::Resampler::Synchronous) => Some(ChunkResampler {
@@ -200,6 +205,7 @@ pub fn new_resampler(
                 .unwrap(),
             ),
             indexing,
+            secs_per_chunk,
         }),
         None => None,
     }
@@ -207,6 +213,7 @@ pub fn new_resampler(
 
 impl ChunkResampler {
     pub fn resample_chunk(&mut self, chunk: &mut AudioChunk, chunksize: usize, channels: usize) {
+        let start = Instant::now();
         chunk.update_channel_mask(self.indexing.active_channels_mask.as_mut().unwrap());
         let mut new_waves = container_from_stash(channels);
         for wave in &chunk.waveforms {
@@ -241,6 +248,10 @@ impl ChunkResampler {
         chunk.frames = chunksize;
         let old_waves = std::mem::replace(&mut chunk.waveforms, new_waves);
         recycle_container(old_waves);
+
+        let secs_elapsed = start.elapsed().as_secs_f32();
+        let load = 100.0 * secs_elapsed / self.secs_per_chunk;
+        trace!("Resampling load: {load}%");
     }
 
     pub fn pump_silence(&mut self, channels: usize, chunksize: usize) -> Vec<Vec<PrcFmt>> {
