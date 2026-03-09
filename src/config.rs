@@ -237,6 +237,36 @@ impl WasapiSampleFormat {
     }
 }
 
+#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+#[allow(clippy::upper_case_acronyms, non_camel_case_types)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub enum AsioSampleFormat {
+    S16_LE,
+    S24_4_LE,
+    S24_3_LE,
+    S32_LE,
+    F32_LE,
+    F64_LE,
+}
+
+#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+impl AsioSampleFormat {
+    // Map binary format to the corresponding ASIO format, if possible.
+    // Used for overriding config values.
+    pub fn from_binary_format(format: &BinarySampleFormat) -> Option<Self> {
+        match format {
+            BinarySampleFormat::S16_LE => Some(Self::S16_LE),
+            BinarySampleFormat::S24_3_LE => Some(Self::S24_3_LE),
+            BinarySampleFormat::S24_4_LJ_LE => Some(Self::S24_4_LE),
+            BinarySampleFormat::S24_4_RJ_LE => Some(Self::S24_4_LE),
+            BinarySampleFormat::S32_LE => Some(Self::S32_LE),
+            BinarySampleFormat::F32_LE => Some(Self::F32_LE),
+            BinarySampleFormat::F64_LE => Some(Self::F64_LE),
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -381,6 +411,9 @@ pub enum CaptureDevice {
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi(CaptureDeviceWasapi),
+    #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+    #[serde(alias = "ASIO", alias = "asio")]
+    Asio(CaptureDeviceAsio),
     #[cfg(all(
         feature = "cpal-backend",
         feature = "jack-backend",
@@ -428,6 +461,8 @@ impl CaptureDevice {
             CaptureDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => dev.channels,
+            #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+            CaptureDevice::Asio(dev) => dev.channels,
             #[cfg(all(
                 feature = "cpal-backend",
                 feature = "jack-backend",
@@ -460,6 +495,8 @@ impl CaptureDevice {
             CaptureDevice::CoreAudio(dev) => dev.labels.clone(),
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => dev.labels.clone(),
+            #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+            CaptureDevice::Asio(dev) => dev.labels.clone(),
             #[cfg(all(
                 feature = "cpal-backend",
                 feature = "jack-backend",
@@ -618,6 +655,19 @@ impl CaptureDeviceWasapi {
     }
 }
 
+#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureDeviceAsio {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub device: String,
+    #[serde(default)]
+    pub format: Option<AsioSampleFormat>,
+    #[serde(default)]
+    pub labels: Option<Vec<Option<String>>>,
+}
+
 #[cfg(target_os = "macos")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -688,6 +738,9 @@ pub enum PlaybackDevice {
     #[cfg(target_os = "windows")]
     #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi(PlaybackDeviceWasapi),
+    #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+    #[serde(alias = "ASIO", alias = "asio")]
+    Asio(PlaybackDeviceAsio),
     #[cfg(all(
         feature = "cpal-backend",
         feature = "jack-backend",
@@ -721,6 +774,8 @@ impl PlaybackDevice {
             PlaybackDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
             PlaybackDevice::Wasapi(dev) => dev.channels,
+            #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+            PlaybackDevice::Asio(dev) => dev.channels,
             #[cfg(all(
                 feature = "cpal-backend",
                 feature = "jack-backend",
@@ -760,6 +815,17 @@ impl PlaybackDeviceWasapi {
     pub fn is_polling(&self) -> bool {
         self.polling.unwrap_or_default()
     }
+}
+
+#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PlaybackDeviceAsio {
+    #[serde(deserialize_with = "validate_nonzero_usize")]
+    pub channels: usize,
+    pub device: String,
+    #[serde(default)]
+    pub format: Option<AsioSampleFormat>,
 }
 
 #[cfg(target_os = "macos")]
@@ -1816,6 +1882,10 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             CaptureDevice::Wasapi(dev) => {
                 dev.channels = chans;
             }
+            #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+            CaptureDevice::Asio(dev) => {
+                dev.channels = chans;
+            }
             #[cfg(all(
                 feature = "cpal-backend",
                 feature = "jack-backend",
@@ -1880,6 +1950,16 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                 } else {
                     let msg =
                         format!("Wasapi does not have a sample format corresponding to {fmt}");
+                    return Err(ConfigError::new(&msg).into());
+                }
+            }
+            #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+            CaptureDevice::Asio(dev) => {
+                let mapped_format = AsioSampleFormat::from_binary_format(&fmt);
+                if let Some(mapped) = mapped_format {
+                    dev.format = Some(mapped);
+                } else {
+                    let msg = format!("ASIO does not have a sample format corresponding to {fmt}");
                     return Err(ConfigError::new(&msg).into());
                 }
             }
@@ -2163,6 +2243,25 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                 )
                 .into());
             }
+        }
+    }
+    #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+    if let (CaptureDevice::Asio(cap_dev), PlaybackDevice::Asio(pb_dev)) =
+        (&conf.devices.capture, &conf.devices.playback)
+    {
+        if cap_dev.device != pb_dev.device {
+            return Err(ConfigError::new(
+                "ASIO only supports one driver at a time. \
+                 Capture and playback must use the same ASIO device",
+            )
+            .into());
+        }
+        if conf.devices.resampler.is_some() {
+            return Err(ConfigError::new(
+                "Resampling is not supported in full-duplex ASIO mode. \
+                 Both capture and playback share the same driver and sample rate",
+            )
+            .into());
         }
     }
     if let PlaybackDevice::File {

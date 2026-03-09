@@ -14,6 +14,7 @@ pipewire-backend = ["pipewire"]
 cpal-backend = ["cpal"]
 jack-backend = ["cpal-backend", "cpal/jack"]
 bluez-backend = ["zbus"]
+asio-backend = ["asio-sys"]
 32bit = []
 websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
@@ -48,6 +49,7 @@ libc = "0.2.172"
 wasapi = "0.22.0"
 # wasapi = { version = "0.22.0", path = "../wasapi-rs" }
 windows = {version = "0.62.0", features = ["Win32_System_Threading", "Win32_Foundation"] }
+asio-sys = { version = "0.2.5", optional = true }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
