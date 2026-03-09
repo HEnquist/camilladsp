@@ -1,9 +1,12 @@
 ## v4.0.0
 New features:
+- Add PipeWire backend.
+- Add ASIO backend.
 - Add RACE processor.
 - Add option for custom log filtering.
 - Support polling mode for WASAPI.
 - Websocket commands for reading and writing partial configs.
+- Websocket command for reading resampler load.
 Changes:
 - New sample format names on all backends.
 - Removed sample format selection for Pulse backend.
