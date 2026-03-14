@@ -23,7 +23,7 @@ use pw::stream::{Stream, StreamFlags};
 // Re-import the properties macro
 use pipewire::properties::properties;
 
-use crate::audiochunk::{AudioChunk, ChunkStats};
+use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::BinarySampleFormat;

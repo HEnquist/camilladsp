@@ -53,7 +53,7 @@ use crate::asio_backend::utils::{
     fixed_cstr_buf_to_string, get_preferred_buffer_size, make_buffer_infos,
     read_current_asio_sample_rate_hz, resolve_binary_format, resolve_format,
 };
-use crate::audiochunk::{AudioChunk, ChunkStats};
+use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config::{AsioSampleFormat, BinarySampleFormat, ConfigError};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};

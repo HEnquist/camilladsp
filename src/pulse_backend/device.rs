@@ -19,7 +19,7 @@ use pulse;
 use pulse::sample;
 use pulse::stream::Direction;
 
-use crate::audiochunk::{AudioChunk, ChunkStats};
+use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::BinarySampleFormat;

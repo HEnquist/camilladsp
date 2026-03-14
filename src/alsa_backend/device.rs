@@ -16,7 +16,7 @@
 
 extern crate alsa;
 extern crate nix;
-use crate::audiochunk::{AudioChunk, ChunkStats};
+use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config::{AlsaSampleFormat, Resampler};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
