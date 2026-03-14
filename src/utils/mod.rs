@@ -15,5 +15,5 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 pub mod countertimer;
-pub mod helpers;
+pub mod decibels;
 pub mod rate_controller;

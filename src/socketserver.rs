@@ -37,7 +37,7 @@ use tungstenite::accept;
 
 use crate::ProcessingState;
 use crate::Res;
-use crate::utils::helpers::linear_to_db;
+use crate::utils::decibels::linear_to_db_inplace;
 use crate::{
     CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus, StopReason,
     list_available_devices, list_supported_devices,
@@ -1675,7 +1675,7 @@ fn playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
         .max_since(time_instant);
     match res {
         Some(mut record) => {
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],
@@ -1691,7 +1691,7 @@ fn playback_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
         .average_sqrt_since(time_instant);
     match res {
         Some(mut record) => {
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],
@@ -1707,7 +1707,7 @@ fn capture_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
         .max_since(time_instant);
     match res {
         Some(mut record) => {
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],
@@ -1723,7 +1723,7 @@ fn capture_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
         .average_sqrt_since(time_instant);
     match res {
         Some(mut record) => {
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],
@@ -1742,7 +1742,7 @@ fn playback_signal_peak_since_last(
     match res {
         Some(mut record) => {
             local_data.last_pb_peak_time = record.time;
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],
@@ -1761,7 +1761,7 @@ fn playback_signal_rms_since_last(
     match res {
         Some(mut record) => {
             local_data.last_pb_rms_time = record.time;
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],
@@ -1780,7 +1780,7 @@ fn capture_signal_peak_since_last(
     match res {
         Some(mut record) => {
             local_data.last_cap_peak_time = record.time;
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],
@@ -1796,7 +1796,7 @@ fn capture_signal_rms_since_last(shared_data: &SharedData, local_data: &mut Loca
     match res {
         Some(mut record) => {
             local_data.last_cap_rms_time = record.time;
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],
@@ -1807,7 +1807,7 @@ fn playback_signal_peak(shared_data: &SharedData) -> Vec<f32> {
     let res = shared_data.playback_status.read().signal_peak.last();
     match res {
         Some(mut record) => {
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],
@@ -1830,7 +1830,7 @@ fn playback_signal_rms(shared_data: &SharedData) -> Vec<f32> {
     let res = shared_data.playback_status.read().signal_rms.last_sqrt();
     match res {
         Some(mut record) => {
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],
@@ -1841,7 +1841,7 @@ fn capture_signal_peak(shared_data: &SharedData) -> Vec<f32> {
     let res = shared_data.capture_status.read().signal_peak.last();
     match res {
         Some(mut record) => {
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],
@@ -1864,7 +1864,7 @@ fn capture_signal_rms(shared_data: &SharedData) -> Vec<f32> {
     let res = shared_data.capture_status.read().signal_rms.last_sqrt();
     match res {
         Some(mut record) => {
-            linear_to_db(&mut record.values);
+            linear_to_db_inplace(&mut record.values);
             record.values
         }
         None => vec![],

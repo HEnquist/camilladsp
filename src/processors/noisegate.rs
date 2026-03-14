@@ -19,6 +19,7 @@ use crate::Res;
 use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::processors::Processor;
+use crate::utils::decibels::db_to_linear;
 
 #[derive(Clone, Debug)]
 pub struct NoiseGate {
@@ -74,7 +75,7 @@ impl NoiseGate {
             config.attenuation
         );
 
-        let factor = (10.0 as PrcFmt).powf(-config.attenuation / 20.0);
+        let factor = db_to_linear(-config.attenuation);
 
         NoiseGate {
             name,
@@ -177,7 +178,7 @@ impl Processor for NoiseGate {
             self.attack = attack;
             self.release = release;
             self.threshold = config.threshold;
-            self.factor = (10.0 as PrcFmt).powf(-config.attenuation / 20.0);
+            self.factor = db_to_linear(-config.attenuation);
 
             debug!(
                 "Updated noise gate '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, attenuation: {}",

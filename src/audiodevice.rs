@@ -53,6 +53,7 @@ use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::Res;
 use crate::StatusMessage;
+use crate::utils::decibels::linear_to_db;
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 pub const RATE_CHANGE_THRESHOLD_COUNT: usize = 3;
@@ -109,16 +110,7 @@ pub struct ChunkStats {
 
 impl ChunkStats {
     pub fn rms_db(&self) -> Vec<f32> {
-        self.rms
-            .iter()
-            .map(|val| {
-                if *val == 0.0 {
-                    -1000.0
-                } else {
-                    20.0 * val.log10() as f32
-                }
-            })
-            .collect()
+        self.rms.iter().map(|val| linear_to_db(*val as f32)).collect()
     }
 
     pub fn rms_linear(&self) -> Vec<f32> {
@@ -126,16 +118,7 @@ impl ChunkStats {
     }
 
     pub fn peak_db(&self) -> Vec<f32> {
-        self.peak
-            .iter()
-            .map(|val| {
-                if *val == 0.0 {
-                    -1000.0
-                } else {
-                    20.0 * val.log10() as f32
-                }
-            })
-            .collect()
+        self.peak.iter().map(|val| linear_to_db(*val as f32)).collect()
     }
 
     pub fn peak_linear(&self) -> Vec<f32> {

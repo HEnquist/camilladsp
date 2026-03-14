@@ -20,6 +20,7 @@ use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::filters::limiter::Limiter;
 use crate::processors::Processor;
+use crate::utils::decibels::db_to_linear;
 
 #[derive(Clone, Debug)]
 pub struct Compressor {
@@ -65,7 +66,7 @@ impl Compressor {
         let release = (-1.0 / srate / config.release).exp();
         let clip_limit = config
             .clip_limit
-            .map(|lim| (10.0 as PrcFmt).powf(lim / 20.0));
+            .map(db_to_linear);
 
         let scratch = vec![0.0; chunksize];
 
@@ -144,7 +145,7 @@ impl Compressor {
                 *val = 0.0;
             }
             *val += self.makeup_gain;
-            *val = (10.0 as PrcFmt).powf(*val / 20.0);
+            *val = db_to_linear(*val);
         }
     }
 
@@ -201,7 +202,7 @@ impl Processor for Compressor {
             let release = (-1.0 / srate / config.release).exp();
             let clip_limit = config
                 .clip_limit
-                .map(|lim| (10.0 as PrcFmt).powf(lim / 20.0));
+                .map(db_to_linear);
 
             let limiter = if let Some(limit) = config.clip_limit {
                 let limitconf = config::LimiterParameters {

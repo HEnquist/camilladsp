@@ -29,6 +29,7 @@ use crate::NewValue;
 use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::Res;
+use crate::utils::decibels::db_to_linear;
 
 #[derive(Clone, Debug)]
 pub struct Gain {
@@ -277,7 +278,7 @@ fn calculate_gain(gain_value: PrcFmt, inverted: bool, mute: bool, linear: bool) 
     let mut gain = if linear {
         gain_value
     } else {
-        (10.0 as PrcFmt).powf(gain_value / 20.0)
+        db_to_linear(gain_value)
     };
     if inverted {
         gain = -gain;

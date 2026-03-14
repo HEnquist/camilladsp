@@ -20,6 +20,7 @@ use crate::audiodevice::AudioChunk;
 use crate::config;
 use crate::container_from_stash;
 use crate::recycle_chunk;
+use crate::utils::decibels::db_to_linear;
 use crate::vec_from_stash;
 
 #[derive(Clone)]
@@ -40,7 +41,7 @@ fn calculate_gain(gain_value: PrcFmt, inverted: bool, linear: bool) -> PrcFmt {
     let mut gain = if linear {
         gain_value
     } else {
-        (10.0 as PrcFmt).powf(gain_value / 20.0)
+        db_to_linear(gain_value)
     };
     if inverted {
         gain = -gain;

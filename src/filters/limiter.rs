@@ -18,6 +18,7 @@ use crate::PrcFmt;
 use crate::Res;
 use crate::config;
 use crate::filters::Filter;
+use crate::utils::decibels::db_to_linear;
 
 const CUBEFACTOR: PrcFmt = 1.0 / 6.75; // = 1 / (2 * 1.5^3)
 
@@ -31,7 +32,7 @@ pub struct Limiter {
 impl Limiter {
     /// Creates a Compressor from a config struct
     pub fn from_config(name: &str, config: config::LimiterParameters) -> Self {
-        let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit / 20.0);
+        let clip_limit = db_to_linear(config.clip_limit);
 
         debug!(
             "Creating limiter '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
@@ -87,7 +88,7 @@ impl Filter for Limiter {
             parameters: config, ..
         } = config
         {
-            let clip_limit = (10.0 as PrcFmt).powf(config.clip_limit / 20.0);
+            let clip_limit = db_to_linear(config.clip_limit);
 
             self.soft_clip = config.soft_clip();
             self.clip_limit = clip_limit;

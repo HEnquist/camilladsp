@@ -14,13 +14,23 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::PrcFmt;
+
+pub fn linear_to_db(value: f32) -> f32 {
+    if value == 0.0 {
+        -1000.0
+    } else {
+        20.0 * value.log10()
+    }
+}
+
+pub fn db_to_linear(value: PrcFmt) -> PrcFmt {
+    (10.0 as PrcFmt).powf(value / 20.0)
+}
+
 // Inplace recalculation of values positive values 0..1 to dB.
-pub fn linear_to_db(values: &mut [f32]) {
+pub fn linear_to_db_inplace(values: &mut [f32]) {
     values.iter_mut().for_each(|val| {
-        if *val == 0.0 {
-            *val = -1000.0;
-        } else {
-            *val = 20.0 * val.log10();
-        }
+        *val = linear_to_db(*val);
     });
 }
