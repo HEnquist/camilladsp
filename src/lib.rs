@@ -49,8 +49,6 @@ extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
-#[cfg(target_os = "windows")]
-extern crate wasapi;
 //#[cfg(target_os = "windows")]
 //extern crate winapi;
 
@@ -119,57 +117,47 @@ impl<PrcFmt> NewValue<PrcFmt> for PrcFmt {
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 #[cfg(target_os = "linux")]
-pub mod alsadevice;
-#[cfg(target_os = "linux")]
-pub mod alsadevice_buffermanager;
-#[cfg(target_os = "linux")]
-pub mod alsadevice_utils;
+pub mod alsa_backend;
 #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-pub mod asiodevice;
-#[cfg(all(target_os = "windows", feature = "asio-backend"))]
-pub mod asiodevice_utils;
+pub mod asio_backend;
 pub mod audiodevice;
-pub mod basicfilters;
-pub mod biquad;
-pub mod biquadcombo;
-pub mod compressor;
 pub mod config;
 pub mod conversions;
 #[cfg(target_os = "macos")]
-pub mod coreaudiodevice;
+pub mod coreaudio_backend;
 pub mod countertimer;
 #[cfg(feature = "cpal-backend")]
-pub mod cpaldevice;
-pub mod diffeq;
-pub mod dither;
-pub mod fftconv;
-pub mod filedevice;
-#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-pub mod filedevice_bluez;
-#[cfg(not(target_os = "linux"))]
-pub mod filereader;
-#[cfg(target_os = "linux")]
-pub mod filereader_nonblock;
+pub mod cpal_backend;
+pub mod file_backend;
 pub mod filters;
 pub mod generatordevice;
 pub mod helpers;
-pub mod limiter;
-pub mod loudness;
 pub mod mixer;
-pub mod noisegate;
 #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-pub mod pipewiredevice;
+pub mod pipewire_backend;
 pub mod processing;
+pub mod processors;
 #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-pub mod pulsedevice;
+pub mod pulse_backend;
 pub mod race;
 pub mod resampling;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
 pub mod statefile;
 #[cfg(target_os = "windows")]
-pub mod wasapidevice;
+pub mod wasapi_backend;
 pub mod wavtools;
+
+pub use filters::basicfilters;
+pub use filters::biquad;
+pub use filters::biquadcombo;
+pub use filters::diffeq;
+pub use filters::dither;
+pub use filters::fftconv;
+pub use filters::limiter;
+pub use filters::loudness;
+pub use processors::compressor;
+pub use processors::noisegate;
 
 const MAX_STASH_SIZE: usize = 1024;
 const MAX_CONTAINER_STASH_SIZE: usize = 128;
@@ -558,13 +546,13 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
 pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String)> {
     match backend.to_lowercase().as_str() {
         #[cfg(target_os = "linux")]
-        "alsa" => alsadevice_utils::list_device_names(input),
+        "alsa" => alsa_backend::utils::list_device_names(input),
         #[cfg(target_os = "macos")]
-        "coreaudio" => coreaudiodevice::list_available_devices(input),
+        "coreaudio" => coreaudio_backend::device::list_available_devices(input),
         #[cfg(target_os = "windows")]
-        "wasapi" => wasapidevice::list_device_names(input),
+        "wasapi" => wasapi_backend::device::list_device_names(input),
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-        "asio" => asiodevice::list_available_devices(),
+        "asio" => asio_backend::device::list_available_devices(),
         _ => Vec::new(),
     }
 }

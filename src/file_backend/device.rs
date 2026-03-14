@@ -39,11 +39,11 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-use crate::filedevice_bluez;
+use crate::file_backend::bluez as filedevice_bluez;
 #[cfg(not(target_os = "linux"))]
-use crate::filereader::BlockingReader;
+use crate::file_backend::filereader::BlockingReader;
 #[cfg(target_os = "linux")]
-use crate::filereader_nonblock::NonBlockingReader;
+use crate::file_backend::filereader_nonblock::NonBlockingReader;
 use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::wavtools::{find_data_in_wav, write_wav_header};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};

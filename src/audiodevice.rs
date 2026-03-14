@@ -16,12 +16,12 @@
 
 // Traits for audio devices
 #[cfg(target_os = "linux")]
-use crate::alsadevice;
+use crate::alsa_backend::device as alsadevice;
 #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-use crate::asiodevice;
+use crate::asio_backend::device as asiodevice;
 use crate::config;
 #[cfg(target_os = "macos")]
-use crate::coreaudiodevice;
+use crate::coreaudio_backend::device as coreaudiodevice;
 #[cfg(all(
     feature = "cpal-backend",
     feature = "jack-backend",
@@ -32,15 +32,15 @@ use crate::coreaudiodevice;
         target_os = "netbsd"
     )
 ))]
-use crate::cpaldevice;
-use crate::filedevice;
+use crate::cpal_backend::device as cpaldevice;
+use crate::file_backend::device as filedevice;
 use crate::generatordevice;
 #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-use crate::pipewiredevice;
+use crate::pipewire_backend::device as pipewiredevice;
 #[cfg(feature = "pulse-backend")]
-use crate::pulsedevice;
+use crate::pulse_backend::device as pulsedevice;
 #[cfg(target_os = "windows")]
-use crate::wasapidevice;
+use crate::wasapi_backend::device as wasapidevice;
 use parking_lot::RwLock;
 
 use std::error;

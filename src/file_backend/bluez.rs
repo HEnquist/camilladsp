@@ -21,7 +21,7 @@ use zbus::Message;
 use zbus::blocking::Connection;
 use zbus::zvariant::OwnedFd;
 
-use crate::filereader_nonblock::NonBlockingReader;
+use crate::file_backend::filereader_nonblock::NonBlockingReader;
 
 pub struct WrappedBluezFd {
     pipe_fd: zbus::zvariant::OwnedFd,

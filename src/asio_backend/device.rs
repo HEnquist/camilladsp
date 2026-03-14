@@ -48,7 +48,7 @@ use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
-use crate::asiodevice_utils::{
+use crate::asio_backend::utils::{
     asio_sample_type_name, copy_from_queue_at_offset, create_asio_buffers,
     fixed_cstr_buf_to_string, get_preferred_buffer_size, make_buffer_infos,
     read_current_asio_sample_rate_hz, resolve_binary_format, resolve_format,

@@ -43,10 +43,10 @@ use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
-use crate::alsadevice_buffermanager::{
+use crate::alsa_backend::buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
-use crate::alsadevice_utils::{
+use crate::alsa_backend::utils::{
     CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams,
     find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
     list_samplerates_as_text, pick_preferred_format, process_events, state_desc,

@@ -14,20 +14,20 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+pub mod basicfilters;
+pub mod biquad;
+pub mod biquadcombo;
+pub mod diffeq;
+pub mod dither;
+pub mod fftconv;
+pub mod limiter;
+pub mod loudness;
+
 use crate::audiodevice::AudioChunk;
-use crate::basicfilters;
-use crate::biquad;
-use crate::biquadcombo;
-use crate::compressor;
 use crate::config;
 use crate::config::BinarySampleFormat;
-use crate::diffeq;
-use crate::dither;
-use crate::fftconv;
-use crate::limiter;
-use crate::loudness;
 use crate::mixer;
-use crate::noisegate;
+use crate::processors::{compressor, noisegate};
 use crate::race;
 use audioadapter_sample::readwrite::ReadSamples;
 use audioadapter_sample::sample::{F32_LE, F64_LE, I16_LE, I24_4LJ_LE, I24_4RJ_LE, I24_LE, I32_LE};

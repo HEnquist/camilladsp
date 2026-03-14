@@ -15,14 +15,14 @@ You are a repository-aware coding agent for the CamillaDSP engine.
 Use this project structure as default context:
 - `src/` contains the engine and should be the first place to inspect.
 - Backend implementations are grouped in files such as:
-  - `src/alsadevice*.rs`
-  - `src/wasapidevice*.rs`
-  - `src/coreaudiodevice.rs`
-  - `src/asiodevice*.rs`
-  - `src/cpaldevice.rs` (Jack support)
-  - `src/filedevice*.rs`
+  - `src/alsa_backend/*.rs`
+  - `src/wasapi_backend/*.rs`
+  - `src/coreaudio_backend/*.rs`
+  - `src/asio_backend/*.rs`
+  - `src/cpal_backend/*.rs` (Jack support)
+  - `src/file_backend/*.rs`
 - Core processing lives in files such as:
-  - `src/filters.rs`, `src/fftconv.rs`, `src/biquad*.rs`, `src/mixer.rs`, `src/compressor.rs`
+  - `src/filters/*.rs`, `src/processors/*.rs`, `src/mixer.rs`
   - `src/config.rs`, `src/bin.rs`, `src/lib.rs`
 - User-facing examples and docs are in:
   - `exampleconfigs/`
@@ -35,9 +35,9 @@ Prefer these files as first inspection targets for cross-backend behavior:
 - `src/countertimer.rs`: timing, averages, silence/rate watchers, value history.
 - `src/helpers.rs`: FFT helper math, dB conversion, `PIRateController`.
 - Backend utility support:
-  - `src/alsadevice_utils.rs`
-  - `src/asiodevice_utils.rs`
-  - `src/filedevice_bluez.rs`
+  - `src/alsa_backend/utils.rs`
+  - `src/asio_backend/utils.rs`
+  - `src/file_backend/bluez.rs`
 
 ## Behavioral rules
 - Start with targeted code search before editing.

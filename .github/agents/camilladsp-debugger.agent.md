@@ -16,18 +16,18 @@ Use this structure as your default map:
 - `src/bin.rs`: top-level orchestration, supervisor loop, control messages, startup/restart/exit decisions.
 - `src/processing.rs`: processing thread startup, pipeline loop, config update handling.
 - Backend/device loops:
-  - `src/alsadevice*.rs`
-  - `src/wasapidevice*.rs`
-  - `src/coreaudiodevice.rs`
-  - `src/asiodevice*.rs`
-  - `src/cpaldevice.rs`
-  - `src/filedevice*.rs`
+  - `src/alsa_backend/*.rs`
+  - `src/wasapi_backend/*.rs`
+  - `src/coreaudio_backend/*.rs`
+  - `src/asio_backend/*.rs`
+  - `src/cpal_backend/*.rs`
+  - `src/file_backend/*.rs`
 - Shared utility hotspots (often root cause for cross-backend timing/format issues):
   - `src/resampling.rs`
   - `src/conversions.rs`
   - `src/countertimer.rs`
   - `src/helpers.rs`
-  - `src/alsadevice_utils.rs`, `src/asiodevice_utils.rs`, `src/filedevice_bluez.rs`
+  - `src/alsa_backend/utils.rs`, `src/asio_backend/utils.rs`, `src/file_backend/bluez.rs`
 - User-facing behavior references:
   - `README.md` section "How it works"
   - `backend_*.md`

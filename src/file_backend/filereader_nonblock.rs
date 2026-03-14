@@ -23,7 +23,7 @@ use std::os::unix::io::{AsRawFd, BorrowedFd};
 use std::time;
 use std::time::Duration;
 
-use crate::filedevice::{ReadResult, Reader};
+use crate::file_backend::device::{ReadResult, Reader};
 
 pub struct NonBlockingReader<'a, R: 'a> {
     poll: [nix::poll::PollFd<'a>; 1],

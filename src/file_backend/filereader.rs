@@ -19,7 +19,7 @@ use std::io::ErrorKind;
 use std::io::Read;
 use std::time::Duration;
 
-use crate::filedevice::{ReadResult, Reader};
+use crate::file_backend::device::{ReadResult, Reader};
 
 pub struct BlockingReader<R> {
     inner: R,

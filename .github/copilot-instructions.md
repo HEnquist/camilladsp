@@ -26,14 +26,14 @@ This repository is the **CamillaDSP engine** (Rust).
 - `src/helpers.rs`: shared DSP/helper math and control loops (`multiply_elements`, `multiply_add_elements`, `linear_to_db`, `PIRateController`).
 	Used in FFT convolution, websocket reporting, and backend rate adjust loops.
 - Backend-specific utility modules:
-	- `src/alsadevice_utils.rs`
-	- `src/asiodevice_utils.rs`
-	- `src/filedevice_bluez.rs`
+	- `src/alsa_backend/utils.rs`
+	- `src/asio_backend/utils.rs`
+	- `src/file_backend/bluez.rs`
 
 When debugging or implementing cross-backend behavior, inspect these utility modules before editing backend-specific loops.
 
 ## Working conventions
-- For backend/device changes, inspect the matching `src/*device*.rs` files and relevant `backend_*.md` docs.
+- For backend/device changes, inspect the matching `src/**/*device*.rs` files and relevant `backend_*.md` docs.
 - For config/schema changes, update both Rust config handling and docs/examples where needed.
 - Keep public YAML keys and CLI behavior backward compatible unless explicitly requested.
 - Do not add new dependencies unless clearly justified.
