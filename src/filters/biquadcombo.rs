@@ -14,7 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::biquad;
+use crate::filters::biquad;
 use crate::config;
 use crate::filters::Filter;
 
@@ -396,7 +396,7 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use crate::biquadcombo;
+    use crate::filters::biquadcombo;
     use crate::config;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {

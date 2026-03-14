@@ -762,7 +762,7 @@ impl Default for NoopDitherer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{PrcFmt, config::DitherParameters, dither::Dither, filters::Filter};
+    use crate::{PrcFmt, config::DitherParameters, filters::Filter, filters::dither::Dither};
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{left} - {right}");

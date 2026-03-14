@@ -37,7 +37,7 @@ use tungstenite::accept;
 
 use crate::ProcessingState;
 use crate::Res;
-use crate::helpers::linear_to_db;
+use crate::utils::helpers::linear_to_db;
 use crate::{
     CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus, StopReason,
     list_available_devices, list_supported_devices,

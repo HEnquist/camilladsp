@@ -14,12 +14,12 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::compressor;
 use crate::config::*;
 use crate::filters;
 use crate::mixer;
-use crate::noisegate;
-use crate::race;
+use crate::processors::compressor;
+use crate::processors::race;
+use crate::processors::noisegate;
 use crate::wavtools::find_data_in_wav_stream;
 use parking_lot::RwLock;
 use serde::{Deserialize, de};

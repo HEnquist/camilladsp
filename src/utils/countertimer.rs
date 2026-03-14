@@ -413,7 +413,7 @@ impl ValueHistory {
 #[cfg(test)]
 mod tests {
     use crate::ProcessingState;
-    use crate::countertimer::{
+    use crate::utils::countertimer::{
         Averager, SilenceCounter, Stopwatch, TimeAverage, ValueHistory, ValueWatcher,
     };
     use std::time::Instant;

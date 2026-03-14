@@ -18,7 +18,7 @@ use crate::PrcFmt;
 use crate::Res;
 use crate::audiodevice::AudioChunk;
 use crate::config;
-use crate::limiter::Limiter;
+use crate::filters::limiter::Limiter;
 use crate::processors::Processor;
 
 #[derive(Clone, Debug)]

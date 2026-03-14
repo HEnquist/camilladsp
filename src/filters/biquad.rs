@@ -636,7 +636,7 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use crate::biquad::{Biquad, BiquadCoefficients, validate_config};
+    use crate::filters::biquad::{Biquad, BiquadCoefficients, validate_config};
     use crate::config::{
         BiquadParameters, GeneralNotchParams, NotchWidth, PeakingWidth, ShelfSteepness,
     };

@@ -142,7 +142,7 @@ pub fn validate_config(_parameters: &config::DiffEqParameters) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use crate::diffeq::DiffEq;
+    use crate::filters::diffeq::DiffEq;
     use crate::filters::Filter;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {

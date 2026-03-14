@@ -14,19 +14,13 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::Res;
-use crate::audiodevice::AudioChunk;
-use crate::config;
-
-pub mod compressor;
-pub mod noisegate;
-pub mod race;
-
-pub trait Processor {
-    // Process a chunk containing several channels.
-    fn process_chunk(&mut self, chunk: &mut AudioChunk) -> Res<()>;
-
-    fn update_parameters(&mut self, config: config::Processor);
-
-    fn name(&self) -> &str;
+// Inplace recalculation of values positive values 0..1 to dB.
+pub fn linear_to_db(values: &mut [f32]) {
+    values.iter_mut().for_each(|val| {
+        if *val == 0.0 {
+            *val = -1000.0;
+        } else {
+            *val = 20.0 * val.log10();
+        }
+    });
 }

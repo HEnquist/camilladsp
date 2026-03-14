@@ -23,7 +23,6 @@ use crate::filters::Filter;
 use crate::mixer;
 use crate::processors;
 use crate::processors::Processor;
-use crate::race;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -279,7 +278,7 @@ impl Pipeline {
                                 Box::new(gate) as Box<dyn Processor>
                             }
                             config::Processor::RACE { parameters, .. } => {
-                                let race = race::RACE::from_config(
+                                let race = processors::race::RACE::from_config(
                                     &step.name,
                                     parameters,
                                     conf.devices.samplerate,

@@ -19,8 +19,8 @@
 use crate::PrcFmt;
 use crate::Res;
 use crate::audiodevice::AudioChunk;
-use crate::basicfilters::Delay;
-use crate::basicfilters::Gain;
+use crate::filters::basicfilters::Delay;
+use crate::filters::basicfilters::Gain;
 use crate::config;
 use crate::config::DelayParameters;
 use crate::config::GainParameters;

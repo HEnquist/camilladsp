@@ -21,7 +21,7 @@ use ringbuf::storage::Heap;
 use ringbuf::traits::*;
 
 use crate::audiodevice::AudioChunk;
-use crate::biquad::{Biquad, BiquadCoefficients};
+use crate::filters::biquad::{Biquad, BiquadCoefficients};
 use crate::config;
 use crate::filters::Filter;
 
@@ -502,7 +502,7 @@ pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use crate::basicfilters::{Delay, Gain};
+    use crate::filters::basicfilters::{Delay, Gain};
     use crate::filters::Filter;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {

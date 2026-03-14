@@ -18,7 +18,7 @@ use crate::audiodevice::*;
 use crate::config;
 use crate::config::BinarySampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-use crate::countertimer;
+use crate::utils::countertimer;
 
 use std::error::Error;
 use std::fs::File;

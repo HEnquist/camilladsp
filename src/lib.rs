@@ -125,13 +125,11 @@ pub mod config;
 pub mod conversions;
 #[cfg(target_os = "macos")]
 pub mod coreaudio_backend;
-pub mod countertimer;
 #[cfg(feature = "cpal-backend")]
 pub mod cpal_backend;
 pub mod file_backend;
 pub mod filters;
 pub mod generatordevice;
-pub mod helpers;
 pub mod mixer;
 pub mod pipeline;
 #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
@@ -140,25 +138,14 @@ pub mod processing;
 pub mod processors;
 #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
 pub mod pulse_backend;
-pub mod race;
 pub mod resampling;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
 pub mod statefile;
+pub mod utils;
 #[cfg(target_os = "windows")]
 pub mod wasapi_backend;
 pub mod wavtools;
-
-pub use filters::basicfilters;
-pub use filters::biquad;
-pub use filters::biquadcombo;
-pub use filters::diffeq;
-pub use filters::dither;
-pub use filters::fftconv;
-pub use filters::limiter;
-pub use filters::loudness;
-pub use processors::compressor;
-pub use processors::noisegate;
 
 const MAX_STASH_SIZE: usize = 1024;
 const MAX_CONTAINER_STASH_SIZE: usize = 128;
@@ -307,8 +294,8 @@ pub struct CaptureStatus {
     pub update_interval: usize,
     pub measured_samplerate: usize,
     pub signal_range: f32,
-    pub signal_rms: countertimer::ValueHistory,
-    pub signal_peak: countertimer::ValueHistory,
+    pub signal_rms: utils::countertimer::ValueHistory,
+    pub signal_peak: utils::countertimer::ValueHistory,
     pub state: ProcessingState,
     pub rate_adjust: f32,
     pub used_channels: Vec<bool>,
@@ -319,8 +306,8 @@ pub struct PlaybackStatus {
     pub update_interval: usize,
     pub clipped_samples: usize,
     pub buffer_level: usize,
-    pub signal_rms: countertimer::ValueHistory,
-    pub signal_peak: countertimer::ValueHistory,
+    pub signal_rms: utils::countertimer::ValueHistory,
+    pub signal_peak: utils::countertimer::ValueHistory,
 }
 
 #[derive(Debug)]

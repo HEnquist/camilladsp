@@ -17,7 +17,6 @@
 use crate::config;
 use crate::filters;
 use crate::filters::Filter;
-use crate::helpers::{multiply_add_elements, multiply_elements};
 use num_complex::Complex;
 use num_traits::Zero;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
@@ -26,6 +25,74 @@ use std::sync::Arc;
 // Sample format
 use crate::PrcFmt;
 use crate::Res;
+
+// element-wise product, result = slice_a * slice_b
+fn multiply_elements(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    let len = result.len();
+    let mut res = &mut result[..len];
+    let mut val_a = &slice_a[..len];
+    let mut val_b = &slice_b[..len];
+
+    unsafe {
+        while res.len() >= 8 {
+            *res.get_unchecked_mut(0) = *val_a.get_unchecked(0) * *val_b.get_unchecked(0);
+            *res.get_unchecked_mut(1) = *val_a.get_unchecked(1) * *val_b.get_unchecked(1);
+            *res.get_unchecked_mut(2) = *val_a.get_unchecked(2) * *val_b.get_unchecked(2);
+            *res.get_unchecked_mut(3) = *val_a.get_unchecked(3) * *val_b.get_unchecked(3);
+            *res.get_unchecked_mut(4) = *val_a.get_unchecked(4) * *val_b.get_unchecked(4);
+            *res.get_unchecked_mut(5) = *val_a.get_unchecked(5) * *val_b.get_unchecked(5);
+            *res.get_unchecked_mut(6) = *val_a.get_unchecked(6) * *val_b.get_unchecked(6);
+            *res.get_unchecked_mut(7) = *val_a.get_unchecked(7) * *val_b.get_unchecked(7);
+            res = &mut res[8..];
+            val_a = val_a.get_unchecked(8..);
+            val_b = val_b.get_unchecked(8..);
+        }
+    }
+    for (r, val) in res
+        .iter_mut()
+        .zip(val_a.iter().zip(val_b.iter()).map(|(a, b)| *a * *b))
+    {
+        *r = val;
+    }
+}
+
+// element-wise add product, result = result + slice_a * slice_b
+fn multiply_add_elements(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    let len = result.len();
+    let mut res = &mut result[..len];
+    let mut val_a = &slice_a[..len];
+    let mut val_b = &slice_b[..len];
+
+    unsafe {
+        while res.len() >= 8 {
+            *res.get_unchecked_mut(0) += *val_a.get_unchecked(0) * *val_b.get_unchecked(0);
+            *res.get_unchecked_mut(1) += *val_a.get_unchecked(1) * *val_b.get_unchecked(1);
+            *res.get_unchecked_mut(2) += *val_a.get_unchecked(2) * *val_b.get_unchecked(2);
+            *res.get_unchecked_mut(3) += *val_a.get_unchecked(3) * *val_b.get_unchecked(3);
+            *res.get_unchecked_mut(4) += *val_a.get_unchecked(4) * *val_b.get_unchecked(4);
+            *res.get_unchecked_mut(5) += *val_a.get_unchecked(5) * *val_b.get_unchecked(5);
+            *res.get_unchecked_mut(6) += *val_a.get_unchecked(6) * *val_b.get_unchecked(6);
+            *res.get_unchecked_mut(7) += *val_a.get_unchecked(7) * *val_b.get_unchecked(7);
+            res = &mut res[8..];
+            val_a = val_a.get_unchecked(8..);
+            val_b = val_b.get_unchecked(8..);
+        }
+    }
+    for (r, val) in res
+        .iter_mut()
+        .zip(val_a.iter().zip(val_b.iter()).map(|(a, b)| *a * *b))
+    {
+        *r += val;
+    }
+}
 
 pub struct FftConv {
     name: String,
@@ -264,7 +331,7 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
 mod tests {
     use crate::PrcFmt;
     use crate::config::ConvParameters;
-    use crate::fftconv::FftConv;
+    use crate::filters::fftconv::FftConv;
     use crate::filters::Filter;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {

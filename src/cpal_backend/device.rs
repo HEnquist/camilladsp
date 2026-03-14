@@ -20,8 +20,8 @@ use crate::config::{BinarySampleFormat, ConfigError};
 use crate::conversions::{
     chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
 };
-use crate::countertimer;
-use crate::helpers::PIRateController;
+use crate::utils::countertimer;
+use crate::utils::rate_controller::PIRateController;
 use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use cpal;
 use cpal::Device;
