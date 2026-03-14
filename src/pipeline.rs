@@ -16,7 +16,7 @@
 
 use crate::ProcessingParameters;
 use crate::Res;
-use crate::audiodevice::AudioChunk;
+use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters;
 use crate::filters::Filter;

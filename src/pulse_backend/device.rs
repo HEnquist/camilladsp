@@ -19,12 +19,13 @@ use pulse;
 use pulse::sample;
 use pulse::stream::Direction;
 
+use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::BinarySampleFormat;
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-use crate::utils::countertimer;
 use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
+use crate::utils::countertimer;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use std::sync::{Arc, Barrier};
 use std::thread;

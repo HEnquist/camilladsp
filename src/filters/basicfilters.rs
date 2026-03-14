@@ -20,16 +20,16 @@ use ringbuf::LocalRb;
 use ringbuf::storage::Heap;
 use ringbuf::traits::*;
 
-use crate::audiodevice::AudioChunk;
-use crate::filters::biquad::{Biquad, BiquadCoefficients};
+use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters::Filter;
+use crate::filters::biquad::{Biquad, BiquadCoefficients};
 
 use crate::NewValue;
 use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::Res;
-use crate::utils::decibels::db_to_linear;
+use crate::utils::decibels::gain_from_value;
 
 #[derive(Clone, Debug)]
 pub struct Gain {
@@ -274,26 +274,11 @@ impl Filter for Volume {
     }
 }
 
-fn calculate_gain(gain_value: PrcFmt, inverted: bool, mute: bool, linear: bool) -> PrcFmt {
-    let mut gain = if linear {
-        gain_value
-    } else {
-        db_to_linear(gain_value)
-    };
-    if inverted {
-        gain = -gain;
-    }
-    if mute {
-        gain = 0.0;
-    }
-    gain
-}
-
 impl Gain {
     /// A simple filter providing gain in dB, and can also invert the signal.
     pub fn new(name: &str, gain_value: PrcFmt, inverted: bool, mute: bool, linear: bool) -> Self {
         let name = name.to_string();
-        let gain = calculate_gain(gain_value, inverted, mute, linear);
+        let gain = gain_from_value(gain_value, linear, inverted, mute);
         Gain { name, gain }
     }
 
@@ -331,7 +316,7 @@ impl Filter for Gain {
             let inverted = conf.is_inverted();
             let mute = conf.is_mute();
             let linear = conf.scale() == config::GainScale::Linear;
-            let gain = calculate_gain(gain_value, inverted, mute, linear);
+            let gain = gain_from_value(gain_value, linear, inverted, mute);
             self.gain = gain;
         } else {
             // This should never happen unless there is a bug somewhere else
@@ -503,8 +488,8 @@ pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use crate::filters::basicfilters::{Delay, Gain};
     use crate::filters::Filter;
+    use crate::filters::basicfilters::{Delay, Gain};
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{left} - {right}");

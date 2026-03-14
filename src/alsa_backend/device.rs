@@ -16,6 +16,7 @@
 
 extern crate alsa;
 extern crate nix;
+use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
 use crate::config::{AlsaSampleFormat, Resampler};
 use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
@@ -52,8 +53,8 @@ use crate::alsa_backend::utils::{
     list_samplerates_as_text, pick_preferred_format, process_events, state_desc,
     sync_linked_controls,
 };
-use crate::utils::rate_controller::PIRateController;
 use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
+use crate::utils::rate_controller::PIRateController;
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 lazy_static! {

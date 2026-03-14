@@ -16,12 +16,10 @@
 
 use crate::PrcFmt;
 use crate::Res;
-use crate::audiodevice::AudioChunk;
+use crate::audiochunk::AudioChunk;
 use crate::config;
-use crate::container_from_stash;
-use crate::recycle_chunk;
-use crate::utils::decibels::db_to_linear;
-use crate::vec_from_stash;
+use crate::stash::{container_from_stash, recycle_chunk, vec_from_stash};
+use crate::utils::decibels::gain_from_value;
 
 #[derive(Clone)]
 pub struct Mixer {
@@ -35,18 +33,6 @@ pub struct Mixer {
 pub struct MixerSource {
     pub channel: usize,
     pub gain: PrcFmt,
-}
-
-fn calculate_gain(gain_value: PrcFmt, inverted: bool, linear: bool) -> PrcFmt {
-    let mut gain = if linear {
-        gain_value
-    } else {
-        db_to_linear(gain_value)
-    };
-    if inverted {
-        gain = -gain;
-    }
-    gain
 }
 
 impl Mixer {
@@ -63,7 +49,7 @@ impl Mixer {
                         let gain_value = cfg_src.gain();
                         let inverted = cfg_src.is_inverted();
                         let linear = cfg_src.scale() == config::GainScale::Linear;
-                        let gain = calculate_gain(gain_value, inverted, linear);
+                        let gain = gain_from_value(gain_value, linear, inverted, false);
                         let src = MixerSource {
                             channel: cfg_src.channel,
                             gain,
@@ -91,7 +77,7 @@ impl Mixer {
                 let gain_value = cfg_src.gain();
                 let inverted = cfg_src.is_inverted();
                 let linear = cfg_src.scale() == config::GainScale::Linear;
-                let gain = calculate_gain(gain_value, inverted, linear);
+                let gain = gain_from_value(gain_value, linear, inverted, false);
                 let src = MixerSource {
                     channel: cfg_src.channel,
                     gain,

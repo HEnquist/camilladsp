@@ -17,13 +17,14 @@ Primary files and folders for this mode:
 - `backend_alsa.md`, `backend_wasapi.md`, `backend_pipewire.md`, `backend_coreaudio.md` for backend-specific details.
 - `websocket.md`, `sample_formats.md`, `filterfunctions.md` for domain-specific references.
 - `exampleconfigs/` for practical YAML examples.
-- `src/config.rs` and nearby config-related code for implementation truth.
+- `src/config/mod.rs`, `src/config/utils.rs` and nearby config-related code for implementation truth.
 
 Shared utility files that often affect documentation wording and behavior notes:
 - `src/resampling.rs` (resampler modes, async/sync behavior, load reporting)
 - `src/conversions.rs` (format conversion behavior, clipping/NaN handling)
-- `src/countertimer.rs` (silence handling, averaging, watcher logic)
-- `src/helpers.rs` (`PIRateController`, `linear_to_db`)
+- `src/utils/countertimer.rs` (silence handling, averaging, watcher logic)
+- `src/utils/decibels.rs` (`linear_to_db`, `db_to_linear`, `gain_from_value`)
+- `src/utils/rate_controller.rs` (`PIRateController`)
 
 ## Behavioral rules
 - Treat Rust implementation as source of truth; docs and examples must match it.
@@ -33,7 +34,7 @@ Shared utility files that often affect documentation wording and behavior notes:
 
 ## Validation
 - Check links, option names, and format strings carefully.
-- If code behavior is unclear, inspect `src/config.rs`, shared utility files, and backend device files before editing docs.
+- If code behavior is unclear, inspect `src/config/mod.rs`, `src/config/utils.rs`, shared utility files, and backend device files before editing docs.
 
 ## Output style
 - Be concise and practical.

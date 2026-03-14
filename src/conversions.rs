@@ -14,9 +14,10 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::PrcFmt;
+use crate::audiochunk::AudioChunk;
 use crate::config::BinarySampleFormat;
-use crate::{PrcFmt, container_from_stash};
-use crate::{audiodevice::*, recycle_chunk, vec_from_stash};
+use crate::stash::{container_from_stash, recycle_chunk, vec_from_stash};
 use audioadapter::{Adapter, AdapterMut};
 use audioadapter_buffers::number_to_float::InterleavedNumbers;
 use audioadapter_sample::sample::{F32_LE, F64_LE, I16_LE, I24_4LJ_LE, I24_4RJ_LE, I24_LE, I32_LE};
@@ -371,7 +372,7 @@ pub fn queue_to_chunk_float<T: num_traits::cast::AsPrimitive<PrcFmt>>(
 mod tests {
     #[cfg(feature = "cpal-backend")]
     use crate::PrcFmt;
-    use crate::audiodevice::AudioChunk;
+    use crate::audiochunk::AudioChunk;
     use crate::config::BinarySampleFormat;
     use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
     #[cfg(feature = "cpal-backend")]

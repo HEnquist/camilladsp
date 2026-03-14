@@ -331,8 +331,8 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
 mod tests {
     use crate::PrcFmt;
     use crate::config::ConvParameters;
-    use crate::filters::fftconv::FftConv;
     use crate::filters::Filter;
+    use crate::filters::fftconv::FftConv;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{left} - {right}");

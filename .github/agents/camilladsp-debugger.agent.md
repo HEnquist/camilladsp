@@ -25,8 +25,11 @@ Use this structure as your default map:
 - Shared utility hotspots (often root cause for cross-backend timing/format issues):
   - `src/resampling.rs`
   - `src/conversions.rs`
-  - `src/countertimer.rs`
-  - `src/helpers.rs`
+  - `src/utils/countertimer.rs`
+  - `src/utils/decibels.rs`
+  - `src/utils/rate_controller.rs`
+  - `src/stash.rs`
+  - `src/audiochunk.rs`
   - `src/alsa_backend/utils.rs`, `src/asio_backend/utils.rs`, `src/file_backend/bluez.rs`
 - User-facing behavior references:
   - `README.md` section "How it works"
@@ -79,7 +82,7 @@ Model the running engine as coordinated threads with queues and status channels.
 - Build a timeline first: command arrival -> thread ready messages -> barrier release -> first audio message -> first error/stop signal.
 - Always identify which thread originated the first anomaly.
 - For startup issues, inspect barrier participation and `CaptureReady`/`PlaybackReady` transitions before anything else.
-- For dropouts/glitches/drift, inspect shared utility hotspots (`resampling`, `conversions`, `countertimer`, `helpers`) before backend-specific loops.
+- For dropouts/glitches/drift, inspect shared utility hotspots (`resampling`, `conversions`, `utils/countertimer`, `utils/decibels`, `utils/rate_controller`, `stash`) before backend-specific loops.
 - For config reload bugs, separate "hot-update path" (pipeline only) from "restart path" (device changes).
 - Prefer root-cause fixes over log-only changes.
 

@@ -1,10 +1,8 @@
 use crate::PrcFmt;
 use crate::ProcessingParameters;
-use crate::audiodevice::AudioChunk;
+use crate::audiochunk::AudioChunk;
 use crate::config;
-use crate::container_from_stash;
-use crate::recycle_container;
-use crate::vec_from_stash;
+use crate::stash::{container_from_stash, recycle_container, vec_from_stash};
 use audioadapter_buffers::direct::{
     InterleavedSlice, SequentialSliceOfVecs, SparseSequentialSliceOfVecs,
 };

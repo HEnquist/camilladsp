@@ -14,10 +14,10 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::filters::basicfilters::Gain;
-use crate::filters::biquad;
 use crate::config;
 use crate::filters::Filter;
+use crate::filters::basicfilters::Gain;
+use crate::filters::biquad;
 use std::sync::Arc;
 
 use crate::PrcFmt;

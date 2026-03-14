@@ -16,7 +16,7 @@
 
 use crate::PrcFmt;
 use crate::Res;
-use crate::audiodevice::AudioChunk;
+use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::processors::Processor;
 use crate::utils::decibels::db_to_linear;

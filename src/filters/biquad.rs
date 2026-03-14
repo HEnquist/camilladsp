@@ -636,11 +636,11 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
-    use crate::filters::biquad::{Biquad, BiquadCoefficients, validate_config};
     use crate::config::{
         BiquadParameters, GeneralNotchParams, NotchWidth, PeakingWidth, ShelfSteepness,
     };
     use crate::filters::Filter;
+    use crate::filters::biquad::{Biquad, BiquadCoefficients, validate_config};
     use num_complex::Complex;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {

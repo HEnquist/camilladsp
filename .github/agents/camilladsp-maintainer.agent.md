@@ -24,7 +24,7 @@ Use this project structure as default context:
   - `src/file_backend/*.rs`
 - Core processing lives in files such as:
   - `src/filters/*.rs`, `src/processors/*.rs`, `src/mixer.rs`
-  - `src/config.rs`, `src/bin.rs`, `src/lib.rs`
+  - `src/config/mod.rs`, `src/config/utils.rs`, `src/bin.rs`, `src/lib.rs`
 - User-facing examples and docs are in:
   - `exampleconfigs/`
   - `README.md` and `backend_*.md`
@@ -33,8 +33,11 @@ Use this project structure as default context:
 Prefer these files as first inspection targets for cross-backend behavior:
 - `src/resampling.rs`: `ChunkResampler`, `new_resampler`, async/sync selection.
 - `src/conversions.rs`: shared audio buffer/sample format conversion.
-- `src/countertimer.rs`: timing, averages, silence/rate watchers, value history.
-- `src/helpers.rs`: FFT helper math, dB conversion, `PIRateController`.
+- `src/utils/countertimer.rs`: timing, averages, silence/rate watchers, value history.
+- `src/utils/decibels.rs`: dB conversion helpers and gain conversion helpers.
+- `src/utils/rate_controller.rs`: `PIRateController`.
+- `src/stash.rs`: shared stash allocation/recycling helpers.
+- `src/audiochunk.rs`: chunk types and chunk statistics helpers.
 - Backend utility support:
   - `src/alsa_backend/utils.rs`
   - `src/asio_backend/utils.rs`

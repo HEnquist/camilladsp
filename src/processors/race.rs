@@ -18,13 +18,13 @@
 
 use crate::PrcFmt;
 use crate::Res;
-use crate::audiodevice::AudioChunk;
-use crate::filters::basicfilters::Delay;
-use crate::filters::basicfilters::Gain;
+use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::config::DelayParameters;
 use crate::config::GainParameters;
 use crate::filters::Filter;
+use crate::filters::basicfilters::Delay;
+use crate::filters::basicfilters::Gain;
 use crate::processors::Processor;
 
 //#[derive(Debug)]

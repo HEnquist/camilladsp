@@ -14,6 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
 use crate::config;
 
@@ -33,9 +34,8 @@ use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
-use crate::container_from_stash;
+use crate::stash::{container_from_stash, vec_from_stash};
 use crate::utils::decibels::db_to_linear;
-use crate::vec_from_stash;
 
 struct SineGenerator {
     time: f64,
@@ -148,8 +148,7 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
             &mut sine_gen as &mut dyn Iterator<Item = PrcFmt>
         }
         config::Signal::Square { freq, level } => {
-            square_gen =
-                SquareGenerator::new(freq, params.samplerate, db_to_linear(level));
+            square_gen = SquareGenerator::new(freq, params.samplerate, db_to_linear(level));
             &mut square_gen as &mut dyn Iterator<Item = PrcFmt>
         }
         config::Signal::WhiteNoise { level } => {
