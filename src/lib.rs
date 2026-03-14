@@ -133,6 +133,7 @@ pub mod filters;
 pub mod generatordevice;
 pub mod helpers;
 pub mod mixer;
+pub mod pipeline;
 #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
 pub mod pipewire_backend;
 pub mod processing;

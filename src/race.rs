@@ -25,7 +25,7 @@ use crate::config;
 use crate::config::DelayParameters;
 use crate::config::GainParameters;
 use crate::filters::Filter;
-use crate::filters::Processor;
+use crate::processors::Processor;
 
 //#[derive(Debug)]
 pub struct RACE {

@@ -14,5 +14,18 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::Res;
+use crate::audiodevice::AudioChunk;
+use crate::config;
+
 pub mod compressor;
 pub mod noisegate;
+
+pub trait Processor {
+    // Process a chunk containing several channels.
+    fn process_chunk(&mut self, chunk: &mut AudioChunk) -> Res<()>;
+
+    fn update_parameters(&mut self, config: config::Processor);
+
+    fn name(&self) -> &str;
+}

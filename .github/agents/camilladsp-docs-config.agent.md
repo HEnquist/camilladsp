@@ -1,10 +1,10 @@
 ---
 description: CamillaDSP docs and config specialist for README/backend docs/example YAML alignment
 tools:
-  - codebase
-  - edits
-  - terminal
-  - problems
+  - search/codebase
+  - edit
+  - execute
+  - read/problems
 ---
 
 # CamillaDSP Docs & Config Agent

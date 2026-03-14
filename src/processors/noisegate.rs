@@ -18,7 +18,7 @@ use crate::PrcFmt;
 use crate::Res;
 use crate::audiodevice::AudioChunk;
 use crate::config;
-use crate::filters::Processor;
+use crate::processors::Processor;
 
 #[derive(Clone, Debug)]
 pub struct NoiseGate {

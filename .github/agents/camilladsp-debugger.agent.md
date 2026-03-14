@@ -1,10 +1,10 @@
 ---
 description: CamillaDSP runtime debugger for thread lifecycle, message flow, startup, restart, and shutdown analysis
 tools:
-  - codebase
-  - edits
-  - terminal
-  - problems
+  - search/codebase
+  - edit
+  - execute
+  - read/problems
 ---
 
 # CamillaDSP Debugger Agent

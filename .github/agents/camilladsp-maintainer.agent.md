@@ -1,10 +1,11 @@
 ---
 description: CamillaDSP-focused coding agent for Rust engine, audio backends, config, and docs
 tools:
-  - codebase
-  - edits
-  - terminal
-  - problems
+  - read
+  - search
+  - edit
+  - execute
+  - read/problems
 ---
 
 # CamillaDSP Maintainer Agent

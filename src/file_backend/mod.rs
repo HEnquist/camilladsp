@@ -14,9 +14,9 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-pub mod device;
 #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
 pub mod bluez;
+pub mod device;
 #[cfg(not(target_os = "linux"))]
 pub mod filereader;
 #[cfg(target_os = "linux")]
