@@ -72,7 +72,7 @@ pub fn container_from_stash(capacity: usize) -> Vec<Vec<PrcFmt>> {
                 vector.capacity(),
                 capacity
             );
-            vector.reserve_exact(capacity);
+            vector.reserve_exact(capacity - vector.capacity());
         }
         vector
     } else {
@@ -89,11 +89,18 @@ pub fn recycle_vec(mut vector: Vec<PrcFmt>) {
             return;
         }
     }
+
     trace!("Recycling a vector");
     for elem in vector.iter_mut() {
         *elem = 0.0;
     }
-    BUFFERSTASH.write().push(vector);
+
+    let mut stash = BUFFERSTASH.write();
+    if stash.len() >= MAX_STASH_SIZE {
+        trace!("Stash is full, dropping a vector");
+        return;
+    }
+    stash.push(vector);
 }
 
 pub fn recycle_container(mut container: Vec<Vec<PrcFmt>>) {
@@ -101,14 +108,12 @@ pub fn recycle_container(mut container: Vec<Vec<PrcFmt>>) {
     for vector in container.drain(..) {
         recycle_vec(vector);
     }
-    {
-        let stash = CONTAINERSTASH.read();
-        if stash.len() >= MAX_CONTAINER_STASH_SIZE {
-            trace!("Stash is full, dropping a container");
-            return;
-        }
+    let mut stash = CONTAINERSTASH.write();
+    if stash.len() >= MAX_CONTAINER_STASH_SIZE {
+        trace!("Stash is full, dropping a container");
+        return;
     }
-    CONTAINERSTASH.write().push(container);
+    stash.push(container);
 }
 
 pub fn recycle_chunk(chunk: AudioChunk) {
