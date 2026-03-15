@@ -2,7 +2,7 @@ use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::audiochunk::AudioChunk;
 use crate::config;
-use crate::stash::{container_from_stash, recycle_container, vec_from_stash};
+use crate::utils::stash::{container_from_stash, recycle_container, vec_from_stash};
 use audioadapter_buffers::direct::{
     InterleavedSlice, SequentialSliceOfVecs, SparseSequentialSliceOfVecs,
 };

@@ -141,12 +141,10 @@ pub mod pulse_backend;
 pub mod resampling;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
-pub mod stash;
 pub mod statefile;
 pub mod utils;
 #[cfg(target_os = "windows")]
 pub mod wasapi_backend;
-pub mod wavtools;
 
 pub enum StatusMessage {
     PlaybackReady,

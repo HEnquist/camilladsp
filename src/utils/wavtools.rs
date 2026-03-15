@@ -318,11 +318,22 @@ mod tests {
         let bytes = vec![0_u8; 1000];
         let mut buffer = Cursor::new(bytes);
         write_wav_header(&mut buffer, 2, BinarySampleFormat::S32_LE, 44100).unwrap();
-        let info = find_data_in_wav_stream(buffer).unwrap();
+        buffer.set_position(0);
+        let info = find_data_in_wav_stream(&mut buffer).unwrap();
+
         assert_eq!(info.sample_format, BinarySampleFormat::S32_LE);
         assert_eq!(info.data_offset, 44);
+        assert_eq!(info.data_length, 4294967295);
         assert_eq!(info.channels, 2);
         assert_eq!(info.sample_rate, 44100);
-        assert_eq!(info.data_length, u32::MAX as usize);
+    }
+
+    #[test]
+    fn test_invalid_wav() {
+        let bytes = vec![0_u8; 1000];
+        let mut buffer = Cursor::new(bytes);
+        let info = find_data_in_wav_stream(&mut buffer);
+
+        assert!(info.is_err());
     }
 }

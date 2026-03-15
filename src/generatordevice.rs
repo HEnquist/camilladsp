@@ -34,8 +34,8 @@ use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
-use crate::stash::{container_from_stash, vec_from_stash};
 use crate::utils::decibels::db_to_linear;
+use crate::utils::stash::{container_from_stash, vec_from_stash};
 
 struct SineGenerator {
     time: f64,

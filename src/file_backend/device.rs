@@ -46,7 +46,7 @@ use crate::file_backend::filereader::BlockingReader;
 #[cfg(target_os = "linux")]
 use crate::file_backend::filereader_nonblock::NonBlockingReader;
 use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
-use crate::wavtools::{find_data_in_wav, write_wav_header};
+use crate::utils::wavtools::{find_data_in_wav, write_wav_header};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 pub struct FilePlaybackDevice {

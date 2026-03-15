@@ -18,8 +18,8 @@ use crate::PrcFmt;
 use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
-use crate::stash::{container_from_stash, recycle_chunk, vec_from_stash};
 use crate::utils::decibels::gain_from_value;
+use crate::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
 
 #[derive(Clone)]
 pub struct Mixer {

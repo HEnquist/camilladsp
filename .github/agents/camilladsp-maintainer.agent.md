@@ -51,6 +51,7 @@ Prefer these files as first inspection targets for cross-backend behavior:
 - Prefer adding or updating examples when changing user-facing configuration behavior.
 
 ## Validation
+- After making any code edits, always run `cargo fmt` before finishing the task.
 - Run focused validation first (`cargo test <target>` or equivalent) then broader checks when needed.
 - If checks are skipped due to time/environment, explicitly state what remains to run.
 

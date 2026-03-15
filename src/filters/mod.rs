@@ -34,7 +34,7 @@ use std::io::{BufRead, Seek, SeekFrom};
 use crate::PrcFmt;
 use crate::Res;
 
-use crate::wavtools::find_data_in_wav;
+use crate::utils::wavtools::find_data_in_wav;
 
 pub trait Filter {
     // Filter a Vec

@@ -20,7 +20,7 @@ use crate::mixer;
 use crate::processors::compressor;
 use crate::processors::noisegate;
 use crate::processors::race;
-use crate::wavtools::find_data_in_wav_stream;
+use crate::utils::wavtools::find_data_in_wav_stream;
 use parking_lot::RwLock;
 use serde::{Deserialize, de};
 use std::error;

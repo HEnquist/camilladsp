@@ -17,7 +17,7 @@
 use crate::PrcFmt;
 use crate::audiochunk::AudioChunk;
 use crate::config::BinarySampleFormat;
-use crate::stash::{container_from_stash, recycle_chunk, vec_from_stash};
+use crate::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
 use audioadapter::{Adapter, AdapterMut};
 use audioadapter_buffers::number_to_float::InterleavedNumbers;
 use audioadapter_sample::sample::{F32_LE, F64_LE, I16_LE, I24_4LJ_LE, I24_4RJ_LE, I24_LE, I32_LE};

@@ -17,7 +17,7 @@
 mod utils;
 
 use self::utils::validate_nonzero_usize;
-use crate::wavtools::{WavParams, find_data_in_wav_stream};
+use crate::utils::wavtools::{WavParams, find_data_in_wav_stream};
 use serde::{Deserialize, Serialize};
 //use serde_with;
 use std::collections::HashMap;
