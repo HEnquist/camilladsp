@@ -82,6 +82,7 @@ pub fn container_from_stash(capacity: usize) -> Vec<Vec<PrcFmt>> {
 }
 
 pub fn recycle_vec(mut vector: Vec<PrcFmt>) {
+    trace!("Recycling a vector");
     {
         let stash = BUFFERSTASH.read();
         if stash.len() >= MAX_STASH_SIZE {
@@ -90,7 +91,6 @@ pub fn recycle_vec(mut vector: Vec<PrcFmt>) {
         }
     }
 
-    trace!("Recycling a vector");
     for elem in vector.iter_mut() {
         *elem = 0.0;
     }
