@@ -28,7 +28,7 @@ Use this structure as your default map:
   - `src/utils/countertimer.rs`
   - `src/utils/decibels.rs`
   - `src/utils/rate_controller.rs`
-  - `src/stash.rs`
+  - `src/utils/stash.rs`
   - `src/audiochunk.rs`
   - `src/alsa_backend/utils.rs`, `src/asio_backend/utils.rs`, `src/file_backend/bluez.rs`
 - User-facing behavior references:

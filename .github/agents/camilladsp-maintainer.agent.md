@@ -36,7 +36,7 @@ Prefer these files as first inspection targets for cross-backend behavior:
 - `src/utils/countertimer.rs`: timing, averages, silence/rate watchers, value history.
 - `src/utils/decibels.rs`: dB conversion helpers and gain conversion helpers.
 - `src/utils/rate_controller.rs`: `PIRateController`.
-- `src/stash.rs`: shared stash allocation/recycling helpers.
+- `src/utils/stash.rs`: shared stash allocation/recycling helpers.
 - `src/audiochunk.rs`: chunk types and chunk statistics helpers.
 - Backend utility support:
   - `src/alsa_backend/utils.rs`

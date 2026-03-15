@@ -33,7 +33,7 @@ pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
     let vec_option = {
         let mut stash = BUFFERSTASH.write();
         trace!(
-            "Try to get a vector from the stash, nbr avaliable: {}",
+            "Try to get a vector from the stash, nbr available: {}",
             stash.len()
         );
         stash.pop()
@@ -60,7 +60,7 @@ pub fn container_from_stash(capacity: usize) -> Vec<Vec<PrcFmt>> {
     let vec_option = {
         let mut stash = CONTAINERSTASH.write();
         trace!(
-            "Try to get a vector container from the stash, nbr avaliable: {}",
+            "Try to get a vector container from the stash, nbr available: {}",
             stash.len()
         );
         stash.pop()

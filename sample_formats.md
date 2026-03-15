@@ -3,7 +3,6 @@
 | Format                      | Type       | Bits     | Bytes | Byte order    | Storage |
 |-----------------------------|------------|----------|-------|---------------|---------|
 | [S16_LE](#s16_le)           | Integer    | 16       | 2     | little-endian | packed  |
-| [S24_LE](#s24_le)           | Integer    | 24       | 3     | little-endian | packed  |
 | [S24_3_LE](#s24_3_le)       | Integer    | 24       | 3     | little-endian | packed  |
 | [S24_4_LJ_LE](#s24_4_lj_le) | Integer    | 24       | 4     | little-endian | padded, left justified  |
 | [S24_4_RJ_LE](#s24_4_rj_le) | Integer    | 24       | 4     | little-endian | padded, right justified |

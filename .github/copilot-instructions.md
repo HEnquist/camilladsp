@@ -26,7 +26,7 @@ This repository is the **CamillaDSP engine** (Rust).
 - `src/utils/decibels.rs`: shared dB/linear conversion helpers (`linear_to_db`, `linear_to_db_inplace`, `db_to_linear`, `gain_from_value`).
 	Used in websocket reporting and gain/rate-related paths.
 - `src/utils/rate_controller.rs`: rate adjust control loop (`PIRateController`).
-- `src/stash.rs`: shared audio/vector stash allocation and recycling (`vec_from_stash`, `container_from_stash`, `recycle_chunk`).
+- `src/utils/stash.rs`: shared audio/vector stash allocation and recycling (`vec_from_stash`, `container_from_stash`, `recycle_chunk`).
 - `src/audiochunk.rs`: `AudioChunk`/`ChunkStats` structures and chunk statistics helpers.
 - Backend-specific utility modules:
 	- `src/alsa_backend/utils.rs`
