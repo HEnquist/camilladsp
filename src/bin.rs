@@ -49,6 +49,8 @@ use camillalib::audiodevice;
 use camillalib::config;
 use camillalib::countertimer;
 use camillalib::processing;
+#[cfg(feature = "rest-api")]
+use camillalib::restserver;
 #[cfg(feature = "websocket")]
 use camillalib::socketserver;
 use camillalib::statefile;
@@ -707,6 +709,16 @@ fn main_process() -> i32 {
                 .requires("port")
                 .action(ArgAction::SetTrue),
         );
+    #[cfg(feature = "rest-api")]
+    let clapapp = clapapp.arg(
+        Arg::new("rest_port")
+            .help("Port for REST API server")
+            .long("rest-port")
+            .value_name("REST_PORT")
+            .display_order(201)
+            .action(ArgAction::Set)
+            .value_parser(clap::builder::RangedU64ValueParser::<usize>::new().range(0..65535)),
+    );
     #[cfg(feature = "secure-websocket")]
     let clapapp = clapapp
         .arg(
@@ -1058,14 +1070,14 @@ fn main_process() -> i32 {
     let active_config = Arc::new(Mutex::new(None));
     let previous_config = Arc::new(Mutex::new(None));
 
+    // State notification infrastructure (shared by websocket and REST servers)
+    #[cfg(any(feature = "websocket", feature = "rest-api"))]
+    let (tx_state, rx_state) = mpsc::sync_channel(1);
+    #[cfg(any(feature = "websocket", feature = "rest-api"))]
+    let unsaved_state_changes = Arc::new(AtomicBool::new(false));
+
     #[cfg(feature = "websocket")]
     {
-        let (tx_state, rx_state) = mpsc::sync_channel(1);
-
-        let processing_params_clone = processing_params.clone();
-        let active_config_path_clone = active_config_path.clone();
-        let unsaved_state_changes = Arc::new(AtomicBool::new(false));
-
         if let Some(port) = matches.get_one::<usize>("port") {
             let serveraddress = matches
                 .get_one::<String>("address")
@@ -1075,14 +1087,14 @@ fn main_process() -> i32 {
 
             let shared_data = socketserver::SharedData {
                 active_config: active_config.clone(),
-                active_config_path,
+                active_config_path: active_config_path.clone(),
                 previous_config: previous_config.clone(),
-                command_sender: tx_command,
-                capture_status,
-                playback_status,
-                processing_params,
-                processing_status,
-                state_change_notify: tx_state,
+                command_sender: tx_command.clone(),
+                capture_status: capture_status.clone(),
+                playback_status: playback_status.clone(),
+                processing_params: processing_params.clone(),
+                processing_status: processing_status.clone(),
+                state_change_notify: tx_state.clone(),
                 state_file_path: statefilename.clone(),
                 unsaved_state_change: unsaved_state_changes.clone(),
             };
@@ -1096,9 +1108,39 @@ fn main_process() -> i32 {
             };
             socketserver::start_server(server_params, shared_data);
         }
+    }
 
+    #[cfg(feature = "rest-api")]
+    {
+        if let Some(rest_port) = matches.get_one::<usize>("rest_port") {
+            let rest_address = matches
+                .get_one::<String>("address")
+                .cloned()
+                .unwrap_or("127.0.0.1".to_string());
+
+            let rest_shared_data = restserver::SharedData {
+                active_config: active_config.clone(),
+                active_config_path: active_config_path.clone(),
+                previous_config: previous_config.clone(),
+                command_sender: tx_command.clone(),
+                capture_status: capture_status.clone(),
+                playback_status: playback_status.clone(),
+                processing_params: processing_params.clone(),
+                processing_status: processing_status.clone(),
+                state_change_notify: tx_state.clone(),
+                state_file_path: statefilename.clone(),
+                unsaved_state_change: unsaved_state_changes.clone(),
+            };
+            restserver::start_server(&rest_address, *rest_port, rest_shared_data);
+        }
+    }
+
+    #[cfg(any(feature = "websocket", feature = "rest-api"))]
+    {
         if let Some(fname) = &statefilename {
             let fname = fname.clone();
+            let processing_params_clone = processing_params.clone();
+            let active_config_path_clone = active_config_path.clone();
 
             thread::spawn(move || loop {
                 thread::sleep(Duration::from_millis(1000));

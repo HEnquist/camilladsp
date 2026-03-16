@@ -15,6 +15,7 @@ bluez-backend = ["zbus"]
 32bit = []
 websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
+rest-api = ["rouille"]
 debug = []
 avoid-rustc-issue-116359 = []
 
@@ -76,12 +77,14 @@ parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
 crossbeam-channel = "0.5"
 rayon = "1.10.0"
 audio_thread_priority = { version = "0.32.0", default-features = false }
+rouille = { version = "3.6", optional = true }
 
 [build-dependencies]
 version_check = "0.9"
 
 [dev-dependencies]
 criterion = "0.3"
+ureq = "3"
 
 [[bench]]
 name = "filters"

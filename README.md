@@ -69,6 +69,7 @@ It does not matter if the damage is caused by incorrect usage or a bug in the so
 - **[Command line options](#command-line-options)**
 - **[Reloading the configuration](#reloading-the-configuration)**
 - **[Controlling via websocket](#controlling-via-websocket)**
+- **[Controlling via REST API](#controlling-via-rest-api)**
 
 **[Processing audio](#processing-audio)**
 - **[Cross-platform](#cross-platform)**
@@ -338,6 +339,7 @@ All the available options, or "features" are:
 - `bluez-backend`: Bluetooth support via BlueALSA (Linux only).
 - `websocket`: Websocket server for control.
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
+- `rest-api`: REST API server for control (uses `rouille`). See [REST API documentation](./restapi.md).
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64).
 - `debug`: Enable extra logging, useful for debugging.
 - `avoid-rustc-issue-116359`: Enable a workaround for [rust issue #116359](https://github.com/rust-lang/rust/issues/116359).
@@ -617,6 +619,16 @@ Note that for this to update the coefficients for a FIR filter, the filename of 
 
 ## Controlling via websocket
 See the [separate readme for the websocket server](./websocket.md)
+
+## Controlling via REST API
+CamillaDSP can also be controlled via a REST API, available when built with the `rest-api` feature:
+```
+cargo build --release --features rest-api
+```
+The REST API provides standard HTTP endpoints under `/api/v1/`.
+An OpenAPI specification is served at `GET /api/v1/openapi.yaml` and is also available in the repository at `docs/openapi.yaml`.
+
+See the [separate readme for the REST API](./restapi.md) for full endpoint documentation and examples.
 
 
 # Processing audio

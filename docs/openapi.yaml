@@ -1,0 +1,1192 @@
+openapi: 3.0.3
+info:
+  title: CamillaDSP REST API
+  description: REST API for controlling CamillaDSP audio processing pipeline. Coexists with the WebSocket interface.
+  version: 1.0.0
+  contact:
+    name: CamillaDSP
+servers:
+  - url: http://localhost:1234/api/v1
+    description: Default local server
+
+components:
+  schemas:
+    ResultOk:
+      type: string
+      enum: [Ok]
+    ResultError:
+      type: string
+      enum: [Error]
+    SuccessResponse:
+      type: object
+      required: [result]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+    ErrorResponse:
+      type: object
+      required: [result, message]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultError'
+        message:
+          type: string
+          example: "Invalid configuration"
+    StringValueResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          type: string
+    OptionalStringValueResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          type: string
+          nullable: true
+    BoolValueResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          type: boolean
+    FloatValueResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          type: number
+          format: float
+    IntValueResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          type: integer
+    FloatArrayResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          type: array
+          items:
+            type: number
+            format: float
+    AllLevels:
+      type: object
+      required: [playback_rms, playback_peak, capture_rms, capture_peak]
+      properties:
+        playback_rms:
+          type: array
+          items:
+            type: number
+            format: float
+        playback_peak:
+          type: array
+          items:
+            type: number
+            format: float
+        capture_rms:
+          type: array
+          items:
+            type: number
+            format: float
+        capture_peak:
+          type: array
+          items:
+            type: number
+            format: float
+    AllLevelsResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          $ref: '#/components/schemas/AllLevels'
+    PbCapLevels:
+      type: object
+      required: [playback, capture]
+      properties:
+        playback:
+          type: array
+          items:
+            type: number
+            format: float
+        capture:
+          type: array
+          items:
+            type: number
+            format: float
+    PbCapLevelsResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          $ref: '#/components/schemas/PbCapLevels'
+    Fader:
+      type: object
+      required: [volume, mute]
+      properties:
+        volume:
+          type: number
+          format: float
+          example: -10.0
+        mute:
+          type: boolean
+          example: false
+    FadersResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          type: array
+          items:
+            $ref: '#/components/schemas/Fader'
+    FaderVolumeResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          type: object
+          required: [index, volume]
+          properties:
+            index:
+              type: integer
+            volume:
+              type: number
+              format: float
+    FaderMuteResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          type: object
+          required: [index, mute]
+          properties:
+            index:
+              type: integer
+            mute:
+              type: boolean
+    SetValueFloat:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: number
+          format: float
+          example: -10.0
+    SetValueBool:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: boolean
+          example: true
+    SetValueInt:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: integer
+          example: 200
+    SetValueString:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+    AdjustVolumeRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: number
+          format: float
+          description: Volume adjustment in dB
+          example: 2.0
+        min:
+          type: number
+          format: float
+          description: Minimum volume limit in dB
+          example: -50.0
+        max:
+          type: number
+          format: float
+          description: Maximum volume limit in dB
+          example: 0.0
+    ReadConfigFileRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          example: "/home/user/config.yml"
+    DeviceEntry:
+      type: array
+      items:
+        type: string
+      minItems: 2
+      maxItems: 2
+      description: "[name, description]"
+    SupportedDeviceTypesResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          type: object
+          required: [playback, capture]
+          properties:
+            playback:
+              type: array
+              items:
+                type: string
+            capture:
+              type: array
+              items:
+                type: string
+    AvailableDevicesResponse:
+      type: object
+      required: [result, value]
+      properties:
+        result:
+          $ref: '#/components/schemas/ResultOk'
+        value:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceEntry'
+
+  parameters:
+    FaderIndex:
+      name: index
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+      description: Fader index (0-based)
+    SinceParam:
+      name: since
+      in: query
+      required: false
+      schema:
+        type: string
+      description: "Time window: a float (seconds) or 'last' for since-last-request"
+      examples:
+        seconds:
+          value: "5.0"
+          summary: Last 5 seconds
+        last:
+          value: "last"
+          summary: Since last request
+    Backend:
+      name: backend
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Audio backend name (e.g. "Alsa", "Pulse", "CoreAudio", "Wasapi")
+
+  responses:
+    Error422:
+      description: Operation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error400:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+paths:
+  # ── System / Lifecycle ──
+  /version:
+    get:
+      summary: Get CamillaDSP version
+      operationId: getVersion
+      tags: [System]
+      responses:
+        '200':
+          description: Version string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringValueResponse'
+              example:
+                result: Ok
+                value: "3.0.1"
+
+  /state:
+    get:
+      summary: Get current processing state
+      operationId: getState
+      tags: [System]
+      responses:
+        '200':
+          description: Processing state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    $ref: '#/components/schemas/ResultOk'
+                  value:
+                    type: string
+                    enum: [Starting, Running, Paused, Inactive, Stalled]
+              example:
+                result: Ok
+                value: Running
+
+  /stopreason:
+    get:
+      summary: Get the reason processing was stopped
+      operationId: getStopReason
+      tags: [System]
+      responses:
+        '200':
+          description: Stop reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringValueResponse'
+
+  /reload:
+    post:
+      summary: Reload the current configuration file
+      operationId: reload
+      tags: [System]
+      responses:
+        '200':
+          description: Reload successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /stop:
+    post:
+      summary: Stop audio processing
+      operationId: stop
+      tags: [System]
+      responses:
+        '200':
+          description: Stop successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /exit:
+    post:
+      summary: Exit the CamillaDSP process
+      operationId: exit
+      tags: [System]
+      responses:
+        '200':
+          description: Exit initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  # ── Configuration ──
+  /config:
+    get:
+      summary: Get active configuration as YAML
+      operationId: getConfig
+      tags: [Configuration]
+      responses:
+        '200':
+          description: Active config in YAML
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringValueResponse'
+    put:
+      summary: Set and apply a new configuration (YAML body)
+      operationId: setConfig
+      tags: [Configuration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueString'
+      responses:
+        '200':
+          description: Config applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /config/json:
+    get:
+      summary: Get active configuration as JSON
+      operationId: getConfigJson
+      tags: [Configuration]
+      responses:
+        '200':
+          description: Active config in JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringValueResponse'
+    put:
+      summary: Set and apply a new configuration (JSON body)
+      operationId: setConfigJson
+      tags: [Configuration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueString'
+      responses:
+        '200':
+          description: Config applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /config/title:
+    get:
+      summary: Get configuration title
+      operationId: getConfigTitle
+      tags: [Configuration]
+      responses:
+        '200':
+          description: Config title
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringValueResponse'
+
+  /config/description:
+    get:
+      summary: Get configuration description
+      operationId: getConfigDescription
+      tags: [Configuration]
+      responses:
+        '200':
+          description: Config description
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringValueResponse'
+
+  /config/previous:
+    get:
+      summary: Get the previous active configuration as YAML
+      operationId: getPreviousConfig
+      tags: [Configuration]
+      responses:
+        '200':
+          description: Previous config in YAML
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringValueResponse'
+
+  /config/filepath:
+    get:
+      summary: Get the active configuration file path
+      operationId: getConfigFilePath
+      tags: [Configuration]
+      responses:
+        '200':
+          description: File path
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptionalStringValueResponse'
+    put:
+      summary: Set the configuration file path (validates the file)
+      operationId: setConfigFilePath
+      tags: [Configuration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueString'
+      responses:
+        '200':
+          description: Path set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /config/read:
+    post:
+      summary: Parse a YAML config string and return the normalized version
+      operationId: readConfig
+      tags: [Configuration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueString'
+      responses:
+        '200':
+          description: Parsed config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringValueResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /config/readfile:
+    post:
+      summary: Read and parse a configuration file from disk
+      operationId: readConfigFile
+      tags: [Configuration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReadConfigFileRequest'
+      responses:
+        '200':
+          description: Parsed config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringValueResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /config/validate:
+    post:
+      summary: Validate a YAML configuration string
+      operationId: validateConfig
+      tags: [Configuration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueString'
+      responses:
+        '200':
+          description: Validated config (may be modified by validation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringValueResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  # ── State File ──
+  /state/filepath:
+    get:
+      summary: Get the state file path
+      operationId: getStateFilePath
+      tags: [State]
+      responses:
+        '200':
+          description: State file path
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptionalStringValueResponse'
+
+  /state/fileupdated:
+    get:
+      summary: Check if the state file is up to date
+      operationId: getStateFileUpdated
+      tags: [State]
+      responses:
+        '200':
+          description: Whether state file reflects current state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolValueResponse'
+
+  # ── Volume & Mute ──
+  /volume:
+    get:
+      summary: Get the main volume (fader 0)
+      operationId: getVolume
+      tags: [Volume]
+      responses:
+        '200':
+          description: Volume in dB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FloatValueResponse'
+              example:
+                result: Ok
+                value: -10.0
+    put:
+      summary: Set the main volume (fader 0)
+      operationId: setVolume
+      tags: [Volume]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueFloat'
+      responses:
+        '200':
+          description: Volume set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /volume/adjust:
+    post:
+      summary: Adjust volume by a relative amount with optional limits
+      operationId: adjustVolume
+      tags: [Volume]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdjustVolumeRequest'
+      responses:
+        '200':
+          description: New volume after adjustment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FloatValueResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /mute:
+    get:
+      summary: Get the main mute state (fader 0)
+      operationId: getMute
+      tags: [Volume]
+      responses:
+        '200':
+          description: Mute state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolValueResponse'
+    put:
+      summary: Set the main mute state (fader 0)
+      operationId: setMute
+      tags: [Volume]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueBool'
+      responses:
+        '200':
+          description: Mute set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /mute/toggle:
+    post:
+      summary: Toggle the main mute state (fader 0)
+      operationId: toggleMute
+      tags: [Volume]
+      responses:
+        '200':
+          description: New mute state after toggle
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolValueResponse'
+
+  # ── Faders ──
+  /faders:
+    get:
+      summary: Get all faders (volume and mute state)
+      operationId: getFaders
+      tags: [Faders]
+      responses:
+        '200':
+          description: All faders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FadersResponse'
+
+  /faders/{index}/volume:
+    get:
+      summary: Get a fader's volume
+      operationId: getFaderVolume
+      tags: [Faders]
+      parameters:
+        - $ref: '#/components/parameters/FaderIndex'
+      responses:
+        '200':
+          description: Fader volume
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaderVolumeResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+    put:
+      summary: Set a fader's volume
+      operationId: setFaderVolume
+      tags: [Faders]
+      parameters:
+        - $ref: '#/components/parameters/FaderIndex'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueFloat'
+      responses:
+        '200':
+          description: Volume set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /faders/{index}/volume/external:
+    put:
+      summary: Set a fader's volume (external, immediate effect)
+      operationId: setFaderExternalVolume
+      tags: [Faders]
+      parameters:
+        - $ref: '#/components/parameters/FaderIndex'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueFloat'
+      responses:
+        '200':
+          description: Volume set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /faders/{index}/volume/adjust:
+    post:
+      summary: Adjust a fader's volume by a relative amount with optional limits
+      operationId: adjustFaderVolume
+      tags: [Faders]
+      parameters:
+        - $ref: '#/components/parameters/FaderIndex'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdjustVolumeRequest'
+      responses:
+        '200':
+          description: New fader volume
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaderVolumeResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /faders/{index}/mute:
+    get:
+      summary: Get a fader's mute state
+      operationId: getFaderMute
+      tags: [Faders]
+      parameters:
+        - $ref: '#/components/parameters/FaderIndex'
+      responses:
+        '200':
+          description: Fader mute state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaderMuteResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+    put:
+      summary: Set a fader's mute state
+      operationId: setFaderMute
+      tags: [Faders]
+      parameters:
+        - $ref: '#/components/parameters/FaderIndex'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueBool'
+      responses:
+        '200':
+          description: Mute set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  /faders/{index}/mute/toggle:
+    post:
+      summary: Toggle a fader's mute state
+      operationId: toggleFaderMute
+      tags: [Faders]
+      parameters:
+        - $ref: '#/components/parameters/FaderIndex'
+      responses:
+        '200':
+          description: New mute state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaderMuteResponse'
+        '422':
+          $ref: '#/components/responses/Error422'
+
+  # ── Signal Levels ──
+  /signal/range:
+    get:
+      summary: Get the signal range of the capture device
+      operationId: getSignalRange
+      tags: [Signal]
+      responses:
+        '200':
+          description: Signal range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FloatValueResponse'
+
+  /signal/levels:
+    get:
+      summary: Get all signal levels (RMS and peak for playback and capture)
+      operationId: getSignalLevels
+      tags: [Signal]
+      parameters:
+        - $ref: '#/components/parameters/SinceParam'
+      responses:
+        '200':
+          description: Signal levels
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllLevelsResponse'
+
+  /signal/peaks/sincestart:
+    get:
+      summary: Get peak signal levels since processing started
+      operationId: getSignalPeaksSinceStart
+      tags: [Signal]
+      responses:
+        '200':
+          description: Peak levels since start
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PbCapLevelsResponse'
+
+  /signal/peaks/sincestart/reset:
+    post:
+      summary: Reset peak signal levels since start
+      operationId: resetSignalPeaksSinceStart
+      tags: [Signal]
+      responses:
+        '200':
+          description: Peaks reset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /signal/capture/rms:
+    get:
+      summary: Get capture signal RMS levels
+      operationId: getCaptureSignalRms
+      tags: [Signal]
+      parameters:
+        - $ref: '#/components/parameters/SinceParam'
+      responses:
+        '200':
+          description: Capture RMS levels in dB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FloatArrayResponse'
+
+  /signal/capture/peak:
+    get:
+      summary: Get capture signal peak levels
+      operationId: getCaptureSignalPeak
+      tags: [Signal]
+      parameters:
+        - $ref: '#/components/parameters/SinceParam'
+      responses:
+        '200':
+          description: Capture peak levels in dB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FloatArrayResponse'
+
+  /signal/playback/rms:
+    get:
+      summary: Get playback signal RMS levels
+      operationId: getPlaybackSignalRms
+      tags: [Signal]
+      parameters:
+        - $ref: '#/components/parameters/SinceParam'
+      responses:
+        '200':
+          description: Playback RMS levels in dB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FloatArrayResponse'
+
+  /signal/playback/peak:
+    get:
+      summary: Get playback signal peak levels
+      operationId: getPlaybackSignalPeak
+      tags: [Signal]
+      parameters:
+        - $ref: '#/components/parameters/SinceParam'
+      responses:
+        '200':
+          description: Playback peak levels in dB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FloatArrayResponse'
+
+  # ── Processing ──
+  /processing/capturerate:
+    get:
+      summary: Get the measured capture sample rate
+      operationId: getCaptureRate
+      tags: [Processing]
+      responses:
+        '200':
+          description: Sample rate in Hz
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntValueResponse'
+              example:
+                result: Ok
+                value: 48000
+
+  /processing/updateinterval:
+    get:
+      summary: Get the signal level update interval
+      operationId: getUpdateInterval
+      tags: [Processing]
+      responses:
+        '200':
+          description: Update interval in ms
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntValueResponse'
+    put:
+      summary: Set the signal level update interval
+      operationId: setUpdateInterval
+      tags: [Processing]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueInt'
+      responses:
+        '200':
+          description: Interval set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /processing/rateadjust:
+    get:
+      summary: Get the current rate adjustment factor
+      operationId: getRateAdjust
+      tags: [Processing]
+      responses:
+        '200':
+          description: Rate adjustment factor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FloatValueResponse'
+
+  /processing/bufferlevel:
+    get:
+      summary: Get the current playback buffer level
+      operationId: getBufferLevel
+      tags: [Processing]
+      responses:
+        '200':
+          description: Buffer level in samples
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntValueResponse'
+
+  /processing/clippedsamples:
+    get:
+      summary: Get the number of clipped samples
+      operationId: getClippedSamples
+      tags: [Processing]
+      responses:
+        '200':
+          description: Clipped sample count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntValueResponse'
+
+  /processing/clippedsamples/reset:
+    post:
+      summary: Reset the clipped samples counter
+      operationId: resetClippedSamples
+      tags: [Processing]
+      responses:
+        '200':
+          description: Counter reset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /processing/load:
+    get:
+      summary: Get the current DSP processing load
+      operationId: getProcessingLoad
+      tags: [Processing]
+      responses:
+        '200':
+          description: Processing load as fraction (0.0 to 1.0+)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FloatValueResponse'
+              example:
+                result: Ok
+                value: 0.15
+
+  # ── Devices ──
+  /devices/supportedtypes:
+    get:
+      summary: Get supported audio device backend types
+      operationId: getSupportedDeviceTypes
+      tags: [Devices]
+      responses:
+        '200':
+          description: Supported device types for playback and capture
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportedDeviceTypesResponse'
+
+  /devices/capture/{backend}:
+    get:
+      summary: Get available capture devices for a backend
+      operationId: getAvailableCaptureDevices
+      tags: [Devices]
+      parameters:
+        - $ref: '#/components/parameters/Backend'
+      responses:
+        '200':
+          description: List of capture devices
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvailableDevicesResponse'
+
+  /devices/playback/{backend}:
+    get:
+      summary: Get available playback devices for a backend
+      operationId: getAvailablePlaybackDevices
+      tags: [Devices]
+      parameters:
+        - $ref: '#/components/parameters/Backend'
+      responses:
+        '200':
+          description: List of playback devices
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvailableDevicesResponse'
+
+tags:
+  - name: System
+    description: Lifecycle and status operations
+  - name: Configuration
+    description: Configuration management
+  - name: State
+    description: State file operations
+  - name: Volume
+    description: Main volume and mute control (fader 0)
+  - name: Faders
+    description: Individual fader control
+  - name: Signal
+    description: Signal level monitoring
+  - name: Processing
+    description: Processing status and parameters
+  - name: Devices
+    description: Audio device discovery

@@ -138,6 +138,8 @@ pub mod noisegate;
 pub mod processing;
 #[cfg(feature = "pulse-backend")]
 pub mod pulsedevice;
+#[cfg(feature = "rest-api")]
+pub mod restserver;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
 pub mod statefile;
