@@ -2,7 +2,7 @@
 
 If the REST API server is enabled by building with the `rest-api` feature and providing the `--rest-port` option, CamillaDSP will listen for incoming HTTP requests on the specified port.
 
-By default the REST API server binds to the address 127.0.0.1, which means it's only accessible locally (on the same machine). If it should be also available to remote machines, give the IP address of the interface where it should be available with the `--rest-address` option. Giving 0.0.0.0 will bind to all interfaces.
+By default the REST API server binds to the address 127.0.0.1, which means it's only accessible locally (on the same machine). If it should be also available to remote machines, give the IP address of the interface where it should be available with the `--address` option (shared with the websocket server). Giving 0.0.0.0 will bind to all interfaces.
 
 The REST API coexists with the WebSocket interface. Both can be used simultaneously.
 
