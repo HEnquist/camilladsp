@@ -557,7 +557,9 @@ impl CaptureDevice for FileCaptureDevice {
         let mut read_bytes = self.read_bytes;
         let sample_format = match &self.source {
             CaptureSource::Filename(fname) => {
-                if self.sample_format.is_none() {
+                if let Some(fmt) = self.sample_format {
+                    fmt
+                } else {
                     // No format was given, try to get from the file.
                     // Only works if the file is in wav format.
                     // Also update channels and read & skip bytes.
@@ -566,8 +568,6 @@ impl CaptureDevice for FileCaptureDevice {
                     read_bytes = wav_info.data_length;
                     channels = wav_info.channels;
                     wav_info.sample_format
-                } else {
-                    self.sample_format.unwrap()
                 }
             }
             _ => self.sample_format.unwrap(),
