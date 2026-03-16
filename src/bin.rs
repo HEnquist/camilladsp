@@ -1112,27 +1112,25 @@ fn main_process() -> i32 {
 
     #[cfg(feature = "rest-api")]
     {
-        if let Some(rest_port) = matches.get_one::<usize>("rest_port") {
-            let rest_address = matches
-                .get_one::<String>("address")
-                .cloned()
-                .unwrap_or("127.0.0.1".to_string());
+        let rest_port = matches
+            .get_one::<usize>("rest_port")
+            .copied()
+            .unwrap_or(1236);
 
-            let rest_shared_data = restserver::SharedData {
-                active_config: active_config.clone(),
-                active_config_path: active_config_path.clone(),
-                previous_config: previous_config.clone(),
-                command_sender: tx_command.clone(),
-                capture_status: capture_status.clone(),
-                playback_status: playback_status.clone(),
-                processing_params: processing_params.clone(),
-                processing_status: processing_status.clone(),
-                state_change_notify: tx_state.clone(),
-                state_file_path: statefilename.clone(),
-                unsaved_state_change: unsaved_state_changes.clone(),
-            };
-            restserver::start_server(&rest_address, *rest_port, rest_shared_data);
-        }
+        let rest_shared_data = restserver::SharedData {
+            active_config: active_config.clone(),
+            active_config_path: active_config_path.clone(),
+            previous_config: previous_config.clone(),
+            command_sender: tx_command.clone(),
+            capture_status: capture_status.clone(),
+            playback_status: playback_status.clone(),
+            processing_params: processing_params.clone(),
+            processing_status: processing_status.clone(),
+            state_change_notify: tx_state.clone(),
+            state_file_path: statefilename.clone(),
+            unsaved_state_change: unsaved_state_changes.clone(),
+        };
+        restserver::start_server("0.0.0.0", rest_port, rest_shared_data);
     }
 
     #[cfg(any(feature = "websocket", feature = "rest-api"))]

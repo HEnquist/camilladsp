@@ -621,11 +621,8 @@ Note that for this to update the coefficients for a FIR filter, the filename of 
 See the [separate readme for the websocket server](./websocket.md)
 
 ## Controlling via REST API
-CamillaDSP can also be controlled via a REST API, available when built with the `rest-api` feature:
-```
-cargo build --release --features rest-api
-```
-The REST API provides standard HTTP endpoints under `/api/v1/`.
+CamillaDSP includes a built-in REST API server that starts automatically on port 1236 (configurable with `--rest-port`).
+The API provides standard HTTP endpoints under `/api/v1/`.
 An OpenAPI specification is served at `GET /api/v1/openapi.yaml` and is also available in the repository at `docs/openapi.yaml`.
 
 See the [separate readme for the REST API](./restapi.md) for full endpoint documentation and examples.

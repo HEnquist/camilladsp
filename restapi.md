@@ -1,23 +1,21 @@
 # Controlling via REST API
 
-If the REST API server is enabled by building with the `rest-api` feature and providing the `--rest-port` option, CamillaDSP will listen for incoming HTTP requests on the specified port.
-
-By default the REST API server binds to the address 127.0.0.1, which means it's only accessible locally (on the same machine). If it should be also available to remote machines, give the IP address of the interface where it should be available with the `--address` option (shared with the websocket server). Giving 0.0.0.0 will bind to all interfaces.
+The REST API server is built in by default and starts automatically on port 1236, listening on all interfaces (0.0.0.0).
 
 The REST API coexists with the WebSocket interface. Both can be used simultaneously.
 
 ## Getting started
 
-### Building with REST API support
+The REST API starts automatically when CamillaDSP runs:
 ```
-cargo build --release --features rest-api
+camilladsp /path/to/config.yml
 ```
+The REST API will be available at `http://<host>:1236/api/v1/`.
 
-### Starting CamillaDSP with the REST API
+The port can be changed with `--rest-port`:
 ```
-camilladsp --rest-port 1236 /path/to/config.yml
+camilladsp --rest-port 8080 /path/to/config.yml
 ```
-The REST API will be available at `http://127.0.0.1:1236/api/v1/`.
 
 ## Response format
 

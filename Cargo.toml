@@ -7,7 +7,7 @@ description = "A flexible tool for processing audio"
 rust-version = "1.74"
 
 [features]
-default = ["websocket"]
+default = ["websocket", "rest-api"]
 pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
 cpal-backend = ["cpal"]
 jack-backend = ["cpal-backend", "cpal/jack"]
