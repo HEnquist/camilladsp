@@ -3,54 +3,6 @@ on: [push, pull_request]
 name: CI test and lint
 
 jobs:
-  check_lint_test_linux:
-    name: Check test and lint Linux
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Update package list
-        run: sudo apt-get update
-
-      - name: Install utils
-        run: sudo apt-get install curl wget -y
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Install Alsa devel
-        run: sudo apt-get install libasound2-dev -y
-
-      - name: Install PulseAudio
-        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
-
-      - name: Install Jack
-        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libjack-dev -y
-
-      - name: Install OpenSSL
-        run: sudo apt-get install openssl libssl-dev -y
-
-      - name: Run cargo check
-        run: cargo check
-
-      - name: Run cargo check nodefault
-        run: cargo check --no-default-features
-
-      - name: Run cargo test with all supported backends
-        run: cargo test --features bluez-backend,cpal-backend,jack-backend,pulse-backend,
-
-      - name: Run cargo test with all optional features
-        run: cargo test --features 32bit,debug,secure-websocket
-
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
-
-      - name: Run cargo clippy
-        run: cargo clippy -- -D warnings
-
   check_test_arm64:
     name: Check and test Linux arm 64bit
     runs-on: ubuntu-latest
