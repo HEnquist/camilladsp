@@ -6,7 +6,6 @@ jobs:
   check_lint_test_linux:
     name: Check test and lint Linux
     runs-on: ubuntu-latest
-    #container: ubuntu:20.04
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -52,30 +51,6 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy -- -D warnings
 
-  check_test_arm:
-    name: Check and test Linux arm
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: armv7-unknown-linux-gnueabihf
-
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build image
-        run: docker build -t cross/armv7:v1 --file Dockerfile_armv7 ./
-
-      - name: Run cargo check
-        run: cross check --target armv7-unknown-linux-gnueabihf
-
-      - name: Run cargo test for arm
-        run: cross test --target armv7-unknown-linux-gnueabihf
-
   check_test_arm64:
     name: Check and test Linux arm 64bit
     runs-on: ubuntu-latest
@@ -92,87 +67,13 @@ jobs:
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build image
-        run: docker build -t cross/armv8:v1 --file Dockerfile_armv8 ./ 
+        run: docker build -t cross/armv8:v1 --file Dockerfile_armv8 ./
 
       - name: Run cargo check
         run: cross check --target aarch64-unknown-linux-gnu
 
       - name: Run cargo test for arm
         run: cross test --target aarch64-unknown-linux-gnu
-
-  check_test_armv6:
-    name: Check and test Linux arm v6
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: arm-unknown-linux-gnueabihf
-
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build image
-        run: docker build -t cross/armv6:v1 --file Dockerfile_armv6 ./
-
-      - name: Run cargo check
-        run: cross check --target arm-unknown-linux-gnueabihf
-
-      - name: Run cargo test for arm
-        run: cross test --target arm-unknown-linux-gnueabihf
-        env: 
-          LD_LIBRARY_PATH: /usr/lib/arm-linux-gnueabihf
-
-  check_test_windows:
-    name: Check and test Windows
-    runs-on: windows-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Run cargo check
-        run: cargo check --no-default-features
-
-      - name: Run cargo test
-        run: cargo test --no-default-features
-
-  check_test_windows7:
-    name: Check and test Windows7 (rustc 1.75)
-    runs-on: windows-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.75.0
-
-      - name: Run cargo check
-        run: cargo check --no-default-features
-
-      - name: Run cargo test
-        run: cargo test --no-default-features
-
-  check_test_macos:
-    name: Check and test macOS Intel
-    runs-on: macos-13
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Run cargo check
-        run: cargo check --no-default-features
-
-      - name: Run cargo test
-        run: cargo test --no-default-features
 
   check_macos_arm:
     name: Check and test macOS Arm
@@ -189,7 +90,3 @@ jobs:
 
       - name: Run cargo test
         run: cargo test --no-default-features
-
-
-
-

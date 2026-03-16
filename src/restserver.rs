@@ -155,18 +155,11 @@ struct SupportedDeviceTypes {
     capture: Vec<String>,
 }
 
-fn send_controller_message(
-    shared_data: &SharedData,
-    msg: ControllerMessage,
-) -> rouille::Response {
+fn send_controller_message(shared_data: &SharedData, msg: ControllerMessage) -> rouille::Response {
     match shared_data.command_sender.try_send(msg) {
         Ok(()) => json_ok_empty(),
-        Err(TrySendError::Full(_)) => {
-            json_error(503, "Too many requests".to_string())
-        }
-        Err(TrySendError::Disconnected(_)) => {
-            json_error(500, "Channel disconnected".to_string())
-        }
+        Err(TrySendError::Full(_)) => json_error(503, "Too many requests".to_string()),
+        Err(TrySendError::Disconnected(_)) => json_error(500, "Channel disconnected".to_string()),
     }
 }
 
@@ -178,10 +171,7 @@ fn notify_state_change(shared_data: &SharedData) {
     shared_data
         .unsaved_state_change
         .store(true, Ordering::Relaxed);
-    shared_data
-        .state_change_notify
-        .try_send(())
-        .unwrap_or(());
+    shared_data.state_change_notify.try_send(()).unwrap_or(());
 }
 
 fn parse_since_param(request: &rouille::Request) -> Option<SinceParam> {
@@ -430,9 +420,7 @@ fn handle_signal_with_since(
         None => json_ok(current_fn(shared_data)),
         Some(SinceParam::Seconds(secs)) => json_ok(since_fn(shared_data, secs)),
         Some(SinceParam::Last) => json_ok(since_last_fn(shared_data, local_data)),
-        Some(SinceParam::Invalid) => {
-            json_error(400, "Invalid 'since' parameter".to_string())
-        }
+        Some(SinceParam::Invalid) => json_error(400, "Invalid 'since' parameter".to_string()),
     }
 }
 
@@ -443,7 +431,10 @@ fn parse_fader_index(index_str: &str) -> Result<usize, rouille::Response> {
     if index >= ProcessingParameters::NUM_FADERS {
         return Err(json_error(
             422,
-            format!("Fader index {index} out of range (0-{})", ProcessingParameters::NUM_FADERS - 1),
+            format!(
+                "Fader index {index} out of range (0-{})",
+                ProcessingParameters::NUM_FADERS - 1
+            ),
         ));
     }
     Ok(index)
@@ -519,15 +510,13 @@ pub fn handle_request(
             let cfg_path = shared_data.active_config_path.lock().clone();
             match cfg_path {
                 Some(path) => match config::load_config(path.as_str()) {
-                    Ok(mut conf) => {
-                        match config::validate_config(&mut conf, Some(path.as_str())) {
-                            Ok(()) => send_controller_message(
-                                shared_data,
-                                ControllerMessage::ConfigChanged(Box::new(conf)),
-                            ),
-                            Err(err) => json_error(422, format!("Invalid config: {err}")),
-                        }
-                    }
+                    Ok(mut conf) => match config::validate_config(&mut conf, Some(path.as_str())) {
+                        Ok(()) => send_controller_message(
+                            shared_data,
+                            ControllerMessage::ConfigChanged(Box::new(conf)),
+                        ),
+                        Err(err) => json_error(422, format!("Invalid config: {err}")),
+                    },
                     Err(err) => json_error(422, format!("Config file error: {err}")),
                 },
                 None => json_error(422, "Config path not set, cannot reload".to_string()),
@@ -580,49 +569,43 @@ pub fn handle_request(
             json_ok(value)
         }
 
-        ("PUT", "/config/filepath") => {
-            match read_json_body::<SetValueString>(request) {
-                Ok(body) => match config::load_validate_config(&body.value) {
-                    Ok(_) => {
-                        *shared_data.active_config_path.lock() = Some(body.value);
-                        notify_state_change(shared_data);
-                        json_ok_empty()
-                    }
-                    Err(err) => json_error(422, format!("Error setting config path: {err}")),
-                },
-                Err(e) => json_error(400, e),
-            }
-        }
+        ("PUT", "/config/filepath") => match read_json_body::<SetValueString>(request) {
+            Ok(body) => match config::load_validate_config(&body.value) {
+                Ok(_) => {
+                    *shared_data.active_config_path.lock() = Some(body.value);
+                    notify_state_change(shared_data);
+                    json_ok_empty()
+                }
+                Err(err) => json_error(422, format!("Error setting config path: {err}")),
+            },
+            Err(e) => json_error(400, e),
+        },
 
         ("PUT", "/config") => match read_json_body::<SetValueString>(request) {
-            Ok(body) => {
-                match serde_yaml::from_str::<config::Configuration>(&body.value) {
-                    Ok(mut conf) => match config::validate_config(&mut conf, None) {
-                        Ok(()) => send_controller_message(
-                            shared_data,
-                            ControllerMessage::ConfigChanged(Box::new(conf)),
-                        ),
-                        Err(err) => json_error(422, format!("Config validation error: {err}")),
-                    },
-                    Err(err) => json_error(400, format!("YAML parse error: {err}")),
-                }
-            }
+            Ok(body) => match serde_yaml::from_str::<config::Configuration>(&body.value) {
+                Ok(mut conf) => match config::validate_config(&mut conf, None) {
+                    Ok(()) => send_controller_message(
+                        shared_data,
+                        ControllerMessage::ConfigChanged(Box::new(conf)),
+                    ),
+                    Err(err) => json_error(422, format!("Config validation error: {err}")),
+                },
+                Err(err) => json_error(400, format!("YAML parse error: {err}")),
+            },
             Err(e) => json_error(400, e),
         },
 
         ("PUT", "/config/json") => match read_json_body::<SetValueString>(request) {
-            Ok(body) => {
-                match serde_json::from_str::<config::Configuration>(&body.value) {
-                    Ok(mut conf) => match config::validate_config(&mut conf, None) {
-                        Ok(()) => send_controller_message(
-                            shared_data,
-                            ControllerMessage::ConfigChanged(Box::new(conf)),
-                        ),
-                        Err(err) => json_error(422, format!("Config validation error: {err}")),
-                    },
-                    Err(err) => json_error(400, format!("JSON parse error: {err}")),
-                }
-            }
+            Ok(body) => match serde_json::from_str::<config::Configuration>(&body.value) {
+                Ok(mut conf) => match config::validate_config(&mut conf, None) {
+                    Ok(()) => send_controller_message(
+                        shared_data,
+                        ControllerMessage::ConfigChanged(Box::new(conf)),
+                    ),
+                    Err(err) => json_error(422, format!("Config validation error: {err}")),
+                },
+                Err(err) => json_error(400, format!("JSON parse error: {err}")),
+            },
             Err(e) => json_error(400, e),
         },
 
@@ -661,9 +644,7 @@ pub fn handle_request(
         }
 
         // ── Volume & Mute (Main / Fader 0) ──
-        ("GET", "/volume") => {
-            json_ok(shared_data.processing_params.target_volume(0))
-        }
+        ("GET", "/volume") => json_ok(shared_data.processing_params.target_volume(0)),
 
         ("PUT", "/volume") => match read_json_body::<SetValueFloat>(request) {
             Ok(body) => {
@@ -692,9 +673,7 @@ pub fn handle_request(
             Err(e) => json_error(400, e),
         },
 
-        ("GET", "/mute") => {
-            json_ok(shared_data.processing_params.is_mute(0))
-        }
+        ("GET", "/mute") => json_ok(shared_data.processing_params.is_mute(0)),
 
         ("PUT", "/mute") => match read_json_body::<SetValueBool>(request) {
             Ok(body) => {
@@ -718,7 +697,10 @@ pub fn handle_request(
             let faders: Vec<Fader> = volumes
                 .iter()
                 .zip(mutes)
-                .map(|(v, m)| Fader { volume: *v, mute: m })
+                .map(|(v, m)| Fader {
+                    volume: *v,
+                    mute: m,
+                })
                 .collect();
             json_ok(faders)
         }
@@ -729,40 +711,36 @@ pub fn handle_request(
             json_ok(capstat.signal_range)
         }
 
-        ("GET", "/signal/levels") => {
-            match parse_since_param(request) {
-                None => {
-                    let levels = AllLevels {
-                        playback_rms: playback_signal_rms(shared_data),
-                        playback_peak: playback_signal_peak(shared_data),
-                        capture_rms: capture_signal_rms(shared_data),
-                        capture_peak: capture_signal_peak(shared_data),
-                    };
-                    json_ok(levels)
-                }
-                Some(SinceParam::Seconds(secs)) => {
-                    let levels = AllLevels {
-                        playback_rms: playback_signal_rms_since(shared_data, secs),
-                        playback_peak: playback_signal_peak_since(shared_data, secs),
-                        capture_rms: capture_signal_rms_since(shared_data, secs),
-                        capture_peak: capture_signal_peak_since(shared_data, secs),
-                    };
-                    json_ok(levels)
-                }
-                Some(SinceParam::Last) => {
-                    let levels = AllLevels {
-                        playback_rms: playback_signal_rms_since_last(shared_data, local_data),
-                        playback_peak: playback_signal_peak_since_last(shared_data, local_data),
-                        capture_rms: capture_signal_rms_since_last(shared_data, local_data),
-                        capture_peak: capture_signal_peak_since_last(shared_data, local_data),
-                    };
-                    json_ok(levels)
-                }
-                Some(SinceParam::Invalid) => {
-                    json_error(400, "Invalid 'since' parameter".to_string())
-                }
+        ("GET", "/signal/levels") => match parse_since_param(request) {
+            None => {
+                let levels = AllLevels {
+                    playback_rms: playback_signal_rms(shared_data),
+                    playback_peak: playback_signal_peak(shared_data),
+                    capture_rms: capture_signal_rms(shared_data),
+                    capture_peak: capture_signal_peak(shared_data),
+                };
+                json_ok(levels)
             }
-        }
+            Some(SinceParam::Seconds(secs)) => {
+                let levels = AllLevels {
+                    playback_rms: playback_signal_rms_since(shared_data, secs),
+                    playback_peak: playback_signal_peak_since(shared_data, secs),
+                    capture_rms: capture_signal_rms_since(shared_data, secs),
+                    capture_peak: capture_signal_peak_since(shared_data, secs),
+                };
+                json_ok(levels)
+            }
+            Some(SinceParam::Last) => {
+                let levels = AllLevels {
+                    playback_rms: playback_signal_rms_since_last(shared_data, local_data),
+                    playback_peak: playback_signal_peak_since_last(shared_data, local_data),
+                    capture_rms: capture_signal_rms_since_last(shared_data, local_data),
+                    capture_peak: capture_signal_peak_since_last(shared_data, local_data),
+                };
+                json_ok(levels)
+            }
+            Some(SinceParam::Invalid) => json_error(400, "Invalid 'since' parameter".to_string()),
+        },
 
         ("GET", "/signal/peaks/sincestart") => {
             let levels = PbCapLevels {
@@ -833,20 +811,18 @@ pub fn handle_request(
             json_ok(capstat.update_interval)
         }
 
-        ("PUT", "/processing/updateinterval") => {
-            match read_json_body::<SetValueInt>(request) {
-                Ok(body) => {
-                    let mut captstat = shared_data.capture_status.write();
-                    let mut playstat = shared_data.playback_status.write();
-                    captstat.update_interval = body.value;
-                    playstat.update_interval = body.value;
-                    drop(captstat);
-                    drop(playstat);
-                    json_ok_empty()
-                }
-                Err(e) => json_error(400, e),
+        ("PUT", "/processing/updateinterval") => match read_json_body::<SetValueInt>(request) {
+            Ok(body) => {
+                let mut captstat = shared_data.capture_status.write();
+                let mut playstat = shared_data.playback_status.write();
+                captstat.update_interval = body.value;
+                playstat.update_interval = body.value;
+                drop(captstat);
+                drop(playstat);
+                json_ok_empty()
             }
-        }
+            Err(e) => json_error(400, e),
+        },
 
         ("GET", "/processing/rateadjust") => {
             let capstat = shared_data.capture_status.read();
@@ -870,9 +846,7 @@ pub fn handle_request(
             json_ok_empty()
         }
 
-        ("GET", "/processing/load") => {
-            json_ok(shared_data.processing_params.processing_load())
-        }
+        ("GET", "/processing/load") => json_ok(shared_data.processing_params.processing_load()),
 
         // ── Devices ──
         ("GET", "/devices/supportedtypes") => {
@@ -898,115 +872,109 @@ fn handle_dynamic_routes(
 
     match (method, segments.as_slice()) {
         // GET /faders/{index}/volume
-        ("GET", ["faders", index, "volume"]) => {
-            match parse_fader_index(index) {
-                Ok(idx) => json_ok(FaderVolumeValue {
-                    index: idx,
-                    volume: shared_data.processing_params.target_volume(idx),
-                }),
-                Err(resp) => resp,
-            }
-        }
+        ("GET", ["faders", index, "volume"]) => match parse_fader_index(index) {
+            Ok(idx) => json_ok(FaderVolumeValue {
+                index: idx,
+                volume: shared_data.processing_params.target_volume(idx),
+            }),
+            Err(resp) => resp,
+        },
 
         // PUT /faders/{index}/volume
-        ("PUT", ["faders", index, "volume"]) => {
-            match parse_fader_index(index) {
-                Ok(idx) => match read_json_body::<SetValueFloat>(request) {
-                    Ok(body) => {
-                        let new_vol = clamped_volume(body.value);
-                        shared_data.processing_params.set_target_volume(idx, new_vol);
-                        notify_state_change(shared_data);
-                        json_ok_empty()
-                    }
-                    Err(e) => json_error(400, e),
-                },
-                Err(resp) => resp,
-            }
-        }
+        ("PUT", ["faders", index, "volume"]) => match parse_fader_index(index) {
+            Ok(idx) => match read_json_body::<SetValueFloat>(request) {
+                Ok(body) => {
+                    let new_vol = clamped_volume(body.value);
+                    shared_data
+                        .processing_params
+                        .set_target_volume(idx, new_vol);
+                    notify_state_change(shared_data);
+                    json_ok_empty()
+                }
+                Err(e) => json_error(400, e),
+            },
+            Err(resp) => resp,
+        },
 
         // PUT /faders/{index}/volume/external
-        ("PUT", ["faders", index, "volume", "external"]) => {
-            match parse_fader_index(index) {
-                Ok(idx) => match read_json_body::<SetValueFloat>(request) {
-                    Ok(body) => {
-                        let new_vol = clamped_volume(body.value);
-                        shared_data.processing_params.set_target_volume(idx, new_vol);
-                        shared_data.processing_params.set_current_volume(idx, new_vol);
-                        notify_state_change(shared_data);
-                        json_ok_empty()
-                    }
-                    Err(e) => json_error(400, e),
-                },
-                Err(resp) => resp,
-            }
-        }
+        ("PUT", ["faders", index, "volume", "external"]) => match parse_fader_index(index) {
+            Ok(idx) => match read_json_body::<SetValueFloat>(request) {
+                Ok(body) => {
+                    let new_vol = clamped_volume(body.value);
+                    shared_data
+                        .processing_params
+                        .set_target_volume(idx, new_vol);
+                    shared_data
+                        .processing_params
+                        .set_current_volume(idx, new_vol);
+                    notify_state_change(shared_data);
+                    json_ok_empty()
+                }
+                Err(e) => json_error(400, e),
+            },
+            Err(resp) => resp,
+        },
 
         // POST /faders/{index}/volume/adjust
-        ("POST", ["faders", index, "volume", "adjust"]) => {
-            match parse_fader_index(index) {
-                Ok(idx) => match read_json_body::<AdjustVolumeRequest>(request) {
-                    Ok(body) => {
-                        let minvol = body.min.unwrap_or(-150.0);
-                        let maxvol = body.max.unwrap_or(50.0);
-                        if maxvol < minvol {
-                            return json_error(422, "max must be >= min".to_string());
-                        }
-                        let mut tempvol = shared_data.processing_params.target_volume(idx);
-                        tempvol += body.value;
-                        tempvol = tempvol.clamp(minvol, maxvol);
-                        shared_data.processing_params.set_target_volume(idx, tempvol);
-                        notify_state_change(shared_data);
-                        json_ok(FaderVolumeValue {
-                            index: idx,
-                            volume: tempvol,
-                        })
+        ("POST", ["faders", index, "volume", "adjust"]) => match parse_fader_index(index) {
+            Ok(idx) => match read_json_body::<AdjustVolumeRequest>(request) {
+                Ok(body) => {
+                    let minvol = body.min.unwrap_or(-150.0);
+                    let maxvol = body.max.unwrap_or(50.0);
+                    if maxvol < minvol {
+                        return json_error(422, "max must be >= min".to_string());
                     }
-                    Err(e) => json_error(400, e),
-                },
-                Err(resp) => resp,
-            }
-        }
-
-        // GET /faders/{index}/mute
-        ("GET", ["faders", index, "mute"]) => {
-            match parse_fader_index(index) {
-                Ok(idx) => json_ok(FaderMuteValue {
-                    index: idx,
-                    mute: shared_data.processing_params.is_mute(idx),
-                }),
-                Err(resp) => resp,
-            }
-        }
-
-        // PUT /faders/{index}/mute
-        ("PUT", ["faders", index, "mute"]) => {
-            match parse_fader_index(index) {
-                Ok(idx) => match read_json_body::<SetValueBool>(request) {
-                    Ok(body) => {
-                        shared_data.processing_params.set_mute(idx, body.value);
-                        notify_state_change(shared_data);
-                        json_ok_empty()
-                    }
-                    Err(e) => json_error(400, e),
-                },
-                Err(resp) => resp,
-            }
-        }
-
-        // POST /faders/{index}/mute/toggle
-        ("POST", ["faders", index, "mute", "toggle"]) => {
-            match parse_fader_index(index) {
-                Ok(idx) => {
-                    let old_mute = shared_data.processing_params.toggle_mute(idx);
+                    let mut tempvol = shared_data.processing_params.target_volume(idx);
+                    tempvol += body.value;
+                    tempvol = tempvol.clamp(minvol, maxvol);
+                    shared_data
+                        .processing_params
+                        .set_target_volume(idx, tempvol);
                     notify_state_change(shared_data);
-                    json_ok(FaderMuteValue {
+                    json_ok(FaderVolumeValue {
                         index: idx,
-                        mute: !old_mute,
+                        volume: tempvol,
                     })
                 }
-                Err(resp) => resp,
+                Err(e) => json_error(400, e),
+            },
+            Err(resp) => resp,
+        },
+
+        // GET /faders/{index}/mute
+        ("GET", ["faders", index, "mute"]) => match parse_fader_index(index) {
+            Ok(idx) => json_ok(FaderMuteValue {
+                index: idx,
+                mute: shared_data.processing_params.is_mute(idx),
+            }),
+            Err(resp) => resp,
+        },
+
+        // PUT /faders/{index}/mute
+        ("PUT", ["faders", index, "mute"]) => match parse_fader_index(index) {
+            Ok(idx) => match read_json_body::<SetValueBool>(request) {
+                Ok(body) => {
+                    shared_data.processing_params.set_mute(idx, body.value);
+                    notify_state_change(shared_data);
+                    json_ok_empty()
+                }
+                Err(e) => json_error(400, e),
+            },
+            Err(resp) => resp,
+        },
+
+        // POST /faders/{index}/mute/toggle
+        ("POST", ["faders", index, "mute", "toggle"]) => match parse_fader_index(index) {
+            Ok(idx) => {
+                let old_mute = shared_data.processing_params.toggle_mute(idx);
+                notify_state_change(shared_data);
+                json_ok(FaderMuteValue {
+                    index: idx,
+                    mute: !old_mute,
+                })
             }
-        }
+            Err(resp) => resp,
+        },
 
         // GET /devices/capture/{backend}
         ("GET", ["devices", "capture", backend]) => {
@@ -1122,12 +1090,8 @@ mod tests {
 
     #[test]
     fn test_parse_since_numeric() {
-        let req = rouille::Request::fake_http(
-            "GET",
-            "/api/v1/signal/levels?since=5.0",
-            vec![],
-            vec![],
-        );
+        let req =
+            rouille::Request::fake_http("GET", "/api/v1/signal/levels?since=5.0", vec![], vec![]);
         match parse_since_param(&req) {
             Some(SinceParam::Seconds(s)) => assert!((s - 5.0).abs() < f32::EPSILON),
             other => panic!("Expected Seconds(5.0), got {:?}", other.is_some()),
@@ -1136,27 +1100,16 @@ mod tests {
 
     #[test]
     fn test_parse_since_last() {
-        let req = rouille::Request::fake_http(
-            "GET",
-            "/api/v1/signal/levels?since=last",
-            vec![],
-            vec![],
-        );
+        let req =
+            rouille::Request::fake_http("GET", "/api/v1/signal/levels?since=last", vec![], vec![]);
         assert!(matches!(parse_since_param(&req), Some(SinceParam::Last)));
     }
 
     #[test]
     fn test_parse_since_invalid() {
-        let req = rouille::Request::fake_http(
-            "GET",
-            "/api/v1/signal/levels?since=xyz",
-            vec![],
-            vec![],
-        );
-        assert!(matches!(
-            parse_since_param(&req),
-            Some(SinceParam::Invalid)
-        ));
+        let req =
+            rouille::Request::fake_http("GET", "/api/v1/signal/levels?since=xyz", vec![], vec![]);
+        assert!(matches!(parse_since_param(&req), Some(SinceParam::Invalid)));
     }
 
     // --- Fader index parsing tests ---
@@ -1356,12 +1309,8 @@ mod tests {
     fn test_fader_mute_toggle() {
         let sd = make_test_shared_data();
         let ld = make_local_data();
-        let req = rouille::Request::fake_http(
-            "POST",
-            "/api/v1/faders/2/mute/toggle",
-            vec![],
-            vec![],
-        );
+        let req =
+            rouille::Request::fake_http("POST", "/api/v1/faders/2/mute/toggle", vec![], vec![]);
         let resp = handle_request(&req, &sd, &ld);
         assert_eq!(resp.status_code, 200);
         let body = response_body(resp);
@@ -1386,12 +1335,8 @@ mod tests {
     fn test_get_signal_levels_with_since() {
         let sd = make_test_shared_data();
         let ld = make_local_data();
-        let req = rouille::Request::fake_http(
-            "GET",
-            "/api/v1/signal/levels?since=5.0",
-            vec![],
-            vec![],
-        );
+        let req =
+            rouille::Request::fake_http("GET", "/api/v1/signal/levels?since=5.0", vec![], vec![]);
         let resp = handle_request(&req, &sd, &ld);
         assert_eq!(resp.status_code, 200);
     }
@@ -1400,12 +1345,8 @@ mod tests {
     fn test_get_signal_levels_invalid_since() {
         let sd = make_test_shared_data();
         let ld = make_local_data();
-        let req = rouille::Request::fake_http(
-            "GET",
-            "/api/v1/signal/levels?since=bogus",
-            vec![],
-            vec![],
-        );
+        let req =
+            rouille::Request::fake_http("GET", "/api/v1/signal/levels?since=bogus", vec![], vec![]);
         let resp = handle_request(&req, &sd, &ld);
         assert_eq!(resp.status_code, 400);
     }
@@ -1415,12 +1356,7 @@ mod tests {
         let sd = make_test_shared_data();
         let ld = make_local_data();
         sd.processing_params.set_processing_load(0.42);
-        let req = rouille::Request::fake_http(
-            "GET",
-            "/api/v1/processing/load",
-            vec![],
-            vec![],
-        );
+        let req = rouille::Request::fake_http("GET", "/api/v1/processing/load", vec![], vec![]);
         let resp = handle_request(&req, &sd, &ld);
         let body = response_body(resp);
         assert!((body["value"].as_f64().unwrap() - 0.42).abs() < 0.001);
@@ -1430,12 +1366,8 @@ mod tests {
     fn test_get_supported_device_types() {
         let sd = make_test_shared_data();
         let ld = make_local_data();
-        let req = rouille::Request::fake_http(
-            "GET",
-            "/api/v1/devices/supportedtypes",
-            vec![],
-            vec![],
-        );
+        let req =
+            rouille::Request::fake_http("GET", "/api/v1/devices/supportedtypes", vec![], vec![]);
         let resp = handle_request(&req, &sd, &ld);
         assert_eq!(resp.status_code, 200);
         let body = response_body(resp);
@@ -1447,12 +1379,7 @@ mod tests {
     fn test_not_found() {
         let sd = make_test_shared_data();
         let ld = make_local_data();
-        let req = rouille::Request::fake_http(
-            "GET",
-            "/api/v1/nonexistent",
-            vec![],
-            vec![],
-        );
+        let req = rouille::Request::fake_http("GET", "/api/v1/nonexistent", vec![], vec![]);
         let resp = handle_request(&req, &sd, &ld);
         assert_eq!(resp.status_code, 404);
     }
@@ -1627,12 +1554,8 @@ mod tests {
         let resp = handle_request(&req, &sd, &ld);
         assert_eq!(resp.status_code, 200);
 
-        let req2 = rouille::Request::fake_http(
-            "GET",
-            "/api/v1/processing/updateinterval",
-            vec![],
-            vec![],
-        );
+        let req2 =
+            rouille::Request::fake_http("GET", "/api/v1/processing/updateinterval", vec![], vec![]);
         let resp2 = handle_request(&req2, &sd, &ld);
         let body = response_body(resp2);
         assert_eq!(body["value"], 500);
