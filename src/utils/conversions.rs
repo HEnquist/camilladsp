@@ -374,9 +374,9 @@ mod tests {
     use crate::PrcFmt;
     use crate::audiochunk::AudioChunk;
     use crate::config::BinarySampleFormat;
-    use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+    use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
     #[cfg(feature = "cpal-backend")]
-    use crate::conversions::{
+    use crate::utils::conversions::{
         chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
     };
     #[cfg(feature = "cpal-backend")]

@@ -122,7 +122,6 @@ pub mod asio_backend;
 pub mod audiochunk;
 pub mod audiodevice;
 pub mod config;
-pub mod conversions;
 #[cfg(target_os = "macos")]
 pub mod coreaudio_backend;
 #[cfg(feature = "cpal-backend")]
@@ -138,7 +137,6 @@ pub mod processing;
 pub mod processors;
 #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
 pub mod pulse_backend;
-pub mod resampling;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
 pub mod statefile;

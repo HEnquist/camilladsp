@@ -31,8 +31,8 @@ Use this project structure as default context:
 
 ## Shared utility hotspots
 Prefer these files as first inspection targets for cross-backend behavior:
-- `src/resampling.rs`: `ChunkResampler`, `new_resampler`, async/sync selection.
-- `src/conversions.rs`: shared audio buffer/sample format conversion.
+- `src/utils/resampling.rs`: `ChunkResampler`, `new_resampler`, async/sync selection.
+- `src/utils/conversions.rs`: shared audio buffer/sample format conversion.
 - `src/utils/countertimer.rs`: timing, averages, silence/rate watchers, value history.
 - `src/utils/decibels.rs`: dB conversion helpers and gain conversion helpers.
 - `src/utils/rate_controller.rs`: `PIRateController`.

@@ -23,8 +23,8 @@ Use this structure as your default map:
   - `src/cpal_backend/*.rs`
   - `src/file_backend/*.rs`
 - Shared utility hotspots (often root cause for cross-backend timing/format issues):
-  - `src/resampling.rs`
-  - `src/conversions.rs`
+  - `src/utils/resampling.rs`
+  - `src/utils/conversions.rs`
   - `src/utils/countertimer.rs`
   - `src/utils/decibels.rs`
   - `src/utils/rate_controller.rs`

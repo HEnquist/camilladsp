@@ -18,7 +18,7 @@ use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::BinarySampleFormat;
-use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 
 use std::error::Error;
@@ -45,7 +45,7 @@ use crate::file_backend::bluez as filedevice_bluez;
 use crate::file_backend::filereader::BlockingReader;
 #[cfg(target_os = "linux")]
 use crate::file_backend::filereader_nonblock::NonBlockingReader;
-use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
+use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::utils::wavtools::{find_data_in_wav, write_wav_header};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 

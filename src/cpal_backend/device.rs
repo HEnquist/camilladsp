@@ -18,12 +18,12 @@ use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::{BinarySampleFormat, ConfigError};
-use crate::conversions::{
+use crate::utils::conversions::{
     chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
 };
-use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::utils::countertimer;
 use crate::utils::rate_controller::PIRateController;
+use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use cpal;
 use cpal::Device;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};

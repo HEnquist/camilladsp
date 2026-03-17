@@ -18,7 +18,7 @@ use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::{BinarySampleFormat, ConfigError, WasapiSampleFormat};
-use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 use crate::utils::rate_controller::PIRateController;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded, unbounded};
@@ -44,7 +44,7 @@ use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
-use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
+use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus};
 enum DeviceState {
     Ok(BinarySampleFormat),

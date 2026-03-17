@@ -56,10 +56,10 @@ use crate::asio_backend::utils::{
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config::{AsioSampleFormat, BinarySampleFormat, ConfigError};
-use crate::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-use crate::resampling::{ChunkResampler, new_resampler, resampler_is_async};
+use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 use crate::utils::rate_controller::PIRateController;
+use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus};
 
 // ---------------------------------------------------------------------------

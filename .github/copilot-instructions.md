@@ -17,9 +17,9 @@ This repository is the **CamillaDSP engine** (Rust).
 - `benches/`: criterion benches.
 
 ## Shared utility index
-- `src/resampling.rs`: shared resampler wrapper and selection (`ChunkResampler`, `new_resampler`, `resampler_is_async`).
+- `src/utils/resampling.rs`: shared resampler wrapper and selection (`ChunkResampler`, `new_resampler`, `resampler_is_async`).
 	Reused by all major backend device files.
-- `src/conversions.rs`: shared sample format and buffer/chunk conversion helpers.
+- `src/utils/conversions.rs`: shared sample format and buffer/chunk conversion helpers.
 	Reused by all major backend device files.
 - `src/utils/countertimer.rs`: shared timing/averaging/watch utilities (`Stopwatch`, `Averager`, `TimeAverage`, `ValueWatcher`, `SilenceCounter`, `ValueHistory`).
 	Reused by all major backend device files and status reporting.

@@ -20,8 +20,8 @@ Primary files and folders for this mode:
 - `src/config/mod.rs`, `src/config/utils.rs` and nearby config-related code for implementation truth.
 
 Shared utility files that often affect documentation wording and behavior notes:
-- `src/resampling.rs` (resampler modes, async/sync behavior, load reporting)
-- `src/conversions.rs` (format conversion behavior, clipping/NaN handling)
+- `src/utils/resampling.rs` (resampler modes, async/sync behavior, load reporting)
+- `src/utils/conversions.rs` (format conversion behavior, clipping/NaN handling)
 - `src/utils/countertimer.rs` (silence handling, averaging, watcher logic)
 - `src/utils/decibels.rs` (`linear_to_db`, `db_to_linear`, `gain_from_value`)
 - `src/utils/rate_controller.rs` (`PIRateController`)
