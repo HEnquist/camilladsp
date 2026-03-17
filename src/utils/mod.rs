@@ -17,5 +17,6 @@
 pub mod countertimer;
 pub mod decibels;
 pub mod rate_controller;
+pub mod ringbuffer;
 pub mod stash;
 pub mod wavtools;

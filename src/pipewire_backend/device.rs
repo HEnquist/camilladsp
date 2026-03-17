@@ -14,6 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::utils::ringbuffer::fill_playback_output_from_ringbuffer;
 use pipewire as pw;
 use pw::spa::param::audio::AudioFormat;
 use pw::spa::utils::Direction;
@@ -329,21 +330,20 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
 
                         // Pop bytes from ring buffer directly into output - no allocations!
                         let mut consumer = rb_consumer_clone.borrow_mut();
-                        let available_bytes = consumer.occupied_len();
-                        let bytes_to_write = available_bytes.min(max_bytes);
+
+                        // Fill output from ring buffer, then zero any missing tail (underrun handling)
+                        let (available_bytes, _bytes_from_rb) =
+                            fill_playback_output_from_ringbuffer(&mut *consumer, out_slice);
 
                         if available_bytes == 0 {
                             trace!("PipeWire playback: buffer empty, outputting silence");
                         }
 
-                        // Pop directly into output slice
-                        consumer.pop_slice(&mut out_slice[..bytes_to_write]);
-
                         // CRITICAL: Tell PipeWire how much data we wrote
                         // For output streams, we must set chunk offset, size, and stride
                         let chunk = data.chunk_mut();
                         *chunk.offset_mut() = 0;
-                        *chunk.size_mut() = bytes_to_write as u32;
+                        *chunk.size_mut() = max_bytes as u32;
                         *chunk.stride_mut() = stride as i32;
 
                         // Update buffer level estimator
@@ -775,6 +775,8 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     Ok(()) => {}
                     Err(_err) => {}
                 }
+
+
                 barrier.wait();
                 debug!("Starting PipeWire capture loop");
 
