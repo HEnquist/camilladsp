@@ -64,11 +64,11 @@ use camillalib::Res;
 use camillalib::ControllerMessage;
 use camillalib::audiodevice;
 use camillalib::config;
-use camillalib::countertimer;
 use camillalib::processing;
 #[cfg(feature = "websocket")]
 use camillalib::socketserver;
 use camillalib::statefile;
+use camillalib::utils::countertimer;
 #[cfg(feature = "websocket")]
 use std::net::IpAddr;
 

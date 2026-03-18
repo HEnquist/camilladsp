@@ -17,7 +17,7 @@
 use crate::ProcessingParameters;
 use crate::audiodevice::*;
 use crate::config;
-use crate::filters;
+use crate::pipeline;
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -57,7 +57,7 @@ pub fn run_processing(
                    Performance can improve by adding more threads or disabling multithreading."
             );
         }
-        let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_params.clone());
+        let mut pipeline = pipeline::Pipeline::from_config(conf_proc, processing_params.clone());
         debug!("build filters, waiting to start processing loop");
 
         let thread_handle =
@@ -154,7 +154,7 @@ pub fn run_processing(
                     config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
                         debug!("Rebuilding pipeline.");
                         let new_pipeline =
-                            filters::Pipeline::from_config(new_config, processing_params.clone());
+                            pipeline::Pipeline::from_config(new_config, processing_params.clone());
                         pipeline = new_pipeline;
                     }
                     config::ConfigChange::FilterParameters {

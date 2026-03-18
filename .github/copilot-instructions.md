@@ -17,23 +17,26 @@ This repository is the **CamillaDSP engine** (Rust).
 - `benches/`: criterion benches.
 
 ## Shared utility index
-- `src/resampling.rs`: shared resampler wrapper and selection (`ChunkResampler`, `new_resampler`, `resampler_is_async`).
+- `src/utils/resampling.rs`: shared resampler wrapper and selection (`ChunkResampler`, `new_resampler`, `resampler_is_async`).
 	Reused by all major backend device files.
-- `src/conversions.rs`: shared sample format and buffer/chunk conversion helpers.
+- `src/utils/conversions.rs`: shared sample format and buffer/chunk conversion helpers.
 	Reused by all major backend device files.
-- `src/countertimer.rs`: shared timing/averaging/watch utilities (`Stopwatch`, `Averager`, `TimeAverage`, `ValueWatcher`, `SilenceCounter`, `ValueHistory`).
+- `src/utils/countertimer.rs`: shared timing/averaging/watch utilities (`Stopwatch`, `Averager`, `TimeAverage`, `ValueWatcher`, `SilenceCounter`, `ValueHistory`).
 	Reused by all major backend device files and status reporting.
-- `src/helpers.rs`: shared DSP/helper math and control loops (`multiply_elements`, `multiply_add_elements`, `linear_to_db`, `PIRateController`).
-	Used in FFT convolution, websocket reporting, and backend rate adjust loops.
+- `src/utils/decibels.rs`: shared dB/linear conversion helpers (`linear_to_db`, `linear_to_db_inplace`, `db_to_linear`, `gain_from_value`).
+	Used in websocket reporting and gain/rate-related paths.
+- `src/utils/rate_controller.rs`: rate adjust control loop (`PIRateController`).
+- `src/utils/stash.rs`: shared audio/vector stash allocation and recycling (`vec_from_stash`, `container_from_stash`, `recycle_chunk`).
+- `src/audiochunk.rs`: `AudioChunk`/`ChunkStats` structures and chunk statistics helpers.
 - Backend-specific utility modules:
-	- `src/alsadevice_utils.rs`
-	- `src/asiodevice_utils.rs`
-	- `src/filedevice_bluez.rs`
+	- `src/alsa_backend/utils.rs`
+	- `src/asio_backend/utils.rs`
+	- `src/file_backend/bluez.rs`
 
 When debugging or implementing cross-backend behavior, inspect these utility modules before editing backend-specific loops.
 
 ## Working conventions
-- For backend/device changes, inspect the matching `src/*device*.rs` files and relevant `backend_*.md` docs.
+- For backend/device changes, inspect the matching `src/**/*device*.rs` files and relevant `backend_*.md` docs.
 - For config/schema changes, update both Rust config handling and docs/examples where needed.
 - Keep public YAML keys and CLI behavior backward compatible unless explicitly requested.
 - Do not add new dependencies unless clearly justified.

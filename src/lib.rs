@@ -49,15 +49,12 @@ extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
-#[cfg(target_os = "windows")]
-extern crate wasapi;
 //#[cfg(target_os = "windows")]
 //extern crate winapi;
 
 #[macro_use]
 extern crate log;
 
-use audiodevice::AudioChunk;
 use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 use std::error;
@@ -119,153 +116,33 @@ impl<PrcFmt> NewValue<PrcFmt> for PrcFmt {
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 #[cfg(target_os = "linux")]
-pub mod alsadevice;
-#[cfg(target_os = "linux")]
-pub mod alsadevice_buffermanager;
-#[cfg(target_os = "linux")]
-pub mod alsadevice_utils;
+pub mod alsa_backend;
 #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-pub mod asiodevice;
-#[cfg(all(target_os = "windows", feature = "asio-backend"))]
-pub mod asiodevice_utils;
+pub mod asio_backend;
+pub mod audiochunk;
 pub mod audiodevice;
-pub mod basicfilters;
-pub mod biquad;
-pub mod biquadcombo;
-pub mod compressor;
 pub mod config;
-pub mod conversions;
 #[cfg(target_os = "macos")]
-pub mod coreaudiodevice;
-pub mod countertimer;
+pub mod coreaudio_backend;
 #[cfg(feature = "cpal-backend")]
-pub mod cpaldevice;
-pub mod diffeq;
-pub mod dither;
-pub mod fftconv;
-pub mod filedevice;
-#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-pub mod filedevice_bluez;
-#[cfg(not(target_os = "linux"))]
-pub mod filereader;
-#[cfg(target_os = "linux")]
-pub mod filereader_nonblock;
+pub mod cpal_backend;
+pub mod file_backend;
 pub mod filters;
 pub mod generatordevice;
-pub mod helpers;
-pub mod limiter;
-pub mod loudness;
 pub mod mixer;
-pub mod noisegate;
+pub mod pipeline;
 #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-pub mod pipewiredevice;
+pub mod pipewire_backend;
 pub mod processing;
+pub mod processors;
 #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-pub mod pulsedevice;
-pub mod race;
-pub mod resampling;
+pub mod pulse_backend;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
 pub mod statefile;
+pub mod utils;
 #[cfg(target_os = "windows")]
-pub mod wasapidevice;
-pub mod wavtools;
-
-const MAX_STASH_SIZE: usize = 1024;
-const MAX_CONTAINER_STASH_SIZE: usize = 128;
-
-lazy_static! {
-    pub static ref BUFFERSTASH: RwLock<Vec<Vec<PrcFmt>>> =
-        RwLock::new(Vec::with_capacity(MAX_STASH_SIZE));
-    pub static ref CONTAINERSTASH: RwLock<Vec<Vec<Vec<PrcFmt>>>> =
-        RwLock::new(Vec::with_capacity(MAX_CONTAINER_STASH_SIZE));
-}
-
-pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
-    let vec_option = {
-        let mut stash = BUFFERSTASH.write();
-        trace!(
-            "Try to get a vector from the stash, nbr avaliable: {}",
-            stash.len()
-        );
-        stash.pop()
-    };
-    if let Some(mut vector) = vec_option {
-        if capacity != vector.len() {
-            if capacity > vector.capacity() {
-                debug!(
-                    "The stashed vector has insufficient capacity, allocating more space {} -> {}",
-                    vector.capacity(),
-                    capacity
-                );
-            }
-            vector.resize(capacity, 0.0);
-        }
-        vector
-    } else {
-        debug!("Stash is empty, allocating a new vector");
-        vec![0.0; capacity]
-    }
-}
-
-pub fn container_from_stash(capacity: usize) -> Vec<Vec<PrcFmt>> {
-    let vec_option = {
-        let mut stash = CONTAINERSTASH.write();
-        trace!(
-            "Try to get a vector container from the stash, nbr avaliable: {}",
-            stash.len()
-        );
-        stash.pop()
-    };
-    if let Some(mut vector) = vec_option {
-        if capacity > vector.capacity() {
-            debug!(
-                "The stashed container vector has insufficient capacity, allocating more space {} -> {}",
-                vector.capacity(),
-                capacity
-            );
-            vector.reserve_exact(capacity);
-        }
-        vector
-    } else {
-        debug!("Stash is empty, allocating a new container vector");
-        Vec::with_capacity(capacity)
-    }
-}
-
-pub fn recycle_vec(mut vector: Vec<PrcFmt>) {
-    {
-        let stash = BUFFERSTASH.read();
-        if stash.len() >= MAX_STASH_SIZE {
-            trace!("Stash is full, dropping a vector");
-            return;
-        }
-    }
-    trace!("Recycling a vector");
-    for elem in vector.iter_mut() {
-        *elem = 0.0;
-    }
-    BUFFERSTASH.write().push(vector);
-}
-
-pub fn recycle_container(mut container: Vec<Vec<PrcFmt>>) {
-    trace!("Recycling a container of vectors");
-    for vector in container.drain(..) {
-        recycle_vec(vector);
-    }
-    {
-        let stash = CONTAINERSTASH.read();
-        if stash.len() >= MAX_CONTAINER_STASH_SIZE {
-            trace!("Stash is full, dropping a container");
-            return;
-        }
-    }
-    CONTAINERSTASH.write().push(container);
-}
-
-pub fn recycle_chunk(chunk: AudioChunk) {
-    recycle_container(chunk.waveforms);
-}
+pub mod wasapi_backend;
 
 pub enum StatusMessage {
     PlaybackReady,
@@ -318,8 +195,8 @@ pub struct CaptureStatus {
     pub update_interval: usize,
     pub measured_samplerate: usize,
     pub signal_range: f32,
-    pub signal_rms: countertimer::ValueHistory,
-    pub signal_peak: countertimer::ValueHistory,
+    pub signal_rms: utils::countertimer::ValueHistory,
+    pub signal_peak: utils::countertimer::ValueHistory,
     pub state: ProcessingState,
     pub rate_adjust: f32,
     pub used_channels: Vec<bool>,
@@ -330,8 +207,8 @@ pub struct PlaybackStatus {
     pub update_interval: usize,
     pub clipped_samples: usize,
     pub buffer_level: usize,
-    pub signal_rms: countertimer::ValueHistory,
-    pub signal_peak: countertimer::ValueHistory,
+    pub signal_rms: utils::countertimer::ValueHistory,
+    pub signal_peak: utils::countertimer::ValueHistory,
 }
 
 #[derive(Debug)]
@@ -558,13 +435,13 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
 pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String)> {
     match backend.to_lowercase().as_str() {
         #[cfg(target_os = "linux")]
-        "alsa" => alsadevice_utils::list_device_names(input),
+        "alsa" => alsa_backend::utils::list_device_names(input),
         #[cfg(target_os = "macos")]
-        "coreaudio" => coreaudiodevice::list_available_devices(input),
+        "coreaudio" => coreaudio_backend::device::list_available_devices(input),
         #[cfg(target_os = "windows")]
-        "wasapi" => wasapidevice::list_device_names(input),
+        "wasapi" => wasapi_backend::device::list_device_names(input),
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-        "asio" => asiodevice::list_available_devices(),
+        "asio" => asio_backend::device::list_available_devices(),
         _ => Vec::new(),
     }
 }

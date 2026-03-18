@@ -14,6 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
 use crate::config;
 
@@ -33,8 +34,8 @@ use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
-use crate::container_from_stash;
-use crate::vec_from_stash;
+use crate::utils::decibels::db_to_linear;
+use crate::utils::stash::{container_from_stash, vec_from_stash};
 
 struct SineGenerator {
     time: f64,
@@ -131,10 +132,6 @@ struct GeneratorParams {
     samplerate: usize,
 }
 
-fn decibel_to_amplitude(level: PrcFmt) -> PrcFmt {
-    (10.0 as PrcFmt).powf(level / 20.0)
-}
-
 fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
     debug!("starting generator loop");
     let mut chunk_stats = ChunkStats {
@@ -147,15 +144,15 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
 
     let mut generator: &mut dyn Iterator<Item = PrcFmt> = match params.signal {
         config::Signal::Sine { freq, level } => {
-            sine_gen = SineGenerator::new(freq, params.samplerate, decibel_to_amplitude(level));
+            sine_gen = SineGenerator::new(freq, params.samplerate, db_to_linear(level));
             &mut sine_gen as &mut dyn Iterator<Item = PrcFmt>
         }
         config::Signal::Square { freq, level } => {
-            square_gen = SquareGenerator::new(freq, params.samplerate, decibel_to_amplitude(level));
+            square_gen = SquareGenerator::new(freq, params.samplerate, db_to_linear(level));
             &mut square_gen as &mut dyn Iterator<Item = PrcFmt>
         }
         config::Signal::WhiteNoise { level } => {
-            noise_gen = NoiseGenerator::new(decibel_to_amplitude(level));
+            noise_gen = NoiseGenerator::new(db_to_linear(level));
             &mut noise_gen as &mut dyn Iterator<Item = PrcFmt>
         }
     };
