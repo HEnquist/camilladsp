@@ -1,51 +1,80 @@
-# CamillaDSP v3.0
+# CamillaDSP
 ![CI test and lint](https://github.com/HEnquist/camilladsp/workflows/CI%20test%20and%20lint/badge.svg)
+CamillaDSP is a powerful and flexible audio processing tool, designed for applications like active crossovers,
+room correction, and advanced audio filtering.
 
-A tool to create audio processing pipelines for applications such as active crossovers or room correction.
-It is written in Rust to benefit from the safety and elegant handling of threading that this language provides.
+The CamillaDSP project encompasses:
 
-Supported platforms: Linux, macOS, Windows.
+*   **CamillaDSP (the engine):** The core DSP engine, written in Rust, responsible for real-time audio processing.
+    It's a command-line application that runs on Linux, macOS, and Windows.
+    It can be used stand-alone, or together with the GUI and other related projects.
+    The CamillaDSP engine is the topic of this readme.
+*   **CamillaDSP (the ecosystem):** A broader family of related projects, including:
+    *   **[CamillaGUI](https://github.com/HEnquist/camillagui-backend):**
+        A user-friendly web-based interface for configuring and controlling the CamillaDSP engine.
+    *   **[camilladsp-setupscripts](https://github.com/HEnquist/camilladsp-setupscripts):**
+        Automated setup scripts.
+    *   **[pyCamillaDSP](https://github.com/HEnquist/pycamilladsp):**
+        A Python library for interacting with the CamillaDSP engine via its websocket interface.
+    *   **[pyCamillaDSP-plot](https://github.com/HEnquist/pycamilladsp-plot):**
+        A Python library for visualizing CamillaDSP configurations and filter responses.
+    *   **[camilladsp-config](https://github.com/HEnquist/camilladsp-config):**
+        A repository of example configurations and scripts for common use cases.
+    *   **[camilladsp-controller](https://github.com/HEnquist/camilladsp-controller):**
+        A controller for automatic sample rate switching.
+
+# CamillaDSP engine v4.0
+
+The CamillaDSP engine is a command-line application that runs on Linux, macOS, and Windows.
 
 Audio data is captured from a capture device and sent to a playback device.
-Alsa, PulseAudio, Jack, Wasapi and CoreAudio are currently supported for both capture and playback.
+ALSA, PulseAudio, PipeWire, Jack, Wasapi, ASIO and CoreAudio are
+currently supported for both capture and playback.
 
 The processing pipeline consists of any number of filters and mixers.
-Mixers are used to route audio between channels and to change the number of channels in the stream.
-Filters can be both IIR and FIR. IIR filters are implemented as biquads, while FIR use convolution via FFT/IFFT.
-A filter can be applied to any number of channels. All processing is done in chunks of a fixed number of samples.
-A small number of samples gives a small in-out latency while a larger number is required for long FIR filters.
+Mixers are used to route audio between channels and to change
+the number of channels in the stream.
+Filters can be both IIR and FIR. IIR filters are implemented as biquads,
+while FIR use convolution via FFT/IFFT.
+A filter can be applied to any number of channels.
+All processing is done in chunks of a fixed number of samples.
+A small number of samples gives a small in-out latency
+while a larger number is more efficient.
 The full configuration is given in a YAML file.
+
+# License
+
+CamillaDSP is free software; you can redistribute it and/or modify it
+under the terms of either of the following licenses:
+
+1) the GNU General Public License version 3,
+   available at [www.gnu.org](https://www.gnu.org/licenses/gpl-3.0.en.html)
+   or [LICENSE_GPLv3.txt](LICENSE_GPLv3.txt).
+2) the Mozilla Public License Version 2.0,
+   available at [www.mozilla.org](https://www.mozilla.org/en-US/MPL/),
+   or [LICENSE_MPL2.0.txt](LICENSE_MPL2.0.txt).
+
+## ASIO backend and license implications
+
+The optional ASIO backend (`asio-backend` feature) depends on the ASIO SDK,
+which is licensed under the GNU General Public License version 3.
+When CamillaDSP is built with the `asio-backend` feature enabled,
+the resulting binary is subject to the GPLv3 license only.
+The MPL 2.0 option does not apply to binaries that include ASIO SDK code.
 
 # Disclaimer
 
-CamillaDSP is distributed under the [GNU GENERAL PUBLIC LICENSE Version 3](LICENSE.txt).
+__The software is provided "as is" without any warranty.
+You use it entirely at your own risk, and the creators/distributors
+are not responsible for any damages that might result from its use or failure.__
 
-This includes the following disclaimer:
->  15. Disclaimer of Warranty.
->
->  THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY
->APPLICABLE LAW.  EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT
->HOLDERS AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS" WITHOUT WARRANTY
->OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
->THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
->PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
->IS WITH YOU.  SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF
->ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
->
->  16. Limitation of Liability.
->
->  IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
->WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
->THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY
->GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE
->USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED TO LOSS OF
->DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD
->PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER PROGRAMS),
->EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
->SUCH DAMAGES.
+For more details, please see the GNU General Public License Version 3.0:
+- §15. Disclaimer of Warranty
+- §16. Limitation of Liability
 
-In short this means that the user is responsible for any damage resulting from using this program.
-It does not matter if the damage is caused by incorrect usage or a bug in the software.
+and the Mozilla Public License Version 2.0:
+- §6. Disclaimer of Warranty
+- §7. Limitation of Liability
 
 # Table of Contents
 **[Introduction](#introduction)**
@@ -64,6 +93,7 @@ It does not matter if the damage is caused by incorrect usage or a bug in the so
 - **[Customized build](#customized-build)**
 - **[Optimize for your system](#optimize-for-your-system)**
 - **[Building on Windows and macOS](#building-on-windows-and-macos)**
+- **[Building with ASIO backend (Windows)](#building-with-asio-backend-windows)**
 
 **[How to run](#how-to-run)**
 - **[Command line options](#command-line-options)**
@@ -75,11 +105,12 @@ It does not matter if the damage is caused by incorrect usage or a bug in the so
   - **[Jack](#jack)**
   - **[File or pipe](#file-or-pipe)**
 - **[Windows](#windows)**
-- **[MacOS (CoreAudio)](#macos-coreaudio)**
+  - **[ASIO](#asio)**
+- **[macOS (CoreAudio)](#macos-coreaudio)**
 - **[Linux](#linux)**
-  - **[Alsa](#alsa)**
+  - **[ALSA](#alsa)**
   - **[PulseAudio](#pulseaudio)**
-  - **[Pipewire](#pipewire)**
+  - **[PipeWire](#pipewire)**
 
 **[Configuration](#configuration)**
 - **[The YAML format](#the-yaml-format)**
@@ -156,7 +187,7 @@ Once all processing is done, the audio data is posted to the input queue of the 
 ### Playback
 The playback thread simply waits for audio messages to appear in the queue.
 Once a message arrives, the audio data is converted to the right sample format for the device, and written to the playback device.
-The Alsa playback device supports monitoring the buffer level of the playback device.
+The ALSA playback device supports monitoring the buffer level of the playback device.
 This is used to send requests for adjusting the capture speed to the supervisor thread, on a separate message channel.
 
 ### Supervisor
@@ -184,7 +215,8 @@ A few examples, done with CamillaDSP v0.5.0:
   CPU usage just under 100%.
 
 ### Linux requirements
-Both 64 and 32 bit architectures are supported. All platforms supported by the Rustc compiler should work.
+Both 64 and 32 bit architectures are supported.
+All platforms supported by the Rustc compiler should work.
 
 Pre-built binaries are provided for:
 - x86_64 (almost all PCs)
@@ -193,33 +225,43 @@ Pre-built binaries are provided for:
 - aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS)
 
 ### Windows requirements
-An x86_64 CPU and the 64-bit version of Windows is recommended. Any x86_64 CPU will likely be sufficient.
+An x86_64 CPU and the 64-bit version of Windows is recommended.
+Any x86_64 CPU will likely be sufficient.
 
 Pre-built binaries are provided for 64-bit systems.
 
-### MacOS requirements
-CamillaDSP can run on both Intel and Apple Silicon macs. Any reasonably recent version of MacOS should work.
+### macOS requirements
+CamillaDSP can run on both Intel and Apple Silicon macs.
+Any reasonably recent version of macOS should work.
 
 Pre-built binaries are provided for both Intel and Apple Silicon
 
 
 ## Usage example: crossover for 2-way speakers
 A crossover must filter all sound being played on the system.
-This is possible with both PulseAudio and Alsa by setting up a loopback device (Alsa) or null sink (Pulse) and setting this device as the default output device.
-CamillaDSP is then configured to capture from the output of this device and play the processed audio on the real sound card.
+This is possible by setting up a virtual loopback device
+and setting this device as the default output device.
+Virtual loopback devices are available for most audio APIs,
+either as built-in features or via third-party solutions.
+CamillaDSP is then configured to capture from the output of this device
+and play the processed audio on the real sound card.
 
 See the [tutorial for a step-by-step guide.](./stepbystep.md)
 
 ## Dependencies
 These are the key dependencies for CamillaDSP.
-* https://crates.io/crates/alsa - Alsa audio backend
-* https://crates.io/crates/clap - Command line argument parsing
-* https://crates.io/crates/cpal - Jack audio backend
+* https://crates.io/crates/alsa - ALSA bindings
+* https://crates.io/crates/coreaudio-rs - CoreAudio bindings
+* https://crates.io/crates/pipewire - PipeWire bindings
+* https://crates.io/crates/asio-sys
+* https://crates.io/crates/wasapi
+* https://crates.io/crates/cpal - Cross platform audio library used to provide Jack support
 * https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend
+* https://crates.io/crates/clap - Command line argument parsing
 * https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
 * https://crates.io/crates/rustfft - FFT used for FIR filters
 * https://crates.io/crates/rubato - Sample rate conversion
-* https://crates.io/crates/serde_yaml - Config file reading
+* https://crates.io/crates/yaml_serde - Config file reading
 * https://crates.io/crates/tungstenite - Websocket server
 
 
@@ -246,10 +288,14 @@ The following configurations are provided:
 
 | Filename | Description | Backends |
 |----------|-------------|----------|
-| `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | Alsa, Pulseaudio |
-| `camilladsp-linux-armv6.tar.gz` | Linux on Armv6 (32-bit), intended for Raspberry Pi 1 and Pi Zero but should also work on others | Alsa |
-| `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon (32-bit), intended for Raspberry Pi 2 and up but should also work on others | Alsa |
-| `camilladsp-linux-aarch64.tar.gz` | Linux on Armv8 (64-bit), intended for Raspberry Pi 3 and up, but should also work on others | Alsa |
+| `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA |
+| `camilladsp-linux-pulseaudio-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA, PulseAudio |
+| `camilladsp-linux-pipewire-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA, PipeWire |
+| `camilladsp-linux-armv6.tar.gz` | Linux on Armv6 (32-bit), intended for Raspberry Pi 1 and Pi Zero but should also work on others | ALSA |
+| `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon (32-bit), intended for Raspberry Pi 2 and up but should also work on others | ALSA |
+| `camilladsp-linux-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA |
+| `camilladsp-linux-pulseaudio-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA, PulseAudio |
+| `camilladsp-linux-pipewire-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA, PipeWire |
 | `camilladsp-macos-amd64.tar.gz` | macOS on 64-bit Intel CPU | CoreAudio |
 | `camilladsp-macos-aarch64.tar.gz` | macOS on Apple silicon | CoreAudio |
 | `camilladsp-windows-amd64.zip` | Windows on 64-bit Intel or AMD CPU | Wasapi |
@@ -269,7 +315,7 @@ Trying will result in an error message such as:
 
 The solution is to remove the "quarantine" attribute from the binary using the `xattr` command.
 
-Open a a terminal and run:
+Open a terminal and run:
 
 ```sh
 xattr -d com.apple.quarantine /path/to/camilladsp
@@ -277,15 +323,19 @@ xattr -d com.apple.quarantine /path/to/camilladsp
 
 # Building
 
-Use recent stable versions of rustc and cargo. The minimum rustc version is 1.61.0.
+__Note: This section describes how to compile CamillaDSP from source. 
+Only do this if you for some reason cannot use any of the pre-built binaries (see [Installing](#installing)).__
+
+Use recent stable versions of rustc and cargo. The minimum rustc version is 1.85.
 
 The recommended way to install rustc and cargo is by using the "rustup" tool.
 This tool works on all supported platforms (Linux, macOS and Windows). Get it here: https://rustup.rs/
 
 For Windows you also need the "Build Tools for Visual Studio". Get them from here: https://aka.ms/buildtools
 
-When building on Linux the Alsa backend is always enabled.
+When building on Linux the ALSA backend is always enabled.
 Similarly, building on Windows always enables the Wasapi backend.
+The optional ASIO backend can be enabled with the `asio-backend` feature (see [Customized build](#customized-build)).
 And building on macOS always enables the CoreAudio backend.
 
 By default both the PulseAudio and Jack backends are disabled, but they can be enabled if desired.
@@ -302,8 +352,8 @@ This feature is enabled by default, but can be left out. The feature name is "we
 For usage see the section "Controlling via websocket".
 
 ## Building in Linux with standard features
-These instructions assume that the linux distribution used is one of Fedora, Debian, Ubunty or Arch.
-They should also work also work on distributions closely related to one of these, such as Manjaro (Arch),
+These instructions assume that the Linux distribution used is one of Fedora, Debian, Ubuntu or Arch.
+They should also work on distributions closely related to one of these, such as Manjaro (Arch),
 or Raspberry Pi OS (Debian).
 
 There are many others, including some specialized distributions for example targeting audio playback.
@@ -315,7 +365,7 @@ If possible, it's recommended to use a pre-built binary on these systems.
 - - Fedora: ```sudo dnf install pkgconf-pkg-config```
 - - Debian/Ubuntu etc: ```sudo apt-get install pkg-config```
 - - Arch: ```sudo pacman -S cargo pkg-config```
-- Install Alsa dependency:
+- Install ALSA dependency:
 - - Fedora: ```sudo dnf install alsa-lib-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libasound2-dev```
 - - Arch: ```sudo pacman -S alsa-lib```
@@ -333,8 +383,10 @@ If possible, it's recommended to use a pre-built binary on these systems.
 ## Customized build
 All the available options, or "features" are:
 - `pulse-backend`: PulseAudio support.
+- `pipewire-backend`: Native PipeWire support (Linux only).
 - `cpal-backend`: Used for Jack support (automatically enabled when needed).
 - `jack-backend`: Jack support (Linux only).
+- `asio-backend`: ASIO support (Windows only, requires the ASIO SDK).
 - `bluez-backend`: Bluetooth support via BlueALSA (Linux only).
 - `websocket`: Websocket server for control.
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
@@ -375,6 +427,11 @@ The `jack-backend` feature requires jack and its development files. To install:
 - Fedora: ```sudo dnf install jack-audio-connection-kit jack-audio-connection-kit-devel```
 - Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
 - Arch:  ```sudo pacman -S jack```
+
+The `pipewire-backend` feature requires PipeWire and its development files. To install:
+- Fedora: ```sudo dnf install pipewire-devel```
+- Debian/Ubuntu etc: ```sudo apt-get install libpipewire-0.3-dev```
+- Arch:  ```sudo pacman -S pipewire```
 
 ## Optimize for your system
 By default Cargo builds for a generic system, meaning the resulting binary might not run as fast as possible on your system.
@@ -419,6 +476,27 @@ The necessary dependencies can be installed with brew:
 brew install pkg-config
 brew install pulseaudio
 ```
+
+## Building with ASIO backend (Windows)
+To build CamillaDSP with ASIO support, enable the `asio-backend` feature.
+This uses the `asio-sys` crate, which generates bindings via `bindgen`.
+The ASIO SDK is downloaded/extracted automatically during the build,
+so you normally do not need to download it manually.
+
+Before building, ensure `bindgen` requirements are met:
+- Install LLVM/Clang (Clang 9.0+). On Windows with winget:
+  - `winget install LLVM.LLVM`
+- In most setups you do **not** need to set `LIBCLANG_PATH` manually.
+  Keep this as a reference in case `bindgen` cannot find `libclang`:
+  - PowerShell: `$env:LIBCLANG_PATH="C:\\Program Files\\LLVM\\bin"`
+  - cmd.exe: `set LIBCLANG_PATH=C:\Program Files\LLVM\bin`
+
+Reference: [rust-bindgen requirements](https://rust-lang.github.io/rust-bindgen/requirements.html)
+
+Build command:
+- `cargo build --release --features asio-backend`
+
+After a successful build, the binary is available at `target/release/camilladsp.exe`.
 
 
 # How to run
@@ -476,7 +554,7 @@ Options:
   -e, --extra_samples <EXTRA_SAMPLES>  Override number of extra samples in config
   -n, --channels <CHANNELS>            Override number of channels of capture device in config
   -r, --samplerate <SAMPLERATE>        Override samplerate in config
-  -f, --format <FORMAT>                Override sample format of capture device in config [possible values: S16LE, S24LE, S24LE3, S32LE, FLOAT32LE, FLOAT64LE]
+  -f, --format <FORMAT>                Override sample format of capture device in config [possible values: S16_LE, S24_3_LE, S24_4_LJ_LE, S24_4_RJ_LE, S32_LE, F32_LE, F64_LE]
   -h, --help                           Print help
   -V, --version                        Print version
 ```
@@ -495,13 +573,25 @@ Alternatively, the log level can be changed with the verbosity flag.
 By passing the verbosity flag once, `-v`, `debug` messages are enabled.
 If it's given twice, `-vv`, it also prints `trace` messages.
 
+The option `custom_log_spec` can be used to define custom filters for the logs.
+When provided, this option overrides what is given by `-v` and `--loglevel`.
+Using this option, the log level can be set to different values for different modules.
+Example, set the base log level to `info`, but increase it to `trace` for the
+Wasapi backend (which is the `camillalib::wasapidevice` module):
+```
+--custom_log_spec="info, camillalib::wasapidevice=trace
+```
+Module names are shown in square brackets in the log messages.
+See the [flexi-logger documentation](https://docs.rs/flexi_logger/latest/flexi_logger/struct.LogSpecification.html)
+for more info on how to write the logger specification.
+
 The log messages are normally written to the terminal via stderr,
 but they can instead be written to a file by giving the `--logfile` option.
 The argument should be the path to the logfile.
 If this file is not writable, CamillaDSP will panic and exit.
 
 Log rotation can be enabled by the `--log_rotate_size` option.
-This creates a new log file whenever the log fize size exceeds the given size in bytes.
+This creates a new log file whenever the log file size exceeds the given size in bytes.
 When rotation is enabled the current log file gets an added infix of `_rCURRENT`,
 so for example `logfile.log` becomes `logfile_rCURRENT.log`.
 When the file is rotated, the old logs are kept with a timestamp as infix,
@@ -647,7 +737,7 @@ It is implemented using the CPAL library, which currently only supports Jack on 
 The Jack server must be running.
 
 Set `device` to "default" for both capture and playback.
-The sample format is fixed at 32-bit float (FLOAT32LE).
+The sample format is fixed at 32-bit float.
 
 The samplerate must match the samplerate configured for the Jack server.
 
@@ -657,13 +747,73 @@ CamillaDSP will show up in Jack as "cpal_client_in" and "cpal_client_out".
 ## Windows
 See the [separate readme for Wasapi](./backend_wasapi.md).
 
+### ASIO
+The ASIO backend is an optional alternative audio backend for Windows.
+It provides low-latency access to audio devices via ASIO drivers.
+To use it, CamillaDSP must be compiled with the `asio-backend` feature enabled.
+
+Note that the ASIO backend is licensed under GPLv3 only,
+due to the ASIO SDK license requirements.
+See the [ASIO backend and license implications](#asio-backend-and-license-implications)
+section for details.
+
+Set the device `type` to `Asio` for both capture and playback.
+The `device` parameter should be set to the name of the ASIO driver to use.
+Available ASIO drivers are listed in the log output at startup (at debug level).
+Note that ASIO exposes drivers rather than actual device availability,
+so drivers for disconnected or powered‑off devices are still included
+in the listing.
+
+Set the `channels` property to the number of channels you want to use.
+The value may be lower than the number of channels the device provides,
+any channels above the specified count are simply ignored.
+
+The supported sample formats are:
+- `S16_LE` - 16-bit signed integer
+- `S24_4_LE` - 24-bit signed integer (in 32-bit container)
+- `S24_3_LE` - 24-bit signed integer (packed 3-byte)
+- `S32_LE` - 32-bit signed integer
+- `F32_LE` - 32-bit float
+- `F64_LE` - 64-bit float
+
+If the `format` parameter is omitted, CamillaDSP will query the device
+for its native sample format and use it automatically.
+ASIO drivers do not perform sample format conversion,
+so if a format is specified it must match the device's native format.
+A mismatch will result in an error at startup.
+
+#### Full-duplex limitations
+When both capture and playback use the ASIO backend,
+CamillaDSP operates them in full-duplex mode
+through a single shared driver instance. This implies:
+- **Same device:** Capture and playback must specify the same ASIO driver name.
+  ASIO only supports one driver loaded at a time.
+- **Same sample rate:** Resampling is not supported in full-duplex ASIO mode.
+  Both directions share the same hardware clock,
+  so `capture_samplerate` must equal `samplerate`
+  and no `resampler` should be configured.
+
+Example configuration:
+```yaml
+capture:
+  type: Asio
+  channels: 2
+  device: "My ASIO Driver"
+  format: S32_LE
+playback:
+  type: Asio
+  channels: 2
+  device: "My ASIO Driver"
+  format: S32_LE
+```
+
 ## MacOS (CoreAudio)
 See the [separate readme for CoreAudio](./backend_coreaudio.md).
 
 ## Linux
 Linux offers several audio APIs that CamillaDSP can use.
 
-### Alsa
+### ALSA
 See the [separate readme for ALSA](./backend_alsa.md).
 
 ### PulseAudio
@@ -680,11 +830,18 @@ pacmd list-sinks
 pacmd list-sources
 ```
 
-### Pipewire
-Pipewire implements both the PulseAudio and Jack APIs.
-It is therefore supported both via the Pulse and the Jack backends, and there is no need for a specific Pipewire backend.
+### PipeWire
 
-Pipewire supports creating null-sink like PulseAudio. Create it with:
+#### Native PipeWire backend
+CamillaDSP has native PipeWire support via the `pipewire-backend` feature.
+This creates filter nodes in the PipeWire graph that can be connected to other nodes using WirePlumber rules or tools like Helvum.
+See [backend_pipewire.md](backend_pipewire.md) for configuration details.
+
+#### Using PipeWire via PulseAudio or Jack compatibility
+PipeWire implements both the PulseAudio and Jack APIs.
+CamillaDSP can therefore also be used with PipeWire via the Pulse and Jack backends.
+
+PipeWire supports creating null-sinks like PulseAudio. Create one with:
 ```
 pactl load-module module-null-sink sink_name=MySink object.linger=1 media.class=Audio/Sink
 ```
@@ -705,10 +862,17 @@ This will list all devices, and the null-sink should be included like this:
 This device can be set as the default output in the Gnome sound settings, meaning all desktop audio will use it.
 The audio sent to this device can then be captured from the monitor output named "MySink.monitor" using the PulseAudio backend.
 
-Pipewire can also be configured to output to an ALSA Loopback.
-This is done by adding an ALSA sink in the Pipewire configuration.
+To configure PipeWire so that this null-sink is loaded on startup, create the file `/usr/share/pipewire/pipewire-pulse.conf.d/camilladsp-sink.conf` containing:
+```
+pulse.cmd = [
+    { cmd = "load-module" args = "module-null-sink sink_name=MySink object.linger=1 media.class=Audio/Sink" flags = [ ] }
+]
+```
+
+PipeWire can also be configured to output to an ALSA Loopback.
+This is done by adding an ALSA sink in the PipeWire configuration.
 This sink then becomes available as an output device in the Gnome sound settings.
-See the "camilladsp-config" repository under [Related projects](#related-projects) for an example Pipewire configuration.
+See the "camilladsp-config" repository under [Related projects](#related-projects) for an example PipeWire configuration.
 
 TODO test with Jack.
 
@@ -721,8 +885,8 @@ BlueALSA is supported on Linux only, and requires building CamillaDSP with the `
 
 #### Prerequisites
 Start by installing `bluez-alsa`.
-Both Pipewire and PulseAudio will interfere with BlueALSA and must be disabled.
-The source device should be paired after disabling Pipewire or PulseAudio and enabling BlueALSA.
+Both PipeWire and PulseAudio will interfere with BlueALSA and must be disabled.
+The source device should be paired after disabling PipeWire or PulseAudio and enabling BlueALSA.
 
 #### Configuration
 
@@ -739,7 +903,7 @@ devices:
   enable_rate_adjust: true
   capture:
     type: Bluez
-    format: S16LE
+    format: S16_LE
     channels: 2
     dbus_path: /org/bluealsa/hci0/dev_A0_B1_C2_D3_E4_F5/a2dpsnk/source
     service: org.bluealsa (*)
@@ -905,13 +1069,12 @@ devices:
     type: Pulse
     channels: 2
     device: "MySink.monitor"
-    format: S16LE
     labels: ["L", "R"] (*)
   playback:
     type: Alsa
     channels: 2
     device: "hw:Generic_1"
-    format: S32LE
+    format: S32_LE
 ```
 A parameter marked (*) in any example is optional. If they are left out from the configuration, or set to `null`, their default values will be used.
 
@@ -965,7 +1128,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   and rounded up to the nearest integer.
 
   Using a smaller chunk size (i.e. more segments) reduces latency
-  but makes the convoultion process less efficient and thus needs more processing power.
+  but makes the convolution process less efficient and thus needs more processing power.
   Although a smaller chunk size leads to increased CPU usage for all filters,
   the difference is larger for FIR filters than the other types.
 
@@ -983,34 +1146,44 @@ A parameter marked (*) in any example is optional. If they are left out from the
   The total queue size limit will be `2*chunksize*queuelimit` samples per channel.
 
   The value should only be changed if the capture device can provide data faster
-  than the playback device can play it, like when using the Alsa "cdsp" plugin.
+  than the playback device can play it, like when using the ALSA "cdsp" plugin.
   If this case, set `queuelimit` to a low value like 1.
 
 * `enable_rate_adjust` (optional, defaults to false)
 
   This enables the playback device to control the rate of the capture device,
   in order to avoid buffer underruns or a slowly increasing latency.
-  This is currently supported when using an Alsa, Wasapi or CoreAudio playback device (and any capture device).
+  This is currently supported when using an ALSA, Wasapi, CoreAudio, PipeWire or ASIO
+  playback device (and any capture device).
   Setting the rate can be done in two ways.
   * Some capture devices provide a way to adjust the speed of their virtual sample clock (also called pitch adjust).
-    This is available with the Alsa Loopback and USB Audio gadget devices on Linux,
+    This is available with the ALSA Loopback and USB Audio gadget devices on Linux,
     as well as BlackHole version 0.5.0 and later on macOS.
     When capturing from any of these devices, the adjustment can be done by tuning the virtual sample clock of the device.
     This avoids the need for asynchronous resampling.
   * If asynchronous resampling is enabled, the adjustment can be done by tuning the resampling ratio.
     Then `resampler` must be set to one of the "Async" types. This is supported for all capture devices.
 
-  With Alsa capture devices, the first option is used whenever it's available.
-  If not, and when not using an Alsa capture device, then the second option is used.
+  The first option is used whenever it's available.
+  If not, then the second option is used if the config has an asynchronous resampler.
+  If neither is available, then rate adjust is disabled.
 
 * `target_level` (optional, defaults to the `chunksize` value)
 
-  The value is the number of samples that should be left in the buffer of the playback device
-  when the next chunk arrives. Only applies when `enable_rate_adjust` is set to `true`.
-  It will take some experimentation to find the right number.
+  The value is the number of samples that should be left
+  in the buffer of the playback device when the next chunk arrives.
+  When processing starts, the playback device will delay its startup
+  in order to get the initial buffer level near this value.
+  See also `enable_rate_adjust` which should be set to `true` to allow matching 
+  capture and playback rates in order to keep the buffer level at the target value.
+  
+  It may take some experimentation to find the optimal number.
   If it's too small there will be buffer underruns from time to time,
   and making it too large might lead to a longer input-output delay than what is acceptable.
-  Suitable values are in the range 1/2 to 1 times the `chunksize`.
+  A suitable starting point is to use the `chunksize` value.
+  Usable values cover a large range, from very small values like 30 on lightly loaded systems
+  with tight latency requirements,
+  to a maximum of `(2 + queuelimit) * chunksize` for minimal underrun risk when latency is not a concern.
 
 * `adjust_period` (optional, defaults to 10)
 
@@ -1098,48 +1271,31 @@ A parameter marked (*) in any example is optional. If they are left out from the
     * `Bluez` (capture only)
     * `Jack`
     * `Wasapi`
+    * `Asio`
     * `CoreAudio`
     * `Alsa`
     * `Pulse`
   * `channels`: number of channels
-  * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `CoreAudio`). For `CoreAudio` and `Wasapi`, `null` will give the default device.
+  * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `Asio`, `CoreAudio`).
+     For `CoreAudio` and `Wasapi`, `null` will give the default device.
+     For `Asio`, use the ASIO driver name.
   * `filename` path to the file (for `File`, `RawFile` and `WavFile`)
-  * `format`: sample format (for all except `Jack`).
+  * `format`: sample format (for all except `Jack` and `Pulse`).
 
-    Currently supported sample formats are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
-    * S16LE - Signed 16-bit int, stored as two bytes
-    * S24LE - Signed 24-bit int, stored as four bytes (three bytes of data, one padding byte)
-    * S24LE3 - Signed 24-bit int, stored as three bytes (with no padding)
-    * S32LE - Signed 32-bit int, stored as four bytes
-    * FLOAT32LE - 32-bit float, stored as four bytes
-    * FLOAT64LE - 64-bit float, stored as eight bytes
+    The available choices for `format` depend on the backend.
 
-    __Note that there are two 24-bit formats! Make sure to select the correct one.__
+    For `File`, `Stdin`, `Stdout` `RawFile` and `Bluez`, the choices are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
+    - [S16_LE](sample_formats.md#s16_le)
+    - [S24_3_LE](sample_formats.md#s24_3_le)
+    - [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le)
+    - [S24_4_LJ_LE](sample_formats.md#s24_4_lj_le)
+    - [S32_LE](sample_formats.md#s32_le)
+    - [F32_LE](sample_formats.md#f32_le)
+    - [F64_LE](sample_formats.md#f64_le)
 
-    ### Supported formats
+    For [ALSA](./backend_alsa.md), [CoreAudio](./backend_coreaudio.md), [Wasapi](./backend_wasapi.md) and [ASIO](#asio), see the respective backend documentation.
 
-    |            | Alsa | Pulse | Wasapi | CoreAudio | Jack | File/Stdin/Stdout |
-    |------------|:----:|:-----:|:------:|:---------:|:----:|:-----------------:|
-    | S16LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
-    | S24LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
-    | S24LE3     | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
-    | S32LE      | Yes  | Yes   | Yes    | Yes       | No   | Yes               |
-    | FLOAT32LE  | Yes  | Yes   | Yes    | Yes       | Yes  | Yes               |
-    | FLOAT64LE  | Yes  | No    | No     | No        | No   | Yes               |
-
-
-    ### Equivalent formats
-
-    This table shows which formats in the different APIs are equivalent.
-
-    | CamillaDSP | Alsa       | Pulse     |
-    |------------|------------|-----------|
-    | S16LE      | S16_LE     | S16LE     |
-    | S24LE      | S24_LE     | S24_32LE  |
-    | S24LE3     | S24_3LE    | S24LE     |
-    | S32LE      | S32_LE     | S32LE     |
-    | FLOAT32LE  | FLOAT_LE   | FLOAT32LE |
-    | FLOAT64LE  | FLOAT64_LE | -         |
+    __Note that there are three different 24-bit formats! Make sure to select the correct one.__
 
   ### File, RawFile, WavFile, Stdin, Stdout
   The `RawFile` device type reads from a file, while `Stdin` reads from stdin.
@@ -1166,10 +1322,12 @@ A parameter marked (*) in any example is optional. If they are left out from the
   Setting it to `false`, `null`, or leaving it out disables the wav header.
   This is a _streaming_ header, meaning it contains a dummy value for the file length.
   Most applications ignore this and calculate the correct length from the file size.
+  The wav format does not support right justified padded data, and therefore it is not
+  possible to enable the wav-header if the format is `S24_4_RJ_LE`.
 
   To read from a wav file, use the `WavFile` capture device.
-  The samplerate and numnber of channels of the file is used to override the values in the config,
-  similar to how these values can be [overriden from the command line](#overriding-config-values).
+  The samplerate and number of channels of the file is used to override the values in the config,
+  similar to how these values can be [overridden from the command line](#overriding-config-values).
   Note that `WavFile` only supports reading from files. Reading from a pipe is not supported.
 
   Example config for raw files:
@@ -1178,7 +1336,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
       type: RawFile
       channels: 2
       filename: "/path/to/inputfile.raw"
-      format: S16LE
+      format: S16_LE
       extra_samples: 123 (*)
       skip_bytes: 0 (*)
       read_bytes: 0 (*)
@@ -1186,7 +1344,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
       type: File
       channels: 2
       filename: "/path/to/outputfile.raw"
-      format: S32LE
+      format: S32_LE
   ```
 
   Example config for Stdin/Stdout:
@@ -1194,14 +1352,14 @@ A parameter marked (*) in any example is optional. If they are left out from the
     capture:
       type: Stdin
       channels: 2
-      format: S16LE
+      format: S16_LE
       extra_samples: 123 (*)
       skip_bytes: 0 (*)
       read_bytes: 0 (*)
     playback:
       type: Stdout
       channels: 2
-      format: S32LE
+      format: S32_LE
   ```
 
   Example config for wav input and output:
@@ -1212,7 +1370,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
     playback:
       type: File
       channels: 2
-      format: S32LE
+      format: S32_LE
       wav_header: true
       filename: "/path/to/outputfile.wav"
   ```
@@ -1284,16 +1442,14 @@ A parameter marked (*) in any example is optional. If they are left out from the
       type: Pulse
       channels: 2
       device: "MySink.monitor"
-      format: S16LE
     playback:
       type: Pulse
       channels: 2
       device: "alsa_output.pci-0000_03_00.6.analog-stereo"
-      format: S32LE
   ```
 
   ### Jack
-  The `Jack` capture and playback devices do not have a `format` parameter, since they always uses the FLOAT32LE format.
+  The `Jack` capture and playback devices do not have a `format` parameter, since they always uses the F32_LE format.
   It seems that the `device` property should always be set to "default".
   This parameter may be removed in a future version.
 
@@ -1685,16 +1841,24 @@ Allowed ranges:
 - low_boost: 0 to 20
 
 ### Delay
-The delay filter provides a delay in milliseconds, millimetres or samples.
-The `unit` can be `ms`, `mm` or `samples`, and if left out it defaults to `ms`.
+The delay filter provides a delay in milliseconds, microseconds, millimetres or samples.
+The delay value must be positive or zero.
+
+The `unit` can be `ms`, `us`, `mm` or `samples`, and if left out it defaults to `ms`.
 When giving the delay in millimetres, the speed of sound of is assumed to be 343 m/s (dry air at 20 degrees Celsius).
 
-If the `subsample` parameter is set to `true`, then it will use use an IIR filter to achieve subsample delay precision.
-If set to `false`, the value will instead be rounded to the nearest number of full samples.
-This is a little faster and should be used if subsample precision is not required.
+When `subsample` is set to `false`, the provided delay value is rounded to the nearest number of full samples.
+This is the default, and recommended for most applications.
+For example, at 44.1 kHz, one sample corresponds to 22.68 us. A delay of 0.7 ms then corresponds to 30.86 samples.
+This gets rounded to the nearest integer, 31, and the resulting delay is about 0.703 ms.
+This is then implemented by a delay line.
 
-
-The delay value must be positive or zero.
+Subsample delay precision can be achieved by setting the `subsample` parameter to `true`.
+In this mode it will also use use an IIR allpass filter in addition to the delay line.
+Using the same 0.7 ms example, the delay line is used to give a delay of 29 samples.
+A second order allpass filter is then used to give the remaining delay of 1.86 samples.
+Note that the allpass filter is an approximation that gives accurate delays at lower frequencies,
+up to about `samplerate / 4`.
 
 Example Delay filter:
 ```
@@ -1757,7 +1921,7 @@ It allows building fully linear-phase active crossovers with arbitrary slopes.
 It also supports compensating the phase shifts of loudspeakers and existing crossovers.
 In the Impulse Settings box configure the rate to the same as used in CamillaDSP
 and the format to 64 bits IEEE-754 (.dbl).
-This corresponds to raw samples in FLOAT64LE format in CamillaDSP.
+This corresponds to raw samples in F64_LE format in CamillaDSP.
 
 #### Values directly in config file
 
@@ -1782,13 +1946,13 @@ filters:
       type: Dummy
       length: 65536
 ```
-This creates a dummy minumum-phase allpass filter of length `length` (that must be at least 1).
+This creates a dummy minimum-phase allpass filter of length `length` (that must be at least 1).
 The first point has a value of one, and all the rest are zero: `[1.0, 0.0, 0.0, ..., 0.0]`.
 This is intended to provide an easy way to evaluate the CPU load for different filter lengths.
 
 #### Coefficients from Wav-file
 
-Supplying the coefficients as `.wav` file is the most convenient method.
+Supplying the coefficients as a `.wav` file is the most convenient method.
 The `Wav` type takes only one parameter `channel`.
 This is used to select which channel of a multi-channel file to load.
 For a standard stereo file, the left track is channel 0, and the right is channel 1.
@@ -1799,7 +1963,7 @@ The sample rate of the file is ignored.
 
 To load coefficients from a raw file, use the `Raw` type. This is also used to load coefficients from text files.
 Raw files are often saved with a `.dbl`, `.raw`, or `.pcm` ending.
-The lack of a header means that the files doesn't contain any information about data format etc.
+The lack of a header means that the file doesn't contain any information about data format etc.
 CamillaDSP supports loading coefficients from such files that contain a single channel only
 (stereo files are not supported), in all the most common sample formats.
 The `Raw` type supports two additional optional parameters, for advanced handling of raw files and text files with headers:
@@ -1819,12 +1983,13 @@ This format is a simple text file with one value per row:
 -0.000012
 ```
 The other possible formats are raw data:
-- S16LE: signed 16-bit little-endian integers
-- S24LE: signed 24-bit little-endian integers stored as 32 bits (with the data in the low 24)
-- S24LE3: signed 24-bit little-endian integers stored as 24 bits
-- S32LE: signed 32-bit little-endian integers
-- FLOAT32LE: 32-bit little endian float
-- FLOAT64LE: 64-bit little endian float
+- [S16_LE](sample_formats.md#s16_le)
+- [S24_3_LE](sample_formats.md#s24_3_le)
+- [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le)
+- [S24_4_LJ_LE](sample_formats.md#s24_4_lj_le)
+- [S32_LE](sample_formats.md#s32_le)
+- [F32_LE](sample_formats.md#f32_le)
+- [F64_LE](sample_formats.md#f64_le)
 
 
 ### IIR
@@ -2250,6 +2415,153 @@ pipeline:
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
 
+### RACE
+The "RACE" processor implements the recursive part of the
+[Recursive Ambiophonic Crosstalk Elimination (RACE)](http://www.filmaker.com/papers/RGRM-RACE_rev.pdf) algorithm.
+The RACE processor processes a aingle pair of channels.
+Multiple processors can be used to process additional channel pairs if needed.
+
+Parameters: 
+* `channels`: number of channels, must match the number of channels of the pipeline where the compressor is inserted.
+* `channel_a`: channel number of first channel of the pair.
+* `channel_b`: channel number of second channel of the pair.
+* `attenuation`: attenuation in dB, must be larger than zero. Typical values are 2 - 3 dB.
+* `delay`: delay value, must be larger than zero. Typical values are in the range 0.06 - 0.1 ms
+* `delay_unit`: unit for delay, see the `Delay` filter.
+* `subsample_delay`: enable subsample delay values, see the `Delay` filter.
+
+The RACE algorithm is normally used with filters,
+to only process a limited range of the audio spectrum.
+![RACE algoriths](race.png)
+
+The RACE processor implements the recursive function block
+indicated by the dashed rectangle.
+This processor is meant to be combined with normal CamillaDSP mixers
+and filters to make up the complete solution.
+
+Example configuration implementing RACE with filters:
+```yml
+processors:
+  race:
+    type: RACE
+    parameters:
+      channels: 6
+      channel_a: 2
+      channel_b: 3
+      attenuation: 3
+      delay: 0.09
+
+mixers:
+  2to6:
+    channels:
+      in: 2
+      out: 6
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 2
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 3
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+      - dest: 4
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 5
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+  6to2:
+    channels:
+      in: 6
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: -3
+            inverted: false
+          - channel: 2
+            gain: -3
+            inverted: false
+          - channel: 4
+            gain: -3
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: -3
+            inverted: false
+          - channel: 3
+            gain: -3
+            inverted: false
+          - channel: 5
+            gain: -3
+            inverted: false
+
+filters:
+  highpass_lower:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 250
+      order: 4
+  lowpass_lower:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 250
+      order: 4
+  highpass_upper:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 5000
+      order: 4
+  lowpass_upper:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 5000
+      order: 4
+
+pipeline:
+  - type: Mixer
+    name: 2to6
+  - type: Filter
+    channels: [0, 1]
+    names:
+      - lowpass_lower
+  - type: Filter
+    channels: [2, 3]
+    names:
+      - highpass_lower
+      - lowpass_upper
+  - type: Filter
+    channels: [4, 5]
+    names:
+      - highpass_upper
+  - type: Processor
+    name: race
+  - type: Mixer
+    name: 6to2
+```
 
 ## Pipeline
 The pipeline section defines the processing steps between input and output.
@@ -2344,11 +2656,13 @@ It contains only filter definitions and pipeline steps, that can be pasted into 
 If using [CamillaGUI](#gui), it is also possible to import the filters into an existing configuration.
 
 # Related projects
-## Other projects using CamillaDSP
+## Tools, utilities and libraries
 * https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels.
 * https://github.com/raptorlightning/I2S-Hat - An SPDIF Hat for the Raspberry Pi 2-X for SPDIF Communication, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/375834-i2s-hat-raspberry-pi-hat-spdif-i2s-communication-dsp.html).
 * https://github.com/daverz/camilla-remote-control - Interface for remote control of CamillaDSP using a FLIRC USB infrared receiver or remote keyboard.
 * https://github.com/Wang-Yue/CamillaDSP-Monitor - A script that provides a DSP pipeline and a spectral analyzer similar to those of the RME ADI-2 DAC/Pro.
+* https://github.com/worstenbrood/CamillaDsp.Client - CamillaDSP websocket client library for .NET, [also available on NuGet](https://www.nuget.org/packages/CamillaDsp.Client/).
+* https://github.com/AlfredJKwack/camillaEQ - A browser-based interactive graphical equalizer and spectrum analyzer for CamillaDSP, and a pipeline editor.
 
 ## Music players
 * https://moodeaudio.org/ - moOde audio player, audiophile-quality music playback for Raspberry Pi.
@@ -2365,7 +2679,7 @@ If using [CamillaGUI](#gui), it is also possible to import the filters into an e
 * https://github.com/phelluy/room_eq_mac_m1 - Room Equalization HowTo with REW and Apple Silicon
 
 ## Projects of general nature which can be useful together with CamillaDSP
-* https://github.com/scripple/alsa_hook_hwparams - Alsa hooks for reacting to sample rate and format changes.
+* https://github.com/scripple/alsa_hook_hwparams - ALSA hooks for reacting to sample rate and format changes.
 * https://github.com/HEnquist/cpal-listdevices - List audio devices with names and supported formats under Windows and macOS.
 
 ## Measurement and filter generation tools
@@ -2376,9 +2690,12 @@ fully linear-phase active crossovers with arbitrary slopes.
 https://www.roomeqwizard.com/ - REW is free software for room acoustic measurement,
 loudspeaker measurement and audio device measurement.
 ### DRC
-https://drc-fir.sourceforge.net/ -  DRC is a program used to generate correction filters
+https://drc-fir.sourceforge.net/ - DRC is a program used to generate correction filters
 for acoustic compensation of HiFi and audio systems in general,
 including listening room compensation.
+### CamillaFIR
+https://github.com/VilhoValittu/CamillaFIR - Automated FIR filter generator for REW measurements.
+Creates phase-linear correction files (WAV/TXT) for Equalizer like APO, Roon, and CamillaDSP.
 
 # Getting help
 

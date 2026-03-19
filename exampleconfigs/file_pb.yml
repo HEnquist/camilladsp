@@ -8,9 +8,9 @@ devices:
     type: RawFile
     channels: 2
     filename: "/home/henrik/test.raw"
-    format: S16LE
+    format: S16_LE
   playback:
     type: Pulse
     channels: 2
     device: "alsa_output.pci-0000_03_00.6.analog-stereo"
-    format: S32LE
+    format: S32_LE

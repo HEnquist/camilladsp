@@ -1,3 +1,19 @@
+// CamillaDSP - A flexible tool for processing audio
+// Copyright (C) 2026 Henrik Enquist
+//
+// This file is part of CamillaDSP.
+//
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
+//
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
+
 #[cfg(target_os = "linux")]
 extern crate alsa;
 #[cfg(target_os = "linux")]
@@ -22,9 +38,10 @@ extern crate native_tls;
 extern crate nix;
 extern crate num_complex;
 extern crate num_traits;
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+extern crate pipewire;
 extern crate rand;
 extern crate rand_distr;
-extern crate rawsample;
 extern crate realfft;
 extern crate rubato;
 extern crate serde;
@@ -32,8 +49,6 @@ extern crate serde_with;
 extern crate signal_hook;
 #[cfg(feature = "websocket")]
 extern crate tungstenite;
-#[cfg(target_os = "windows")]
-extern crate wasapi;
 //#[cfg(target_os = "windows")]
 //extern crate winapi;
 
@@ -45,8 +60,8 @@ use serde::Serialize;
 use std::error;
 use std::fmt;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU32, Ordering},
     Arc,
+    atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
 // Logging macros to give extra logs
@@ -101,49 +116,33 @@ impl<PrcFmt> NewValue<PrcFmt> for PrcFmt {
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 #[cfg(target_os = "linux")]
-pub mod alsadevice;
-#[cfg(target_os = "linux")]
-pub mod alsadevice_buffermanager;
-#[cfg(target_os = "linux")]
-pub mod alsadevice_utils;
+pub mod alsa_backend;
+#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+pub mod asio_backend;
+pub mod audiochunk;
 pub mod audiodevice;
-pub mod basicfilters;
-pub mod biquad;
-pub mod biquadcombo;
-pub mod compressor;
 pub mod config;
-pub mod conversions;
 #[cfg(target_os = "macos")]
-pub mod coreaudiodevice;
-pub mod countertimer;
+pub mod coreaudio_backend;
 #[cfg(feature = "cpal-backend")]
-pub mod cpaldevice;
-pub mod diffeq;
-pub mod dither;
-pub mod fftconv;
-pub mod filedevice;
-#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-pub mod filedevice_bluez;
-#[cfg(not(target_os = "linux"))]
-pub mod filereader;
-#[cfg(target_os = "linux")]
-pub mod filereader_nonblock;
+pub mod cpal_backend;
+pub mod file_backend;
 pub mod filters;
 pub mod generatordevice;
-pub mod helpers;
-pub mod limiter;
-pub mod loudness;
 pub mod mixer;
-pub mod noisegate;
+pub mod pipeline;
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+pub mod pipewire_backend;
 pub mod processing;
-#[cfg(feature = "pulse-backend")]
-pub mod pulsedevice;
+pub mod processors;
+#[cfg(all(target_os = "linux", feature = "pulse-backend"))]
+pub mod pulse_backend;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
 pub mod statefile;
+pub mod utils;
 #[cfg(target_os = "windows")]
-pub mod wasapidevice;
-pub mod wavtools;
+pub mod wasapi_backend;
 
 pub enum StatusMessage {
     PlaybackReady,
@@ -196,8 +195,8 @@ pub struct CaptureStatus {
     pub update_interval: usize,
     pub measured_samplerate: usize,
     pub signal_range: f32,
-    pub signal_rms: countertimer::ValueHistory,
-    pub signal_peak: countertimer::ValueHistory,
+    pub signal_rms: utils::countertimer::ValueHistory,
+    pub signal_peak: utils::countertimer::ValueHistory,
     pub state: ProcessingState,
     pub rate_adjust: f32,
     pub used_channels: Vec<bool>,
@@ -208,8 +207,8 @@ pub struct PlaybackStatus {
     pub update_interval: usize,
     pub clipped_samples: usize,
     pub buffer_level: usize,
-    pub signal_rms: countertimer::ValueHistory,
-    pub signal_peak: countertimer::ValueHistory,
+    pub signal_rms: utils::countertimer::ValueHistory,
+    pub signal_peak: utils::countertimer::ValueHistory,
 }
 
 #[derive(Debug)]
@@ -221,6 +220,7 @@ pub struct ProcessingParameters {
     current_volume: [AtomicU32; Self::NUM_FADERS],
     mute: [AtomicBool; Self::NUM_FADERS],
     processing_load: AtomicU32,
+    resampler_load: AtomicU32,
 }
 
 impl ProcessingParameters {
@@ -253,6 +253,7 @@ impl ProcessingParameters {
                 AtomicBool::new(initial_mutes[4]),
             ],
             processing_load: AtomicU32::new(0.0f32.to_bits()),
+            resampler_load: AtomicU32::new(0.0f32.to_bits()),
         }
     }
 
@@ -311,6 +312,14 @@ impl ProcessingParameters {
 
     pub fn processing_load(&self) -> f32 {
         f32::from_bits(self.processing_load.load(Ordering::Relaxed))
+    }
+
+    pub fn set_resampler_load(&self, load: f32) {
+        self.resampler_load.store(load.to_bits(), Ordering::Relaxed)
+    }
+
+    pub fn resampler_load(&self) -> f32 {
+        f32::from_bits(self.resampler_load.load(Ordering::Relaxed))
     }
 }
 
@@ -390,14 +399,18 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         playbacktypes.push("Alsa".to_owned());
         capturetypes.push("Alsa".to_owned());
     }
-    if cfg!(feature = "pulse-backend") {
+    if cfg!(all(target_os = "linux", feature = "pulse-backend")) {
         playbacktypes.push("Pulse".to_owned());
         capturetypes.push("Pulse".to_owned());
     }
-    if cfg!(feature = "bluez-backend") {
+    if cfg!(all(target_os = "linux", feature = "pipewire-backend")) {
+        playbacktypes.push("PipeWire".to_owned());
+        capturetypes.push("PipeWire".to_owned());
+    }
+    if cfg!(all(target_os = "linux", feature = "bluez-backend")) {
         capturetypes.push("Bluez".to_owned());
     }
-    if cfg!(feature = "jack-backend") {
+    if cfg!(all(target_os = "linux", feature = "jack-backend")) {
         playbacktypes.push("Jack".to_owned());
         capturetypes.push("Jack".to_owned());
     }
@@ -409,6 +422,10 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         playbacktypes.push("Wasapi".to_owned());
         capturetypes.push("Wasapi".to_owned());
     }
+    if cfg!(all(target_os = "windows", feature = "asio-backend")) {
+        playbacktypes.push("Asio".to_owned());
+        capturetypes.push("Asio".to_owned());
+    }
     (playbacktypes, capturetypes)
 }
 
@@ -416,13 +433,15 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
 // Returns two strings per device, the device name and a readable name.
 // Some backends do not make a diference between these, and return the same name twice.
 pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String)> {
-    match backend {
+    match backend.to_lowercase().as_str() {
         #[cfg(target_os = "linux")]
-        "Alsa" => alsadevice_utils::list_device_names(input),
+        "alsa" => alsa_backend::utils::list_device_names(input),
         #[cfg(target_os = "macos")]
-        "CoreAudio" => coreaudiodevice::list_available_devices(input),
+        "coreaudio" => coreaudio_backend::device::list_available_devices(input),
         #[cfg(target_os = "windows")]
-        "Wasapi" => wasapidevice::list_device_names(input),
+        "wasapi" => wasapi_backend::device::list_device_names(input),
+        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        "asio" => asio_backend::device::list_available_devices(),
         _ => Vec::new(),
     }
 }

@@ -1,9 +1,27 @@
+// CamillaDSP - A flexible tool for processing audio
+// Copyright (C) 2026 Henrik Enquist
+//
+// This file is part of CamillaDSP.
+//
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
+//
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
+
 // Traits for audio devices
 #[cfg(target_os = "linux")]
-use crate::alsadevice;
+use crate::alsa_backend::device as alsadevice;
+#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+use crate::asio_backend::device as asiodevice;
 use crate::config;
 #[cfg(target_os = "macos")]
-use crate::coreaudiodevice;
+use crate::coreaudio_backend::device as coreaudiodevice;
 #[cfg(all(
     feature = "cpal-backend",
     feature = "jack-backend",
@@ -14,29 +32,26 @@ use crate::coreaudiodevice;
         target_os = "netbsd"
     )
 ))]
-use crate::cpaldevice;
-use crate::filedevice;
+use crate::cpal_backend::device as cpaldevice;
+use crate::file_backend::device as filedevice;
 use crate::generatordevice;
+#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+use crate::pipewire_backend::device as pipewiredevice;
 #[cfg(feature = "pulse-backend")]
-use crate::pulsedevice;
+use crate::pulse_backend::device as pulsedevice;
 #[cfg(target_os = "windows")]
-use crate::wasapidevice;
+use crate::wasapi_backend::device as wasapidevice;
 use parking_lot::RwLock;
-use rubato::{
-    calculate_cutoff, FastFixedOut, FftFixedOut, PolynomialDegree, SincFixedOut,
-    SincInterpolationParameters, SincInterpolationType, VecResampler, WindowFunction,
-};
+
 use std::error;
 use std::fmt;
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
-use std::time::Instant;
 
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::Res;
 use crate::StatusMessage;
+use crate::audiochunk::AudioChunk;
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 pub const RATE_CHANGE_THRESHOLD_COUNT: usize = 3;
@@ -74,155 +89,11 @@ pub enum AudioMessage {
     EndOfStream,
 }
 
-/// Main container of audio data
-pub struct AudioChunk {
-    pub frames: usize,
-    pub channels: usize,
-    pub maxval: PrcFmt,
-    pub minval: PrcFmt,
-    pub timestamp: Instant,
-    pub valid_frames: usize,
-    pub waveforms: Vec<Vec<PrcFmt>>,
-}
-
-/// Container for RMS and peak values of a chunk
-pub struct ChunkStats {
-    pub rms: Vec<PrcFmt>,
-    pub peak: Vec<PrcFmt>,
-}
-
-impl ChunkStats {
-    pub fn rms_db(&self) -> Vec<f32> {
-        self.rms
-            .iter()
-            .map(|val| {
-                if *val == 0.0 {
-                    -1000.0
-                } else {
-                    20.0 * val.log10() as f32
-                }
-            })
-            .collect()
-    }
-
-    pub fn rms_linear(&self) -> Vec<f32> {
-        self.rms.iter().map(|val| *val as f32).collect()
-    }
-
-    pub fn peak_db(&self) -> Vec<f32> {
-        self.peak
-            .iter()
-            .map(|val| {
-                if *val == 0.0 {
-                    -1000.0
-                } else {
-                    20.0 * val.log10() as f32
-                }
-            })
-            .collect()
-    }
-
-    pub fn peak_linear(&self) -> Vec<f32> {
-        self.peak.iter().map(|val| *val as f32).collect()
-    }
-}
-
-impl AudioChunk {
-    pub fn new(
-        waveforms: Vec<Vec<PrcFmt>>,
-        maxval: PrcFmt,
-        minval: PrcFmt,
-        frames: usize,
-        valid_frames: usize,
-    ) -> Self {
-        let timestamp = Instant::now();
-        let channels = waveforms.len();
-        //let frames = waveforms[0].len();
-        AudioChunk {
-            frames,
-            channels,
-            maxval,
-            minval,
-            timestamp,
-            valid_frames,
-            waveforms,
-        }
-    }
-
-    pub fn from(chunk: &AudioChunk, waveforms: Vec<Vec<PrcFmt>>) -> Self {
-        let timestamp = chunk.timestamp;
-        let maxval = chunk.maxval;
-        let minval = chunk.minval;
-        let frames = chunk.frames;
-        let valid_frames = chunk.valid_frames;
-        let channels = waveforms.len();
-        AudioChunk {
-            frames,
-            channels,
-            maxval,
-            minval,
-            timestamp,
-            valid_frames,
-            waveforms,
-        }
-    }
-
-    pub fn stats(&self) -> ChunkStats {
-        let rms_peak: Vec<(PrcFmt, PrcFmt)> =
-            self.waveforms.iter().map(|wf| rms_and_peak(wf)).collect();
-        let rms: Vec<PrcFmt> = rms_peak.iter().map(|rp| rp.0).collect();
-        let peak: Vec<PrcFmt> = rms_peak.iter().map(|rp| rp.1).collect();
-        ChunkStats { rms, peak }
-    }
-
-    pub fn update_stats(&self, stats: &mut ChunkStats) {
-        stats.rms.resize(self.channels, 0.0);
-        stats.peak.resize(self.channels, 0.0);
-        for (wf, (peakval, rmsval)) in self
-            .waveforms
-            .iter()
-            .zip(stats.peak.iter_mut().zip(stats.rms.iter_mut()))
-        {
-            let (rms, peak) = rms_and_peak(wf);
-            *peakval = peak;
-            *rmsval = rms;
-        }
-        xtrace!(
-            "Stats: rms {:?}, peak {:?}",
-            stats.rms_db(),
-            stats.peak_db()
-        );
-    }
-
-    pub fn update_channel_mask(&self, mask: &mut [bool]) {
-        mask.iter_mut()
-            .zip(self.waveforms.iter())
-            .for_each(|(m, w)| *m = !w.is_empty());
-    }
-}
-
-/// Get RMS and peak value of a vector
-pub fn rms_and_peak(data: &[PrcFmt]) -> (PrcFmt, PrcFmt) {
-    if !data.is_empty() {
-        let (squaresum, peakval) = data.iter().fold((0.0, 0.0), |(sqsum, peak), value| {
-            let newpeak = if peak > value.abs() {
-                peak
-            } else {
-                value.abs()
-            };
-            (sqsum + *value * *value, newpeak)
-        });
-        ((squaresum / data.len() as PrcFmt).sqrt(), peakval)
-    } else {
-        (0.0, 0.0)
-    }
-}
-
 /// A playback device
 pub trait PlaybackDevice {
     fn start(
         &mut self,
-        channel: mpsc::Receiver<AudioMessage>,
+        channel: crossbeam_channel::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -233,10 +104,10 @@ pub trait PlaybackDevice {
 pub trait CaptureDevice {
     fn start(
         &mut self,
-        channel: mpsc::SyncSender<AudioMessage>,
+        channel: crossbeam_channel::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
-        command_channel: mpsc::Receiver<CommandMessage>,
+        command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
         processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>>;
@@ -261,16 +132,32 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             enable_rate_adjust: conf.rate_adjust(),
         }),
         #[cfg(feature = "pulse-backend")]
-        config::PlaybackDevice::Pulse {
+        config::PlaybackDevice::Pulse { channels, device } => {
+            Box::new(pulsedevice::PulsePlaybackDevice {
+                devname: device,
+                samplerate: conf.samplerate,
+                chunksize: conf.chunksize,
+                channels,
+            })
+        }
+        #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+        config::PlaybackDevice::PipeWire {
             channels,
-            device,
-            format,
-        } => Box::new(pulsedevice::PulsePlaybackDevice {
-            devname: device,
+            ref node_name,
+            ref node_description,
+            ref node_group_name,
+            ref autoconnect_to,
+        } => Box::new(pipewiredevice::PipeWirePlaybackDevice {
+            node_name: node_name.clone(),
+            node_description: node_description.clone(),
+            node_group_name: node_group_name.clone(),
+            autoconnect_to: autoconnect_to.clone(),
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            sample_format: format,
+            target_level: conf.target_level(),
+            adjust_period: conf.adjust_period(),
+            enable_rate_adjust: conf.rate_adjust(),
         }),
         config::PlaybackDevice::File {
             channels,
@@ -324,7 +211,27 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             target_level: conf.target_level(),
             adjust_period: conf.adjust_period(),
             enable_rate_adjust: conf.rate_adjust(),
+            polling: dev.is_polling(),
         }),
+        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        config::PlaybackDevice::Asio(ref dev) => {
+            let full_duplex = if let config::CaptureDevice::Asio(ref cap_dev) = conf.capture {
+                cap_dev.device == dev.device
+            } else {
+                false
+            };
+            Box::new(asiodevice::AsioPlaybackDevice {
+                devname: dev.device.clone(),
+                samplerate: conf.samplerate,
+                chunksize: conf.chunksize,
+                channels: dev.channels,
+                sample_format: dev.format,
+                target_level: conf.target_level(),
+                adjust_period: conf.adjust_period(),
+                enable_rate_adjust: conf.rate_adjust(),
+                full_duplex,
+            })
+        }
         #[cfg(all(
             feature = "cpal-backend",
             feature = "jack-backend",
@@ -344,7 +251,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             samplerate: conf.samplerate,
             chunksize: conf.chunksize,
             channels,
-            sample_format: config::SampleFormat::FLOAT32LE,
+            sample_format: config::BinarySampleFormat::F32_LE,
             target_level: conf.target_level(),
             adjust_period: conf.adjust_period(),
             enable_rate_adjust: conf.rate_adjust(),
@@ -352,182 +259,22 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     }
 }
 
-pub fn resampler_is_async(conf: &Option<config::Resampler>) -> bool {
-    matches!(
-        &conf,
-        Some(config::Resampler::AsyncSinc { .. }) | Some(config::Resampler::AsyncPoly { .. })
-    )
-}
-
-pub fn new_async_sinc_parameters(
-    resampler_conf: &config::AsyncSincParameters,
-) -> SincInterpolationParameters {
-    match &resampler_conf {
-        config::AsyncSincParameters::Profile {
-            profile: config::AsyncSincProfile::VeryFast,
-        } => {
-            let sinc_len = 64;
-            let oversampling_factor = 1024;
-            let interpolation = SincInterpolationType::Linear;
-            let window = WindowFunction::Hann2;
-            let f_cutoff = calculate_cutoff(sinc_len, window);
-            SincInterpolationParameters {
-                sinc_len,
-                f_cutoff,
-                oversampling_factor,
-                interpolation,
-                window,
-            }
-        }
-        config::AsyncSincParameters::Profile {
-            profile: config::AsyncSincProfile::Fast,
-        } => {
-            let sinc_len = 128;
-            let oversampling_factor = 1024;
-            let interpolation = SincInterpolationType::Linear;
-            let window = WindowFunction::Blackman2;
-            let f_cutoff = calculate_cutoff(sinc_len, window);
-            SincInterpolationParameters {
-                sinc_len,
-                f_cutoff,
-                oversampling_factor,
-                interpolation,
-                window,
-            }
-        }
-        config::AsyncSincParameters::Profile {
-            profile: config::AsyncSincProfile::Balanced,
-        } => {
-            let sinc_len = 192;
-            let oversampling_factor = 512;
-            let interpolation = SincInterpolationType::Quadratic;
-            let window = WindowFunction::BlackmanHarris2;
-            let f_cutoff = calculate_cutoff(sinc_len, window);
-            SincInterpolationParameters {
-                sinc_len,
-                f_cutoff,
-                oversampling_factor,
-                interpolation,
-                window,
-            }
-        }
-        config::AsyncSincParameters::Profile {
-            profile: config::AsyncSincProfile::Accurate,
-        } => {
-            let sinc_len = 256;
-            let oversampling_factor = 256;
-            let interpolation = SincInterpolationType::Cubic;
-            let window = WindowFunction::BlackmanHarris2;
-            let f_cutoff = calculate_cutoff(sinc_len, window);
-            SincInterpolationParameters {
-                sinc_len,
-                f_cutoff,
-                oversampling_factor,
-                interpolation,
-                window,
-            }
-        }
-        config::AsyncSincParameters::Free {
-            sinc_len,
-            window,
-            f_cutoff,
-            interpolation,
-            oversampling_factor,
-        } => {
-            let interpolation = match interpolation {
-                config::AsyncSincInterpolation::Nearest => SincInterpolationType::Nearest,
-                config::AsyncSincInterpolation::Linear => SincInterpolationType::Linear,
-                config::AsyncSincInterpolation::Quadratic => SincInterpolationType::Quadratic,
-                config::AsyncSincInterpolation::Cubic => SincInterpolationType::Cubic,
-            };
-
-            let wind = match window {
-                config::AsyncSincWindow::Hann => WindowFunction::Hann,
-                config::AsyncSincWindow::Hann2 => WindowFunction::Hann2,
-                config::AsyncSincWindow::Blackman => WindowFunction::Blackman,
-                config::AsyncSincWindow::Blackman2 => WindowFunction::Blackman2,
-                config::AsyncSincWindow::BlackmanHarris => WindowFunction::BlackmanHarris,
-                config::AsyncSincWindow::BlackmanHarris2 => WindowFunction::BlackmanHarris2,
-            };
-            let cutoff = if let Some(co) = f_cutoff {
-                *co
-            } else {
-                calculate_cutoff(*sinc_len, wind)
-            };
-            SincInterpolationParameters {
-                sinc_len: *sinc_len,
-                f_cutoff: cutoff,
-                oversampling_factor: *oversampling_factor,
-                interpolation,
-                window: wind,
-            }
-        }
-    }
-}
-
-pub fn new_resampler(
-    resampler_conf: &Option<config::Resampler>,
-    num_channels: usize,
-    samplerate: usize,
-    capture_samplerate: usize,
-    chunksize: usize,
-) -> Option<Box<dyn VecResampler<PrcFmt>>> {
-    match &resampler_conf {
-        Some(config::Resampler::AsyncSinc(parameters)) => {
-            let sinc_params = new_async_sinc_parameters(parameters);
-            debug!(
-                "Creating asynchronous resampler with parameters: {:?}",
-                sinc_params
-            );
-            Some(Box::new(
-                SincFixedOut::<PrcFmt>::new(
-                    samplerate as f64 / capture_samplerate as f64,
-                    1.1,
-                    sinc_params,
-                    chunksize,
-                    num_channels,
-                )
-                .unwrap(),
-            ))
-        }
-        Some(config::Resampler::AsyncPoly { interpolation }) => {
-            let degree = match interpolation {
-                config::AsyncPolyInterpolation::Linear => PolynomialDegree::Linear,
-                config::AsyncPolyInterpolation::Cubic => PolynomialDegree::Cubic,
-                config::AsyncPolyInterpolation::Quintic => PolynomialDegree::Quintic,
-                config::AsyncPolyInterpolation::Septic => PolynomialDegree::Septic,
-            };
-            Some(Box::new(
-                FastFixedOut::<PrcFmt>::new(
-                    samplerate as f64 / capture_samplerate as f64,
-                    1.1,
-                    degree,
-                    chunksize,
-                    num_channels,
-                )
-                .unwrap(),
-            ))
-        }
-        Some(config::Resampler::Synchronous) => Some(Box::new(
-            FftFixedOut::<PrcFmt>::new(capture_samplerate, samplerate, chunksize, 2, num_channels)
-                .unwrap(),
-        )),
-        None => None,
-    }
-}
-
 /// Create a capture device.
 pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     // Use `capture_samplerate` from config if given, and resampling is enabled.
     // Else, use `samplerate`.
-    let capture_samplerate = if conf.capture_samplerate.is_some() && conf.resampler.is_some() {
-        conf.capture_samplerate.unwrap()
+    let capture_samplerate = if let Some(capture_rate) = conf.capture_samplerate
+        && conf.resampler.is_some()
+    {
+        capture_rate
     } else {
         conf.samplerate
     };
     if let Some(cr) = conf.capture_samplerate {
         if cr != conf.samplerate && conf.resampler.is_none() {
-            warn!("Resampling is disabled and capture_samplerate is different than samplerate, ignoring capture_samplerate.");
+            warn!(
+                "Resampling is disabled and capture_samplerate is different than samplerate, ignoring capture_samplerate."
+            );
         }
     }
     let diff_rates = capture_samplerate != conf.samplerate;
@@ -541,13 +288,17 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         && !conf.rate_adjust()
         && matches!(&conf.resampler, Some(config::Resampler::AsyncSinc { .. }))
     {
-        info!("Using AsyncSinc resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time.");
+        info!(
+            "Using AsyncSinc resampler for synchronous resampling. Consider switching to \"Synchronous\" to save CPU time."
+        );
     } else if diff_rates
         && conf.resampler.is_some()
         && !conf.rate_adjust()
         && matches!(&conf.resampler, Some(config::Resampler::AsyncPoly { .. }))
     {
-        info!("Using AsyncPoly resampler for synchronous resampling. Consider switching to \"Synchronous\" to increase resampling quality.");
+        info!(
+            "Using AsyncPoly resampler for synchronous resampling. Consider switching to \"Synchronous\" to increase resampling quality."
+        );
     }
     match conf.capture {
         #[cfg(target_os = "linux")]
@@ -579,7 +330,6 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         config::CaptureDevice::Pulse {
             channels,
             ref device,
-            format,
             ..
         } => Box::new(pulsedevice::PulseCaptureDevice {
             devname: device.clone(),
@@ -588,7 +338,27 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
-            sample_format: format,
+            silence_threshold: conf.silence_threshold(),
+            silence_timeout: conf.silence_timeout(),
+        }),
+        #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+        config::CaptureDevice::PipeWire {
+            channels,
+            ref node_name,
+            ref node_description,
+            ref node_group_name,
+            ref autoconnect_to,
+            ..
+        } => Box::new(pipewiredevice::PipeWireCaptureDevice {
+            node_name: node_name.clone(),
+            node_description: node_description.clone(),
+            node_group_name: node_group_name.clone(),
+            autoconnect_to: autoconnect_to.clone(),
+            samplerate: conf.samplerate,
+            resampler_config: conf.resampler,
+            capture_samplerate,
+            chunksize: conf.chunksize,
+            channels,
             silence_threshold: conf.silence_threshold(),
             silence_timeout: conf.silence_timeout(),
         }),
@@ -696,7 +466,30 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             silence_timeout: conf.silence_timeout(),
             stop_on_rate_change: conf.stop_on_rate_change(),
             rate_measure_interval: conf.rate_measure_interval(),
+            polling: dev.is_polling(),
         }),
+        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        config::CaptureDevice::Asio(ref dev) => {
+            let full_duplex = if let config::PlaybackDevice::Asio(ref pb_dev) = conf.playback {
+                pb_dev.device == dev.device
+            } else {
+                false
+            };
+            Box::new(asiodevice::AsioCaptureDevice {
+                devname: dev.device.clone(),
+                samplerate: conf.samplerate,
+                capture_samplerate,
+                resampler_config: conf.resampler,
+                chunksize: conf.chunksize,
+                channels: dev.channels,
+                sample_format: dev.format,
+                silence_threshold: conf.silence_threshold(),
+                silence_timeout: conf.silence_timeout(),
+                stop_on_rate_change: conf.stop_on_rate_change(),
+                rate_measure_interval: conf.rate_measure_interval(),
+                full_duplex,
+            })
+        }
         #[cfg(all(
             feature = "cpal-backend",
             feature = "jack-backend",
@@ -719,7 +512,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             capture_samplerate,
             chunksize: conf.chunksize,
             channels,
-            sample_format: config::SampleFormat::FLOAT32LE,
+            sample_format: config::BinarySampleFormat::F32_LE,
             silence_threshold: conf.silence_threshold(),
             silence_timeout: conf.silence_timeout(),
             stop_on_rate_change: conf.stop_on_rate_change(),
@@ -730,7 +523,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
 
 #[cfg(test)]
 mod tests {
-    use crate::audiodevice::{rms_and_peak, AudioChunk, ChunkStats};
+    use crate::audiochunk::{AudioChunk, ChunkStats, rms_and_peak};
 
     #[test]
     fn vec_rms_and_peak() {

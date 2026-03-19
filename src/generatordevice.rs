@@ -1,14 +1,30 @@
+// CamillaDSP - A flexible tool for processing audio
+// Copyright (C) 2026 Henrik Enquist
+//
+// This file is part of CamillaDSP.
+//
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
+//
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
+
+use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
 use crate::config;
 
 use std::f64::consts::PI;
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
 use parking_lot::RwLock;
 
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::{SeedableRng, rngs::SmallRng};
 use rand_distr::{Distribution, Uniform};
 
 use crate::CaptureStatus;
@@ -18,6 +34,8 @@ use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
+use crate::utils::decibels::db_to_linear;
+use crate::utils::stash::{container_from_stash, vec_from_stash};
 
 struct SineGenerator {
     time: f64,
@@ -80,8 +98,8 @@ struct NoiseGenerator {
 
 impl NoiseGenerator {
     fn new(amplitude: PrcFmt) -> Self {
-        let rng = SmallRng::from_entropy();
-        let distribution = Uniform::new_inclusive(-amplitude, amplitude);
+        let rng = SmallRng::from_os_rng();
+        let distribution = Uniform::new_inclusive(-amplitude, amplitude).unwrap();
         NoiseGenerator { rng, distribution }
     }
 }
@@ -101,9 +119,9 @@ pub struct GeneratorDevice {
 }
 
 struct CaptureChannels {
-    audio: mpsc::SyncSender<AudioMessage>,
+    audio: crossbeam_channel::Sender<AudioMessage>,
     status: crossbeam_channel::Sender<StatusMessage>,
-    command: mpsc::Receiver<CommandMessage>,
+    command: crossbeam_channel::Receiver<CommandMessage>,
 }
 
 struct GeneratorParams {
@@ -112,10 +130,6 @@ struct GeneratorParams {
     capture_status: Arc<RwLock<CaptureStatus>>,
     signal: config::Signal,
     samplerate: usize,
-}
-
-fn decibel_to_amplitude(level: PrcFmt) -> PrcFmt {
-    (10.0 as PrcFmt).powf(level / 20.0)
 }
 
 fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
@@ -130,15 +144,15 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
 
     let mut generator: &mut dyn Iterator<Item = PrcFmt> = match params.signal {
         config::Signal::Sine { freq, level } => {
-            sine_gen = SineGenerator::new(freq, params.samplerate, decibel_to_amplitude(level));
+            sine_gen = SineGenerator::new(freq, params.samplerate, db_to_linear(level));
             &mut sine_gen as &mut dyn Iterator<Item = PrcFmt>
         }
         config::Signal::Square { freq, level } => {
-            square_gen = SquareGenerator::new(freq, params.samplerate, decibel_to_amplitude(level));
+            square_gen = SquareGenerator::new(freq, params.samplerate, db_to_linear(level));
             &mut square_gen as &mut dyn Iterator<Item = PrcFmt>
         }
         config::Signal::WhiteNoise { level } => {
-            noise_gen = NoiseGenerator::new(decibel_to_amplitude(level));
+            noise_gen = NoiseGenerator::new(db_to_linear(level));
             &mut noise_gen as &mut dyn Iterator<Item = PrcFmt>
         }
     };
@@ -158,21 +172,21 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
             Ok(CommandMessage::SetSpeed { .. }) => {
                 warn!("Signal generator does not support rate adjust. Ignoring request.");
             }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 error!("Command channel was closed");
                 break;
             }
         };
-        let mut waveform = vec![0.0; params.chunksize];
+        let mut waveform = vec_from_stash(params.chunksize);
         for (sample, value) in waveform.iter_mut().zip(&mut generator) {
             *sample = value;
         }
-        let mut waveforms = Vec::with_capacity(params.channels);
-        waveforms.push(waveform);
+        let mut waveforms = container_from_stash(params.channels);
         for _ in 1..params.channels {
-            waveforms.push(waveforms[0].clone());
+            waveforms.push(waveform.clone());
         }
+        waveforms.insert(0, waveform);
 
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, params.chunksize, params.chunksize);
 
@@ -199,10 +213,10 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
 impl CaptureDevice for GeneratorDevice {
     fn start(
         &mut self,
-        channel: mpsc::SyncSender<AudioMessage>,
+        channel: crossbeam_channel::Sender<AudioMessage>,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
-        command_channel: mpsc::Receiver<CommandMessage>,
+        command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
         _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {

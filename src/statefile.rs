@@ -1,11 +1,26 @@
-//use crate::config::Configuration;
+// CamillaDSP - A flexible tool for processing audio
+// Copyright (C) 2026 Henrik Enquist
+//
+// This file is part of CamillaDSP.
+//
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
+//
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
+
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::ProcessingParameters;
 
@@ -34,7 +49,7 @@ pub fn load_state(filename: &str) -> Option<State> {
             return None;
         }
     };
-    let state: State = match serde_yaml::from_str(&contents) {
+    let state: State = match yaml_serde::from_str(&contents) {
         Ok(st) => st,
         Err(err) => {
             warn!("Invalid statefile, ignoring! Error:\n{err}");
@@ -61,7 +76,7 @@ pub fn save_state(
 }
 
 pub fn save_state_to_file(filename: &str, state: &State) -> bool {
-    debug!("Saving state to {}", filename);
+    debug!("Saving state to {filename}");
     match std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -69,24 +84,18 @@ pub fn save_state_to_file(filename: &str, state: &State) -> bool {
         .open(filename)
     {
         Ok(f) => {
-            if let Err(writeerr) = serde_yaml::to_writer(&f, &state) {
-                error!(
-                    "Unable to write to statefile '{}', error: {}",
-                    filename, writeerr
-                );
+            if let Err(writeerr) = yaml_serde::to_writer(&f, &state) {
+                error!("Unable to write to statefile '{filename}', error: {writeerr}");
                 return false;
             }
             if let Err(syncerr) = &f.sync_all() {
-                error!(
-                    "Unable to commit statefile '{}' data to disk, error: {}",
-                    filename, syncerr
-                );
+                error!("Unable to commit statefile '{filename}' data to disk, error: {syncerr}");
                 return false;
             }
             true
         }
         Err(openerr) => {
-            error!("Unable to open statefile {}, error: {}", filename, openerr);
+            error!("Unable to open statefile {filename}, error: {openerr}");
             false
         }
     }

@@ -1,20 +1,35 @@
+// CamillaDSP - A flexible tool for processing audio
+// Copyright (C) 2026 Henrik Enquist
+//
+// This file is part of CamillaDSP.
+//
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
+//
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
+
+use crate::ProcessingParameters;
 use crate::audiodevice::*;
 use crate::config;
-use crate::filters;
-use crate::ProcessingParameters;
+use crate::pipeline;
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
 pub fn run_processing(
     conf_proc: config::Configuration,
     barrier_proc: Arc<Barrier>,
-    tx_pb: mpsc::SyncSender<AudioMessage>,
-    rx_cap: mpsc::Receiver<AudioMessage>,
-    rx_pipeconf: mpsc::Receiver<(config::ConfigChange, config::Configuration)>,
+    tx_pb: crossbeam_channel::Sender<AudioMessage>,
+    rx_cap: crossbeam_channel::Receiver<AudioMessage>,
+    rx_pipeconf: crossbeam_channel::Receiver<(config::ConfigChange, config::Configuration)>,
     processing_params: Arc<ProcessingParameters>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
@@ -27,9 +42,8 @@ pub fn run_processing(
             .unwrap_or_default();
         if nbr_threads > hw_threads && multithreaded {
             warn!(
-                "Requested {} worker threads. For optimal performance, this number should not \
-                exceed the available CPU cores, which is {}.",
-                nbr_threads, hw_threads
+                "Requested {nbr_threads} worker threads. For optimal performance, this number should not \
+                exceed the available CPU cores, which is {hw_threads}."
             );
         }
         if hw_threads == 1 && multithreaded {
@@ -43,7 +57,7 @@ pub fn run_processing(
                    Performance can improve by adding more threads or disabling multithreading."
             );
         }
-        let mut pipeline = filters::Pipeline::from_config(conf_proc, processing_params.clone());
+        let mut pipeline = pipeline::Pipeline::from_config(conf_proc, processing_params.clone());
         debug!("build filters, waiting to start processing loop");
 
         let thread_handle =
@@ -53,10 +67,7 @@ pub fn run_processing(
                     Some(h)
                 }
                 Err(err) => {
-                    warn!(
-                        "Processing thread could not get real time priority, error: {}",
-                        err
-                    );
+                    warn!("Processing thread could not get real time priority, error: {err}");
                     None
                 }
             };
@@ -94,7 +105,7 @@ pub fn run_processing(
                     });
                 }
                 Err(err) => {
-                    warn!("Failed to build thread pool, error: {}", err);
+                    warn!("Failed to build thread pool, error: {err}");
                 }
             };
         }
@@ -129,7 +140,7 @@ pub fn run_processing(
                     }
                 }
                 Err(err) => {
-                    error!("Message channel error: {}", err);
+                    error!("Message channel error: {err}");
                     let msg = AudioMessage::EndOfStream;
                     if tx_pb.send(msg).is_err() {
                         info!("Playback thread has already stopped.");
@@ -143,7 +154,7 @@ pub fn run_processing(
                     config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
                         debug!("Rebuilding pipeline.");
                         let new_pipeline =
-                            filters::Pipeline::from_config(new_config, processing_params.clone());
+                            pipeline::Pipeline::from_config(new_config, processing_params.clone());
                         pipeline = new_pipeline;
                     }
                     config::ConfigChange::FilterParameters {
@@ -151,10 +162,7 @@ pub fn run_processing(
                         mixers,
                         processors,
                     } => {
-                        debug!(
-                            "Updating parameters of filters: {:?}, mixers: {:?}.",
-                            filters, mixers
-                        );
+                        debug!("Updating parameters of filters: {filters:?}, mixers: {mixers:?}.");
                         pipeline.update_parameters(new_config, &filters, &mixers, &processors);
                     }
                     config::ConfigChange::Devices => {
@@ -167,6 +175,7 @@ pub fn run_processing(
             };
         }
         processing_params.set_processing_load(0.0);
+        processing_params.set_resampler_load(0.0);
         if let Some(h) = thread_handle {
             match demote_current_thread_from_real_time(h) {
                 Ok(_) => {

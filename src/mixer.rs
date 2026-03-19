@@ -1,7 +1,25 @@
-use crate::audiodevice::AudioChunk;
-use crate::config;
+// CamillaDSP - A flexible tool for processing audio
+// Copyright (C) 2026 Henrik Enquist
+//
+// This file is part of CamillaDSP.
+//
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
+//
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
+
 use crate::PrcFmt;
 use crate::Res;
+use crate::audiochunk::AudioChunk;
+use crate::config;
+use crate::utils::decibels::gain_from_value;
+use crate::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
 
 #[derive(Clone)]
 pub struct Mixer {
@@ -15,18 +33,6 @@ pub struct Mixer {
 pub struct MixerSource {
     pub channel: usize,
     pub gain: PrcFmt,
-}
-
-fn calculate_gain(gain_value: PrcFmt, inverted: bool, linear: bool) -> PrcFmt {
-    let mut gain = if linear {
-        gain_value
-    } else {
-        (10.0 as PrcFmt).powf(gain_value / 20.0)
-    };
-    if inverted {
-        gain = -gain;
-    }
-    gain
 }
 
 impl Mixer {
@@ -43,7 +49,7 @@ impl Mixer {
                         let gain_value = cfg_src.gain();
                         let inverted = cfg_src.is_inverted();
                         let linear = cfg_src.scale() == config::GainScale::Linear;
-                        let gain = calculate_gain(gain_value, inverted, linear);
+                        let gain = gain_from_value(gain_value, linear, inverted, false);
                         let src = MixerSource {
                             channel: cfg_src.channel,
                             gain,
@@ -71,7 +77,7 @@ impl Mixer {
                 let gain_value = cfg_src.gain();
                 let inverted = cfg_src.is_inverted();
                 let linear = cfg_src.scale() == config::GainScale::Linear;
-                let gain = calculate_gain(gain_value, inverted, linear);
+                let gain = gain_from_value(gain_value, linear, inverted, false);
                 let src = MixerSource {
                     channel: cfg_src.channel,
                     gain,
@@ -85,22 +91,29 @@ impl Mixer {
     }
 
     /// Apply a Mixer to an AudioChunk, yielding a new AudioChunk with a possibly different number of channels.
-    pub fn process_chunk(&mut self, input: &AudioChunk) -> AudioChunk {
-        let mut waveforms = Vec::<Vec<PrcFmt>>::with_capacity(self.channels_out);
+    pub fn process_chunk(&mut self, input: AudioChunk) -> AudioChunk {
+        let mut waveforms = container_from_stash(self.channels_out);
         for out_chan in 0..self.channels_out {
-            waveforms.push(vec![0.0; input.frames]);
+            let v = vec_from_stash(input.frames);
+            waveforms.push(v);
             for source in 0..self.mapping[out_chan].len() {
                 let source_chan = self.mapping[out_chan][source].channel;
                 if !input.waveforms[source_chan].is_empty() {
                     let gain = self.mapping[out_chan][source].gain;
-                    for n in 0..input.frames {
-                        waveforms[out_chan][n] += gain * input.waveforms[source_chan][n];
+                    for (out_val, in_val) in waveforms[out_chan]
+                        .iter_mut()
+                        .zip(input.waveforms[source_chan].iter())
+                        .take(input.frames)
+                    {
+                        *out_val += gain * in_val;
                     }
                 }
             }
         }
 
-        AudioChunk::from(input, waveforms)
+        let new_chunk = AudioChunk::from(&input, waveforms);
+        recycle_chunk(input);
+        new_chunk
     }
 }
 
@@ -108,6 +121,8 @@ impl Mixer {
 pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
     let chan_in = mixer_config.channels.r#in;
     let chan_out = mixer_config.channels.out;
+    let mut output_channels: Vec<usize> = Vec::with_capacity(chan_out);
+    let mut input_channels: Vec<usize> = Vec::with_capacity(chan_in);
     for mapping in mixer_config.mapping.iter() {
         if mapping.dest >= chan_out {
             let msg = format!(
@@ -117,12 +132,28 @@ pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
             );
             return Err(config::ConfigError::new(&msg).into());
         }
+        if output_channels.contains(&mapping.dest) {
+            let msg = format!(
+                "There is more than one mapping for destination channel {}",
+                mapping.dest,
+            );
+            return Err(config::ConfigError::new(&msg).into());
+        }
+        output_channels.push(mapping.dest);
+        input_channels.clear();
         for source in mapping.sources.iter() {
             if source.channel >= chan_in {
                 let msg = format!(
                     "Invalid source channel {}, max is {}.",
                     source.channel,
                     chan_in - 1
+                );
+                return Err(config::ConfigError::new(&msg).into());
+            }
+            if input_channels.contains(&source.channel) {
+                let msg = format!(
+                    "Input channel {} is listed mote than once for destination channel {}",
+                    source.channel, mapping.dest,
                 );
                 return Err(config::ConfigError::new(&msg).into());
             }

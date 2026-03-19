@@ -3,7 +3,7 @@ on: [push, pull_request]
 name: CI test and lint
 
 jobs:
-  check_lint_test_linux:
+  check_lint_test_linux_amd64:
     name: Check test and lint Linux
     runs-on: ubuntu-latest
     #container: ubuntu:20.04
@@ -25,6 +25,9 @@ jobs:
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
+      - name: Install PipeWire development files
+        run: sudo apt-get install libpipewire-0.3-dev -y
+
       - name: Install PulseAudio
         run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
 
@@ -41,7 +44,7 @@ jobs:
         run: cargo check --no-default-features
 
       - name: Run cargo test with all supported backends
-        run: cargo test --features bluez-backend,cpal-backend,jack-backend,pulse-backend,
+        run: cargo test --features bluez-backend,cpal-backend,jack-backend,pulse-backend,pipewire-backend
 
       - name: Run cargo test with all optional features
         run: cargo test --features 32bit,debug,secure-websocket
@@ -52,8 +55,41 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy -- -D warnings
 
-  check_test_arm:
-    name: Check and test Linux arm
+  check_test_aarch64:
+    name: Check and test Linux arm 64bit
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Update package list
+        run: sudo apt-get update
+
+      - name: Install utils
+        run: sudo apt-get install curl wget -y
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Alsa devel
+        run: sudo apt-get install libasound2-dev -y
+
+      - name: Run cargo check
+        run: cargo check
+
+      - name: Run cargo test
+        run: cargo test
+
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Run cargo clippy
+        run: cargo clippy -- -D warnings
+
+  check_test_armv7:
+    name: Check and test Linux armv7
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -75,30 +111,6 @@ jobs:
 
       - name: Run cargo test for arm
         run: cross test --target armv7-unknown-linux-gnueabihf
-
-  check_test_arm64:
-    name: Check and test Linux arm 64bit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-gnu
-
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build image
-        run: docker build -t cross/armv8:v1 --file Dockerfile_armv8 ./ 
-
-      - name: Run cargo check
-        run: cross check --target aarch64-unknown-linux-gnu
-
-      - name: Run cargo test for arm
-        run: cross test --target aarch64-unknown-linux-gnu
 
   check_test_armv6:
     name: Check and test Linux arm v6
@@ -126,7 +138,7 @@ jobs:
         env: 
           LD_LIBRARY_PATH: /usr/lib/arm-linux-gnueabihf
 
-  check_test_windows:
+  check_test_and_lint_windows:
     name: Check and test Windows
     runs-on: windows-latest
     steps:
@@ -135,6 +147,8 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Run cargo check
         run: cargo check --no-default-features
@@ -142,25 +156,18 @@ jobs:
       - name: Run cargo test
         run: cargo test --no-default-features
 
-  check_test_windows7:
-    name: Check and test Windows7 (rustc 1.75)
-    runs-on: windows-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.75.0
+      - name: Run cargo clippy
+        run: cargo clippy -- -D warnings
 
-      - name: Run cargo check
-        run: cargo check --no-default-features
-
-      - name: Run cargo test
-        run: cargo test --no-default-features
+      - name: Run cargo clippy with ASIO backend
+        run: cargo clippy --features asio-backend -- -D warnings
 
   check_test_macos:
     name: Check and test macOS Intel
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -174,7 +181,7 @@ jobs:
       - name: Run cargo test
         run: cargo test --no-default-features
 
-  check_macos_arm:
+  check_test_and_lint_macos_arm:
     name: Check and test macOS Arm
     runs-on: macos-latest
     steps:
@@ -183,12 +190,20 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Run cargo check
         run: cargo check --no-default-features
 
       - name: Run cargo test
         run: cargo test --no-default-features
+
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Run cargo clippy
+        run: cargo clippy -- -D warnings
 
 
 

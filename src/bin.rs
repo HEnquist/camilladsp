@@ -1,3 +1,19 @@
+// CamillaDSP - A flexible tool for processing audio
+// Copyright (C) 2026 Henrik Enquist
+//
+// This file is part of CamillaDSP.
+//
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
+//
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
+
 #[cfg(target_os = "linux")]
 extern crate alsa;
 extern crate camillalib;
@@ -23,13 +39,13 @@ extern crate flexi_logger;
 #[macro_use]
 extern crate log;
 
-use clap::{crate_authors, crate_description, crate_name, crate_version, Arg, ArgAction, Command};
+use clap::{Arg, ArgAction, Command, crate_authors, crate_description, crate_name, crate_version};
 use crossbeam_channel::select;
+use git_version::git_version;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::env;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
@@ -37,35 +53,36 @@ use std::time::Duration;
 use flexi_logger::DeferredNow;
 use log::Record;
 #[cfg(not(windows))]
-use signal_hook::consts::signal::*;
-#[cfg(not(windows))]
 use signal_hook::consts::TERM_SIGNALS;
 #[cfg(not(windows))]
-use signal_hook::iterator::{exfiltrator::SignalOnly, SignalsInfo};
+use signal_hook::consts::signal::*;
+#[cfg(not(windows))]
+use signal_hook::iterator::{SignalsInfo, exfiltrator::SignalOnly};
 
 use camillalib::Res;
 
+use camillalib::ControllerMessage;
 use camillalib::audiodevice;
 use camillalib::config;
-use camillalib::countertimer;
 use camillalib::processing;
 #[cfg(feature = "websocket")]
 use camillalib::socketserver;
 use camillalib::statefile;
-use camillalib::ControllerMessage;
+use camillalib::utils::countertimer;
 #[cfg(feature = "websocket")]
 use std::net::IpAddr;
 
 use camillalib::{
-    list_supported_devices, CaptureStatus, CommandMessage, ExitState, PlaybackStatus,
-    ProcessingParameters, ProcessingState, ProcessingStatus, SharedConfigs, StatusMessage,
-    StatusStructs, StopReason,
+    CaptureStatus, CommandMessage, ExitState, PlaybackStatus, ProcessingParameters,
+    ProcessingState, ProcessingStatus, SharedConfigs, StatusMessage, StatusStructs, StopReason,
+    list_supported_devices,
 };
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
 const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
 const EXIT_FORCED: i32 = 103; // Exit was forced by a second SIGINT
 const EXIT_OK: i32 = 0; // All ok
+const GIT_HASH: &str = git_version!(fallback = "unknown");
 
 // Customized version of `colored_opt_format` from flexi_logger.
 fn custom_colored_logger_format(
@@ -76,10 +93,11 @@ fn custom_colored_logger_format(
     let level = record.level();
     write!(
         w,
-        "{} {:<5} [{}:{}] {}",
+        "{} {:<5} [{}] <{}:{}> {}",
         now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
         flexi_logger::style(level).paint(level.to_string()),
-        record.file().unwrap_or("<unnamed>"),
+        record.module_path().unwrap_or("*unknown module*"),
+        record.file().unwrap_or("*unknown file*"),
         record.line().unwrap_or(0),
         &record.args()
     )
@@ -93,10 +111,11 @@ pub fn custom_logger_format(
 ) -> Result<(), std::io::Error> {
     write!(
         w,
-        "{} {:<5} [{}:{}] {}",
+        "{} {:<5} [{}] <{}:{}> {}",
         now.now().format("%Y-%m-%d %H:%M:%S%.6f"),
         record.level(),
-        record.file().unwrap_or("<unnamed>"),
+        record.module_path().unwrap_or("*unknown module*"),
+        record.file().unwrap_or("*unknown file*"),
         record.line().unwrap_or(0),
         &record.args()
     )
@@ -124,15 +143,15 @@ fn run(
             return Ok(ExitState::Exit);
         }
     };
-    let (tx_pb, rx_pb) = mpsc::sync_channel(active_config.devices.queuelimit());
-    let (tx_cap, rx_cap) = mpsc::sync_channel(active_config.devices.queuelimit());
+    let (tx_pb, rx_pb) = crossbeam_channel::bounded(active_config.devices.queuelimit());
+    let (tx_cap, rx_cap) = crossbeam_channel::bounded(active_config.devices.queuelimit());
 
     let (tx_status, rx_status) = crossbeam_channel::unbounded();
     let tx_status_pb = tx_status.clone();
     let tx_status_cap = tx_status;
 
-    let (tx_command_cap, rx_command_cap) = mpsc::channel();
-    let (tx_pipeconf, rx_pipeconf) = mpsc::channel();
+    let (tx_command_cap, rx_command_cap) = crossbeam_channel::unbounded();
+    let (tx_pipeconf, rx_pipeconf) = crossbeam_channel::unbounded();
 
     let barrier = Arc::new(Barrier::new(4));
     let barrier_pb = barrier.clone();
@@ -160,7 +179,7 @@ fn run(
         .unwrap();
 
     let used_channels = config::used_capture_channels(&active_config);
-    debug!("Using channels {:?}", used_channels);
+    debug!("Using channels {used_channels:?}");
     {
         let mut capture_status = status_structs.capture.write();
         capture_status.state = ProcessingState::Starting;
@@ -198,6 +217,8 @@ fn run(
                             debug!("Dropping config change command since there are more commands in the queue");
                             continue;
                         }
+                        status_structs.processing.set_processing_load(0.0);
+                        status_structs.processing.set_resampler_load(0.0);
                         let comp = config::config_diff(&active_config, &new_conf);
                         match comp {
                             config::ConfigChange::Pipeline
@@ -207,7 +228,7 @@ fn run(
                                 active_config = *new_conf;
                                 *shared_configs.active.lock() = Some(active_config.clone());
                                 let used_channels = config::used_capture_channels(&active_config);
-                                debug!("Using channels {:?}", used_channels);
+                                debug!("Using channels {used_channels:?}");
                                 status_structs.capture.write().used_channels = used_channels;
                                 debug!("Sent changes to pipeline");
                             }
@@ -216,9 +237,9 @@ fn run(
                                 if tx_command_cap.send(CommandMessage::Exit).is_err() {
                                     debug!("Capture thread has already exited");
                                 }
-                                trace!("Wait for pb..");
+                                trace!("Wait for playback thread to exit..");
                                 pb_handle.join().unwrap();
-                                trace!("Wait for cap..");
+                                trace!("Wait for capture thread to exit..");
                                 cap_handle.join().unwrap();
                                 *shared_configs.active.lock() = Some(*new_conf);
                                 trace!("All threads stopped, returning");
@@ -234,9 +255,9 @@ fn run(
                         if tx_command_cap.send(CommandMessage::Exit).is_err() {
                             debug!("Capture thread has already exited");
                         }
-                        trace!("Wait for pb..");
+                        trace!("Wait for playback thread to exit..");
                         pb_handle.join().unwrap();
-                        trace!("Wait for cap..");
+                        trace!("Wait for capture thread to exit..");
                         cap_handle.join().unwrap();
                         {
                             let mut active_cfg_shared = shared_configs.active.lock();
@@ -252,9 +273,9 @@ fn run(
                         if tx_command_cap.send(CommandMessage::Exit).is_err() {
                             debug!("Capture thread has already exited");
                         }
-                        trace!("Wait for pb..");
+                        trace!("Wait for playback thread to exit..");
                         pb_handle.join().unwrap();
-                        trace!("Wait for cap..");
+                        trace!("Wait for capture thread to exit..");
                         cap_handle.join().unwrap();
                         *shared_configs.previous.lock() = Some(active_config);
                         trace!("All threads stopped, exiting");
@@ -290,7 +311,7 @@ fn run(
                             }
                         }
                         StatusMessage::PlaybackError(message) => {
-                            error!("Playback error: {}", message);
+                            error!("Playback error: {message}");
                             if tx_command_cap.send(CommandMessage::Exit).is_err() {
                                 debug!("Capture thread has already exited");
                             }
@@ -307,11 +328,12 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
+                            status_structs.capture.write().state = ProcessingState::Inactive;
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
                         StatusMessage::CaptureError(message) => {
-                            error!("Capture error: {}", message);
+                            error!("Capture error: {message}");
                             if is_starting {
                                 debug!("Error while starting, release barrier");
                                 barrier.wait();
@@ -325,6 +347,7 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
+                            status_structs.capture.write().state = ProcessingState::Inactive;
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -347,6 +370,7 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
+                            status_structs.capture.write().state = ProcessingState::Inactive;
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -356,9 +380,9 @@ fn run(
                                 debug!("Error while starting, release barrier");
                                 barrier.wait();
                             }
-                            debug!("Wait for playback thread to exit..");
                             status_structs.status.write().stop_reason =
                                 StopReason::CaptureFormatChange(rate);
+                            debug!("Wait for playback thread to exit..");
                             pb_handle.join().unwrap();
                             {
                                 let mut active_cfg_shared = shared_configs.active.lock();
@@ -366,6 +390,7 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
+                            status_structs.capture.write().state = ProcessingState::Inactive;
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -383,6 +408,10 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
+                            trace!("Wait for playback thread to exit..");
+                            pb_handle.join().unwrap();
+                            trace!("Wait for capture thread to exit..");
+                            cap_handle.join().unwrap();
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -399,16 +428,16 @@ fn run(
                             }
                         }
                         StatusMessage::SetVolume(vol) => {
-                            debug!("SetVolume message to  {} dB received", vol);
+                            debug!("SetVolume message to  {vol} dB received");
                             status_structs.processing.set_target_volume(0, vol);
                         }
                         StatusMessage::SetMute(mute) => {
-                            debug!("SetMute message to {} received", mute);
+                            debug!("SetMute message to {mute} received");
                             status_structs.processing.set_mute(0, mute);
                         }
                     },
                     Err(err) => {
-                        warn!("Capture, Playback and Processing threads have exited: {}", err);
+                        warn!("Capture, Playback and Processing threads have exited: {err}");
                         status_structs.status.write().stop_reason = StopReason::UnknownError(
                             "Capture, Playback and Processing threads have exited".to_string(),
                         );
@@ -452,19 +481,30 @@ fn main_process() -> i32 {
     let playback_types = format!("Playback: {}", pb_types.join(", "));
     let capture_types = format!("Capture: {}", cap_types.join(", "));
 
+    let license_notice = if cfg!(feature = "asio-backend") {
+        "License: GPLv3 only (built with ASIO backend)".to_string()
+    } else {
+        "License: GPLv3 or MPL-2.0".to_string()
+    };
+
+    let version_with_hash: &'static str =
+        Box::leak(format!("{} ({})", crate_version!(), GIT_HASH).into_boxed_str());
+
     let longabout = format!(
-        "{} v{}\n{}\n{}\n\n{}\n\nSupported device types:\n{}\n{}",
+        "{} v{} ({})\n{}\n{}\n\n{}\n\n{}\n\nSupported device types:\n{}\n{}",
         crate_name!(),
         crate_version!(),
+        GIT_HASH,
         crate_authors!(),
         crate_description!(),
+        license_notice,
         featurelist,
         capture_types,
         playback_types
     );
 
     let clapapp = Command::new("CamillaDSP")
-        .version(crate_version!())
+        .version(version_with_hash)
         .about(longabout)
         .author(crate_authors!())
         //.setting(AppSettings::ArgRequiredElseHelp)
@@ -492,6 +532,7 @@ fn main_process() -> i32 {
                 .help("Check config file and exit")
                 .short('c')
                 .long("check")
+                .display_order(4)
                 .requires("configfile")
                 .action(ArgAction::SetTrue),
         )
@@ -499,6 +540,7 @@ fn main_process() -> i32 {
             Arg::new("verbosity")
                 .help("Increase message verbosity")
                 .short('v')
+                .display_order(100)
                 .action(ArgAction::Count),
         )
         .arg(
@@ -507,7 +549,7 @@ fn main_process() -> i32 {
                 .short('l')
                 .long("loglevel")
                 .value_name("LOGLEVEL")
-                .display_order(100)
+                .display_order(101)
                 .conflicts_with("verbosity")
                 .action(ArgAction::Set)
                 .value_parser(["trace", "debug", "info", "warn", "error", "off"]),
@@ -518,7 +560,7 @@ fn main_process() -> i32 {
                 .short('o')
                 .long("logfile")
                 .value_name("LOGFILE")
-                .display_order(101)
+                .display_order(102)
                 .action(ArgAction::Set),
         )
         .arg(
@@ -526,7 +568,7 @@ fn main_process() -> i32 {
                 .help("Rotate log file when the size in bytes exceeds this value")
                 .long("log_rotate_size")
                 .value_name("ROTATE_SIZE")
-                .display_order(102)
+                .display_order(103)
                 .requires("logfile")
                 .value_parser(clap::value_parser!(u32).range(1000..))
                 .action(ArgAction::Set),
@@ -536,9 +578,18 @@ fn main_process() -> i32 {
                 .help("Number of previous log files to keep")
                 .long("log_keep_nbr")
                 .value_name("KEEP_NBR")
-                .display_order(103)
+                .display_order(104)
                 .requires("log_rotate_size")
                 .value_parser(clap::value_parser!(u32))
+                .action(ArgAction::Set),
+        )
+        .arg(
+            Arg::new("custom_log_spec")
+                .help("Custom logger specification")
+                .long("custom_log_spec")
+                .value_name("LOG_SPEC")
+                .display_order(105)
+                .value_parser(clap::value_parser!(String))
                 .action(ArgAction::Set),
         )
         .arg(
@@ -661,12 +712,13 @@ fn main_process() -> i32 {
                 .display_order(410)
                 .action(ArgAction::Set)
                 .value_parser([
-                    "S16LE",
-                    "S24LE",
-                    "S24LE3",
-                    "S32LE",
-                    "FLOAT32LE",
-                    "FLOAT64LE",
+                    "S16_LE",
+                    "S24_3_LE",
+                    "S24_4_LJ_LE",
+                    "S24_4_RJ_LE",
+                    "S32_LE",
+                    "F32_LE",
+                    "F64_LE",
                 ])
                 .help("Override sample format of capture device in config"),
         );
@@ -706,6 +758,16 @@ fn main_process() -> i32 {
                 .help("Wait for config from websocket")
                 .requires("port")
                 .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("no_config")
+                .long("no_config")
+                .display_order(299)
+                .help("Ignore config file in statefile and start without")
+                .requires("wait")
+                .requires("statefile")
+                .conflicts_with("configfile")
+                .action(ArgAction::SetTrue),
         );
     #[cfg(feature = "secure-websocket")]
     let clapapp = clapapp
@@ -739,6 +801,9 @@ fn main_process() -> i32 {
     if let Some(level) = matches.get_one::<String>("loglevel") {
         loglevel = level;
     }
+    if let Some(spec) = matches.get_one::<String>("custom_log_spec") {
+        loglevel = spec;
+    }
 
     let logger = if let Some(logfile) = matches.get_one::<String>("logfile") {
         let mut path = PathBuf::from(logfile);
@@ -748,7 +813,7 @@ fn main_process() -> i32 {
             path = fullpath;
         }
         let mut logger = flexi_logger::Logger::try_with_str(loglevel)
-            .unwrap()
+            .expect("The provided logger specification is invalid")
             .format(custom_logger_format)
             .log_to_file(flexi_logger::FileSpec::try_from(path).unwrap())
             .write_mode(flexi_logger::WriteMode::Async);
@@ -770,7 +835,7 @@ fn main_process() -> i32 {
         logger.start().unwrap()
     } else {
         flexi_logger::Logger::try_with_str(loglevel)
-            .unwrap()
+            .expect("The provided logger specification is invalid")
             .format(custom_colored_logger_format)
             .set_palette("196;208;-;27;8".to_string())
             .log_to_stderr()
@@ -778,7 +843,7 @@ fn main_process() -> i32 {
             .start()
             .unwrap()
     };
-    info!("CamillaDSP version {}", crate_version!());
+    info!("CamillaDSP version {} ({})", crate_version!(), GIT_HASH);
     info!(
         "Running on {}, {}",
         std::env::consts::OS,
@@ -808,7 +873,7 @@ fn main_process() -> i32 {
         overrides.channels = matches.get_one::<usize>("channels").copied();
         overrides.sample_format = matches
             .get_one::<String>("format")
-            .map(|s| config::SampleFormat::from_name(s).unwrap());
+            .map(|s| config::BinarySampleFormat::from_name(s).unwrap());
     }
 
     let statefilename: Option<String> = matches.get_one::<String>("statefile").cloned();
@@ -890,7 +955,7 @@ fn main_process() -> i32 {
     debug!("Initial mute: {initial_mutes:?}");
     debug!("Initial volume: {initial_volumes:?}");
 
-    debug!("Read config file {:?}", configname);
+    debug!("Read config file {configname:?}");
 
     if matches.get_flag("check") {
         match config::load_validate_config(&configname.unwrap()) {
@@ -908,7 +973,12 @@ fn main_process() -> i32 {
 
     if configname.is_none() {
         if let Some(s) = &state {
-            configname.clone_from(&s.config_path)
+            if matches.get_flag("no_config") {
+                debug!("Ignoring config from statefile as per command line argument");
+            } else {
+                debug!("Using config from statefile");
+                configname.clone_from(&s.config_path);
+            }
         }
     }
 
@@ -922,7 +992,7 @@ fn main_process() -> i32 {
         if state.is_none() || state.map(|s| s != state_to_save).unwrap_or(false) {
             statefile::save_state_to_file(fname, &state_to_save);
         } else {
-            debug!("No change to state from {}, not overwriting.", fname);
+            debug!("No change to state from {fname}, not overwriting.");
         }
     }
 
@@ -936,7 +1006,7 @@ fn main_process() -> i32 {
                     .unwrap();
             }
             Err(err) => {
-                error!("{}", err);
+                error!("{err}");
                 debug!("Exiting due to config error");
                 return EXIT_BAD_CONFIG;
             }
@@ -957,7 +1027,7 @@ fn main_process() -> i32 {
         let mut signals = SignalsInfo::<SignalOnly>::new(&sigs).unwrap();
         let mut exit_requested = false;
         for info in &mut signals {
-            debug!("Received signal: {}", info);
+            debug!("Received signal: {info}");
             match info {
                 SIGHUP => {
                     let path = (*active_path_thread.lock()).clone();
@@ -968,11 +1038,11 @@ fn main_process() -> i32 {
                                 if let Err(e) = tx_command_thread
                                     .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
                                 {
-                                    error!("Error sending reload message: {}", e);
+                                    error!("Error sending reload message: {e}");
                                 }
                             }
                             Err(err) => {
-                                error!("Config error during reload: {}", err);
+                                error!("Config error during reload: {err}");
                             }
                         };
                     } else {
@@ -981,7 +1051,7 @@ fn main_process() -> i32 {
                 }
                 SIGUSR1 => {
                     if let Err(e) = tx_command_thread.try_send(ControllerMessage::Stop) {
-                        error!("Error sending stop message: {}", e);
+                        error!("Error sending stop message: {e}");
                     }
                 }
                 _ => {
@@ -993,7 +1063,7 @@ fn main_process() -> i32 {
                     info!("Shutting down");
                     exit_requested = true;
                     if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
-                        error!("Error sending exit message: {}", e);
+                        error!("Error sending exit message: {e}");
                     }
                 }
             };
@@ -1018,7 +1088,7 @@ fn main_process() -> i32 {
                 info!("Shutting down");
                 exit_requested = true;
                 if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
-                    error!("Error sending exit message: {}", e);
+                    error!("Error sending exit message: {e}");
                 }
             }
             thread::sleep(DELAY);
@@ -1060,7 +1130,7 @@ fn main_process() -> i32 {
 
     #[cfg(feature = "websocket")]
     {
-        let (tx_state, rx_state) = mpsc::sync_channel(1);
+        let (tx_state, rx_state) = crossbeam_channel::bounded(1);
 
         let processing_params_clone = processing_params.clone();
         let active_config_path_clone = active_config_path.clone();
@@ -1100,19 +1170,21 @@ fn main_process() -> i32 {
         if let Some(fname) = &statefilename {
             let fname = fname.clone();
 
-            thread::spawn(move || loop {
-                thread::sleep(Duration::from_millis(1000));
-                match rx_state.recv() {
-                    Ok(()) => {
-                        debug!("saving state to {}", &fname);
-                        statefile::save_state(
-                            &fname,
-                            &active_config_path_clone,
-                            &processing_params_clone,
-                            &unsaved_state_changes,
-                        );
+            thread::spawn(move || {
+                loop {
+                    thread::sleep(Duration::from_millis(1000));
+                    match rx_state.recv() {
+                        Ok(()) => {
+                            debug!("saving state to {}", &fname);
+                            statefile::save_state(
+                                &fname,
+                                &active_config_path_clone,
+                                &processing_params_clone,
+                                &unsaved_state_changes,
+                            );
+                        }
+                        Err(_) => break,
                     }
-                    Err(_) => break,
                 }
             });
         }
@@ -1129,7 +1201,9 @@ fn main_process() -> i32 {
             }
             if !wait && !has_commands {
                 if !has_config {
-                    debug!("Wait mode is disabled, there are no queued commands, and no new config. Exiting.");
+                    debug!(
+                        "Wait mode is disabled, there are no queued commands, and no new config. Exiting."
+                    );
                     return EXIT_OK;
                 }
                 debug!("Wait mode is disabled and there are no queued commands, continuing");
@@ -1150,7 +1224,7 @@ fn main_process() -> i32 {
                     return EXIT_OK;
                 }
                 Err(e) => {
-                    warn!("Error recv from cmd queue {}", e);
+                    warn!("Error recv from cmd queue {e}");
                     return EXIT_OK;
                 }
             }
@@ -1163,11 +1237,11 @@ fn main_process() -> i32 {
 
         debug!("Config ready, start processing");
         let exitstatus = run(shared_configs, status_structs.clone(), rx_command.clone());
-        debug!("Processing ended with status {:?}", exitstatus);
+        debug!("Processing ended with status {exitstatus:?}");
 
         match exitstatus {
             Err(e) => {
-                error!("({}) {}", e.to_string(), e);
+                error!("{e}");
                 if !wait {
                     return EXIT_PROCESSING_ERROR;
                 }
