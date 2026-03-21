@@ -100,5 +100,9 @@ harness = false
 name = "conversions"
 harness = false
 
+[[bench]]
+name = "pipeline"
+harness = false
+
 [profile.release]
 codegen-units = 1
