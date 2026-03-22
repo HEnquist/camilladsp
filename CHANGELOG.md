@@ -1,3 +1,7 @@
+## v4.0.1
+Changes:
+- Improved documentation on sample formats and rate adjust
+
 ## v4.0.0
 New features:
 - Add PipeWire backend.
