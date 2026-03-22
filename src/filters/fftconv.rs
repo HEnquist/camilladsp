@@ -26,8 +26,12 @@ use std::sync::Arc;
 use crate::PrcFmt;
 use crate::Res;
 
+#[cfg(target_arch = "aarch64")]
+#[path = "fftconv_neon.rs"]
+mod neon;
+
 // element-wise product, result = slice_a * slice_b
-fn multiply_elements(
+fn multiply_elements_scalar(
     result: &mut [Complex<PrcFmt>],
     slice_a: &[Complex<PrcFmt>],
     slice_b: &[Complex<PrcFmt>],
@@ -61,7 +65,7 @@ fn multiply_elements(
 }
 
 // element-wise add product, result = result + slice_a * slice_b
-fn multiply_add_elements(
+fn multiply_add_elements_scalar(
     result: &mut [Complex<PrcFmt>],
     slice_a: &[Complex<PrcFmt>],
     slice_b: &[Complex<PrcFmt>],
@@ -92,6 +96,36 @@ fn multiply_add_elements(
     {
         *r += val;
     }
+}
+
+// Element-wise product: result = slice_a * slice_b. Dispatches to NEON or scalar.
+#[inline]
+fn multiply_elements(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    #[cfg(target_arch = "aarch64")]
+    if neon::has_neon() {
+        // SAFETY: NEON support has been verified by has_neon().
+        return unsafe { neon::multiply_elements_neon(result, slice_a, slice_b) };
+    }
+    multiply_elements_scalar(result, slice_a, slice_b);
+}
+
+// Element-wise accumulate product: result += slice_a * slice_b. Dispatches to NEON or scalar.
+#[inline]
+fn multiply_add_elements(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    #[cfg(target_arch = "aarch64")]
+    if neon::has_neon() {
+        // SAFETY: NEON support has been verified by has_neon().
+        return unsafe { neon::multiply_add_elements_neon(result, slice_a, slice_b) };
+    }
+    multiply_add_elements_scalar(result, slice_a, slice_b);
 }
 
 pub struct FftConv {
