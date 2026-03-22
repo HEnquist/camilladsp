@@ -95,8 +95,14 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, with_conv: bool) -> Pip
     if with_conv {
         filters.insert("pre_conv_1".to_string(), build_conv_filter(CONV_LENGTHS[0]));
         filters.insert("pre_conv_2".to_string(), build_conv_filter(CONV_LENGTHS[1]));
-        filters.insert("post_conv_1".to_string(), build_conv_filter(CONV_LENGTHS[0]));
-        filters.insert("post_conv_2".to_string(), build_conv_filter(CONV_LENGTHS[1]));
+        filters.insert(
+            "post_conv_1".to_string(),
+            build_conv_filter(CONV_LENGTHS[0]),
+        );
+        filters.insert(
+            "post_conv_2".to_string(),
+            build_conv_filter(CONV_LENGTHS[1]),
+        );
         pre_filter_names.push("pre_conv_1".to_string());
         pre_filter_names.push("pre_conv_2".to_string());
         post_filter_names.push("post_conv_1".to_string());
