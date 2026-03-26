@@ -335,6 +335,53 @@ impl Filter for FftConv {
     }
 }
 
+// Benchmark API: kernel wrappers for benches/fftconv_kernels.rs (feature = "bench" only).
+
+#[cfg(feature = "bench")]
+pub fn bench_multiply_elements_scalar(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    multiply_elements_scalar(result, slice_a, slice_b);
+}
+
+#[cfg(feature = "bench")]
+pub fn bench_multiply_add_elements_scalar(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    multiply_add_elements_scalar(result, slice_a, slice_b);
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "bench"))]
+pub fn bench_has_avx_fma() -> bool {
+    avx::has_avx_fma()
+}
+
+/// # Safety
+/// Caller must verify AVX+FMA availability via `bench_has_avx_fma()`.
+#[cfg(all(target_arch = "x86_64", feature = "bench"))]
+pub unsafe fn bench_multiply_elements_avx_fma(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    unsafe { avx::multiply_elements_avx_fma(result, slice_a, slice_b) };
+}
+
+/// # Safety
+/// Caller must verify AVX+FMA availability via `bench_has_avx_fma()`.
+#[cfg(all(target_arch = "x86_64", feature = "bench"))]
+pub unsafe fn bench_multiply_add_elements_avx_fma(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    unsafe { avx::multiply_add_elements_avx_fma(result, slice_a, slice_b) };
+}
+
 /// Validate a FFT convolution config.
 pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {

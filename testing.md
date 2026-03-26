@@ -40,5 +40,12 @@ There are benchmarks to monitor the performance of some filters.
 These use the `criterion` framework.
 Run them with cargo:
 ```sh
-cargo bench
+cargo bench --features bench
+```
+
+## FFT Convolution Kernel Benchmarks
+
+Micro-benchmarks for the complex-multiply kernels (scalar vs AVX+FMA) are available:
+```sh
+cargo bench --features bench --bench fftconv_kernels
 ```
