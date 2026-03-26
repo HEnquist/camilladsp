@@ -361,6 +361,42 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     }
 }
 
+#[cfg(feature = "bench")]
+pub fn bench_multiply_elements_scalar(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    multiply_elements_scalar(result, slice_a, slice_b);
+}
+
+#[cfg(feature = "bench")]
+pub fn bench_multiply_add_elements_scalar(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    multiply_add_elements_scalar(result, slice_a, slice_b);
+}
+
+#[cfg(all(target_arch = "aarch64", feature = "bench"))]
+pub unsafe fn bench_multiply_elements_neon(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    unsafe { neon::multiply_elements_neon(result, slice_a, slice_b) };
+}
+
+#[cfg(all(target_arch = "aarch64", feature = "bench"))]
+pub unsafe fn bench_multiply_add_elements_neon(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    unsafe { neon::multiply_add_elements_neon(result, slice_a, slice_b) };
+}
+
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;

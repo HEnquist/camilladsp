@@ -42,3 +42,10 @@ Run them with cargo:
 ```sh
 cargo bench
 ```
+
+## FFT Convolution Kernel Benchmarks
+
+Micro-benchmarks for the complex-multiply kernels (scalar vs NEON) are available:
+```sh
+cargo bench --features bench --bench fftconv_kernels
+```

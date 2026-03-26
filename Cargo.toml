@@ -16,6 +16,7 @@ jack-backend = ["cpal-backend", "cpal/jack"]
 bluez-backend = ["zbus"]
 asio-backend = ["asio-sys"]
 32bit = []
+bench = []
 websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
 debug = []
@@ -103,6 +104,11 @@ harness = false
 [[bench]]
 name = "pipeline"
 harness = false
+
+[[bench]]
+name = "fftconv_kernels"
+harness = false
+required-features = ["bench"]
 
 [profile.release]
 codegen-units = 1
