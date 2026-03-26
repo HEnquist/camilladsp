@@ -425,6 +425,13 @@ pub struct Biquad {
     pub name: String,
 }
 
+#[cfg(all(target_arch = "x86_64", not(feature = "32bit")))]
+fn has_avx() -> bool {
+    use std::sync::OnceLock;
+    static DETECTED: OnceLock<bool> = OnceLock::new();
+    *DETECTED.get_or_init(|| is_x86_feature_detected!("avx"))
+}
+
 impl Biquad {
     /// Creates a Direct Form 2 Transposed biquad filter from a set of coefficients
     pub fn new(name: &str, samplerate: usize, coefficients: BiquadCoefficients) -> Self {
@@ -484,6 +491,36 @@ impl Biquad {
         out
     }
 
+    #[cfg(all(target_arch = "x86_64", not(feature = "32bit")))]
+    #[target_feature(enable = "avx")]
+    unsafe fn process_chunk_vex(&mut self, waveform: &mut [PrcFmt]) {
+        use std::arch::x86_64::*;
+        for item in waveform.iter_mut() {
+            let input = *item;
+            let input_input = _mm_load1_pd(&input);
+
+            let b0 = _mm_load_sd(&self.coeffs.b0);
+            let b0_b1 = _mm_loadh_pd(b0, &self.coeffs.b1);
+            let b2_nul = _mm_load_sd(&self.coeffs.b2);
+
+            let a1 = _mm_load_sd(&self.coeffs.a1);
+            let a1_a2 = _mm_loadh_pd(a1, &self.coeffs.a2);
+
+            let s1 = _mm_load_sd(&self.s1);
+            let s1_s2 = _mm_loadh_pd(s1, &self.s2);
+
+            let out_s1a = _mm_add_pd(s1_s2, _mm_mul_pd(input_input, b0_b1));
+            let out_out = _mm_unpacklo_pd(out_s1a, out_s1a);
+            let s2a_nul = _mm_mul_sd(b2_nul, input_input);
+            let s1a_s2a = _mm_shuffle_pd(out_s1a, s2a_nul, 0x01);
+            let s1new_s2new = _mm_sub_pd(s1a_s2a, _mm_mul_pd(a1_a2, out_out));
+
+            _mm_storel_pd(&mut self.s1, s1new_s2new);
+            _mm_storeh_pd(&mut self.s2, s1new_s2new);
+            _mm_storel_pd(item, out_out);
+        }
+    }
+
     /// Flush stored subnormal numbers to zero.
     fn flush_subnormals(&mut self) {
         if self.s1.is_subnormal() {
@@ -503,6 +540,13 @@ impl Filter for Biquad {
     }
 
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+        #[cfg(all(target_arch = "x86_64", not(feature = "32bit")))]
+        if has_avx() {
+            // SAFETY: has_avx() verified AVX support at runtime.
+            unsafe { self.process_chunk_vex(waveform) };
+            self.flush_subnormals();
+            return Ok(());
+        }
         for item in waveform.iter_mut() {
             *item = self.process_single(*item);
         }
