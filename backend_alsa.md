@@ -113,7 +113,7 @@ The choices for sample formats for ALSA devices are:
 | --- | --- | --- |
 | [S16_LE](sample_formats.md#s16_le) | [S16_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a8b66a29293c62df9d1678c609fab76c0) | 16-bit signed integer, little-endian |
 | [S24_3_LE](sample_formats.md#s24_3_le) | [S24_3LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a76ef58eb516389000bdc678ca69515c3) | 24-bit signed integer, stored packed as 3 bytes per sample, little-endian |
-| [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le) | [S24_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a04b3c3b9ad0106c9619a28b753d8fd18)  | 24-bit signed integer, stored padded to 4 bytes right justified, little-endian |
+| [S24_4_LE](sample_formats.md#s24_4_rj_le) | [S24_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a04b3c3b9ad0106c9619a28b753d8fd18)  | 24-bit signed integer, stored padded to 4 bytes right justified, little-endian |
 | [S32_LE](sample_formats.md#s32_le) | [S32_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8aa99dcea38d9cd8ea3b8a6e9ea85bcc52) | 32-bit signed integer, little-endian |
 | [F32_LE](sample_formats.md#f32_le) | [FLOAT_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a083f32474a84d344e0da496470085c8f) | 32-bit floating point, little-endian |
 | [F64_LE](sample_formats.md#f64_le) | [FLOAT64_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a8e6d82461abbb8be043f8addd23f76c0) | 64-bit floating point, little-endian |
@@ -128,6 +128,8 @@ This can be added by giving the device name as `plughw:Name` instead of `hw:Name
 
 Devices supporting 24-bit samples have different requirements
 for how the samples are delivered.
+See also [Sample format subsets](sample_formats.md#sample-format-subsets)
+for how backend format subsets relate to the exact binary formats.
 
 USB devices normally use the packed `S24_3_LE` format.
 
@@ -137,8 +139,11 @@ ALSA does not have a specific format for this.
 Instead these devices use the `S32_LE`
 format and ignore the eight least significant bits.
 
-The padded right justified `S24_4_RJ_LE` format is included for completeness,
-but is used by very few devices.
+ALSA supports one padded 24-bit format,
+called [S24_LE](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m.html#ggaa14b7f26877a812acbb39811364177f8a04b3c3b9ad0106c9619a28b753d8fd18).
+In the CamillaDSP ALSA backend this is named `S24_4_LE`,
+and maps to the binary format `S24_4_RJ_LE` (right justified).
+This format is included for completeness, but is used by very few devices.
 
 
 ## Routing all audio through CamillaDSP
@@ -210,7 +215,7 @@ The sample format is optional. If set to `null` or left out,
 the highest quality available format is chosen automatically.
 
 When the format is set automatically, 32-bit integer (`S32_LE`) is considered the best,
-followed by 24-bit (`S24_3_LE` and `S24_4_RJ_LE`) and 16-bit integer (`S16_LE`).
+followed by 24-bit (`S24_3_LE` and `S24_4_LE`) and 16-bit integer (`S16_LE`).
 The 32-bit (`F32_LE`) and 64-bit (`F64_LE`) float formats are high quality,
 but are supported by very few devices. Therefore these are checked last.
 
