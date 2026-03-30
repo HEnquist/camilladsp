@@ -15,8 +15,10 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 // Traits for audio devices
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "threaded-alsa")))]
 use crate::alsa_backend::device as alsadevice;
+#[cfg(all(target_os = "linux", feature = "threaded-alsa"))]
+use crate::alsa_backend::threaded_device as alsadevice;
 #[cfg(all(target_os = "windows", feature = "asio-backend"))]
 use crate::asio_backend::device as asiodevice;
 use crate::config;

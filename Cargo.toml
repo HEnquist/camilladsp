@@ -9,6 +9,7 @@ license = "GPL-3.0-only OR MPL-2.0"
 
 [features]
 default = ["websocket"]
+threaded-alsa = []
 pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
 pipewire-backend = ["pipewire"]
 cpal-backend = ["cpal"]
