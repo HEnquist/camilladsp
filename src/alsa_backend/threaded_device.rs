@@ -953,8 +953,9 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                             tx_dev
                                                 .send(PlaybackDeviceMessage::SetPitch(speed))
                                                 .unwrap_or(());
-                                            playback_status.write().buffer_level =
-                                                av_delay as usize;
+                                            if let Some(mut ps) = playback_status.try_write() {
+                                                ps.buffer_level = av_delay as usize;
+                                            }
                                         }
                                     }
 
@@ -977,7 +978,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     let sleep_duration = Duration::from_micros(
                                         (1_000_000 * chunksize / samplerate / 2) as u64,
                                     );
-                                    let max_retries = 8;
+                                    let max_retries = 16;
                                     for _ in 0..max_retries {
                                         if device_producer.vacant_len() >= bytes_to_write {
                                             break;
