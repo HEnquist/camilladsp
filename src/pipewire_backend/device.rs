@@ -19,7 +19,7 @@ use pipewire as pw;
 use pw::spa::param::audio::AudioFormat;
 use pw::spa::utils::Direction;
 use pw::spa::utils::Id;
-use pw::stream::{Stream, StreamFlags};
+use pw::stream::StreamFlags;
 
 // Re-import the properties macro
 use pipewire::properties::properties;
@@ -58,6 +58,12 @@ struct MainLoopQuitter {
 // SAFETY: pw_main_loop_quit() is thread-safe according to PipeWire documentation
 unsafe impl Send for MainLoopQuitter {}
 unsafe impl Sync for MainLoopQuitter {}
+
+impl Clone for MainLoopQuitter {
+    fn clone(&self) -> Self {
+        Self { raw: self.raw }
+    }
+}
 
 impl MainLoopQuitter {
     fn new(mainloop: &pw::main_loop::MainLoop) -> Self {
@@ -210,7 +216,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                 // Initialize PipeWire
                 pw::init();
 
-                let mainloop = match pw::main_loop::MainLoop::new(None) {
+                let mainloop = match pw::main_loop::MainLoopBox::new(None) {
                     Ok(ml) => ml,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire main loop: {:?}", e);
@@ -223,7 +229,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     }
                 };
 
-                let context = match pw::context::Context::new(&mainloop) {
+                let context = match pw::context::ContextBox::new(mainloop.loop_(), None) {
                     Ok(ctx) => ctx,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire context: {:?}", e);
@@ -267,7 +273,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     props.insert("target.object", target.as_str());
                 }
 
-                let stream = match Stream::new(&core, "CamillaDSP-Playback", props) {
+                let stream = match pw::stream::StreamBox::new(&core, "CamillaDSP-Playback", props) {
                     Ok(s) => s,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire stream: {:?}", e);
@@ -323,7 +329,10 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                         // Get output slice - data() returns slice sized to maxsize
                         let out_slice = match data.data() {
                             Some(s) => s,
-                            None => return,
+                            None => {
+                                warn!("PipeWire playback: no data pointer in buffer, skipping callback");
+                                return;
+                            }
                         };
                         let max_bytes = out_slice.len();
                         xtrace!("PW playback callback with {} bytes", max_bytes);
@@ -332,11 +341,16 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                         let mut consumer = rb_consumer_clone.borrow_mut();
 
                         // Fill output from ring buffer, then zero any missing tail (underrun handling)
-                        let (available_bytes, _bytes_from_rb) =
+                        let (available_bytes, bytes_from_rb) =
                             fill_playback_output_from_ringbuffer(&mut *consumer, out_slice);
 
                         if available_bytes == 0 {
-                            trace!("PipeWire playback: buffer empty, outputting silence");
+                            warn!("PipeWire playback: buffer empty, outputting silence");
+                        } else if bytes_from_rb < max_bytes {
+                            debug!(
+                                "PipeWire playback: partial underrun, had {} of {} bytes",
+                                bytes_from_rb, max_bytes
+                            );
                         }
 
                         // CRITICAL: Tell PipeWire how much data we wrote
@@ -595,7 +609,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                 // Initialize PipeWire
                 pw::init();
 
-                let mainloop = match pw::main_loop::MainLoop::new(None) {
+                let mainloop = match pw::main_loop::MainLoopBox::new(None) {
                     Ok(ml) => ml,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire main loop: {:?}", e);
@@ -608,7 +622,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     }
                 };
 
-                let context = match pw::context::Context::new(&mainloop) {
+                let context = match pw::context::ContextBox::new(mainloop.loop_(), None) {
                     Ok(ctx) => ctx,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire context: {:?}", e);
@@ -652,7 +666,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     props.insert("target.object", target.as_str());
                 }
 
-                let stream = match Stream::new(&core, "CamillaDSP-Capture", props) {
+                let stream = match pw::stream::StreamBox::new(&core, "CamillaDSP-Capture", props) {
                     Ok(s) => s,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire stream: {:?}", e);
@@ -676,7 +690,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
 
                 let exit_flag = Arc::new(AtomicBool::new(false));
                 let exit_flag_clone = exit_flag.clone();
-                let mainloop_clone = mainloop.clone();
+                let callback_quitter = MainLoopQuitter::new(&mainloop);
 
                 // Set up stream listener for capture
                 let rb_producer_clone = rb_producer.clone();
@@ -688,7 +702,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     })
                     .process(move |stream, _| {
                         if exit_flag_clone.load(Ordering::Relaxed) {
-                            mainloop_clone.quit();
+                            callback_quitter.quit();
                             return;
                         }
 
@@ -726,7 +740,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         let mut producer = rb_producer_clone.borrow_mut();
                         let pushed = producer.push_slice(in_slice);
                         if pushed < size {
-                            trace!("Capture ring buffer full, dropped {} bytes", size - pushed);
+                            warn!("Capture ring buffer full, dropped {} bytes", size - pushed);
                         }
 
                         // Notify processing thread that data is available
@@ -833,6 +847,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                             }
                             Ok(CommandMessage::SetSpeed { speed }) => {
                                 rate_adjust = speed;
+                                debug!("Requested to adjust capture speed to {speed}");
                                 if let Some(resampl) = &mut resampler {
                                     if async_src {
                                         if resampl.resampler.set_resample_ratio_relative(speed, true).is_err() {
@@ -867,6 +882,11 @@ impl CaptureDevice for PipeWireCaptureDevice {
                             tries += 1;
                         }
                         if rb_consumer.occupied_len() < capture_bytes {
+                            warn!(
+                                "Capture: waited 1s but only got {} of {} bytes, skipping chunk",
+                                rb_consumer.occupied_len(),
+                                capture_bytes
+                            );
                             continue;
                         }
 
@@ -937,7 +957,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                             match channel.try_send(msg) {
                                 Ok(()) => {}
                                 Err(crossbeam_channel::TrySendError::Full(_)) => {
-                                    trace!("Capture: processing pipeline full, dropping frame");
+                                    warn!("Capture: processing pipeline full, dropping frame");
                                 }
                                 Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
                                     info!("Processing thread has already stopped.");
