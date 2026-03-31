@@ -95,12 +95,6 @@ enum PlaybackResult {
     Stalled,
 }
 
-#[derive(Debug, Default)]
-struct PlaybackWriteOutcome {
-    device_stalled: bool,
-    recovered_from_stall: bool,
-}
-
 fn prepare_playback_bytes(
     buffer: &mut Vec<u8>,
     write_remainder: &[u8],
@@ -143,7 +137,7 @@ fn apply_playback_write_result(
         usize,
         &[u8], // pre-allocated zero buffer for stall recovery
     )>,
-) -> PlaybackWriteOutcome {
+) -> bool {
     match playback_res {
         Ok(PlaybackResult::Normal(bytes_written)) => {
             let bytes_written = bytes_written.min(bytes_to_play);
@@ -154,10 +148,7 @@ fn apply_playback_write_result(
             } else {
                 write_remainder.clear();
             }
-            PlaybackWriteOutcome {
-                device_stalled: false,
-                recovered_from_stall: was_stalled,
-            }
+            false
         }
         Ok(PlaybackResult::Stalled) => {
             if write_remainder.is_empty() {
@@ -179,19 +170,13 @@ fn apply_playback_write_result(
                         .unwrap_or_default();
                 }
             }
-            PlaybackWriteOutcome {
-                device_stalled: true,
-                recovered_from_stall: false,
-            }
+            true
         }
         Err(msg) => {
             status_channel
                 .send(StatusMessage::PlaybackError(msg.to_string()))
                 .unwrap_or(());
-            PlaybackWriteOutcome {
-                device_stalled: was_stalled,
-                recovered_from_stall: false,
-            }
+            was_stalled
         }
     }
 }
@@ -204,21 +189,15 @@ fn run_playback_inner_loop<C>(
     io: &alsa::pcm::IO<u8>,
     buf_manager: &PlaybackBufferManager,
     status_channel_inner: &crossbeam_channel::Sender<StatusMessage>,
-    playback_status_inner: &Arc<RwLock<PlaybackStatus>>,
+    buffer_fill: &Mutex<countertimer::DeviceBufferEstimator>,
     samplerate: usize,
     chunksize: usize,
     channels: usize,
     bytes_per_sample: usize,
-    target_level: usize,
-    adjust_period: f32,
-    adjust_enabled: bool,
 ) where
     C: Consumer<Item = u8> + Observer,
 {
     let bytes_per_frame = channels * bytes_per_sample;
-    let mut timer = countertimer::Stopwatch::new();
-    let mut buffer_avg = countertimer::Averager::new();
-    let adjust = adjust_period > 0.0 && adjust_enabled;
     let millis_per_frame: f32 = 1000.0 / samplerate as f32;
     let mut device_stalled = false;
     let mut pcm_paused = false;
@@ -232,8 +211,6 @@ fn run_playback_inner_loop<C>(
     let mut buffer = vec![0u8; 4 * chunksize * channels * bytes_per_sample];
     let mut sample_queue_bytes = 0usize;
     let mut write_remainder: Vec<u8> = Vec::with_capacity(chunksize * channels * bytes_per_sample);
-    let mut rate_controller =
-        PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
     let mut _pitch_hctl: Option<HCtl> = None;
     let mut pitch_elem = None;
     if let Ok(pcminfo) = pcmdevice.info() {
@@ -288,6 +265,14 @@ fn run_playback_inner_loop<C>(
                             }
                         }
                     }
+                    Ok(PlaybackDeviceMessage::SetPitch(speed)) => {
+                        if let Some(elem_uac2_gadget) = &pitch_elem {
+                            if let Some(ref mut elval) = pitch_elval {
+                                elval.set_integer(0, (1_000_000.0 / speed) as i32).unwrap();
+                                elem_uac2_gadget.write(elval).unwrap();
+                            }
+                        }
+                    }
                     Ok(PlaybackDeviceMessage::EndOfStream) => {
                         end_of_stream = true;
                         break;
@@ -299,14 +284,6 @@ fn run_playback_inner_loop<C>(
                     }
                 }
             }
-
-            let avail_before_write = if !device_stalled
-                && pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32
-            {
-                pcmdevice.avail().ok()
-            } else {
-                None
-            };
 
             let available_bytes = sample_queue_bytes.min(device_consumer.occupied_len());
             let bytes_to_play = match prepare_playback_bytes(
@@ -338,7 +315,7 @@ fn run_playback_inner_loop<C>(
                 buf_manager,
             );
             pcm_paused = false;
-            let write_outcome = apply_playback_write_result(
+            device_stalled = apply_playback_write_result(
                 playback_res,
                 bytes_to_play,
                 &buffer,
@@ -348,48 +325,17 @@ fn run_playback_inner_loop<C>(
                 status_channel_inner,
                 Some((pcmdevice, io, buf_manager, bytes_per_frame, &stall_zero_buf)),
             );
-            if write_outcome.recovered_from_stall {
-                // Only restart buffer_avg (measurements during stall are invalid),
-                // but keep the timer running so rate adjust isn't blocked by
-                // occasional stalls.
-                buffer_avg.restart();
-            }
-            device_stalled = write_outcome.device_stalled;
 
+            // Update the buffer level estimator after each write (like WASAPI).
+            // This lets the outer thread interpolate accurate fill levels between updates.
             if !device_stalled {
-                if let Some(avail) = avail_before_write {
-                    let delay = buf_manager.current_delay(avail);
-                    let queued_frames = sample_queue_bytes as f64 / bytes_per_frame as f64;
-                    buffer_avg.add_value(delay as f64 + queued_frames);
-                }
-                if timer.larger_than_millis((1000.0 * adjust_period) as u64) {
-                    if let Some(avg_delay) = buffer_avg.average() {
-                        timer.restart();
-                        buffer_avg.restart();
-                        if adjust {
-                            let capture_speed = rate_controller.next(avg_delay);
-                            if let Some(elem_uac2_gadget) = &pitch_elem {
-                                if let Some(ref mut elval) = pitch_elval {
-                                    elval
-                                        .set_integer(0, (1_000_000.0 / capture_speed) as i32)
-                                        .unwrap();
-                                    elem_uac2_gadget.write(elval).unwrap();
-                                }
-                            } else {
-                                status_channel_inner
-                                    .try_send(StatusMessage::SetSpeed(capture_speed))
-                                    .unwrap_or(());
-                            }
-                        }
-                        if let Some(mut playback_status) = playback_status_inner.try_write() {
-                            playback_status.buffer_level = avg_delay as usize;
-                            debug!(
-                                "PB: buffer level: {:.1}, signal rms: {:?}",
-                                avg_delay,
-                                playback_status.signal_rms.last_sqrt()
-                            );
-                        } else {
-                            debug!("PB: buffer level: {:.1}", avg_delay);
+                if pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+                    if let Some(avail) = pcmdevice.avail().ok() {
+                        let delay = buf_manager.current_delay(avail) as usize;
+                        let ring_frames = device_consumer.occupied_len() / bytes_per_frame;
+                        let channel_frames = rx_play.len() * chunksize;
+                        if let Some(mut est) = buffer_fill.try_lock() {
+                            est.add(delay + ring_frames + channel_frames);
                         }
                     }
                 }
@@ -422,6 +368,14 @@ fn run_playback_inner_loop<C>(
                     if can_pause && !pcm_paused {
                         if pcmdevice.pause(true).is_ok() {
                             pcm_paused = true;
+                        }
+                    }
+                }
+                Ok(PlaybackDeviceMessage::SetPitch(speed)) => {
+                    if let Some(elem_uac2_gadget) = &pitch_elem {
+                        if let Some(ref mut elval) = pitch_elval {
+                            elval.set_integer(0, (1_000_000.0 / speed) as i32).unwrap();
+                            elem_uac2_gadget.write(elval).unwrap();
                         }
                     }
                 }
@@ -832,6 +786,7 @@ enum PlaybackDeviceMessage {
     Data(usize),
     Pause,
     EndOfStream,
+    SetPitch(f64),
 }
 
 enum CaptureDeviceMessage {
@@ -874,7 +829,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                 let (mut device_producer, mut device_consumer) = ringbuffer.split();
 
                 let status_channel_inner = status_channel.clone();
-                let playback_status_inner = playback_status.clone();
+                let buffer_fill = Arc::new(Mutex::new(
+                    countertimer::DeviceBufferEstimator::new(samplerate),
+                ));
+                let buffer_fill_inner = buffer_fill.clone();
 
                 let innerhandle = thread::Builder::new()
                     .name("AlsaPlaybackInner".to_string())
@@ -919,14 +877,11 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     &io,
                                     &buf_manager,
                                     &status_channel_inner,
-                                    &playback_status_inner,
+                                    &buffer_fill_inner,
                                     samplerate,
                                     chunksize,
                                     channels,
                                     binary_format.bytes_per_sample(),
-                                    target_level,
-                                    adjust_period,
-                                    adjust_enabled,
                                 );
 
                                 if let Some(h) = thread_handle {
@@ -957,9 +912,52 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         let mut buf =
                             vec![0u8; channels * chunksize * binary_format.bytes_per_sample()];
 
+                        // Buffer level tracking with time-based estimation (like WASAPI)
+                        let adjust = adjust_period > 0.0 && adjust_enabled;
+                        let mut buffer_avg = countertimer::Averager::new();
+                        let mut timer = countertimer::Stopwatch::new();
+                        let mut rate_controller = PIRateController::new_with_default_gains(
+                            samplerate,
+                            adjust_period as f64,
+                            target_level,
+                        );
+
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
+                                    // Sample the estimator on each chunk (like WASAPI)
+                                    let estimated_buffer_fill = buffer_fill
+                                        .try_lock()
+                                        .map(|b| b.estimate() as f64)
+                                        .unwrap_or_default();
+                                    buffer_avg.add_value(
+                                        estimated_buffer_fill
+                                            + (channel.len() * chunksize) as f64,
+                                    );
+                                    if adjust
+                                        && timer.larger_than_millis(
+                                            (1000.0 * adjust_period) as u64,
+                                        )
+                                    {
+                                        if let Some(av_delay) = buffer_avg.average() {
+                                            let speed = rate_controller.next(av_delay);
+                                            timer.restart();
+                                            buffer_avg.restart();
+                                            debug!(
+                                                "PB: buffer level {:.1}, set capture rate to {:.6}",
+                                                av_delay, speed
+                                            );
+                                            status_channel
+                                                .send(StatusMessage::SetSpeed(speed))
+                                                .unwrap_or(());
+                                            tx_dev
+                                                .send(PlaybackDeviceMessage::SetPitch(speed))
+                                                .unwrap_or(());
+                                            playback_status.write().buffer_level =
+                                                av_delay as usize;
+                                        }
+                                    }
+
                                     chunk.update_stats(&mut chunk_stats);
                                     let conversion_result =
                                         chunk_to_buffer_rawbytes(chunk, &mut buf, &binary_format);
@@ -994,7 +992,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         );
                                         continue;
                                     }
-                                    if tx_dev.send(PlaybackDeviceMessage::Data(bytes_to_write)).is_err() {
+                                    if tx_dev
+                                        .send(PlaybackDeviceMessage::Data(bytes_to_write))
+                                        .is_err()
+                                    {
                                         status_channel
                                             .send(StatusMessage::PlaybackError(
                                                 "Playback inner queue closed".to_string(),
