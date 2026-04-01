@@ -23,9 +23,12 @@ use alsa::hctl::{Elem, HCtl};
 use alsa::pcm::{Format, HwParams};
 use alsa::{Card, Direction};
 use alsa_sys;
+use nix::errno::Errno;
 use parking_lot::RwLock;
 use std::ffi::CString;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use crate::ProcessingParameters;
 
@@ -181,6 +184,39 @@ pub fn state_desc(state: u32) -> String {
         }
         _ => format!("Unknown state with number {state}"),
     }
+}
+
+pub fn recover_suspended_pcm(pcmdevice: &alsa::PCM, direction: &str) -> Res<()> {
+    warn!("{direction}: device is suspended, trying to resume");
+
+    let mut attempt = 0usize;
+    loop {
+        match pcmdevice.resume() {
+            Ok(()) => {
+                info!("{direction}: resumed suspended ALSA device");
+                return Ok(());
+            }
+            Err(err) => match Errno::from_raw(err.errno()) {
+                Errno::EAGAIN => {
+                    attempt += 1;
+                    if attempt >= 200 {
+                        warn!(
+                            "{direction}: resume is still pending after {attempt} attempts, falling back to prepare"
+                        );
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                errno => {
+                    debug!("{direction}: resume failed with {errno:?}, falling back to prepare");
+                    break;
+                }
+            },
+        }
+    }
+
+    pcmdevice.prepare()?;
+    Ok(())
 }
 
 pub fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {
