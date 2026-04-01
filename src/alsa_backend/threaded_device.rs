@@ -95,6 +95,120 @@ enum PlaybackResult {
     Stalled,
 }
 
+fn recover_playback_error(
+    pcmdevice: &alsa::PCM,
+    err: alsa::Error,
+    epipe_msg: &str,
+    estrpipe_msg: &str,
+    generic_msg: &str,
+    prime_after_recover: bool,
+) -> Res<bool> {
+    match Errno::from_raw(err.errno()) {
+        Errno::EPIPE => {
+            warn!("{epipe_msg}. Error: {err}");
+            trace!("snd_pcm_prepare");
+            pcmdevice.prepare()?;
+            Ok(prime_after_recover)
+        }
+        Errno::ESTRPIPE => {
+            warn!("{estrpipe_msg}. Error: {err}");
+            recover_suspended_pcm(pcmdevice, "PB")?;
+            Ok(prime_after_recover)
+        }
+        _ => {
+            warn!("{generic_msg}, error: {err}");
+            Err(Box::new(err))
+        }
+    }
+}
+
+fn prime_playback_delay(
+    pcmdevice: &alsa::PCM,
+    io: &alsa::pcm::IO<u8>,
+    millis_per_frame: f32,
+    bytes_per_frame: usize,
+    queued_frames: usize,
+    buf_manager: &PlaybackBufferManager,
+    silence_buf: &[u8],
+) -> Res<()> {
+    let target_frames = buf_manager
+        .target_level()
+        .min(buf_manager.data.buffersize()) as usize;
+    if target_frames == 0 {
+        return Ok(());
+    }
+
+    let current_delay = pcmdevice
+        .avail()
+        .ok()
+        .map(|avail| buf_manager.current_delay(avail).max(0) as usize)
+        .unwrap_or_default();
+    let queued_total = current_delay.saturating_add(queued_frames);
+    let missing_frames = target_frames.saturating_sub(queued_total);
+    if missing_frames == 0 {
+        return Ok(());
+    }
+
+    let silence_bytes = missing_frames * bytes_per_frame;
+    if silence_bytes > silence_buf.len() {
+        return Err(DeviceError::new("Playback silence buffer is too small").into());
+    }
+
+    let mut bytes_written = 0usize;
+    let mut retries = 0usize;
+    let mut timeout_millis = (2.0 * millis_per_frame * buf_manager.data.buffersize() as f32) as u32;
+    if timeout_millis < 20 {
+        timeout_millis = 20;
+    }
+
+    while bytes_written < silence_bytes {
+        retries += 1;
+        if retries >= 100 {
+            return Err(DeviceError::new(
+                "Aborting playback silence priming after too many retries",
+            )
+            .into());
+        }
+
+        let slice = &silence_buf[bytes_written..silence_bytes];
+        match io.writei(slice) {
+            Ok(0) => {
+                if !pcmdevice.wait(Some(timeout_millis))? {
+                    return Err(DeviceError::new("Timed out while priming playback delay").into());
+                }
+            }
+            Ok(frames_written) => {
+                bytes_written += frames_written * bytes_per_frame;
+            }
+            Err(err) => match Errno::from_raw(err.errno()) {
+                Errno::EAGAIN => {
+                    if !pcmdevice.wait(Some(timeout_millis))? {
+                        return Err(DeviceError::new(
+                            "Timed out while waiting to prime playback delay",
+                        )
+                        .into());
+                    }
+                }
+                _ => {
+                    if recover_playback_error(
+                        pcmdevice,
+                        err,
+                        "PB: silence priming underrun, trying to recover",
+                        "PB: silence priming interrupted by suspend, trying to recover",
+                        "PB: failed to prime playback delay",
+                        true,
+                    )? {
+                        bytes_written = 0;
+                    }
+                }
+            },
+        }
+    }
+
+    trace!("PB: primed playback delay with {missing_frames} silent frames");
+    Ok(())
+}
+
 fn prepare_playback_bytes(
     buffer: &mut Vec<u8>,
     write_remainder: &[u8],
@@ -238,7 +352,7 @@ fn run_playback_inner_loop<C>(
 
     // Pre-allocate zero buffer for stall recovery writes, avoiding
     // heap allocation on the RT thread during error recovery.
-    let stall_zero_buf = vec![0u8; buf_manager.frames_to_stall() as usize * bytes_per_frame];
+    let silence_buf = vec![0u8; buf_manager.data.buffersize() as usize * bytes_per_frame];
 
     let mut end_of_stream = false;
     let mut channel_disconnected = false;
@@ -315,7 +429,9 @@ fn run_playback_inner_loop<C>(
                 io,
                 millis_per_frame,
                 bytes_per_frame,
+                sample_queue_bytes / bytes_per_frame,
                 buf_manager,
+                &silence_buf,
             );
             pcm_paused = false;
             device_stalled = apply_playback_write_result(
@@ -326,7 +442,7 @@ fn run_playback_inner_loop<C>(
                 &mut write_remainder,
                 device_stalled,
                 status_channel_inner,
-                Some((pcmdevice, io, buf_manager, bytes_per_frame, &stall_zero_buf)),
+                Some((pcmdevice, io, buf_manager, bytes_per_frame, &silence_buf)),
             );
 
             // Update the buffer level estimator after each write (like WASAPI).
@@ -422,7 +538,9 @@ fn run_playback_inner_loop<C>(
                             io,
                             millis_per_frame,
                             bytes_per_frame,
+                            0,
                             buf_manager,
+                            &silence_buf,
                         );
                     } else {
                         thread::yield_now();
@@ -451,7 +569,9 @@ fn play_buffer(
     io: &alsa::pcm::IO<u8>,
     millis_per_frame: f32,
     bytes_per_frame: usize,
+    queued_frames: usize,
     buf_manager: &PlaybackBufferManager,
+    silence_buf: &[u8],
 ) -> Res<PlaybackResult> {
     let playback_state = pcmdevice.state_raw();
     xtrace!("Playback state {:?}", playback_state);
@@ -466,15 +586,37 @@ fn play_buffer(
     } else if playback_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("PB: Prepare playback after buffer underrun");
         pcmdevice.prepare()?;
-        buf_manager.sleep_for_target_delay(millis_per_frame);
+        prime_playback_delay(
+            pcmdevice,
+            io,
+            millis_per_frame,
+            bytes_per_frame,
+            queued_frames,
+            buf_manager,
+            silence_buf,
+        )?;
     } else if playback_state == alsa_sys::SND_PCM_STATE_SUSPENDED as i32 {
         recover_suspended_pcm(pcmdevice, "PB")?;
-        buf_manager.sleep_for_target_delay(millis_per_frame);
+        prime_playback_delay(
+            pcmdevice,
+            io,
+            millis_per_frame,
+            bytes_per_frame,
+            queued_frames,
+            buf_manager,
+            silence_buf,
+        )?;
     } else if playback_state == alsa_sys::SND_PCM_STATE_PREPARED as i32 {
         info!("PB: Starting playback from Prepared state");
-        // This sleep applies for the first chunk and in combination with the threshold=1 (i.e. start at first write)
-        // and the next chunk generates the initial target delay.
-        buf_manager.sleep_for_target_delay(millis_per_frame);
+        prime_playback_delay(
+            pcmdevice,
+            io,
+            millis_per_frame,
+            bytes_per_frame,
+            queued_frames,
+            buf_manager,
+            silence_buf,
+        )?;
     } else if playback_state == alsa_sys::SND_PCM_STATE_PAUSED as i32 {
         debug!("PB: Device is in paused state, unpausing.");
         if let Err(err) = pcmdevice.pause(false) {
@@ -514,22 +656,26 @@ fn play_buffer(
             trace!("PB: Wait timed out, playback device takes too long to drain buffer");
             return Ok(PlaybackResult::Stalled);
         }
-        Err(err) => match Errno::from_raw(err.errno()) {
-            Errno::EPIPE => {
-                warn!("PB: wait underrun, trying to recover. Error: {err}");
-                trace!("snd_pcm_prepare");
-                pcmdevice.prepare()?;
+        Err(err) => {
+            if recover_playback_error(
+                pcmdevice,
+                err,
+                "PB: wait underrun, trying to recover",
+                "PB: wait interrupted by suspend, trying to recover",
+                "PB: device failed while waiting for available buffer space",
+                false,
+            )? {
+                prime_playback_delay(
+                    pcmdevice,
+                    io,
+                    millis_per_frame,
+                    bytes_per_frame,
+                    queued_frames,
+                    buf_manager,
+                    silence_buf,
+                )?;
             }
-            Errno::ESTRPIPE => {
-                warn!("PB: wait interrupted by suspend, trying to recover. Error: {err}");
-                recover_suspended_pcm(pcmdevice, "PB")?;
-                buf_manager.sleep_for_target_delay(millis_per_frame);
-            }
-            _ => {
-                warn!("PB: device failed while waiting for available buffer space, error: {err}");
-                return Err(Box::new(err));
-            }
-        },
+        }
     }
 
     //trace!("Delay BEFORE writing {} is {:?} frames",  buffer.len() / bytes_per_frame, pcmdevice.status().ok().map(|status| status.get_delay()));
@@ -544,22 +690,26 @@ fn play_buffer(
                 trace!("PB: encountered EAGAIN error on write, trying later");
                 Ok(PlaybackResult::Normal(0))
             }
-            Errno::EPIPE => {
-                warn!("PB: write underrun, trying to recover. Error: {err}");
-                trace!("snd_pcm_prepare");
-                pcmdevice.prepare()?;
-                buf_manager.sleep_for_target_delay(millis_per_frame);
-                Ok(PlaybackResult::Normal(0))
-            }
-            Errno::ESTRPIPE => {
-                warn!("PB: write interrupted by suspend, trying to recover. Error: {err}");
-                recover_suspended_pcm(pcmdevice, "PB")?;
-                buf_manager.sleep_for_target_delay(millis_per_frame);
-                Ok(PlaybackResult::Normal(0))
-            }
             _ => {
-                warn!("PB: write failed, error: {err}");
-                Err(Box::new(err))
+                if recover_playback_error(
+                    pcmdevice,
+                    err,
+                    "PB: write underrun, trying to recover",
+                    "PB: write interrupted by suspend, trying to recover",
+                    "PB: write failed",
+                    true,
+                )? {
+                    prime_playback_delay(
+                        pcmdevice,
+                        io,
+                        millis_per_frame,
+                        bytes_per_frame,
+                        queued_frames,
+                        buf_manager,
+                        silence_buf,
+                    )?;
+                }
+                Ok(PlaybackResult::Normal(0))
             }
         },
     }

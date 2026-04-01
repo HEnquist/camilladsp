@@ -18,8 +18,6 @@ extern crate alsa;
 extern crate nix;
 use alsa::pcm::{Frames, HwParams, SwParams};
 use std::fmt::Debug;
-use std::thread;
-use std::time::Duration;
 
 use crate::Res;
 use crate::config;
@@ -231,13 +229,8 @@ impl PlaybackBufferManager {
         }
     }
 
-    pub fn sleep_for_target_delay(&self, millis_per_frame: f32) {
-        let sleep_millis = (self.target_level as f32 * millis_per_frame) as u64;
-        trace!(
-            "Sleeping for {} frames = {} ms",
-            self.target_level, sleep_millis
-        );
-        thread::sleep(Duration::from_millis(sleep_millis));
+    pub fn target_level(&self) -> Frames {
+        self.target_level
     }
 }
 
