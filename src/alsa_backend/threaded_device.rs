@@ -862,10 +862,13 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     chunksize as u32,
                                     samplerate as u32,
                                 ) {
-                                    Ok(h) => Some(h),
+                                    Ok(h) => {
+                                        debug!("Playback inner thread has real-time priority.");
+                                        Some(h)
+                                    }
                                     Err(err) => {
                                         warn!(
-                                            "Playback inner thread could not get real time priority, error: {err}"
+                                            "Playback inner thread could not get real time priority, error: {err}."
                                         );
                                         None
                                     }
@@ -885,7 +888,18 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                 );
 
                                 if let Some(h) = thread_handle {
-                                    demote_current_thread_from_real_time(h).unwrap_or_default();
+                                    match demote_current_thread_from_real_time(h) {
+                                        Ok(_) => {
+                                            debug!(
+                                                "Playback inner thread returned to normal priority."
+                                            )
+                                        }
+                                        Err(_) => {
+                                            warn!(
+                                                "Could not bring the inner playback thread back to normal priority."
+                                            )
+                                        }
+                                    };
                                 }
                             }
                             Err(err) => {
@@ -904,6 +918,22 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             .unwrap_or(());
                         barrier.wait();
                         tx_start.send(()).unwrap_or(());
+
+                        let thread_handle = match promote_current_thread_to_real_time(
+                            chunksize as u32,
+                            samplerate as u32,
+                        ) {
+                            Ok(h) => {
+                                debug!("Playback outer thread has real-time priority.");
+                                Some(h)
+                            }
+                            Err(err) => {
+                                warn!(
+                                    "Playback outer thread could not get real time priority, error: {err}."
+                                );
+                                None
+                            }
+                        };
 
                         let mut chunk_stats = ChunkStats {
                             rms: vec![0.0; channels],
@@ -1020,6 +1050,19 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     break;
                                 }
                             }
+                        }
+
+                        if let Some(h) = thread_handle {
+                            match demote_current_thread_from_real_time(h) {
+                                Ok(_) => {
+                                    debug!("Playback outer thread returned to normal priority.")
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Could not bring the outer playback thread back to normal priority."
+                                    )
+                                }
+                            };
                         }
                     }
                     Ok(AlsaThreadState::Error(err)) => {
@@ -1225,12 +1268,15 @@ impl CaptureDevice for AlsaCaptureDevice {
 
                                 let thread_handle = match promote_current_thread_to_real_time(
                                     chunksize as u32,
-                                    samplerate as u32,
+                                    capture_samplerate as u32,
                                 ) {
-                                    Ok(h) => Some(h),
+                                    Ok(h) => {
+                                        debug!("Capture inner thread has real-time priority.");
+                                        Some(h)
+                                    }
                                     Err(err) => {
                                         warn!(
-                                            "Capture inner thread could not get real time priority, error: {err}"
+                                            "Capture inner thread could not get real time priority, error: {err}."
                                         );
                                         None
                                     }
@@ -1340,7 +1386,18 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 }
 
                                 if let Some(h) = thread_handle {
-                                    demote_current_thread_from_real_time(h).unwrap_or_default();
+                                    match demote_current_thread_from_real_time(h) {
+                                        Ok(_) => {
+                                            debug!(
+                                                "Capture inner thread returned to normal priority."
+                                            )
+                                        }
+                                        Err(_) => {
+                                            warn!(
+                                                "Could not bring the inner capture thread back to normal priority."
+                                            )
+                                        }
+                                    };
                                 }
                                 cap_params.capture_status.write().state = ProcessingState::Inactive;
                             }
@@ -1388,11 +1445,17 @@ impl CaptureDevice for AlsaCaptureDevice {
                         barrier.wait();
                         tx_start_inner.send(()).unwrap_or(());
 
-                        let thread_handle = match promote_current_thread_to_real_time(0, 1) {
-                            Ok(h) => Some(h),
+                        let thread_handle = match promote_current_thread_to_real_time(
+                            chunksize as u32,
+                            samplerate as u32,
+                        ) {
+                            Ok(h) => {
+                                debug!("Capture outer thread has real-time priority.");
+                                Some(h)
+                            }
                             Err(err) => {
                                 warn!(
-                                    "Capture outer thread could not get real time priority, error: {err}"
+                                    "Capture outer thread could not get real time priority, error: {err}."
                                 );
                                 None
                             }
@@ -1567,7 +1630,16 @@ impl CaptureDevice for AlsaCaptureDevice {
                         }
 
                         if let Some(h) = thread_handle {
-                            demote_current_thread_from_real_time(h).unwrap_or_default();
+                            match demote_current_thread_from_real_time(h) {
+                                Ok(_) => {
+                                    debug!("Capture outer thread returned to normal priority.")
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Could not bring the outer capture thread back to normal priority."
+                                    )
+                                }
+                            };
                         }
                         capture_status.write().state = ProcessingState::Inactive;
                     }

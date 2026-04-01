@@ -15,6 +15,9 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::utils::ringbuffer::fill_playback_output_from_ringbuffer;
+use audio_thread_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
 use pipewire as pw;
 use pw::spa::param::audio::AudioFormat;
 use pw::spa::utils::Direction;
@@ -406,6 +409,22 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     Err(_err) => {}
                 }
                 barrier.wait();
+
+                let thread_handle = match promote_current_thread_to_real_time(
+                    chunksize as u32,
+                    samplerate as u32,
+                ) {
+                    Ok(h) => {
+                        debug!("Playback inner thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Playback inner thread could not get real time priority, error: {err}."
+                        );
+                        None
+                    }
+                };
                 debug!("Starting PipeWire playback loop");
 
                 // Spawn a thread to receive AudioMessages and send to PipeWire thread
@@ -415,6 +434,21 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                 let stride = channels * store_bytes_per_sample;
                 // Buffer level monitoring parameters (similar to other backends)
                 let receiver_handle = thread::spawn(move || {
+                    let thread_handle = match promote_current_thread_to_real_time(
+                        chunksize as u32,
+                        samplerate as u32,
+                    ) {
+                        Ok(h) => {
+                            debug!("Playback outer thread has real-time priority.");
+                            Some(h)
+                        }
+                        Err(err) => {
+                            warn!(
+                                "Playback outer thread could not get real time priority, error: {err}."
+                            );
+                            None
+                        }
+                    };
                     let mut chunk_stats = ChunkStats {
                         rms: vec![0.0; channels],
                         peak: vec![0.0; channels],
@@ -540,6 +574,18 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                             }
                         }
                     }
+                    if let Some(h) = thread_handle {
+                        match demote_current_thread_from_real_time(h) {
+                            Ok(_) => {
+                                debug!("Playback outer thread returned to normal priority.")
+                            }
+                            Err(_) => {
+                                warn!(
+                                    "Could not bring the outer playback thread back to normal priority."
+                                )
+                            }
+                        };
+                    }
                     // Signal mainloop to quit - pw_main_loop_quit is thread-safe
                     quitter.quit();
                 });
@@ -549,6 +595,16 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
 
                 // Wait for receiver thread
                 let _ = receiver_handle.join();
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => debug!("Playback inner thread returned to normal priority."),
+                        Err(_) => {
+                            warn!(
+                                "Could not bring the inner playback thread back to normal priority."
+                            )
+                        }
+                    };
+                }
             })
             .unwrap();
         Ok(Box::new(handle))
@@ -792,6 +848,22 @@ impl CaptureDevice for PipeWireCaptureDevice {
 
 
                 barrier.wait();
+
+                let thread_handle = match promote_current_thread_to_real_time(
+                    chunksize as u32,
+                    capture_samplerate as u32,
+                ) {
+                    Ok(h) => {
+                        debug!("Capture inner thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Capture inner thread could not get real time priority, error: {err}."
+                        );
+                        None
+                    }
+                };
                 debug!("Starting PipeWire capture loop");
 
                 // Initialize resampler
@@ -809,6 +881,21 @@ impl CaptureDevice for PipeWireCaptureDevice {
                 let capture_status_clone = capture_status.clone();
                 let quitter = MainLoopQuitter::new(&mainloop);
                 let processing_handle = thread::spawn(move || {
+                    let thread_handle = match promote_current_thread_to_real_time(
+                        chunksize as u32,
+                        samplerate as u32,
+                    ) {
+                        Ok(h) => {
+                            debug!("Capture outer thread has real-time priority.");
+                            Some(h)
+                        }
+                        Err(err) => {
+                            warn!(
+                                "Capture outer thread could not get real time priority, error: {err}."
+                            );
+                            None
+                        }
+                    };
                     let mut averager = countertimer::TimeAverage::new();
                     let mut silence_counter = countertimer::SilenceCounter::new(
                         silence_threshold,
@@ -975,6 +1062,16 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         }
                     }
 
+                    if let Some(h) = thread_handle {
+                        match demote_current_thread_from_real_time(h) {
+                            Ok(_) => debug!("Capture outer thread returned to normal priority."),
+                            Err(_) => {
+                                warn!(
+                                    "Could not bring the outer capture thread back to normal priority."
+                                )
+                            }
+                        };
+                    }
                     capture_status_clone.write().state = ProcessingState::Inactive;
                     // Signal mainloop to quit - pw_main_loop_quit is thread-safe
                     quitter.quit();
@@ -985,6 +1082,16 @@ impl CaptureDevice for PipeWireCaptureDevice {
 
                 // Wait for processing thread
                 let _ = processing_handle.join();
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => debug!("Capture inner thread returned to normal priority."),
+                        Err(_) => {
+                            warn!(
+                                "Could not bring the inner capture thread back to normal priority."
+                            )
+                        }
+                    };
+                }
             })
             .unwrap();
         Ok(Box::new(handle))
