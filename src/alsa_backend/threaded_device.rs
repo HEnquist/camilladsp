@@ -242,14 +242,17 @@ fn run_playback_inner_loop<C>(
 
     let mut end_of_stream = false;
     let mut channel_disconnected = false;
-    let mut no_data_count = 0u32;
+    let mut playback_interrupted = false;
 
     loop {
         let available_bytes = sample_queue_bytes.min(device_consumer.occupied_len());
         let have_data = available_bytes >= bytes_per_frame || !write_remainder.is_empty();
 
         if have_data {
-            no_data_count = 0;
+            if playback_interrupted {
+                info!("PB: Normal playback resumes");
+                playback_interrupted = false;
+            }
             // Drain pending messages non-blocking to keep sample_queue_bytes up to date.
             // The device paces the loop via play_buffer's internal pcmdevice.wait(),
             // so we only need try_recv here - no blocking required.
@@ -333,9 +336,8 @@ fn run_playback_inner_loop<C>(
                     if let Some(avail) = pcmdevice.avail().ok() {
                         let delay = buf_manager.current_delay(avail) as usize;
                         let ring_frames = device_consumer.occupied_len() / bytes_per_frame;
-                        let channel_frames = rx_play.len() * chunksize;
                         if let Some(mut est) = buffer_fill.try_lock() {
-                            est.add(delay + ring_frames + channel_frames);
+                            est.add(delay + ring_frames);
                         }
                     }
                 }
@@ -358,9 +360,9 @@ fn run_playback_inner_loop<C>(
             }
             break;
         } else {
-            // No data available yet - block on channel until new data arrives.
-            let timeout_ms = ((1000.0 * chunksize as f32 / samplerate as f32) as u64).max(1);
-            match rx_play.recv_timeout(Duration::from_millis(timeout_ms)) {
+            // No data available yet - poll the channel non-blocking.
+            // The RT thread should stay paced by the device state rather than a channel timeout.
+            match rx_play.try_recv() {
                 Ok(PlaybackDeviceMessage::Data(bytes)) => {
                     sample_queue_bytes = sample_queue_bytes.saturating_add(bytes);
                 }
@@ -388,7 +390,7 @@ fn run_playback_inner_loop<C>(
                     }
                     break;
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                Err(crossbeam_channel::TryRecvError::Empty) => {
                     // Only write silence if the device buffer is running low.
                     // The ALSA device buffer may still have plenty of valid audio
                     // even though the ring buffer is momentarily empty (the non-RT
@@ -404,12 +406,13 @@ fn run_playback_inner_loop<C>(
                         } else {
                             None
                         };
+                    let low_delay_threshold = buf_manager.data.periodsize().max(1) as usize;
                     let buffer_low =
-                        device_delay.map_or(true, |delay| (delay as usize) < chunksize);
+                        device_delay.map_or(true, |delay| (delay as usize) < low_delay_threshold);
                     if buffer_low {
-                        no_data_count += 1;
-                        if no_data_count == 4 {
+                        if !playback_interrupted {
                             warn!("PB: Playback interrupted, no data available");
+                            playback_interrupted = true;
                         }
                         let silence_bytes = chunksize * bytes_per_frame;
                         buffer[..silence_bytes].fill(0);
@@ -421,9 +424,11 @@ fn run_playback_inner_loop<C>(
                             bytes_per_frame,
                             buf_manager,
                         );
+                    } else {
+                        thread::yield_now();
                     }
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                Err(crossbeam_channel::TryRecvError::Disconnected) => {
                     status_channel_inner
                         .send(StatusMessage::PlaybackError(
                             "Playback inner queue disconnected".to_string(),
@@ -825,8 +830,17 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                 let (tx_state_dev, rx_state_dev) = crossbeam_channel::bounded(0);
                 let (tx_start, rx_start) = crossbeam_channel::bounded(0);
 
-                let ringbuffer = HeapRb::<u8>::new(channels * 4 * (2 * chunksize + 2048));
+                let ringbuffer_bytes_per_sample = conf_sample_format
+                    .map(|format| format.to_binary_format().bytes_per_sample())
+                    .unwrap_or(std::mem::size_of::<f64>());
+                let playback_prefill_frames = target_level.max(3 * chunksize);
+                let ringbuffer_frame_capacity = playback_prefill_frames + 4 * chunksize;
+                let ringbuffer = HeapRb::<u8>::new(
+                    channels * ringbuffer_bytes_per_sample * ringbuffer_frame_capacity,
+                );
                 let (mut device_producer, mut device_consumer) = ringbuffer.split();
+                let playback_prefill_bytes =
+                    channels * ringbuffer_bytes_per_sample * playback_prefill_frames;
 
                 let status_channel_inner = status_channel.clone();
                 let buffer_fill = Arc::new(Mutex::new(
@@ -917,7 +931,6 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             .send(StatusMessage::PlaybackReady)
                             .unwrap_or(());
                         barrier.wait();
-                        tx_start.send(()).unwrap_or(());
 
                         let thread_handle = match promote_current_thread_to_real_time(
                             chunksize as u32,
@@ -951,6 +964,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             adjust_period as f64,
                             target_level,
                         );
+                        let mut inner_started = false;
 
                         loop {
                             match channel.recv() {
@@ -1034,11 +1048,28 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                             .unwrap_or(());
                                         break;
                                     }
+                                    if !inner_started
+                                        && device_producer.occupied_len() >= playback_prefill_bytes
+                                    {
+                                        debug!(
+                                            "Starting playback inner thread after prefilling {} bytes (target {} bytes).",
+                                            device_producer.occupied_len(),
+                                            playback_prefill_bytes
+                                        );
+                                        tx_start.send(()).unwrap_or(());
+                                        inner_started = true;
+                                    }
                                 }
                                 Ok(AudioMessage::Pause) => {
                                     tx_dev.send(PlaybackDeviceMessage::Pause).unwrap_or(());
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
+                                    if !inner_started {
+                                        debug!(
+                                            "Starting playback inner thread without full prefill because end of stream was received."
+                                        );
+                                        tx_start.send(()).unwrap_or(());
+                                    }
                                     tx_dev.send(PlaybackDeviceMessage::EndOfStream).unwrap_or(());
                                     break;
                                 }
@@ -1046,6 +1077,12 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     status_channel
                                         .send(StatusMessage::PlaybackError(err.to_string()))
                                         .unwrap_or(());
+                                    if !inner_started {
+                                        debug!(
+                                            "Starting playback inner thread without full prefill because the playback channel closed."
+                                        );
+                                        tx_start.send(()).unwrap_or(());
+                                    }
                                     tx_dev.send(PlaybackDeviceMessage::EndOfStream).unwrap_or(());
                                     break;
                                 }
