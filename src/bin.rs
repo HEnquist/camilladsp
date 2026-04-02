@@ -122,10 +122,10 @@ pub fn custom_logger_format(
 }
 
 fn parse_gain_value(v: &str) -> Result<f32, String> {
-    if let Ok(gain) = v.parse::<f32>() {
-        if (-120.0..=20.0).contains(&gain) {
-            return Ok(gain);
-        }
+    if let Ok(gain) = v.parse::<f32>()
+        && (-120.0..=20.0).contains(&gain)
+    {
+        return Ok(gain);
     }
     Err(String::from("Must be a number between -120 and +20"))
 }
@@ -971,14 +971,14 @@ fn main_process() -> i32 {
         }
     }
 
-    if configname.is_none() {
-        if let Some(s) = &state {
-            if matches.get_flag("no_config") {
-                debug!("Ignoring config from statefile as per command line argument");
-            } else {
-                debug!("Using config from statefile");
-                configname.clone_from(&s.config_path);
-            }
+    if configname.is_none()
+        && let Some(s) = &state
+    {
+        if matches.get_flag("no_config") {
+            debug!("Ignoring config from statefile as per command line argument");
+        } else {
+            debug!("Using config from statefile");
+            configname.clone_from(&s.config_path);
         }
     }
 

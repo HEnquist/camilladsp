@@ -512,16 +512,16 @@ pub fn get_event_action(
     ctl: &Ctl,
     params: &mut CaptureParams,
 ) -> EventAction {
-    if let Some(eldata) = &elems.loopback_active {
-        if eldata.numid == numid {
-            let value = eldata.read_as_bool();
-            debug!("Loopback active: {value:?}");
-            if let Some(active) = value {
-                if active {
-                    return EventAction::None;
-                }
-                return EventAction::SourceInactive;
+    if let Some(eldata) = &elems.loopback_active
+        && eldata.numid == numid
+    {
+        let value = eldata.read_as_bool();
+        debug!("Loopback active: {value:?}");
+        if let Some(active) = value {
+            if active {
+                return EventAction::None;
             }
+            return EventAction::SourceInactive;
         }
     }
     // Include this if the notify functionality of the loopback gets fixed
@@ -555,40 +555,40 @@ pub fn get_event_action(
             }
         }
     } */
-    if let Some(eldata) = &elems.volume {
-        if eldata.numid == numid {
-            let vol_db = eldata.read_volume_in_db(ctl);
-            debug!("Mixer volume control: {vol_db:?} dB");
-            if let Some(vol) = vol_db {
-                params.linked_volume_value = Some(vol);
-                return EventAction::SetVolume(vol);
-            }
+    if let Some(eldata) = &elems.volume
+        && eldata.numid == numid
+    {
+        let vol_db = eldata.read_volume_in_db(ctl);
+        debug!("Mixer volume control: {vol_db:?} dB");
+        if let Some(vol) = vol_db {
+            params.linked_volume_value = Some(vol);
+            return EventAction::SetVolume(vol);
         }
     }
-    if let Some(eldata) = &elems.mute {
-        if eldata.numid == numid {
-            let active = eldata.read_as_bool();
-            debug!("Mixer switch active: {active:?}");
-            if let Some(active_val) = active {
-                params.linked_mute_value = Some(!active_val);
-                return EventAction::SetMute(!active_val);
-            }
+    if let Some(eldata) = &elems.mute
+        && eldata.numid == numid
+    {
+        let active = eldata.read_as_bool();
+        debug!("Mixer switch active: {active:?}");
+        if let Some(active_val) = active {
+            params.linked_mute_value = Some(!active_val);
+            return EventAction::SetMute(!active_val);
         }
     }
-    if let Some(eldata) = &elems.gadget_rate {
-        if eldata.numid == numid {
-            let value = eldata.read_as_int();
-            debug!("Gadget rate: {value:?}");
-            if let Some(rate) = value {
-                if rate == 0 {
-                    return EventAction::SourceInactive;
-                }
-                if rate as usize != params.capture_samplerate {
-                    return EventAction::FormatChange(rate as usize);
-                }
-                debug!("Capture device resumed with unchanged sample rate");
-                return EventAction::None;
+    if let Some(eldata) = &elems.gadget_rate
+        && eldata.numid == numid
+    {
+        let value = eldata.read_as_int();
+        debug!("Gadget rate: {value:?}");
+        if let Some(rate) = value {
+            if rate == 0 {
+                return EventAction::SourceInactive;
             }
+            if rate as usize != params.capture_samplerate {
+                return EventAction::FormatChange(rate as usize);
+            }
+            debug!("Capture device resumed with unchanged sample rate");
+            return EventAction::None;
         }
     }
     trace!("Ignoring event from control with numid {numid}");

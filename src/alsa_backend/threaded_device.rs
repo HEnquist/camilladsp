@@ -236,6 +236,7 @@ fn prepare_playback_bytes(
     }
 }
 
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn apply_playback_write_result(
     playback_res: Res<PlaybackResult>,
     bytes_to_play: usize,
@@ -376,18 +377,16 @@ fn run_playback_inner_loop<C>(
                         sample_queue_bytes = sample_queue_bytes.saturating_add(bytes);
                     }
                     Ok(PlaybackDeviceMessage::Pause) => {
-                        if can_pause && !pcm_paused {
-                            if pcmdevice.pause(true).is_ok() {
-                                pcm_paused = true;
-                            }
+                        if can_pause && !pcm_paused && pcmdevice.pause(true).is_ok() {
+                            pcm_paused = true;
                         }
                     }
                     Ok(PlaybackDeviceMessage::SetPitch(speed)) => {
-                        if let Some(elem_uac2_gadget) = &pitch_elem {
-                            if let Some(ref mut elval) = pitch_elval {
-                                elval.set_integer(0, (1_000_000.0 / speed) as i32).unwrap();
-                                elem_uac2_gadget.write(elval).unwrap();
-                            }
+                        if let Some(elem_uac2_gadget) = &pitch_elem
+                            && let Some(ref mut elval) = pitch_elval
+                        {
+                            elval.set_integer(0, (1_000_000.0 / speed) as i32).unwrap();
+                            elem_uac2_gadget.write(elval).unwrap();
                         }
                     }
                     Ok(PlaybackDeviceMessage::EndOfStream) => {
@@ -447,15 +446,14 @@ fn run_playback_inner_loop<C>(
 
             // Update the buffer level estimator after each write (like WASAPI).
             // This lets the outer thread interpolate accurate fill levels between updates.
-            if !device_stalled {
-                if pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-                    if let Some(avail) = pcmdevice.avail().ok() {
-                        let delay = buf_manager.current_delay(avail) as usize;
-                        let ring_frames = device_consumer.occupied_len() / bytes_per_frame;
-                        if let Some(mut est) = buffer_fill.try_lock() {
-                            est.add(delay + ring_frames);
-                        }
-                    }
+            if !device_stalled
+                && pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32
+                && let Ok(avail) = pcmdevice.avail()
+            {
+                let delay = buf_manager.current_delay(avail) as usize;
+                let ring_frames = device_consumer.occupied_len() / bytes_per_frame;
+                if let Some(mut est) = buffer_fill.try_lock() {
+                    est.add(delay + ring_frames);
                 }
             }
         } else if end_of_stream || channel_disconnected {
@@ -483,18 +481,16 @@ fn run_playback_inner_loop<C>(
                     sample_queue_bytes = sample_queue_bytes.saturating_add(bytes);
                 }
                 Ok(PlaybackDeviceMessage::Pause) => {
-                    if can_pause && !pcm_paused {
-                        if pcmdevice.pause(true).is_ok() {
-                            pcm_paused = true;
-                        }
+                    if can_pause && !pcm_paused && pcmdevice.pause(true).is_ok() {
+                        pcm_paused = true;
                     }
                 }
                 Ok(PlaybackDeviceMessage::SetPitch(speed)) => {
-                    if let Some(elem_uac2_gadget) = &pitch_elem {
-                        if let Some(ref mut elval) = pitch_elval {
-                            elval.set_integer(0, (1_000_000.0 / speed) as i32).unwrap();
-                            elem_uac2_gadget.write(elval).unwrap();
-                        }
+                    if let Some(elem_uac2_gadget) = &pitch_elem
+                        && let Some(ref mut elval) = pitch_elval
+                    {
+                        elval.set_integer(0, (1_000_000.0 / speed) as i32).unwrap();
+                        elem_uac2_gadget.write(elval).unwrap();
                     }
                 }
                 Ok(PlaybackDeviceMessage::EndOfStream) => {
@@ -524,7 +520,7 @@ fn run_playback_inner_loop<C>(
                         };
                     let low_delay_threshold = buf_manager.data.periodsize().max(1) as usize;
                     let buffer_low =
-                        device_delay.map_or(true, |delay| (delay as usize) < low_delay_threshold);
+                        device_delay.is_none_or(|delay| (delay as usize) < low_delay_threshold);
                     if buffer_low {
                         if !playback_interrupted {
                             warn!("PB: Playback interrupted, no data available");
@@ -563,6 +559,7 @@ fn run_playback_inner_loop<C>(
 }
 
 /// Play a buffer.
+#[allow(clippy::too_many_arguments)]
 fn play_buffer(
     buffer: &[u8],
     pcmdevice: &alsa::PCM,
@@ -1165,24 +1162,23 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         && timer.larger_than_millis(
                                             (1000.0 * adjust_period) as u64,
                                         )
+                                        && let Some(av_delay) = buffer_avg.average()
                                     {
-                                        if let Some(av_delay) = buffer_avg.average() {
-                                            let speed = rate_controller.next(av_delay);
-                                            timer.restart();
-                                            buffer_avg.restart();
-                                            debug!(
-                                                "PB: buffer level {:.1}, set capture rate to {:.6}",
-                                                av_delay, speed
-                                            );
-                                            status_channel
-                                                .send(StatusMessage::SetSpeed(speed))
-                                                .unwrap_or(());
-                                            tx_dev
-                                                .send(PlaybackDeviceMessage::SetPitch(speed))
-                                                .unwrap_or(());
-                                            if let Some(mut ps) = playback_status.try_write() {
-                                                ps.buffer_level = av_delay as usize;
-                                            }
+                                        let speed = rate_controller.next(av_delay);
+                                        timer.restart();
+                                        buffer_avg.restart();
+                                        debug!(
+                                            "PB: buffer level {:.1}, set capture rate to {:.6}",
+                                            av_delay, speed
+                                        );
+                                        status_channel
+                                            .send(StatusMessage::SetSpeed(speed))
+                                            .unwrap_or(());
+                                        tx_dev
+                                            .send(PlaybackDeviceMessage::SetPitch(speed))
+                                            .unwrap_or(());
+                                        if let Some(mut ps) = playback_status.try_write() {
+                                            ps.buffer_level = av_delay as usize;
                                         }
                                     }
 
@@ -1778,21 +1774,20 @@ impl CaptureDevice for AlsaCaptureDevice {
                             device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
 
                             averager.add_value(capture_bytes);
-                            if let Some(capture_status_guard) = capture_status.try_upgradable_read() {
-                                if averager.larger_than_millis(capture_status_guard.update_interval as u64)
+                            if let Some(capture_status_guard) = capture_status.try_upgradable_read()
+                                && averager.larger_than_millis(capture_status_guard.update_interval as u64)
+                            {
+                                let bytes_per_sec = averager.average();
+                                averager.restart();
+                                let measured_rate_f =
+                                    bytes_per_sec / (channels * bytes_per_sample) as f64;
+                                if let Ok(mut capture_status) =
+                                    RwLockUpgradableReadGuard::try_upgrade(capture_status_guard)
                                 {
-                                    let bytes_per_sec = averager.average();
-                                    averager.restart();
-                                    let measured_rate_f =
-                                        bytes_per_sec / (channels * bytes_per_sample) as f64;
-                                    if let Ok(mut capture_status) =
-                                        RwLockUpgradableReadGuard::try_upgrade(capture_status_guard)
-                                    {
-                                        capture_status.measured_samplerate = measured_rate_f as usize;
-                                        capture_status.signal_range = value_range as f32;
-                                        capture_status.rate_adjust = rate_adjust as f32;
-                                        capture_status.state = state;
-                                    }
+                                    capture_status.measured_samplerate = measured_rate_f as usize;
+                                    capture_status.signal_range = value_range as f32;
+                                    capture_status.rate_adjust = rate_adjust as f32;
+                                    capture_status.state = state;
                                 }
                             }
 

@@ -648,38 +648,38 @@ fn playback_loop_bytes(
                             delay as f64 + (params.chunksize * waiting_chunks_in_channel) as f64,
                         );
                     }
-                    if timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
-                        if let Some(avg_delay) = buffer_avg.average() {
-                            timer.restart();
-                            buffer_avg.restart();
-                            if adjust {
-                                let capture_speed = rate_controller.next(avg_delay);
-                                if let Some(elem_uac2_gadget) = &element_uac2_gadget {
-                                    let mut elval = ElemValue::new(ElemType::Integer).unwrap();
-                                    // speed is reciprocal on playback side
-                                    elval
-                                        .set_integer(0, (1_000_000.0 / capture_speed) as i32)
-                                        .unwrap();
-                                    elem_uac2_gadget.write(&elval).unwrap();
-                                    debug!("Set gadget playback speed to {capture_speed}");
-                                } else {
-                                    debug!("Send SetSpeed message for speed {capture_speed}");
-                                    channels
-                                        .status
-                                        .send(StatusMessage::SetSpeed(capture_speed))
-                                        .unwrap_or(());
-                                }
-                            }
-                            if let Some(mut playback_status) = params.playback_status.try_write() {
-                                playback_status.buffer_level = avg_delay as usize;
-                                debug!(
-                                    "PB: buffer level: {:.1}, signal rms: {:?}",
-                                    avg_delay,
-                                    playback_status.signal_rms.last_sqrt()
-                                );
+                    if timer.larger_than_millis((1000.0 * params.adjust_period) as u64)
+                        && let Some(avg_delay) = buffer_avg.average()
+                    {
+                        timer.restart();
+                        buffer_avg.restart();
+                        if adjust {
+                            let capture_speed = rate_controller.next(avg_delay);
+                            if let Some(elem_uac2_gadget) = &element_uac2_gadget {
+                                let mut elval = ElemValue::new(ElemType::Integer).unwrap();
+                                // speed is reciprocal on playback side
+                                elval
+                                    .set_integer(0, (1_000_000.0 / capture_speed) as i32)
+                                    .unwrap();
+                                elem_uac2_gadget.write(&elval).unwrap();
+                                debug!("Set gadget playback speed to {capture_speed}");
                             } else {
-                                xtrace!("playback params blocked, skip rms update");
+                                debug!("Send SetSpeed message for speed {capture_speed}");
+                                channels
+                                    .status
+                                    .send(StatusMessage::SetSpeed(capture_speed))
+                                    .unwrap_or(());
                             }
+                        }
+                        if let Some(mut playback_status) = params.playback_status.try_write() {
+                            playback_status.buffer_level = avg_delay as usize;
+                            debug!(
+                                "PB: buffer level: {:.1}, signal rms: {:?}",
+                                avg_delay,
+                                playback_status.signal_rms.last_sqrt()
+                            );
+                        } else {
+                            xtrace!("playback params blocked, skip rms update");
                         }
                     }
                 }
