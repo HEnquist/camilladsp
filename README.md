@@ -394,8 +394,6 @@ All the available options, or "features" are:
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64).
 - `debug`: Enable extra logging, useful for debugging.
-- `avoid-rustc-issue-116359`: Enable a workaround for [rust issue #116359](https://github.com/rust-lang/rust/issues/116359).
-  Used to check if a performance issue is caused by this compiler bug.
 
 
 The `websocket` feature is included in the default features, meaning it will be enabled if you don't specify anything.
@@ -2767,4 +2765,3 @@ See the [list of frequently asked questions.](./FAQ.md)
 
 ## Troubleshooting
 See the trouble [troubleshooting guide](./troubleshooting.md) for explanations of most error messages.
-
