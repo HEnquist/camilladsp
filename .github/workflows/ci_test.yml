@@ -2,6 +2,10 @@ on: [push, pull_request]
 
 name: CI test and lint
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
 jobs:
   check_lint_test_linux_amd64:
     name: Check test and lint Linux
