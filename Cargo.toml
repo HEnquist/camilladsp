@@ -20,7 +20,6 @@ asio-backend = ["asio-sys"]
 websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
 debug = []
-avoid-rustc-issue-116359 = []
 
 [lib]
 name = "camillalib"
