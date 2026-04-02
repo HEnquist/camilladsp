@@ -1,6 +1,6 @@
 [package]
 name = "CamillaDSP"
-version = "4.0.1"
+version = "4.1.0-alpha.1"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2024"
 description = "A flexible tool for processing audio"

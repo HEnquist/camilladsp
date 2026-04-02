@@ -1,3 +1,9 @@
+## 4.1.0
+New features:
+- Experimental optional multi-threaded Alsa backend.
+Bugfixes:
+- Linux: fix stuttering on PipeWire playback.
+
 ## v4.0.1
 Changes:
 - Improved documentation on sample formats and rate adjust
