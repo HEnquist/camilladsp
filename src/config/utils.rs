@@ -565,15 +565,14 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         );
     }
     #[cfg(target_os = "windows")]
-    if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {
-        if let Some(format) = dev.format {
-            if format != WasapiSampleFormat::F32 && !dev.is_exclusive() {
-                return Err(ConfigError::new(
-                    "Wasapi shared mode playback must use F32 sample format",
-                )
-                .into());
-            }
-        }
+    if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback
+        && let Some(format) = dev.format
+        && format != WasapiSampleFormat::F32
+        && !dev.is_exclusive()
+    {
+        return Err(
+            ConfigError::new("Wasapi shared mode playback must use F32 sample format").into(),
+        );
     }
     #[cfg(all(target_os = "windows", feature = "asio-backend"))]
     if let (CaptureDevice::Asio(cap_dev), PlaybackDevice::Asio(pb_dev)) =
