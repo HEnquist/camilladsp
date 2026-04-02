@@ -177,6 +177,26 @@ fn build_audio_params(samplerate: u32, channels: u32) -> Vec<u8> {
     buffer
 }
 
+fn pipewire_playback_ringbuffer_frames(chunksize: usize, target_level: usize) -> usize {
+    let playback_prefill_frames = target_level.max(3 * chunksize);
+    playback_prefill_frames + 4 * chunksize
+}
+
+fn pipewire_playback_callback_bytes(
+    requested_bytes: usize,
+    max_bytes: usize,
+    stride: usize,
+    chunksize: usize,
+) -> usize {
+    let fallback_bytes = chunksize * stride;
+    let bytes = if requested_bytes == 0 || requested_bytes > max_bytes {
+        fallback_bytes.min(max_bytes)
+    } else {
+        requested_bytes
+    };
+    bytes - (bytes % stride)
+}
+
 /// Start a playback thread listening for AudioMessages via a channel.
 impl PlaybackDevice for PipeWirePlaybackDevice {
     fn start(
@@ -298,7 +318,9 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
 
                 // Ring buffer for lock-free, allocation-free audio data transfer
                 // The producer (receiver thread) pushes raw bytes, consumer (callback) pops them
-                let ring_size = 4 * chunksize * channels * store_bytes_per_sample;
+                let ring_size = pipewire_playback_ringbuffer_frames(chunksize, target_level)
+                    * channels
+                    * store_bytes_per_sample;
                 let ringbuffer = HeapRb::<u8>::new(ring_size);
                 let (mut rb_producer, rb_consumer) = ringbuffer.split();
                 let rb_consumer = Rc::new(RefCell::new(rb_consumer));
@@ -329,7 +351,10 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                         let data = &mut datas[0];
                         let stride = channels * store_bytes_per_sample;
 
-                        // Get output slice - data() returns slice sized to maxsize
+                        let requested_bytes = data.chunk().size() as usize;
+
+                        // Get output slice - data() returns the mapped buffer capacity,
+                        // not necessarily the amount due for this callback.
                         let out_slice = match data.data() {
                             Some(s) => s,
                             None => {
@@ -338,21 +363,34 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                             }
                         };
                         let max_bytes = out_slice.len();
-                        xtrace!("PW playback callback with {} bytes", max_bytes);
+                        let callback_bytes = pipewire_playback_callback_bytes(
+                            requested_bytes,
+                            max_bytes,
+                            stride,
+                            chunksize,
+                        );
+                        xtrace!(
+                            "PW playback callback with {} bytes due (chunk {} / max {})",
+                            callback_bytes,
+                            requested_bytes,
+                            max_bytes
+                        );
 
                         // Pop bytes from ring buffer directly into output - no allocations!
                         let mut consumer = rb_consumer_clone.borrow_mut();
 
                         // Fill output from ring buffer, then zero any missing tail (underrun handling)
-                        let (available_bytes, bytes_from_rb) =
-                            fill_playback_output_from_ringbuffer(&mut *consumer, out_slice);
+                        let (available_bytes, bytes_from_rb) = fill_playback_output_from_ringbuffer(
+                            &mut *consumer,
+                            &mut out_slice[..callback_bytes],
+                        );
 
                         if available_bytes == 0 {
                             warn!("PipeWire playback: buffer empty, outputting silence");
-                        } else if bytes_from_rb < max_bytes {
+                        } else if bytes_from_rb < callback_bytes {
                             debug!(
                                 "PipeWire playback: partial underrun, had {} of {} bytes",
-                                bytes_from_rb, max_bytes
+                                bytes_from_rb, callback_bytes
                             );
                         }
 
@@ -360,7 +398,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                         // For output streams, we must set chunk offset, size, and stride
                         let chunk = data.chunk_mut();
                         *chunk.offset_mut() = 0;
-                        *chunk.size_mut() = max_bytes as u32;
+                        *chunk.size_mut() = callback_bytes as u32;
                         *chunk.stride_mut() = stride as i32;
 
                         // Update buffer level estimator
