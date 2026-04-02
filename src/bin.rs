@@ -1013,6 +1013,7 @@ fn main_process() -> i32 {
         }
     }
 
+    #[cfg(any(not(windows), feature = "websocket"))]
     let active_config_path = Arc::new(Mutex::new(configname));
 
     let tx_command_thread = tx_command.clone();

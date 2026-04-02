@@ -546,24 +546,23 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         return Err(ConfigError::new("Volume limit cannot be less than -150 dB").into());
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
-        if let Some(format) = dev.format {
-            if format != WasapiSampleFormat::F32 && !dev.is_exclusive() {
-                return Err(ConfigError::new(
-                    "Wasapi shared mode capture must use F32 sample format",
-                )
-                .into());
-            }
-        }
+    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture
+        && let Some(format) = dev.format
+        && format != WasapiSampleFormat::F32
+        && !dev.is_exclusive()
+    {
+        return Err(
+            ConfigError::new("Wasapi shared mode capture must use F32 sample format").into(),
+        );
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
-        if dev.is_loopback() && dev.is_exclusive() {
-            return Err(ConfigError::new(
-                "Wasapi loopback capture is only supported in shared mode",
-            )
-            .into());
-        }
+    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture
+        && dev.is_loopback()
+        && dev.is_exclusive()
+    {
+        return Err(
+            ConfigError::new("Wasapi loopback capture is only supported in shared mode").into(),
+        );
     }
     #[cfg(target_os = "windows")]
     if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {

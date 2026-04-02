@@ -171,10 +171,10 @@ pub fn list_device_names(input: bool) -> Vec<String> {
     let mut names = Vec::new();
     if let Ok(all_ids) = get_audio_device_ids() {
         for device_id in all_ids.iter() {
-            if let Ok(name) = get_device_name(*device_id) {
-                if device_supports_scope(*device_id, input) {
-                    names.push(name.to_string());
-                }
+            if let Ok(name) = get_device_name(*device_id)
+                && device_supports_scope(*device_id, input)
+            {
+                names.push(name.to_string());
             }
         }
     }
@@ -580,33 +580,34 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         Ok(AudioMessage::Audio(chunk)) => {
                             let estimated_buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
                             buffer_avg.add_value(estimated_buffer_fill + (channel.len() * chunksize) as f64);
-                            if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
-                                if let Some(av_delay) = buffer_avg.average() {
-                                    let speed = rate_controller.next(av_delay);
-                                    let changed = (speed - rate_adjust_value).abs() > 0.000_001;
+                            if adjust
+                                && timer.larger_than_millis((1000.0 * adjust_period) as u64)
+                                && let Some(av_delay) = buffer_avg.average()
+                            {
+                                let speed = rate_controller.next(av_delay);
+                                let changed = (speed - rate_adjust_value).abs() > 0.000_001;
 
-                                    timer.restart();
-                                    buffer_avg.restart();
-                                    if changed {
-                                        debug!(
-                                            "Current buffer level {:.1}, set capture rate to {:.4}%.",
-                                            av_delay,
-                                            100.0 * speed
-                                        );
-                                        status_channel
-                                            .send(StatusMessage::SetSpeed(speed))
-                                            .unwrap_or(());
-                                        rate_adjust_value = speed;
-                                    }
-                                    else {
-                                        debug!(
-                                            "Current buffer level {:.1}, leaving capture rate at {:.4}%.",
-                                            av_delay,
-                                            100.0 * rate_adjust_value
-                                        );
-                                    }
-                                    playback_status.write().buffer_level = av_delay as usize;
+                                timer.restart();
+                                buffer_avg.restart();
+                                if changed {
+                                    debug!(
+                                        "Current buffer level {:.1}, set capture rate to {:.4}%.",
+                                        av_delay,
+                                        100.0 * speed
+                                    );
+                                    status_channel
+                                        .send(StatusMessage::SetSpeed(speed))
+                                        .unwrap_or(());
+                                    rate_adjust_value = speed;
                                 }
+                                else {
+                                    debug!(
+                                        "Current buffer level {:.1}, leaving capture rate at {:.4}%.",
+                                        av_delay,
+                                        100.0 * rate_adjust_value
+                                    );
+                                }
+                                playback_status.write().buffer_level = av_delay as usize;
                             }
                             chunk.update_stats(&mut chunk_stats);
 
