@@ -13,7 +13,7 @@ jobs:
     #container: ubuntu:20.04
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Update package list
         run: sudo apt-get update
@@ -37,7 +37,7 @@ jobs:
         run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-linux-amd64
           path: camilladsp.tar.gz
@@ -62,7 +62,7 @@ jobs:
         run: tar -zcvf camilladsp-pipewire.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
       - name: Upload binary with PipeWire artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-linux-pipewire-amd64
           path: camilladsp-pipewire.tar.gz
@@ -87,7 +87,7 @@ jobs:
         run: tar -zcvf camilladsp-pulse.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
       - name: Upload binary with PulseAudio artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-linux-pulseaudio-amd64
           path: camilladsp-pulse.tar.gz
@@ -108,7 +108,7 @@ jobs:
     #container: ubuntu:20.04
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Update package list
         run: sudo apt-get update
@@ -132,7 +132,7 @@ jobs:
         run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-linux-aarch64
           path: camilladsp.tar.gz
@@ -157,7 +157,7 @@ jobs:
         run: tar -zcvf camilladsp-pipewire.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
       - name: Upload binary with PipeWire artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-linux-pipewire-aarch64
           path: camilladsp-pipewire.tar.gz
@@ -182,7 +182,7 @@ jobs:
         run: tar -zcvf camilladsp-pulse.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
 
       - name: Upload binary with PulseAudio artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-linux-pulseaudio-aarch64
           path: camilladsp-pulse.tar.gz
@@ -202,7 +202,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -224,7 +224,7 @@ jobs:
         run: tar -zcvf camilladsp.tar.gz -C target/armv7-unknown-linux-gnueabihf/release camilladsp --owner=0 --group=0 --numeric-owner
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-linux-armv7
           path: camilladsp.tar.gz
@@ -244,7 +244,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -264,7 +264,7 @@ jobs:
         run: tar -zcvf camilladsp.tar.gz -C target/arm-unknown-linux-gnueabihf/release camilladsp --owner=0 --group=0 --numeric-owner
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-linux-armv6
           path: camilladsp.tar.gz
@@ -284,7 +284,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -296,7 +296,7 @@ jobs:
         run: powershell Compress-Archive target/release/camilladsp.exe camilladsp.zip
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-windows-amd64
           path: camilladsp.zip
@@ -318,7 +318,7 @@ jobs:
         run: powershell Compress-Archive target/release/camilladsp.exe camilladsp-asio.zip
 
       - name: Upload binary artifact with ASIO backend
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-windows-asio-amd64
           path: camilladsp-asio.zip
@@ -338,7 +338,7 @@ jobs:
     runs-on: macos-15-intel
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -350,7 +350,7 @@ jobs:
         run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-macos-amd64
           path: camilladsp.tar.gz
@@ -371,7 +371,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -383,7 +383,7 @@ jobs:
         run: tar -zcvf camilladsp.tar.gz -C target/release camilladsp
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: camilladsp-macos-aarch64
           path: camilladsp.tar.gz

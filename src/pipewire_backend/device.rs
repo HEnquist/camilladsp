@@ -15,11 +15,14 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::utils::ringbuffer::fill_playback_output_from_ringbuffer;
+use audio_thread_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
 use pipewire as pw;
 use pw::spa::param::audio::AudioFormat;
 use pw::spa::utils::Direction;
 use pw::spa::utils::Id;
-use pw::stream::{Stream, StreamFlags};
+use pw::stream::StreamFlags;
 
 // Re-import the properties macro
 use pipewire::properties::properties;
@@ -58,6 +61,12 @@ struct MainLoopQuitter {
 // SAFETY: pw_main_loop_quit() is thread-safe according to PipeWire documentation
 unsafe impl Send for MainLoopQuitter {}
 unsafe impl Sync for MainLoopQuitter {}
+
+impl Clone for MainLoopQuitter {
+    fn clone(&self) -> Self {
+        Self { raw: self.raw }
+    }
+}
 
 impl MainLoopQuitter {
     fn new(mainloop: &pw::main_loop::MainLoop) -> Self {
@@ -168,6 +177,26 @@ fn build_audio_params(samplerate: u32, channels: u32) -> Vec<u8> {
     buffer
 }
 
+fn pipewire_playback_ringbuffer_frames(chunksize: usize, target_level: usize) -> usize {
+    let playback_prefill_frames = target_level.max(3 * chunksize);
+    playback_prefill_frames + 4 * chunksize
+}
+
+fn pipewire_playback_callback_bytes(
+    requested_bytes: usize,
+    max_bytes: usize,
+    stride: usize,
+    chunksize: usize,
+) -> usize {
+    let fallback_bytes = chunksize * stride;
+    let bytes = if requested_bytes == 0 || requested_bytes > max_bytes {
+        fallback_bytes.min(max_bytes)
+    } else {
+        requested_bytes
+    };
+    bytes - (bytes % stride)
+}
+
 /// Start a playback thread listening for AudioMessages via a channel.
 impl PlaybackDevice for PipeWirePlaybackDevice {
     fn start(
@@ -210,7 +239,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                 // Initialize PipeWire
                 pw::init();
 
-                let mainloop = match pw::main_loop::MainLoop::new(None) {
+                let mainloop = match pw::main_loop::MainLoopBox::new(None) {
                     Ok(ml) => ml,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire main loop: {:?}", e);
@@ -223,7 +252,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     }
                 };
 
-                let context = match pw::context::Context::new(&mainloop) {
+                let context = match pw::context::ContextBox::new(mainloop.loop_(), None) {
                     Ok(ctx) => ctx,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire context: {:?}", e);
@@ -267,7 +296,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     props.insert("target.object", target.as_str());
                 }
 
-                let stream = match Stream::new(&core, "CamillaDSP-Playback", props) {
+                let stream = match pw::stream::StreamBox::new(&core, "CamillaDSP-Playback", props) {
                     Ok(s) => s,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire stream: {:?}", e);
@@ -289,7 +318,9 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
 
                 // Ring buffer for lock-free, allocation-free audio data transfer
                 // The producer (receiver thread) pushes raw bytes, consumer (callback) pops them
-                let ring_size = 4 * chunksize * channels * store_bytes_per_sample;
+                let ring_size = pipewire_playback_ringbuffer_frames(chunksize, target_level)
+                    * channels
+                    * store_bytes_per_sample;
                 let ringbuffer = HeapRb::<u8>::new(ring_size);
                 let (mut rb_producer, rb_consumer) = ringbuffer.split();
                 let rb_consumer = Rc::new(RefCell::new(rb_consumer));
@@ -320,30 +351,54 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                         let data = &mut datas[0];
                         let stride = channels * store_bytes_per_sample;
 
-                        // Get output slice - data() returns slice sized to maxsize
+                        let requested_bytes = data.chunk().size() as usize;
+
+                        // Get output slice - data() returns the mapped buffer capacity,
+                        // not necessarily the amount due for this callback.
                         let out_slice = match data.data() {
                             Some(s) => s,
-                            None => return,
+                            None => {
+                                warn!("PipeWire playback: no data pointer in buffer, skipping callback");
+                                return;
+                            }
                         };
                         let max_bytes = out_slice.len();
-                        xtrace!("PW playback callback with {} bytes", max_bytes);
+                        let callback_bytes = pipewire_playback_callback_bytes(
+                            requested_bytes,
+                            max_bytes,
+                            stride,
+                            chunksize,
+                        );
+                        xtrace!(
+                            "PW playback callback with {} bytes due (chunk {} / max {})",
+                            callback_bytes,
+                            requested_bytes,
+                            max_bytes
+                        );
 
                         // Pop bytes from ring buffer directly into output - no allocations!
                         let mut consumer = rb_consumer_clone.borrow_mut();
 
                         // Fill output from ring buffer, then zero any missing tail (underrun handling)
-                        let (available_bytes, _bytes_from_rb) =
-                            fill_playback_output_from_ringbuffer(&mut *consumer, out_slice);
+                        let (available_bytes, bytes_from_rb) = fill_playback_output_from_ringbuffer(
+                            &mut *consumer,
+                            &mut out_slice[..callback_bytes],
+                        );
 
                         if available_bytes == 0 {
-                            trace!("PipeWire playback: buffer empty, outputting silence");
+                            warn!("PipeWire playback: buffer empty, outputting silence");
+                        } else if bytes_from_rb < callback_bytes {
+                            debug!(
+                                "PipeWire playback: partial underrun, had {} of {} bytes",
+                                bytes_from_rb, callback_bytes
+                            );
                         }
 
                         // CRITICAL: Tell PipeWire how much data we wrote
                         // For output streams, we must set chunk offset, size, and stride
                         let chunk = data.chunk_mut();
                         *chunk.offset_mut() = 0;
-                        *chunk.size_mut() = max_bytes as u32;
+                        *chunk.size_mut() = callback_bytes as u32;
                         *chunk.stride_mut() = stride as i32;
 
                         // Update buffer level estimator
@@ -392,6 +447,22 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     Err(_err) => {}
                 }
                 barrier.wait();
+
+                let thread_handle = match promote_current_thread_to_real_time(
+                    chunksize as u32,
+                    samplerate as u32,
+                ) {
+                    Ok(h) => {
+                        debug!("Playback inner thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Playback inner thread could not get real time priority, error: {err}."
+                        );
+                        None
+                    }
+                };
                 debug!("Starting PipeWire playback loop");
 
                 // Spawn a thread to receive AudioMessages and send to PipeWire thread
@@ -401,6 +472,21 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                 let stride = channels * store_bytes_per_sample;
                 // Buffer level monitoring parameters (similar to other backends)
                 let receiver_handle = thread::spawn(move || {
+                    let thread_handle = match promote_current_thread_to_real_time(
+                        chunksize as u32,
+                        samplerate as u32,
+                    ) {
+                        Ok(h) => {
+                            debug!("Playback outer thread has real-time priority.");
+                            Some(h)
+                        }
+                        Err(err) => {
+                            warn!(
+                                "Playback outer thread could not get real time priority, error: {err}."
+                            );
+                            None
+                        }
+                    };
                     let mut chunk_stats = ChunkStats {
                         rms: vec![0.0; channels],
                         peak: vec![0.0; channels],
@@ -424,33 +510,34 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                             Ok(AudioMessage::Audio(chunk)) => {
                                 let estimated_buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
                                 buffer_avg.add_value(estimated_buffer_fill + (channel.len() * chunksize) as f64);
-                                if adjust && buffer_level_timer.larger_than_millis((1000.0 * adjust_period) as u64) {
-                                    if let Some(av_delay) = buffer_avg.average() {
-                                        let speed = rate_controller.next(av_delay);
-                                        let changed = (speed - rate_adjust_value).abs() > 0.000_001;
+                                if adjust
+                                    && buffer_level_timer.larger_than_millis((1000.0 * adjust_period) as u64)
+                                    && let Some(av_delay) = buffer_avg.average()
+                                {
+                                    let speed = rate_controller.next(av_delay);
+                                    let changed = (speed - rate_adjust_value).abs() > 0.000_001;
 
-                                        buffer_level_timer.restart();
-                                        buffer_avg.restart();
-                                        if changed {
-                                            debug!(
-                                                "Current buffer level {:.1}, set capture rate to {:.4}%.",
-                                                av_delay,
-                                                100.0 * speed
-                                            );
-                                            status_channel
-                                                .send(StatusMessage::SetSpeed(speed))
-                                                .unwrap_or(());
-                                            rate_adjust_value = speed;
-                                        }
-                                        else {
-                                            debug!(
-                                                "Current buffer level {:.1}, leaving capture rate at {:.4}%.",
-                                                av_delay,
-                                                100.0 * rate_adjust_value
-                                            );
-                                        }
-                                        playback_status.write().buffer_level = av_delay as usize;
+                                    buffer_level_timer.restart();
+                                    buffer_avg.restart();
+                                    if changed {
+                                        debug!(
+                                            "Current buffer level {:.1}, set capture rate to {:.4}%.",
+                                            av_delay,
+                                            100.0 * speed
+                                        );
+                                        status_channel
+                                            .send(StatusMessage::SetSpeed(speed))
+                                            .unwrap_or(());
+                                        rate_adjust_value = speed;
                                     }
+                                    else {
+                                        debug!(
+                                            "Current buffer level {:.1}, leaving capture rate at {:.4}%.",
+                                            av_delay,
+                                            100.0 * rate_adjust_value
+                                        );
+                                    }
+                                    playback_status.write().buffer_level = av_delay as usize;
                                 }
                                 chunk.update_stats(&mut chunk_stats);
 
@@ -526,6 +613,18 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                             }
                         }
                     }
+                    if let Some(h) = thread_handle {
+                        match demote_current_thread_from_real_time(h) {
+                            Ok(_) => {
+                                debug!("Playback outer thread returned to normal priority.")
+                            }
+                            Err(_) => {
+                                warn!(
+                                    "Could not bring the outer playback thread back to normal priority."
+                                )
+                            }
+                        };
+                    }
                     // Signal mainloop to quit - pw_main_loop_quit is thread-safe
                     quitter.quit();
                 });
@@ -535,6 +634,16 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
 
                 // Wait for receiver thread
                 let _ = receiver_handle.join();
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => debug!("Playback inner thread returned to normal priority."),
+                        Err(_) => {
+                            warn!(
+                                "Could not bring the inner playback thread back to normal priority."
+                            )
+                        }
+                    };
+                }
             })
             .unwrap();
         Ok(Box::new(handle))
@@ -595,7 +704,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                 // Initialize PipeWire
                 pw::init();
 
-                let mainloop = match pw::main_loop::MainLoop::new(None) {
+                let mainloop = match pw::main_loop::MainLoopBox::new(None) {
                     Ok(ml) => ml,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire main loop: {:?}", e);
@@ -608,7 +717,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     }
                 };
 
-                let context = match pw::context::Context::new(&mainloop) {
+                let context = match pw::context::ContextBox::new(mainloop.loop_(), None) {
                     Ok(ctx) => ctx,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire context: {:?}", e);
@@ -652,7 +761,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     props.insert("target.object", target.as_str());
                 }
 
-                let stream = match Stream::new(&core, "CamillaDSP-Capture", props) {
+                let stream = match pw::stream::StreamBox::new(&core, "CamillaDSP-Capture", props) {
                     Ok(s) => s,
                     Err(e) => {
                         let msg = format!("Failed to create PipeWire stream: {:?}", e);
@@ -676,7 +785,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
 
                 let exit_flag = Arc::new(AtomicBool::new(false));
                 let exit_flag_clone = exit_flag.clone();
-                let mainloop_clone = mainloop.clone();
+                let callback_quitter = MainLoopQuitter::new(&mainloop);
 
                 // Set up stream listener for capture
                 let rb_producer_clone = rb_producer.clone();
@@ -688,7 +797,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     })
                     .process(move |stream, _| {
                         if exit_flag_clone.load(Ordering::Relaxed) {
-                            mainloop_clone.quit();
+                            callback_quitter.quit();
                             return;
                         }
 
@@ -726,7 +835,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         let mut producer = rb_producer_clone.borrow_mut();
                         let pushed = producer.push_slice(in_slice);
                         if pushed < size {
-                            trace!("Capture ring buffer full, dropped {} bytes", size - pushed);
+                            warn!("Capture ring buffer full, dropped {} bytes", size - pushed);
                         }
 
                         // Notify processing thread that data is available
@@ -778,6 +887,22 @@ impl CaptureDevice for PipeWireCaptureDevice {
 
 
                 barrier.wait();
+
+                let thread_handle = match promote_current_thread_to_real_time(
+                    chunksize as u32,
+                    capture_samplerate as u32,
+                ) {
+                    Ok(h) => {
+                        debug!("Capture inner thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Capture inner thread could not get real time priority, error: {err}."
+                        );
+                        None
+                    }
+                };
                 debug!("Starting PipeWire capture loop");
 
                 // Initialize resampler
@@ -795,6 +920,21 @@ impl CaptureDevice for PipeWireCaptureDevice {
                 let capture_status_clone = capture_status.clone();
                 let quitter = MainLoopQuitter::new(&mainloop);
                 let processing_handle = thread::spawn(move || {
+                    let thread_handle = match promote_current_thread_to_real_time(
+                        chunksize as u32,
+                        samplerate as u32,
+                    ) {
+                        Ok(h) => {
+                            debug!("Capture outer thread has real-time priority.");
+                            Some(h)
+                        }
+                        Err(err) => {
+                            warn!(
+                                "Capture outer thread could not get real time priority, error: {err}."
+                            );
+                            None
+                        }
+                    };
                     let mut averager = countertimer::TimeAverage::new();
                     let mut silence_counter = countertimer::SilenceCounter::new(
                         silence_threshold,
@@ -833,6 +973,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                             }
                             Ok(CommandMessage::SetSpeed { speed }) => {
                                 rate_adjust = speed;
+                                debug!("Requested to adjust capture speed to {speed}");
                                 if let Some(resampl) = &mut resampler {
                                     if async_src {
                                         if resampl.resampler.set_resample_ratio_relative(speed, true).is_err() {
@@ -867,6 +1008,11 @@ impl CaptureDevice for PipeWireCaptureDevice {
                             tries += 1;
                         }
                         if rb_consumer.occupied_len() < capture_bytes {
+                            warn!(
+                                "Capture: waited 1s but only got {} of {} bytes, skipping chunk",
+                                rb_consumer.occupied_len(),
+                                capture_bytes
+                            );
                             continue;
                         }
 
@@ -937,7 +1083,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                             match channel.try_send(msg) {
                                 Ok(()) => {}
                                 Err(crossbeam_channel::TrySendError::Full(_)) => {
-                                    trace!("Capture: processing pipeline full, dropping frame");
+                                    warn!("Capture: processing pipeline full, dropping frame");
                                 }
                                 Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
                                     info!("Processing thread has already stopped.");
@@ -955,6 +1101,16 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         }
                     }
 
+                    if let Some(h) = thread_handle {
+                        match demote_current_thread_from_real_time(h) {
+                            Ok(_) => debug!("Capture outer thread returned to normal priority."),
+                            Err(_) => {
+                                warn!(
+                                    "Could not bring the outer capture thread back to normal priority."
+                                )
+                            }
+                        };
+                    }
                     capture_status_clone.write().state = ProcessingState::Inactive;
                     // Signal mainloop to quit - pw_main_loop_quit is thread-safe
                     quitter.quit();
@@ -965,6 +1121,16 @@ impl CaptureDevice for PipeWireCaptureDevice {
 
                 // Wait for processing thread
                 let _ = processing_handle.join();
+                if let Some(h) = thread_handle {
+                    match demote_current_thread_from_real_time(h) {
+                        Ok(_) => debug!("Capture inner thread returned to normal priority."),
+                        Err(_) => {
+                            warn!(
+                                "Could not bring the inner capture thread back to normal priority."
+                            )
+                        }
+                    };
+                }
             })
             .unwrap();
         Ok(Box::new(handle))
