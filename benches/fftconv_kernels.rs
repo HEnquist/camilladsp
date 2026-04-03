@@ -65,19 +65,18 @@ fn bench_multiply_elements(c: &mut Criterion) {
         });
 
         #[cfg(target_arch = "x86_64")]
-        group.bench_with_input(BenchmarkId::new("avx", len), &len, |b, &len| {
-            if !bench_has_avx_fma() {
-                return;
-            }
-            let (a, bv, mut result) = make_buffers(len);
-            b.iter(|| unsafe {
-                bench_multiply_elements_avx_fma(
-                    black_box(&mut result),
-                    black_box(&a),
-                    black_box(&bv),
-                )
+        if bench_has_avx_fma() {
+            group.bench_with_input(BenchmarkId::new("avx", len), &len, |b, &len| {
+                let (a, bv, mut result) = make_buffers(len);
+                b.iter(|| unsafe {
+                    bench_multiply_elements_avx_fma(
+                        black_box(&mut result),
+                        black_box(&a),
+                        black_box(&bv),
+                    )
+                });
             });
-        });
+        }
     }
 
     group.finish();
@@ -105,23 +104,22 @@ fn bench_multiply_add_elements(c: &mut Criterion) {
         });
 
         #[cfg(target_arch = "x86_64")]
-        group.bench_with_input(BenchmarkId::new("avx", len), &len, |b, &len| {
-            if !bench_has_avx_fma() {
-                return;
-            }
-            let (a, bv, result_init) = make_buffers(len);
-            b.iter_batched_ref(
-                || result_init.clone(),
-                |result| unsafe {
-                    bench_multiply_add_elements_avx_fma(
-                        black_box(result),
-                        black_box(&a),
-                        black_box(&bv),
-                    );
-                },
-                BatchSize::SmallInput,
-            );
-        });
+        if bench_has_avx_fma() {
+            group.bench_with_input(BenchmarkId::new("avx", len), &len, |b, &len| {
+                let (a, bv, result_init) = make_buffers(len);
+                b.iter_batched_ref(
+                    || result_init.clone(),
+                    |result| unsafe {
+                        bench_multiply_add_elements_avx_fma(
+                            black_box(result),
+                            black_box(&a),
+                            black_box(&bv),
+                        );
+                    },
+                    BatchSize::SmallInput,
+                );
+            });
+        }
     }
 
     group.finish();
