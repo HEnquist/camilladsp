@@ -31,6 +31,7 @@ use crate::Res;
 mod neon;
 
 // element-wise product, result = slice_a * slice_b
+#[cfg(any(not(target_arch = "aarch64"), test, feature = "bench"))]
 fn multiply_elements_scalar(
     result: &mut [Complex<PrcFmt>],
     slice_a: &[Complex<PrcFmt>],
@@ -65,6 +66,7 @@ fn multiply_elements_scalar(
 }
 
 // element-wise add product, result = result + slice_a * slice_b
+#[cfg(any(not(target_arch = "aarch64"), test, feature = "bench"))]
 fn multiply_add_elements_scalar(
     result: &mut [Complex<PrcFmt>],
     slice_a: &[Complex<PrcFmt>],

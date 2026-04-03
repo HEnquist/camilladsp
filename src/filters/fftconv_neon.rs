@@ -383,16 +383,6 @@ pub(super) unsafe fn multiply_add_elements_neon(
     }
 }
 
-// NEON is architecturally mandatory on all AArch64 implementations (ARM
-// Architecture Reference Manual, section A1.1), so no runtime detection is
-// needed. The function is kept to match the dispatch pattern of the AVX path,
-// where runtime detection is genuinely required.
-#[cfg(target_arch = "aarch64")]
-#[inline]
-pub(super) fn has_neon() -> bool {
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
