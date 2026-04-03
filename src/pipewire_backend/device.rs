@@ -177,9 +177,46 @@ fn build_audio_params(samplerate: u32, channels: u32) -> Vec<u8> {
     buffer
 }
 
-fn pipewire_playback_ringbuffer_frames(chunksize: usize, target_level: usize) -> usize {
+fn pipewire_min_ringbuffer_frames(samplerate: usize) -> usize {
+    (samplerate * 25).div_ceil(1000)
+}
+
+fn pipewire_playback_ringbuffer_frames(
+    samplerate: usize,
+    chunksize: usize,
+    target_level: usize,
+) -> usize {
+    // We do not know the actual PipeWire quantum here, so this is a dedicated
+    // guess based on the configured chunksize. Keep the ringbuffer at least
+    // 25 ms long so it can absorb larger-than-expected callback quanta.
     let playback_prefill_frames = target_level.max(3 * chunksize);
-    playback_prefill_frames + 4 * chunksize
+    let ringbuffer_frames = playback_prefill_frames + 4 * chunksize;
+    ringbuffer_frames.max(pipewire_min_ringbuffer_frames(samplerate))
+}
+
+fn pipewire_capture_ringbuffer_frames(samplerate: usize, chunksize: usize) -> usize {
+    // We do not know the actual PipeWire quantum here, so this is a dedicated
+    // guess based on the configured chunksize. Keep the ringbuffer at least
+    // 25 ms long so it can absorb larger-than-expected callback quanta.
+    (4 * chunksize).max(pipewire_min_ringbuffer_frames(samplerate))
+}
+
+fn pipewire_quantum_frames(bytes: usize, stride: usize) -> Option<usize> {
+    if stride == 0 {
+        return None;
+    }
+    let aligned_bytes = bytes - (bytes % stride);
+    if aligned_bytes == 0 {
+        None
+    } else {
+        Some(aligned_bytes / stride)
+    }
+}
+
+fn pipewire_logged_quantum(frames_bytes: &[usize], stride: usize) -> Option<(usize, usize)> {
+    frames_bytes
+        .iter()
+        .find_map(|bytes| pipewire_quantum_frames(*bytes, stride).map(|frames| (frames, *bytes)))
 }
 
 fn pipewire_playback_callback_bytes(
@@ -318,7 +355,11 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
 
                 // Ring buffer for lock-free, allocation-free audio data transfer
                 // The producer (receiver thread) pushes raw bytes, consumer (callback) pops them
-                let ring_size = pipewire_playback_ringbuffer_frames(chunksize, target_level)
+                let ring_size = pipewire_playback_ringbuffer_frames(
+                    samplerate,
+                    chunksize,
+                    target_level,
+                )
                     * channels
                     * store_bytes_per_sample;
                 let ringbuffer = HeapRb::<u8>::new(ring_size);
@@ -327,6 +368,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
 
                 // Set up stream listener
                 let rb_consumer_clone = rb_consumer.clone();
+                let mut logged_playback_quantum = false;
                 let _listener = stream
                     .add_local_listener_with_user_data(())
                     .state_changed(move |_, _, old, new| {
@@ -369,6 +411,18 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                             stride,
                             chunksize,
                         );
+                        if !logged_playback_quantum {
+                            if let Some((quantum_frames, quantum_bytes)) =
+                                pipewire_logged_quantum(&[requested_bytes, callback_bytes, max_bytes], stride)
+                            {
+                                debug!(
+                                    "PipeWire playback callback quantum is {} frames ({} bytes)",
+                                    quantum_frames,
+                                    quantum_bytes
+                                );
+                                logged_playback_quantum = true;
+                            }
+                        }
                         xtrace!(
                             "PW playback callback with {} bytes due (chunk {} / max {})",
                             callback_bytes,
@@ -775,7 +829,9 @@ impl CaptureDevice for PipeWireCaptureDevice {
                 };
 
                 // Ring buffer for lock-free, allocation-free capture data transfer
-                let ring_size = 4 * chunksize * channels * store_bytes_per_sample;
+                let ring_size = pipewire_capture_ringbuffer_frames(capture_samplerate, chunksize)
+                    * channels
+                    * store_bytes_per_sample;
                 let ringbuffer = HeapRb::<u8>::new(ring_size);
                 let (rb_producer, mut rb_consumer) = ringbuffer.split();
                 let rb_producer = Rc::new(RefCell::new(rb_producer));
@@ -790,6 +846,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                 // Set up stream listener for capture
                 let rb_producer_clone = rb_producer.clone();
                 let notify_tx_clone = notify_tx.clone();
+                let mut logged_capture_quantum = false;
                 let _listener = stream
                     .add_local_listener_with_user_data(())
                     .state_changed(move |_, _, old, new| {
@@ -816,9 +873,23 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         }
 
                         let data = &mut datas[0];
+                        let stride = channels * store_bytes_per_sample;
                         let chunk_data = data.chunk();
                         let offset = chunk_data.offset() as usize;
                         let size = chunk_data.size() as usize;
+                        let available_bytes = data.data().map(|slice| slice.len()).unwrap_or_default();
+                        if !logged_capture_quantum {
+                            if let Some((quantum_frames, quantum_bytes)) =
+                                pipewire_logged_quantum(&[size, available_bytes], stride)
+                            {
+                                debug!(
+                                    "PipeWire capture callback quantum is {} frames ({} bytes)",
+                                    quantum_frames,
+                                    quantum_bytes
+                                );
+                                logged_capture_quantum = true;
+                            }
+                        }
                         xtrace!("PW capture callback with data size {} bytes", size);
 
                         if size == 0 {
