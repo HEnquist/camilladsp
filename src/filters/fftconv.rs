@@ -106,10 +106,11 @@ fn multiply_elements(
     slice_b: &[Complex<PrcFmt>],
 ) {
     #[cfg(target_arch = "aarch64")]
-    if neon::has_neon() {
-        // SAFETY: NEON support has been verified by has_neon().
-        return unsafe { neon::multiply_elements_neon(result, slice_a, slice_b) };
-    }
+    unsafe {
+        // SAFETY: NEON is mandatory on all AArch64 implementations.
+        neon::multiply_elements_neon(result, slice_a, slice_b)
+    };
+    #[cfg(not(target_arch = "aarch64"))]
     multiply_elements_scalar(result, slice_a, slice_b);
 }
 
@@ -121,10 +122,11 @@ fn multiply_add_elements(
     slice_b: &[Complex<PrcFmt>],
 ) {
     #[cfg(target_arch = "aarch64")]
-    if neon::has_neon() {
-        // SAFETY: NEON support has been verified by has_neon().
-        return unsafe { neon::multiply_add_elements_neon(result, slice_a, slice_b) };
-    }
+    unsafe {
+        // SAFETY: NEON is mandatory on all AArch64 implementations.
+        neon::multiply_add_elements_neon(result, slice_a, slice_b)
+    };
+    #[cfg(not(target_arch = "aarch64"))]
     multiply_add_elements_scalar(result, slice_a, slice_b);
 }
 

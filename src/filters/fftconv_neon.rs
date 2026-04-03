@@ -24,9 +24,10 @@ use num_complex::Complex;
 // [-1, 1] to get the correct subtract/add pattern, then use FMA:
 //   result = a_re * b + a_im * b_swap_signed
 //
-// For multiply_add (accumulate), the accumulator is folded into the first FMA
-// to eliminate a separate ADD instruction:
-//   result = fma(fma(acc, a_re, b), a_im, b_swap_signed)
+// For multiply_add (accumulate), the kernel computes the complex product first,
+// then adds the accumulator via a separate add:
+//   prod = a_re * b + a_im * b_swap_signed  (via vmulq + vfmaq)
+//   result = acc + prod                     (via vaddq)
 //
 // 4x-register unrolled main loop + 1x cleanup + scalar tail (f32 only).
 
@@ -382,15 +383,14 @@ pub(super) unsafe fn multiply_add_elements_neon(
     }
 }
 
-// Cached NEON detection; NEON is mandatory on aarch64 so this always returns true,
-// but we keep the same pattern as the AVX path for consistency.
+// NEON is architecturally mandatory on all AArch64 implementations (ARM
+// Architecture Reference Manual, section A1.1), so no runtime detection is
+// needed. The function is kept to match the dispatch pattern of the AVX path,
+// where runtime detection is genuinely required.
 #[cfg(target_arch = "aarch64")]
 #[inline]
 pub(super) fn has_neon() -> bool {
-    use std::arch::is_aarch64_feature_detected;
-    use std::sync::OnceLock;
-    static DETECTED: OnceLock<bool> = OnceLock::new();
-    *DETECTED.get_or_init(|| is_aarch64_feature_detected!("neon"))
+    true
 }
 
 #[cfg(test)]
@@ -436,12 +436,6 @@ mod tests {
     fn multiply_elements_neon_matches_scalar_all_lengths() {
         use super::super::multiply_elements_scalar;
         use super::multiply_elements_neon;
-        use std::arch::is_aarch64_feature_detected;
-
-        if !is_aarch64_feature_detected!("neon") {
-            return;
-        }
-
         // Cover all f64 tail lengths: mod 4 (main loop) and individual cleanup.
         for len in [
             0usize, 1, 2, 3, 4, 5, 7, 8, 9, 13, 15, 16, 17, 24, 25, 100, 1025,
@@ -451,7 +445,7 @@ mod tests {
             let mut result = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
 
             multiply_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON support verified above.
+            // SAFETY: NEON is mandatory on all AArch64 implementations.
             unsafe { multiply_elements_neon(&mut result, &a, &b) };
 
             for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
@@ -476,12 +470,6 @@ mod tests {
     fn multiply_add_elements_neon_matches_scalar_all_lengths() {
         use super::super::multiply_add_elements_scalar;
         use super::multiply_add_elements_neon;
-        use std::arch::is_aarch64_feature_detected;
-
-        if !is_aarch64_feature_detected!("neon") {
-            return;
-        }
-
         for len in [
             0usize, 1, 2, 3, 4, 5, 7, 8, 9, 13, 15, 16, 17, 24, 25, 100, 1025,
         ] {
@@ -495,7 +483,7 @@ mod tests {
             let mut result = init.clone();
 
             multiply_add_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON support verified above.
+            // SAFETY: NEON is mandatory on all AArch64 implementations.
             unsafe { multiply_add_elements_neon(&mut result, &a, &b) };
 
             for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
@@ -522,12 +510,6 @@ mod tests {
     fn multiply_elements_neon_f32_matches_scalar_all_lengths() {
         use super::super::multiply_elements_scalar;
         use super::multiply_elements_neon;
-        use std::arch::is_aarch64_feature_detected;
-
-        if !is_aarch64_feature_detected!("neon") {
-            return;
-        }
-
         // Cover all f32 tail lengths: mod 2 (cleanup) and mod 8 (main loop).
         for len in [
             0usize, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 32, 33, 48, 49, 100, 1025,
@@ -537,7 +519,7 @@ mod tests {
             let mut result = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
 
             multiply_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON support verified above.
+            // SAFETY: NEON is mandatory on all AArch64 implementations.
             unsafe { multiply_elements_neon(&mut result, &a, &b) };
 
             for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
@@ -562,12 +544,6 @@ mod tests {
     fn multiply_add_elements_neon_f32_matches_scalar_all_lengths() {
         use super::super::multiply_add_elements_scalar;
         use super::multiply_add_elements_neon;
-        use std::arch::is_aarch64_feature_detected;
-
-        if !is_aarch64_feature_detected!("neon") {
-            return;
-        }
-
         for len in [
             0usize, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 32, 33, 48, 49, 100, 1025,
         ] {
@@ -580,7 +556,7 @@ mod tests {
             let mut result = init.clone();
 
             multiply_add_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON support verified above.
+            // SAFETY: NEON is mandatory on all AArch64 implementations.
             unsafe { multiply_add_elements_neon(&mut result, &a, &b) };
 
             for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
@@ -607,12 +583,6 @@ mod tests {
     fn multiply_add_multi_round_neon_matches_scalar() {
         use super::super::{multiply_add_elements_scalar, multiply_elements_scalar};
         use super::{multiply_add_elements_neon, multiply_elements_neon};
-        use std::arch::is_aarch64_feature_detected;
-
-        if !is_aarch64_feature_detected!("neon") {
-            return;
-        }
-
         let nsegments = 16;
         let len = 1025; // typical FFT spectrum size for chunksize=1024
 
@@ -677,12 +647,6 @@ mod tests {
     fn multiply_elements_neon_large_buffers() {
         use super::super::multiply_elements_scalar;
         use super::multiply_elements_neon;
-        use std::arch::is_aarch64_feature_detected;
-
-        if !is_aarch64_feature_detected!("neon") {
-            return;
-        }
-
         // 4097: typical large FFT spectrum, exercises 4x body + remainder.
         // 8192: power-of-two, exercises 4x body with no remainder.
         // 8193: one past power-of-two, exercises cleanup (1 element).
@@ -722,12 +686,6 @@ mod tests {
     fn multiply_add_elements_neon_large_buffers() {
         use super::super::multiply_add_elements_scalar;
         use super::multiply_add_elements_neon;
-        use std::arch::is_aarch64_feature_detected;
-
-        if !is_aarch64_feature_detected!("neon") {
-            return;
-        }
-
         for len in [4097usize, 8192, 8193] {
             let (a, b) = make_test_vectors(len);
             let init: Vec<Complex<PrcFmt>> = (0..len)
@@ -770,12 +728,6 @@ mod tests {
     fn multiply_add_multi_round_neon_f32_matches_scalar() {
         use super::super::{multiply_add_elements_scalar, multiply_elements_scalar};
         use super::{multiply_add_elements_neon, multiply_elements_neon};
-        use std::arch::is_aarch64_feature_detected;
-
-        if !is_aarch64_feature_detected!("neon") {
-            return;
-        }
-
         let nsegments = 16;
         let len = 1025;
 
@@ -807,13 +759,13 @@ mod tests {
 
         // First segment: overwrite.
         multiply_elements_scalar(&mut expected, &segments[0].0, &segments[0].1);
-        // SAFETY: NEON support verified above.
+        // SAFETY: NEON is mandatory on all AArch64 implementations.
         unsafe { multiply_elements_neon(&mut result, &segments[0].0, &segments[0].1) };
 
         // Remaining segments: accumulate.
         for (a, b) in &segments[1..] {
             multiply_add_elements_scalar(&mut expected, a, b);
-            // SAFETY: NEON support verified above.
+            // SAFETY: NEON is mandatory on all AArch64 implementations.
             unsafe { multiply_add_elements_neon(&mut result, a, b) };
         }
 
@@ -842,12 +794,6 @@ mod tests {
     fn multiply_elements_neon_f32_large_buffers() {
         use super::super::multiply_elements_scalar;
         use super::multiply_elements_neon;
-        use std::arch::is_aarch64_feature_detected;
-
-        if !is_aarch64_feature_detected!("neon") {
-            return;
-        }
-
         // 4097: exercises 4x body + remainder.
         // 8192: power-of-two, no remainder.
         // 8193: one past power-of-two, exercises scalar tail (1 element).
@@ -857,7 +803,7 @@ mod tests {
             let mut result = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
 
             multiply_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON support verified above.
+            // SAFETY: NEON is mandatory on all AArch64 implementations.
             unsafe { multiply_elements_neon(&mut result, &a, &b) };
 
             for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
@@ -888,12 +834,6 @@ mod tests {
     fn multiply_add_elements_neon_f32_large_buffers() {
         use super::super::multiply_add_elements_scalar;
         use super::multiply_add_elements_neon;
-        use std::arch::is_aarch64_feature_detected;
-
-        if !is_aarch64_feature_detected!("neon") {
-            return;
-        }
-
         for len in [4097usize, 8192, 8193] {
             let (a, b) = make_test_vectors(len);
             let init: Vec<Complex<PrcFmt>> = (0..len)
@@ -904,7 +844,7 @@ mod tests {
             let mut result = init.clone();
 
             multiply_add_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON support verified above.
+            // SAFETY: NEON is mandatory on all AArch64 implementations.
             unsafe { multiply_add_elements_neon(&mut result, &a, &b) };
 
             for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
