@@ -26,8 +26,12 @@ use std::sync::Arc;
 use crate::PrcFmt;
 use crate::Res;
 
+#[cfg(target_arch = "x86_64")]
+#[path = "fftconv_avx.rs"]
+mod avx;
+
 // element-wise product, result = slice_a * slice_b
-fn multiply_elements(
+fn multiply_elements_scalar(
     result: &mut [Complex<PrcFmt>],
     slice_a: &[Complex<PrcFmt>],
     slice_b: &[Complex<PrcFmt>],
@@ -61,7 +65,7 @@ fn multiply_elements(
 }
 
 // element-wise add product, result = result + slice_a * slice_b
-fn multiply_add_elements(
+fn multiply_add_elements_scalar(
     result: &mut [Complex<PrcFmt>],
     slice_a: &[Complex<PrcFmt>],
     slice_b: &[Complex<PrcFmt>],
@@ -94,6 +98,36 @@ fn multiply_add_elements(
     }
 }
 
+// Element-wise product: result = slice_a * slice_b. Dispatches to AVX+FMA or scalar.
+#[inline]
+fn multiply_elements(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    #[cfg(target_arch = "x86_64")]
+    if avx::has_avx_fma() {
+        // SAFETY: AVX and FMA support has been verified by has_avx_fma().
+        return unsafe { avx::multiply_elements_avx_fma(result, slice_a, slice_b) };
+    }
+    multiply_elements_scalar(result, slice_a, slice_b);
+}
+
+// Element-wise accumulate product: result += slice_a * slice_b. Dispatches to AVX+FMA or scalar.
+#[inline]
+fn multiply_add_elements(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    #[cfg(target_arch = "x86_64")]
+    if avx::has_avx_fma() {
+        // SAFETY: AVX and FMA support has been verified by has_avx_fma().
+        return unsafe { avx::multiply_add_elements_avx_fma(result, slice_a, slice_b) };
+    }
+    multiply_add_elements_scalar(result, slice_a, slice_b);
+}
+
 pub struct FftConv {
     name: String,
     npoints: usize,
@@ -112,7 +146,7 @@ pub struct FftConv {
 }
 
 impl FftConv {
-    /// Create a new FFT colvolution filter.
+    /// Create a new FFT convolution filter.
     pub fn new(name: &str, data_length: usize, coeffs: &[PrcFmt]) -> Self {
         let name = name.to_string();
         let input_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
@@ -301,6 +335,53 @@ impl Filter for FftConv {
     }
 }
 
+// Benchmark API: kernel wrappers for benches/fftconv_kernels.rs (feature = "bench" only).
+
+#[cfg(feature = "bench")]
+pub fn bench_multiply_elements_scalar(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    multiply_elements_scalar(result, slice_a, slice_b);
+}
+
+#[cfg(feature = "bench")]
+pub fn bench_multiply_add_elements_scalar(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    multiply_add_elements_scalar(result, slice_a, slice_b);
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "bench"))]
+pub fn bench_has_avx_fma() -> bool {
+    avx::has_avx_fma()
+}
+
+/// # Safety
+/// Caller must verify AVX+FMA availability via `bench_has_avx_fma()`.
+#[cfg(all(target_arch = "x86_64", feature = "bench"))]
+pub unsafe fn bench_multiply_elements_avx_fma(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    unsafe { avx::multiply_elements_avx_fma(result, slice_a, slice_b) };
+}
+
+/// # Safety
+/// Caller must verify AVX+FMA availability via `bench_has_avx_fma()`.
+#[cfg(all(target_arch = "x86_64", feature = "bench"))]
+pub unsafe fn bench_multiply_add_elements_avx_fma(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    unsafe { avx::multiply_add_elements_avx_fma(result, slice_a, slice_b) };
+}
+
 /// Validate a FFT convolution config.
 pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {
@@ -333,6 +414,7 @@ mod tests {
     use crate::config::ConvParameters;
     use crate::filters::Filter;
     use crate::filters::fftconv::FftConv;
+    use num_complex::Complex;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{left} - {right}");
@@ -390,5 +472,42 @@ mod tests {
         assert!(compare_waveforms(wave3, exp3, 1e-5));
         assert!(compare_waveforms(wave4, exp4, 1e-5));
         assert!(compare_waveforms(wave5, exp5, 1e-5));
+    }
+
+    // FMA rounds differently from scalar; SIMD results may differ by a few ULPs.
+    #[cfg(not(feature = "32bit"))]
+    const SIMD_TOL: PrcFmt = 1e-9;
+    #[cfg(feature = "32bit")]
+    const SIMD_TOL: PrcFmt = 1e-5;
+
+    #[test]
+    fn multiply_elements_scalar_known_values() {
+        use super::multiply_elements_scalar;
+
+        // (1 + 2i) * (3 + 4i) = (3-8) + (4+6)i = -5 + 10i
+        let a = vec![Complex::new(1.0 as PrcFmt, 2.0)];
+        let b = vec![Complex::new(3.0 as PrcFmt, 4.0)];
+        let mut result = vec![Complex::new(0.0 as PrcFmt, 0.0)];
+
+        multiply_elements_scalar(&mut result, &a, &b);
+
+        assert!(is_close(result[0].re, -5.0, SIMD_TOL));
+        assert!(is_close(result[0].im, 10.0, SIMD_TOL));
+    }
+
+    #[test]
+    fn multiply_add_elements_scalar_known_values() {
+        use super::multiply_add_elements_scalar;
+
+        // result starts at (1 + 1i), then += (1 + 2i) * (3 + 4i) = -5 + 10i
+        // expected final: (-4 + 11i)
+        let a = vec![Complex::new(1.0 as PrcFmt, 2.0)];
+        let b = vec![Complex::new(3.0 as PrcFmt, 4.0)];
+        let mut result = vec![Complex::new(1.0 as PrcFmt, 1.0)];
+
+        multiply_add_elements_scalar(&mut result, &a, &b);
+
+        assert!(is_close(result[0].re, -4.0, SIMD_TOL));
+        assert!(is_close(result[0].im, 11.0, SIMD_TOL));
     }
 }
