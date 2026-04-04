@@ -1528,21 +1528,20 @@ impl PlaybackDevice for AsioPlaybackDevice {
 
                             if adjust
                                 && timer.larger_than_millis((1000.0 * adjust_period) as u64)
+                                && let Some(av_delay) = buffer_avg.average()
                             {
-                                if let Some(av_delay) = buffer_avg.average() {
-                                    let speed = rate_controller.next(av_delay);
-                                    timer.restart();
-                                    buffer_avg.restart();
-                                    debug!(
-                                        "Playback, current buffer level {:.1}, set capture rate to {:.4}%.",
-                                        av_delay,
-                                        100.0 * speed
-                                    );
-                                    status_channel
-                                        .send(StatusMessage::SetSpeed(speed))
-                                        .unwrap_or(());
-                                    playback_status.write().buffer_level = av_delay as usize;
-                                }
+                                let speed = rate_controller.next(av_delay);
+                                timer.restart();
+                                buffer_avg.restart();
+                                debug!(
+                                    "Playback, current buffer level {:.1}, set capture rate to {:.4}%.",
+                                    av_delay,
+                                    100.0 * speed
+                                );
+                                status_channel
+                                    .send(StatusMessage::SetSpeed(speed))
+                                    .unwrap_or(());
+                                playback_status.write().buffer_level = av_delay as usize;
                             }
 
                             chunk.update_stats(&mut chunk_stats);

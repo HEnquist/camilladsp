@@ -1,4 +1,5 @@
 # Sample formats
+These are all the binary sample formats supported by CamillaDSP.
 
 | Format                      | Type       | Bits     | Bytes | Byte order    | Storage |
 |-----------------------------|------------|----------|-------|---------------|---------|
@@ -9,6 +10,29 @@
 | [S32_LE](#s32_le)           | Integer    | 32       | 4     | little-endian | packed  |
 | [F32_LE](#f32_le)           | Float      | 32       | 4     | little-endian | packed  |
 | [F64_LE](#f64_le)           | Float      | 64       | 8     | little-endian | packed  |
+
+
+## Sample format subsets
+Most audio APIs support only a subset of the possible binary formats,
+and for some APIs CamillaDSP auto-detects some properties of the chosen format.
+To simplify configuration, the backends for the different APIs use simplified lists of formats.
+
+These simplified names are API-level formats, while the names in the table above are exact binary formats.
+For example, `S24` means "24-bit signed integer" but does not specify storage details.
+Depending on backend and device capabilities, `S24` may map to one of:
+- `S24_3_LE` (packed, 3 bytes per sample)
+- `S24_4_LJ_LE` (padded to 4 bytes, left justified)
+- `S24_4_RJ_LE` (padded to 4 bytes, right justified)
+
+In the same way, backend-specific names such as ALSA `S24_4_LE` are mapped internally
+to the corresponding exact CamillaDSP binary format.
+
+When you select a simplified format, CamillaDSP queries the audio API/device,
+checks which concrete binary formats are actually supported,
+and picks a matching one automatically.
+If `format` is left out or set to `null`, CamillaDSP can also auto-select the format itself,
+using backend-specific quality priorities.
+See each backend documentation page for details on available simplified formats and selection order.
 
 
 ## Byte order

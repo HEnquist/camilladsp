@@ -10,7 +10,7 @@ use camillalib::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_r
 fn bench_to_chunk_small(c: &mut Criterion) {
     let datalen = 2 * 4 * 64;
     let data = vec![0u8; datalen];
-    let mask = vec![true, true];
+    let mask = [true, true];
     c.bench_function("to_chunk_small", |b| {
         b.iter(|| {
             let chunk = buffer_to_chunk_rawbytes(
@@ -29,7 +29,7 @@ fn bench_to_chunk_small(c: &mut Criterion) {
 fn bench_to_chunk_large(c: &mut Criterion) {
     let datalen = 2 * 4 * 4096;
     let data = vec![0u8; datalen];
-    let mask = vec![true, true];
+    let mask = [true, true];
     c.bench_function("to_chunk_large", |b| {
         b.iter(|| {
             let chunk = buffer_to_chunk_rawbytes(
@@ -46,7 +46,7 @@ fn bench_to_chunk_large(c: &mut Criterion) {
 }
 
 fn bench_to_bytes_large(c: &mut Criterion) {
-    let mask = vec![true, true];
+    let mask = [true, true];
     let num_frames = 4096;
     let datalen = 2 * 4 * num_frames;
     let mut data = vec![0u8; datalen];
@@ -63,7 +63,7 @@ fn bench_to_bytes_large(c: &mut Criterion) {
 }
 
 fn bench_to_bytes_small(c: &mut Criterion) {
-    let mask = vec![true, true];
+    let mask = [true, true];
     let num_frames = 64;
     let datalen = 2 * 4 * num_frames;
     let mut data = vec![0u8; datalen];

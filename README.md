@@ -118,6 +118,7 @@ and the Mozilla Public License Version 2.0:
 - **[Volume control](#volume-control)**
 - **[Devices](#devices)**
 - **[Resampling](#resampling)**
+- **[Rate adjust: what problem it solves, and how it works](#rate-adjust-what-problem-it-solves-and-how-it-works)**
 - **[Mixers](#mixers)**
 - **[Filters](#filters)**
    - **[Gain](#gain)**
@@ -387,13 +388,12 @@ All the available options, or "features" are:
 - `cpal-backend`: Used for Jack support (automatically enabled when needed).
 - `jack-backend`: Jack support (Linux only).
 - `asio-backend`: ASIO support (Windows only, requires the ASIO SDK).
+- `threaded-alsa`: Experimental ALSA backend implementation (Linux only). When enabled, it replaces the legacy ALSA backend.
 - `bluez-backend`: Bluetooth support via BlueALSA (Linux only).
 - `websocket`: Websocket server for control.
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64).
 - `debug`: Enable extra logging, useful for debugging.
-- `avoid-rustc-issue-116359`: Enable a workaround for [rust issue #116359](https://github.com/rust-lang/rust/issues/116359).
-  Used to check if a performance issue is caused by this compiler bug.
 
 
 The `websocket` feature is included in the default features, meaning it will be enabled if you don't specify anything.
@@ -1151,22 +1151,13 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
 * `enable_rate_adjust` (optional, defaults to false)
 
-  This enables the playback device to control the rate of the capture device,
-  in order to avoid buffer underruns or a slowly increasing latency.
-  This is currently supported when using an ALSA, Wasapi, CoreAudio, PipeWire or ASIO
-  playback device (and any capture device).
-  Setting the rate can be done in two ways.
-  * Some capture devices provide a way to adjust the speed of their virtual sample clock (also called pitch adjust).
-    This is available with the ALSA Loopback and USB Audio gadget devices on Linux,
-    as well as BlackHole version 0.5.0 and later on macOS.
-    When capturing from any of these devices, the adjustment can be done by tuning the virtual sample clock of the device.
-    This avoids the need for asynchronous resampling.
-  * If asynchronous resampling is enabled, the adjustment can be done by tuning the resampling ratio.
-    Then `resampler` must be set to one of the "Async" types. This is supported for all capture devices.
-
-  The first option is used whenever it's available.
-  If not, then the second option is used if the config has an asynchronous resampler.
-  If neither is available, then rate adjust is disabled.
+  This enables correction of long-term clock drift between the capture device and playback device,
+  which can otherwise cause underruns or steadily changing delay when clocks are independent.
+  This is supported when using an ALSA, Wasapi, CoreAudio, PipeWire or ASIO playback device
+  (with any capture device).
+  CamillaDSP uses virtual clock tuning when available, otherwise async resampling,
+  and if neither method is available then rate adjust is disabled.
+  See also [Rate adjust: what problem it solves, and how it works](#rate-adjust-what-problem-it-solves-and-how-it-works).
 
 * `target_level` (optional, defaults to the `chunksize` value)
 
@@ -1176,10 +1167,12 @@ A parameter marked (*) in any example is optional. If they are left out from the
   in order to get the initial buffer level near this value.
   See also `enable_rate_adjust` which should be set to `true` to allow matching 
   capture and playback rates in order to keep the buffer level at the target value.
+  For details on how this value is used during drift correction,
+  see [Rate adjust: what problem it solves, and how it works](#rate-adjust-what-problem-it-solves-and-how-it-works).
   
   It may take some experimentation to find the optimal number.
   If it's too small there will be buffer underruns from time to time,
-  and making it too large might lead to a longer input-output delay than what is acceptable.
+  and making it too large increases end-to-end delay (capture input to playback output).
   A suitable starting point is to use the `chunksize` value.
   Usable values cover a large range, from very small values like 30 on lightly loaded systems
   with tight latency requirements,
@@ -1189,8 +1182,12 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
   The `adjust_period` parameter is used to set the interval between corrections, in seconds.
   The default is 10 seconds. Only applies when `enable_rate_adjust` is set to `true`.
-  A smaller value will make for a faster reaction time, which may be useful if there are occasional
-  buffer underruns when running with a small `target_level` to minimize latency.
+  A smaller value reacts faster but can be less smooth,
+  while a larger value is steadier but slower to react.
+  Faster reaction can be useful if there are occasional
+  buffer underruns when running with a small `target_level` to minimize delay.
+  See [Rate adjust: what problem it solves, and how it works](#rate-adjust-what-problem-it-solves-and-how-it-works)
+  for how these periodic corrections are computed and applied.
 
 * `silence_threshold` & `silence_timeout` (optional)
   The fields `silence_threshold` and `silence_timeout` are optional
@@ -1284,7 +1281,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
     The available choices for `format` depend on the backend.
 
-    For `File`, `Stdin`, `Stdout` `RawFile` and `Bluez`, the choices are signed little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
+    For `File`, `Stdin`, `Stdout` `RawFile` and `Bluez`, the choices are signed
+    little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
     - [S16_LE](sample_formats.md#s16_le)
     - [S24_3_LE](sample_formats.md#s24_3_le)
     - [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le)
@@ -1622,10 +1620,73 @@ When rate adjust is enabled the resampling ratio is dynamically adjusted in orde
 for drifts and mismatches between the input and output sample clocks.
 Using the "Synchronous" type with rate adjust enabled will print warnings,
 and any rate adjust request will be ignored.
+The next section explains the rate-adjust logic in detail.
+
+## Rate adjust: what problem it solves, and how it works
+
+### User-level view (black box)
+
+Rate adjust is for setups where the capture device and playback device do **not** share
+the same hardware clock.
+
+Without rate adjust, two independent clocks will drift apart over time:
+- if capture runs slightly faster than playback, the playback buffer level slowly increases,
+- if capture runs slightly slower than playback, the playback buffer level slowly decreases
+  and may eventually underrun.
+
+Rate adjust keeps the playback buffer near `target_level` by continuously making
+small corrections to the effective capture rate.
+
+In this section, **delay** means end-to-end audio delay from capture input to playback output.
+A higher playback buffer level gives more underrun safety, but also more delay.
+
+### What CamillaDSP measures
+
+When `enable_rate_adjust: true`, CamillaDSP monitors playback buffer level
+and compares it to `target_level`.
+Every `adjust_period` seconds it computes a small correction request.
+The goal is to keep the long-term average buffer level near `target_level`.
+
+### How CamillaDSP applies the correction
+
+CamillaDSP applies the correction from the capture side, using the first available method:
+
+1. **Capture device clock tuning available (preferred)**
+
+  CamillaDSP slightly adjusts the capture device clock/pitch.
+  This is currently supported for ALSA Loopback and USB Audio Gadget on Linux,
+  and BlackHole 0.5.0+ on macOS.
+  In this mode, async resampling is not needed for drift correction,
+  and the audio samples are passed through unchanged (bit-perfect rate matching).
+
+2. **No capture clock tuning, but async resampler enabled**
+
+  CamillaDSP adjusts the ratio of an async resampler (`AsyncSinc` or `AsyncPoly`) to track drift.
+
+3. **Neither method available**
+
+  Rate adjust requests cannot be applied, so independent clocks will still drift over long runtimes.
+
+### Practical meaning of settings
+- `target_level`
+  Desired steady-state level of the playback buffer, in samples.
+  Higher values increase underrun margin but also increase end-to-end delay.
+- `adjust_period`
+  How often corrections are updated.
+  Smaller values react faster but may be less smooth;
+  larger values are steadier but slower to react.
+
+### Typical outcomes
+- **Independent clocks + rate adjust enabled:** stable long-term buffer level,
+  stable delay, lower underrun risk.
+- **Independent clocks + rate adjust disabled:** buffer level drifts over time;
+  underruns or growing delay are likely.
+- **Shared hardware clock:** rate adjust is normally unnecessary.
 
 
 ## Mixers
-A mixer is used to route audio between channels, and to increase or decrease the number of channels in the pipeline.
+A mixer is used to route audio between channels, and to increase or decrease
+the number of channels in the pipeline.
 Example for a mixer that copies two channels into four:
 ```
 mixers:
@@ -2704,4 +2765,3 @@ See the [list of frequently asked questions.](./FAQ.md)
 
 ## Troubleshooting
 See the trouble [troubleshooting guide](./troubleshooting.md) for explanations of most error messages.
-

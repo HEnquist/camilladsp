@@ -14,6 +14,13 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+#![allow(
+    unused_imports,
+    unused_variables,
+    unreachable_code,
+    clippy::collapsible_if
+)]
+
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config;

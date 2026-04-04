@@ -975,22 +975,23 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             let estimated_buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
                             buffer_avg.add_value(estimated_buffer_fill + (channel.len() * chunksize) as f64);
 
-                            if adjust && timer.larger_than_millis((1000.0 * adjust_period) as u64) {
-                                if let Some(av_delay) = buffer_avg.average() {
-                                    let speed = rate_controller.next(av_delay);
-                                    timer.restart();
-                                    buffer_avg.restart();
-                                    debug!(
-                                        "Playback, current buffer level {:.1}, set capture rate to {:.4}%.",
-                                        av_delay,
-                                        100.0 * speed
-                                    );
-                                    status_channel
-                                        .send(StatusMessage::SetSpeed(speed))
-                                        .unwrap_or(());
-                                    playback_status.write().buffer_level =
-                                        av_delay as usize;
-                                }
+                            if adjust
+                                && timer.larger_than_millis((1000.0 * adjust_period) as u64)
+                                && let Some(av_delay) = buffer_avg.average()
+                            {
+                                let speed = rate_controller.next(av_delay);
+                                timer.restart();
+                                buffer_avg.restart();
+                                debug!(
+                                    "Playback, current buffer level {:.1}, set capture rate to {:.4}%.",
+                                    av_delay,
+                                    100.0 * speed
+                                );
+                                status_channel
+                                    .send(StatusMessage::SetSpeed(speed))
+                                    .unwrap_or(());
+                                playback_status.write().buffer_level =
+                                    av_delay as usize;
                             }
                             chunk.update_stats(&mut chunk_stats);
                             conversion_result =

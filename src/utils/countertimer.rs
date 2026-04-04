@@ -209,6 +209,9 @@ impl TimeAverage {
 
     pub fn average(&self) -> f64 {
         let seconds = self.timer.current_duration().as_secs_f64();
+        if seconds == 0.0 {
+            return 0.0;
+        }
         self.sum as f64 / seconds
     }
 
@@ -414,43 +417,59 @@ impl ValueHistory {
 mod tests {
     use crate::ProcessingState;
     use crate::utils::countertimer::{
-        Averager, SilenceCounter, Stopwatch, TimeAverage, ValueHistory, ValueWatcher,
+        Averager, HistoryRecord, SilenceCounter, Stopwatch, TimeAverage, ValueHistory, ValueWatcher,
     };
-    use std::time::Instant;
-    use std::{thread, time};
+    use std::time::{Duration, Instant};
 
-    fn spinsleep(time: u128) {
-        let start = Instant::now();
-        while Instant::now().duration_since(start).as_millis() <= time {}
+    fn instant_in_past(duration: Duration) -> Instant {
+        Instant::now().checked_sub(duration).unwrap()
     }
 
-    fn sleep(time: u64) {
-        let millis = time::Duration::from_millis(time);
-        thread::sleep(millis);
+    fn set_last_record_time(hist: &mut ValueHistory, time: Instant) {
+        hist.buffer.front_mut().unwrap().time = time;
+    }
+
+    fn add_record_at(hist: &mut ValueHistory, time: Instant, values: Vec<f32>) {
+        hist.add_record(values);
+        // Override the timestamp so time-based queries can be tested deterministically.
+        set_last_record_time(hist, time);
+    }
+
+    fn add_record_squared_at(hist: &mut ValueHistory, time: Instant, values: Vec<f32>) {
+        hist.add_record_squared(values);
+        // Override the timestamp so time-based RMS queries do not depend on sleeping.
+        set_last_record_time(hist, time);
+    }
+
+    fn last_record(hist: &ValueHistory) -> HistoryRecord {
+        hist.last().unwrap()
     }
 
     #[test]
     fn stopwatch_as_timer() {
         let mut t = Stopwatch::new();
-        assert!(!t.larger_than_millis(8));
-        spinsleep(5);
-        assert!(!t.larger_than_millis(8));
-        spinsleep(5);
-        assert!(t.larger_than_millis(8));
+        // Set an artificial elapsed time to avoid relying on scheduler timing.
+        t.start_time = instant_in_past(Duration::from_millis(10));
+        assert!(!t.larger_than_millis(1000));
+        // Move the start time further back to simulate a long-running timer deterministically.
+        t.start_time = instant_in_past(Duration::from_secs(2));
+        assert!(t.larger_than_millis(1000));
         t.restart();
-        assert!(!t.larger_than_millis(8));
+        assert!(!t.larger_than_millis(1000));
     }
 
     #[test]
     fn stopwatch() {
         let mut t = Stopwatch::new();
         assert_eq!(t.stored_millis(), 0);
-        spinsleep(100);
-        assert_eq!(t.stored_millis(), 0);
+        // Inject a stored value directly so this assertion does not depend on real time passing.
+        t.value = Duration::from_millis(321);
+        assert_eq!(t.stored_millis(), 321);
+        // Backdate the start time so store_and_restart observes a known elapsed interval.
+        t.start_time = instant_in_past(Duration::from_secs(2));
         t.store_and_restart();
-        assert!(t.stored_millis() > 80);
-        assert!(t.stored_millis() < 120);
-        t.store_and_restart();
+        assert!(t.stored_millis() >= 1000);
+        t.restart();
         assert_eq!(t.stored_millis(), 0);
     }
 
@@ -469,20 +488,16 @@ mod tests {
     #[test]
     fn timeaverage() {
         let mut a = TimeAverage::new();
-        spinsleep(10);
         assert_eq!(a.average(), 0.0);
-        a.add_value(125);
-        spinsleep(10);
-        a.add_value(125);
-        spinsleep(10);
-        a.add_value(125);
-        spinsleep(10);
-        a.add_value(125);
-        spinsleep(10);
-        assert!(a.average() > 7000.0);
-        assert!(a.average() < 13000.0);
+        a.add_value(1_000_000);
+        a.add_value(1_000_000);
+        a.add_value(1_000_000);
+        a.add_value(1_000_000);
+        // Adjust the nested stopwatch directly so the rate calculation uses a deterministic interval.
+        a.timer.start_time = instant_in_past(Duration::from_secs(2));
+        assert!(a.average() > 1_500_000.0);
+        assert!(a.average() < 2_500_000.0);
         a.restart();
-        spinsleep(10);
         assert_eq!(a.average(), 0.0);
     }
 
@@ -562,16 +577,39 @@ mod tests {
     #[test]
     fn test_valuehistory() {
         let mut hist = ValueHistory::new(6, 2);
-        let start1 = Instant::now();
-        sleep(10);
-        hist.add_record(vec![1.0, 2.0]);
-        hist.add_record(vec![2.0, 3.0]);
-        hist.add_record(vec![3.0, 4.0]);
-        let start2 = Instant::now();
-        sleep(10);
-        hist.add_record(vec![5.0, 8.0]);
-        hist.add_record(vec![6.0, 9.0]);
-        hist.add_record(vec![7.0, 10.0]);
+        let now = Instant::now();
+        let start1 = now.checked_sub(Duration::from_secs(6)).unwrap();
+        let start2 = now.checked_sub(Duration::from_secs(2)).unwrap();
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_secs(5)).unwrap(),
+            vec![1.0, 2.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_secs(4)).unwrap(),
+            vec![2.0, 3.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_secs(3)).unwrap(),
+            vec![3.0, 4.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_millis(1500)).unwrap(),
+            vec![5.0, 8.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_secs(1)).unwrap(),
+            vec![6.0, 9.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_millis(500)).unwrap(),
+            vec![7.0, 10.0],
+        );
         // This must include all values.
         assert_eq!(
             format!("{:?}", vec![4.0, 6.0]),
@@ -582,16 +620,28 @@ mod tests {
             format!("{:?}", vec![6.0, 9.0]),
             format!("{:?}", hist.average_since(start2).unwrap().values)
         );
-        hist.add_record(vec![5.0, 8.0]);
-        hist.add_record(vec![6.0, 9.0]);
-        hist.add_record(vec![7.0, 10.0]);
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_millis(400)).unwrap(),
+            vec![5.0, 8.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_millis(300)).unwrap(),
+            vec![6.0, 9.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_millis(200)).unwrap(),
+            vec![7.0, 10.0],
+        );
         // This must include the last 6 since the history length is set to 6.
         assert_eq!(
             format!("{:?}", vec![6.0, 9.0]),
             format!("{:?}", hist.average_since(start1).unwrap().values)
         );
 
-        let last = hist.last().unwrap().time;
+        let last = last_record(&hist).time;
         // No new data, should be empty
         assert!(hist.average_since(last).is_none());
     }
@@ -599,10 +649,18 @@ mod tests {
     #[test]
     fn test_valuehistory_rms() {
         let mut hist = ValueHistory::new(10, 1);
-        let start1 = Instant::now();
-        sleep(10);
-        hist.add_record_squared(vec![7.0]);
-        hist.add_record_squared(vec![1.0]);
+        let now = Instant::now();
+        let start1 = now.checked_sub(Duration::from_secs(2)).unwrap();
+        add_record_squared_at(
+            &mut hist,
+            now.checked_sub(Duration::from_secs(1)).unwrap(),
+            vec![7.0],
+        );
+        add_record_squared_at(
+            &mut hist,
+            now.checked_sub(Duration::from_millis(500)).unwrap(),
+            vec![1.0],
+        );
         assert_eq!(
             format!("{:?}", vec![5.0]),
             format!("{:?}", hist.average_sqrt_since(start1).unwrap().values)
@@ -612,16 +670,39 @@ mod tests {
     #[test]
     fn test_valuehistory_peak() {
         let mut hist = ValueHistory::new(10, 1);
-        hist.add_record(vec![8.0]);
-        hist.add_record(vec![9.0]);
-        sleep(10);
-        let start1 = Instant::now();
-        hist.add_record(vec![5.0]);
-        hist.add_record(vec![6.0]);
-        sleep(10);
-        let start2 = Instant::now();
-        hist.add_record(vec![1.0]);
-        hist.add_record(vec![2.0]);
+        let now = Instant::now();
+        let start1 = now.checked_sub(Duration::from_secs(2)).unwrap();
+        let start2 = now.checked_sub(Duration::from_millis(500)).unwrap();
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_secs(4)).unwrap(),
+            vec![8.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_secs(3)).unwrap(),
+            vec![9.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_millis(1500)).unwrap(),
+            vec![5.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_secs(1)).unwrap(),
+            vec![6.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_millis(400)).unwrap(),
+            vec![1.0],
+        );
+        add_record_at(
+            &mut hist,
+            now.checked_sub(Duration::from_millis(200)).unwrap(),
+            vec![2.0],
+        );
         // This must include only values added after start1.
         assert_eq!(
             format!("{:?}", vec![6.0]),
@@ -638,7 +719,7 @@ mod tests {
             format!("{:?}", hist.global_max())
         );
 
-        let last = hist.last().unwrap().time;
+        let last = last_record(&hist).time;
         // No new data, should be empty
         assert!(hist.max_since(last).is_none());
     }

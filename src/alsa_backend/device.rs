@@ -35,6 +35,7 @@ use nix::errno::Errno;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::ffi::CString;
 use std::fmt::Debug;
+use std::sync::LazyLock;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
@@ -50,16 +51,14 @@ use crate::alsa_backend::buffermanager::{
 use crate::alsa_backend::utils::{
     CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams,
     find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
-    list_samplerates_as_text, pick_preferred_format, process_events, state_desc,
-    sync_linked_controls,
+    list_samplerates_as_text, pick_preferred_format, process_events, recover_suspended_pcm,
+    state_desc, sync_linked_controls,
 };
 use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
-lazy_static! {
-    static ref ALSA_MUTEX: Mutex<()> = Mutex::new(());
-}
+static ALSA_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 pub struct AlsaPlaybackDevice {
     pub devname: String,
@@ -129,6 +128,9 @@ fn play_buffer(
         warn!("PB: Prepare playback after buffer underrun");
         pcmdevice.prepare()?;
         buf_manager.sleep_for_target_delay(millis_per_frame);
+    } else if playback_state == alsa_sys::SND_PCM_STATE_SUSPENDED as i32 {
+        recover_suspended_pcm(pcmdevice, "PB")?;
+        buf_manager.sleep_for_target_delay(millis_per_frame);
     } else if playback_state == alsa_sys::SND_PCM_STATE_PREPARED as i32 {
         info!("PB: Starting playback from Prepared state");
         // This sleep applies for the first chunk and in combination with the threshold=1 (i.e. start at first write)
@@ -172,19 +174,24 @@ fn play_buffer(
                 trace!("PB: Wait timed out, playback device takes too long to drain buffer");
                 return Ok(PlaybackResult::Stalled);
             }
-            Err(err) => {
-                if Errno::from_raw(err.errno()) == Errno::EPIPE {
+            Err(err) => match Errno::from_raw(err.errno()) {
+                Errno::EPIPE => {
                     warn!("PB: wait underrun, trying to recover. Error: {err}");
                     trace!("snd_pcm_prepare");
-                    // Would recover() be better than prepare()?
                     pcmdevice.prepare()?;
-                } else {
+                }
+                Errno::ESTRPIPE => {
+                    warn!("PB: wait interrupted by suspend, trying to recover. Error: {err}");
+                    recover_suspended_pcm(pcmdevice, "PB")?;
+                    buf_manager.sleep_for_target_delay(millis_per_frame);
+                }
+                _ => {
                     warn!(
                         "PB: device failed while waiting for available buffer space, error: {err}"
                     );
                     return Err(Box::new(err));
                 }
-            }
+            },
         }
 
         //trace!("Delay BEFORE writing {} is {:?} frames",  buffer.len() / bytes_per_frame, pcmdevice.status().ok().map(|status| status.get_delay()));
@@ -212,11 +219,16 @@ fn play_buffer(
                 Errno::EPIPE => {
                     warn!("PB: write underrun, trying to recover. Error: {err}");
                     trace!("snd_pcm_prepare");
-                    // Would recover() be better than prepare()?
                     pcmdevice.prepare()?;
                     buf_manager.sleep_for_target_delay(millis_per_frame);
                     io.writei(buffer)?;
                     break;
+                }
+                Errno::ESTRPIPE => {
+                    warn!("PB: write interrupted by suspend, trying to recover. Error: {err}");
+                    recover_suspended_pcm(pcmdevice, "PB")?;
+                    buf_manager.sleep_for_target_delay(millis_per_frame);
+                    continue;
                 }
                 _ => {
                     warn!("PB: write failed, error: {err}");
@@ -247,6 +259,11 @@ fn capture_buffer(
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("Prepare capture device");
         pcmdevice.prepare()?;
+    } else if capture_state == alsa_sys::SND_PCM_STATE_SUSPENDED as i32 {
+        recover_suspended_pcm(pcmdevice, "Capture")?;
+        if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+            pcmdevice.start()?;
+        }
     } else if capture_state < 0 {
         // This should never happen but sometimes does anyway,
         // for example if a USB device is unplugged.
@@ -303,20 +320,30 @@ fn capture_buffer(
                         break;
                     }
                 }
-                Err(err) => {
-                    if Errno::from_raw(err.errno()) == Errno::EPIPE {
+                Err(err) => match Errno::from_raw(err.errno()) {
+                    Errno::EPIPE => {
                         warn!("Capture: wait overrun, trying to recover. Error: {err}");
                         trace!("snd_pcm_prepare");
-                        // Would recover() be better than prepare()?
                         pcmdevice.prepare()?;
                         break;
-                    } else {
+                    }
+                    Errno::ESTRPIPE => {
+                        warn!(
+                            "Capture: wait interrupted by suspend, trying to recover. Error: {err}"
+                        );
+                        recover_suspended_pcm(pcmdevice, "Capture")?;
+                        if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+                            pcmdevice.start()?;
+                        }
+                        break;
+                    }
+                    _ => {
                         warn!(
                             "Capture: device failed while waiting for available frames, error: {err}"
                         );
                         return Err(Box::new(err));
                     }
-                }
+                },
             }
         }
         match io.readi(buffer) {
@@ -346,8 +373,15 @@ fn capture_buffer(
                 Errno::EPIPE => {
                     warn!("Capture: read overrun, trying to recover. Error: {err}");
                     trace!("snd_pcm_prepare");
-                    // Would recover() be better than prepare()?
                     pcmdevice.prepare()?;
+                    continue;
+                }
+                Errno::ESTRPIPE => {
+                    warn!("Capture: read interrupted by suspend, trying to recover. Error: {err}");
+                    recover_suspended_pcm(pcmdevice, "Capture")?;
+                    if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+                        pcmdevice.start()?;
+                    }
                     continue;
                 }
                 _ => {
@@ -613,38 +647,38 @@ fn playback_loop_bytes(
                             delay as f64 + (params.chunksize * waiting_chunks_in_channel) as f64,
                         );
                     }
-                    if timer.larger_than_millis((1000.0 * params.adjust_period) as u64) {
-                        if let Some(avg_delay) = buffer_avg.average() {
-                            timer.restart();
-                            buffer_avg.restart();
-                            if adjust {
-                                let capture_speed = rate_controller.next(avg_delay);
-                                if let Some(elem_uac2_gadget) = &element_uac2_gadget {
-                                    let mut elval = ElemValue::new(ElemType::Integer).unwrap();
-                                    // speed is reciprocal on playback side
-                                    elval
-                                        .set_integer(0, (1_000_000.0 / capture_speed) as i32)
-                                        .unwrap();
-                                    elem_uac2_gadget.write(&elval).unwrap();
-                                    debug!("Set gadget playback speed to {capture_speed}");
-                                } else {
-                                    debug!("Send SetSpeed message for speed {capture_speed}");
-                                    channels
-                                        .status
-                                        .send(StatusMessage::SetSpeed(capture_speed))
-                                        .unwrap_or(());
-                                }
-                            }
-                            if let Some(mut playback_status) = params.playback_status.try_write() {
-                                playback_status.buffer_level = avg_delay as usize;
-                                debug!(
-                                    "PB: buffer level: {:.1}, signal rms: {:?}",
-                                    avg_delay,
-                                    playback_status.signal_rms.last_sqrt()
-                                );
+                    if timer.larger_than_millis((1000.0 * params.adjust_period) as u64)
+                        && let Some(avg_delay) = buffer_avg.average()
+                    {
+                        timer.restart();
+                        buffer_avg.restart();
+                        if adjust {
+                            let capture_speed = rate_controller.next(avg_delay);
+                            if let Some(elem_uac2_gadget) = &element_uac2_gadget {
+                                let mut elval = ElemValue::new(ElemType::Integer).unwrap();
+                                // speed is reciprocal on playback side
+                                elval
+                                    .set_integer(0, (1_000_000.0 / capture_speed) as i32)
+                                    .unwrap();
+                                elem_uac2_gadget.write(&elval).unwrap();
+                                debug!("Set gadget playback speed to {capture_speed}");
                             } else {
-                                xtrace!("playback params blocked, skip rms update");
+                                debug!("Send SetSpeed message for speed {capture_speed}");
+                                channels
+                                    .status
+                                    .send(StatusMessage::SetSpeed(capture_speed))
+                                    .unwrap_or(());
                             }
+                        }
+                        if let Some(mut playback_status) = params.playback_status.try_write() {
+                            playback_status.buffer_level = avg_delay as usize;
+                            debug!(
+                                "PB: buffer level: {:.1}, signal rms: {:?}",
+                                avg_delay,
+                                playback_status.signal_rms.last_sqrt()
+                            );
+                        } else {
+                            xtrace!("playback params blocked, skip rms update");
                         }
                     }
                 }
