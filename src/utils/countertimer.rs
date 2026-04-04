@@ -209,6 +209,9 @@ impl TimeAverage {
 
     pub fn average(&self) -> f64 {
         let seconds = self.timer.current_duration().as_secs_f64();
+        if seconds == 0.0 {
+            return 0.0;
+        }
         self.sum as f64 / seconds
     }
 
