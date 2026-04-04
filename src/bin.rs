@@ -44,9 +44,11 @@ use git_version::git_version;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::env;
 use std::path::PathBuf;
+#[cfg(any(windows, feature = "websocket"))]
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use std::thread;
+#[cfg(any(windows, feature = "websocket"))]
 use std::time::Duration;
 
 use flexi_logger::DeferredNow;
