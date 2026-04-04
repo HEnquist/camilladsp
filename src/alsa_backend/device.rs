@@ -35,6 +35,7 @@ use nix::errno::Errno;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::ffi::CString;
 use std::fmt::Debug;
+use std::sync::LazyLock;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
@@ -57,9 +58,7 @@ use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
-lazy_static! {
-    static ref ALSA_MUTEX: Mutex<()> = Mutex::new(());
-}
+static ALSA_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 pub struct AlsaPlaybackDevice {
     pub devname: String,

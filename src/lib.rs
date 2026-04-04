@@ -19,12 +19,10 @@ extern crate alsa;
 #[cfg(target_os = "linux")]
 extern crate alsa_sys;
 extern crate clap;
-#[cfg(feature = "cpal-backend")]
-extern crate cpal;
-#[macro_use]
-extern crate lazy_static;
 #[cfg(target_os = "macos")]
 extern crate coreaudio;
+#[cfg(feature = "cpal-backend")]
+extern crate cpal;
 extern crate crossbeam_channel;
 #[cfg(target_os = "macos")]
 extern crate dispatch;

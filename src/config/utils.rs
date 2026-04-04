@@ -29,6 +29,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 // Keep same result type used by config module utility functions.
 type Res<T> = Result<T, Box<dyn error::Error>>;
@@ -41,14 +42,14 @@ pub struct OverridesState {
     pub channels: Option<usize>,
 }
 
-lazy_static! {
-    pub static ref OVERRIDES: RwLock<OverridesState> = RwLock::new(OverridesState {
+pub static OVERRIDES: LazyLock<RwLock<OverridesState>> = LazyLock::new(|| {
+    RwLock::new(OverridesState {
         samplerate: None,
         sample_format: None,
         extra_samples: None,
         channels: None,
-    });
-}
+    })
+});
 
 #[derive(Debug)]
 pub struct ConfigErrorType {

@@ -67,7 +67,6 @@ rand = { version = "0.9.1", default-features = false, features = ["small_rng", "
 rand_distr = "0.5.1"
 clap = { version = "4.5.4", features = ["cargo"] }
 git-version = "0.3"
-lazy_static = "1.4.0"
 log = "0.4.14"
 flexi_logger = { version = "0.30.2", features = ["async", "colors"] }
 chrono = "0.4"
