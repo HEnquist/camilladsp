@@ -26,11 +26,16 @@ use std::sync::Arc;
 use crate::PrcFmt;
 use crate::Res;
 
+#[cfg(target_arch = "aarch64")]
+#[path = "fftconv_neon.rs"]
+mod neon;
+
 #[cfg(target_arch = "x86_64")]
 #[path = "fftconv_avx.rs"]
 mod avx;
 
 // element-wise product, result = slice_a * slice_b
+#[cfg(any(not(target_arch = "aarch64"), test, feature = "bench"))]
 fn multiply_elements_scalar(
     result: &mut [Complex<PrcFmt>],
     slice_a: &[Complex<PrcFmt>],
@@ -65,6 +70,7 @@ fn multiply_elements_scalar(
 }
 
 // element-wise add product, result = result + slice_a * slice_b
+#[cfg(any(not(target_arch = "aarch64"), test, feature = "bench"))]
 fn multiply_add_elements_scalar(
     result: &mut [Complex<PrcFmt>],
     slice_a: &[Complex<PrcFmt>],
@@ -98,33 +104,59 @@ fn multiply_add_elements_scalar(
     }
 }
 
-// Element-wise product: result = slice_a * slice_b. Dispatches to AVX+FMA or scalar.
+// Element-wise product: result = slice_a * slice_b.
+// Dispatches to NEON (aarch64), AVX+FMA (x86_64 with runtime support), or scalar.
 #[inline]
 fn multiply_elements(
     result: &mut [Complex<PrcFmt>],
     slice_a: &[Complex<PrcFmt>],
     slice_b: &[Complex<PrcFmt>],
 ) {
-    #[cfg(target_arch = "x86_64")]
-    if avx::has_avx_fma() {
-        // SAFETY: AVX and FMA support has been verified by has_avx_fma().
-        return unsafe { avx::multiply_elements_avx_fma(result, slice_a, slice_b) };
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: NEON is mandatory on all AArch64 implementations.
+        unsafe { neon::multiply_elements_neon(result, slice_a, slice_b) };
     }
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if avx::has_avx_fma() {
+            // SAFETY: AVX and FMA support has been verified by has_avx_fma().
+            unsafe { avx::multiply_elements_avx_fma(result, slice_a, slice_b) };
+        } else {
+            multiply_elements_scalar(result, slice_a, slice_b);
+        }
+    }
+
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     multiply_elements_scalar(result, slice_a, slice_b);
 }
 
-// Element-wise accumulate product: result += slice_a * slice_b. Dispatches to AVX+FMA or scalar.
+// Element-wise accumulate product: result += slice_a * slice_b.
+// Dispatches to NEON (aarch64), AVX+FMA (x86_64 with runtime support), or scalar.
 #[inline]
 fn multiply_add_elements(
     result: &mut [Complex<PrcFmt>],
     slice_a: &[Complex<PrcFmt>],
     slice_b: &[Complex<PrcFmt>],
 ) {
-    #[cfg(target_arch = "x86_64")]
-    if avx::has_avx_fma() {
-        // SAFETY: AVX and FMA support has been verified by has_avx_fma().
-        return unsafe { avx::multiply_add_elements_avx_fma(result, slice_a, slice_b) };
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: NEON is mandatory on all AArch64 implementations.
+        unsafe { neon::multiply_add_elements_neon(result, slice_a, slice_b) };
     }
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if avx::has_avx_fma() {
+            // SAFETY: AVX and FMA support has been verified by has_avx_fma().
+            unsafe { avx::multiply_add_elements_avx_fma(result, slice_a, slice_b) };
+        } else {
+            multiply_add_elements_scalar(result, slice_a, slice_b);
+        }
+    }
+
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     multiply_add_elements_scalar(result, slice_a, slice_b);
 }
 
@@ -380,6 +412,28 @@ pub unsafe fn bench_multiply_add_elements_avx_fma(
     slice_b: &[Complex<PrcFmt>],
 ) {
     unsafe { avx::multiply_add_elements_avx_fma(result, slice_a, slice_b) };
+}
+
+#[cfg(all(target_arch = "aarch64", feature = "bench"))]
+/// # Safety
+/// Caller must ensure this is only used on aarch64 where NEON is available.
+pub unsafe fn bench_multiply_elements_neon(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    unsafe { neon::multiply_elements_neon(result, slice_a, slice_b) };
+}
+
+#[cfg(all(target_arch = "aarch64", feature = "bench"))]
+/// # Safety
+/// Caller must ensure this is only used on aarch64 where NEON is available.
+pub unsafe fn bench_multiply_add_elements_neon(
+    result: &mut [Complex<PrcFmt>],
+    slice_a: &[Complex<PrcFmt>],
+    slice_b: &[Complex<PrcFmt>],
+) {
+    unsafe { neon::multiply_add_elements_neon(result, slice_a, slice_b) };
 }
 
 /// Validate a FFT convolution config.

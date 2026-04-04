@@ -1,4 +1,5 @@
-//! Micro-benchmarks for fftconv complex-multiply kernels: scalar vs AVX+FMA.
+//! Micro-benchmarks for fftconv complex-multiply kernels.
+//! Compares scalar with AVX+FMA on x86_64 and NEON on aarch64.
 
 extern crate camillalib;
 extern crate criterion;
@@ -14,12 +15,17 @@ use camillalib::PrcFmt;
 use camillalib::filters::fftconv::{
     bench_has_avx_fma, bench_multiply_add_elements_avx_fma, bench_multiply_elements_avx_fma,
 };
+#[cfg(target_arch = "aarch64")]
+use camillalib::filters::fftconv::{
+    bench_multiply_add_elements_neon, bench_multiply_elements_neon,
+};
 use camillalib::filters::fftconv::{
     bench_multiply_add_elements_scalar, bench_multiply_elements_scalar,
 };
 
 const SIZES: &[usize] = &[129, 513, 1025, 4097, 16385];
 
+#[allow(clippy::type_complexity)]
 fn make_buffers(
     len: usize,
 ) -> (
@@ -64,6 +70,14 @@ fn bench_multiply_elements(c: &mut Criterion) {
             });
         });
 
+        #[cfg(target_arch = "aarch64")]
+        group.bench_with_input(BenchmarkId::new("neon", len), &len, |b, &len| {
+            let (a, bv, mut result) = make_buffers(len);
+            b.iter(|| unsafe {
+                bench_multiply_elements_neon(black_box(&mut result), black_box(&a), black_box(&bv))
+            });
+        });
+
         #[cfg(target_arch = "x86_64")]
         if bench_has_avx_fma() {
             group.bench_with_input(BenchmarkId::new("avx", len), &len, |b, &len| {
@@ -94,6 +108,22 @@ fn bench_multiply_add_elements(c: &mut Criterion) {
                 || result_init.clone(),
                 |result| {
                     bench_multiply_add_elements_scalar(
+                        black_box(result),
+                        black_box(&a),
+                        black_box(&bv),
+                    );
+                },
+                BatchSize::SmallInput,
+            );
+        });
+
+        #[cfg(target_arch = "aarch64")]
+        group.bench_with_input(BenchmarkId::new("neon", len), &len, |b, &len| {
+            let (a, bv, result_init) = make_buffers(len);
+            b.iter_batched_ref(
+                || result_init.clone(),
+                |result| unsafe {
+                    bench_multiply_add_elements_neon(
                         black_box(result),
                         black_box(&a),
                         black_box(&bv),
