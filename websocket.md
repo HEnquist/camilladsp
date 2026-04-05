@@ -114,6 +114,57 @@ Commands for reading and changing settings for the websocket server.
   * "PlaybackError": the playback device encountered an error.
   * "CaptureFormatChange": the sample rate or format of the capture device changed.
   * "PlaybackFormatChange": the sample rate or format of the playback device changed.
+
+Subscribe to pushed state changes instead of polling.
+- `SubscribeState`
+
+When subscribed, CamillaDSP sends a `StateEvent` whenever processing state changes.
+For non-stop states, the payload only contains `state`.
+For the stop state (`"Inactive"`), the payload also contains `stop_reason`.
+
+Example subscribe request:
+```json
+"SubscribeState"
+```
+
+Example pushed event while running:
+```json
+{
+  "StateEvent": {
+    "result": "Ok",
+    "value": {
+      "state": "Running"
+    }
+  }
+}
+```
+
+Example pushed event when stopped:
+```json
+{
+  "StateEvent": {
+    "result": "Ok",
+    "value": {
+      "state": "Inactive",
+      "stop_reason": "Done"
+    }
+  }
+}
+```
+
+While state streaming is active, only the stop command is accepted:
+- `StopSubscription`
+
+Example stop request:
+```json
+"StopSubscription"
+```
+
+Any other command sent during active state streaming gets an `Invalid` response.
+Sending `StopSubscription` when no subscription is active also gets an `Invalid` response.
+
+For a minimal end-to-end example client, see `testscripts/state_subscriber.py`.
+
 - `GetCaptureRate` : get the measured sample rate of the capture device.
   * return the value as an integer
 - `GetSignalRange` : get the range of values in the last chunk.
@@ -196,15 +247,15 @@ Example pushed event:
 ```
 
 While streaming is active, only the stop command is accepted:
-- `StopSignalLevelSubscription`
+- `StopSubscription`
 
 Example stop request:
 ```json
-"StopSignalLevelSubscription"
+"StopSubscription"
 ```
 
 Any other command sent during active streaming gets an `Invalid` response.
-Sending `StopSignalLevelSubscription` when no signal-level subscription is active also gets an `Invalid` response.
+Sending `StopSubscription` when no subscription is active also gets an `Invalid` response.
 
 For a minimal end-to-end example client, see `testscripts/signal_level_subscriber.py`.
 

@@ -45,6 +45,8 @@ use crate::{
 };
 use crate::{ControllerMessage, config};
 
+const SUBSCRIPTION_READ_TIMEOUT_MS: u64 = 10;
+
 #[derive(Debug, Clone)]
 pub struct SharedData {
     pub active_config: Arc<Mutex<Option<config::Configuration>>>,
@@ -132,7 +134,8 @@ enum WsCommand {
     GetSignalLevelsSince(f32),
     GetSignalLevelsSinceLast,
     SubscribeSignalLevels(WsSignalLevelSide),
-    StopSignalLevelSubscription,
+    StopSubscription,
+    SubscribeState,
     GetSignalPeaksSinceStart,
     ResetSignalPeaksSinceStart,
     GetChannelLabels,
@@ -213,6 +216,19 @@ struct StreamLevels {
     side: WsSignalLevelSide,
     rms: Vec<f32>,
     peak: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum ActiveStream {
+    SignalLevels(WsSignalLevelSide),
+    State,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+struct StateUpdate {
+    state: ProcessingState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop_reason: Option<StopReason>,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -358,12 +374,19 @@ enum WsReply {
     SubscribeSignalLevels {
         result: WsResult,
     },
-    StopSignalLevelSubscription {
+    SubscribeState {
+        result: WsResult,
+    },
+    StopSubscription {
         result: WsResult,
     },
     SignalLevelsEvent {
         result: WsResult,
         value: StreamLevels,
+    },
+    StateEvent {
+        result: WsResult,
+        value: StateUpdate,
     },
     GetSignalPeaksSinceStart {
         result: WsResult,
@@ -607,89 +630,107 @@ macro_rules! make_handler {
         ) {
             match websocket_res {
                 Ok(mut websocket) => {
-                    configure_stream_timeout(&mut websocket);
-                    let mut active_signal_stream: Option<WsSignalLevelSide> = None;
+                    set_stream_timeout(&mut websocket, None);
+                    let mut active_stream: Option<ActiveStream> = None;
                     let mut last_playback_stream_generation = 0_u64;
                     let mut last_capture_stream_generation = 0_u64;
+                    let mut last_state_stream_value = ProcessingState::Inactive;
                     loop {
-                        if let Some(side) = active_signal_stream {
-                            match side {
-                                WsSignalLevelSide::Playback => {
-                                    let generation = signal_monitor::generation(
-                                        MonitorSignalLevelSide::Playback,
-                                    );
-                                    if generation != last_playback_stream_generation {
-                                        last_playback_stream_generation = generation;
-                                        if let Some(reply) = get_stream_levels_event(
-                                            WsSignalLevelSide::Playback,
-                                            shared_data_inst,
-                                        ) {
-                                            let write_result = websocket.send(Message::text(
-                                                serde_json::to_string(&reply).unwrap(),
-                                            ));
-                                            if let Err(err) = write_result {
-                                                warn!("Failed to write: {}", err);
-                                                break;
+                        if let Some(stream) = active_stream {
+                            match stream {
+                                ActiveStream::SignalLevels(side) => match side {
+                                    WsSignalLevelSide::Playback => {
+                                        let generation = signal_monitor::generation(
+                                            MonitorSignalLevelSide::Playback,
+                                        );
+                                        if generation != last_playback_stream_generation {
+                                            last_playback_stream_generation = generation;
+                                            if let Some(reply) = get_stream_levels_event(
+                                                WsSignalLevelSide::Playback,
+                                                shared_data_inst,
+                                            ) {
+                                                let write_result = websocket.send(Message::text(
+                                                    serde_json::to_string(&reply).unwrap(),
+                                                ));
+                                                if let Err(err) = write_result {
+                                                    warn!("Failed to write: {}", err);
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                WsSignalLevelSide::Capture => {
-                                    let generation = signal_monitor::generation(
-                                        MonitorSignalLevelSide::Capture,
-                                    );
-                                    if generation != last_capture_stream_generation {
-                                        last_capture_stream_generation = generation;
-                                        if let Some(reply) = get_stream_levels_event(
-                                            WsSignalLevelSide::Capture,
-                                            shared_data_inst,
-                                        ) {
-                                            let write_result = websocket.send(Message::text(
-                                                serde_json::to_string(&reply).unwrap(),
-                                            ));
-                                            if let Err(err) = write_result {
-                                                warn!("Failed to write: {}", err);
-                                                break;
+                                    WsSignalLevelSide::Capture => {
+                                        let generation = signal_monitor::generation(
+                                            MonitorSignalLevelSide::Capture,
+                                        );
+                                        if generation != last_capture_stream_generation {
+                                            last_capture_stream_generation = generation;
+                                            if let Some(reply) = get_stream_levels_event(
+                                                WsSignalLevelSide::Capture,
+                                                shared_data_inst,
+                                            ) {
+                                                let write_result = websocket.send(Message::text(
+                                                    serde_json::to_string(&reply).unwrap(),
+                                                ));
+                                                if let Err(err) = write_result {
+                                                    warn!("Failed to write: {}", err);
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                WsSignalLevelSide::Both => {
-                                    let playback_generation = signal_monitor::generation(
-                                        MonitorSignalLevelSide::Playback,
-                                    );
-                                    if playback_generation != last_playback_stream_generation {
-                                        last_playback_stream_generation = playback_generation;
-                                        if let Some(reply) = get_stream_levels_event(
-                                            WsSignalLevelSide::Playback,
-                                            shared_data_inst,
-                                        ) {
-                                            let write_result = websocket.send(Message::text(
-                                                serde_json::to_string(&reply).unwrap(),
-                                            ));
-                                            if let Err(err) = write_result {
-                                                warn!("Failed to write: {}", err);
-                                                break;
+                                    WsSignalLevelSide::Both => {
+                                        let playback_generation = signal_monitor::generation(
+                                            MonitorSignalLevelSide::Playback,
+                                        );
+                                        if playback_generation != last_playback_stream_generation {
+                                            last_playback_stream_generation = playback_generation;
+                                            if let Some(reply) = get_stream_levels_event(
+                                                WsSignalLevelSide::Playback,
+                                                shared_data_inst,
+                                            ) {
+                                                let write_result = websocket.send(Message::text(
+                                                    serde_json::to_string(&reply).unwrap(),
+                                                ));
+                                                if let Err(err) = write_result {
+                                                    warn!("Failed to write: {}", err);
+                                                    break;
+                                                }
                                             }
                                         }
-                                    }
 
-                                    let capture_generation = signal_monitor::generation(
-                                        MonitorSignalLevelSide::Capture,
-                                    );
-                                    if capture_generation != last_capture_stream_generation {
-                                        last_capture_stream_generation = capture_generation;
-                                        if let Some(reply) = get_stream_levels_event(
-                                            WsSignalLevelSide::Capture,
-                                            shared_data_inst,
-                                        ) {
-                                            let write_result = websocket.send(Message::text(
-                                                serde_json::to_string(&reply).unwrap(),
-                                            ));
-                                            if let Err(err) = write_result {
-                                                warn!("Failed to write: {}", err);
-                                                break;
+                                        let capture_generation = signal_monitor::generation(
+                                            MonitorSignalLevelSide::Capture,
+                                        );
+                                        if capture_generation != last_capture_stream_generation {
+                                            last_capture_stream_generation = capture_generation;
+                                            if let Some(reply) = get_stream_levels_event(
+                                                WsSignalLevelSide::Capture,
+                                                shared_data_inst,
+                                            ) {
+                                                let write_result = websocket.send(Message::text(
+                                                    serde_json::to_string(&reply).unwrap(),
+                                                ));
+                                                if let Err(err) = write_result {
+                                                    warn!("Failed to write: {}", err);
+                                                    break;
+                                                }
                                             }
+                                        }
+                                    }
+                                },
+                                ActiveStream::State => {
+                                    let current_state = current_processing_state(shared_data_inst);
+                                    if current_state != last_state_stream_value {
+                                        last_state_stream_value = current_state;
+                                        let reply =
+                                            get_state_event(current_state, shared_data_inst);
+                                        let write_result = websocket.send(Message::text(
+                                            serde_json::to_string(&reply).unwrap(),
+                                        ));
+                                        if let Err(err) = write_result {
+                                            warn!("Failed to write: {}", err);
+                                            break;
                                         }
                                     }
                                 }
@@ -704,14 +745,27 @@ macro_rules! make_handler {
                                 debug!("parsed command: {:?}", command);
                                 let reply = match command {
                                     Ok(cmd) => {
-                                        if active_signal_stream.is_some()
-                                            && cmd != WsCommand::StopSignalLevelSubscription
-                                        {
-                                            Some(stream_invalid_reply())
+                                        if active_stream.is_some() {
+                                            if cmd != WsCommand::StopSubscription {
+                                                Some(stream_invalid_reply())
+                                            } else {
+                                                active_stream = None;
+                                                set_stream_timeout(&mut websocket, None);
+                                                Some(WsReply::StopSubscription {
+                                                    result: WsResult::Ok,
+                                                })
+                                            }
                                         } else {
                                             match cmd {
                                                 WsCommand::SubscribeSignalLevels(side) => {
-                                                    active_signal_stream = Some(side);
+                                                    active_stream =
+                                                        Some(ActiveStream::SignalLevels(side));
+                                                    set_stream_timeout(
+                                                        &mut websocket,
+                                                        Some(Duration::from_millis(
+                                                            SUBSCRIPTION_READ_TIMEOUT_MS,
+                                                        )),
+                                                    );
                                                     last_playback_stream_generation =
                                                         signal_monitor::generation(
                                                             MonitorSignalLevelSide::Playback,
@@ -724,18 +778,24 @@ macro_rules! make_handler {
                                                         result: WsResult::Ok,
                                                     })
                                                 }
-                                                WsCommand::StopSignalLevelSubscription => {
-                                                    if active_signal_stream.is_some() {
-                                                        active_signal_stream = None;
-                                                        Some(WsReply::StopSignalLevelSubscription {
-                                                            result: WsResult::Ok,
-                                                        })
-                                                    } else {
-                                                        Some(WsReply::Invalid {
-                                                            error: "No active signal level subscription"
-                                                                .to_string(),
-                                                        })
-                                                    }
+                                                WsCommand::SubscribeState => {
+                                                    active_stream = Some(ActiveStream::State);
+                                                    set_stream_timeout(
+                                                        &mut websocket,
+                                                        Some(Duration::from_millis(
+                                                            SUBSCRIPTION_READ_TIMEOUT_MS,
+                                                        )),
+                                                    );
+                                                    last_state_stream_value =
+                                                        current_processing_state(shared_data_inst);
+                                                    Some(WsReply::SubscribeState {
+                                                        result: WsResult::Ok,
+                                                    })
+                                                }
+                                                WsCommand::StopSubscription => {
+                                                    Some(WsReply::Invalid {
+                                                        error: "No active subscription".to_string(),
+                                                    })
                                                 }
                                                 _ => handle_command(
                                                     cmd,
@@ -800,22 +860,15 @@ fn accept_plain_stream(
     Ok(ws)
 }
 
-fn configure_stream_timeout(websocket: &mut WebSocket<TcpStream>) {
-    if let Err(err) = websocket
-        .get_mut()
-        .set_read_timeout(Some(Duration::from_millis(20)))
-    {
+fn set_stream_timeout(websocket: &mut WebSocket<TcpStream>, timeout: Option<Duration>) {
+    if let Err(err) = websocket.get_mut().set_read_timeout(timeout) {
         warn!("Failed to set websocket read timeout: {err}");
     }
 }
 
 #[cfg(feature = "secure-websocket")]
-fn configure_stream_timeout(websocket: &mut WebSocket<TlsStream<TcpStream>>) {
-    if let Err(err) = websocket
-        .get_mut()
-        .get_mut()
-        .set_read_timeout(Some(Duration::from_millis(20)))
-    {
+fn set_stream_timeout(websocket: &mut WebSocket<TlsStream<TcpStream>>, timeout: Option<Duration>) {
+    if let Err(err) = websocket.get_mut().get_mut().set_read_timeout(timeout) {
         warn!("Failed to set websocket read timeout: {err}");
     }
 }
@@ -856,7 +909,24 @@ fn get_stream_levels_event(
 
 fn stream_invalid_reply() -> WsReply {
     WsReply::Invalid {
-        error: "Only StopSignalLevelSubscription is accepted while streaming is active".to_string(),
+        error: "Only StopSubscription is accepted while streaming is active".to_string(),
+    }
+}
+
+fn current_processing_state(shared_data: &SharedData) -> ProcessingState {
+    shared_data.capture_status.read().state
+}
+
+fn get_state_event(state: ProcessingState, shared_data: &SharedData) -> WsReply {
+    let stop_reason = if state == ProcessingState::Inactive {
+        Some(shared_data.processing_status.read().stop_reason.clone())
+    } else {
+        None
+    };
+
+    WsReply::StateEvent {
+        result: WsResult::Ok,
+        value: StateUpdate { state, stop_reason },
     }
 }
 
@@ -1061,8 +1131,11 @@ fn handle_command(
             error: "SubscribeSignalLevels can only be handled by the websocket stream loop"
                 .to_string(),
         }),
-        WsCommand::StopSignalLevelSubscription => Some(WsReply::Invalid {
-            error: "No active signal level subscription".to_string(),
+        WsCommand::SubscribeState => Some(WsReply::Invalid {
+            error: "SubscribeState can only be handled by the websocket stream loop".to_string(),
+        }),
+        WsCommand::StopSubscription => Some(WsReply::Invalid {
+            error: "No active subscription".to_string(),
         }),
         WsCommand::GetSignalPeaksSinceStart => {
             let levels = PbCapLevels {
@@ -2125,14 +2198,17 @@ mod tests {
             res,
             WsCommand::SubscribeSignalLevels(WsSignalLevelSide::Playback)
         );
-        let cmd = Message::text("\"StopSignalLevelSubscription\"");
+        let cmd = Message::text("\"StopSubscription\"");
         let res = parse_command(cmd).unwrap();
-        assert_eq!(res, WsCommand::StopSignalLevelSubscription);
+        assert_eq!(res, WsCommand::StopSubscription);
         let cmd = Message::text("{\"SubscribeSignalLevels\": \"both\"}");
         let res = parse_command(cmd).unwrap();
         assert_eq!(
             res,
             WsCommand::SubscribeSignalLevels(WsSignalLevelSide::Both)
         );
+        let cmd = Message::text("\"SubscribeState\"");
+        let res = parse_command(cmd).unwrap();
+        assert_eq!(res, WsCommand::SubscribeState);
     }
 }
