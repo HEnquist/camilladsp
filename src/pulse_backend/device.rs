@@ -204,6 +204,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                         playback_status
                                             .signal_peak
                                             .add_record(chunk_stats.peak_linear());
+                                        crate::signal_monitor::mark_playback_updated();
                                     }
                                 }
                                 Ok(AudioMessage::Pause) => {
@@ -388,6 +389,7 @@ impl CaptureDevice for PulseCaptureDevice {
                                 let mut capture_status = capture_status.write();
                                 capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                                 capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                                crate::signal_monitor::mark_capture_updated();
                             }
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);

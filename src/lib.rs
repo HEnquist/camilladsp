@@ -135,6 +135,7 @@ pub mod processing;
 pub mod processors;
 #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
 pub mod pulse_backend;
+pub mod signal_monitor;
 #[cfg(feature = "websocket")]
 pub mod socketserver;
 pub mod statefile;

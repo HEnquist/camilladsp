@@ -405,6 +405,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                         let mut playback_status = playback_status.write();
                                         playback_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                                         playback_status.signal_peak.add_record(chunk_stats.peak_linear());
+                                        crate::signal_monitor::mark_playback_updated();
                                     }
                                     buffer_avg.add_value(
                                         (buffer_fill.load(Ordering::Relaxed) / channels_clone + channel.len() * chunksize_clone)
@@ -722,6 +723,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 let mut capture_status = capture_status.write();
                                 capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
                                 capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                                crate::signal_monitor::mark_capture_updated();
                             }
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);

@@ -1557,6 +1557,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                                 playback_status
                                     .signal_peak
                                     .add_record(chunk_stats.peak_linear());
+                                crate::signal_monitor::mark_playback_updated();
                             } else {
                                 xtrace!("Playback status blocked, skip rms update.");
                             }
@@ -2092,6 +2093,7 @@ impl CaptureDevice for AsioCaptureDevice {
                         capture_status
                             .signal_peak
                             .add_record(chunk_stats.peak_linear());
+                        crate::signal_monitor::mark_capture_updated();
                     } else {
                         xtrace!("Capture status blocked, skip rms update.");
                     }

@@ -638,6 +638,7 @@ fn playback_loop_bytes(
                         playback_status
                             .signal_peak
                             .add_record(chunk_stats.peak_linear());
+                        crate::signal_monitor::mark_playback_updated();
                     } else {
                         xtrace!("playback status blocked, skip update");
                     }
@@ -1051,6 +1052,7 @@ fn capture_loop_bytes(
             capture_status
                 .signal_peak
                 .add_record(chunk_stats.peak_linear());
+            crate::signal_monitor::mark_capture_updated();
         } else {
             xtrace!("capture status blocked, skip rms update");
         }

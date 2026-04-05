@@ -1194,6 +1194,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         playback_status
                                             .signal_peak
                                             .add_record(chunk_stats.peak_linear());
+                                        crate::signal_monitor::mark_playback_updated();
                                     }
 
                                     let bytes_to_write = conversion_result.0;
@@ -1826,6 +1827,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 capture_status_write
                                     .signal_peak
                                     .add_record(chunk_stats.peak_linear());
+                                crate::signal_monitor::mark_capture_updated();
                             }
 
                             value_range = chunk.maxval - chunk.minval;

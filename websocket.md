@@ -164,6 +164,50 @@ The values are returned as a json object with keys `playback_peak`, `playback_rm
 - `GetSignalLevelsSince`
 - `GetSignalLevelsSinceLast`
 
+Subscribe to pushed level updates instead of polling.
+The command takes one argument, either `"playback"`, `"capture"`, or `"both"`:
+- `SubscribeSignalLevels`
+
+When subscribed, CamillaDSP sends a `SignalLevelsEvent` message each time a new chunk has been analyzed for the selected side.
+The event payload has keys `side`, `rms`, and `peak`.
+
+Example subscribe request:
+```json
+{"SubscribeSignalLevels": "playback"}
+```
+
+Example subscribe request for both sides:
+```json
+{"SubscribeSignalLevels": "both"}
+```
+
+Example pushed event:
+```json
+{
+  "SignalLevelsEvent": {
+    "result": "Ok",
+    "value": {
+      "side": "playback",
+      "rms": [-18.2, -18.5],
+      "peak": [-6.1, -6.0]
+    }
+  }
+}
+```
+
+While streaming is active, only the stop command is accepted:
+- `StopSignalLevelSubscription`
+
+Example stop request:
+```json
+"StopSignalLevelSubscription"
+```
+
+Any other command sent during active streaming gets an `Invalid` response.
+Sending `StopSignalLevelSubscription` when no signal-level subscription is active also gets an `Invalid` response.
+
+For a minimal end-to-end example client, see `testscripts/signal_level_subscriber.py`.
+
 Get the peak since start.
 - `GetSignalPeaksSinceStart` : Get the playback and capture peak level since processing started.
   The values are returned as a json object with keys `playback` and `capture`.

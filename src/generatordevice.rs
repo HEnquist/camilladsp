@@ -199,6 +199,7 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
             capture_status
                 .signal_peak
                 .add_record(chunk_stats.peak_linear());
+            crate::signal_monitor::mark_capture_updated();
         }
         let msg = AudioMessage::Audio(chunk);
         if msg_channels.audio.send(msg).is_err() {
