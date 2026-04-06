@@ -29,6 +29,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 // Keep same result type used by config module utility functions.
 type Res<T> = Result<T, Box<dyn error::Error>>;
@@ -41,14 +42,14 @@ pub struct OverridesState {
     pub channels: Option<usize>,
 }
 
-lazy_static! {
-    pub static ref OVERRIDES: RwLock<OverridesState> = RwLock::new(OverridesState {
+pub static OVERRIDES: LazyLock<RwLock<OverridesState>> = LazyLock::new(|| {
+    RwLock::new(OverridesState {
         samplerate: None,
         sample_format: None,
         extra_samples: None,
         channels: None,
-    });
-}
+    })
+});
 
 #[derive(Debug)]
 pub struct ConfigErrorType {
@@ -476,20 +477,20 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     if let (Some(newmixers), Some(oldmixers)) = (&newconf.mixers, &currentconf.mixers) {
         for (mixer, params) in newmixers {
             // The pipeline didn't change, any added mixer isn't included and can be skipped
-            if let Some(current_mixer) = oldmixers.get(mixer) {
-                if params != current_mixer {
-                    mixers.push(mixer.to_string());
-                }
+            if let Some(current_mixer) = oldmixers.get(mixer)
+                && params != current_mixer
+            {
+                mixers.push(mixer.to_string());
             }
         }
     }
     if let (Some(newprocs), Some(oldprocs)) = (&newconf.processors, &currentconf.processors) {
         for (proc, params) in newprocs {
             // The pipeline didn't change, any added processor isn't included and can be skipped
-            if let Some(current_proc) = oldprocs.get(proc) {
-                if params != current_proc {
-                    processors.push(proc.to_string());
-                }
+            if let Some(current_proc) = oldprocs.get(proc)
+                && params != current_proc
+            {
+                processors.push(proc.to_string());
             }
         }
     }
@@ -521,22 +522,20 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         let msg = format!("target_level cannot be larger than {target_level_limit}");
         return Err(ConfigError::new(&msg).into());
     }
-    if let Some(period) = conf.devices.adjust_period {
-        if period <= 0.0 {
-            return Err(ConfigError::new("adjust_period must be positive and > 0").into());
-        }
+    if let Some(period) = conf.devices.adjust_period
+        && period <= 0.0
+    {
+        return Err(ConfigError::new("adjust_period must be positive and > 0").into());
     }
-    if let Some(threshold) = conf.devices.silence_threshold {
-        if threshold > 0.0 {
-            return Err(
-                ConfigError::new("silence_threshold must be less than or equal to 0").into(),
-            );
-        }
+    if let Some(threshold) = conf.devices.silence_threshold
+        && threshold > 0.0
+    {
+        return Err(ConfigError::new("silence_threshold must be less than or equal to 0").into());
     }
-    if let Some(timeout) = conf.devices.silence_timeout {
-        if timeout < 0.0 {
-            return Err(ConfigError::new("silence_timeout cannot be negative").into());
-        }
+    if let Some(timeout) = conf.devices.silence_timeout
+        && timeout < 0.0
+    {
+        return Err(ConfigError::new("silence_timeout cannot be negative").into());
     }
     if conf.devices.ramp_time() < 0.0 {
         return Err(ConfigError::new("Volume ramp time cannot be negative").into());
@@ -548,35 +547,33 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         return Err(ConfigError::new("Volume limit cannot be less than -150 dB").into());
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
-        if let Some(format) = dev.format {
-            if format != WasapiSampleFormat::F32 && !dev.is_exclusive() {
-                return Err(ConfigError::new(
-                    "Wasapi shared mode capture must use F32 sample format",
-                )
-                .into());
-            }
-        }
+    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture
+        && let Some(format) = dev.format
+        && format != WasapiSampleFormat::F32
+        && !dev.is_exclusive()
+    {
+        return Err(
+            ConfigError::new("Wasapi shared mode capture must use F32 sample format").into(),
+        );
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture {
-        if dev.is_loopback() && dev.is_exclusive() {
-            return Err(ConfigError::new(
-                "Wasapi loopback capture is only supported in shared mode",
-            )
-            .into());
-        }
+    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture
+        && dev.is_loopback()
+        && dev.is_exclusive()
+    {
+        return Err(
+            ConfigError::new("Wasapi loopback capture is only supported in shared mode").into(),
+        );
     }
     #[cfg(target_os = "windows")]
-    if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback {
-        if let Some(format) = dev.format {
-            if format != WasapiSampleFormat::F32 && !dev.is_exclusive() {
-                return Err(ConfigError::new(
-                    "Wasapi shared mode playback must use F32 sample format",
-                )
-                .into());
-            }
-        }
+    if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback
+        && let Some(format) = dev.format
+        && format != WasapiSampleFormat::F32
+        && !dev.is_exclusive()
+    {
+        return Err(
+            ConfigError::new("Wasapi shared mode playback must use F32 sample format").into(),
+        );
     }
     #[cfg(all(target_os = "windows", feature = "asio-backend"))]
     if let (CaptureDevice::Asio(cap_dev), PlaybackDevice::Asio(pb_dev)) =
@@ -600,12 +597,12 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     if let PlaybackDevice::File {
         format, wav_header, ..
     } = &conf.devices.playback
+        && *format == BinarySampleFormat::S24_4_RJ_LE
+        && *wav_header == Some(true)
     {
-        if *format == BinarySampleFormat::S24_4_RJ_LE && *wav_header == Some(true) {
-            return Err(
-                ConfigError::new("Wav files do not support the S24_4_RJ_LE sample format").into(),
-            );
-        }
+        return Err(
+            ConfigError::new("Wav files do not support the S24_4_RJ_LE sample format").into(),
+        );
     }
     if let CaptureDevice::RawFile(dev) = &conf.devices.capture {
         let fname = &dev.filename;
@@ -801,12 +798,12 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
 pub fn used_capture_channels(conf: &Configuration) -> Vec<bool> {
     if let Some(pipeline) = &conf.pipeline {
         for step in pipeline.iter() {
-            if let PipelineStep::Mixer(mix) = step {
-                if !mix.is_bypassed() {
-                    // Safe to unwrap here since we have already verified that the mixer exists
-                    let mixerconf = conf.mixers.as_ref().unwrap().get(&mix.name).unwrap();
-                    return mixer::used_input_channels(mixerconf);
-                }
+            if let PipelineStep::Mixer(mix) = step
+                && !mix.is_bypassed()
+            {
+                // Safe to unwrap here since we have already verified that the mixer exists
+                let mixerconf = conf.mixers.as_ref().unwrap().get(&mix.name).unwrap();
+                return mixer::used_input_channels(mixerconf);
             }
         }
     }
@@ -826,12 +823,11 @@ pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opt
     if let Some(conf) = config {
         if let Some(pipeline) = &conf.pipeline {
             for step in pipeline.iter().rev() {
-                if let PipelineStep::Mixer(mixerstep) = step {
-                    if let Some(mixers) = &conf.mixers {
-                        if let Some(mixer) = mixers.get(&mixerstep.name) {
-                            return mixer.labels.clone();
-                        }
-                    }
+                if let PipelineStep::Mixer(mixerstep) = step
+                    && let Some(mixers) = &conf.mixers
+                    && let Some(mixer) = mixers.get(&mixerstep.name)
+                {
+                    return mixer.labels.clone();
                 }
             }
         }

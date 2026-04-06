@@ -1,3 +1,11 @@
+## 4.1.0
+New features:
+- Experimental optional multi-threaded Alsa backend.
+- Added SIMD acceleration for FFT convolution,
+  using NEON on aarch64 and AVX/FMA on amd64.
+Bugfixes:
+- Linux: fix stuttering on PipeWire playback.
+
 ## v4.0.1
 Changes:
 - Improved documentation on sample formats and rate adjust

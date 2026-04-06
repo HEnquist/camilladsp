@@ -15,8 +15,10 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 // Traits for audio devices
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "threaded-alsa")))]
 use crate::alsa_backend::device as alsadevice;
+#[cfg(all(target_os = "linux", feature = "threaded-alsa"))]
+use crate::alsa_backend::threaded_device as alsadevice;
 #[cfg(all(target_os = "windows", feature = "asio-backend"))]
 use crate::asio_backend::device as asiodevice;
 use crate::config;
@@ -270,12 +272,13 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
     } else {
         conf.samplerate
     };
-    if let Some(cr) = conf.capture_samplerate {
-        if cr != conf.samplerate && conf.resampler.is_none() {
-            warn!(
-                "Resampling is disabled and capture_samplerate is different than samplerate, ignoring capture_samplerate."
-            );
-        }
+    if let Some(cr) = conf.capture_samplerate
+        && cr != conf.samplerate
+        && conf.resampler.is_none()
+    {
+        warn!(
+            "Resampling is disabled and capture_samplerate is different than samplerate, ignoring capture_samplerate."
+        );
     }
     let diff_rates = capture_samplerate != conf.samplerate;
     // Check for non-optimal resampling settings

@@ -32,7 +32,7 @@ pub struct BiquadCombo {
 
 impl BiquadCombo {
     fn butterworth_q(order: usize) -> Vec<PrcFmt> {
-        let odd = order % 2 > 0;
+        let odd = !order.is_multiple_of(2);
         let pi = std::f64::consts::PI as PrcFmt;
         let n_so = order / 2;
         let mut qvalues = Vec::with_capacity(n_so + usize::from(odd));
@@ -79,7 +79,7 @@ impl BiquadCombo {
     fn linkwitzriley_q(order: usize) -> Vec<PrcFmt> {
         let mut q_temp = BiquadCombo::butterworth_q(order / 2);
         let mut qvalues;
-        if order % 4 > 0 {
+        if !order.is_multiple_of(4) {
             q_temp.pop();
             qvalues = q_temp.clone();
             qvalues.append(&mut q_temp);

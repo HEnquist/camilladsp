@@ -1,14 +1,15 @@
 [package]
 name = "CamillaDSP"
-version = "4.0.1"
+version = "4.1.0-alpha.1"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2024"
 description = "A flexible tool for processing audio"
-rust-version = "1.85"
+rust-version = "1.90"
 license = "GPL-3.0-only OR MPL-2.0"
 
 [features]
 default = ["websocket"]
+threaded-alsa = []
 pulse-backend = ["libpulse-simple-binding", "libpulse-binding"]
 pipewire-backend = ["pipewire"]
 cpal-backend = ["cpal"]
@@ -16,10 +17,10 @@ jack-backend = ["cpal-backend", "cpal/jack"]
 bluez-backend = ["zbus"]
 asio-backend = ["asio-sys"]
 32bit = []
+bench = []
 websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
 debug = []
-avoid-rustc-issue-116359 = []
 
 [lib]
 name = "camillalib"
@@ -34,7 +35,7 @@ alsa = "0.9.0"
 alsa-sys = "0.3.1"
 nix = { version = "0.30", features = ["poll", "signal"] }
 zbus = { version = "5.7.0", optional = true }
-pipewire = { version = "0.8", optional = true }
+pipewire = { version = "0.9", optional = true }
 
 [target.'cfg(target_os="macos")'.dependencies]
 coreaudio-rs = "0.13.0"
@@ -66,7 +67,6 @@ rand = { version = "0.9.1", default-features = false, features = ["small_rng", "
 rand_distr = "0.5.1"
 clap = { version = "4.5.4", features = ["cargo"] }
 git-version = "0.3"
-lazy_static = "1.4.0"
 log = "0.4.14"
 flexi_logger = { version = "0.30.2", features = ["async", "colors"] }
 chrono = "0.4"
@@ -103,6 +103,11 @@ harness = false
 [[bench]]
 name = "pipeline"
 harness = false
+
+[[bench]]
+name = "fftconv_kernels"
+harness = false
+required-features = ["bench"]
 
 [profile.release]
 codegen-units = 1

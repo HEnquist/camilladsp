@@ -15,6 +15,7 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use parking_lot::RwLock;
+use std::sync::LazyLock;
 
 use crate::PrcFmt;
 use crate::audiochunk::AudioChunk;
@@ -22,12 +23,10 @@ use crate::audiochunk::AudioChunk;
 const MAX_STASH_SIZE: usize = 1024;
 const MAX_CONTAINER_STASH_SIZE: usize = 128;
 
-lazy_static! {
-    pub static ref BUFFERSTASH: RwLock<Vec<Vec<PrcFmt>>> =
-        RwLock::new(Vec::with_capacity(MAX_STASH_SIZE));
-    pub static ref CONTAINERSTASH: RwLock<Vec<Vec<Vec<PrcFmt>>>> =
-        RwLock::new(Vec::with_capacity(MAX_CONTAINER_STASH_SIZE));
-}
+pub static BUFFERSTASH: LazyLock<RwLock<Vec<Vec<PrcFmt>>>> =
+    LazyLock::new(|| RwLock::new(Vec::with_capacity(MAX_STASH_SIZE)));
+pub static CONTAINERSTASH: LazyLock<RwLock<Vec<Vec<Vec<PrcFmt>>>>> =
+    LazyLock::new(|| RwLock::new(Vec::with_capacity(MAX_CONTAINER_STASH_SIZE)));
 
 pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
     let vec_option = {

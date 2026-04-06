@@ -42,3 +42,12 @@ Run them with cargo:
 ```sh
 cargo bench
 ```
+
+## FFT Convolution Kernel Benchmarks
+
+Micro-benchmarks for the complex-multiply kernels are available.
+They compare scalar against NEON on `aarch64` and AVX+FMA on `x86_64`.
+The `bench` feature flag is required to expose the kernel functions:
+```sh
+cargo bench --features bench --bench fftconv_kernels
+```
