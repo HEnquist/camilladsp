@@ -545,6 +545,8 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                         rms: vec![0.0; channels],
                         peak: vec![0.0; channels],
                     };
+                    let mut rms_values = Vec::new();
+                    let mut peak_values = Vec::new();
                     // Pre-allocate conversion buffer to avoid repeated allocations
                     let mut raw_buffer = vec![0u8; chunksize * stride];
                     // Buffer level tracking with time-based estimation
@@ -600,16 +602,18 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                                     &mut raw_buffer,
                                     &binary_format,
                                 );
+                                chunk_stats.rms_linear(&mut rms_values);
+                                chunk_stats.peak_linear(&mut peak_values);
                                 if let Some(mut playback_status) = playback_status_clone.try_write() {
                                     if conversion_result.1 > 0 {
                                         playback_status.clipped_samples += conversion_result.1;
                                     }
                                     playback_status
                                         .signal_rms
-                                        .add_record_squared(chunk_stats.rms_linear());
+                                        .add_record_squared(&rms_values);
                                     playback_status
                                         .signal_peak
-                                        .add_record(chunk_stats.peak_linear());
+                                        .add_record(&peak_values);
                                 }
                                 else {
                                     xtrace!("Playback status blocked, skipping rms update.");
@@ -1020,6 +1024,8 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         rms: vec![0.0; channels],
                         peak: vec![0.0; channels],
                     };
+                    let mut rms_values = Vec::new();
+                    let mut peak_values = Vec::new();
                     let mut channel_mask = vec![true; channels];
                     let chunksize_bytes = channels * chunksize * store_bytes_per_sample;
                     // Pre-allocated buffer for capture data (sized for max resampler input)
@@ -1135,9 +1141,11 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         else {
                             xtrace!("Capture status blocked, skip update.");
                         }
+                        chunk_stats.rms_linear(&mut rms_values);
+                        chunk_stats.peak_linear(&mut peak_values);
                         if let Some(mut capture_status) = capture_status_clone.try_write() {
-                            capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
-                            capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                            capture_status.signal_rms.add_record_squared(&rms_values);
+                            capture_status.signal_peak.add_record(&peak_values);
                         }
                         else {
                             xtrace!("Capture status blocked, skip rms update.");

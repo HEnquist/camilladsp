@@ -264,6 +264,8 @@ impl PlaybackDevice for CpalPlaybackDevice {
                         let mut buffer_avg = countertimer::Averager::new();
                         let mut timer = countertimer::Stopwatch::new();
                         let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
+                        let mut rms_values = Vec::new();
+                        let mut peak_values = Vec::new();
 
                         let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
 
@@ -401,10 +403,12 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     chunk.update_stats(&mut chunk_stats);
+                                    chunk_stats.rms_linear(&mut rms_values);
+                                    chunk_stats.peak_linear(&mut peak_values);
                                     {
                                         let mut playback_status = playback_status.write();
-                                        playback_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
-                                        playback_status.signal_peak.add_record(chunk_stats.peak_linear());
+                                        playback_status.signal_rms.add_record_squared(&rms_values);
+                                        playback_status.signal_peak.add_record(&peak_values);
                                     }
                                     buffer_avg.add_value(
                                         (buffer_fill.load(Ordering::Relaxed) / channels_clone + channel.len() * chunksize_clone)
@@ -594,6 +598,8 @@ impl CaptureDevice for CpalCaptureDevice {
                         let rate_measure_interval_ms = (1000.0 * rate_measure_interval) as u64;
                         let mut value_range = 0.0;
                         let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
+                        let mut rms_values = Vec::new();
+                        let mut peak_values = Vec::new();
                         let mut rate_adjust = 0.0;
                         let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                         let mut state = ProcessingState::Running;
@@ -718,10 +724,12 @@ impl CaptureDevice for CpalCaptureDevice {
                                 trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                             }
                             chunk.update_stats(&mut chunk_stats);
+                            chunk_stats.rms_linear(&mut rms_values);
+                            chunk_stats.peak_linear(&mut peak_values);
                             {
                                 let mut capture_status = capture_status.write();
-                                capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
-                                capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                                capture_status.signal_rms.add_record_squared(&rms_values);
+                                capture_status.signal_peak.add_record(&peak_values);
                             }
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);

@@ -158,6 +158,8 @@ impl PlaybackDevice for FilePlaybackDevice {
                             rms: vec![0.0; channels],
                             peak: vec![0.0; channels],
                         };
+                        let mut rms_values = Vec::new();
+                        let mut peak_values = Vec::new();
                         barrier.wait();
                         debug!("starting playback loop");
                         if wav_header {
@@ -189,16 +191,14 @@ impl PlaybackDevice for FilePlaybackDevice {
                                                 .unwrap_or(());
                                         }
                                     };
+                                    chunk_stats.rms_linear(&mut rms_values);
+                                    chunk_stats.peak_linear(&mut peak_values);
                                     if let Some(mut playback_status) = playback_status.try_write() {
                                         if nbr_clipped > 0 {
                                             playback_status.clipped_samples += nbr_clipped;
                                         }
-                                        playback_status
-                                            .signal_rms
-                                            .add_record_squared(chunk_stats.rms_linear());
-                                        playback_status
-                                            .signal_peak
-                                            .add_record(chunk_stats.peak_linear());
+                                        playback_status.signal_rms.add_record_squared(&rms_values);
+                                        playback_status.signal_peak.add_record(&peak_values);
                                     } else {
                                         xtrace!("playback status blocked, skip rms update");
                                     }
@@ -307,6 +307,8 @@ fn capture_loop(
         rms: vec![0.0; params.channels],
         peak: vec![0.0; params.channels],
     };
+    let mut rms_values = Vec::new();
+    let mut peak_values = Vec::new();
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     let mut state = ProcessingState::Running;
@@ -501,13 +503,11 @@ fn capture_loop(
             true,
         );
         chunk.update_stats(&mut chunk_stats);
+        chunk_stats.rms_linear(&mut rms_values);
+        chunk_stats.peak_linear(&mut peak_values);
         if let Some(mut capture_status) = params.capture_status.try_write() {
-            capture_status
-                .signal_rms
-                .add_record_squared(chunk_stats.rms_linear());
-            capture_status
-                .signal_peak
-                .add_record(chunk_stats.peak_linear());
+            capture_status.signal_rms.add_record_squared(&rms_values);
+            capture_status.signal_peak.add_record(&peak_values);
         } else {
             xtrace!("capture status blocked, skip rms update");
         }

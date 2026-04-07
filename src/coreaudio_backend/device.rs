@@ -428,6 +428,8 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     rms: vec![0.0; channels],
                     peak: vec![0.0; channels],
                 };
+                let mut rms_values = Vec::new();
+                let mut peak_values = Vec::new();
                 let blockalign = 4 * channels;
 
                 let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
@@ -616,16 +618,18 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 &mut buf,
                                 &BinarySampleFormat::F32_LE,
                             );
+                            chunk_stats.rms_linear(&mut rms_values);
+                            chunk_stats.peak_linear(&mut peak_values);
                             if let Some(mut playback_status) = playback_status.try_write() {
                                 if conversion_result.1 > 0 {
                                     playback_status.clipped_samples += conversion_result.1;
                                 }
                                 playback_status
                                     .signal_rms
-                                    .add_record_squared(chunk_stats.rms_linear());
+                                    .add_record_squared(&rms_values);
                                 playback_status
                                     .signal_peak
-                                    .add_record(chunk_stats.peak_linear());
+                                    .add_record(&peak_values);
                             }
                             else {
                                 xtrace!("Playback status blocked, skipping rms update.");
@@ -845,6 +849,8 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let mut valuewatcher = countertimer::ValueWatcher::new(capture_samplerate as f32, RATE_CHANGE_THRESHOLD_VALUE, RATE_CHANGE_THRESHOLD_COUNT);
                 let mut value_range = 0.0;
                 let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
+                let mut rms_values = Vec::new();
+                let mut peak_values = Vec::new();
                 let mut rate_adjust = 0.0;
                 let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                 let mut state = ProcessingState::Running;
@@ -1037,9 +1043,11 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     }
                     prev_len = device_consumer.occupied_len();
                     chunk.update_stats(&mut chunk_stats);
+                    chunk_stats.rms_linear(&mut rms_values);
+                    chunk_stats.peak_linear(&mut peak_values);
                     if let Some(mut capture_status) = capture_status.try_write() {
-                        capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
-                        capture_status.signal_peak.add_record(chunk_stats.peak_linear());
+                        capture_status.signal_rms.add_record_squared(&rms_values);
+                        capture_status.signal_peak.add_record(&peak_values);
                     }
                     else {
                         xtrace!("Capture status blocked, skip rms update.");

@@ -138,6 +138,8 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
         rms: vec![0.0; params.channels],
         peak: vec![0.0; params.channels],
     };
+    let mut rms_values = Vec::new();
+    let mut peak_values = Vec::new();
     let mut sine_gen;
     let mut square_gen;
     let mut noise_gen;
@@ -191,14 +193,12 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, params.chunksize, params.chunksize);
 
         chunk.update_stats(&mut chunk_stats);
+        chunk_stats.rms_linear(&mut rms_values);
+        chunk_stats.peak_linear(&mut peak_values);
         {
             let mut capture_status = params.capture_status.write();
-            capture_status
-                .signal_rms
-                .add_record_squared(chunk_stats.rms_linear());
-            capture_status
-                .signal_peak
-                .add_record(chunk_stats.peak_linear());
+            capture_status.signal_rms.add_record_squared(&rms_values);
+            capture_status.signal_peak.add_record(&peak_values);
         }
         let msg = AudioMessage::Audio(chunk);
         if msg_channels.audio.send(msg).is_err() {

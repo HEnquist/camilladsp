@@ -1275,6 +1275,8 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     rms: vec![0.0; channels],
                     peak: vec![0.0; channels],
                 };
+                let mut rms_values = Vec::new();
+                let mut peak_values = Vec::new();
 
                 let mut rate_controller = PIRateController::new_with_default_gains(
                     samplerate,
@@ -1547,16 +1549,18 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             chunk.update_stats(&mut chunk_stats);
                             conversion_result =
                                 chunk_to_buffer_rawbytes(chunk, &mut buf, &binary_format);
+                            chunk_stats.rms_linear(&mut rms_values);
+                            chunk_stats.peak_linear(&mut peak_values);
                             if let Some(mut playback_status) = playback_status.try_write() {
                                 if conversion_result.1 > 0 {
                                     playback_status.clipped_samples += conversion_result.1;
                                 }
                                 playback_status
                                     .signal_rms
-                                    .add_record_squared(chunk_stats.rms_linear());
+                                    .add_record_squared(&rms_values);
                                 playback_status
                                     .signal_peak
-                                    .add_record(chunk_stats.peak_linear());
+                                    .add_record(&peak_values);
                             } else {
                                 xtrace!("Playback status blocked, skip rms update.");
                             }
@@ -1900,6 +1904,8 @@ impl CaptureDevice for AsioCaptureDevice {
                     rms: vec![0.0; channels],
                     peak: vec![0.0; channels],
                 };
+                let mut rms_values = Vec::new();
+                let mut peak_values = Vec::new();
                 let mut rate_adjust = 0.0;
                 let mut silence_counter = countertimer::SilenceCounter::new(
                     silence_threshold,
@@ -2085,13 +2091,15 @@ impl CaptureDevice for AsioCaptureDevice {
 
                     // Signal statistics
                     chunk.update_stats(&mut chunk_stats);
+                    chunk_stats.rms_linear(&mut rms_values);
+                    chunk_stats.peak_linear(&mut peak_values);
                     if let Some(mut capture_status) = capture_status.try_write() {
                         capture_status
                             .signal_rms
-                            .add_record_squared(chunk_stats.rms_linear());
+                            .add_record_squared(&rms_values);
                         capture_status
                             .signal_peak
-                            .add_record(chunk_stats.peak_linear());
+                            .add_record(&peak_values);
                     } else {
                         xtrace!("Capture status blocked, skip rms update.");
                     }

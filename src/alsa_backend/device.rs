@@ -484,6 +484,8 @@ fn playback_loop_bytes(
         rms: vec![0.0; params.channels],
         peak: vec![0.0; params.channels],
     };
+    let mut rms_values = Vec::new();
+    let mut peak_values = Vec::new();
     let mut buffer_avg = countertimer::Averager::new();
     let mut conversion_result;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
@@ -628,16 +630,14 @@ fn playback_loop_bytes(
                 };
                 if !device_stalled {
                     // updates only for non-stalled device
+                    chunk_stats.rms_linear(&mut rms_values);
+                    chunk_stats.peak_linear(&mut peak_values);
                     if let Some(mut playback_status) = params.playback_status.try_write() {
                         if conversion_result.1 > 0 {
                             playback_status.clipped_samples += conversion_result.1;
                         }
-                        playback_status
-                            .signal_rms
-                            .add_record_squared(chunk_stats.rms_linear());
-                        playback_status
-                            .signal_peak
-                            .add_record(chunk_stats.peak_linear());
+                        playback_status.signal_rms.add_record_squared(&rms_values);
+                        playback_status.signal_peak.add_record(&peak_values);
                     } else {
                         xtrace!("playback status blocked, skip update");
                     }
@@ -871,6 +871,8 @@ fn capture_loop_bytes(
         rms: vec![0.0; params.channels],
         peak: vec![0.0; params.channels],
     };
+    let mut rms_values = Vec::new();
+    let mut peak_values = Vec::new();
     let thread_handle = match promote_current_thread_to_real_time(
         params.chunksize as u32,
         params.samplerate as u32,
@@ -1044,13 +1046,11 @@ fn capture_loop_bytes(
             false,
         );
         chunk.update_stats(&mut chunk_stats);
+        chunk_stats.rms_linear(&mut rms_values);
+        chunk_stats.peak_linear(&mut peak_values);
         if let Some(mut capture_status) = params.capture_status.try_write() {
-            capture_status
-                .signal_rms
-                .add_record_squared(chunk_stats.rms_linear());
-            capture_status
-                .signal_peak
-                .add_record(chunk_stats.peak_linear());
+            capture_status.signal_rms.add_record_squared(&rms_values);
+            capture_status.signal_peak.add_record(&peak_values);
         } else {
             xtrace!("capture status blocked, skip rms update");
         }

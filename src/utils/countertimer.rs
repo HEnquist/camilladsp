@@ -272,57 +272,109 @@ pub struct ValueHistory {
     peak: Vec<f32>,
     nbr_values: usize,
     history_length: usize,
+    valid_records: usize,
 }
 
 impl ValueHistory {
     pub fn new(history_length: usize, nbr_values: usize) -> Self {
-        Self {
+        let mut history = Self {
             buffer: VecDeque::<HistoryRecord>::with_capacity(history_length),
             peak: vec![0.0; nbr_values],
             nbr_values,
             history_length,
+            valid_records: 0,
+        };
+        history.reset_storage(nbr_values);
+        history
+    }
+
+    fn reset_storage(&mut self, nbr_values: usize) {
+        self.nbr_values = nbr_values;
+        self.valid_records = 0;
+        self.peak.resize(nbr_values, 0.0);
+        self.reset_global_max();
+        self.buffer = VecDeque::<HistoryRecord>::with_capacity(self.history_length);
+        let now = Instant::now();
+        for _ in 0..self.history_length {
+            self.buffer.push_back(HistoryRecord {
+                time: now,
+                values: vec![0.0; nbr_values],
+            });
         }
     }
 
     // Add a record
-    pub fn add_record(&mut self, values: Vec<f32>) {
+    pub fn add_record(&mut self, values: &[f32]) {
+        if self.history_length == 0 {
+            return;
+        }
         if values.len() != self.nbr_values {
             debug!(
                 "Number of values changed. New {}, prev {}. Clearing history.",
                 values.len(),
                 self.nbr_values
             );
-            self.nbr_values = values.len();
-            self.buffer.clear();
-            self.peak = vec![0.0; self.nbr_values];
+            self.reset_storage(values.len());
         }
-        let time = Instant::now();
-        self.peak
+        let mut record = self
+            .buffer
+            .pop_back()
+            .expect("ValueHistory storage must be preallocated");
+        record.time = Instant::now();
+        for ((slot, max), value) in record
+            .values
             .iter_mut()
+            .zip(self.peak.iter_mut())
             .zip(values.iter())
-            .for_each(|(max, val)| {
-                if *val > *max {
-                    *max = *val;
-                }
-            });
-        let record = HistoryRecord { time, values };
-        if self.buffer.len() == self.history_length {
-            self.buffer.pop_back();
+        {
+            *slot = *value;
+            if *value > *max {
+                *max = *value;
+            }
         }
         self.buffer.push_front(record);
+        self.valid_records = (self.valid_records + 1).min(self.history_length);
     }
 
     // Add a record but square the numbers (used for RMS history)
-    pub fn add_record_squared(&mut self, mut values: Vec<f32>) {
-        values.iter_mut().for_each(|val| *val = *val * *val);
-        self.add_record(values);
+    pub fn add_record_squared(&mut self, values: &[f32]) {
+        if self.history_length == 0 {
+            return;
+        }
+        if values.len() != self.nbr_values {
+            debug!(
+                "Number of values changed. New {}, prev {}. Clearing history.",
+                values.len(),
+                self.nbr_values
+            );
+            self.reset_storage(values.len());
+        }
+        let mut record = self
+            .buffer
+            .pop_back()
+            .expect("ValueHistory storage must be preallocated");
+        record.time = Instant::now();
+        for ((slot, max), value) in record
+            .values
+            .iter_mut()
+            .zip(self.peak.iter_mut())
+            .zip(values.iter())
+        {
+            let squared = *value * *value;
+            *slot = squared;
+            if squared > *max {
+                *max = squared;
+            }
+        }
+        self.buffer.push_front(record);
+        self.valid_records = (self.valid_records + 1).min(self.history_length);
     }
 
     // Get the average since the given Instance
     pub fn average_since(&self, time: Instant) -> Option<HistoryRecord> {
         let mut scratch = vec![0.0; self.nbr_values];
         let mut nbr_summed = 0;
-        for record in self.buffer.iter() {
+        for record in self.buffer.iter().take(self.valid_records) {
             if record.time <= time {
                 break;
             }
@@ -348,7 +400,7 @@ impl ValueHistory {
     pub fn max_since(&self, time: Instant) -> Option<HistoryRecord> {
         let mut scratch = vec![0.0; self.nbr_values];
         let mut valid = false;
-        for record in self.buffer.iter() {
+        for record in self.buffer.iter().take(self.valid_records) {
             if record.time <= time {
                 break;
             }
@@ -385,7 +437,7 @@ impl ValueHistory {
 
     // Clear the history and global peak
     pub fn clear_history(&mut self) {
-        self.buffer.clear();
+        self.valid_records = 0;
         self.reset_global_max();
     }
 
@@ -401,11 +453,15 @@ impl ValueHistory {
     }
 
     pub fn last(&self) -> Option<HistoryRecord> {
-        self.buffer.front().cloned()
+        if self.valid_records == 0 {
+            None
+        } else {
+            self.buffer.front().cloned()
+        }
     }
 
     pub fn last_sqrt(&self) -> Option<HistoryRecord> {
-        let mut result = self.buffer.front().cloned();
+        let mut result = self.last();
         if let Some(ref mut record) = result {
             record.values.iter_mut().for_each(|val| *val = val.sqrt())
         };
@@ -430,13 +486,13 @@ mod tests {
     }
 
     fn add_record_at(hist: &mut ValueHistory, time: Instant, values: Vec<f32>) {
-        hist.add_record(values);
+        hist.add_record(&values);
         // Override the timestamp so time-based queries can be tested deterministically.
         set_last_record_time(hist, time);
     }
 
     fn add_record_squared_at(hist: &mut ValueHistory, time: Instant, values: Vec<f32>) {
-        hist.add_record_squared(values);
+        hist.add_record_squared(&values);
         // Override the timestamp so time-based RMS queries do not depend on sleeping.
         set_last_record_time(hist, time);
     }
@@ -727,10 +783,10 @@ mod tests {
     #[test]
     fn test_valuehistory_last() {
         let mut hist = ValueHistory::new(10, 1);
-        hist.add_record(vec![1.0]);
-        hist.add_record(vec![2.0]);
-        hist.add_record(vec![3.0]);
-        hist.add_record(vec![4.0]);
+        hist.add_record(&[1.0]);
+        hist.add_record(&[2.0]);
+        hist.add_record(&[3.0]);
+        hist.add_record(&[4.0]);
         assert_eq!(
             format!("{:?}", vec![4.0]),
             format!("{:?}", hist.last().unwrap().values)
@@ -744,13 +800,13 @@ mod tests {
     #[test]
     fn test_valuehistory_change_nbr() {
         let mut hist = ValueHistory::new(10, 2);
-        hist.add_record(vec![1.0, 1.0]);
-        hist.add_record(vec![2.0, 2.0]);
+        hist.add_record(&[1.0, 1.0]);
+        hist.add_record(&[2.0, 2.0]);
         assert_eq!(
             format!("{:?}", vec![2.0, 2.0]),
             format!("{:?}", hist.last().unwrap().values)
         );
-        hist.add_record(vec![3.0]);
+        hist.add_record(&[3.0]);
         assert_eq!(
             format!("{:?}", vec![3.0]),
             format!("{:?}", hist.last().unwrap().values)
