@@ -16,9 +16,12 @@
 
 use crate::PrcFmt;
 
+/// Clamp the lower limit of the dB value to -200 dB,
+/// which is below the dynamic range of 32-bit integers
+/// and should be sufficient for all practical purposes.
 pub fn linear_to_db(value: f32) -> f32 {
-    if value == 0.0 {
-        -1000.0
+    if value.abs() < 4.66e-10 {
+        -200.0
     } else {
         20.0 * value.log10()
     }
