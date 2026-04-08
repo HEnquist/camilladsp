@@ -502,6 +502,8 @@ fn playback_loop_bytes(
     let io = pcmdevice.io_bytes();
     debug!("Playback loop uses a buffer of {} frames", params.chunksize);
     let mut buffer = vec![0u8; params.chunksize * params.bytes_per_frame];
+    let zero_stall_buf =
+        vec![0u8; buf_manager.data().buffersize() as usize * params.bytes_per_frame];
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
@@ -603,13 +605,10 @@ fn playback_loop_bytes(
                             pcmdevice
                                 .prepare()
                                 .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
-                            // writing zeros to be able to check for un-stalling in pcmdevice.wait
-                            let zero_buf = vec![
-                                0u8;
-                                buf_manager.frames_to_stall() as usize
-                                    * params.bytes_per_frame
-                            ];
-                            match io.writei(&zero_buf) {
+                            // Write preallocated zeros so pcmdevice.wait can detect when playback starts draining again.
+                            let stall_bytes =
+                                buf_manager.frames_to_stall() as usize * params.bytes_per_frame;
+                            match io.writei(&zero_stall_buf[..stall_bytes]) {
                                 Ok(frames) => {
                                     trace!("PB: Wrote {frames} zero frames");
                                 }
