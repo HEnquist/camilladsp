@@ -629,17 +629,13 @@ fn playback_loop_bytes(
                 };
                 if !device_stalled {
                     // updates only for non-stalled device
-                    chunk_stats.rms_linear(&mut rms_values);
-                    chunk_stats.peak_linear(&mut peak_values);
-                    if let Some(mut playback_status) = params.playback_status.try_write() {
-                        if conversion_result.1 > 0 {
-                            playback_status.clipped_samples += conversion_result.1;
-                        }
-                        playback_status.signal_rms.add_record_squared(&rms_values);
-                        playback_status.signal_peak.add_record(&peak_values);
-                    } else {
-                        xtrace!("playback status blocked, skip update");
-                    }
+                    crate::update_playback_signal_status(
+                        &params.playback_status,
+                        &chunk_stats,
+                        &mut rms_values,
+                        &mut peak_values,
+                        conversion_result.1,
+                    );
                     if let Some(avail) = avail_at_chunk_recvd {
                         let delay = buf_manager.current_delay(avail);
                         buffer_avg.add_value(
@@ -1045,14 +1041,12 @@ fn capture_loop_bytes(
             false,
         );
         chunk.update_stats(&mut chunk_stats);
-        chunk_stats.rms_linear(&mut rms_values);
-        chunk_stats.peak_linear(&mut peak_values);
-        if let Some(mut capture_status) = params.capture_status.try_write() {
-            capture_status.signal_rms.add_record_squared(&rms_values);
-            capture_status.signal_peak.add_record(&peak_values);
-        } else {
-            xtrace!("capture status blocked, skip rms update");
-        }
+        crate::update_capture_signal_status(
+            &params.capture_status,
+            &chunk_stats,
+            &mut rms_values,
+            &mut peak_values,
+        );
         value_range = chunk.maxval - chunk.minval;
         trace!("Captured chunk with value range {value_range}");
         if device_stalled {

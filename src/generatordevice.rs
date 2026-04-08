@@ -193,14 +193,12 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, params.chunksize, params.chunksize);
 
         chunk.update_stats(&mut chunk_stats);
-        chunk_stats.rms_linear(&mut rms_values);
-        chunk_stats.peak_linear(&mut peak_values);
-        if let Some(mut capture_status) = params.capture_status.try_write() {
-            capture_status.signal_rms.add_record_squared(&rms_values);
-            capture_status.signal_peak.add_record(&peak_values);
-        } else {
-            xtrace!("capture status blocked, skip update");
-        }
+        crate::update_capture_signal_status(
+            &params.capture_status,
+            &chunk_stats,
+            &mut rms_values,
+            &mut peak_values,
+        );
         let msg = AudioMessage::Audio(chunk);
         if msg_channels.audio.send(msg).is_err() {
             info!("Processing thread has already stopped.");

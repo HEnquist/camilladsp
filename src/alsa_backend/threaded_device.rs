@@ -1186,19 +1186,13 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     chunk.update_stats(&mut chunk_stats);
                                     let conversion_result =
                                         chunk_to_buffer_rawbytes(chunk, &mut buf, &binary_format);
-                                    chunk_stats.rms_linear(&mut rms_values);
-                                    chunk_stats.peak_linear(&mut peak_values);
-                                    if let Some(mut playback_status) = playback_status.try_write() {
-                                        if conversion_result.1 > 0 {
-                                            playback_status.clipped_samples += conversion_result.1;
-                                        }
-                                        playback_status
-                                            .signal_rms
-                                            .add_record_squared(&rms_values);
-                                        playback_status
-                                            .signal_peak
-                                            .add_record(&peak_values);
-                                    }
+                                    crate::update_playback_signal_status(
+                                        &playback_status,
+                                        &chunk_stats,
+                                        &mut rms_values,
+                                        &mut peak_values,
+                                        conversion_result.1,
+                                    );
 
                                     let bytes_to_write = conversion_result.0;
                                     let sleep_duration = Duration::from_micros(
@@ -1825,16 +1819,12 @@ impl CaptureDevice for AlsaCaptureDevice {
                             );
 
                             chunk.update_stats(&mut chunk_stats);
-                            chunk_stats.rms_linear(&mut rms_values);
-                            chunk_stats.peak_linear(&mut peak_values);
-                            if let Some(mut capture_status_write) = capture_status.try_write() {
-                                capture_status_write
-                                    .signal_rms
-                                    .add_record_squared(&rms_values);
-                                capture_status_write
-                                    .signal_peak
-                                    .add_record(&peak_values);
-                            }
+                            crate::update_capture_signal_status(
+                                &capture_status,
+                                &chunk_stats,
+                                &mut rms_values,
+                                &mut peak_values,
+                            );
 
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);

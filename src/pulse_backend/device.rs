@@ -195,17 +195,13 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                                 .unwrap();
                                         }
                                     };
-                                    chunk_stats.rms_linear(&mut rms_values);
-                                    chunk_stats.peak_linear(&mut peak_values);
-                                    if let Some(mut playback_status) = playback_status.try_write() {
-                                        if conversion_result.1 > 0 {
-                                            playback_status.clipped_samples += conversion_result.1;
-                                        }
-                                        playback_status.signal_rms.add_record_squared(&rms_values);
-                                        playback_status.signal_peak.add_record(&peak_values);
-                                    } else {
-                                        xtrace!("playback status blocked, skip update");
-                                    }
+                                    crate::update_playback_signal_status(
+                                        &playback_status,
+                                        &chunk_stats,
+                                        &mut rms_values,
+                                        &mut peak_values,
+                                        conversion_result.1,
+                                    );
                                 }
                                 Ok(AudioMessage::Pause) => {
                                     trace!("Pause message received");
@@ -387,14 +383,12 @@ impl CaptureDevice for PulseCaptureDevice {
                             };
                             let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &binary_format, capture_bytes, &capture_status.read().used_channels, false);
                             chunk.update_stats(&mut chunk_stats);
-                            chunk_stats.rms_linear(&mut rms_values);
-                            chunk_stats.peak_linear(&mut peak_values);
-                            if let Some(mut capture_status) = capture_status.try_write() {
-                                capture_status.signal_rms.add_record_squared(&rms_values);
-                                capture_status.signal_peak.add_record(&peak_values);
-                            } else {
-                                xtrace!("capture status blocked, skip update");
-                            }
+                            crate::update_capture_signal_status(
+                                &capture_status,
+                                &chunk_stats,
+                                &mut rms_values,
+                                &mut peak_values,
+                            );
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {

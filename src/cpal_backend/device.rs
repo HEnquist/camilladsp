@@ -403,14 +403,13 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     chunk.update_stats(&mut chunk_stats);
-                                    chunk_stats.rms_linear(&mut rms_values);
-                                    chunk_stats.peak_linear(&mut peak_values);
-                                    if let Some(mut playback_status) = playback_status.try_write() {
-                                        playback_status.signal_rms.add_record_squared(&rms_values);
-                                        playback_status.signal_peak.add_record(&peak_values);
-                                    } else {
-                                        xtrace!("playback status blocked, skip update");
-                                    }
+                                    crate::update_playback_signal_status(
+                                        &playback_status,
+                                        &chunk_stats,
+                                        &mut rms_values,
+                                        &mut peak_values,
+                                        0,
+                                    );
                                     buffer_avg.add_value(
                                         (buffer_fill.load(Ordering::Relaxed) / channels_clone + channel.len() * chunksize_clone)
                                             as f64,
@@ -728,14 +727,12 @@ impl CaptureDevice for CpalCaptureDevice {
                                 trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                             }
                             chunk.update_stats(&mut chunk_stats);
-                            chunk_stats.rms_linear(&mut rms_values);
-                            chunk_stats.peak_linear(&mut peak_values);
-                            if let Some(mut capture_status) = capture_status.try_write() {
-                                capture_status.signal_rms.add_record_squared(&rms_values);
-                                capture_status.signal_peak.add_record(&peak_values);
-                            } else {
-                                xtrace!("capture status blocked, skip update");
-                            }
+                            crate::update_capture_signal_status(
+                                &capture_status,
+                                &chunk_stats,
+                                &mut rms_values,
+                                &mut peak_values,
+                            );
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {
