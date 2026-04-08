@@ -1,4 +1,6 @@
 import json
+from datetime import datetime
+
 import websocket
 
 WS_URL = "ws://127.0.0.1:1234"
@@ -53,10 +55,11 @@ try:
             value = event.get("value", {})
             state = value.get("state")
             stop_reason = value.get("stop_reason")
+            timestamp = datetime.now().isoformat(timespec="milliseconds")
             if stop_reason is not None:
-                print(f"state={state}, stop_reason={stop_reason}")
+                print(f"{timestamp} state={state}, stop_reason={stop_reason}")
             else:
-                print(f"state={state}")
+                print(f"{timestamp} state={state}")
 except KeyboardInterrupt:
     print("Stopping state subscription...")
 
