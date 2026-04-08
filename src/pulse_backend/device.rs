@@ -197,13 +197,14 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                     };
                                     chunk_stats.rms_linear(&mut rms_values);
                                     chunk_stats.peak_linear(&mut peak_values);
-                                    {
-                                        let mut playback_status = playback_status.write();
+                                    if let Some(mut playback_status) = playback_status.try_write() {
                                         if conversion_result.1 > 0 {
                                             playback_status.clipped_samples += conversion_result.1;
                                         }
                                         playback_status.signal_rms.add_record_squared(&rms_values);
                                         playback_status.signal_peak.add_record(&peak_values);
+                                    } else {
+                                        xtrace!("playback status blocked, skip update");
                                     }
                                 }
                                 Ok(AudioMessage::Pause) => {
@@ -388,10 +389,11 @@ impl CaptureDevice for PulseCaptureDevice {
                             chunk.update_stats(&mut chunk_stats);
                             chunk_stats.rms_linear(&mut rms_values);
                             chunk_stats.peak_linear(&mut peak_values);
-                            {
-                                let mut capture_status = capture_status.write();
+                            if let Some(mut capture_status) = capture_status.try_write() {
                                 capture_status.signal_rms.add_record_squared(&rms_values);
                                 capture_status.signal_peak.add_record(&peak_values);
+                            } else {
+                                xtrace!("capture status blocked, skip update");
                             }
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);

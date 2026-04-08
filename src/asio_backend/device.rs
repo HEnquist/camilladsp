@@ -1543,7 +1543,11 @@ impl PlaybackDevice for AsioPlaybackDevice {
                                 status_channel
                                     .send(StatusMessage::SetSpeed(speed))
                                     .unwrap_or(());
-                                playback_status.write().buffer_level = av_delay as usize;
+                                if let Some(mut playback_status) = playback_status.try_write() {
+                                    playback_status.buffer_level = av_delay as usize;
+                                } else {
+                                    xtrace!("playback status blocked, skip buffer level update");
+                                }
                             }
 
                             chunk.update_stats(&mut chunk_stats);

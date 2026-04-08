@@ -405,10 +405,11 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                     chunk.update_stats(&mut chunk_stats);
                                     chunk_stats.rms_linear(&mut rms_values);
                                     chunk_stats.peak_linear(&mut peak_values);
-                                    {
-                                        let mut playback_status = playback_status.write();
+                                    if let Some(mut playback_status) = playback_status.try_write() {
                                         playback_status.signal_rms.add_record_squared(&rms_values);
                                         playback_status.signal_peak.add_record(&peak_values);
+                                    } else {
+                                        xtrace!("playback status blocked, skip update");
                                     }
                                     buffer_avg.add_value(
                                         (buffer_fill.load(Ordering::Relaxed) / channels_clone + channel.len() * chunksize_clone)
@@ -429,8 +430,11 @@ impl PlaybackDevice for CpalPlaybackDevice {
                                             status_channel
                                                 .send(StatusMessage::SetSpeed(speed))
                                                 .unwrap();
-                                            playback_status.write().buffer_level =
-                                                av_delay as usize;
+                                            if let Some(mut playback_status) = playback_status.try_write() {
+                                                playback_status.buffer_level = av_delay as usize;
+                                            } else {
+                                                xtrace!("playback status blocked, skip buffer level update");
+                                            }
                                         }
                                     }
 
@@ -726,10 +730,11 @@ impl CaptureDevice for CpalCaptureDevice {
                             chunk.update_stats(&mut chunk_stats);
                             chunk_stats.rms_linear(&mut rms_values);
                             chunk_stats.peak_linear(&mut peak_values);
-                            {
-                                let mut capture_status = capture_status.write();
+                            if let Some(mut capture_status) = capture_status.try_write() {
                                 capture_status.signal_rms.add_record_squared(&rms_values);
                                 capture_status.signal_peak.add_record(&peak_values);
+                            } else {
+                                xtrace!("capture status blocked, skip update");
                             }
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
