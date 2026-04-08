@@ -158,6 +158,8 @@ impl PlaybackDevice for FilePlaybackDevice {
                             rms: vec![0.0; channels],
                             peak: vec![0.0; channels],
                         };
+                        let mut rms_values = Vec::new();
+                        let mut peak_values = Vec::new();
                         barrier.wait();
                         debug!("starting playback loop");
                         if wav_header {
@@ -189,19 +191,13 @@ impl PlaybackDevice for FilePlaybackDevice {
                                                 .unwrap_or(());
                                         }
                                     };
-                                    if let Some(mut playback_status) = playback_status.try_write() {
-                                        if nbr_clipped > 0 {
-                                            playback_status.clipped_samples += nbr_clipped;
-                                        }
-                                        playback_status
-                                            .signal_rms
-                                            .add_record_squared(chunk_stats.rms_linear());
-                                        playback_status
-                                            .signal_peak
-                                            .add_record(chunk_stats.peak_linear());
-                                    } else {
-                                        xtrace!("playback status blocked, skip rms update");
-                                    }
+                                    crate::update_playback_signal_status(
+                                        &playback_status,
+                                        &chunk_stats,
+                                        &mut rms_values,
+                                        &mut peak_values,
+                                        nbr_clipped,
+                                    );
                                 }
                                 Ok(AudioMessage::Pause) => {
                                     trace!("Pause message received");
@@ -307,6 +303,8 @@ fn capture_loop(
         rms: vec![0.0; params.channels],
         peak: vec![0.0; params.channels],
     };
+    let mut rms_values = Vec::new();
+    let mut peak_values = Vec::new();
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     let mut state = ProcessingState::Running;
@@ -501,16 +499,12 @@ fn capture_loop(
             true,
         );
         chunk.update_stats(&mut chunk_stats);
-        if let Some(mut capture_status) = params.capture_status.try_write() {
-            capture_status
-                .signal_rms
-                .add_record_squared(chunk_stats.rms_linear());
-            capture_status
-                .signal_peak
-                .add_record(chunk_stats.peak_linear());
-        } else {
-            xtrace!("capture status blocked, skip rms update");
-        }
+        crate::update_capture_signal_status(
+            &params.capture_status,
+            &chunk_stats,
+            &mut rms_values,
+            &mut peak_values,
+        );
         value_range = chunk.maxval - chunk.minval;
         state = silence_counter.update(value_range);
         if state == ProcessingState::Running {

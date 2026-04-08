@@ -26,52 +26,18 @@ use num_traits;
 #[cfg(feature = "cpal-backend")]
 use std::collections::VecDeque;
 
-/// Convert an AudioChunk to an interleaved buffer of u8.
-pub fn chunk_to_buffer_rawbytes(
+fn chunk_to_buffer_with_adapter<'a, A>(
     chunk: AudioChunk,
-    buf: &mut [u8],
-    sample_format: &BinarySampleFormat,
-) -> (usize, usize) {
-    let frames = chunk.frames;
-    let channels = chunk.channels;
-    let mut adapter: Box<dyn AdapterMut<PrcFmt>> = match *sample_format {
-        BinarySampleFormat::S16_LE => Box::new(
-            InterleavedNumbers::<&mut [I16_LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
-                .unwrap(),
-        ),
-        BinarySampleFormat::S24_3_LE => Box::new(
-            InterleavedNumbers::<&mut [I24_LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
-                .unwrap(),
-        ),
-        BinarySampleFormat::S24_4_RJ_LE => Box::new(
-            InterleavedNumbers::<&mut [I24_4RJ_LE], PrcFmt>::new_from_bytes_mut(
-                buf, channels, frames,
-            )
-            .unwrap(),
-        ),
-        BinarySampleFormat::S24_4_LJ_LE => Box::new(
-            InterleavedNumbers::<&mut [I24_4LJ_LE], PrcFmt>::new_from_bytes_mut(
-                buf, channels, frames,
-            )
-            .unwrap(),
-        ),
-        BinarySampleFormat::S32_LE => Box::new(
-            InterleavedNumbers::<&mut [I32_LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
-                .unwrap(),
-        ),
-        BinarySampleFormat::F32_LE => Box::new(
-            InterleavedNumbers::<&mut [F32_LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
-                .unwrap(),
-        ),
-        BinarySampleFormat::F64_LE => Box::new(
-            InterleavedNumbers::<&mut [F64_LE], PrcFmt>::new_from_bytes_mut(buf, channels, frames)
-                .unwrap(),
-        ),
-    };
+    adapter: &'a mut A,
+    bytes_per_sample: usize,
+) -> (usize, usize)
+where
+    A: AdapterMut<'a, PrcFmt>,
+{
     let mut clipped = 0;
     let mut peak: PrcFmt = 0.0;
-    let num_valid_bytes = chunk.valid_frames * chunk.channels * sample_format.bytes_per_sample();
-    for chan in 0..channels {
+    let num_valid_bytes = chunk.valid_frames * chunk.channels * bytes_per_sample;
+    for chan in 0..chunk.channels {
         if chunk.waveforms[chan].is_empty() {
             adapter.fill_channel_with(chan, &0.0);
         } else {
@@ -101,63 +67,26 @@ pub fn chunk_to_buffer_rawbytes(
     (num_valid_bytes, clipped)
 }
 
-/// Convert a buffer of interleaved u8 to an AudioChunk.
-pub fn buffer_to_chunk_rawbytes(
-    buffer: &[u8],
+fn buffer_to_chunk_with_adapter<'a, A>(
+    adapter: &'a A,
     channels: usize,
-    sample_format: &BinarySampleFormat,
-    valid_bytes: usize,
+    num_frames: usize,
+    num_valid_frames: usize,
     used_channels: &[bool],
     check_for_nan: bool,
-) -> AudioChunk {
-    let num_frames = buffer.len() / sample_format.bytes_per_sample() / channels;
-    let num_valid_frames = valid_bytes / sample_format.bytes_per_sample() / channels;
+) -> AudioChunk
+where
+    A: Adapter<'a, PrcFmt>,
+{
     let mut maxvalue: PrcFmt = 0.0;
     let mut minvalue: PrcFmt = 0.0;
     let mut wfs = container_from_stash(channels);
-    let adapter: Box<dyn Adapter<PrcFmt>> = match *sample_format {
-        BinarySampleFormat::S16_LE => Box::new(
-            InterleavedNumbers::<&[I16_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
-        ),
-        BinarySampleFormat::S24_3_LE => Box::new(
-            InterleavedNumbers::<&[I24_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
-        ),
-        BinarySampleFormat::S24_4_RJ_LE => Box::new(
-            InterleavedNumbers::<&[I24_4RJ_LE], PrcFmt>::new_from_bytes(
-                buffer, channels, num_frames,
-            )
-            .unwrap(),
-        ),
-        BinarySampleFormat::S24_4_LJ_LE => Box::new(
-            InterleavedNumbers::<&[I24_4LJ_LE], PrcFmt>::new_from_bytes(
-                buffer, channels, num_frames,
-            )
-            .unwrap(),
-        ),
-        BinarySampleFormat::S32_LE => Box::new(
-            InterleavedNumbers::<&[I32_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
-        ),
-        BinarySampleFormat::F32_LE => Box::new(
-            InterleavedNumbers::<&[F32_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
-        ),
-        BinarySampleFormat::F64_LE => Box::new(
-            InterleavedNumbers::<&[F64_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
-        ),
-    };
     for (ch, used) in used_channels.iter().enumerate() {
         if *used {
             let mut wf = vec_from_stash(num_frames);
             let nbr = adapter.copy_from_channel_to_slice(ch, 0, &mut wf[0..num_valid_frames]);
             if nbr > 0 {
-                let (mavx, minv) = if check_for_nan
-                    && (*sample_format == BinarySampleFormat::F32_LE
-                        || *sample_format == BinarySampleFormat::F64_LE)
-                {
+                let (mavx, minv) = if check_for_nan {
                     let mut maxv = 0.0;
                     let mut minv = 0.0;
                     let mut invalid_values = 0;
@@ -194,6 +123,157 @@ pub fn buffer_to_chunk_rawbytes(
         }
     }
     AudioChunk::new(wfs, maxvalue, minvalue, num_frames, num_valid_frames)
+}
+
+/// Convert an AudioChunk to an interleaved buffer of u8.
+pub fn chunk_to_buffer_rawbytes(
+    chunk: AudioChunk,
+    buf: &mut [u8],
+    sample_format: &BinarySampleFormat,
+) -> (usize, usize) {
+    let frames = chunk.frames;
+    let channels = chunk.channels;
+    let bytes_per_sample = sample_format.bytes_per_sample();
+    match *sample_format {
+        BinarySampleFormat::S16_LE => chunk_to_buffer_with_adapter(
+            chunk,
+            &mut InterleavedNumbers::<&mut [I16_LE], PrcFmt>::new_from_bytes_mut(
+                buf, channels, frames,
+            )
+            .unwrap(),
+            bytes_per_sample,
+        ),
+        BinarySampleFormat::S24_3_LE => chunk_to_buffer_with_adapter(
+            chunk,
+            &mut InterleavedNumbers::<&mut [I24_LE], PrcFmt>::new_from_bytes_mut(
+                buf, channels, frames,
+            )
+            .unwrap(),
+            bytes_per_sample,
+        ),
+        BinarySampleFormat::S24_4_RJ_LE => chunk_to_buffer_with_adapter(
+            chunk,
+            &mut InterleavedNumbers::<&mut [I24_4RJ_LE], PrcFmt>::new_from_bytes_mut(
+                buf, channels, frames,
+            )
+            .unwrap(),
+            bytes_per_sample,
+        ),
+        BinarySampleFormat::S24_4_LJ_LE => chunk_to_buffer_with_adapter(
+            chunk,
+            &mut InterleavedNumbers::<&mut [I24_4LJ_LE], PrcFmt>::new_from_bytes_mut(
+                buf, channels, frames,
+            )
+            .unwrap(),
+            bytes_per_sample,
+        ),
+        BinarySampleFormat::S32_LE => chunk_to_buffer_with_adapter(
+            chunk,
+            &mut InterleavedNumbers::<&mut [I32_LE], PrcFmt>::new_from_bytes_mut(
+                buf, channels, frames,
+            )
+            .unwrap(),
+            bytes_per_sample,
+        ),
+        BinarySampleFormat::F32_LE => chunk_to_buffer_with_adapter(
+            chunk,
+            &mut InterleavedNumbers::<&mut [F32_LE], PrcFmt>::new_from_bytes_mut(
+                buf, channels, frames,
+            )
+            .unwrap(),
+            bytes_per_sample,
+        ),
+        BinarySampleFormat::F64_LE => chunk_to_buffer_with_adapter(
+            chunk,
+            &mut InterleavedNumbers::<&mut [F64_LE], PrcFmt>::new_from_bytes_mut(
+                buf, channels, frames,
+            )
+            .unwrap(),
+            bytes_per_sample,
+        ),
+    }
+}
+
+/// Convert a buffer of interleaved u8 to an AudioChunk.
+pub fn buffer_to_chunk_rawbytes(
+    buffer: &[u8],
+    channels: usize,
+    sample_format: &BinarySampleFormat,
+    valid_bytes: usize,
+    used_channels: &[bool],
+    check_for_nan: bool,
+) -> AudioChunk {
+    let num_frames = buffer.len() / sample_format.bytes_per_sample() / channels;
+    let num_valid_frames = valid_bytes / sample_format.bytes_per_sample() / channels;
+    match *sample_format {
+        BinarySampleFormat::S16_LE => buffer_to_chunk_with_adapter(
+            &InterleavedNumbers::<&[I16_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
+                .unwrap(),
+            channels,
+            num_frames,
+            num_valid_frames,
+            used_channels,
+            false,
+        ),
+        BinarySampleFormat::S24_3_LE => buffer_to_chunk_with_adapter(
+            &InterleavedNumbers::<&[I24_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
+                .unwrap(),
+            channels,
+            num_frames,
+            num_valid_frames,
+            used_channels,
+            false,
+        ),
+        BinarySampleFormat::S24_4_RJ_LE => buffer_to_chunk_with_adapter(
+            &InterleavedNumbers::<&[I24_4RJ_LE], PrcFmt>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
+            channels,
+            num_frames,
+            num_valid_frames,
+            used_channels,
+            false,
+        ),
+        BinarySampleFormat::S24_4_LJ_LE => buffer_to_chunk_with_adapter(
+            &InterleavedNumbers::<&[I24_4LJ_LE], PrcFmt>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
+            channels,
+            num_frames,
+            num_valid_frames,
+            used_channels,
+            false,
+        ),
+        BinarySampleFormat::S32_LE => buffer_to_chunk_with_adapter(
+            &InterleavedNumbers::<&[I32_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
+                .unwrap(),
+            channels,
+            num_frames,
+            num_valid_frames,
+            used_channels,
+            false,
+        ),
+        BinarySampleFormat::F32_LE => buffer_to_chunk_with_adapter(
+            &InterleavedNumbers::<&[F32_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
+                .unwrap(),
+            channels,
+            num_frames,
+            num_valid_frames,
+            used_channels,
+            check_for_nan,
+        ),
+        BinarySampleFormat::F64_LE => buffer_to_chunk_with_adapter(
+            &InterleavedNumbers::<&[F64_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
+                .unwrap(),
+            channels,
+            num_frames,
+            num_valid_frames,
+            used_channels,
+            check_for_nan,
+        ),
+    }
 }
 
 /// Convert an AudioChunk to an interleaved queue of ints, only used by CPAL backend.

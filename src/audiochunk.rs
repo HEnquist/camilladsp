@@ -37,26 +37,30 @@ pub struct ChunkStats {
 }
 
 impl ChunkStats {
-    pub fn rms_db(&self) -> Vec<f32> {
-        self.rms
-            .iter()
-            .map(|val| linear_to_db(*val as f32))
-            .collect()
+    fn write_values<F>(&self, source: &[PrcFmt], values: &mut Vec<f32>, map: F)
+    where
+        F: Fn(PrcFmt) -> f32,
+    {
+        values.resize(source.len(), 0.0);
+        for (slot, value) in values.iter_mut().zip(source.iter()) {
+            *slot = map(*value);
+        }
     }
 
-    pub fn rms_linear(&self) -> Vec<f32> {
-        self.rms.iter().map(|val| *val as f32).collect()
+    pub fn rms_db(&self, values: &mut Vec<f32>) {
+        self.write_values(&self.rms, values, |value| linear_to_db(value as f32))
     }
 
-    pub fn peak_db(&self) -> Vec<f32> {
-        self.peak
-            .iter()
-            .map(|val| linear_to_db(*val as f32))
-            .collect()
+    pub fn rms_linear(&self, values: &mut Vec<f32>) {
+        self.write_values(&self.rms, values, |value| value as f32)
     }
 
-    pub fn peak_linear(&self) -> Vec<f32> {
-        self.peak.iter().map(|val| *val as f32).collect()
+    pub fn peak_db(&self, values: &mut Vec<f32>) {
+        self.write_values(&self.peak, values, |value| linear_to_db(value as f32))
+    }
+
+    pub fn peak_linear(&self, values: &mut Vec<f32>) {
+        self.write_values(&self.peak, values, |value| value as f32)
     }
 }
 
@@ -119,11 +123,7 @@ impl AudioChunk {
             *peakval = peak;
             *rmsval = rms;
         }
-        xtrace!(
-            "Stats: rms {:?}, peak {:?}",
-            stats.rms_db(),
-            stats.peak_db()
-        );
+        xtrace!("Stats: rms {:?}, peak {:?}", stats.rms, stats.peak);
     }
 
     pub fn update_channel_mask(&self, mask: &mut [bool]) {

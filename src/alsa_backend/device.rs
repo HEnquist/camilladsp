@@ -484,6 +484,8 @@ fn playback_loop_bytes(
         rms: vec![0.0; params.channels],
         peak: vec![0.0; params.channels],
     };
+    let mut rms_values = Vec::new();
+    let mut peak_values = Vec::new();
     let mut buffer_avg = countertimer::Averager::new();
     let mut conversion_result;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
@@ -500,6 +502,8 @@ fn playback_loop_bytes(
     let io = pcmdevice.io_bytes();
     debug!("Playback loop uses a buffer of {} frames", params.chunksize);
     let mut buffer = vec![0u8; params.chunksize * params.bytes_per_frame];
+    let zero_stall_buf =
+        vec![0u8; buf_manager.data().buffersize() as usize * params.bytes_per_frame];
     let pcminfo = pcmdevice.info().unwrap();
     let card = pcminfo.get_card();
     let device = pcminfo.get_device();
@@ -601,13 +605,10 @@ fn playback_loop_bytes(
                             pcmdevice
                                 .prepare()
                                 .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
-                            // writing zeros to be able to check for un-stalling in pcmdevice.wait
-                            let zero_buf = vec![
-                                0u8;
-                                buf_manager.frames_to_stall() as usize
-                                    * params.bytes_per_frame
-                            ];
-                            match io.writei(&zero_buf) {
+                            // Write preallocated zeros so pcmdevice.wait can detect when playback starts draining again.
+                            let stall_bytes =
+                                buf_manager.frames_to_stall() as usize * params.bytes_per_frame;
+                            match io.writei(&zero_stall_buf[..stall_bytes]) {
                                 Ok(frames) => {
                                     trace!("PB: Wrote {frames} zero frames");
                                 }
@@ -628,19 +629,13 @@ fn playback_loop_bytes(
                 };
                 if !device_stalled {
                     // updates only for non-stalled device
-                    if let Some(mut playback_status) = params.playback_status.try_write() {
-                        if conversion_result.1 > 0 {
-                            playback_status.clipped_samples += conversion_result.1;
-                        }
-                        playback_status
-                            .signal_rms
-                            .add_record_squared(chunk_stats.rms_linear());
-                        playback_status
-                            .signal_peak
-                            .add_record(chunk_stats.peak_linear());
-                    } else {
-                        xtrace!("playback status blocked, skip update");
-                    }
+                    crate::update_playback_signal_status(
+                        &params.playback_status,
+                        &chunk_stats,
+                        &mut rms_values,
+                        &mut peak_values,
+                        conversion_result.1,
+                    );
                     if let Some(avail) = avail_at_chunk_recvd {
                         let delay = buf_manager.current_delay(avail);
                         buffer_avg.add_value(
@@ -871,6 +866,8 @@ fn capture_loop_bytes(
         rms: vec![0.0; params.channels],
         peak: vec![0.0; params.channels],
     };
+    let mut rms_values = Vec::new();
+    let mut peak_values = Vec::new();
     let thread_handle = match promote_current_thread_to_real_time(
         params.chunksize as u32,
         params.samplerate as u32,
@@ -1044,16 +1041,12 @@ fn capture_loop_bytes(
             false,
         );
         chunk.update_stats(&mut chunk_stats);
-        if let Some(mut capture_status) = params.capture_status.try_write() {
-            capture_status
-                .signal_rms
-                .add_record_squared(chunk_stats.rms_linear());
-            capture_status
-                .signal_peak
-                .add_record(chunk_stats.peak_linear());
-        } else {
-            xtrace!("capture status blocked, skip rms update");
-        }
+        crate::update_capture_signal_status(
+            &params.capture_status,
+            &chunk_stats,
+            &mut rms_values,
+            &mut peak_values,
+        );
         value_range = chunk.maxval - chunk.minval;
         trace!("Captured chunk with value range {value_range}");
         if device_stalled {
