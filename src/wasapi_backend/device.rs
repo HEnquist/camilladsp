@@ -849,6 +849,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     rms: vec![0.0; channels],
                     peak: vec![0.0; channels],
                 };
+                let mut rms_values = Vec::new();
+                let mut peak_values = Vec::new();
 
                 let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
 
@@ -990,28 +992,22 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                 status_channel
                                     .send(StatusMessage::SetSpeed(speed))
                                     .unwrap_or(());
-                                playback_status.write().buffer_level =
-                                    av_delay as usize;
+                                if let Some(mut playback_status) = playback_status.try_write() {
+                                    playback_status.buffer_level = av_delay as usize;
+                                } else {
+                                    xtrace!("Playback status blocked, skip buffer level update.");
+                                }
                             }
                             chunk.update_stats(&mut chunk_stats);
                             conversion_result =
                                 chunk_to_buffer_rawbytes(chunk, &mut buf, &binary_format);
-                            if let Some(mut playback_status) = playback_status.try_write() {
-                                if conversion_result.1 > 0 {
-                                    playback_status.clipped_samples +=
-                                        conversion_result.1;
-                                }
-                                playback_status
-                                    .signal_rms
-                                    .add_record_squared(chunk_stats.rms_linear());
-                                playback_status
-                                    .signal_peak
-                                    .add_record(chunk_stats.peak_linear());
-                                crate::signal_monitor::mark_playback_updated();
-                            }
-                            else {
-                                xtrace!("Playback status blocked, skip rms update.");
-                            }
+                            crate::update_playback_signal_status(
+                                &playback_status,
+                                &chunk_stats,
+                                &mut rms_values,
+                                &mut peak_values,
+                                conversion_result.1,
+                            );
                             // Wait for enough space in the ring buffer before pushing.
                             // This is essential when the capture side is not rate-limited
                             // (e.g. signal generator): without this wait the data would
@@ -1264,6 +1260,8 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let mut valuewatcher = countertimer::ValueWatcher::new(capture_samplerate as f32, RATE_CHANGE_THRESHOLD_VALUE, RATE_CHANGE_THRESHOLD_COUNT);
                 let mut value_range = 0.0;
                 let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
+                let mut rms_values = Vec::new();
+                let mut peak_values = Vec::new();
                 let mut rate_adjust = 0.0;
                 let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                 let mut state = ProcessingState::Running;
@@ -1429,14 +1427,12 @@ impl CaptureDevice for WasapiCaptureDevice {
                             false,
                         );
                         chunk.update_stats(&mut chunk_stats);
-                        if let Some(mut capture_status) = capture_status.try_write() {
-                            capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
-                            capture_status.signal_peak.add_record(chunk_stats.peak_linear());
-                            crate::signal_monitor::mark_capture_updated();
-                        }
-                        else {
-                            xtrace!("Capture status blocked, skip rms update.");
-                        }
+                        crate::update_capture_signal_status(
+                            &capture_status,
+                            &chunk_stats,
+                            &mut rms_values,
+                            &mut peak_values,
+                        );
                         value_range = chunk.maxval - chunk.minval;
                         state = silence_counter.update(value_range);
                         if state == ProcessingState::Running {

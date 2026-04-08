@@ -555,8 +555,12 @@ mod tests {
             rms: vec![0.0, 0.5],
             peak: vec![1.0],
         };
-        assert_eq!(-1000.0, stats.rms_db()[0]);
-        assert_eq!(0.0, stats.peak_db()[0]);
-        assert!(stats.rms_db()[1] > -6.1 && stats.rms_db()[1] < -5.9);
+        let mut values = Vec::new();
+        stats.rms_db(&mut values);
+        assert_eq!(-1000.0, values[0]);
+        stats.peak_db(&mut values);
+        assert_eq!(0.0, values[0]);
+        stats.rms_db(&mut values);
+        assert!(values[1] > -6.1 && values[1] < -5.9);
     }
 }

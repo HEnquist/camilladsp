@@ -159,6 +159,8 @@ impl PlaybackDevice for PulsePlaybackDevice {
                             rms: vec![0.0; channels],
                             peak: vec![0.0; channels],
                         };
+                        let mut rms_values = Vec::new();
+                        let mut peak_values = Vec::new();
                         let bytes_per_frame = channels * store_bytes_per_sample;
                         barrier.wait();
                         let mut last_instant = Instant::now();
@@ -193,19 +195,13 @@ impl PlaybackDevice for PulsePlaybackDevice {
                                                 .unwrap();
                                         }
                                     };
-                                    {
-                                        let mut playback_status = playback_status.write();
-                                        if conversion_result.1 > 0 {
-                                            playback_status.clipped_samples += conversion_result.1;
-                                        }
-                                        playback_status
-                                            .signal_rms
-                                            .add_record_squared(chunk_stats.rms_linear());
-                                        playback_status
-                                            .signal_peak
-                                            .add_record(chunk_stats.peak_linear());
-                                        crate::signal_monitor::mark_playback_updated();
-                                    }
+                                    crate::update_playback_signal_status(
+                                        &playback_status,
+                                        &chunk_stats,
+                                        &mut rms_values,
+                                        &mut peak_values,
+                                        conversion_result.1,
+                                    );
                                 }
                                 Ok(AudioMessage::Pause) => {
                                     trace!("Pause message received");
@@ -314,6 +310,8 @@ impl CaptureDevice for PulseCaptureDevice {
                         let mut rate_adjust = 0.0;
                         let mut state = ProcessingState::Running;
                         let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
+                        let mut rms_values = Vec::new();
+                        let mut peak_values = Vec::new();
                         let bytes_per_frame = channels * store_bytes_per_sample;
                         let mut last_instant = Instant::now();
                         loop {
@@ -385,12 +383,12 @@ impl CaptureDevice for PulseCaptureDevice {
                             };
                             let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &binary_format, capture_bytes, &capture_status.read().used_channels, false);
                             chunk.update_stats(&mut chunk_stats);
-                            {
-                                let mut capture_status = capture_status.write();
-                                capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
-                                capture_status.signal_peak.add_record(chunk_stats.peak_linear());
-                                crate::signal_monitor::mark_capture_updated();
-                            }
+                            crate::update_capture_signal_status(
+                                &capture_status,
+                                &chunk_stats,
+                                &mut rms_values,
+                                &mut peak_values,
+                            );
                             value_range = chunk.maxval - chunk.minval;
                             state = silence_counter.update(value_range);
                             if state == ProcessingState::Running {

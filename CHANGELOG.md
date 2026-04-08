@@ -1,3 +1,11 @@
+# 4.1.2
+Bugfixes:
+- Removed memory allocations in real time audio paths to improve stability.
+
+# 4.1.1
+Bugfixes:
+- Correct mistake in version string.
+
 ## 4.1.0
 New features:
 - Experimental optional multi-threaded Alsa backend.

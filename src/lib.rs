@@ -210,6 +210,44 @@ pub struct PlaybackStatus {
     pub signal_peak: utils::countertimer::ValueHistory,
 }
 
+pub(crate) fn update_capture_signal_status(
+    capture_status: &Arc<RwLock<CaptureStatus>>,
+    chunk_stats: &audiochunk::ChunkStats,
+    rms_values: &mut Vec<f32>,
+    peak_values: &mut Vec<f32>,
+) {
+    chunk_stats.rms_linear(rms_values);
+    chunk_stats.peak_linear(peak_values);
+    if let Some(mut capture_status) = capture_status.try_write() {
+        capture_status.signal_rms.add_record_squared(rms_values);
+        capture_status.signal_peak.add_record(peak_values);
+        signal_monitor::mark_capture_updated();
+    } else {
+        xtrace!("capture status blocked, skip update");
+    }
+}
+
+pub(crate) fn update_playback_signal_status(
+    playback_status: &Arc<RwLock<PlaybackStatus>>,
+    chunk_stats: &audiochunk::ChunkStats,
+    rms_values: &mut Vec<f32>,
+    peak_values: &mut Vec<f32>,
+    clipped_samples: usize,
+) {
+    chunk_stats.rms_linear(rms_values);
+    chunk_stats.peak_linear(peak_values);
+    if let Some(mut playback_status) = playback_status.try_write() {
+        if clipped_samples > 0 {
+            playback_status.clipped_samples += clipped_samples;
+        }
+        playback_status.signal_rms.add_record_squared(rms_values);
+        playback_status.signal_peak.add_record(peak_values);
+        signal_monitor::mark_playback_updated();
+    } else {
+        xtrace!("playback status blocked, skip update");
+    }
+}
+
 #[derive(Debug)]
 pub struct ProcessingParameters {
     // Optimization: volumes are actually `f32`s, but by representing their

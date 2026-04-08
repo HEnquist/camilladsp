@@ -545,6 +545,8 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                         rms: vec![0.0; channels],
                         peak: vec![0.0; channels],
                     };
+                    let mut rms_values = Vec::new();
+                    let mut peak_values = Vec::new();
                     // Pre-allocate conversion buffer to avoid repeated allocations
                     let mut raw_buffer = vec![0u8; chunksize * stride];
                     // Buffer level tracking with time-based estimation
@@ -591,7 +593,11 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                                             100.0 * rate_adjust_value
                                         );
                                     }
-                                    playback_status.write().buffer_level = av_delay as usize;
+                                    if let Some(mut playback_status) = playback_status.try_write() {
+                                        playback_status.buffer_level = av_delay as usize;
+                                    } else {
+                                        xtrace!("playback status blocked, skip buffer level update");
+                                    }
                                 }
                                 chunk.update_stats(&mut chunk_stats);
 
@@ -600,21 +606,13 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                                     &mut raw_buffer,
                                     &binary_format,
                                 );
-                                if let Some(mut playback_status) = playback_status_clone.try_write() {
-                                    if conversion_result.1 > 0 {
-                                        playback_status.clipped_samples += conversion_result.1;
-                                    }
-                                    playback_status
-                                        .signal_rms
-                                        .add_record_squared(chunk_stats.rms_linear());
-                                    playback_status
-                                        .signal_peak
-                                        .add_record(chunk_stats.peak_linear());
-                                    crate::signal_monitor::mark_playback_updated();
-                                }
-                                else {
-                                    xtrace!("Playback status blocked, skipping rms update.");
-                                }
+                                crate::update_playback_signal_status(
+                                    &playback_status_clone,
+                                    &chunk_stats,
+                                    &mut rms_values,
+                                    &mut peak_values,
+                                    conversion_result.1,
+                                );
 
                                 // Wait for enough space in the ring buffer before pushing.
                                 // This is essential when the capture side is not rate-limited
@@ -1021,6 +1019,8 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         rms: vec![0.0; channels],
                         peak: vec![0.0; channels],
                     };
+                    let mut rms_values = Vec::new();
+                    let mut peak_values = Vec::new();
                     let mut channel_mask = vec![true; channels];
                     let chunksize_bytes = channels * chunksize * store_bytes_per_sample;
                     // Pre-allocated buffer for capture data (sized for max resampler input)
@@ -1136,14 +1136,12 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         else {
                             xtrace!("Capture status blocked, skip update.");
                         }
-                        if let Some(mut capture_status) = capture_status_clone.try_write() {
-                            capture_status.signal_rms.add_record_squared(chunk_stats.rms_linear());
-                            capture_status.signal_peak.add_record(chunk_stats.peak_linear());
-                            crate::signal_monitor::mark_capture_updated();
-                        }
-                        else {
-                            xtrace!("Capture status blocked, skip rms update.");
-                        }
+                        crate::update_capture_signal_status(
+                            &capture_status_clone,
+                            &chunk_stats,
+                            &mut rms_values,
+                            &mut peak_values,
+                        );
 
                         state = silence_counter.update(value_range);
 
