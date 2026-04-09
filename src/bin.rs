@@ -66,10 +66,10 @@ use camillalib::ControllerMessage;
 use camillalib::audiodevice;
 use camillalib::config;
 use camillalib::processing;
-#[cfg(feature = "websocket")]
-use camillalib::socketserver;
 use camillalib::statefile;
 use camillalib::utils::countertimer;
+#[cfg(feature = "websocket")]
+use camillalib::websocket_server;
 #[cfg(feature = "websocket")]
 use std::net::IpAddr;
 
@@ -1145,7 +1145,7 @@ fn main_process() -> i32 {
                 .unwrap_or("127.0.0.1".to_string());
             let serverport = *port;
 
-            let shared_data = socketserver::SharedData {
+            let shared_data = websocket_server::SharedData {
                 active_config: active_config.clone(),
                 active_config_path,
                 previous_config: previous_config.clone(),
@@ -1158,7 +1158,7 @@ fn main_process() -> i32 {
                 state_file_path: statefilename.clone(),
                 unsaved_state_change: unsaved_state_changes.clone(),
             };
-            let server_params = socketserver::ServerParameters {
+            let server_params = websocket_server::ServerParameters {
                 port: serverport,
                 address: &serveraddress,
                 #[cfg(feature = "secure-websocket")]
@@ -1166,7 +1166,7 @@ fn main_process() -> i32 {
                 #[cfg(feature = "secure-websocket")]
                 cert_pass: matches.get_one::<String>("pass").map(|x| x.as_str()),
             };
-            socketserver::start_server(server_params, shared_data);
+            websocket_server::start_server(server_params, shared_data);
         }
 
         if let Some(fname) = &statefilename {

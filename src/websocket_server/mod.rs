@@ -14,18 +14,16 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+mod datastructures;
+mod utils;
+
 use clap::crate_version;
 use crossbeam_channel::TrySendError;
 use json_patch::merge;
 #[cfg(feature = "secure-websocket")]
-use native_tls::{Identity, TlsAcceptor, TlsStream};
+use native_tls::{TlsAcceptor, TlsStream};
 use parking_lot::{Mutex, RwLock};
-use serde::{Deserialize, Serialize};
 use serde_json;
-#[cfg(feature = "secure-websocket")]
-use std::fs::File;
-#[cfg(feature = "secure-websocket")]
-use std::io::Read;
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,15 +31,31 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tungstenite::Message;
 use tungstenite::WebSocket;
-use tungstenite::accept;
 
+use self::datastructures::{
+    AllLevels, ChannelLabels, Fader, PbCapLevels, ValueWithOptionalLimits, VuLevels,
+    VuSubscription, WsCommand, WsReply, WsResult, WsSignalLevelSide,
+};
+use self::utils::{
+    accept_plain_stream, capture_signal_global_peak, capture_signal_peak,
+    capture_signal_peak_since, capture_signal_peak_since_last, capture_signal_rms,
+    capture_signal_rms_since, capture_signal_rms_since_last, clamped_volume,
+    current_processing_state, get_signal_levels_values_linear, get_state_event,
+    get_stream_levels_event, is_timeout_error, parse_command, playback_signal_global_peak,
+    playback_signal_peak, playback_signal_peak_since, playback_signal_peak_since_last,
+    playback_signal_rms, playback_signal_rms_since, playback_signal_rms_since_last,
+    reset_capture_signal_global_peak, reset_playback_signal_global_peak, set_stream_timeout,
+    smooth_levels, smoothing_alpha, stream_invalid_reply, validate_vu_subscription,
+};
+#[cfg(feature = "secure-websocket")]
+use self::utils::{accept_secure_stream, make_acceptor};
 use crate::ProcessingState;
 use crate::Res;
 use crate::signal_monitor::{self, SignalLevelSide as MonitorSignalLevelSide};
 use crate::utils::decibels::linear_to_db_inplace;
 use crate::{
-    CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus, StopReason,
-    list_available_devices, list_supported_devices,
+    CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus, list_available_devices,
+    list_supported_devices,
 };
 use crate::{ControllerMessage, config};
 
@@ -63,7 +77,7 @@ pub struct SharedData {
 }
 
 #[derive(Debug, Clone)]
-pub struct LocalData {
+pub(crate) struct LocalData {
     pub last_cap_rms_time: Instant,
     pub last_cap_peak_time: Instant,
     pub last_pb_rms_time: Instant,
@@ -80,481 +94,147 @@ pub struct ServerParameters<'a> {
     pub cert_pass: Option<&'a str>,
 }
 
-#[derive(Debug, PartialEq, Deserialize)]
-#[serde(untagged)]
-enum ValueWithOptionalLimits {
-    Plain(f32),
-    Limited(f32, f32, f32),
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum WsSignalLevelSide {
-    Playback,
-    Capture,
-    Both,
-}
-
-#[derive(Debug, PartialEq, Deserialize)]
-enum WsCommand {
-    SetConfigFilePath(String),
-    SetConfig(String),
-    SetConfigJson(String),
-    PatchConfig(serde_json::Value),
-    SetConfigValue(String, serde_json::Value),
-    Reload,
-    GetConfig,
-    GetConfigValue(String),
-    GetConfigTitle,
-    GetConfigDescription,
-    GetPreviousConfig,
-    ReadConfig(String),
-    ReadConfigJson(String),
-    ReadConfigFile(String),
-    ValidateConfig(String),
-    ValidateConfigJson(String),
-    GetConfigJson,
-    GetConfigFilePath,
-    GetStateFilePath,
-    GetStateFileUpdated,
-    GetSignalRange,
-    GetCaptureSignalRms,
-    GetCaptureSignalRmsSince(f32),
-    GetCaptureSignalRmsSinceLast,
-    GetCaptureSignalPeak,
-    GetCaptureSignalPeakSince(f32),
-    GetCaptureSignalPeakSinceLast,
-    GetPlaybackSignalRms,
-    GetPlaybackSignalRmsSince(f32),
-    GetPlaybackSignalRmsSinceLast,
-    GetPlaybackSignalPeak,
-    GetPlaybackSignalPeakSince(f32),
-    GetPlaybackSignalPeakSinceLast,
-    GetSignalLevels,
-    GetSignalLevelsSince(f32),
-    GetSignalLevelsSinceLast,
-    SubscribeSignalLevels(WsSignalLevelSide),
-    StopSubscription,
-    SubscribeState,
-    GetSignalPeaksSinceStart,
-    ResetSignalPeaksSinceStart,
-    GetChannelLabels,
-    GetCaptureRate,
-    GetUpdateInterval,
-    SetUpdateInterval(usize),
-    GetVolume,
-    SetVolume(f32),
-    AdjustVolume(ValueWithOptionalLimits),
-    GetMute,
-    SetMute(bool),
-    ToggleMute,
-    GetFaders,
-    GetFaderVolume(usize),
-    SetFaderVolume(usize, f32),
-    SetFaderExternalVolume(usize, f32),
-    AdjustFaderVolume(usize, ValueWithOptionalLimits),
-    GetFaderMute(usize),
-    SetFaderMute(usize, bool),
-    ToggleFaderMute(usize),
-    GetVersion,
-    GetState,
-    GetStopReason,
-    GetRateAdjust,
-    GetClippedSamples,
-    ResetClippedSamples,
-    GetBufferLevel,
-    GetSupportedDeviceTypes,
-    GetAvailableCaptureDevices(String),
-    GetAvailablePlaybackDevices(String),
-    GetProcessingLoad,
-    GetResamplerLoad,
-    Exit,
-    Stop,
-    None,
-}
-
-#[derive(Debug, Eq, PartialEq, Serialize)]
-enum WsResult {
-    Ok,
-    ShutdownInProgressError,
-    RateLimitExceededError,
-    InvalidFaderError,
-    ConfigValidationError(String),
-    ConfigReadError(String),
-    InvalidValueError(String),
-    InvalidRequestError(String),
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-struct ChannelLabels {
-    playback: Option<Vec<Option<String>>>,
-    capture: Option<Vec<Option<String>>>,
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-struct AllLevels {
-    playback_rms: Vec<f32>,
-    playback_peak: Vec<f32>,
-    capture_rms: Vec<f32>,
-    capture_peak: Vec<f32>,
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-struct PbCapLevels {
-    playback: Vec<f32>,
-    capture: Vec<f32>,
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-struct Fader {
-    volume: f32,
-    mute: bool,
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-struct StreamLevels {
-    side: WsSignalLevelSide,
+#[derive(Debug, Default)]
+struct VuSideState {
+    last_update: Option<Instant>,
     rms: Vec<f32>,
     peak: Vec<f32>,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+impl VuSideState {
+    fn seed(&mut self, now: Instant, rms: Vec<f32>, peak: Vec<f32>) {
+        self.last_update = Some(now);
+        self.rms = rms;
+        self.peak = peak;
+    }
+
+    fn update(
+        &mut self,
+        now: Instant,
+        rms: Vec<f32>,
+        peak: Vec<f32>,
+        attack_ms: f32,
+        release_ms: f32,
+    ) {
+        match self.last_update {
+            None => self.seed(now, rms, peak),
+            Some(previous) => {
+                let attack = smoothing_alpha(now.duration_since(previous), attack_ms);
+                let release = smoothing_alpha(now.duration_since(previous), release_ms);
+                self.rms = smooth_levels(&self.rms, rms, attack, release);
+                self.peak = smooth_levels(&self.peak, peak, attack, release);
+                self.last_update = Some(now);
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct VuSubscriptionState {
+    publish_interval: Option<Duration>,
+    attack_ms: f32,
+    release_ms: f32,
+    playback: VuSideState,
+    capture: VuSideState,
+    last_publish: Option<Instant>,
+    pending_publish: bool,
+}
+
+impl VuSubscriptionState {
+    fn new(config: VuSubscription) -> Self {
+        let publish_interval = if config.max_rate > 0.0 {
+            Some(Duration::from_secs_f32(1.0 / config.max_rate))
+        } else {
+            None
+        };
+
+        Self {
+            publish_interval,
+            attack_ms: config.attack.max(0.0),
+            release_ms: config.release.max(0.0),
+            playback: VuSideState::default(),
+            capture: VuSideState::default(),
+            last_publish: None,
+            pending_publish: false,
+        }
+    }
+
+    fn seed_from_shared(&mut self, shared_data: &SharedData) {
+        let now = Instant::now();
+        if let Some((rms, peak)) =
+            get_signal_levels_values_linear(WsSignalLevelSide::Playback, shared_data)
+        {
+            self.playback.seed(now, rms, peak);
+        }
+        if let Some((rms, peak)) =
+            get_signal_levels_values_linear(WsSignalLevelSide::Capture, shared_data)
+        {
+            self.capture.seed(now, rms, peak);
+        }
+    }
+
+    fn update_side(
+        &mut self,
+        side: MonitorSignalLevelSide,
+        rms: Vec<f32>,
+        peak: Vec<f32>,
+        now: Instant,
+    ) {
+        match side {
+            MonitorSignalLevelSide::Playback => {
+                self.playback
+                    .update(now, rms, peak, self.attack_ms, self.release_ms);
+            }
+            MonitorSignalLevelSide::Capture => {
+                self.capture
+                    .update(now, rms, peak, self.attack_ms, self.release_ms);
+            }
+        }
+        self.pending_publish = true;
+    }
+
+    fn should_publish_at(&self, now: Instant) -> bool {
+        if !self.pending_publish {
+            return false;
+        }
+
+        match self.publish_interval {
+            None => true,
+            Some(interval) => self
+                .last_publish
+                .map(|last| now.duration_since(last) >= interval)
+                .unwrap_or(true),
+        }
+    }
+
+    fn publish_at(&mut self, now: Instant) -> WsReply {
+        self.last_publish = Some(now);
+        self.pending_publish = false;
+        let mut playback_rms = self.playback.rms.clone();
+        let mut playback_peak = self.playback.peak.clone();
+        let mut capture_rms = self.capture.rms.clone();
+        let mut capture_peak = self.capture.peak.clone();
+        linear_to_db_inplace(&mut playback_rms);
+        linear_to_db_inplace(&mut playback_peak);
+        linear_to_db_inplace(&mut capture_rms);
+        linear_to_db_inplace(&mut capture_peak);
+        WsReply::VuLevelsEvent {
+            result: WsResult::Ok,
+            value: VuLevels {
+                playback_rms,
+                playback_peak,
+                capture_rms,
+                capture_peak,
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
 enum ActiveStream {
     SignalLevels(WsSignalLevelSide),
+    VuLevels(VuSubscriptionState),
     State,
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-struct StateUpdate {
-    state: ProcessingState,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stop_reason: Option<StopReason>,
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-enum WsReply {
-    SetConfigFilePath {
-        result: WsResult,
-    },
-    SetConfig {
-        result: WsResult,
-    },
-    SetConfigJson {
-        result: WsResult,
-    },
-    PatchConfig {
-        result: WsResult,
-    },
-    SetConfigValue {
-        result: WsResult,
-    },
-    Reload {
-        result: WsResult,
-    },
-    GetConfig {
-        result: WsResult,
-        value: String,
-    },
-    GetConfigJson {
-        result: WsResult,
-        value: String,
-    },
-    GetConfigValue {
-        result: WsResult,
-        value: serde_json::Value,
-    },
-    GetConfigTitle {
-        result: WsResult,
-        value: String,
-    },
-    GetConfigDescription {
-        result: WsResult,
-        value: String,
-    },
-    GetPreviousConfig {
-        result: WsResult,
-        value: String,
-    },
-    ReadConfig {
-        result: WsResult,
-        value: String,
-    },
-    ReadConfigJson {
-        result: WsResult,
-        value: String,
-    },
-    ReadConfigFile {
-        result: WsResult,
-        value: String,
-    },
-    ValidateConfig {
-        result: WsResult,
-        value: String,
-    },
-    ValidateConfigJson {
-        result: WsResult,
-        value: String,
-    },
-    GetConfigFilePath {
-        result: WsResult,
-        value: Option<String>,
-    },
-    GetStateFilePath {
-        result: WsResult,
-        value: Option<String>,
-    },
-    GetStateFileUpdated {
-        result: WsResult,
-        value: bool,
-    },
-    GetSignalRange {
-        result: WsResult,
-        value: f32,
-    },
-    GetPlaybackSignalRms {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetPlaybackSignalRmsSince {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetPlaybackSignalRmsSinceLast {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetPlaybackSignalPeak {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetPlaybackSignalPeakSince {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetPlaybackSignalPeakSinceLast {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetCaptureSignalRms {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetCaptureSignalRmsSince {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetCaptureSignalRmsSinceLast {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetCaptureSignalPeak {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetCaptureSignalPeakSince {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetCaptureSignalPeakSinceLast {
-        result: WsResult,
-        value: Vec<f32>,
-    },
-    GetSignalLevels {
-        result: WsResult,
-        value: AllLevels,
-    },
-    GetSignalLevelsSince {
-        result: WsResult,
-        value: AllLevels,
-    },
-    GetSignalLevelsSinceLast {
-        result: WsResult,
-        value: AllLevels,
-    },
-    SubscribeSignalLevels {
-        result: WsResult,
-    },
-    SubscribeState {
-        result: WsResult,
-    },
-    StopSubscription {
-        result: WsResult,
-    },
-    SignalLevelsEvent {
-        result: WsResult,
-        value: StreamLevels,
-    },
-    StateEvent {
-        result: WsResult,
-        value: StateUpdate,
-    },
-    GetSignalPeaksSinceStart {
-        result: WsResult,
-        value: PbCapLevels,
-    },
-    ResetSignalPeaksSinceStart {
-        result: WsResult,
-    },
-    GetChannelLabels {
-        result: WsResult,
-        value: ChannelLabels,
-    },
-    GetCaptureRate {
-        result: WsResult,
-        value: usize,
-    },
-    GetUpdateInterval {
-        result: WsResult,
-        value: usize,
-    },
-    SetUpdateInterval {
-        result: WsResult,
-    },
-    SetVolume {
-        result: WsResult,
-    },
-    GetVolume {
-        result: WsResult,
-        value: f32,
-    },
-    AdjustVolume {
-        result: WsResult,
-        value: f32,
-    },
-    SetMute {
-        result: WsResult,
-    },
-    GetMute {
-        result: WsResult,
-        value: bool,
-    },
-    ToggleMute {
-        result: WsResult,
-        value: bool,
-    },
-    SetFaderVolume {
-        result: WsResult,
-    },
-    SetFaderExternalVolume {
-        result: WsResult,
-    },
-    GetFaders {
-        result: WsResult,
-        value: Vec<Fader>,
-    },
-    GetFaderVolume {
-        result: WsResult,
-        value: (usize, f32),
-    },
-    AdjustFaderVolume {
-        result: WsResult,
-        value: (usize, f32),
-    },
-    SetFaderMute {
-        result: WsResult,
-    },
-    GetFaderMute {
-        result: WsResult,
-        value: (usize, bool),
-    },
-    ToggleFaderMute {
-        result: WsResult,
-        value: (usize, bool),
-    },
-    GetVersion {
-        result: WsResult,
-        value: String,
-    },
-    GetState {
-        result: WsResult,
-        value: ProcessingState,
-    },
-    GetStopReason {
-        result: WsResult,
-        value: StopReason,
-    },
-    GetRateAdjust {
-        result: WsResult,
-        value: f32,
-    },
-    GetBufferLevel {
-        result: WsResult,
-        value: usize,
-    },
-    GetClippedSamples {
-        result: WsResult,
-        value: usize,
-    },
-    ResetClippedSamples {
-        result: WsResult,
-    },
-    GetSupportedDeviceTypes {
-        result: WsResult,
-        value: (Vec<String>, Vec<String>),
-    },
-    GetAvailableCaptureDevices {
-        result: WsResult,
-        value: Vec<(String, String)>,
-    },
-    GetAvailablePlaybackDevices {
-        result: WsResult,
-        value: Vec<(String, String)>,
-    },
-    GetProcessingLoad {
-        result: WsResult,
-        value: f32,
-    },
-    GetResamplerLoad {
-        result: WsResult,
-        value: f32,
-    },
-    Exit {
-        result: WsResult,
-    },
-    Stop {
-        result: WsResult,
-    },
-    Invalid {
-        error: String,
-    },
-}
-
-fn parse_command(cmd: Message) -> Res<WsCommand> {
-    match cmd {
-        Message::Text(command_str) => {
-            let command = serde_json::from_str::<WsCommand>(&command_str)?;
-            Ok(command)
-        }
-        _ => Ok(WsCommand::None),
-    }
-}
-
-#[cfg(feature = "secure-websocket")]
-fn make_acceptor_with_cert(cert: &str, key: &str) -> Res<Arc<TlsAcceptor>> {
-    let mut file = File::open(cert)?;
-    let mut identity = vec![];
-    file.read_to_end(&mut identity)?;
-    let identity = Identity::from_pkcs12(&identity, key)?;
-    let acceptor = TlsAcceptor::new(identity)?;
-    Ok(Arc::new(acceptor))
-}
-
-#[cfg(feature = "secure-websocket")]
-fn make_acceptor(cert_file: &Option<&str>, cert_key: &Option<&str>) -> Option<Arc<TlsAcceptor>> {
-    if let (Some(cert), Some(key)) = (cert_file, cert_key) {
-        let acceptor = make_acceptor_with_cert(cert, key);
-        match acceptor {
-            Ok(acc) => {
-                debug!("Created TLS acceptor");
-                return Some(acc);
-            }
-            Err(err) => {
-                error!("Could not create TLS acceptor: {}", err);
-            }
-        }
-    }
-    debug!("Running websocket server without TLS");
-    None
 }
 
 pub fn start_server(parameters: ServerParameters, shared_data: SharedData) {
@@ -636,9 +316,9 @@ macro_rules! make_handler {
                     let mut last_capture_stream_generation = 0_u64;
                     let mut last_state_stream_value = ProcessingState::Inactive;
                     loop {
-                        if let Some(stream) = active_stream {
+                        if let Some(stream) = active_stream.as_mut() {
                             match stream {
-                                ActiveStream::SignalLevels(side) => match side {
+                                ActiveStream::SignalLevels(side) => match *side {
                                     WsSignalLevelSide::Playback => {
                                         let generation = signal_monitor::generation(
                                             MonitorSignalLevelSide::Playback,
@@ -719,6 +399,54 @@ macro_rules! make_handler {
                                         }
                                     }
                                 },
+                                ActiveStream::VuLevels(vu_state) => {
+                                    let playback_generation = signal_monitor::generation(
+                                        MonitorSignalLevelSide::Playback,
+                                    );
+                                    if playback_generation != last_playback_stream_generation {
+                                        last_playback_stream_generation = playback_generation;
+                                        if let Some((rms, peak)) = get_signal_levels_values_linear(
+                                            WsSignalLevelSide::Playback,
+                                            shared_data_inst,
+                                        ) {
+                                            vu_state.update_side(
+                                                MonitorSignalLevelSide::Playback,
+                                                rms,
+                                                peak,
+                                                Instant::now(),
+                                            );
+                                        }
+                                    }
+
+                                    let capture_generation =
+                                        signal_monitor::generation(MonitorSignalLevelSide::Capture);
+                                    if capture_generation != last_capture_stream_generation {
+                                        last_capture_stream_generation = capture_generation;
+                                        if let Some((rms, peak)) = get_signal_levels_values_linear(
+                                            WsSignalLevelSide::Capture,
+                                            shared_data_inst,
+                                        ) {
+                                            vu_state.update_side(
+                                                MonitorSignalLevelSide::Capture,
+                                                rms,
+                                                peak,
+                                                Instant::now(),
+                                            );
+                                        }
+                                    }
+
+                                    let now = Instant::now();
+                                    if vu_state.should_publish_at(now) {
+                                        let reply = vu_state.publish_at(now);
+                                        let write_result = websocket.send(Message::text(
+                                            serde_json::to_string(&reply).unwrap(),
+                                        ));
+                                        if let Err(err) = write_result {
+                                            warn!("Failed to write: {}", err);
+                                            break;
+                                        }
+                                    }
+                                }
                                 ActiveStream::State => {
                                     let current_state = current_processing_state(shared_data_inst);
                                     if current_state != last_state_stream_value {
@@ -777,6 +505,42 @@ macro_rules! make_handler {
                                                     Some(WsReply::SubscribeSignalLevels {
                                                         result: WsResult::Ok,
                                                     })
+                                                }
+                                                WsCommand::SubscribeVuLevels(config) => {
+                                                    match validate_vu_subscription(config) {
+                                                        Ok(config) => {
+                                                            let mut vu_state =
+                                                                VuSubscriptionState::new(config);
+                                                            vu_state.seed_from_shared(
+                                                                shared_data_inst,
+                                                            );
+                                                            active_stream = Some(
+                                                                ActiveStream::VuLevels(vu_state),
+                                                            );
+                                                            set_stream_timeout(
+                                                                &mut websocket,
+                                                                Some(Duration::from_millis(
+                                                                    SUBSCRIPTION_READ_TIMEOUT_MS,
+                                                                )),
+                                                            );
+                                                            last_playback_stream_generation =
+                                                                signal_monitor::generation(
+                                                                    MonitorSignalLevelSide::Playback,
+                                                                );
+                                                            last_capture_stream_generation =
+                                                                signal_monitor::generation(
+                                                                    MonitorSignalLevelSide::Capture,
+                                                                );
+                                                            Some(WsReply::SubscribeVuLevels {
+                                                                result: WsResult::Ok,
+                                                            })
+                                                        }
+                                                        Err(result) => {
+                                                            Some(WsReply::SubscribeVuLevels {
+                                                                result,
+                                                            })
+                                                        }
+                                                    }
                                                 }
                                                 WsCommand::SubscribeState => {
                                                     active_stream = Some(ActiveStream::State);
@@ -843,92 +607,6 @@ macro_rules! make_handler {
 make_handler!(TcpStream, handle_tcp);
 #[cfg(feature = "secure-websocket")]
 make_handler!(TlsStream<TcpStream>, handle_tls);
-
-#[cfg(feature = "secure-websocket")]
-fn accept_secure_stream(
-    acceptor: Arc<TlsAcceptor>,
-    stream: Result<TcpStream, std::io::Error>,
-) -> Res<tungstenite::WebSocket<TlsStream<TcpStream>>> {
-    let ws = accept(acceptor.accept(stream?)?)?;
-    Ok(ws)
-}
-
-fn accept_plain_stream(
-    stream: Result<TcpStream, std::io::Error>,
-) -> Res<tungstenite::WebSocket<TcpStream>> {
-    let ws = accept(stream?)?;
-    Ok(ws)
-}
-
-fn set_stream_timeout(websocket: &mut WebSocket<TcpStream>, timeout: Option<Duration>) {
-    if let Err(err) = websocket.get_mut().set_read_timeout(timeout) {
-        warn!("Failed to set websocket read timeout: {err}");
-    }
-}
-
-#[cfg(feature = "secure-websocket")]
-fn set_stream_timeout(websocket: &mut WebSocket<TlsStream<TcpStream>>, timeout: Option<Duration>) {
-    if let Err(err) = websocket.get_mut().get_mut().set_read_timeout(timeout) {
-        warn!("Failed to set websocket read timeout: {err}");
-    }
-}
-
-fn is_timeout_error(err: &tungstenite::error::Error) -> bool {
-    matches!(
-        err,
-        tungstenite::error::Error::Io(io_err)
-            if io_err.kind() == std::io::ErrorKind::WouldBlock
-                || io_err.kind() == std::io::ErrorKind::TimedOut
-    )
-}
-
-fn get_stream_levels_event(
-    side: WsSignalLevelSide,
-    shared_data_inst: &SharedData,
-) -> Option<WsReply> {
-    let (rms, peak) = match side {
-        WsSignalLevelSide::Playback => (
-            playback_signal_rms(shared_data_inst),
-            playback_signal_peak(shared_data_inst),
-        ),
-        WsSignalLevelSide::Capture => (
-            capture_signal_rms(shared_data_inst),
-            capture_signal_peak(shared_data_inst),
-        ),
-        WsSignalLevelSide::Both => return None,
-    };
-    if rms.is_empty() && peak.is_empty() {
-        None
-    } else {
-        Some(WsReply::SignalLevelsEvent {
-            result: WsResult::Ok,
-            value: StreamLevels { side, rms, peak },
-        })
-    }
-}
-
-fn stream_invalid_reply() -> WsReply {
-    WsReply::Invalid {
-        error: "Only StopSubscription is accepted while streaming is active".to_string(),
-    }
-}
-
-fn current_processing_state(shared_data: &SharedData) -> ProcessingState {
-    shared_data.capture_status.read().state
-}
-
-fn get_state_event(state: ProcessingState, shared_data: &SharedData) -> WsReply {
-    let stop_reason = if state == ProcessingState::Inactive {
-        Some(shared_data.processing_status.read().stop_reason.clone())
-    } else {
-        None
-    };
-
-    WsReply::StateEvent {
-        result: WsResult::Ok,
-        value: StateUpdate { state, stop_reason },
-    }
-}
 
 fn handle_command(
     command: WsCommand,
@@ -1130,6 +808,9 @@ fn handle_command(
         WsCommand::SubscribeSignalLevels(_) => Some(WsReply::Invalid {
             error: "SubscribeSignalLevels can only be handled by the websocket stream loop"
                 .to_string(),
+        }),
+        WsCommand::SubscribeVuLevels(_) => Some(WsReply::Invalid {
+            error: "SubscribeVuLevels can only be handled by the websocket stream loop".to_string(),
         }),
         WsCommand::SubscribeState => Some(WsReply::Invalid {
             error: "SubscribeState can only be handled by the websocket stream loop".to_string(),
@@ -1943,239 +1624,13 @@ fn handle_command(
     }
 }
 
-fn clamped_volume(vol: f32) -> f32 {
-    let mut new_vol = vol;
-    // Clamp to -150 .. 50 dB, probably larger than needed..
-    if new_vol < -150.0 {
-        new_vol = -150.0;
-        warn!("Clamped volume at -150 dB")
-    } else if new_vol > 50.0 {
-        new_vol = 50.0;
-        warn!("Clamped volume at +50 dB")
-    }
-    new_vol
-}
-
-// Workaround to safely subtract from an Instant on all operating systems
-fn get_subtracted_instant(seconds: f32) -> Instant {
-    let now = Instant::now();
-    let mut clamped_seconds = seconds.clamp(0.0, 600.0);
-    let mut maybe_instant = None;
-    while maybe_instant.is_none() && clamped_seconds > 0.1 {
-        maybe_instant = now.checked_sub(Duration::from_secs_f32(clamped_seconds));
-        clamped_seconds /= 2.0;
-    }
-    maybe_instant.unwrap_or(now)
-}
-
-fn playback_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let time_instant = get_subtracted_instant(time);
-    let res = shared_data
-        .playback_status
-        .read()
-        .signal_peak
-        .max_since(time_instant);
-    match res {
-        Some(mut record) => {
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
-fn playback_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let time_instant = get_subtracted_instant(time);
-    let res = shared_data
-        .playback_status
-        .read()
-        .signal_rms
-        .average_sqrt_since(time_instant);
-    match res {
-        Some(mut record) => {
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
-fn capture_signal_peak_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let time_instant = get_subtracted_instant(time);
-    let res = shared_data
-        .capture_status
-        .read()
-        .signal_peak
-        .max_since(time_instant);
-    match res {
-        Some(mut record) => {
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
-fn capture_signal_rms_since(shared_data: &SharedData, time: f32) -> Vec<f32> {
-    let time_instant = get_subtracted_instant(time);
-    let res = shared_data
-        .capture_status
-        .read()
-        .signal_rms
-        .average_sqrt_since(time_instant);
-    match res {
-        Some(mut record) => {
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
-fn playback_signal_peak_since_last(
-    shared_data: &SharedData,
-    local_data: &mut LocalData,
-) -> Vec<f32> {
-    let res = shared_data
-        .playback_status
-        .read()
-        .signal_peak
-        .max_since(local_data.last_pb_peak_time);
-    match res {
-        Some(mut record) => {
-            local_data.last_pb_peak_time = record.time;
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
-fn playback_signal_rms_since_last(
-    shared_data: &SharedData,
-    local_data: &mut LocalData,
-) -> Vec<f32> {
-    let res = shared_data
-        .playback_status
-        .read()
-        .signal_rms
-        .average_sqrt_since(local_data.last_pb_rms_time);
-    match res {
-        Some(mut record) => {
-            local_data.last_pb_rms_time = record.time;
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
-fn capture_signal_peak_since_last(
-    shared_data: &SharedData,
-    local_data: &mut LocalData,
-) -> Vec<f32> {
-    let res = shared_data
-        .capture_status
-        .read()
-        .signal_peak
-        .max_since(local_data.last_cap_peak_time);
-    match res {
-        Some(mut record) => {
-            local_data.last_cap_peak_time = record.time;
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
-fn capture_signal_rms_since_last(shared_data: &SharedData, local_data: &mut LocalData) -> Vec<f32> {
-    let res = shared_data
-        .capture_status
-        .read()
-        .signal_rms
-        .average_sqrt_since(local_data.last_cap_rms_time);
-    match res {
-        Some(mut record) => {
-            local_data.last_cap_rms_time = record.time;
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
-fn playback_signal_peak(shared_data: &SharedData) -> Vec<f32> {
-    let res = shared_data.playback_status.read().signal_peak.last();
-    match res {
-        Some(mut record) => {
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
-fn playback_signal_global_peak(shared_data: &SharedData) -> Vec<f32> {
-    shared_data.playback_status.read().signal_peak.global_max()
-}
-
-fn reset_playback_signal_global_peak(shared_data: &SharedData) {
-    shared_data
-        .playback_status
-        .write()
-        .signal_peak
-        .reset_global_max();
-}
-
-fn playback_signal_rms(shared_data: &SharedData) -> Vec<f32> {
-    let res = shared_data.playback_status.read().signal_rms.last_sqrt();
-    match res {
-        Some(mut record) => {
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
-fn capture_signal_peak(shared_data: &SharedData) -> Vec<f32> {
-    let res = shared_data.capture_status.read().signal_peak.last();
-    match res {
-        Some(mut record) => {
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
-fn capture_signal_global_peak(shared_data: &SharedData) -> Vec<f32> {
-    shared_data.capture_status.read().signal_peak.global_max()
-}
-
-fn reset_capture_signal_global_peak(shared_data: &SharedData) {
-    shared_data
-        .capture_status
-        .write()
-        .signal_peak
-        .reset_global_max();
-}
-
-fn capture_signal_rms(shared_data: &SharedData) -> Vec<f32> {
-    let res = shared_data.capture_status.read().signal_rms.last_sqrt();
-    match res {
-        Some(mut record) => {
-            linear_to_db_inplace(&mut record.values);
-            record.values
-        }
-        None => vec![],
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::socketserver::{WsCommand, WsSignalLevelSide, parse_command};
+    use super::VuSubscriptionState;
+    use super::datastructures::{VuSubscription, WsCommand, WsResult, WsSignalLevelSide};
+    use super::utils::{parse_command, validate_vu_subscription};
+    use crate::signal_monitor::SignalLevelSide as MonitorSignalLevelSide;
+    use std::time::{Duration, Instant};
     use tungstenite::Message;
 
     #[test]
@@ -2207,8 +1662,107 @@ mod tests {
             res,
             WsCommand::SubscribeSignalLevels(WsSignalLevelSide::Both)
         );
+        let cmd = Message::text(
+            "{\"SubscribeVuLevels\": {\"max_rate\": 30.0, \"attack\": 10.0, \"release\": 200.0}}",
+        );
+        let res = parse_command(cmd).unwrap();
+        assert_eq!(
+            res,
+            WsCommand::SubscribeVuLevels(VuSubscription {
+                max_rate: 30.0,
+                attack: 10.0,
+                release: 200.0,
+            })
+        );
         let cmd = Message::text("\"SubscribeState\"");
         let res = parse_command(cmd).unwrap();
         assert_eq!(res, WsCommand::SubscribeState);
+    }
+
+    #[test]
+    fn vu_levels_smoothing_and_rate_limit() {
+        let mut state = VuSubscriptionState::new(VuSubscription {
+            max_rate: 10.0,
+            attack: 100.0,
+            release: 200.0,
+        });
+        let start = Instant::now();
+
+        state.update_side(
+            MonitorSignalLevelSide::Playback,
+            vec![0.1],
+            vec![0.31622776],
+            start,
+        );
+        assert!(state.should_publish_at(start));
+        let reply = state.publish_at(start);
+        match reply {
+            super::WsReply::VuLevelsEvent { value, .. } => {
+                assert!((value.playback_rms[0] + 20.0).abs() < 0.1);
+                assert!((value.playback_peak[0] + 10.0).abs() < 0.1);
+            }
+            _ => panic!("unexpected reply type"),
+        }
+
+        let first_update = start + Duration::from_millis(50);
+        state.update_side(
+            MonitorSignalLevelSide::Playback,
+            vec![1.0],
+            vec![1.0],
+            first_update,
+        );
+        assert!(!state.should_publish_at(first_update));
+        assert!(state.playback.rms[0] > 0.1);
+        assert!(state.playback.rms[0] < 1.0);
+
+        let second_update = start + Duration::from_millis(120);
+        assert!(state.should_publish_at(second_update));
+        let _ = state.publish_at(second_update);
+
+        state.update_side(
+            MonitorSignalLevelSide::Playback,
+            vec![0.01],
+            vec![0.031622775],
+            second_update + Duration::from_millis(100),
+        );
+        assert!(state.playback.rms[0] > 0.01);
+    }
+
+    #[test]
+    fn vu_subscription_limits_are_validated() {
+        assert_eq!(
+            validate_vu_subscription(VuSubscription {
+                max_rate: 30.0,
+                attack: -1.0,
+                release: 100.0,
+            }),
+            Err(WsResult::InvalidValueError(
+                "attack must be between 0 and 60000 ms".to_string()
+            ))
+        );
+
+        assert_eq!(
+            validate_vu_subscription(VuSubscription {
+                max_rate: 30.0,
+                attack: 100.0,
+                release: 60000.1,
+            }),
+            Err(WsResult::InvalidValueError(
+                "release must be between 0 and 60000 ms".to_string()
+            ))
+        );
+
+        assert_eq!(
+            validate_vu_subscription(VuSubscription {
+                max_rate: 30.0,
+                attack: 0.0,
+                release: 60_000.0,
+            }),
+            Ok(VuSubscription {
+                max_rate: 30.0,
+                attack: 0.0,
+                release: 60_000.0,
+            })
+        );
     }
 }

@@ -136,12 +136,12 @@ pub mod processors;
 #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
 pub mod pulse_backend;
 pub mod signal_monitor;
-#[cfg(feature = "websocket")]
-pub mod socketserver;
 pub mod statefile;
 pub mod utils;
 #[cfg(target_os = "windows")]
 pub mod wasapi_backend;
+#[cfg(feature = "websocket")]
+pub mod websocket_server;
 
 pub enum StatusMessage {
     PlaybackReady,

@@ -259,6 +259,50 @@ Sending `StopSubscription` when no subscription is active also gets an `Invalid`
 
 For a minimal end-to-end example client, see `testscripts/signal_level_subscriber.py`.
 
+There is also a separate command for subscribing to smoothed, rate-capped VU updates instead of handling that in a separate backend.
+
+- `SubscribeVuLevels`
+
+This command takes an object with three parameters:
+- `max_rate` : maximum event rate in Hz. A value less than or equal to zero disables rate limiting.
+- `attack` : attack time constant in milliseconds for rising values. Valid range is `0` to `60000`. `0` disables attack smoothing.
+- `release` : release time constant in milliseconds for falling values. Valid range is `0` to `60000`. `0` disables release smoothing.
+
+If `attack` or `release` is outside the valid range, CamillaDSP replies with `SubscribeVuLevels` and `InvalidValueError` instead of starting the subscription.
+
+This stream always includes both playback and capture levels in each pushed event.
+
+When subscribed, CamillaDSP sends a `VuLevelsEvent` message containing the latest smoothed `playback_rms`, `playback_peak`, `capture_rms`, and `capture_peak` vectors.
+
+Example subscribe request:
+```json
+{
+  "SubscribeVuLevels": {
+    "max_rate": 30.0,
+    "attack": 10.0,
+    "release": 200.0
+  }
+}
+```
+
+Example pushed event:
+```json
+{
+  "VuLevelsEvent": {
+    "result": "Ok",
+    "value": {
+      "playback_rms": [-18.2, -18.5],
+      "playback_peak": [-6.1, -6.0],
+      "capture_rms": [-42.3, -41.9],
+      "capture_peak": [-30.5, -29.8]
+    }
+  }
+}
+```
+
+While VU streaming is active, the same subscription rule applies:
+- `StopSubscription`
+
 Get the peak since start.
 - `GetSignalPeaksSinceStart` : Get the playback and capture peak level since processing started.
   The values are returned as a json object with keys `playback` and `capture`.
