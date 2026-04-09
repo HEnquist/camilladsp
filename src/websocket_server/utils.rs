@@ -36,7 +36,7 @@ fn validate_vu_time_constant(name: &str, value: f32) -> Result<(), WsResult> {
         )));
     }
 
-    if value < 0.0 || value > MAX_VU_TIME_CONSTANT_MS {
+    if !(0.0..=MAX_VU_TIME_CONSTANT_MS).contains(&value) {
         return Err(WsResult::InvalidValueError(format!(
             "{name} must be between 0 and {MAX_VU_TIME_CONSTANT_MS:.0} ms"
         )));
