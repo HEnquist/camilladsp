@@ -1201,7 +1201,13 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let (tx_disconnectreason, rx_disconnectreason) = unbounded();
 
                 // Use 4 bytes per sample (the maximum) for the ring buffer
-                let ringbuffer = HeapRb::<u8>::new(channels * 4 * ( 2 * chunksize + 2048 ));
+                let buffer_capacity_frames = if let Some(resamp) = &resampler {
+                    resamp.resampler.input_frames_max()
+                } else {
+                    chunksize
+                };
+                let ringbuffer =
+                    HeapRb::<u8>::new(channels * 4 * (2 * buffer_capacity_frames + 2048));
                 let (device_producer, mut device_consumer) = ringbuffer.split();
 
                 trace!("Build input stream.");

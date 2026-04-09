@@ -1768,8 +1768,13 @@ impl CaptureDevice for AsioCaptureDevice {
                 };
 
                 let blockalign = bytes_per_sample * channels;
+                let buffer_capacity_frames = if let Some(resamp) = &resampler {
+                    resamp.resampler.input_frames_max()
+                } else {
+                    chunksize
+                };
                 let ringbuffer =
-                    HeapRb::<u8>::new(blockalign * (2 * chunksize + 2048));
+                    HeapRb::<u8>::new(blockalign * (2 * buffer_capacity_frames + 2048));
                 let (device_producer, mut device_consumer) = ringbuffer.split();
                 let mut _single_capture_buffer_infos: Option<Vec<ASIOBufferInfo>> = None;
                 let mut _single_capture_callbacks: Option<Box<ASIOCallbacks>> = None;
