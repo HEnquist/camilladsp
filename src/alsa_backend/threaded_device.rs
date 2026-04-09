@@ -1348,7 +1348,13 @@ impl CaptureDevice for AlsaCaptureDevice {
                 let (tx_state_dev, rx_state_dev) = crossbeam_channel::bounded(0);
                 let (tx_start_inner, rx_start_inner) = crossbeam_channel::bounded(0);
 
-                let ringbuffer = HeapRb::<u8>::new(channels * 4 * (2 * chunksize + 2048));
+                let buffer_capacity_frames = if let Some(resamp) = &resampler {
+                    resamp.resampler.input_frames_max()
+                } else {
+                    chunksize
+                };
+                let ringbuffer =
+                    HeapRb::<u8>::new(channels * 4 * (2 * buffer_capacity_frames + 2048));
                 let (mut device_producer, mut device_consumer) = ringbuffer.split();
 
                 let status_channel_inner = status_channel.clone();
