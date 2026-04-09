@@ -757,7 +757,12 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let semaphore = Semaphore::new(0);
                 let device_sph = semaphore.clone();
 
-                let ringbuffer = HeapRb::<u8>::new(blockalign * ( 2 * chunksize + 2 * callback_frames ));
+                let buffer_capacity_frames = if let Some(resamp) = &resampler {
+                    resamp.resampler.input_frames_max()
+                } else {
+                    chunksize
+                };
+                let ringbuffer = HeapRb::<u8>::new(blockalign * ( 2 * buffer_capacity_frames + 2 * callback_frames ));
                 let (mut device_producer, mut device_consumer) = ringbuffer.split();
 
                 trace!("Build input stream.");
