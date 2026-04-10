@@ -422,7 +422,7 @@ fn capture_loop(
                         stalled = true;
                         prev_state = state;
                         state = ProcessingState::Stalled;
-                        params.capture_status.write().state = ProcessingState::Stalled;
+                        crate::set_capture_state(&params.capture_status, ProcessingState::Stalled);
                     }
                     continue;
                 }
@@ -433,7 +433,7 @@ fn capture_loop(
                     debug!("Leaving stalled state, resuming processing");
                     stalled = false;
                     state = prev_state;
-                    params.capture_status.write().state = state;
+                    crate::set_capture_state(&params.capture_status, state);
                 }
                 bytes_read = bytes;
                 nbr_bytes_read += bytes;
@@ -452,7 +452,7 @@ fn capture_loop(
                             capture_status.measured_samplerate = measured_rate_f as usize;
                             capture_status.signal_range = value_range as f32;
                             capture_status.rate_adjust = rate_adjust as f32;
-                            capture_status.state = state;
+                            crate::update_capture_state(&mut capture_status, state);
                         } else {
                             xtrace!("capture status upgrade blocked, skip update");
                         }
@@ -527,7 +527,7 @@ fn capture_loop(
             sleep_until_next(bytes_per_frame, params.capture_samplerate, bytes_to_capture);
         }
     }
-    params.capture_status.write().state = ProcessingState::Inactive;
+    crate::set_capture_state(&params.capture_status, ProcessingState::Inactive);
 }
 
 /// Start a capture thread providing AudioMessages via a channel

@@ -701,7 +701,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                     capture_status.measured_samplerate = measured_rate_f as usize;
                                     capture_status.signal_range = value_range as f32;
                                     capture_status.rate_adjust = rate_adjust as f32;
-                                    capture_status.state = state;
+                                    crate::update_capture_state(&mut capture_status, state);
                                 }
                             }
                             watcher_averager.add_value(capture_samples);
@@ -753,7 +753,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 }
                             }
                         }
-                        capture_status.write().state = ProcessingState::Inactive;
+                        crate::set_capture_state(&capture_status, ProcessingState::Inactive);
                     }
                     Err(err) => {
                         let send_result = status_channel

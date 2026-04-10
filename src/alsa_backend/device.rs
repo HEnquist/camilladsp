@@ -970,7 +970,7 @@ fn capture_loop_bytes(
                             capture_status.measured_samplerate = measured_rate_f as usize;
                             capture_status.signal_range = value_range as f32;
                             capture_status.rate_adjust = rate_adjust as f32;
-                            capture_status.state = state;
+                            crate::update_capture_state(&mut capture_status, state);
                         } else {
                             xtrace!("capture status upgrade blocked, skip update");
                         }
@@ -1012,14 +1012,14 @@ fn capture_loop_bytes(
                     pcmdevice
                         .prepare()
                         .unwrap_or_else(|err| warn!("Capture error {err:?}"));
-                    params.capture_status.write().state = ProcessingState::Stalled;
+                    crate::set_capture_state(&params.capture_status, ProcessingState::Stalled);
                 }
             }
             Ok(CaptureResult::Done) => {
                 info!("Capture stopped");
                 let msg = AudioMessage::EndOfStream;
                 channels.audio.send(msg).unwrap_or(());
-                params.capture_status.write().state = ProcessingState::Inactive;
+                crate::set_capture_state(&params.capture_status, ProcessingState::Inactive);
                 return;
             }
             Err(msg) => {
@@ -1082,7 +1082,7 @@ fn capture_loop_bytes(
             }
         };
     }
-    params.capture_status.write().state = ProcessingState::Inactive;
+    crate::set_capture_state(&params.capture_status, ProcessingState::Inactive);
 }
 
 fn update_avail_min(

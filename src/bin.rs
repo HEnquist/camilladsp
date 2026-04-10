@@ -183,7 +183,7 @@ fn run(
     debug!("Using channels {used_channels:?}");
     {
         let mut capture_status = status_structs.capture.write();
-        capture_status.state = ProcessingState::Starting;
+        camillalib::update_capture_state(&mut capture_status, ProcessingState::Starting);
         capture_status.used_channels = used_channels;
     }
 
@@ -308,7 +308,10 @@ fn run(
                                 barrier.wait();
                                 debug!("Supervisor loop starts now!");
                                 is_starting = false;
-                                status_structs.status.write().stop_reason = StopReason::None;
+                                camillalib::set_stop_reason(
+                                    &status_structs.status,
+                                    StopReason::None,
+                                );
                             }
                         }
                         StatusMessage::PlaybackError(message) => {
@@ -321,7 +324,10 @@ fn run(
                                 barrier.wait();
                             }
                             debug!("Wait for capture thread to exit..");
-                            status_structs.status.write().stop_reason = StopReason::PlaybackError(message);
+                            camillalib::set_stop_reason(
+                                &status_structs.status,
+                                StopReason::PlaybackError(message),
+                            );
                             cap_handle.join().unwrap();
                             {
                                 let mut active_cfg_shared = shared_configs.active.lock();
@@ -329,7 +335,10 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
-                            status_structs.capture.write().state = ProcessingState::Inactive;
+                            camillalib::set_capture_state(
+                                &status_structs.capture,
+                                ProcessingState::Inactive,
+                            );
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -340,7 +349,10 @@ fn run(
                                 barrier.wait();
                             }
                             debug!("Wait for playback thread to exit..");
-                            status_structs.status.write().stop_reason = StopReason::CaptureError(message);
+                            camillalib::set_stop_reason(
+                                &status_structs.status,
+                                StopReason::CaptureError(message),
+                            );
                             pb_handle.join().unwrap();
                             {
                                 let mut active_cfg_shared = shared_configs.active.lock();
@@ -348,7 +360,10 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
-                            status_structs.capture.write().state = ProcessingState::Inactive;
+                            camillalib::set_capture_state(
+                                &status_structs.capture,
+                                ProcessingState::Inactive,
+                            );
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -362,8 +377,10 @@ fn run(
                                 barrier.wait();
                             }
                             debug!("Wait for capture thread to exit..");
-                            status_structs.status.write().stop_reason =
-                                StopReason::PlaybackFormatChange(rate);
+                            camillalib::set_stop_reason(
+                                &status_structs.status,
+                                StopReason::PlaybackFormatChange(rate),
+                            );
                             cap_handle.join().unwrap();
                             {
                                 let mut active_cfg_shared = shared_configs.active.lock();
@@ -371,7 +388,10 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
-                            status_structs.capture.write().state = ProcessingState::Inactive;
+                            camillalib::set_capture_state(
+                                &status_structs.capture,
+                                ProcessingState::Inactive,
+                            );
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -381,8 +401,10 @@ fn run(
                                 debug!("Error while starting, release barrier");
                                 barrier.wait();
                             }
-                            status_structs.status.write().stop_reason =
-                                StopReason::CaptureFormatChange(rate);
+                            camillalib::set_stop_reason(
+                                &status_structs.status,
+                                StopReason::CaptureFormatChange(rate),
+                            );
                             debug!("Wait for playback thread to exit..");
                             pb_handle.join().unwrap();
                             {
@@ -391,7 +413,10 @@ fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
-                            status_structs.capture.write().state = ProcessingState::Inactive;
+                            camillalib::set_capture_state(
+                                &status_structs.capture,
+                                ProcessingState::Inactive,
+                            );
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -400,7 +425,10 @@ fn run(
                             {
                                 let stat = status_structs.status.upgradable_read();
                                 if stat.stop_reason == StopReason::None {
-                                    RwLockUpgradableReadGuard::upgrade(stat).stop_reason = StopReason::Done;
+                                    camillalib::update_stop_reason(
+                                        &mut RwLockUpgradableReadGuard::upgrade(stat),
+                                        StopReason::Done,
+                                    );
                                 }
                             }
                             {
@@ -439,8 +467,16 @@ fn run(
                     },
                     Err(err) => {
                         warn!("Capture, Playback and Processing threads have exited: {err}");
-                        status_structs.status.write().stop_reason = StopReason::UnknownError(
-                            "Capture, Playback and Processing threads have exited".to_string(),
+                        camillalib::set_stop_reason(
+                            &status_structs.status,
+                            StopReason::UnknownError(
+                                "Capture, Playback and Processing threads have exited"
+                                    .to_string(),
+                            ),
+                        );
+                        camillalib::set_capture_state(
+                            &status_structs.capture,
+                            ProcessingState::Inactive,
                         );
                         return Ok(ExitState::Restart);
                     }

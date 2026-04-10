@@ -227,6 +227,29 @@ pub(crate) fn update_capture_signal_status(
     }
 }
 
+pub fn update_capture_state(capture_status: &mut CaptureStatus, state: ProcessingState) {
+    if capture_status.state != state {
+        capture_status.state = state;
+        signal_monitor::mark_state_updated();
+    }
+}
+
+pub fn set_capture_state(capture_status: &Arc<RwLock<CaptureStatus>>, state: ProcessingState) {
+    let mut capture_status = capture_status.write();
+    update_capture_state(&mut capture_status, state);
+}
+
+pub fn update_stop_reason(processing_status: &mut ProcessingStatus, stop_reason: StopReason) {
+    if processing_status.stop_reason != stop_reason {
+        processing_status.stop_reason = stop_reason;
+    }
+}
+
+pub fn set_stop_reason(processing_status: &Arc<RwLock<ProcessingStatus>>, stop_reason: StopReason) {
+    let mut processing_status = processing_status.write();
+    update_stop_reason(&mut processing_status, stop_reason);
+}
+
 pub(crate) fn update_playback_signal_status(
     playback_status: &Arc<RwLock<PlaybackStatus>>,
     chunk_stats: &audiochunk::ChunkStats,

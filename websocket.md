@@ -220,6 +220,8 @@ The command takes one argument, either `"playback"`, `"capture"`, or `"both"`:
 - `SubscribeSignalLevels`
 
 When subscribed, CamillaDSP sends a `SignalLevelsEvent` message each time a new chunk has been analyzed for the selected side.
+This means the event rate follows the chunk analysis rate, and therefore depends on the configured chunk size and sample rate.
+For example, smaller chunks or a higher sample rate give more frequent events, while larger chunks or a lower sample rate give fewer events.
 The event payload has keys `side`, `rms`, and `peak`.
 
 Example subscribe request:
@@ -267,6 +269,21 @@ This command takes an object with three parameters:
 - `max_rate` : maximum event rate in Hz. A value less than or equal to zero disables rate limiting.
 - `attack` : attack time constant in milliseconds for rising values. Valid range is `0` to `60000`. `0` disables attack smoothing.
 - `release` : release time constant in milliseconds for falling values. Valid range is `0` to `60000`. `0` disables release smoothing.
+
+The `attack` and `release` values control the smoothing of the displayed levels, not the underlying measurement itself.
+`attack` determines how quickly the displayed value rises when the signal gets louder.
+A smaller value gives a faster, more responsive meter, while a larger value gives a slower and smoother rise.
+`release` determines how quickly the displayed value falls when the signal gets quieter.
+A smaller value makes the meter drop quickly, while a larger value makes it decay more slowly and appear steadier.
+For peak values, upward changes are applied immediately regardless of the configured `attack` value, so short transients are not hidden.
+The configured `release` value still affects how quickly peak values fall.
+
+If `max_rate` is set higher than the rate at which new signal level values become available, no extra events are generated.
+In that case, events are sent at the natural update rate of the underlying level data.
+If rate limiting is disabled, the same applies: events are sent whenever new values are available, so the event rate is then determined by the chunk analysis rate and therefore depends on the configured chunk size and sample rate.
+
+For a response that feels similar to a traditional analog meter, a good starting point is an `attack` of about `50` ms and a `release` of about `300` ms.
+That gives a meter that rises quickly enough to feel responsive, while still falling slowly enough to remain easy to read.
 
 If `attack` or `release` is outside the valid range, CamillaDSP replies with `SubscribeVuLevels` and `InvalidValueError` instead of starting the subscription.
 

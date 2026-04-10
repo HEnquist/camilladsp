@@ -121,8 +121,10 @@ impl VuSideState {
             Some(previous) => {
                 let attack = smoothing_alpha(now.duration_since(previous), attack_ms);
                 let release = smoothing_alpha(now.duration_since(previous), release_ms);
+                // Peak rises should stay immediate so short transients are not hidden.
+                let peak_attack = 1.0;
                 self.rms = smooth_levels(&self.rms, rms, attack, release);
-                self.peak = smooth_levels(&self.peak, peak, attack, release);
+                self.peak = smooth_levels(&self.peak, peak, peak_attack, release);
                 self.last_update = Some(now);
             }
         }
@@ -314,6 +316,7 @@ macro_rules! make_handler {
                     let mut active_stream: Option<ActiveStream> = None;
                     let mut last_playback_stream_generation = 0_u64;
                     let mut last_capture_stream_generation = 0_u64;
+                    let mut last_state_stream_generation = 0_u64;
                     let mut last_state_stream_value = ProcessingState::Inactive;
                     loop {
                         if let Some(stream) = active_stream.as_mut() {
@@ -448,17 +451,24 @@ macro_rules! make_handler {
                                     }
                                 }
                                 ActiveStream::State => {
-                                    let current_state = current_processing_state(shared_data_inst);
-                                    if current_state != last_state_stream_value {
-                                        last_state_stream_value = current_state;
-                                        let reply =
-                                            get_state_event(current_state, shared_data_inst);
-                                        let write_result = websocket.send(Message::text(
-                                            serde_json::to_string(&reply).unwrap(),
-                                        ));
-                                        if let Err(err) = write_result {
-                                            warn!("Failed to write: {}", err);
-                                            break;
+                                    let generation = signal_monitor::wait_for_state_change(
+                                        last_state_stream_generation,
+                                        Duration::from_millis(SUBSCRIPTION_READ_TIMEOUT_MS),
+                                    );
+                                    if generation != last_state_stream_generation {
+                                        last_state_stream_generation = generation;
+                                        let current_state = current_processing_state(shared_data_inst);
+                                        if current_state != last_state_stream_value {
+                                            last_state_stream_value = current_state;
+                                            let reply =
+                                                get_state_event(current_state, shared_data_inst);
+                                            let write_result = websocket.send(Message::text(
+                                                serde_json::to_string(&reply).unwrap(),
+                                            ));
+                                            if let Err(err) = write_result {
+                                                warn!("Failed to write: {}", err);
+                                                break;
+                                            }
                                         }
                                     }
                                 }
@@ -550,6 +560,8 @@ macro_rules! make_handler {
                                                             SUBSCRIPTION_READ_TIMEOUT_MS,
                                                         )),
                                                     );
+                                                    last_state_stream_generation =
+                                                        signal_monitor::state_generation();
                                                     last_state_stream_value =
                                                         current_processing_state(shared_data_inst);
                                                     Some(WsReply::SubscribeState {
@@ -1714,6 +1726,7 @@ mod tests {
         assert!(!state.should_publish_at(first_update));
         assert!(state.playback.rms[0] > 0.1);
         assert!(state.playback.rms[0] < 1.0);
+        assert_eq!(state.playback.peak[0], 1.0);
 
         let second_update = start + Duration::from_millis(120);
         assert!(state.should_publish_at(second_update));
@@ -1726,6 +1739,7 @@ mod tests {
             second_update + Duration::from_millis(100),
         );
         assert!(state.playback.rms[0] > 0.01);
+        assert!(state.playback.peak[0] > 0.031622775);
     }
 
     #[test]
