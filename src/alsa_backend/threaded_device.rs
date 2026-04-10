@@ -56,7 +56,7 @@ use crate::alsa_backend::utils::{
 };
 use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
-use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
 static ALSA_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -726,6 +726,9 @@ fn capture_buffer(
     params: &mut CaptureParams,
     processing_params: &Arc<ProcessingParameters>,
 ) -> Res<(CaptureResult, usize)> {
+    if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok((CaptureResult::Done, 0));
+    }
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("Prepare capture device");
@@ -762,12 +765,21 @@ fn capture_buffer(
         None
     };
     trace!("Capture pcmdevice.wait with timeout {timeout_millis} ms");
+    let mut remaining_timeout_millis = timeout_millis;
     loop {
-        match fds.wait(timeout_millis as i32) {
+        if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok((CaptureResult::Done, 0));
+        }
+        let poll_slice_millis = remaining_timeout_millis.min(20);
+        match fds.wait(poll_slice_millis as i32) {
             Ok(pollresult) => {
                 if pollresult.poll_res == 0 {
-                    debug!("Capture wait timed out after {timeout_millis} ms, device stalled");
-                    return Ok((CaptureResult::Stalled, 0));
+                    if remaining_timeout_millis <= poll_slice_millis {
+                        debug!("Capture wait timed out after {timeout_millis} ms, device stalled");
+                        return Ok((CaptureResult::Stalled, 0));
+                    }
+                    remaining_timeout_millis -= poll_slice_millis;
+                    continue;
                 }
                 if pollresult.ctl {
                     trace!("Got a control event");
@@ -789,6 +801,8 @@ fn capture_buffer(
                     trace!("Capture waited for {:?}", start.map(|s| s.elapsed()));
                     break;
                 }
+                remaining_timeout_millis =
+                    remaining_timeout_millis.saturating_sub(poll_slice_millis);
             }
             Err(err) => match Errno::from_raw(err.errno()) {
                 Errno::EPIPE => {
@@ -813,6 +827,9 @@ fn capture_buffer(
                 }
             },
         }
+    }
+    if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok((CaptureResult::Done, 0));
     }
     match io.readi(buffer) {
         Ok(frames_read) => {
@@ -940,16 +957,48 @@ fn send_capture_audio(
     channel: &crossbeam_channel::Sender<AudioMessage>,
     msg: AudioMessage,
 ) -> bool {
-    match msg {
-        AudioMessage::EndOfStream => channel.send(AudioMessage::EndOfStream).is_ok(),
-        _ => match channel.try_send(msg) {
-            Ok(()) => true,
-            Err(crossbeam_channel::TrySendError::Full(_)) => {
-                trace!("Capture: downstream queue full, dropping message");
-                true
+    match channel.try_send(msg) {
+        Ok(()) => true,
+        Err(crossbeam_channel::TrySendError::Full(_)) => {
+            trace!("Capture: downstream queue full, dropping message");
+            true
+        }
+        Err(crossbeam_channel::TrySendError::Disconnected(_)) => false,
+    }
+}
+
+fn send_playback_device_message(
+    channel: &crossbeam_channel::Sender<PlaybackDeviceMessage>,
+    msg: PlaybackDeviceMessage,
+) -> bool {
+    let mut pending = msg;
+    loop {
+        match channel.try_send(pending) {
+            Ok(()) => return true,
+            Err(crossbeam_channel::TrySendError::Full(msg)) => {
+                if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+                    trace!("Playback: inner queue full during shutdown, dropping message");
+                    return true;
+                }
+                pending = msg;
+                std::thread::sleep(std::time::Duration::from_millis(1));
             }
-            Err(crossbeam_channel::TrySendError::Disconnected(_)) => false,
-        },
+            Err(crossbeam_channel::TrySendError::Disconnected(_)) => return false,
+        }
+    }
+}
+
+fn send_capture_device_message(
+    channel: &crossbeam_channel::Sender<CaptureDeviceMessage>,
+    msg: CaptureDeviceMessage,
+) -> bool {
+    match channel.try_send(msg) {
+        Ok(()) => true,
+        Err(crossbeam_channel::TrySendError::Full(_)) => {
+            trace!("Capture: inner queue full, dropping device message");
+            true
+        }
+        Err(crossbeam_channel::TrySendError::Disconnected(_)) => false,
     }
 }
 
@@ -1007,7 +1056,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (tx_dev, rx_dev) = crossbeam_channel::bounded(channel_capacity);
                 let (tx_state_dev, rx_state_dev) = crossbeam_channel::bounded(0);
-                let (tx_start, rx_start) = crossbeam_channel::bounded(0);
+                let (tx_start, rx_start) = crossbeam_channel::bounded(1);
 
                 let ringbuffer_bytes_per_sample = conf_sample_format
                     .map(|format| format.to_binary_format().bytes_per_sample())
@@ -1175,9 +1224,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         status_channel
                                             .send(StatusMessage::SetSpeed(speed))
                                             .unwrap_or(());
-                                        tx_dev
-                                            .send(PlaybackDeviceMessage::SetPitch(speed))
-                                            .unwrap_or(());
+                                        let _ = send_playback_device_message(
+                                            &tx_dev,
+                                            PlaybackDeviceMessage::SetPitch(speed),
+                                        );
                                         if let Some(mut ps) = playback_status.try_write() {
                                             ps.buffer_level = av_delay as usize;
                                         }
@@ -1213,10 +1263,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         );
                                         continue;
                                     }
-                                    if tx_dev
-                                        .send(PlaybackDeviceMessage::Data(bytes_to_write))
-                                        .is_err()
-                                    {
+                                    if !send_playback_device_message(
+                                        &tx_dev,
+                                        PlaybackDeviceMessage::Data(bytes_to_write),
+                                    ) {
                                         status_channel
                                             .send(StatusMessage::PlaybackError(
                                                 "Playback inner queue closed".to_string(),
@@ -1237,7 +1287,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     }
                                 }
                                 Ok(AudioMessage::Pause) => {
-                                    tx_dev.send(PlaybackDeviceMessage::Pause).unwrap_or(());
+                                    let _ = send_playback_device_message(
+                                        &tx_dev,
+                                        PlaybackDeviceMessage::Pause,
+                                    );
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     if !inner_started {
@@ -1246,7 +1299,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         );
                                         tx_start.send(()).unwrap_or(());
                                     }
-                                    tx_dev.send(PlaybackDeviceMessage::EndOfStream).unwrap_or(());
+                                    let _ = send_playback_device_message(
+                                        &tx_dev,
+                                        PlaybackDeviceMessage::EndOfStream,
+                                    );
                                     break;
                                 }
                                 Err(err) => {
@@ -1259,7 +1315,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         );
                                         tx_start.send(()).unwrap_or(());
                                     }
-                                    tx_dev.send(PlaybackDeviceMessage::EndOfStream).unwrap_or(());
+                                    let _ = send_playback_device_message(
+                                        &tx_dev,
+                                        PlaybackDeviceMessage::EndOfStream,
+                                    );
                                     break;
                                 }
                             }
@@ -1291,6 +1350,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         barrier.wait();
                     }
                 }
+                drop(tx_start);
+                drop(tx_dev);
                 innerhandle.join().unwrap_or(());
             })
             .unwrap();
@@ -1346,7 +1407,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                 let (tx_dev, rx_dev) = crossbeam_channel::bounded(channel_capacity);
                 let (tx_inner_command, rx_inner_command) = crossbeam_channel::bounded(32);
                 let (tx_state_dev, rx_state_dev) = crossbeam_channel::bounded(0);
-                let (tx_start_inner, rx_start_inner) = crossbeam_channel::bounded(0);
+                let (tx_start_inner, rx_start_inner) = crossbeam_channel::bounded(1);
 
                 let buffer_capacity_frames = if let Some(resamp) = &resampler {
                     resamp.resampler.input_frames_max()
@@ -1507,9 +1568,10 @@ impl CaptureDevice for AlsaCaptureDevice {
                                             status_channel_inner
                                                 .send(StatusMessage::CaptureDone)
                                                 .unwrap_or(());
-                                            tx_dev
-                                                .send(CaptureDeviceMessage::EndOfStream)
-                                                .unwrap_or(());
+                                            let _ = send_capture_device_message(
+                                                &tx_dev,
+                                                CaptureDeviceMessage::EndOfStream,
+                                            );
                                             break;
                                         }
                                         Ok(CommandMessage::SetSpeed { speed }) => {
@@ -1525,9 +1587,10 @@ impl CaptureDevice for AlsaCaptureDevice {
                                         }
                                         Err(crossbeam_channel::TryRecvError::Empty) => {}
                                         Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                                            tx_dev
-                                                .send(CaptureDeviceMessage::EndOfStream)
-                                                .unwrap_or(());
+                                            let _ = send_capture_device_message(
+                                                &tx_dev,
+                                                CaptureDeviceMessage::EndOfStream,
+                                            );
                                             break;
                                         }
                                     }
@@ -1577,9 +1640,10 @@ impl CaptureDevice for AlsaCaptureDevice {
                                             status_channel_inner
                                                 .send(StatusMessage::CaptureDone)
                                                 .unwrap_or(());
-                                            tx_dev
-                                                .send(CaptureDeviceMessage::EndOfStream)
-                                                .unwrap_or(());
+                                            let _ = send_capture_device_message(
+                                                &tx_dev,
+                                                CaptureDeviceMessage::EndOfStream,
+                                            );
                                             break;
                                         }
                                         Err(msg) => {
@@ -1588,9 +1652,10 @@ impl CaptureDevice for AlsaCaptureDevice {
                                                     msg.to_string(),
                                                 ))
                                                 .unwrap_or(());
-                                            tx_dev
-                                                .send(CaptureDeviceMessage::EndOfStream)
-                                                .unwrap_or(());
+                                            let _ = send_capture_device_message(
+                                                &tx_dev,
+                                                CaptureDeviceMessage::EndOfStream,
+                                            );
                                             break;
                                         }
                                     }
@@ -1746,11 +1811,17 @@ impl CaptureDevice for AlsaCaptureDevice {
                                         }
                                     }
                                     Ok(CaptureDeviceMessage::EndOfStream) => {
-                                        channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                                        let _ = send_capture_audio(
+                                            &channel,
+                                            AudioMessage::EndOfStream,
+                                        );
                                         break 'outer;
                                     }
                                     Err(err) => {
-                                        channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                                        let _ = send_capture_audio(
+                                            &channel,
+                                            AudioMessage::EndOfStream,
+                                        );
                                         status_channel
                                             .send(StatusMessage::CaptureError(err.to_string()))
                                             .unwrap_or(());
