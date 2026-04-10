@@ -135,12 +135,13 @@ pub mod processing;
 pub mod processors;
 #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
 pub mod pulse_backend;
-#[cfg(feature = "websocket")]
-pub mod socketserver;
+pub mod signal_monitor;
 pub mod statefile;
 pub mod utils;
 #[cfg(target_os = "windows")]
 pub mod wasapi_backend;
+#[cfg(feature = "websocket")]
+pub mod websocket_server;
 
 pub enum StatusMessage {
     PlaybackReady,
@@ -220,9 +221,33 @@ pub(crate) fn update_capture_signal_status(
     if let Some(mut capture_status) = capture_status.try_write() {
         capture_status.signal_rms.add_record_squared(rms_values);
         capture_status.signal_peak.add_record(peak_values);
+        signal_monitor::mark_capture_updated();
     } else {
         xtrace!("capture status blocked, skip update");
     }
+}
+
+pub fn update_capture_state(capture_status: &mut CaptureStatus, state: ProcessingState) {
+    if capture_status.state != state {
+        capture_status.state = state;
+        signal_monitor::mark_state_updated();
+    }
+}
+
+pub fn set_capture_state(capture_status: &Arc<RwLock<CaptureStatus>>, state: ProcessingState) {
+    let mut capture_status = capture_status.write();
+    update_capture_state(&mut capture_status, state);
+}
+
+pub fn update_stop_reason(processing_status: &mut ProcessingStatus, stop_reason: StopReason) {
+    if processing_status.stop_reason != stop_reason {
+        processing_status.stop_reason = stop_reason;
+    }
+}
+
+pub fn set_stop_reason(processing_status: &Arc<RwLock<ProcessingStatus>>, stop_reason: StopReason) {
+    let mut processing_status = processing_status.write();
+    update_stop_reason(&mut processing_status, stop_reason);
 }
 
 pub(crate) fn update_playback_signal_status(
@@ -240,6 +265,7 @@ pub(crate) fn update_playback_signal_status(
         }
         playback_status.signal_rms.add_record_squared(rms_values);
         playback_status.signal_peak.add_record(peak_values);
+        signal_monitor::mark_playback_updated();
     } else {
         xtrace!("playback status blocked, skip update");
     }

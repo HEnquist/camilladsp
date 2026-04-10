@@ -1126,7 +1126,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                                     capture_status.measured_samplerate = measured_rate_f as usize;
                                     capture_status.signal_range = value_range as f32;
                                     capture_status.rate_adjust = rate_adjust as f32;
-                                    capture_status.state = state;
+                                    crate::update_capture_state(&mut capture_status, state);
                                 }
                                 else {
                                     xtrace!("Capture status upgrade blocked, skip update.");
@@ -1182,7 +1182,10 @@ impl CaptureDevice for PipeWireCaptureDevice {
                             }
                         };
                     }
-                    capture_status_clone.write().state = ProcessingState::Inactive;
+                    crate::set_capture_state(
+                        &capture_status_clone,
+                        ProcessingState::Inactive,
+                    );
                     // Signal mainloop to quit - pw_main_loop_quit is thread-safe
                     quitter.quit();
                 });

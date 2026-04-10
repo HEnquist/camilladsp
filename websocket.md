@@ -114,6 +114,57 @@ Commands for reading and changing settings for the websocket server.
   * "PlaybackError": the playback device encountered an error.
   * "CaptureFormatChange": the sample rate or format of the capture device changed.
   * "PlaybackFormatChange": the sample rate or format of the playback device changed.
+
+Subscribe to pushed state changes instead of polling.
+- `SubscribeState`
+
+When subscribed, CamillaDSP sends a `StateEvent` whenever processing state changes.
+For non-stop states, the payload only contains `state`.
+For the stop state (`"Inactive"`), the payload also contains `stop_reason`.
+
+Example subscribe request:
+```json
+"SubscribeState"
+```
+
+Example pushed event while running:
+```json
+{
+  "StateEvent": {
+    "result": "Ok",
+    "value": {
+      "state": "Running"
+    }
+  }
+}
+```
+
+Example pushed event when stopped:
+```json
+{
+  "StateEvent": {
+    "result": "Ok",
+    "value": {
+      "state": "Inactive",
+      "stop_reason": "Done"
+    }
+  }
+}
+```
+
+While state streaming is active, only the stop command is accepted:
+- `StopSubscription`
+
+Example stop request:
+```json
+"StopSubscription"
+```
+
+Any other command sent during active state streaming gets an `Invalid` response.
+Sending `StopSubscription` when no subscription is active also gets an `Invalid` response.
+
+For a minimal end-to-end example client, see `testscripts/state_subscriber.py`.
+
 - `GetCaptureRate` : get the measured sample rate of the capture device.
   * return the value as an integer
 - `GetSignalRange` : get the range of values in the last chunk.
@@ -163,6 +214,111 @@ The values are returned as a json object with keys `playback_peak`, `playback_rm
 - `GetSignalLevels`
 - `GetSignalLevelsSince`
 - `GetSignalLevelsSinceLast`
+
+Subscribe to pushed level updates instead of polling.
+The command takes one argument, either `"playback"`, `"capture"`, or `"both"`:
+- `SubscribeSignalLevels`
+
+When subscribed, CamillaDSP sends a `SignalLevelsEvent` message each time a new chunk has been analyzed for the selected side.
+This means the event rate follows the chunk analysis rate, and therefore depends on the configured chunk size and sample rate.
+For example, smaller chunks or a higher sample rate give more frequent events, while larger chunks or a lower sample rate give fewer events.
+The event payload has keys `side`, `rms`, and `peak`.
+
+Example subscribe request:
+```json
+{"SubscribeSignalLevels": "playback"}
+```
+
+Example subscribe request for both sides:
+```json
+{"SubscribeSignalLevels": "both"}
+```
+
+Example pushed event:
+```json
+{
+  "SignalLevelsEvent": {
+    "result": "Ok",
+    "value": {
+      "side": "playback",
+      "rms": [-18.2, -18.5],
+      "peak": [-6.1, -6.0]
+    }
+  }
+}
+```
+
+While streaming is active, only the stop command is accepted:
+- `StopSubscription`
+
+Example stop request:
+```json
+"StopSubscription"
+```
+
+Any other command sent during active streaming gets an `Invalid` response.
+Sending `StopSubscription` when no subscription is active also gets an `Invalid` response.
+
+For a minimal end-to-end example client, see `testscripts/signal_level_subscriber.py`.
+
+There is also a separate command for subscribing to smoothed, rate-capped VU updates instead of handling that in a separate backend.
+
+- `SubscribeVuLevels`
+
+This command takes an object with three parameters:
+- `max_rate` : maximum event rate in Hz. A value less than or equal to zero disables rate limiting.
+- `attack` : attack time constant in milliseconds for rising values. Valid range is `0` to `60000`. `0` disables attack smoothing.
+- `release` : release time constant in milliseconds for falling values. Valid range is `0` to `60000`. `0` disables release smoothing.
+
+The `attack` and `release` values control the smoothing of the displayed levels, not the underlying measurement itself.
+`attack` determines how quickly the displayed value rises when the signal gets louder.
+A smaller value gives a faster, more responsive meter, while a larger value gives a slower and smoother rise.
+`release` determines how quickly the displayed value falls when the signal gets quieter.
+A smaller value makes the meter drop quickly, while a larger value makes it decay more slowly and appear steadier.
+For peak values, upward changes are applied immediately regardless of the configured `attack` value, so short transients are not hidden.
+The configured `release` value still affects how quickly peak values fall.
+
+If `max_rate` is set higher than the rate at which new signal level values become available, no extra events are generated.
+In that case, events are sent at the natural update rate of the underlying level data.
+If rate limiting is disabled, the same applies: events are sent whenever new values are available, so the event rate is then determined by the chunk analysis rate and therefore depends on the configured chunk size and sample rate.
+
+For a response that feels similar to a traditional analog meter, a good starting point is an `attack` of about `50` ms and a `release` of about `300` ms.
+That gives a meter that rises quickly enough to feel responsive, while still falling slowly enough to remain easy to read.
+
+If `attack` or `release` is outside the valid range, CamillaDSP replies with `SubscribeVuLevels` and `InvalidValueError` instead of starting the subscription.
+
+This stream always includes both playback and capture levels in each pushed event.
+
+When subscribed, CamillaDSP sends a `VuLevelsEvent` message containing the latest smoothed `playback_rms`, `playback_peak`, `capture_rms`, and `capture_peak` vectors.
+
+Example subscribe request:
+```json
+{
+  "SubscribeVuLevels": {
+    "max_rate": 30.0,
+    "attack": 10.0,
+    "release": 200.0
+  }
+}
+```
+
+Example pushed event:
+```json
+{
+  "VuLevelsEvent": {
+    "result": "Ok",
+    "value": {
+      "playback_rms": [-18.2, -18.5],
+      "playback_peak": [-6.1, -6.0],
+      "capture_rms": [-42.3, -41.9],
+      "capture_peak": [-30.5, -29.8]
+    }
+  }
+}
+```
+
+While VU streaming is active, the same subscription rule applies:
+- `StopSubscription`
 
 Get the peak since start.
 - `GetSignalPeaksSinceStart` : Get the playback and capture peak level since processing started.

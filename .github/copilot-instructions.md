@@ -19,7 +19,7 @@ This repository is the **CamillaDSP engine** (Rust).
 ## Cargo feature map
 The authoritative feature list is in `Cargo.toml`. When a task depends on optional functionality, check both the feature gate and any platform gate before editing.
 
-- `default = ["websocket"]`: enables the websocket control server by default. Main implementation: `src/socketserver.rs`, with startup and CLI integration in `src/bin.rs` and module gating in `src/lib.rs`.
+- `default = ["websocket"]`: enables the websocket control server by default. Main implementation: `src/websocket_server/mod.rs`, with helper code in `src/websocket_server/utils.rs`, runtime setup in `src/bin.rs`, and module gating in `src/lib.rs`.
 - `threaded-alsa`: switches Linux ALSA playback and capture over to the threaded ALSA backend instead of the legacy backend. Main implementation switch: `src/alsa_backend/mod.rs`. Threaded code lives in `src/alsa_backend/threaded_device.rs` and `src/alsa_backend/threaded_buffermanager.rs`; legacy code lives in `src/alsa_backend/device.rs` and `src/alsa_backend/buffermanager.rs`.
 - `pulse-backend`: enables the Linux PulseAudio backend and related config parsing. Main implementation: `src/pulse_backend/device.rs`, with gating in `src/lib.rs`, `src/audiodevice.rs`, `src/config/mod.rs`, `src/config/utils.rs`, and `src/bin.rs`.
 - `pipewire-backend`: enables the Linux PipeWire backend. Main implementation: `src/pipewire_backend/device.rs`, with module gating in `src/lib.rs`.
@@ -29,8 +29,8 @@ The authoritative feature list is in `Cargo.toml`. When a task depends on option
 - `asio-backend`: enables the Windows ASIO backend. Main implementation: `src/asio_backend/device.rs` and `src/asio_backend/utils.rs`, with module gating in `src/lib.rs`.
 - `32bit`: changes the internal processing sample type from `f64` to `f32`. Main type definition: `src/lib.rs` (`PrcFmt`), with numerics and conversion consequences across the DSP codebase, especially `src/utils/conversions.rs`, `src/utils/resampling.rs`, and filter implementations.
 - `bench`: enables benchmark-only code paths needed by Criterion benches. Main gated code: `src/filters/fftconv.rs`, and the benches themselves live in `benches/`.
-- `websocket`: enables the websocket control and monitoring server. Main implementation: `src/socketserver.rs`, with runtime setup in `src/bin.rs` and module gating in `src/lib.rs`.
-- `secure-websocket`: adds TLS support on top of `websocket`. Main implementation: TLS-specific branches in `src/socketserver.rs` and certificate-related CLI/runtime handling in `src/bin.rs`.
+- `websocket`: enables the websocket control and monitoring server. Main implementation: `src/websocket_server/mod.rs`, with runtime setup in `src/bin.rs` and module gating in `src/lib.rs`.
+- `secure-websocket`: adds TLS support on top of `websocket`. Main implementation: TLS-specific branches in `src/websocket_server/mod.rs` and certificate-related CLI/runtime handling in `src/bin.rs`.
 - `debug`: enables extra trace and debug-only instrumentation, not a separate subsystem. Representative gated locations: `src/lib.rs`, `src/wasapi_backend/device.rs`, `src/coreaudio_backend/device.rs`, and `src/cpal_backend/device.rs`.
 
 When changing backend selection, config parsing, CLI flags, or websocket behavior, verify the relevant feature-gated code paths and do not assume the default build includes every backend.

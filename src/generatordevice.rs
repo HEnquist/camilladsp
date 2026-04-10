@@ -205,7 +205,7 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
             break;
         }
     }
-    params.capture_status.write().state = ProcessingState::Inactive;
+    crate::set_capture_state(&params.capture_status, ProcessingState::Inactive);
 }
 
 /// Start a capture thread providing AudioMessages via a channel
