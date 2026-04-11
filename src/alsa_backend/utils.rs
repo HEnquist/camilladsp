@@ -175,62 +175,54 @@ pub fn list_available_devices_detailed(input: bool) -> Vec<crate::AudioDeviceDes
         let mut channel_capabilities = Vec::new();
 
         // Try to open the device to probe it
-        if let Ok(pcm) = alsa::PCM::new(&name, direction, false) {
-            if let Ok(hwp) = HwParams::any(&pcm) {
-                if let (Ok(min_ch), Ok(max_ch)) = (hwp.get_channels_min(), hwp.get_channels_max()) {
-                    // Probe every channel count in the supported range.
-                    // set_channels is a fast hardware params check, so iterating is fine.
-                    let max_ch = max_ch.min(128);
-                    for channels in min_ch..=max_ch {
-                        let mut samplerates = Vec::new();
-                        // Refine HwParams for this channel count
-                        if let Ok(hwp_ch) = HwParams::any(&pcm) {
-                            if hwp_ch.set_channels(channels).is_ok() {
-                                if let Ok(rates_values) = list_samplerates(&hwp_ch) {
-                                    let rates = match rates_values {
-                                        SupportedValues::Discrete(r) => r,
-                                        SupportedValues::Range(min, max) => STANDARD_RATES
-                                            .iter()
-                                            .filter(|&&r| r >= min && r <= max)
-                                            .copied()
-                                            .collect(),
-                                    };
+        if let Ok(pcm) = alsa::PCM::new(&name, direction, false)
+            && let Ok(hwp) = HwParams::any(&pcm)
+            && let (Ok(min_ch), Ok(max_ch)) = (hwp.get_channels_min(), hwp.get_channels_max())
+        {
+            // Probe every channel count in the supported range.
+            // set_channels is a fast hardware params check, so iterating is fine.
+            let max_ch = max_ch.min(128);
+            for channels in min_ch..=max_ch {
+                let mut samplerates = Vec::new();
+                // Refine HwParams for this channel count
+                if let Ok(hwp_ch) = HwParams::any(&pcm)
+                    && hwp_ch.set_channels(channels).is_ok()
+                    && let Ok(rates_values) = list_samplerates(&hwp_ch)
+                {
+                    let rates = match rates_values {
+                        SupportedValues::Discrete(r) => r,
+                        SupportedValues::Range(min, max) => STANDARD_RATES
+                            .iter()
+                            .filter(|&&r| r >= min && r <= max)
+                            .copied()
+                            .collect(),
+                    };
 
-                                    for rate in rates {
-                                        let mut formats = Vec::new();
-                                        if let Ok(hwp_rate) = HwParams::any(&pcm) {
-                                            if hwp_rate.set_channels(channels).is_ok()
-                                                && hwp_rate
-                                                    .set_rate(rate, alsa::ValueOr::Nearest)
-                                                    .is_ok()
-                                            {
-                                                if let Ok(supported_formats) =
-                                                    list_formats(&hwp_rate)
-                                                {
-                                                    for fmt in supported_formats {
-                                                        formats.push(format!("{:?}", fmt));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        if !formats.is_empty() {
-                                            samplerates.push(crate::SamplerateCapability {
-                                                samplerate: rate as usize,
-                                                formats,
-                                            });
-                                        }
-                                    }
-                                }
+                    for rate in rates {
+                        let mut formats = Vec::new();
+                        if let Ok(hwp_rate) = HwParams::any(&pcm)
+                            && hwp_rate.set_channels(channels).is_ok()
+                            && hwp_rate.set_rate(rate, alsa::ValueOr::Nearest).is_ok()
+                            && let Ok(supported_formats) = list_formats(&hwp_rate)
+                        {
+                            for fmt in supported_formats {
+                                formats.push(format!("{:?}", fmt));
                             }
                         }
-
-                        if !samplerates.is_empty() {
-                            channel_capabilities.push(crate::ChannelCapability {
-                                channels: channels as usize,
-                                samplerates,
+                        if !formats.is_empty() {
+                            samplerates.push(crate::SamplerateCapability {
+                                samplerate: rate as usize,
+                                formats,
                             });
                         }
                     }
+                }
+
+                if !samplerates.is_empty() {
+                    channel_capabilities.push(crate::ChannelCapability {
+                        channels: channels as usize,
+                        samplerates,
+                    });
                 }
             }
         }
