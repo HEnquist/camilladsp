@@ -499,23 +499,27 @@ pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String
     }
 }
 
-pub fn list_available_devices_detailed(backend: &str, input: bool) -> Vec<AudioDeviceDescriptor> {
+#[derive(Debug, PartialEq, serde::Serialize)]
+pub enum DeviceError {
+    DeviceNotFound(String),
+    DeviceBusy(String),
+    Other(String),
+}
+
+pub fn get_device_capabilities(
+    backend: &str,
+    device_name: &str,
+    input: bool,
+) -> Result<AudioDeviceDescriptor, DeviceError> {
     match backend.to_lowercase().as_str() {
         #[cfg(target_os = "linux")]
-        "alsa" => alsa_backend::utils::list_available_devices_detailed(input),
+        "alsa" => alsa_backend::utils::get_device_capabilities(device_name, input),
         #[cfg(target_os = "macos")]
-        "coreaudio" => coreaudio_backend::device::list_available_devices_detailed(input),
+        "coreaudio" => coreaudio_backend::device::get_device_capabilities(device_name, input),
         #[cfg(target_os = "windows")]
-        "wasapi" => wasapi_backend::device::list_available_devices_detailed(input),
+        "wasapi" => wasapi_backend::device::get_device_capabilities(device_name, input),
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-        "asio" => asio_backend::device::list_available_devices_detailed(input),
-        _ => list_available_devices(backend, input)
-            .into_iter()
-            .map(|(name, description)| AudioDeviceDescriptor {
-                name,
-                description,
-                capabilities: Vec::new(),
-            })
-            .collect(),
+        "asio" => asio_backend::device::get_device_capabilities(device_name, input),
+        _ => Err(DeviceError::Other("Unsupported backend".to_string())),
     }
 }

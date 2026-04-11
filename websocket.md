@@ -283,8 +283,8 @@ They accept a backend name as input, and return a list of names.
 - `GetAvailableCaptureDevices` : get a list of available capture devices. 
 - `GetAvailablePlaybackDevices` : get a list of available playback devices. 
 
-- `GetAvailableCaptureDevicesDetailed` : get a list of available capture devices with detailed hierarchical capabilities. 
-- `GetAvailablePlaybackDevicesDetailed` : get a list of available playback devices with detailed hierarchical capabilities. 
+- `GetCaptureDeviceCapabilities` : get the capabilities of a specific capture device. Requires two arguments: backend name and device name.
+- `GetPlaybackDeviceCapabilities` : get the capabilities of a specific playback device. Requires two arguments: backend name and device name.
 
 Each element in the returned list for the non-detailed commands consists of one string for the device identifier,
 and one optional string for the name.
@@ -308,7 +308,7 @@ Example entries for Alsa:
 ]
 ```
 
-The detailed commands return a list of objects with the following structure:
+The capability commands return an object with the following structure:
 ```json
 {
   "name": "Device name",

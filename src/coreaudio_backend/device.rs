@@ -189,202 +189,199 @@ pub fn list_available_devices(input: bool) -> Vec<(String, String)> {
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
-pub fn list_available_devices_detailed(input: bool) -> Vec<crate::AudioDeviceDescriptor> {
-    let mut descriptors = Vec::new();
-    if let Ok(all_ids) = get_audio_device_ids() {
-        for device_id in all_ids.iter() {
-            if let Ok(name) = get_device_name(*device_id)
-                && device_supports_scope(*device_id, input)
-            {
-                // Map: Channels -> SampleRate -> Formats
-                let mut capabilities_map: std::collections::HashMap<
-                    usize,
-                    std::collections::HashMap<usize, Vec<String>>,
-                > = std::collections::HashMap::new();
+pub fn get_device_capabilities(
+    device_name: &str,
+    input: bool,
+) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
+    let device_id = match get_device_id_from_name_and_scope(device_name, input) {
+        Some(id) => id,
+        None => {
+            return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
+        }
+    };
 
-                if let Ok(supported_formats) = get_supported_physical_stream_formats(*device_id) {
-                    for ranged_desc in supported_formats {
-                        let asbd = ranged_desc.mFormat;
-                        let channels = asbd.mChannelsPerFrame as usize;
+    if !device_supports_scope(device_id, input) {
+        return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
+    }
 
-                        // Get format string
-                        let is_float = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0;
-                        let bit_depth = asbd.mBitsPerChannel;
-                        let format_str = if is_float {
-                            if bit_depth == 64 { "F64" } else { "F32" }
-                        } else {
-                            match bit_depth {
-                                16 => "S16",
-                                24 => "S24",
-                                32 => "S32",
-                                _ => continue,
-                            }
-                        };
+    let mut capabilities_map: std::collections::HashMap<
+        usize,
+        std::collections::HashMap<usize, Vec<String>>,
+    > = std::collections::HashMap::new();
 
-                        let rates = if ranged_desc.mSampleRateRange.mMinimum
-                            == ranged_desc.mSampleRateRange.mMaximum
-                        {
-                            vec![ranged_desc.mSampleRateRange.mMinimum as usize]
-                        } else {
-                            vec![
-                                ranged_desc.mSampleRateRange.mMinimum as usize,
-                                ranged_desc.mSampleRateRange.mMaximum as usize,
-                            ]
-                        };
+    if let Ok(supported_formats) = get_supported_physical_stream_formats(device_id) {
+        for ranged_desc in supported_formats {
+            let asbd = ranged_desc.mFormat;
+            let channels = asbd.mChannelsPerFrame as usize;
 
-                        let rate_map = capabilities_map.entry(channels).or_default();
-                        for rate in rates {
-                            rate_map
-                                .entry(rate)
-                                .or_default()
-                                .push(format_str.to_string());
-                        }
-                    }
+            // Get format string
+            let is_float = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0;
+            let bit_depth = asbd.mBitsPerChannel;
+            let format_str = if is_float {
+                if bit_depth == 64 { "F64" } else { "F32" }
+            } else {
+                match bit_depth {
+                    16 => "S16",
+                    24 => "S24",
+                    32 => "S32",
+                    _ => continue,
                 }
+            };
 
-                if capabilities_map.is_empty() {
-                    // Fallback to nominal rates and current config
-                    let property_address = AudioObjectPropertyAddress {
-                        mSelector:
-                            objc2_core_audio::kAudioDevicePropertyAvailableNominalSampleRates,
-                        mScope: kAudioObjectPropertyScopeGlobal,
-                        mElement: kAudioObjectPropertyElementMain,
-                    };
-                    let mut data_size = 0u32;
-                    if unsafe {
-                        AudioObjectGetPropertyDataSize(
-                            *device_id,
-                            NonNull::from(&property_address),
-                            0,
-                            null(),
-                            NonNull::from(&mut data_size),
-                        )
-                    } == 0
-                    {
-                        let nbr_items = data_size
-                            / mem::size_of::<objc2_core_audio_types::AudioValueRange>() as u32;
-                        let mut ranges =
-                            vec![
-                                unsafe { mem::zeroed::<objc2_core_audio_types::AudioValueRange>() };
-                                nbr_items as usize
-                            ];
-                        if unsafe {
-                            AudioObjectGetPropertyData(
-                                *device_id,
-                                NonNull::from(&property_address),
-                                0,
-                                null(),
-                                NonNull::from(&mut data_size),
-                                NonNull::new(ranges.as_mut_ptr()).unwrap().cast(),
-                            )
-                        } == 0
-                        {
-                            let current_format = get_current_device_format(*device_id, input)
-                                .unwrap_or_else(|_| "F32".to_string());
+            let rates =
+                if ranged_desc.mSampleRateRange.mMinimum == ranged_desc.mSampleRateRange.mMaximum {
+                    vec![ranged_desc.mSampleRateRange.mMinimum as usize]
+                } else {
+                    vec![
+                        ranged_desc.mSampleRateRange.mMinimum as usize,
+                        ranged_desc.mSampleRateRange.mMaximum as usize,
+                    ]
+                };
 
-                            // Probe channel count
-                            let scope = if input {
-                                kAudioObjectPropertyScopeInput
-                            } else {
-                                kAudioObjectPropertyScopeOutput
-                            };
-                            let config_address = AudioObjectPropertyAddress {
-                                mSelector: kAudioDevicePropertyStreamConfiguration,
-                                mScope: scope,
-                                mElement: kAudioObjectPropertyElementWildcard,
-                            };
-                            let mut config_size = 0u32;
-                            let mut channels = 2; // fallback
-                            if unsafe {
-                                AudioObjectGetPropertyDataSize(
-                                    *device_id,
-                                    NonNull::from(&config_address),
-                                    0,
-                                    null(),
-                                    NonNull::from(&mut config_size),
-                                )
-                            } == 0
-                            {
-                                // Allocate aligned storage for AudioBufferList
-                                let layout = std::alloc::Layout::from_size_align(
-                                    config_size as usize,
-                                    mem::align_of::<AudioBufferList>(),
-                                )
-                                .unwrap();
-                                let buf_list_ptr = unsafe { std::alloc::alloc_zeroed(layout) }
-                                    as *mut AudioBufferList;
-                                if !buf_list_ptr.is_null() {
-                                    if unsafe {
-                                        AudioObjectGetPropertyData(
-                                            *device_id,
-                                            NonNull::from(&config_address),
-                                            0,
-                                            null(),
-                                            NonNull::from(&mut config_size),
-                                            NonNull::new(buf_list_ptr).unwrap().cast(),
-                                        )
-                                    } == 0
-                                    {
-                                        let nbr_buffers =
-                                            unsafe { (*buf_list_ptr).mNumberBuffers } as usize;
-                                        // mBuffers is a variable-length array starting at the first element
-                                        let buffers_ptr =
-                                            unsafe { (*buf_list_ptr).mBuffers.as_ptr() };
-                                        let buffers = unsafe {
-                                            std::slice::from_raw_parts(buffers_ptr, nbr_buffers)
-                                        };
-                                        channels =
-                                            buffers.iter().map(|b| b.mNumberChannels).sum::<u32>()
-                                                as usize;
-                                    }
-                                    unsafe { std::alloc::dealloc(buf_list_ptr as *mut u8, layout) };
-                                }
-                            }
-
-                            let rate_map = capabilities_map.entry(channels).or_default();
-                            for range in ranges {
-                                rate_map
-                                    .entry(range.mMinimum as usize)
-                                    .or_default()
-                                    .push(current_format.clone());
-                            }
-                        }
-                    }
-                }
-
-                let mut capabilities: Vec<crate::ChannelCapability> = capabilities_map
-                    .into_iter()
-                    .map(|(channels, rate_map)| {
-                        let mut samplerates: Vec<crate::SamplerateCapability> = rate_map
-                            .into_iter()
-                            .map(|(samplerate, mut formats)| {
-                                formats.sort_unstable();
-                                formats.dedup();
-                                crate::SamplerateCapability {
-                                    samplerate,
-                                    formats,
-                                }
-                            })
-                            .collect();
-                        samplerates.sort_unstable_by_key(|s| s.samplerate);
-                        crate::ChannelCapability {
-                            channels,
-                            samplerates,
-                        }
-                    })
-                    .collect();
-
-                capabilities.sort_unstable_by_key(|c| c.channels);
-
-                descriptors.push(crate::AudioDeviceDescriptor {
-                    name: name.to_string(),
-                    description: name.to_string(),
-                    capabilities,
-                });
+            let rate_map = capabilities_map.entry(channels).or_default();
+            for rate in rates {
+                rate_map
+                    .entry(rate)
+                    .or_default()
+                    .push(format_str.to_string());
             }
         }
     }
-    descriptors
+
+    if capabilities_map.is_empty() {
+        // Fallback to nominal rates and current config
+        let property_address = AudioObjectPropertyAddress {
+            mSelector: objc2_core_audio::kAudioDevicePropertyAvailableNominalSampleRates,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain,
+        };
+        let mut data_size = 0u32;
+        if unsafe {
+            AudioObjectGetPropertyDataSize(
+                device_id,
+                NonNull::from(&property_address),
+                0,
+                null(),
+                NonNull::from(&mut data_size),
+            )
+        } == 0
+        {
+            let nbr_items =
+                data_size / mem::size_of::<objc2_core_audio_types::AudioValueRange>() as u32;
+            let mut ranges =
+                vec![
+                    unsafe { mem::zeroed::<objc2_core_audio_types::AudioValueRange>() };
+                    nbr_items as usize
+                ];
+            if unsafe {
+                AudioObjectGetPropertyData(
+                    device_id,
+                    NonNull::from(&property_address),
+                    0,
+                    null(),
+                    NonNull::from(&mut data_size),
+                    NonNull::new(ranges.as_mut_ptr()).unwrap().cast(),
+                )
+            } == 0
+            {
+                let current_format = get_current_device_format(device_id, input)
+                    .unwrap_or_else(|_| "F32".to_string());
+
+                // Probe channel count
+                let scope = if input {
+                    kAudioObjectPropertyScopeInput
+                } else {
+                    kAudioObjectPropertyScopeOutput
+                };
+                let config_address = AudioObjectPropertyAddress {
+                    mSelector: kAudioDevicePropertyStreamConfiguration,
+                    mScope: scope,
+                    mElement: kAudioObjectPropertyElementWildcard,
+                };
+                let mut config_size = 0u32;
+                let mut channels = 2; // fallback
+                if unsafe {
+                    AudioObjectGetPropertyDataSize(
+                        device_id,
+                        NonNull::from(&config_address),
+                        0,
+                        null(),
+                        NonNull::from(&mut config_size),
+                    )
+                } == 0
+                {
+                    // Allocate aligned storage for AudioBufferList
+                    let layout = std::alloc::Layout::from_size_align(
+                        config_size as usize,
+                        mem::align_of::<AudioBufferList>(),
+                    )
+                    .unwrap();
+                    let buf_list_ptr =
+                        unsafe { std::alloc::alloc_zeroed(layout) } as *mut AudioBufferList;
+                    if !buf_list_ptr.is_null() {
+                        if unsafe {
+                            AudioObjectGetPropertyData(
+                                device_id,
+                                NonNull::from(&config_address),
+                                0,
+                                null(),
+                                NonNull::from(&mut config_size),
+                                NonNull::new(buf_list_ptr).unwrap().cast(),
+                            )
+                        } == 0
+                        {
+                            let nbr_buffers = unsafe { (*buf_list_ptr).mNumberBuffers } as usize;
+                            // mBuffers is a variable-length array starting at the first element
+                            let buffers_ptr = unsafe { (*buf_list_ptr).mBuffers.as_ptr() };
+                            let buffers =
+                                unsafe { std::slice::from_raw_parts(buffers_ptr, nbr_buffers) };
+                            channels =
+                                buffers.iter().map(|b| b.mNumberChannels).sum::<u32>() as usize;
+                        }
+                        unsafe { std::alloc::dealloc(buf_list_ptr as *mut u8, layout) };
+                    }
+                }
+
+                let rate_map = capabilities_map.entry(channels).or_default();
+                for range in ranges {
+                    rate_map
+                        .entry(range.mMinimum as usize)
+                        .or_default()
+                        .push(current_format.clone());
+                }
+            }
+        }
+    }
+
+    let mut capabilities: Vec<crate::ChannelCapability> = capabilities_map
+        .into_iter()
+        .map(|(channels, rate_map)| {
+            let mut samplerates: Vec<crate::SamplerateCapability> = rate_map
+                .into_iter()
+                .map(|(samplerate, mut formats)| {
+                    formats.sort_unstable();
+                    formats.dedup();
+                    crate::SamplerateCapability {
+                        samplerate,
+                        formats,
+                    }
+                })
+                .collect();
+            samplerates.sort_unstable_by_key(|s| s.samplerate);
+            crate::ChannelCapability {
+                channels,
+                samplerates,
+            }
+        })
+        .collect();
+
+    capabilities.sort_unstable_by_key(|c| c.channels);
+
+    Ok(crate::AudioDeviceDescriptor {
+        name: device_name.to_string(),
+        description: device_name.to_string(),
+        capabilities,
+    })
 }
 
 fn get_current_device_format(device_id: AudioDeviceID, input: bool) -> Res<String> {

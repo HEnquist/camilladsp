@@ -1216,72 +1216,80 @@ pub fn list_available_devices() -> Vec<(String, String)> {
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
-pub fn list_available_devices_detailed(input: bool) -> Vec<crate::AudioDeviceDescriptor> {
-    let names = list_device_names();
-    let mut descriptors = Vec::new();
-
+pub fn get_device_capabilities(
+    device_name: &str,
+    input: bool,
+) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
     const COMMON_RATES: &[u32] = &[
         8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000, 352800,
         384000, 705600, 768000,
     ];
 
-    for name in names {
-        let mut capabilities = Vec::new();
-
-        // Probing ASIO requires loading the driver
-        if load_driver_by_name(&name).is_ok() {
-            let mut supported_rates = Vec::new();
-            for &rate in COMMON_RATES {
-                if unsafe { can_sample_rate(rate as f64) } == 0 {
-                    supported_rates.push(rate);
-                }
-            }
-
-            // ASIO usually has one fixed format for all channels and rates in a driver
-            let mut formats = Vec::new();
-            if let Ok(fmt) = resolve_format(&None, true) {
-                formats.push(format!("{:?}", fmt));
-            }
-
-            // Get channel count for the requested direction
-            let mut input_channels: i32 = 0;
-            let mut output_channels: i32 = 0;
-            unsafe {
-                if ASIOGetChannels(&mut input_channels, &mut output_channels) == 0 {
-                    let channels = if input {
-                        input_channels as usize
-                    } else {
-                        output_channels as usize
-                    };
-
-                    let mut samplerates = Vec::new();
-                    for rate in supported_rates {
-                        samplerates.push(crate::SamplerateCapability {
-                            samplerate: rate as usize,
-                            formats: formats.clone(),
-                        });
-                    }
-
-                    if !samplerates.is_empty() {
-                        capabilities.push(crate::ChannelCapability {
-                            channels,
-                            samplerates,
-                        });
-                    }
-                }
-            }
-
-            teardown_asio_driver();
-        }
-
-        descriptors.push(crate::AudioDeviceDescriptor {
-            name: name.clone(),
-            description: name,
-            capabilities,
-        });
+    let names = list_device_names();
+    if !names.contains(&device_name.to_string()) {
+        return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
     }
 
-    descriptors
+    let mut capabilities = Vec::new();
+
+    // Probing ASIO requires loading the driver
+    if let Err(e) = load_driver_by_name(device_name) {
+        let msg = format!("{:?}", e);
+        if msg.contains("ASE_NotPresent") || msg.contains("ASE_HWMalfunction") {
+            return Err(crate::DeviceError::DeviceBusy(device_name.to_string()));
+        } else {
+            return Err(crate::DeviceError::Other(msg));
+        }
+    }
+
+    let mut supported_rates = Vec::new();
+    for &rate in COMMON_RATES {
+        if unsafe { can_sample_rate(rate as f64) } == 0 {
+            supported_rates.push(rate);
+        }
+    }
+
+    // ASIO usually has one fixed format for all channels and rates in a driver
+    let mut formats = Vec::new();
+    if let Ok(fmt) = resolve_format(&None, true) {
+        formats.push(format!("{:?}", fmt));
+    }
+
+    // Get channel count for the requested direction
+    let mut input_channels: i32 = 0;
+    let mut output_channels: i32 = 0;
+    unsafe {
+        if ASIOGetChannels(&mut input_channels, &mut output_channels) == 0 {
+            let channels = if input {
+                input_channels as usize
+            } else {
+                output_channels as usize
+            };
+
+            let mut samplerates = Vec::new();
+            for rate in supported_rates {
+                samplerates.push(crate::SamplerateCapability {
+                    samplerate: rate as usize,
+                    formats: formats.clone(),
+                });
+            }
+
+            if !samplerates.is_empty() {
+                capabilities.push(crate::ChannelCapability {
+                    channels,
+                    samplerates,
+                });
+            }
+        }
+    }
+
+    teardown_asio_driver();
+
+    Ok(crate::AudioDeviceDescriptor {
+        name: device_name.to_string(),
+        description: device_name.to_string(),
+        capabilities,
+    })
 }
 
 // ---------------------------------------------------------------------------

@@ -108,84 +108,122 @@ pub fn list_device_names(input: bool) -> Vec<(String, String)> {
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
-pub fn list_available_devices_detailed(input: bool) -> Vec<crate::AudioDeviceDescriptor> {
+pub fn get_device_capabilities(
+    device_name: &str,
+    input: bool,
+) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
     let direction = if input {
         wasapi::Direction::Capture
     } else {
         wasapi::Direction::Render
     };
     let _ = wasapi::initialize_mta();
-    let mut descriptors = Vec::new();
 
-    if let Ok(enumerator) = wasapi::DeviceEnumerator::new()
-        && let Ok(collection) = enumerator.get_device_collection(&direction)
-        && let Ok(count) = collection.get_nbr_devices()
-    {
-        for n in 0..count {
-            if let Ok(device) = collection.get_device_at_index(n)
-                && let Ok(name) = device.get_friendlyname()
-            {
-                let mut channel_capabilities = Vec::new();
+    let enumerator = match wasapi::DeviceEnumerator::new() {
+        Ok(e) => e,
+        Err(_) => {
+            return Err(crate::DeviceError::Other(
+                "Failed to initialize DeviceEnumerator".to_string(),
+            ));
+        }
+    };
 
-                if let Ok(audio_client) = device.get_iaudioclient() {
-                    // Use the mix format to find the device's native channel count.
-                    let max_channels = audio_client
-                        .get_mixformat()
-                        .map(|fmt| fmt.get_nchannels() as usize)
-                        .unwrap_or(2);
-                    const COMMON_RATES: &[usize] = &[
-                        8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000,
-                        176400, 192000, 352800, 384000, 705600, 768000,
-                    ];
-                    for channels in 1..=max_channels {
-                        let mut samplerates = Vec::new();
-                        for &rate in COMMON_RATES {
-                            let mut formats = Vec::new();
-                            for fmt in &[
-                                WasapiSampleFormat::S16,
-                                WasapiSampleFormat::S24,
-                                WasapiSampleFormat::S32,
-                                WasapiSampleFormat::F32,
-                            ] {
-                                if get_supported_wave_format(
-                                    &audio_client,
-                                    fmt,
-                                    rate,
-                                    channels,
-                                    &wasapi::ShareMode::Shared,
-                                )
-                                .is_ok()
-                                {
-                                    formats.push(format!("{:?}", fmt));
-                                }
-                            }
+    let collection = match enumerator.get_device_collection(&direction) {
+        Ok(c) => c,
+        Err(_) => {
+            return Err(crate::DeviceError::Other(
+                "Failed to get device collection".to_string(),
+            ));
+        }
+    };
 
-                            if !formats.is_empty() {
-                                samplerates.push(crate::SamplerateCapability {
-                                    samplerate: rate,
-                                    formats,
-                                });
-                            }
-                        }
+    let count = collection.get_nbr_devices().unwrap_or(0);
+    let mut target_device = None;
 
-                        if !samplerates.is_empty() {
-                            channel_capabilities.push(crate::ChannelCapability {
-                                channels,
-                                samplerates,
-                            });
-                        }
-                    }
+    for n in 0..count {
+        if let Ok(device) = collection.get_device_at_index(n)
+            && let Ok(name) = device.get_friendlyname()
+            && name == device_name
+        {
+            target_device = Some(device);
+            break;
+        }
+    }
+
+    let device = match target_device {
+        Some(d) => d,
+        None => {
+            return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
+        }
+    };
+
+    let audio_client = match device.get_iaudioclient() {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = format!("{}", e);
+            if msg.contains("AUDCLNT_E_DEVICE_IN_USE") {
+                return Err(crate::DeviceError::DeviceBusy(device_name.to_string()));
+            } else {
+                return Err(crate::DeviceError::Other(msg));
+            }
+        }
+    };
+
+    let mut channel_capabilities = Vec::new();
+
+    // Use the mix format to find the device's native channel count.
+    let max_channels = audio_client
+        .get_mixformat()
+        .map(|fmt| fmt.get_nchannels() as usize)
+        .unwrap_or(2);
+    const COMMON_RATES: &[usize] = &[
+        8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
+        352800, 384000, 705600, 768000,
+    ];
+    for channels in 1..=max_channels {
+        let mut samplerates = Vec::new();
+        for &rate in COMMON_RATES {
+            let mut formats = Vec::new();
+            for fmt in &[
+                WasapiSampleFormat::S16,
+                WasapiSampleFormat::S24,
+                WasapiSampleFormat::S32,
+                WasapiSampleFormat::F32,
+            ] {
+                if get_supported_wave_format(
+                    &audio_client,
+                    fmt,
+                    rate,
+                    channels,
+                    &wasapi::ShareMode::Shared,
+                )
+                .is_ok()
+                {
+                    formats.push(format!("{:?}", fmt));
                 }
+            }
 
-                descriptors.push(crate::AudioDeviceDescriptor {
-                    name: name.clone(),
-                    description: name,
-                    capabilities: channel_capabilities,
+            if !formats.is_empty() {
+                samplerates.push(crate::SamplerateCapability {
+                    samplerate: rate,
+                    formats,
                 });
             }
         }
+
+        if !samplerates.is_empty() {
+            channel_capabilities.push(crate::ChannelCapability {
+                channels,
+                samplerates,
+            });
+        }
     }
-    descriptors
+
+    Ok(crate::AudioDeviceDescriptor {
+        name: device_name.to_string(),
+        description: device_name.to_string(),
+        capabilities: channel_capabilities,
+    })
 }
 
 fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<String>> {
