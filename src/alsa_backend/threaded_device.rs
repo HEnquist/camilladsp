@@ -56,7 +56,7 @@ use crate::alsa_backend::utils::{
 };
 use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
-use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
 static ALSA_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -392,6 +392,11 @@ fn run_playback_inner_loop<C>(
                         end_of_stream = true;
                         break;
                     }
+                    Ok(PlaybackDeviceMessage::Stop) => {
+                        let drop_res = pcmdevice.drop();
+                        trace!("pcm_drop result {drop_res:?}");
+                        break;
+                    }
                     Err(crossbeam_channel::TryRecvError::Empty) => break,
                     Err(crossbeam_channel::TryRecvError::Disconnected) => {
                         channel_disconnected = true;
@@ -499,6 +504,11 @@ fn run_playback_inner_loop<C>(
                     if !pcm_paused {
                         pcmdevice.drain().unwrap_or_default();
                     }
+                    break;
+                }
+                Ok(PlaybackDeviceMessage::Stop) => {
+                    let drop_res = pcmdevice.drop();
+                    trace!("pcm_drop result {drop_res:?}");
                     break;
                 }
                 Err(crossbeam_channel::TryRecvError::Empty) => {
@@ -970,6 +980,7 @@ enum PlaybackDeviceMessage {
     Data(usize),
     Pause,
     EndOfStream,
+    Stop,
     SetPitch(f64),
 }
 
@@ -1007,19 +1018,15 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (tx_dev, rx_dev) = crossbeam_channel::bounded(channel_capacity);
                 let (tx_state_dev, rx_state_dev) = crossbeam_channel::bounded(0);
-                let (tx_start, rx_start) = crossbeam_channel::bounded(0);
 
                 let ringbuffer_bytes_per_sample = conf_sample_format
                     .map(|format| format.to_binary_format().bytes_per_sample())
                     .unwrap_or(std::mem::size_of::<f64>());
-                let playback_prefill_frames = target_level.max(3 * chunksize);
-                let ringbuffer_frame_capacity = playback_prefill_frames + 4 * chunksize;
+                let ringbuffer_frame_capacity = target_level.max(3 * chunksize) + 4 * chunksize;
                 let ringbuffer = HeapRb::<u8>::new(
                     channels * ringbuffer_bytes_per_sample * ringbuffer_frame_capacity,
                 );
                 let (mut device_producer, mut device_consumer) = ringbuffer.split();
-                let playback_prefill_bytes =
-                    channels * ringbuffer_bytes_per_sample * playback_prefill_frames;
 
                 let status_channel_inner = status_channel.clone();
                 let buffer_fill = Arc::new(Mutex::new(
@@ -1045,9 +1052,6 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                 tx_state_dev
                                     .send(AlsaThreadState::Ready(binary_format))
                                     .unwrap_or(());
-                                if rx_start.recv().is_err() {
-                                    return;
-                                }
 
                                 let io = pcmdevice.io_bytes();
 
@@ -1145,7 +1149,6 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             adjust_period as f64,
                             target_level,
                         );
-                        let mut inner_started = false;
 
                         loop {
                             match channel.recv() {
@@ -1224,42 +1227,33 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                             .unwrap_or(());
                                         break;
                                     }
-                                    if !inner_started
-                                        && device_producer.occupied_len() >= playback_prefill_bytes
-                                    {
-                                        debug!(
-                                            "Starting playback inner thread after prefilling {} bytes (target {} bytes).",
-                                            device_producer.occupied_len(),
-                                            playback_prefill_bytes
-                                        );
-                                        tx_start.send(()).unwrap_or(());
-                                        inner_started = true;
-                                    }
                                 }
                                 Ok(AudioMessage::Pause) => {
                                     tx_dev.send(PlaybackDeviceMessage::Pause).unwrap_or(());
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
-                                    if !inner_started {
-                                        debug!(
-                                            "Starting playback inner thread without full prefill because end of stream was received."
-                                        );
-                                        tx_start.send(()).unwrap_or(());
-                                    }
-                                    tx_dev.send(PlaybackDeviceMessage::EndOfStream).unwrap_or(());
+                                    let msg = if SHUTDOWN_REQUESTED
+                                        .load(std::sync::atomic::Ordering::Relaxed)
+                                    {
+                                        PlaybackDeviceMessage::Stop
+                                    } else {
+                                        PlaybackDeviceMessage::EndOfStream
+                                    };
+                                    tx_dev.send(msg).unwrap_or(());
                                     break;
                                 }
                                 Err(err) => {
                                     status_channel
                                         .send(StatusMessage::PlaybackError(err.to_string()))
                                         .unwrap_or(());
-                                    if !inner_started {
-                                        debug!(
-                                            "Starting playback inner thread without full prefill because the playback channel closed."
-                                        );
-                                        tx_start.send(()).unwrap_or(());
-                                    }
-                                    tx_dev.send(PlaybackDeviceMessage::EndOfStream).unwrap_or(());
+                                    let msg = if SHUTDOWN_REQUESTED
+                                        .load(std::sync::atomic::Ordering::Relaxed)
+                                    {
+                                        PlaybackDeviceMessage::Stop
+                                    } else {
+                                        PlaybackDeviceMessage::EndOfStream
+                                    };
+                                    tx_dev.send(msg).unwrap_or(());
                                     break;
                                 }
                             }
