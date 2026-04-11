@@ -1247,7 +1247,7 @@ pub fn list_available_devices_detailed(input: bool) -> Vec<crate::AudioDeviceDes
             let mut input_channels: i32 = 0;
             let mut output_channels: i32 = 0;
             unsafe {
-                if asio_sys::ASIOGetChannels(&mut input_channels, &mut output_channels) == 0 {
+                if ASIOGetChannels(&mut input_channels, &mut output_channels) == 0 {
                     let channels = if input {
                         input_channels as usize
                     } else {
