@@ -224,7 +224,6 @@ fn get_physical_capabilities(
     }
 }
 
-
 fn get_fallback_capabilities(
     device_id: AudioDeviceID,
     input: bool,
