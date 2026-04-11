@@ -217,16 +217,21 @@ pub fn get_device_capabilities(
             // Get format string
             let is_float = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0;
             let bit_depth = asbd.mBitsPerChannel;
-            let format_str = if is_float {
-                if bit_depth == 64 { "F64" } else { "F32" }
+            let format_enum = if is_float {
+                if bit_depth == 32 {
+                    CoreAudioSampleFormat::F32
+                } else {
+                    continue;
+                }
             } else {
                 match bit_depth {
-                    16 => "S16",
-                    24 => "S24",
-                    32 => "S32",
+                    16 => CoreAudioSampleFormat::S16,
+                    24 => CoreAudioSampleFormat::S24,
+                    32 => CoreAudioSampleFormat::S32,
                     _ => continue,
                 }
             };
+            let format_str = format!("{:?}", format_enum);
 
             let rates =
                 if ranged_desc.mSampleRateRange.mMinimum == ranged_desc.mSampleRateRange.mMaximum {
@@ -419,17 +424,21 @@ fn get_current_device_format(device_id: AudioDeviceID, input: bool) -> Res<Strin
     let is_float = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0;
     let bit_depth = asbd.mBitsPerChannel;
 
-    let format_str = if is_float {
-        if bit_depth == 64 { "F64" } else { "F32" }
+    let format_enum = if is_float {
+        if bit_depth == 32 {
+            CoreAudioSampleFormat::F32
+        } else {
+            return Err(ConfigError::new("Unsupported float bit depth").into());
+        }
     } else {
         match bit_depth {
-            16 => "S16",
-            24 => "S24",
-            32 => "S32",
-            _ => "F32",
+            16 => CoreAudioSampleFormat::S16,
+            24 => CoreAudioSampleFormat::S24,
+            32 => CoreAudioSampleFormat::S32,
+            _ => return Err(ConfigError::new("Unsupported int bit depth").into()),
         }
     };
-    Ok(format_str.to_string())
+    Ok(format!("{:?}", format_enum))
 }
 
 fn device_supports_scope(device_id: u32, input: bool) -> bool {
