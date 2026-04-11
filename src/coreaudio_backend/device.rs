@@ -215,23 +215,10 @@ pub fn get_device_capabilities(
             let channels = asbd.mChannelsPerFrame as usize;
 
             // Get format string
-            let is_float = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0;
-            let bit_depth = asbd.mBitsPerChannel;
-            let format_enum = if is_float {
-                if bit_depth == 32 {
-                    CoreAudioSampleFormat::F32
-                } else {
-                    continue;
-                }
-            } else {
-                match bit_depth {
-                    16 => CoreAudioSampleFormat::S16,
-                    24 => CoreAudioSampleFormat::S24,
-                    32 => CoreAudioSampleFormat::S32,
-                    _ => continue,
-                }
+            let format_str = match get_format_from_asbd(&asbd) {
+                Some(fmt) => format!("{:?}", fmt),
+                None => continue,
             };
-            let format_str = format!("{:?}", format_enum);
 
             let rates =
                 if ranged_desc.mSampleRateRange.mMinimum == ranged_desc.mSampleRateRange.mMaximum {
@@ -389,6 +376,25 @@ pub fn get_device_capabilities(
     })
 }
 
+fn get_format_from_asbd(asbd: &AudioStreamBasicDescription) -> Option<CoreAudioSampleFormat> {
+    let is_float = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0;
+    let bit_depth = asbd.mBitsPerChannel;
+    if is_float {
+        if bit_depth == 32 {
+            Some(CoreAudioSampleFormat::F32)
+        } else {
+            None
+        }
+    } else {
+        match bit_depth {
+            16 => Some(CoreAudioSampleFormat::S16),
+            24 => Some(CoreAudioSampleFormat::S24),
+            32 => Some(CoreAudioSampleFormat::S32),
+            _ => None,
+        }
+    }
+}
+
 fn get_current_device_format(device_id: AudioDeviceID, input: bool) -> Res<String> {
     let scope = if input {
         kAudioObjectPropertyScopeInput
@@ -421,24 +427,10 @@ fn get_current_device_format(device_id: AudioDeviceID, input: bool) -> Res<Strin
         .into());
     }
 
-    let is_float = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0;
-    let bit_depth = asbd.mBitsPerChannel;
-
-    let format_enum = if is_float {
-        if bit_depth == 32 {
-            CoreAudioSampleFormat::F32
-        } else {
-            return Err(ConfigError::new("Unsupported float bit depth").into());
-        }
-    } else {
-        match bit_depth {
-            16 => CoreAudioSampleFormat::S16,
-            24 => CoreAudioSampleFormat::S24,
-            32 => CoreAudioSampleFormat::S32,
-            _ => return Err(ConfigError::new("Unsupported int bit depth").into()),
-        }
-    };
-    Ok(format!("{:?}", format_enum))
+    match get_format_from_asbd(&asbd) {
+        Some(fmt) => Ok(format!("{:?}", fmt)),
+        None => Err(ConfigError::new("Unsupported bit depth or format").into()),
+    }
 }
 
 fn device_supports_scope(device_id: u32, input: bool) -> bool {
