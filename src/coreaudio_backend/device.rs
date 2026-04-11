@@ -206,23 +206,19 @@ fn get_physical_capabilities(
                 None => continue,
             };
 
-            let rates = if ranged_desc.mSampleRateRange.mMinimum
-                == ranged_desc.mSampleRateRange.mMaximum
-            {
-                vec![ranged_desc.mSampleRateRange.mMinimum as usize]
-            } else {
-                vec![
-                    ranged_desc.mSampleRateRange.mMinimum as usize,
-                    ranged_desc.mSampleRateRange.mMaximum as usize,
-                ]
-            };
+            let rates =
+                if ranged_desc.mSampleRateRange.mMinimum == ranged_desc.mSampleRateRange.mMaximum {
+                    vec![ranged_desc.mSampleRateRange.mMinimum as usize]
+                } else {
+                    vec![
+                        ranged_desc.mSampleRateRange.mMinimum as usize,
+                        ranged_desc.mSampleRateRange.mMaximum as usize,
+                    ]
+                };
 
             let rate_map = capabilities_map.entry(channels).or_default();
             for rate in rates {
-                rate_map
-                    .entry(rate)
-                    .or_default()
-                    .push(format_str.clone());
+                rate_map.entry(rate).or_default().push(format_str.clone());
             }
         }
     }
@@ -255,11 +251,10 @@ fn get_fallback_capabilities(
     {
         let nbr_items =
             data_size / mem::size_of::<objc2_core_audio_types::AudioValueRange>() as u32;
-        let mut ranges =
-            vec![
-                unsafe { mem::zeroed::<objc2_core_audio_types::AudioValueRange>() };
-                nbr_items as usize
-            ];
+        let mut ranges = vec![
+            unsafe { mem::zeroed::<objc2_core_audio_types::AudioValueRange>() };
+            nbr_items as usize
+        ];
         if unsafe {
             AudioObjectGetPropertyData(
                 device_id,
@@ -271,8 +266,8 @@ fn get_fallback_capabilities(
             )
         } == 0
         {
-            let current_format = get_current_device_format(device_id, input)
-                .unwrap_or_else(|_| "F32".to_string());
+            let current_format =
+                get_current_device_format(device_id, input).unwrap_or_else(|_| "F32".to_string());
             let channels = get_device_channel_count(device_id, input);
 
             let rate_map = capabilities_map.entry(channels).or_default();
