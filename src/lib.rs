@@ -463,6 +463,25 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     (playbacktypes, capturetypes)
 }
 
+#[derive(Debug, PartialEq, Serialize)]
+pub struct SamplerateCapability {
+    pub samplerate: usize,
+    pub formats: Vec<String>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct ChannelCapability {
+    pub channels: usize,
+    pub samplerates: Vec<SamplerateCapability>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct AudioDeviceDescriptor {
+    pub name: String,
+    pub description: String,
+    pub capabilities: Vec<ChannelCapability>,
+}
+
 // Return a list of supported devices.
 // Returns two strings per device, the device name and a readable name.
 // Some backends do not make a diference between these, and return the same name twice.
@@ -477,5 +496,26 @@ pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
         "asio" => asio_backend::device::list_available_devices(),
         _ => Vec::new(),
+    }
+}
+
+pub fn list_available_devices_detailed(backend: &str, input: bool) -> Vec<AudioDeviceDescriptor> {
+    match backend.to_lowercase().as_str() {
+        #[cfg(target_os = "linux")]
+        "alsa" => alsa_backend::utils::list_available_devices_detailed(input),
+        #[cfg(target_os = "macos")]
+        "coreaudio" => coreaudio_backend::device::list_available_devices_detailed(input),
+        #[cfg(target_os = "windows")]
+        "wasapi" => wasapi_backend::device::list_available_devices_detailed(input),
+        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        "asio" => asio_backend::device::list_available_devices_detailed(input),
+        _ => list_available_devices(backend, input)
+            .into_iter()
+            .map(|(name, description)| AudioDeviceDescriptor {
+                name,
+                description,
+                capabilities: Vec::new(),
+            })
+            .collect(),
     }
 }

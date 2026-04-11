@@ -283,11 +283,14 @@ They accept a backend name as input, and return a list of names.
 - `GetAvailableCaptureDevices` : get a list of available capture devices. 
 - `GetAvailablePlaybackDevices` : get a list of available playback devices. 
 
-Each element in the returned list consists of one string for the device identifier,
+- `GetAvailableCaptureDevicesDetailed` : get a list of available capture devices with detailed hierarchical capabilities. 
+- `GetAvailablePlaybackDevicesDetailed` : get a list of available playback devices with detailed hierarchical capabilities. 
+
+Each element in the returned list for the non-detailed commands consists of one string for the device identifier,
 and one optional string for the name.
 Some backends use the name as identifier, they then return `null` as name.
 
-The currently supported backend names are `Alsa`, `CoreAudio` and `Wasapi`.
+The currently supported backend names are `Alsa`, `CoreAudio`, `Wasapi` and `Asio`.
 
 Example entries for Wasapi:
 ```
@@ -303,6 +306,25 @@ Example entries for Alsa:
   ["hw:Loopback,0,0", "Loopback, Loopback PCM, subdevice #0"],
   ["hw:Generic,0,0", "HD-Audio Generic, ALC236 Analog, subdevice #0"]
 ]
+```
+
+The detailed commands return a list of objects with the following structure:
+```json
+{
+  "name": "Device name",
+  "description": "Readable description",
+  "capabilities": [
+    {
+      "channels": 2,
+      "samplerates": [
+        {
+          "samplerate": 44100,
+          "formats": ["S16_LE", "S32_LE"]
+        }
+      ]
+    }
+  ]
+}
 ```
 
 ## Error responses

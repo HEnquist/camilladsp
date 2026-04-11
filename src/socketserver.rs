@@ -39,8 +39,8 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::utils::decibels::linear_to_db_inplace;
 use crate::{
-    CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus, StopReason,
-    list_available_devices, list_supported_devices,
+    AudioDeviceDescriptor, CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus,
+    StopReason, list_available_devices, list_available_devices_detailed, list_supported_devices,
 };
 use crate::{ControllerMessage, config};
 
@@ -152,6 +152,8 @@ enum WsCommand {
     GetSupportedDeviceTypes,
     GetAvailableCaptureDevices(String),
     GetAvailablePlaybackDevices(String),
+    GetAvailableCaptureDevicesDetailed(String),
+    GetAvailablePlaybackDevicesDetailed(String),
     GetProcessingLoad,
     GetResamplerLoad,
     Exit,
@@ -448,6 +450,14 @@ enum WsReply {
     GetAvailablePlaybackDevices {
         result: WsResult,
         value: Vec<(String, String)>,
+    },
+    GetAvailableCaptureDevicesDetailed {
+        result: WsResult,
+        value: Vec<AudioDeviceDescriptor>,
+    },
+    GetAvailablePlaybackDevicesDetailed {
+        result: WsResult,
+        value: Vec<AudioDeviceDescriptor>,
     },
     GetProcessingLoad {
         result: WsResult,
@@ -1619,6 +1629,20 @@ fn handle_command(
         WsCommand::GetAvailablePlaybackDevices(backend) => {
             let devs = list_available_devices(&backend, false);
             Some(WsReply::GetAvailablePlaybackDevices {
+                result: WsResult::Ok,
+                value: devs,
+            })
+        }
+        WsCommand::GetAvailableCaptureDevicesDetailed(backend) => {
+            let devs = list_available_devices_detailed(&backend, true);
+            Some(WsReply::GetAvailableCaptureDevicesDetailed {
+                result: WsResult::Ok,
+                value: devs,
+            })
+        }
+        WsCommand::GetAvailablePlaybackDevicesDetailed(backend) => {
+            let devs = list_available_devices_detailed(&backend, false);
+            Some(WsReply::GetAvailablePlaybackDevicesDetailed {
                 result: WsResult::Ok,
                 value: devs,
             })

@@ -108,6 +108,88 @@ pub fn list_device_names(input: bool) -> Vec<(String, String)> {
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
+pub fn list_available_devices_detailed(input: bool) -> Vec<crate::AudioDeviceDescriptor> {
+    let direction = if input {
+        wasapi::Direction::Capture
+    } else {
+        wasapi::Direction::Render
+    };
+    let _ = wasapi::initialize_mta();
+    let mut descriptors = Vec::new();
+
+    if let Ok(enumerator) = wasapi::DeviceEnumerator::new() {
+        if let Ok(collection) = enumerator.get_device_collection(&direction) {
+            if let Ok(count) = collection.get_nbr_devices() {
+                for n in 0..count {
+                    if let Ok(device) = collection.get_device_at_index(n) {
+                        if let Ok(name) = device.get_friendlyname() {
+                            let mut channel_capabilities = Vec::new();
+
+                            if let Ok(audio_client) = device.get_iaudioclient() {
+                                // Use the mix format to find the device's native channel count,
+                                // then probe from 1 up to at least 8 (7.1 surround).
+                                let max_channels = audio_client
+                                    .get_mixformat()
+                                    .map(|fmt| fmt.get_nchannels() as usize)
+                                    .unwrap_or(2);
+                                const COMMON_RATES: &[usize] = &[
+                                    8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200,
+                                    96000, 176400, 192000, 352800, 384000, 705600, 768000,
+                                ];
+                                for channels in 1..=max_channels {
+                                    let mut samplerates = Vec::new();
+                                    for &rate in COMMON_RATES {
+                                        let mut formats = Vec::new();
+                                        for fmt in &[
+                                            WasapiSampleFormat::S16,
+                                            WasapiSampleFormat::S24,
+                                            WasapiSampleFormat::S32,
+                                            WasapiSampleFormat::F32,
+                                        ] {
+                                            if get_supported_wave_format(
+                                                &audio_client,
+                                                fmt,
+                                                rate,
+                                                channels,
+                                                &wasapi::ShareMode::Shared,
+                                            )
+                                            .is_ok()
+                                            {
+                                                formats.push(format!("{:?}", fmt));
+                                            }
+                                        }
+
+                                        if !formats.is_empty() {
+                                            samplerates.push(crate::SamplerateCapability {
+                                                samplerate: rate,
+                                                formats,
+                                            });
+                                        }
+                                    }
+
+                                    if !samplerates.is_empty() {
+                                        channel_capabilities.push(crate::ChannelCapability {
+                                            channels: channels as usize,
+                                            samplerates,
+                                        });
+                                    }
+                                }
+                            }
+
+                            descriptors.push(crate::AudioDeviceDescriptor {
+                                name: name.clone(),
+                                description: name,
+                                capabilities: channel_capabilities,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    descriptors
+}
+
 fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<String>> {
     let mut names = Vec::new();
     let count = collection.get_nbr_devices()?;

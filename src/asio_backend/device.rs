@@ -1216,6 +1216,74 @@ pub fn list_available_devices() -> Vec<(String, String)> {
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
+pub fn list_available_devices_detailed(input: bool) -> Vec<crate::AudioDeviceDescriptor> {
+    let names = list_device_names();
+    let mut descriptors = Vec::new();
+
+    const COMMON_RATES: &[u32] = &[
+        8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000, 352800,
+        384000, 705600, 768000,
+    ];
+
+    for name in names {
+        let mut capabilities = Vec::new();
+
+        // Probing ASIO requires loading the driver
+        if load_driver_by_name(&name).is_ok() {
+            let mut supported_rates = Vec::new();
+            for &rate in COMMON_RATES {
+                if unsafe { can_sample_rate(rate as f64) } == 0 {
+                    supported_rates.push(rate);
+                }
+            }
+
+            // ASIO usually has one fixed format for all channels and rates in a driver
+            let mut formats = Vec::new();
+            if let Ok(fmt) = resolve_format(&None, true) {
+                formats.push(format!("{:?}", fmt));
+            }
+
+            // Get channel count for the requested direction
+            let mut input_channels: i32 = 0;
+            let mut output_channels: i32 = 0;
+            unsafe {
+                if asio_sys::ASIOGetChannels(&mut input_channels, &mut output_channels) == 0 {
+                    let channels = if input {
+                        input_channels as usize
+                    } else {
+                        output_channels as usize
+                    };
+
+                    let mut samplerates = Vec::new();
+                    for rate in supported_rates {
+                        samplerates.push(crate::SamplerateCapability {
+                            samplerate: rate as usize,
+                            formats: formats.clone(),
+                        });
+                    }
+
+                    if !samplerates.is_empty() {
+                        capabilities.push(crate::ChannelCapability {
+                            channels,
+                            samplerates,
+                        });
+                    }
+                }
+            }
+
+            teardown_asio_driver();
+        }
+
+        descriptors.push(crate::AudioDeviceDescriptor {
+            name: name.clone(),
+            description: name,
+            capabilities,
+        });
+    }
+
+    descriptors
+}
+
 // ---------------------------------------------------------------------------
 // Helper: number of capture frames accounting for resampler
 // ---------------------------------------------------------------------------
