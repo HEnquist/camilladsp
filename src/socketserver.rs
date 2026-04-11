@@ -162,7 +162,7 @@ enum WsCommand {
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
-pub enum WsResult {
+enum WsResult {
     Ok,
     ShutdownInProgressError,
     RateLimitExceededError,
