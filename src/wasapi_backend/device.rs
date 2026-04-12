@@ -195,6 +195,26 @@ pub fn get_device_capabilities(
                 formats.push("Shared:F32".to_string());
             }
 
+            // Exclusive mode supports multiple sample formats.
+            for fmt in &[
+                WasapiSampleFormat::S16,
+                WasapiSampleFormat::S24,
+                WasapiSampleFormat::S32,
+                WasapiSampleFormat::F32,
+            ] {
+                if get_supported_wave_format(
+                    &audio_client,
+                    fmt,
+                    rate,
+                    channels,
+                    &wasapi::ShareMode::Exclusive,
+                )
+                .is_ok()
+                {
+                    formats.push(format!("Exclusive:{:?}", fmt));
+                }
+            }
+
             if !formats.is_empty() {
                 samplerates.push(crate::SamplerateCapability {
                     samplerate: rate,
