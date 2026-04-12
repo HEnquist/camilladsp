@@ -181,23 +181,18 @@ pub fn get_device_capabilities(
         for &rate in crate::STANDARD_RATES {
             let rate = rate as usize;
             let mut formats = Vec::new();
-            for fmt in &[
-                WasapiSampleFormat::S16,
-                WasapiSampleFormat::S24,
-                WasapiSampleFormat::S32,
-                WasapiSampleFormat::F32,
-            ] {
-                if get_supported_wave_format(
-                    &audio_client,
-                    fmt,
-                    rate,
-                    channels,
-                    &wasapi::ShareMode::Shared,
-                )
-                .is_ok()
-                {
-                    formats.push(format!("{:?}", fmt));
-                }
+
+            // Shared mode always uses F32 internally, so only probe that format.
+            if get_supported_wave_format(
+                &audio_client,
+                &WasapiSampleFormat::F32,
+                rate,
+                channels,
+                &wasapi::ShareMode::Shared,
+            )
+            .is_ok()
+            {
+                formats.push("Shared:F32".to_string());
             }
 
             if !formats.is_empty() {
