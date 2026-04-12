@@ -1050,11 +1050,7 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
     debug!("ASIO current sample rate: {current_rate} Hz");
 
     // Log supported sample rates
-    const COMMON_RATES: &[u32] = &[
-        8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000, 352800,
-        384000, 705600, 768000,
-    ];
-    let supported: Vec<u32> = COMMON_RATES
+    let supported: Vec<u32> = crate::STANDARD_RATES
         .iter()
         .copied()
         .filter(|&r| unsafe { can_sample_rate(r as f64) } == 0)
@@ -1220,11 +1216,6 @@ pub fn get_device_capabilities(
     device_name: &str,
     input: bool,
 ) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
-    const COMMON_RATES: &[u32] = &[
-        8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000, 352800,
-        384000, 705600, 768000,
-    ];
-
     let names = list_device_names();
     if !names.contains(&device_name.to_string()) {
         return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
@@ -1243,7 +1234,7 @@ pub fn get_device_capabilities(
     }
 
     let mut supported_rates = Vec::new();
-    for &rate in COMMON_RATES {
+    for &rate in crate::STANDARD_RATES {
         if unsafe { can_sample_rate(rate as f64) } == 0 {
             supported_rates.push(rate);
         }

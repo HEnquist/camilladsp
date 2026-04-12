@@ -176,13 +176,10 @@ pub fn get_device_capabilities(
         .get_mixformat()
         .map(|fmt| fmt.get_nchannels() as usize)
         .unwrap_or(2);
-    const COMMON_RATES: &[usize] = &[
-        8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
-        352800, 384000, 705600, 768000,
-    ];
     for channels in 1..=max_channels {
         let mut samplerates = Vec::new();
-        for &rate in COMMON_RATES {
+        for &rate in crate::STANDARD_RATES {
+            let rate = rate as usize;
             let mut formats = Vec::new();
             for fmt in &[
                 WasapiSampleFormat::S16,

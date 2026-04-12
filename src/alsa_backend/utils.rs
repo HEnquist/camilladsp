@@ -32,10 +32,7 @@ use std::time::Duration;
 
 use crate::ProcessingParameters;
 
-const STANDARD_RATES: [u32; 17] = [
-    5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
-    352800, 384000, 705600, 768000,
-];
+use crate::STANDARD_RATES;
 
 #[derive(Debug)]
 pub enum SupportedValues {

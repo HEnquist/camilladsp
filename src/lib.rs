@@ -463,6 +463,14 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     (playbacktypes, capturetypes)
 }
 
+/// Curated list of standard audio sample rates used across all backends
+/// for capability probing. Backends should use this instead of defining
+/// their own local rate tables.
+pub const STANDARD_RATES: &[u32] = &[
+    5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
+    352800, 384000, 705600, 768000,
+];
+
 #[derive(Debug, PartialEq, Serialize)]
 pub struct SamplerateCapability {
     pub samplerate: usize,
