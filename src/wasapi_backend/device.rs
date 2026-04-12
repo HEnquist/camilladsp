@@ -187,7 +187,7 @@ pub fn get_device_capabilities(
             )
             .is_ok()
             {
-                formats.push("Shared:F32".to_string());
+                formats.push(format!("{:?}", WasapiSampleFormat::F32));
             }
 
             // Exclusive mode supports multiple sample formats.
@@ -206,10 +206,11 @@ pub fn get_device_capabilities(
                 )
                 .is_ok()
                 {
-                    formats.push(format!("Exclusive:{:?}", fmt));
+                    formats.push(format!("{:?}", fmt));
                 }
             }
-
+            formats.sort();
+            formats.dedup();
             if !formats.is_empty() {
                 samplerates.push(crate::SamplerateCapability {
                     samplerate: rate,
