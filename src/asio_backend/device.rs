@@ -1242,10 +1242,17 @@ pub fn get_device_capabilities(
 
     // ASIO usually has one fixed format for all channels and rates in a driver.
     // Use the correct direction so playback queries the output channel format.
-    let mut formats = Vec::new();
-    if let Ok(fmt) = resolve_format(&None, input) {
-        formats.push(format!("{:?}", fmt));
-    }
+    let direction_name = if input { "capture" } else { "playback" };
+    let fmt = match resolve_format(&None, input) {
+        Ok(fmt) => fmt,
+        Err(_) => {
+            teardown_asio_driver();
+            return Err(crate::DeviceError::Other(format!(
+                "Failed to detect {direction_name} sample format for ASIO device '{device_name}'"
+            )));
+        }
+    };
+    let formats = vec![format!("{:?}", fmt)];
 
     // Get channel count for the requested direction
     let mut input_channels: i32 = 0;
