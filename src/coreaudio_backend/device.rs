@@ -210,10 +210,16 @@ fn get_physical_capabilities(
                 if ranged_desc.mSampleRateRange.mMinimum == ranged_desc.mSampleRateRange.mMaximum {
                     vec![ranged_desc.mSampleRateRange.mMinimum as usize]
                 } else {
-                    vec![
-                        ranged_desc.mSampleRateRange.mMinimum as usize,
-                        ranged_desc.mSampleRateRange.mMaximum as usize,
-                    ]
+                    // Expand continuous ranges against the shared standard rate
+                    // table so clients see all usable discrete rates, not just
+                    // the endpoints.
+                    let min = ranged_desc.mSampleRateRange.mMinimum as usize;
+                    let max = ranged_desc.mSampleRateRange.mMaximum as usize;
+                    crate::STANDARD_RATES
+                        .iter()
+                        .filter(|&&r| (r as usize) >= min && (r as usize) <= max)
+                        .map(|&r| r as usize)
+                        .collect()
                 };
 
             let rate_map = capabilities_map.entry(channels).or_default();
@@ -271,10 +277,21 @@ fn get_fallback_capabilities(
 
             let rate_map = capabilities_map.entry(channels).or_default();
             for range in ranges {
-                rate_map
-                    .entry(range.mMinimum as usize)
-                    .or_default()
-                    .push(current_format.clone());
+                let min = range.mMinimum as usize;
+                let max = range.mMaximum as usize;
+                if min == max {
+                    rate_map
+                        .entry(min)
+                        .or_default()
+                        .push(current_format.clone());
+                } else {
+                    for &r in crate::STANDARD_RATES {
+                        let r = r as usize;
+                        if r >= min && r <= max {
+                            rate_map.entry(r).or_default().push(current_format.clone());
+                        }
+                    }
+                }
             }
         }
     }
