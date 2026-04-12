@@ -53,14 +53,13 @@ use objc2_core_audio::{
     AudioDeviceID, AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize,
     AudioObjectPropertyAddress, AudioObjectSetPropertyData, kAudioDevicePropertyClockSource,
     kAudioDevicePropertyClockSourceNameForIDCFString, kAudioDevicePropertyClockSources,
-    kAudioDevicePropertyStereoPan, kAudioDevicePropertyStreamConfiguration, kAudioHardwareNoError,
+    kAudioDevicePropertyStereoPan, kAudioDevicePropertyStreamConfiguration,
     kAudioObjectPropertyElementMain, kAudioObjectPropertyElementWildcard,
     kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput,
     kAudioObjectPropertyScopeOutput,
 };
 use objc2_core_audio_types::{
-    AudioBuffer, AudioBufferList, AudioStreamBasicDescription, AudioValueTranslation,
-    kAudioFormatFlagIsFloat,
+    AudioBufferList, AudioStreamBasicDescription, AudioValueTranslation, kAudioFormatFlagIsFloat,
 };
 use objc2_core_foundation::CFString;
 
@@ -189,13 +188,7 @@ pub fn list_available_devices(input: bool) -> Vec<(String, String)> {
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
-fn get_physical_capabilities(
-    device_id: AudioDeviceID,
-    capabilities_map: &mut std::collections::HashMap<
-        usize,
-        std::collections::HashMap<usize, Vec<String>>,
-    >,
-) {
+fn get_physical_capabilities(device_id: AudioDeviceID, capabilities_map: &mut CapabilitiesMap) {
     if let Ok(supported_formats) = get_supported_physical_stream_formats(device_id) {
         for ranged_desc in supported_formats {
             let asbd = ranged_desc.mFormat;
@@ -233,10 +226,7 @@ fn get_physical_capabilities(
 fn get_fallback_capabilities(
     device_id: AudioDeviceID,
     input: bool,
-    capabilities_map: &mut std::collections::HashMap<
-        usize,
-        std::collections::HashMap<usize, Vec<String>>,
-    >,
+    capabilities_map: &mut CapabilitiesMap,
 ) {
     let property_address = AudioObjectPropertyAddress {
         mSelector: objc2_core_audio::kAudioDevicePropertyAvailableNominalSampleRates,
@@ -362,10 +352,7 @@ pub fn get_device_capabilities(
         return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
     }
 
-    let mut capabilities_map: std::collections::HashMap<
-        usize,
-        std::collections::HashMap<usize, Vec<String>>,
-    > = std::collections::HashMap::new();
+    let mut capabilities_map: CapabilitiesMap = std::collections::HashMap::new();
 
     get_physical_capabilities(device_id, &mut capabilities_map);
 
@@ -373,34 +360,10 @@ pub fn get_device_capabilities(
         get_fallback_capabilities(device_id, input, &mut capabilities_map);
     }
 
-    let mut capabilities: Vec<crate::ChannelCapability> = capabilities_map
-        .into_iter()
-        .map(|(channels, rate_map)| {
-            let mut samplerates: Vec<crate::SamplerateCapability> = rate_map
-                .into_iter()
-                .map(|(samplerate, mut formats)| {
-                    formats.sort_unstable();
-                    formats.dedup();
-                    crate::SamplerateCapability {
-                        samplerate,
-                        formats,
-                    }
-                })
-                .collect();
-            samplerates.sort_unstable_by_key(|s| s.samplerate);
-            crate::ChannelCapability {
-                channels,
-                samplerates,
-            }
-        })
-        .collect();
-
-    capabilities.sort_unstable_by_key(|c| c.channels);
-
     Ok(crate::AudioDeviceDescriptor {
         name: device_name.to_string(),
         description: device_name.to_string(),
-        capabilities,
+        capabilities: capabilities_from_map(capabilities_map),
     })
 }
 
@@ -462,34 +425,37 @@ fn get_current_device_format(device_id: AudioDeviceID, input: bool) -> Res<Strin
 }
 
 fn device_supports_scope(device_id: u32, input: bool) -> bool {
-    let scope = if input {
-        kAudioObjectPropertyScopeInput
-    } else {
-        kAudioObjectPropertyScopeOutput
-    };
-    let property_address = AudioObjectPropertyAddress {
-        mSelector: kAudioDevicePropertyStreamConfiguration,
-        mScope: scope,
-        mElement: kAudioObjectPropertyElementWildcard,
-    };
+    get_device_channel_count(device_id, input) > 0
+}
 
-    let data_size = 0u32;
-    let status = unsafe {
-        AudioObjectGetPropertyDataSize(
-            device_id,
-            NonNull::from(&property_address),
-            0,
-            null(),
-            NonNull::from(&data_size),
-        )
-    };
-    if status != kAudioHardwareNoError {
-        return false;
-    }
-    // This gives the length of the buffer list, there is no need to read the actual list.
-    let nbr_buffers =
-        (data_size - mem::size_of::<u32>() as u32) / mem::size_of::<AudioBuffer>() as u32;
-    nbr_buffers > 0
+type CapabilitiesMap =
+    std::collections::HashMap<usize, std::collections::HashMap<usize, Vec<String>>>;
+
+/// Convert a capabilities map into a sorted Vec<ChannelCapability>.
+fn capabilities_from_map(map: CapabilitiesMap) -> Vec<crate::ChannelCapability> {
+    let mut capabilities: Vec<crate::ChannelCapability> = map
+        .into_iter()
+        .map(|(channels, rate_map)| {
+            let mut samplerates: Vec<crate::SamplerateCapability> = rate_map
+                .into_iter()
+                .map(|(samplerate, mut formats)| {
+                    formats.sort_unstable();
+                    formats.dedup();
+                    crate::SamplerateCapability {
+                        samplerate,
+                        formats,
+                    }
+                })
+                .collect();
+            samplerates.sort_unstable_by_key(|s| s.samplerate);
+            crate::ChannelCapability {
+                channels,
+                samplerates,
+            }
+        })
+        .collect();
+    capabilities.sort_unstable_by_key(|c| c.channels);
+    capabilities
 }
 
 fn open_coreaudio_playback(
