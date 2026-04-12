@@ -1223,14 +1223,10 @@ pub fn get_device_capabilities(
 
     let mut capabilities = Vec::new();
 
-    // Probing ASIO requires loading the driver
+    // Probing ASIO requires loading the driver.
+    // ConfigError does not carry typed error codes, so fall back to Other.
     if let Err(e) = load_driver_by_name(device_name) {
-        let msg = format!("{:?}", e);
-        if msg.contains("ASE_NotPresent") || msg.contains("ASE_HWMalfunction") {
-            return Err(crate::DeviceError::DeviceBusy(device_name.to_string()));
-        } else {
-            return Err(crate::DeviceError::Other(msg));
-        }
+        return Err(crate::DeviceError::Other(format!("{e}")));
     }
 
     let mut supported_rates = Vec::new();

@@ -172,14 +172,14 @@ pub fn get_device_capabilities(
     let pcm = match alsa::PCM::new(device_name, direction, false) {
         Ok(p) => p,
         Err(e) => {
-            let msg = format!("{}", e);
-            if msg.contains("Device or resource busy") {
-                return Err(crate::DeviceError::DeviceBusy(device_name.to_string()));
-            } else if msg.contains("No such file or directory") || msg.contains("No such device") {
-                return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
-            } else {
-                return Err(crate::DeviceError::Other(msg));
-            }
+            let errno = Errno::from_raw(e.errno());
+            return Err(match errno {
+                Errno::EBUSY => crate::DeviceError::DeviceBusy(device_name.to_string()),
+                Errno::ENOENT | Errno::ENODEV => {
+                    crate::DeviceError::DeviceNotFound(device_name.to_string())
+                }
+                _ => crate::DeviceError::Other(format!("{e}")),
+            });
         }
     };
 

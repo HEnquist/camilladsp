@@ -160,12 +160,7 @@ pub fn get_device_capabilities(
     let audio_client = match device.get_iaudioclient() {
         Ok(c) => c,
         Err(e) => {
-            let msg = format!("{}", e);
-            if msg.contains("AUDCLNT_E_DEVICE_IN_USE") {
-                return Err(crate::DeviceError::DeviceBusy(device_name.to_string()));
-            } else {
-                return Err(crate::DeviceError::Other(msg));
-            }
+            return Err(crate::DeviceError::Other(format!("{e}")));
         }
     };
 
