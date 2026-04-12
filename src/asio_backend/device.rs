@@ -1240,9 +1240,10 @@ pub fn get_device_capabilities(
         }
     }
 
-    // ASIO usually has one fixed format for all channels and rates in a driver
+    // ASIO usually has one fixed format for all channels and rates in a driver.
+    // Use the correct direction so playback queries the output channel format.
     let mut formats = Vec::new();
-    if let Ok(fmt) = resolve_format(&None, true) {
+    if let Ok(fmt) = resolve_format(&None, input) {
         formats.push(format!("{:?}", fmt));
     }
 
