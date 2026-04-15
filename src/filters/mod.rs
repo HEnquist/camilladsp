@@ -21,6 +21,7 @@ pub mod diffeq;
 pub mod dither;
 pub mod fftconv;
 pub mod limiter;
+pub mod lookahead_limiter;
 pub mod loudness;
 
 use crate::config;
@@ -230,6 +231,9 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
             biquadcombo::validate_config(fs, parameters)
         }
         config::Filter::Limiter { parameters, .. } => limiter::validate_config(parameters),
+        config::Filter::LookaheadLimiter { parameters, .. } => {
+            lookahead_limiter::validate_config(parameters)
+        }
     }
 }
 

@@ -14,8 +14,6 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::ProcessingParameters;
-use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters;
@@ -23,6 +21,8 @@ use crate::filters::Filter;
 use crate::mixer;
 use crate::processors;
 use crate::processors::Processor;
+use crate::ProcessingParameters;
+use crate::Res;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -95,6 +95,14 @@ impl FilterGroup {
                 }
                 config::Filter::Limiter { parameters, .. } => {
                     Box::new(filters::limiter::Limiter::from_config(name, parameters))
+                }
+                config::Filter::LookaheadLimiter { parameters, .. } => {
+                    Box::new(filters::lookahead_limiter::LookaheadLimiter::from_config(
+                        name,
+                        parameters,
+                        sample_freq,
+                        waveform_length,
+                    ))
                 }
             };
             filters.push(filter);

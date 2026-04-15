@@ -1010,6 +1010,11 @@ pub enum Filter {
         description: Option<String>,
         parameters: LimiterParameters,
     },
+    LookaheadLimiter {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: LookaheadLimiterParameters,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1603,6 +1608,22 @@ pub struct LimiterParameters {
 impl LimiterParameters {
     pub fn soft_clip(&self) -> bool {
         self.soft_clip.unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LookaheadLimiterParameters {
+    #[serde(default)]
+    pub limit: PrcFmt,
+    pub attack: PrcFmt,
+    pub release: PrcFmt,
+    pub unit: TimeUnit,
+}
+
+impl LookaheadLimiterParameters {
+    pub fn unit(&self) -> TimeUnit {
+        self.unit
     }
 }
 
