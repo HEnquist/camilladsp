@@ -14,8 +14,8 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
 use crate::config::TimeUnit;
+use crate::PrcFmt;
 
 /// Convert a time value with a given unit to a number of samples (floating point).
 /// The result is exact, not rounded.
@@ -25,5 +25,15 @@ pub fn time_to_samples(value: PrcFmt, unit: TimeUnit, samplerate: usize) -> PrcF
         TimeUnit::Milliseconds => value / 1000.0 * samplerate as PrcFmt,
         TimeUnit::Millimetres => value / 1000.0 * samplerate as PrcFmt / 343.0,
         TimeUnit::Samples => value,
+    }
+}
+
+/// Convert a time value with a given unit to seconds.
+pub fn time_to_seconds(value: PrcFmt, unit: TimeUnit, samplerate: usize) -> PrcFmt {
+    match unit {
+        TimeUnit::Microseconds => value / 1_000_000.0,
+        TimeUnit::Milliseconds => value / 1000.0,
+        TimeUnit::Millimetres => value / 1000.0 / 343.0,
+        TimeUnit::Samples => value / samplerate as PrcFmt,
     }
 }
