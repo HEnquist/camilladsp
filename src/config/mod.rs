@@ -1618,13 +1618,12 @@ pub struct LookaheadLimiterParameters {
     pub limit: PrcFmt,
     pub attack: PrcFmt,
     pub release: PrcFmt,
-    #[serde(default)]
-    pub unit: Option<TimeUnit>,
+    pub unit: TimeUnit,
 }
 
 impl LookaheadLimiterParameters {
     pub fn unit(&self) -> TimeUnit {
-        self.unit.unwrap_or(TimeUnit::Milliseconds)
+        self.unit
     }
 }
 
