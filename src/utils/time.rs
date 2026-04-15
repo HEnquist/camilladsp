@@ -27,8 +27,3 @@ pub fn time_to_samples(value: PrcFmt, unit: TimeUnit, samplerate: usize) -> PrcF
         TimeUnit::Samples => value,
     }
 }
-
-/// Convert a time value with a given unit to a number of samples, rounded up to the nearest integer.
-pub fn time_to_samples_ceil(value: PrcFmt, unit: TimeUnit, samplerate: usize) -> usize {
-    time_to_samples(value, unit, samplerate).ceil() as usize
-}

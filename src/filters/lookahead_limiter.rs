@@ -1,138 +1,144 @@
+// CamillaDSP - A flexible tool for processing audio
+// Copyright (C) 2026 Henrik Enquist
+//
+// This file is part of CamillaDSP.
+//
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
+//
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/en-US/MPL/2.0/>.
+
 use crate::PrcFmt;
 use crate::Res;
 use crate::config;
 use crate::filters::Filter;
-use crate::utils::time::time_to_samples_ceil;
+use crate::utils::decibels::db_to_linear;
+use crate::utils::time::time_to_samples;
+use std::collections::VecDeque;
 
-/// A lookahead limiter that applies gain reduction with lookahead attack and exponential release.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct LookaheadLimiter {
     pub name: String,
-    /// Linear gain limit (amplitude)
     pub limit: PrcFmt,
-    /// Attack time in config units (for display)
-    pub attack: PrcFmt,
-    /// Release time in config units (for display)
-    pub release: PrcFmt,
+    pub attack: usize,
+    pub release: usize,
     pub samplerate: usize,
-    /// Lookahead length in samples (N)
-    lookahead_samples: usize,
-    /// Release coefficient alpha_r = exp(-1/(T_r * fs))
-    alpha_r: PrcFmt,
-    /// Peak gain state carried across buffers (step 2)
-    peak_gain: PrcFmt,
-    /// Steps counter for linear attack (step 2)
-    steps: usize,
-    /// Previous gain state for exponential release (step 3)
-    g_prev: PrcFmt,
+    alpha: PrcFmt,
+    epsilon: PrcFmt,
+    lookahead_buffer: VecDeque<PrcFmt>,
+    release_gain: PrcFmt,
 }
 
 impl LookaheadLimiter {
-    /// Creates a LookaheadLimiter from a config struct
     pub fn from_config(
         name: &str,
         config: config::LookaheadLimiterParameters,
         samplerate: usize,
     ) -> Self {
-        let limit = (10.0 as PrcFmt).powf(config.limit / 20.0);
+        let limit = db_to_linear(config.limit);
         let unit = config.unit();
-        let lookahead_samples = time_to_samples_ceil(config.attack, unit, samplerate);
-        let release_samples = time_to_samples_ceil(config.release, unit, samplerate);
+        let attack = time_to_samples(config.attack, unit, samplerate) as usize;
+        let release = time_to_samples(config.release, unit, samplerate) as usize;
+        let epsilon = 10f64.powf(-80.0 / 20.0); // -80 dB
+        let alpha = epsilon.powf(1.0 / release as PrcFmt);
 
-        // Compute release coefficient alpha_r = exp(-1 / (T_r * fs))
-        // where T_r = release time in seconds.
-        let release_time_seconds =
-            time_to_samples(config.release, unit, samplerate) / samplerate as PrcFmt;
-        let alpha_r = if release_time_seconds > 0.0 {
-            (-1.0 / (release_time_seconds * samplerate as PrcFmt)).exp()
-        } else {
-            // If release time is zero, instant release (alpha_r = 0)
-            0.0
-        };
+        if attack > samplerate {
+            panic!(
+                "Lookahead limiter attack time exceeds 1 second ({} samples > {} samplerate)",
+                attack, samplerate
+            );
+        }
 
         debug!(
-            "Creating lookahead limiter '{}', limit dB: {}, linear: {}, attack/lookahead: {} ms ({} samples), release: {} ms ({} samples), alpha_r: {}",
-            name,
-            config.limit,
-            limit,
-            config.attack,
-            lookahead_samples,
-            config.release,
-            release_samples,
-            alpha_r
+            "Creating lookahead limiter '{}', limit dB: {}, linear: {}, attack/lookahead: {} samples, release: {} samples, alpha: {}",
+            name, config.limit, limit, attack, release, alpha
         );
 
         LookaheadLimiter {
             name: name.to_string(),
             limit,
-            attack: config.attack,
-            release: config.release,
+            attack,
+            release,
             samplerate,
-            lookahead_samples,
-            alpha_r,
-            peak_gain: 1.0,
-            steps: lookahead_samples + 1,
-            g_prev: 1.0,
+            alpha,
+            epsilon,
+            lookahead_buffer: vec![0.0; samplerate].into(),
+            release_gain: 1.0,
         }
     }
 
-    /// Process the waveform with lookahead limiting.
-    fn apply_lookahead_limit(&mut self, input: &mut [PrcFmt]) {
+    fn apply_lookahead_limiter(&mut self, input: &mut [PrcFmt]) {
         let n = input.len();
         if n == 0 {
             return;
         }
 
-        let limit = self.limit;
-        let N = self.lookahead_samples;
-        let alpha_r = self.alpha_r;
-
-        // step 1: target gain
-        let mut g0 = vec![1.0 as PrcFmt; n];
-        for i in 0..n {
-            let abs_x = input[i].abs();
-            if abs_x > limit {
-                g0[i] = limit / abs_x;
-            }
-        }
-
-        // step 2: backward linear attack (carry peak state across buffers)
-        let mut g1 = g0.clone();
-        let mut peak_gain = self.peak_gain;
-        let mut steps = self.steps;
-
-        for i in (0..n).rev() {
-            if g0[i] < 1.0 {
-                peak_gain = g0[i];
-                steps = 0;
+        let get_sample = |i: usize, buf: &VecDeque<PrcFmt>, inp: &[PrcFmt]| -> PrcFmt {
+            if i < self.attack {
+                buf[self.samplerate - self.attack + i]
             } else {
-                steps += 1;
+                inp[i - self.attack]
             }
-            if steps <= N {
-                g1[i] = g1[i].min(1.0 - (1.0 - peak_gain) * steps as PrcFmt / N as PrcFmt);
+        };
+
+        let mut gain_buffer = vec![1.0 as PrcFmt; self.attack + n];
+
+        // Compute gain reduction curve like a simple peak limiter
+        for i in 0..(self.attack + n) {
+            let sample_abs = get_sample(i, &self.lookahead_buffer, input).abs();
+            if sample_abs > self.limit {
+                gain_buffer[i] = self.limit / sample_abs;
             }
         }
 
-        // store state for next buffer
-        self.peak_gain = peak_gain;
-        self.steps = steps;
-
-        // step 3: forward exponential release (carry g_prev across buffers)
-        let mut g2 = g1.clone();
-        let mut prev = self.g_prev;
-
-        for i in 0..n {
-            if g1[i] > prev {
-                g2[i] = g1[i].min(1.0 - (1.0 - prev) * alpha_r);
+        // Backward pass turning peaks into linear ramps.
+        let mut attack_peak = 1.0;
+        let mut samples_since_attack_peak = self.attack;
+        for i in (0..(self.attack + n)).rev() {
+            let mut gain = 1.0;
+            if samples_since_attack_peak <= self.attack {
+                let ramp = (self.attack - samples_since_attack_peak) as PrcFmt
+                    / (self.attack + 1) as PrcFmt;
+                gain = 1.0 - (ramp * attack_peak);
+                samples_since_attack_peak += 1;
             }
-            prev = g2[i];
+            if gain_buffer[i] < gain {
+                gain = gain_buffer[i];
+                attack_peak = gain_buffer[i];
+                samples_since_attack_peak = 0;
+            }
+            gain_buffer[i] = gain;
         }
 
-        self.g_prev = prev;
-
-        // apply gain
+        // Forward pass turning peaks into exponential decay.
         for i in 0..n {
-            input[i] *= g2[i];
+            self.release_gain = 1.0 - (1.0 - self.release_gain) * self.alpha;
+            if self.release_gain > 1.0 - self.epsilon {
+                self.release_gain = 1.0
+            }
+            if gain_buffer[i] < self.release_gain {
+                self.release_gain = gain_buffer[i];
+            } else {
+                gain_buffer[i] = self.release_gain;
+            }
+        }
+
+        let mut buf: Vec<PrcFmt> = vec![0.0; n];
+        for i in 0..n {
+            buf[i] = get_sample(i, &self.lookahead_buffer, input);
+        }
+        self.lookahead_buffer.drain(0..n);
+        for sample in &mut *input {
+            self.lookahead_buffer.push_back(*sample);
+        }
+        for i in 0..n {
+            input[i] = buf[i] * gain_buffer[i];
         }
     }
 }
@@ -142,9 +148,8 @@ impl Filter for LookaheadLimiter {
         &self.name
     }
 
-    /// Apply the lookahead limiter to a waveform, modifying it in-place.
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        self.apply_lookahead_limit(waveform);
+        self.apply_lookahead_limiter(waveform);
         Ok(())
     }
 
@@ -153,46 +158,29 @@ impl Filter for LookaheadLimiter {
             parameters: config, ..
         } = config
         {
-            let limit = (10.0 as PrcFmt).powf(config.limit / 20.0);
-            let unit = config.unit();
-            let lookahead_samples = time_to_samples_ceil(config.attack, unit, self.samplerate);
-            let release_samples = time_to_samples_ceil(config.release, unit, self.samplerate);
-
-            // recompute alpha_r
-            let release_time_seconds =
-                time_to_samples(config.release, unit, self.samplerate) / self.samplerate as PrcFmt;
-            let alpha_r = if release_time_seconds > 0.0 {
-                (-1.0 / (release_time_seconds * self.samplerate as PrcFmt)).exp()
-            } else {
-                0.0
-            };
-
-            self.limit = limit;
-            self.attack = config.attack;
-            self.release = config.release;
-            self.lookahead_samples = lookahead_samples;
-            self.alpha_r = alpha_r;
-            // Note: we keep peak_gain, steps, g_prev unchanged across parameter updates.
+            let new_attack =
+                time_to_samples(config.attack, config.unit(), self.samplerate) as usize;
+            if new_attack > self.samplerate {
+                panic!(
+                    "Lookahead limiter attack time exceeds 1 second ({} samples > {} samplerate)",
+                    new_attack, self.samplerate
+                );
+            }
+            self.limit = db_to_linear(config.limit);
+            self.attack = new_attack;
+            self.release = time_to_samples(config.release, config.unit(), self.samplerate) as usize;
+            self.alpha = self.epsilon.powf(1.0 / self.release as PrcFmt);
 
             debug!(
-                "Updated lookahead limiter '{}', limit dB: {}, linear: {}, attack/lookahead: {} units ({} samples), release: {} units ({} samples), alpha_r: {}",
-                self.name,
-                config.limit,
-                limit,
-                config.attack,
-                lookahead_samples,
-                config.release,
-                release_samples,
-                alpha_r
+                "Updated lookahead limiter '{}', limit dB: {}, linear: {}, attack/lookahead: {} samples, release: {} samples, alpha: {}",
+                self.name, config.limit, self.limit, self.attack, self.release, self.alpha
             );
         } else {
-            // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
         }
     }
 }
 
-/// Validate the lookahead limiter config
 pub fn validate_config(config: &config::LookaheadLimiterParameters) -> Res<()> {
     if config.attack <= 0.0 {
         let msg = "Attack time must be positive.";
@@ -202,56 +190,138 @@ pub fn validate_config(config: &config::LookaheadLimiterParameters) -> Res<()> {
         let msg = "Release time must be non-negative.";
         return Err(config::ConfigError::new(msg).into());
     }
+    let unit = config.unit();
+    match unit {
+        config::TimeUnit::Microseconds => {
+            if config.attack > 1_000_000.0 {
+                let msg = "Attack time must not exceed 1 second.";
+                return Err(config::ConfigError::new(msg).into());
+            }
+        }
+        config::TimeUnit::Milliseconds => {
+            if config.attack > 1000.0 {
+                let msg = "Attack time must not exceed 1 second.";
+                return Err(config::ConfigError::new(msg).into());
+            }
+        }
+        config::TimeUnit::Millimetres => {
+            let seconds = config.attack / 1000.0 / 343.0;
+            if seconds > 1.0 {
+                let msg = "Attack time must not exceed 1 second.";
+                return Err(config::ConfigError::new(msg).into());
+            }
+        }
+        config::TimeUnit::Samples => {}
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::TimeUnit;
 
-    // Helper function to create a test limiter
-    fn create_test_limiter(
-        limit_db: PrcFmt,
-        attack_ms: PrcFmt,
-        release_ms: PrcFmt,
-        samplerate: usize,
-    ) -> LookaheadLimiter {
-        let config = config::LookaheadLimiterParameters {
-            limit: limit_db,
-            attack: attack_ms,
-            release: release_ms,
-            unit: None,
-        };
-        LookaheadLimiter::from_config("test", config, samplerate)
+    fn assert_close(left: &[PrcFmt], right: &[PrcFmt], epsilon: PrcFmt) {
+        assert_eq!(left.len(), right.len());
+        for (i, (&l, &r)) in left.iter().zip(right.iter()).enumerate() {
+            if (l - r).abs() > epsilon {
+                panic!(
+                    "Mismatch at index {i}: left={l}, right={r}, diff={}\nleft:   {left:?}\nright: {right:?}",
+                    l - r
+                );
+            }
+        }
     }
 
     #[test]
     fn test_no_limiting_below_threshold() {
-        let mut limiter = create_test_limiter(0.0, 10.0, 100.0, 48000);
+        let config = config::LookaheadLimiterParameters {
+            limit: 0.0,
+            unit: Some(TimeUnit::Samples),
+            attack: 4.0,
+            release: 4.0,
+        };
+        let mut limiter = LookaheadLimiter::from_config("test", config, 48000);
         let mut input = vec![0.5, 0.5, 0.5];
         let expected = vec![0.5, 0.5, 0.5];
-
-        limiter.apply_lookahead_limit(&mut input);
-        assert_eq!(input, expected);
+        limiter.apply_lookahead_limiter(&mut input);
+        assert_close(&input, &expected, 1e-9);
     }
 
     #[test]
-    fn test_hard_clip_above_threshold() {
-        // Input above limit should be limited to limit (1.0)
-        let mut limiter = create_test_limiter(0.0, 10.0, 100.0, 48000);
-        let mut input = vec![2.0, 2.0, 2.0];
-        // Expect gain reduction to 1.0
-        limiter.apply_lookahead_limit(&mut input);
-        assert!(input[0].abs() <= 1.0);
+    fn test_limiter_basic() {
+        let config = config::LookaheadLimiterParameters {
+            limit: 0.0,
+            unit: Some(TimeUnit::Samples),
+            attack: 4.0,
+            release: 4.0,
+        };
+        let mut limiter = LookaheadLimiter::from_config("test", config, 48000);
+        let mut input = vec![
+            1.0, 1.0, 1.0, 1.0, 1.0, 2.0, -2.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+            1.0, 1.0,
+        ];
+        let expected = vec![
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.9, 0.8, 0.7, 0.6, 1.0, -1.0, 0.7, 0.6, 1.0, 0.95, 0.995,
+            0.9995, 1.0, 1.0,
+        ];
+        limiter.apply_lookahead_limiter(&mut input);
+        assert_close(&input, &expected, 1e-6);
+    }
+
+    /// Zero attack and release should behave like a peak limiter
+    #[test]
+    fn test_limiter_peak() {
+        let config = config::LookaheadLimiterParameters {
+            limit: 0.0,
+            unit: Some(TimeUnit::Samples),
+            attack: 0.0,
+            release: 0.0,
+        };
+        let mut limiter = LookaheadLimiter::from_config("test", config, 48000);
+        let mut input = vec![
+            1.0, 1.0, 1.0, 1.0, 2.0, -2.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        ];
+        let expected = vec![
+            1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        ];
+        limiter.apply_lookahead_limiter(&mut input);
+        assert_close(&input, &expected, 1e-6);
     }
 
     #[test]
-    fn test_limit_conversion_db_to_linear() {
-        // dB to linear conversion still works
-        let limiter = create_test_limiter(-6.0, 10.0, 100.0, 48000);
-        assert!((limiter.limit - 0.5).abs() < 0.01);
+    fn test_limiter_zero_release() {
+        let config = config::LookaheadLimiterParameters {
+            limit: 0.0,
+            unit: Some(TimeUnit::Samples),
+            attack: 4.0,
+            release: 0.0,
+        };
+        let mut limiter = LookaheadLimiter::from_config("test", config, 48000);
+        let mut input = vec![2.0, 2.0, 2.0, 2.0, 2.0];
+        limiter.apply_lookahead_limiter(&mut input);
+        for &val in &input {
+            assert!(val.abs() <= 1.0 + 1e-6);
+        }
+    }
 
-        let limiter = create_test_limiter(6.0, 10.0, 100.0, 48000);
-        assert!((limiter.limit - 2.0).abs() < 0.01);
+    #[test]
+    fn test_limiter_state_persistence() {
+        let config = config::LookaheadLimiterParameters {
+            limit: 0.0,
+            unit: Some(TimeUnit::Samples),
+            attack: 4.0,
+            release: 4.0,
+        };
+        let mut limiter = LookaheadLimiter::from_config("test", config, 48000);
+        let mut buf1 = vec![1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0];
+        let expected1 = vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.9, 0.8, 0.7, 0.6, 1.0];
+        limiter.apply_lookahead_limiter(&mut buf1);
+        assert_close(&buf1, &expected1, 1e-6);
+
+        let mut buf2 = vec![1.0, 1.0, 1.0, 1.0];
+        let expected2 = vec![0.95, 0.995, 0.9995, 1.0];
+        limiter.apply_lookahead_limiter(&mut buf2);
+        assert_close(&buf2, &expected2, 1e-6);
     }
 }
