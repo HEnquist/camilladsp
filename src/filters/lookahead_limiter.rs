@@ -32,7 +32,6 @@ pub struct LookaheadLimiter {
     epsilon: PrcFmt,
     lookahead_buffer: VecDeque<PrcFmt>,
     release_gain: PrcFmt,
-    gain_buffer: Vec<PrcFmt>,
     output_buffer: Vec<PrcFmt>,
 }
 
@@ -77,7 +76,6 @@ impl LookaheadLimiter {
             epsilon,
             lookahead_buffer: vec![0.0; samplerate].into(),
             release_gain: 1.0,
-            gain_buffer: vec![1.0 as PrcFmt; attack + chunksize],
             output_buffer: vec![0.0 as PrcFmt; chunksize],
         }
     }
@@ -88,41 +86,40 @@ impl LookaheadLimiter {
             return;
         }
 
-        let get_sample = |i: usize, buf: &VecDeque<PrcFmt>, inp: &[PrcFmt]| -> PrcFmt {
-            if i < self.attack {
-                buf[self.samplerate - self.attack + i]
-            } else {
-                inp[i - self.attack]
-            }
-        };
-
-        // Compute gain reduction curve like a simple peak limiter
-        for i in 0..(self.attack + n) {
-            let sample_abs = get_sample(i, &self.lookahead_buffer, input).abs();
-            if sample_abs > self.limit {
-                self.gain_buffer[i] = self.limit / sample_abs;
-            } else {
-                self.gain_buffer[i] = 1.0;
-            }
-        }
-
         // Backward pass turning peaks into linear ramps.
         let mut attack_peak = 1.0;
         let mut samples_since_attack_peak = self.attack;
         for i in (0..(self.attack + n)).rev() {
             let mut gain = 1.0;
+
+            // Get sample amplitude
+            let amplitude = (if i < self.attack {
+                self.lookahead_buffer[self.samplerate - self.attack + i]
+            } else {
+                input[i - self.attack]
+            })
+            .abs();
+
+            // Compute gain envelope like simple limiter
+            if amplitude > self.limit {
+                self.output_buffer[i] = self.limit / amplitude;
+            } else {
+                self.output_buffer[i] = 1.0;
+            }
+
+            // Compute ramp
             if samples_since_attack_peak <= self.attack {
                 let ramp = (self.attack - samples_since_attack_peak) as PrcFmt
                     / (self.attack + 1) as PrcFmt;
                 gain = 1.0 - (ramp * attack_peak);
                 samples_since_attack_peak += 1;
             }
-            if self.gain_buffer[i] < gain {
-                gain = self.gain_buffer[i];
-                attack_peak = self.gain_buffer[i];
+            if self.output_buffer[i] < gain {
+                gain = self.output_buffer[i];
+                attack_peak = self.output_buffer[i];
                 samples_since_attack_peak = 0;
             }
-            self.gain_buffer[i] = gain;
+            self.output_buffer[i] = gain;
         }
 
         // Forward pass turning peaks into exponential decay.
@@ -131,23 +128,31 @@ impl LookaheadLimiter {
             if self.release_gain > 1.0 - self.epsilon {
                 self.release_gain = 1.0
             }
-            if self.gain_buffer[i] < self.release_gain {
-                self.release_gain = self.gain_buffer[i];
+            if self.output_buffer[i] < self.release_gain {
+                self.release_gain = self.output_buffer[i];
             } else {
-                self.gain_buffer[i] = self.release_gain;
+                self.output_buffer[i] = self.release_gain;
             }
         }
 
-        let delayed_samples = &mut self.output_buffer[..n];
+        // Apply gain reduction to delayed samples
         for i in 0..n {
-            delayed_samples[i] = get_sample(i, &self.lookahead_buffer, input);
+            self.output_buffer[i] *= if i < self.attack {
+                self.lookahead_buffer[self.samplerate - self.attack + i]
+            } else {
+                input[i - self.attack]
+            }
         }
+
+        // Copy input to end of lookahead buffer
         self.lookahead_buffer.drain(0..n);
         for sample in &mut *input {
             self.lookahead_buffer.push_back(*sample);
         }
+
+        // Ouput
         for i in 0..n {
-            input[i] = delayed_samples[i] * self.gain_buffer[i];
+            input[i] = self.output_buffer[i];
         }
     }
 }
