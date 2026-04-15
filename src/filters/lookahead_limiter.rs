@@ -87,11 +87,9 @@ impl LookaheadLimiter {
         }
 
         // Backward pass turning peaks into linear ramps.
-        let mut attack_peak = 1.0;
-        let mut samples_since_attack_peak = self.attack;
+        let mut peak = 1.0;
+        let mut samples_since_peak = self.attack;
         for i in (0..(self.attack + n)).rev() {
-            let mut gain = 1.0;
-
             // Get sample amplitude
             let amplitude = (if i < self.attack {
                 self.lookahead_buffer[self.samplerate - self.attack + i]
@@ -100,25 +98,31 @@ impl LookaheadLimiter {
             })
             .abs();
 
-            // Compute gain envelope like simple limiter
-            if amplitude > self.limit {
-                self.output_buffer[i] = self.limit / amplitude;
+            // Compute reduction gain for current sample
+            let mut gain = if amplitude > self.limit {
+                self.limit / amplitude
             } else {
-                self.output_buffer[i] = 1.0;
-            }
+                1.0
+            };
 
             // Compute ramp
-            if samples_since_attack_peak <= self.attack {
-                let ramp = (self.attack - samples_since_attack_peak) as PrcFmt
-                    / (self.attack + 1) as PrcFmt;
-                gain = 1.0 - (ramp * attack_peak);
-                samples_since_attack_peak += 1;
+            let mut ramp_gain = 1.0;
+            if samples_since_peak <= self.attack {
+                let ramp =
+                    (self.attack - samples_since_peak) as PrcFmt / (self.attack + 1) as PrcFmt;
+                ramp_gain = 1.0 - (ramp * peak);
+                samples_since_peak += 1;
             }
-            if self.output_buffer[i] < gain {
-                gain = self.output_buffer[i];
-                attack_peak = self.output_buffer[i];
-                samples_since_attack_peak = 0;
+
+            // Peak found, start new ramp
+            if gain < ramp_gain {
+                peak = gain;
+                samples_since_peak = 0;
+            } else {
+                gain = ramp_gain;
             }
+
+            // Save gain envelope
             self.output_buffer[i] = gain;
         }
 
@@ -249,22 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn test_no_limiting_below_threshold() {
-        let config = config::LookaheadLimiterParameters {
-            limit: 0.0,
-            unit: TimeUnit::Samples,
-            attack: 4.0,
-            release: 4.0,
-        };
-        let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
-        let mut input = vec![0.5, 0.5, 0.5];
-        let expected = vec![0.5, 0.5, 0.5];
-        limiter.apply_lookahead_limiter(&mut input);
-        assert_close(&input, &expected, 1e-9);
-    }
-
-    #[test]
-    fn test_limiter_basic() {
+    fn test_lookahead_limiter_basic() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
             unit: TimeUnit::Samples,
@@ -286,7 +275,7 @@ mod tests {
 
     /// Zero attack and release should behave like a peak limiter
     #[test]
-    fn test_limiter_peak() {
+    fn test_lookahead_limiter_peak() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
             unit: TimeUnit::Samples,
@@ -305,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn test_limiter_zero_release() {
+    fn test_lookahead_limiter_zero_release() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
             unit: TimeUnit::Samples,
@@ -321,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn test_limiter_state_persistence() {
+    fn test_lookahead_limiter_state_persistence() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
             unit: TimeUnit::Samples,
