@@ -53,13 +53,13 @@ use objc2_core_audio::{
     AudioDeviceID, AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize,
     AudioObjectPropertyAddress, AudioObjectSetPropertyData, kAudioDevicePropertyClockSource,
     kAudioDevicePropertyClockSourceNameForIDCFString, kAudioDevicePropertyClockSources,
-    kAudioDevicePropertyStereoPan, kAudioDevicePropertyStreamConfiguration,
+    kAudioDevicePropertyStereoPan, kAudioDevicePropertyStreamConfiguration, kAudioHardwareNoError,
     kAudioObjectPropertyElementMain, kAudioObjectPropertyElementWildcard,
     kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput,
     kAudioObjectPropertyScopeOutput,
 };
 use objc2_core_audio_types::{
-    AudioBufferList, AudioStreamBasicDescription, AudioValueTranslation, kAudioFormatFlagIsFloat,
+    AudioBuffer, AudioStreamBasicDescription, AudioValueTranslation, kAudioFormatFlagIsFloat,
 };
 use objc2_core_foundation::CFString;
 
@@ -223,122 +223,6 @@ fn get_physical_capabilities(device_id: AudioDeviceID, capabilities_map: &mut Ca
     }
 }
 
-fn get_fallback_capabilities(
-    device_id: AudioDeviceID,
-    input: bool,
-    capabilities_map: &mut CapabilitiesMap,
-) {
-    let property_address = AudioObjectPropertyAddress {
-        mSelector: objc2_core_audio::kAudioDevicePropertyAvailableNominalSampleRates,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain,
-    };
-    let mut data_size = 0u32;
-    if unsafe {
-        AudioObjectGetPropertyDataSize(
-            device_id,
-            NonNull::from(&property_address),
-            0,
-            null(),
-            NonNull::from(&mut data_size),
-        )
-    } == 0
-    {
-        let nbr_items =
-            data_size / mem::size_of::<objc2_core_audio_types::AudioValueRange>() as u32;
-        let mut ranges = vec![
-            unsafe { mem::zeroed::<objc2_core_audio_types::AudioValueRange>() };
-            nbr_items as usize
-        ];
-        if unsafe {
-            AudioObjectGetPropertyData(
-                device_id,
-                NonNull::from(&property_address),
-                0,
-                null(),
-                NonNull::from(&mut data_size),
-                NonNull::new(ranges.as_mut_ptr()).unwrap().cast(),
-            )
-        } == 0
-        {
-            let current_format =
-                get_current_device_format(device_id, input).unwrap_or_else(|_| "F32".to_string());
-            let channels = get_device_channel_count(device_id, input);
-
-            let rate_map = capabilities_map.entry(channels).or_default();
-            for range in ranges {
-                let min = range.mMinimum as usize;
-                let max = range.mMaximum as usize;
-                if min == max {
-                    rate_map
-                        .entry(min)
-                        .or_default()
-                        .push(current_format.clone());
-                } else {
-                    for &r in crate::STANDARD_RATES {
-                        let r = r as usize;
-                        if r >= min && r <= max {
-                            rate_map.entry(r).or_default().push(current_format.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn get_device_channel_count(device_id: AudioDeviceID, input: bool) -> usize {
-    let scope = if input {
-        kAudioObjectPropertyScopeInput
-    } else {
-        kAudioObjectPropertyScopeOutput
-    };
-    let config_address = AudioObjectPropertyAddress {
-        mSelector: kAudioDevicePropertyStreamConfiguration,
-        mScope: scope,
-        mElement: kAudioObjectPropertyElementWildcard,
-    };
-    let mut config_size = 0u32;
-    let mut channels = 2; // fallback
-    if unsafe {
-        AudioObjectGetPropertyDataSize(
-            device_id,
-            NonNull::from(&config_address),
-            0,
-            null(),
-            NonNull::from(&mut config_size),
-        )
-    } == 0
-    {
-        let layout = std::alloc::Layout::from_size_align(
-            config_size as usize,
-            mem::align_of::<AudioBufferList>(),
-        )
-        .unwrap();
-        let buf_list_ptr = unsafe { std::alloc::alloc_zeroed(layout) } as *mut AudioBufferList;
-        if !buf_list_ptr.is_null() {
-            if unsafe {
-                AudioObjectGetPropertyData(
-                    device_id,
-                    NonNull::from(&config_address),
-                    0,
-                    null(),
-                    NonNull::from(&mut config_size),
-                    NonNull::new(buf_list_ptr).unwrap().cast(),
-                )
-            } == 0
-            {
-                let nbr_buffers = unsafe { (*buf_list_ptr).mNumberBuffers } as usize;
-                let buffers_ptr = unsafe { (*buf_list_ptr).mBuffers.as_ptr() };
-                let buffers = unsafe { std::slice::from_raw_parts(buffers_ptr, nbr_buffers) };
-                channels = buffers.iter().map(|b| b.mNumberChannels).sum::<u32>() as usize;
-            }
-            unsafe { std::alloc::dealloc(buf_list_ptr as *mut u8, layout) };
-        }
-    }
-    channels
-}
-
 pub fn get_device_capabilities(
     device_name: &str,
     input: bool,
@@ -355,10 +239,6 @@ pub fn get_device_capabilities(
     let mut capabilities_map: CapabilitiesMap = std::collections::HashMap::new();
 
     get_physical_capabilities(device_id, &mut capabilities_map);
-
-    if capabilities_map.is_empty() {
-        get_fallback_capabilities(device_id, input, &mut capabilities_map);
-    }
 
     Ok(crate::AudioDeviceDescriptor {
         name: device_name.to_string(),
@@ -386,46 +266,35 @@ fn get_format_from_asbd(asbd: &AudioStreamBasicDescription) -> Option<CoreAudioS
     }
 }
 
-fn get_current_device_format(device_id: AudioDeviceID, input: bool) -> Res<String> {
+fn device_supports_scope(device_id: u32, input: bool) -> bool {
     let scope = if input {
         kAudioObjectPropertyScopeInput
     } else {
         kAudioObjectPropertyScopeOutput
     };
     let property_address = AudioObjectPropertyAddress {
-        mSelector: objc2_core_audio::kAudioDevicePropertyStreamFormat,
+        mSelector: kAudioDevicePropertyStreamConfiguration,
         mScope: scope,
-        mElement: kAudioObjectPropertyElementMain,
+        mElement: kAudioObjectPropertyElementWildcard,
     };
 
-    let mut asbd = unsafe { mem::zeroed::<AudioStreamBasicDescription>() };
-    let mut data_size = mem::size_of::<AudioStreamBasicDescription>() as u32;
+    let data_size = 0u32;
     let status = unsafe {
-        AudioObjectGetPropertyData(
+        AudioObjectGetPropertyDataSize(
             device_id,
             NonNull::from(&property_address),
             0,
             null(),
-            NonNull::from(&mut data_size),
-            NonNull::from(&mut asbd).cast(),
+            NonNull::from(&data_size),
         )
     };
-
-    if status != 0 {
-        return Err(ConfigError::new(&format!(
-            "Unable to get current device format, error code: {status}"
-        ))
-        .into());
+    if status != kAudioHardwareNoError {
+        return false;
     }
-
-    match get_format_from_asbd(&asbd) {
-        Some(fmt) => Ok(format!("{:?}", fmt)),
-        None => Err(ConfigError::new("Unsupported bit depth or format").into()),
-    }
-}
-
-fn device_supports_scope(device_id: u32, input: bool) -> bool {
-    get_device_channel_count(device_id, input) > 0
+    // This gives the length of the buffer list, there is no need to read the actual list.
+    let nbr_buffers =
+        (data_size - mem::size_of::<u32>() as u32) / mem::size_of::<AudioBuffer>() as u32;
+    nbr_buffers > 0
 }
 
 type CapabilitiesMap =
