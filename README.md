@@ -2379,10 +2379,7 @@ Parameters:
   * `clip_limit`: the level in dB to clip at.
 
 ### Lookahead Limiter
-The "LookaheadLimiter" filter is a lookahead limiter with smooth attack ramping and exponential release.
-It delays the signal by the attack time, detects peaks in advance and smoothly ramps gain reduction
-to reach the required level exactly when the peak arrives. After the peak passes, the gain
-is restored using an exponential release curve.
+The "LookaheadLimiter" delays the input signal by the attack time, detects peaks in advance and ramps up gain reduction to reach the required level when the peak arrives. After the peak passes, the gain is restored using an exponential release curve.
 
 Example:
 ```
@@ -2390,6 +2387,7 @@ Example:
     type: LookaheadLimiter
     parameters:
       limit: 0.0 (*)
+      unit: ms (*)
       attack: 2.0
       release: 100.0
 ```
