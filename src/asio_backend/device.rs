@@ -49,7 +49,7 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 use crate::asio_backend::utils::{
-    asio_sample_type_name, copy_from_queue_at_offset, create_asio_buffers,
+    asio_format_to_str, asio_sample_type_name, copy_from_queue_at_offset, create_asio_buffers,
     fixed_cstr_buf_to_string, get_preferred_buffer_size, make_buffer_infos,
     read_current_asio_sample_rate_hz, resolve_binary_format, resolve_format,
 };
@@ -1210,18 +1210,6 @@ pub fn list_device_names() -> Vec<String> {
 pub fn list_available_devices() -> Vec<(String, String)> {
     let names = list_device_names();
     names.iter().map(|n| (n.clone(), n.clone())).collect()
-}
-
-/// Convert an `AsioSampleFormat` to the canonical string used in YAML configs.
-fn asio_format_to_str(fmt: crate::config::AsioSampleFormat) -> &'static str {
-    match fmt {
-        crate::config::AsioSampleFormat::S16_LE => "S16_LE",
-        crate::config::AsioSampleFormat::S24_4_LE => "S24_4_LE",
-        crate::config::AsioSampleFormat::S24_3_LE => "S24_3_LE",
-        crate::config::AsioSampleFormat::S32_LE => "S32_LE",
-        crate::config::AsioSampleFormat::F32_LE => "F32_LE",
-        crate::config::AsioSampleFormat::F64_LE => "F64_LE",
-    }
 }
 
 pub fn get_device_capabilities(
