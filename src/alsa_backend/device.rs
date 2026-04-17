@@ -56,7 +56,7 @@ use crate::alsa_backend::utils::{
 };
 use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
-use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
 static ALSA_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -69,6 +69,8 @@ pub struct AlsaPlaybackDevice {
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
+    pub buffersize: Option<usize>,
+    pub period: Option<usize>,
 }
 
 pub struct AlsaCaptureDevice {
@@ -86,6 +88,8 @@ pub struct AlsaCaptureDevice {
     pub stop_on_inactive: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
+    pub buffersize: Option<usize>,
+    pub period: Option<usize>,
 }
 
 struct CaptureChannels {
@@ -255,6 +259,9 @@ fn capture_buffer(
     params: &mut CaptureParams,
     processing_params: &Arc<ProcessingParameters>,
 ) -> Res<CaptureResult> {
+    if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok(CaptureResult::Done);
+    }
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("Prepare capture device");
@@ -292,12 +299,23 @@ fn capture_buffer(
             None
         };
         trace!("Capture pcmdevice.wait with timeout {timeout_millis} ms");
+        let mut remaining_timeout_millis = timeout_millis;
         loop {
-            match fds.wait(timeout_millis as i32) {
+            if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+                return Ok(CaptureResult::Done);
+            }
+            let poll_slice_millis = remaining_timeout_millis.min(20);
+            match fds.wait(poll_slice_millis as i32) {
                 Ok(pollresult) => {
                     if pollresult.poll_res == 0 {
-                        trace!("Wait timed out, capture device takes too long to capture frames");
-                        return Ok(CaptureResult::Stalled);
+                        if remaining_timeout_millis <= poll_slice_millis {
+                            trace!(
+                                "Wait timed out, capture device takes too long to capture frames"
+                            );
+                            return Ok(CaptureResult::Stalled);
+                        }
+                        remaining_timeout_millis -= poll_slice_millis;
+                        continue;
                     }
                     if pollresult.ctl {
                         trace!("Got a control event");
@@ -319,6 +337,8 @@ fn capture_buffer(
                         trace!("Capture waited for {:?}", start.map(|s| s.elapsed()));
                         break;
                     }
+                    remaining_timeout_millis =
+                        remaining_timeout_millis.saturating_sub(poll_slice_millis);
                 }
                 Err(err) => match Errno::from_raw(err.errno()) {
                     Errno::EPIPE => {
@@ -345,6 +365,9 @@ fn capture_buffer(
                     }
                 },
             }
+        }
+        if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(CaptureResult::Done);
         }
         match io.readi(buffer) {
             Ok(frames_read) => {
@@ -1144,8 +1167,12 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let conf_sample_format = self.sample_format;
-        let mut buf_manager =
-            PlaybackBufferManager::new(chunksize as Frames, target_level as Frames);
+        let mut buf_manager = PlaybackBufferManager::new(
+            chunksize as Frames,
+            target_level as Frames,
+            self.buffersize.map(|value| value as Frames),
+            self.period.map(|value| value as Frames),
+        );
         let handle = thread::Builder::new()
             .name("AlsaPlayback".to_string())
             .spawn(move || {
@@ -1228,6 +1255,8 @@ impl CaptureDevice for AlsaCaptureDevice {
         let mut buf_manager = CaptureBufferManager::new(
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
+            self.buffersize.map(|value| value as Frames),
+            self.period.map(|value| value as Frames),
         );
 
         let handle = thread::Builder::new()
