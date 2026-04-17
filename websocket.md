@@ -313,19 +313,79 @@ The capability commands return an object with the following structure:
 {
   "name": "Device name",
   "description": "Readable description",
-  "capabilities": [
+  "capability_sets": [
     {
-      "channels": 2,
-      "samplerates": [
+      "mode": "Unified",
+      "capabilities": [
         {
-          "samplerate": 44100,
-          "formats": ["S16_LE", "S32_LE"]
+          "channels": 2,
+          "samplerates": [
+            {
+              "samplerate": 44100,
+              "formats": ["S16_LE", "S32_LE"]
+            }
+          ]
         }
       ]
     }
   ]
 }
 ```
+
+Each entry in `capability_sets` has a `mode` field that indicates which operating mode the capabilities belong to:
+- `Unified`: used by ALSA, CoreAudio, and ASIO, which have a single capability model.
+- `Shared`: WASAPI shared mode. Derived directly from the Windows audio engine mix format.
+  There is always exactly one channel count and one sample rate in this set, and the format is always `F32`.
+- `Exclusive`: WASAPI exclusive mode. Probed independently of shared mode.
+  Supports multiple channel counts, sample rates, and formats.
+
+For WASAPI, the response contains two sets — one `Shared` and one `Exclusive`:
+```json
+{
+  "name": "Speakers (Realtek HD Audio)",
+  "description": "Speakers (Realtek HD Audio)",
+  "capability_sets": [
+    {
+      "mode": "Shared",
+      "capabilities": [
+        {
+          "channels": 2,
+          "samplerates": [
+            {
+              "samplerate": 48000,
+              "formats": ["F32"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "Exclusive",
+      "capabilities": [
+        {
+          "channels": 2,
+          "samplerates": [
+            {
+              "samplerate": 44100,
+              "formats": ["S16", "S24", "S32", "F32"]
+            },
+            {
+              "samplerate": 48000,
+              "formats": ["S16", "S24", "S32", "F32"]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+If the device is not found, busy, or the probe fails, the result field will contain an error
+and `capability_sets` will be an empty list. The possible errors are:
+- `DeviceNotFoundError`: the named device does not exist.
+- `DeviceBusyError`: the device is currently in use and cannot be probed (e.g. an active ASIO stream).
+- `DeviceError`: the probe failed for another reason. The error includes a description.
 
 ## Error responses
 If a command succeeds, CamillaDSP will reply with the string `Ok` in the `result` field.
