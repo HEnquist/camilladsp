@@ -211,7 +211,7 @@ pub fn get_device_capabilities(
                         && let Ok(supported_formats) = list_formats(&hwp_rate)
                     {
                         for fmt in supported_formats {
-                            formats.push(format!("{:?}", fmt));
+                            formats.push(alsa_format_to_str(fmt).to_string());
                         }
                     }
                     if !formats.is_empty() {
@@ -234,7 +234,10 @@ pub fn get_device_capabilities(
     Ok(crate::AudioDeviceDescriptor {
         name: device_name.to_string(),
         description: device_name.to_string(), // In ALSA we only have device_name as name
-        capabilities: channel_capabilities,
+        capability_sets: vec![crate::DeviceCapabilitySet {
+            mode: crate::CapabilityMode::Unified,
+            capabilities: channel_capabilities,
+        }],
     })
 }
 
@@ -353,6 +356,17 @@ pub fn list_channels_as_text(hwp: &HwParams) -> String {
         format!("supported channels, min: {min_ch}, max: {max_ch}, list: {ch_list:?}")
     } else {
         "failed checking supported channels".to_string()
+    }
+}
+
+pub fn alsa_format_to_str(fmt: AlsaSampleFormat) -> &'static str {
+    match fmt {
+        AlsaSampleFormat::S16_LE => "S16_LE",
+        AlsaSampleFormat::S24_3_LE => "S24_3_LE",
+        AlsaSampleFormat::S24_4_LE => "S24_4_LE",
+        AlsaSampleFormat::S32_LE => "S32_LE",
+        AlsaSampleFormat::F32_LE => "F32_LE",
+        AlsaSampleFormat::F64_LE => "F64_LE",
     }
 }
 

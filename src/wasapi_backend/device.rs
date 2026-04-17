@@ -108,6 +108,16 @@ pub fn list_device_names(input: bool) -> Vec<(String, String)> {
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
+/// Convert a `WasapiSampleFormat` to the canonical string used in YAML configs.
+fn wasapi_format_to_str(fmt: &WasapiSampleFormat) -> &'static str {
+    match fmt {
+        WasapiSampleFormat::S16 => "S16",
+        WasapiSampleFormat::S24 => "S24",
+        WasapiSampleFormat::S32 => "S32",
+        WasapiSampleFormat::F32 => "F32",
+    }
+}
+
 pub fn get_device_capabilities(
     device_name: &str,
     input: bool,
@@ -164,33 +174,40 @@ pub fn get_device_capabilities(
         }
     };
 
-    let mut channel_capabilities = Vec::new();
+    let mut capability_sets = Vec::new();
 
-    // Use the mix format to find the device's native channel count.
-    let max_channels = audio_client
-        .get_mixformat()
-        .map(|fmt| fmt.get_nchannels() as usize)
-        .unwrap_or(2);
-    for channels in 1..=max_channels {
+    // --- Shared mode: use GetMixFormat as the sole authoritative descriptor ---
+    // WASAPI shared mode operates through the audio engine at a single fixed mix
+    // format; probing a synthetic channel/rate grid would misrepresent what the
+    // shared path can actually honour (CamillaDSP uses autoconvert=false).
+    if let Ok(mix_fmt) = audio_client.get_mixformat() {
+        let channels = mix_fmt.get_nchannels() as usize;
+        let rate = mix_fmt.get_samplespersec() as usize;
+        // CamillaDSP always presents F32 to the shared-mode audio engine.
+        let shared_caps = vec![crate::ChannelCapability {
+            channels,
+            samplerates: vec![crate::SamplerateCapability {
+                samplerate: rate,
+                formats: vec!["F32".to_string()],
+            }],
+        }];
+        capability_sets.push(crate::DeviceCapabilitySet {
+            mode: crate::CapabilityMode::Shared,
+            capabilities: shared_caps,
+        });
+    }
+
+    // --- Exclusive mode: probe independently with a generous channel ceiling ---
+    // GetMixFormat describes the shared-mode engine format and is not a valid upper
+    // bound for exclusive-mode channel support. Probe up to MAX_EXCLUSIVE_CHANNELS
+    // so that e.g. 8-channel or multi-channel exclusive devices are not under-reported.
+    const MAX_EXCLUSIVE_CHANNELS: usize = 32;
+    let mut exclusive_caps = Vec::new();
+    for channels in 1..=MAX_EXCLUSIVE_CHANNELS {
         let mut samplerates = Vec::new();
         for &rate in crate::STANDARD_RATES {
             let rate = rate as usize;
             let mut formats = Vec::new();
-
-            // Shared mode always uses F32 internally, so only probe that format.
-            if get_supported_wave_format(
-                &audio_client,
-                &WasapiSampleFormat::F32,
-                rate,
-                channels,
-                &wasapi::ShareMode::Shared,
-            )
-            .is_ok()
-            {
-                formats.push(format!("{:?}", WasapiSampleFormat::F32));
-            }
-
-            // Exclusive mode supports multiple sample formats.
             for fmt in &[
                 WasapiSampleFormat::S16,
                 WasapiSampleFormat::S24,
@@ -206,7 +223,7 @@ pub fn get_device_capabilities(
                 )
                 .is_ok()
                 {
-                    formats.push(format!("{:?}", fmt));
+                    formats.push(wasapi_format_to_str(fmt).to_string());
                 }
             }
             formats.sort();
@@ -218,19 +235,24 @@ pub fn get_device_capabilities(
                 });
             }
         }
-
         if !samplerates.is_empty() {
-            channel_capabilities.push(crate::ChannelCapability {
+            exclusive_caps.push(crate::ChannelCapability {
                 channels,
                 samplerates,
             });
         }
     }
+    if !exclusive_caps.is_empty() {
+        capability_sets.push(crate::DeviceCapabilitySet {
+            mode: crate::CapabilityMode::Exclusive,
+            capabilities: exclusive_caps,
+        });
+    }
 
     Ok(crate::AudioDeviceDescriptor {
         name: device_name.to_string(),
         description: device_name.to_string(),
-        capabilities: channel_capabilities,
+        capability_sets,
     })
 }
 

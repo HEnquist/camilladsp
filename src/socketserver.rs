@@ -1655,7 +1655,7 @@ fn handle_command(
                         value: crate::AudioDeviceDescriptor {
                             name: device_name,
                             description: "".to_string(),
-                            capabilities: Vec::new(),
+                            capability_sets: Vec::new(),
                         },
                     })
                 }
@@ -1680,7 +1680,7 @@ fn handle_command(
                         value: crate::AudioDeviceDescriptor {
                             name: device_name,
                             description: "".to_string(),
-                            capabilities: Vec::new(),
+                            capability_sets: Vec::new(),
                         },
                     })
                 }

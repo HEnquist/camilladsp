@@ -195,7 +195,7 @@ fn get_physical_capabilities(device_id: AudioDeviceID, capabilities_map: &mut Ca
             let channels = asbd.mChannelsPerFrame as usize;
 
             let format_str = match get_format_from_asbd(&asbd) {
-                Some(fmt) => format!("{:?}", fmt),
+                Some(fmt) => coreaudio_format_to_str(fmt).to_string(),
                 None => continue,
             };
 
@@ -243,8 +243,20 @@ pub fn get_device_capabilities(
     Ok(crate::AudioDeviceDescriptor {
         name: device_name.to_string(),
         description: device_name.to_string(),
-        capabilities: capabilities_from_map(capabilities_map),
+        capability_sets: vec![crate::DeviceCapabilitySet {
+            mode: crate::CapabilityMode::Unified,
+            capabilities: capabilities_from_map(capabilities_map),
+        }],
     })
+}
+
+fn coreaudio_format_to_str(fmt: CoreAudioSampleFormat) -> &'static str {
+    match fmt {
+        CoreAudioSampleFormat::S16 => "S16",
+        CoreAudioSampleFormat::S24 => "S24",
+        CoreAudioSampleFormat::S32 => "S32",
+        CoreAudioSampleFormat::F32 => "F32",
+    }
 }
 
 fn get_format_from_asbd(asbd: &AudioStreamBasicDescription) -> Option<CoreAudioSampleFormat> {

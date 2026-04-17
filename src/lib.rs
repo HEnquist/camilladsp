@@ -484,10 +484,26 @@ pub struct ChannelCapability {
 }
 
 #[derive(Debug, PartialEq, Serialize)]
+pub enum CapabilityMode {
+    /// Device uses a unified capability model (ALSA, CoreAudio, ASIO).
+    Unified,
+    /// WASAPI shared-mode capabilities (derived from the mix format).
+    Shared,
+    /// WASAPI exclusive-mode capabilities (probed independently).
+    Exclusive,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct DeviceCapabilitySet {
+    pub mode: CapabilityMode,
+    pub capabilities: Vec<ChannelCapability>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
 pub struct AudioDeviceDescriptor {
     pub name: String,
     pub description: String,
-    pub capabilities: Vec<ChannelCapability>,
+    pub capability_sets: Vec<DeviceCapabilitySet>,
 }
 
 // Return a list of supported devices.
