@@ -14,15 +14,33 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::ProcessingParameters;
 use crate::audiodevice::*;
 use crate::config;
 use crate::pipeline;
+use crate::{ProcessingParameters, SHUTDOWN_REQUESTED};
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 use std::sync::{Arc, Barrier};
 use std::thread;
+
+fn forward_to_playback(tx_pb: &crossbeam_channel::Sender<AudioMessage>, msg: AudioMessage) -> bool {
+    let is_droppable = !matches!(msg, AudioMessage::EndOfStream);
+    let mut pending = msg;
+    loop {
+        match tx_pb.send_timeout(pending, std::time::Duration::from_millis(20)) {
+            Ok(()) => return true,
+            Err(crossbeam_channel::SendTimeoutError::Timeout(msg)) => {
+                if is_droppable && SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+                    trace!("Processing: playback queue full during shutdown, dropping message");
+                    return true;
+                }
+                pending = msg;
+            }
+            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => return false,
+        }
+    }
+}
 
 pub fn run_processing(
     conf_proc: config::Configuration,
@@ -118,7 +136,7 @@ pub fn run_processing(
                     //trace!("AudioMessage::Audio received");
                     chunk = pipeline.process_chunk(chunk);
                     let msg = AudioMessage::Audio(chunk);
-                    if tx_pb.send(msg).is_err() {
+                    if !forward_to_playback(&tx_pb, msg) {
                         info!("Playback thread has already stopped.");
                         break;
                     }
@@ -126,7 +144,7 @@ pub fn run_processing(
                 Ok(AudioMessage::EndOfStream) => {
                     trace!("AudioMessage::EndOfStream received");
                     let msg = AudioMessage::EndOfStream;
-                    if tx_pb.send(msg).is_err() {
+                    if !forward_to_playback(&tx_pb, msg) {
                         info!("Playback thread has already stopped.");
                     }
                     break;
@@ -134,16 +152,20 @@ pub fn run_processing(
                 Ok(AudioMessage::Pause) => {
                     trace!("AudioMessage::Pause received");
                     let msg = AudioMessage::Pause;
-                    if tx_pb.send(msg).is_err() {
+                    if !forward_to_playback(&tx_pb, msg) {
                         info!("Playback thread has already stopped.");
                         break;
                     }
                 }
                 Err(err) => {
-                    error!("Message channel error: {err}");
-                    let msg = AudioMessage::EndOfStream;
-                    if tx_pb.send(msg).is_err() {
-                        info!("Playback thread has already stopped.");
+                    if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+                        debug!("Capture channel closed during shutdown.");
+                    } else {
+                        error!("Message channel error: {err}");
+                        let msg = AudioMessage::EndOfStream;
+                        if !forward_to_playback(&tx_pb, msg) {
+                            info!("Playback thread has already stopped.");
+                        }
                     }
                     break;
                 }
@@ -167,7 +189,7 @@ pub fn run_processing(
                     }
                     config::ConfigChange::Devices => {
                         let msg = AudioMessage::EndOfStream;
-                        tx_pb.send(msg).unwrap();
+                        let _ = forward_to_playback(&tx_pb, msg);
                         break;
                     }
                     _ => {}
