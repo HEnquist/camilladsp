@@ -63,7 +63,10 @@ pub trait DeviceBufferManager {
     // Calculate a buffer size and apply it to a hwp container. Only for use when opening a device.
     fn apply_buffer_size(&mut self, hwp: &HwParams) -> Res<()> {
         let min_period = hwp.get_period_size_min().unwrap_or(0);
-        let buffer_frames = self.calculate_buffer_size(min_period);
+        let buffer_frames = self
+            .data()
+            .requested_bufsize
+            .unwrap_or_else(|| self.calculate_buffer_size(min_period));
         let alt_buffer_frames = self.calculate_buffer_size_alt(min_period);
         let data = self.data_mut();
         debug!("Setting buffer size to {buffer_frames} frames");
@@ -71,7 +74,10 @@ pub trait DeviceBufferManager {
             Ok(frames) => {
                 data.bufsize = frames;
             }
-            Err(_) => {
+            Err(err) => {
+                if data.requested_bufsize.is_some() {
+                    return Err(Box::new(err));
+                }
                 debug!(
                     "Device did not accept a buffer size of {buffer_frames} frames, trying again with {alt_buffer_frames}"
                 );
@@ -85,13 +91,16 @@ pub trait DeviceBufferManager {
     // Calculate a period size and apply it to a hwp container. Only for use when opening a device, after setting buffer size.
     fn apply_period_size(&mut self, hwp: &HwParams) -> Res<()> {
         let data = self.data_mut();
-        let period_frames = data.bufsize / 8;
+        let period_frames = data.requested_period.unwrap_or(data.bufsize / 8);
         debug!("Setting period size to {period_frames} frames");
         match hwp.set_period_size_near(period_frames, alsa::ValueOr::Nearest) {
             Ok(frames) => {
                 data.period = frames;
             }
-            Err(_) => {
+            Err(err) => {
+                if data.requested_period.is_some() {
+                    return Err(Box::new(err));
+                }
                 let alt_period_frames =
                     3 * 2.0f32.powi((period_frames as f32 / 2.0).log2().ceil() as i32) as Frames;
                 debug!(
@@ -151,6 +160,8 @@ pub struct DeviceBufferData {
     io_size: Frames, /* size of read/write block */
     chunksize: Frames,
     resampling_ratio: f32,
+    requested_bufsize: Option<Frames>,
+    requested_period: Option<Frames>,
 }
 
 impl DeviceBufferData {
@@ -169,7 +180,12 @@ pub struct CaptureBufferManager {
 }
 
 impl CaptureBufferManager {
-    pub fn new(chunksize: Frames, resampling_ratio: f32) -> Self {
+    pub fn new(
+        chunksize: Frames,
+        resampling_ratio: f32,
+        requested_bufsize: Option<Frames>,
+        requested_period: Option<Frames>,
+    ) -> Self {
         let init_io_size = (chunksize as f32 / resampling_ratio) as Frames;
         CaptureBufferManager {
             data: DeviceBufferData {
@@ -180,6 +196,8 @@ impl CaptureBufferManager {
                 io_size: init_io_size,
                 resampling_ratio,
                 chunksize,
+                requested_bufsize,
+                requested_period,
             },
         }
     }
@@ -214,7 +232,12 @@ pub struct PlaybackBufferManager {
 }
 
 impl PlaybackBufferManager {
-    pub fn new(chunksize: Frames, target_level: Frames) -> Self {
+    pub fn new(
+        chunksize: Frames,
+        target_level: Frames,
+        requested_bufsize: Option<Frames>,
+        requested_period: Option<Frames>,
+    ) -> Self {
         PlaybackBufferManager {
             data: DeviceBufferData {
                 bufsize: 0,
@@ -224,6 +247,8 @@ impl PlaybackBufferManager {
                 io_size: chunksize,
                 resampling_ratio: 1.0,
                 chunksize,
+                requested_bufsize,
+                requested_period,
             },
             target_level,
         }

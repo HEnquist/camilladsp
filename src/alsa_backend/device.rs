@@ -69,6 +69,8 @@ pub struct AlsaPlaybackDevice {
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
+    pub buffersize: Option<usize>,
+    pub period: Option<usize>,
 }
 
 pub struct AlsaCaptureDevice {
@@ -86,6 +88,8 @@ pub struct AlsaCaptureDevice {
     pub stop_on_inactive: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
+    pub buffersize: Option<usize>,
+    pub period: Option<usize>,
 }
 
 struct CaptureChannels {
@@ -1163,8 +1167,12 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let conf_sample_format = self.sample_format;
-        let mut buf_manager =
-            PlaybackBufferManager::new(chunksize as Frames, target_level as Frames);
+        let mut buf_manager = PlaybackBufferManager::new(
+            chunksize as Frames,
+            target_level as Frames,
+            self.buffersize.map(|value| value as Frames),
+            self.period.map(|value| value as Frames),
+        );
         let handle = thread::Builder::new()
             .name("AlsaPlayback".to_string())
             .spawn(move || {
@@ -1247,6 +1255,8 @@ impl CaptureDevice for AlsaCaptureDevice {
         let mut buf_manager = CaptureBufferManager::new(
             chunksize as Frames,
             samplerate as f32 / capture_samplerate as f32,
+            self.buffersize.map(|value| value as Frames),
+            self.period.map(|value| value as Frames),
         );
 
         let handle = thread::Builder::new()

@@ -69,6 +69,8 @@ pub struct AlsaPlaybackDevice {
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
+    pub buffersize: Option<usize>,
+    pub period: Option<usize>,
 }
 
 pub struct AlsaCaptureDevice {
@@ -86,6 +88,8 @@ pub struct AlsaCaptureDevice {
     pub stop_on_inactive: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
+    pub buffersize: Option<usize>,
+    pub period: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -1048,6 +1052,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let conf_sample_format = self.sample_format;
+        let optional_buffersize = self.buffersize;
+        let optional_period = self.period;
 
         let handle = thread::Builder::new()
             .name("AlsaPlayback".to_string())
@@ -1079,8 +1085,12 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                 let innerhandle = thread::Builder::new()
                     .name("AlsaPlaybackInner".to_string())
                     .spawn(move || {
-                        let mut buf_manager =
-                            PlaybackBufferManager::new(chunksize as Frames, target_level as Frames);
+                        let mut buf_manager = PlaybackBufferManager::new(
+                            chunksize as Frames,
+                            target_level as Frames,
+                            optional_buffersize.map(|value| value as Frames),
+                            optional_period.map(|value| value as Frames),
+                        );
                         match open_pcm(
                             devname,
                             samplerate as u32,
@@ -1385,6 +1395,8 @@ impl CaptureDevice for AlsaCaptureDevice {
         let stop_on_inactive = self.stop_on_inactive;
         let link_volume_control = self.link_volume_control.clone();
         let link_mute_control = self.link_mute_control.clone();
+        let optional_buffersize = self.buffersize;
+        let optional_period = self.period;
 
         let handle = thread::Builder::new()
             .name("AlsaCapture".to_string())
@@ -1428,6 +1440,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                         let mut buf_manager = CaptureBufferManager::new(
                             chunksize as Frames,
                             samplerate as f32 / capture_samplerate as f32,
+                            optional_buffersize.map(|value| value as Frames),
+                            optional_period.map(|value| value as Frames),
                         );
 
                         match open_pcm(
