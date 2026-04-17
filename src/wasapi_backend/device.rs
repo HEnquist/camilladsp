@@ -183,12 +183,13 @@ pub fn get_device_capabilities(
     if let Ok(mix_fmt) = audio_client.get_mixformat() {
         let channels = mix_fmt.get_nchannels() as usize;
         let rate = mix_fmt.get_samplespersec() as usize;
+        let fmt = WasapiSampleFormat::F32;
         // CamillaDSP always presents F32 to the shared-mode audio engine.
         let shared_caps = vec![crate::ChannelCapability {
             channels,
             samplerates: vec![crate::SamplerateCapability {
                 samplerate: rate,
-                formats: vec!["F32".to_string()],
+                formats: vec![wasapi_format_to_str(fmt).to_string()],
             }],
         }];
         capability_sets.push(crate::DeviceCapabilitySet {
