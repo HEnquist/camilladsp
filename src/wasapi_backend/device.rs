@@ -108,6 +108,155 @@ pub fn list_device_names(input: bool) -> Vec<(String, String)> {
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
+/// Convert a `WasapiSampleFormat` to the canonical string used in YAML configs.
+fn wasapi_format_to_str(fmt: WasapiSampleFormat) -> &'static str {
+    match fmt {
+        WasapiSampleFormat::S16 => "S16",
+        WasapiSampleFormat::S24 => "S24",
+        WasapiSampleFormat::S32 => "S32",
+        WasapiSampleFormat::F32 => "F32",
+    }
+}
+
+pub fn get_device_capabilities(
+    device_name: &str,
+    input: bool,
+) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
+    let direction = if input {
+        wasapi::Direction::Capture
+    } else {
+        wasapi::Direction::Render
+    };
+    let _ = wasapi::initialize_mta();
+
+    let enumerator = match wasapi::DeviceEnumerator::new() {
+        Ok(e) => e,
+        Err(_) => {
+            return Err(crate::DeviceError::Other(
+                "Failed to initialize DeviceEnumerator".to_string(),
+            ));
+        }
+    };
+
+    let collection = match enumerator.get_device_collection(&direction) {
+        Ok(c) => c,
+        Err(_) => {
+            return Err(crate::DeviceError::Other(
+                "Failed to get device collection".to_string(),
+            ));
+        }
+    };
+
+    let count = collection.get_nbr_devices().unwrap_or(0);
+    let mut target_device = None;
+
+    for n in 0..count {
+        if let Ok(device) = collection.get_device_at_index(n)
+            && let Ok(name) = device.get_friendlyname()
+            && name == device_name
+        {
+            target_device = Some(device);
+            break;
+        }
+    }
+
+    let device = match target_device {
+        Some(d) => d,
+        None => {
+            return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
+        }
+    };
+
+    let audio_client = match device.get_iaudioclient() {
+        Ok(c) => c,
+        Err(e) => {
+            return Err(crate::DeviceError::Other(format!("{e}")));
+        }
+    };
+
+    let mut capability_sets = Vec::new();
+
+    // --- Shared mode: use GetMixFormat as the sole authoritative descriptor ---
+    // WASAPI shared mode operates through the audio engine at a single fixed mix
+    // format; probing a synthetic channel/rate grid would misrepresent what the
+    // shared path can actually honour (CamillaDSP uses autoconvert=false).
+    if let Ok(mix_fmt) = audio_client.get_mixformat() {
+        let channels = mix_fmt.get_nchannels() as usize;
+        let rate = mix_fmt.get_samplespersec() as usize;
+        let fmt = WasapiSampleFormat::F32;
+        // CamillaDSP always presents F32 to the shared-mode audio engine.
+        let shared_caps = vec![crate::ChannelCapability {
+            channels,
+            samplerates: vec![crate::SamplerateCapability {
+                samplerate: rate,
+                formats: vec![wasapi_format_to_str(fmt).to_string()],
+            }],
+        }];
+        capability_sets.push(crate::DeviceCapabilitySet {
+            mode: crate::CapabilityMode::Shared,
+            capabilities: shared_caps,
+        });
+    }
+
+    // --- Exclusive mode: probe independently with a generous channel ceiling ---
+    // GetMixFormat describes the shared-mode engine format and is not a valid upper
+    // bound for exclusive-mode channel support. Probe up to MAX_EXCLUSIVE_CHANNELS
+    // so that e.g. 8-channel or multi-channel exclusive devices are not under-reported.
+    const MAX_EXCLUSIVE_CHANNELS: usize = 32;
+    let mut exclusive_caps = Vec::new();
+    for channels in 1..=MAX_EXCLUSIVE_CHANNELS {
+        let mut samplerates = Vec::new();
+        for &rate in crate::STANDARD_RATES {
+            let rate = rate as usize;
+            let mut formats = Vec::new();
+            for fmt in &[
+                WasapiSampleFormat::S16,
+                WasapiSampleFormat::S24,
+                WasapiSampleFormat::S32,
+                WasapiSampleFormat::F32,
+            ] {
+                if get_supported_wave_format(
+                    &audio_client,
+                    fmt,
+                    rate,
+                    channels,
+                    &wasapi::ShareMode::Exclusive,
+                )
+                .is_ok()
+                {
+                    formats.push(wasapi_format_to_str(*fmt).to_string());
+                }
+            }
+            formats.sort();
+            formats.dedup();
+            if !formats.is_empty() {
+                samplerates.push(crate::SamplerateCapability {
+                    samplerate: rate,
+                    formats,
+                });
+            }
+        }
+        if !samplerates.is_empty() {
+            exclusive_caps.push(crate::ChannelCapability {
+                channels,
+                samplerates,
+            });
+        }
+    }
+    if !exclusive_caps.is_empty() {
+        capability_sets.push(crate::DeviceCapabilitySet {
+            mode: crate::CapabilityMode::Exclusive,
+            capabilities: exclusive_caps,
+        });
+    }
+
+    Ok(crate::AudioDeviceDescriptor {
+        name: device_name.to_string(),
+        description: device_name.to_string(),
+        capability_sets,
+    })
+}
+
 fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<String>> {
     let mut names = Vec::new();
     let count = collection.get_nbr_devices()?;
