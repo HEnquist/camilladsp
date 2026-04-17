@@ -109,7 +109,7 @@ pub fn list_device_names(input: bool) -> Vec<(String, String)> {
 }
 
 /// Convert a `WasapiSampleFormat` to the canonical string used in YAML configs.
-fn wasapi_format_to_str(fmt: &WasapiSampleFormat) -> &'static str {
+fn wasapi_format_to_str(fmt: WasapiSampleFormat) -> &'static str {
     match fmt {
         WasapiSampleFormat::S16 => "S16",
         WasapiSampleFormat::S24 => "S24",
@@ -224,7 +224,7 @@ pub fn get_device_capabilities(
                 )
                 .is_ok()
                 {
-                    formats.push(wasapi_format_to_str(fmt).to_string());
+                    formats.push(wasapi_format_to_str(*fmt).to_string());
                 }
             }
             formats.sort();
