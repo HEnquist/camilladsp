@@ -736,6 +736,9 @@ fn capture_buffer(
     params: &mut CaptureParams,
     processing_params: &Arc<ProcessingParameters>,
 ) -> Res<(CaptureResult, usize)> {
+    if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok((CaptureResult::Done, 0));
+    }
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("Prepare capture device");
@@ -772,12 +775,21 @@ fn capture_buffer(
         None
     };
     trace!("Capture pcmdevice.wait with timeout {timeout_millis} ms");
+    let mut remaining_timeout_millis = timeout_millis;
     loop {
-        match fds.wait(timeout_millis as i32) {
+        if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok((CaptureResult::Done, 0));
+        }
+        let poll_slice_millis = remaining_timeout_millis.min(20);
+        match fds.wait(poll_slice_millis as i32) {
             Ok(pollresult) => {
                 if pollresult.poll_res == 0 {
-                    debug!("Capture wait timed out after {timeout_millis} ms, device stalled");
-                    return Ok((CaptureResult::Stalled, 0));
+                    if remaining_timeout_millis <= poll_slice_millis {
+                        debug!("Capture wait timed out after {timeout_millis} ms, device stalled");
+                        return Ok((CaptureResult::Stalled, 0));
+                    }
+                    remaining_timeout_millis -= poll_slice_millis;
+                    continue;
                 }
                 if pollresult.ctl {
                     trace!("Got a control event");
@@ -799,6 +811,8 @@ fn capture_buffer(
                     trace!("Capture waited for {:?}", start.map(|s| s.elapsed()));
                     break;
                 }
+                remaining_timeout_millis =
+                    remaining_timeout_millis.saturating_sub(poll_slice_millis);
             }
             Err(err) => match Errno::from_raw(err.errno()) {
                 Errno::EPIPE => {
@@ -823,6 +837,9 @@ fn capture_buffer(
                 }
             },
         }
+    }
+    if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok((CaptureResult::Done, 0));
     }
     match io.readi(buffer) {
         Ok(frames_read) => {
@@ -960,6 +977,30 @@ fn send_capture_audio(
             }
             Err(crossbeam_channel::TrySendError::Disconnected(_)) => false,
         },
+    }
+}
+
+fn send_playback_device_message(
+    channel: &crossbeam_channel::Sender<PlaybackDeviceMessage>,
+    msg: PlaybackDeviceMessage,
+) -> bool {
+    let is_droppable = matches!(
+        msg,
+        PlaybackDeviceMessage::Data(_) | PlaybackDeviceMessage::SetPitch(_)
+    );
+    let mut pending = msg;
+    loop {
+        match channel.send_timeout(pending, std::time::Duration::from_millis(20)) {
+            Ok(()) => return true,
+            Err(crossbeam_channel::SendTimeoutError::Timeout(msg)) => {
+                if is_droppable && SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+                    trace!("Playback: inner queue full during shutdown, dropping message");
+                    return true;
+                }
+                pending = msg;
+            }
+            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => return false,
+        }
     }
 }
 
@@ -1178,9 +1219,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         status_channel
                                             .send(StatusMessage::SetSpeed(speed))
                                             .unwrap_or(());
-                                        tx_dev
-                                            .send(PlaybackDeviceMessage::SetPitch(speed))
-                                            .unwrap_or(());
+                                        let _ = send_playback_device_message(
+                                            &tx_dev,
+                                            PlaybackDeviceMessage::SetPitch(speed),
+                                        );
                                         if let Some(mut ps) = playback_status.try_write() {
                                             ps.buffer_level = av_delay as usize;
                                         }
@@ -1216,10 +1258,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         );
                                         continue;
                                     }
-                                    if tx_dev
-                                        .send(PlaybackDeviceMessage::Data(bytes_to_write))
-                                        .is_err()
-                                    {
+                                    if !send_playback_device_message(
+                                        &tx_dev,
+                                        PlaybackDeviceMessage::Data(bytes_to_write),
+                                    ) {
                                         status_channel
                                             .send(StatusMessage::PlaybackError(
                                                 "Playback inner queue closed".to_string(),
@@ -1229,7 +1271,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     }
                                 }
                                 Ok(AudioMessage::Pause) => {
-                                    tx_dev.send(PlaybackDeviceMessage::Pause).unwrap_or(());
+                                    let _ = send_playback_device_message(
+                                        &tx_dev,
+                                        PlaybackDeviceMessage::Pause,
+                                    );
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
                                     let msg = if SHUTDOWN_REQUESTED
@@ -1239,7 +1284,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     } else {
                                         PlaybackDeviceMessage::EndOfStream
                                     };
-                                    tx_dev.send(msg).unwrap_or(());
+                                    let _ = send_playback_device_message(&tx_dev, msg);
                                     break;
                                 }
                                 Err(err) => {
@@ -1253,7 +1298,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     } else {
                                         PlaybackDeviceMessage::EndOfStream
                                     };
-                                    tx_dev.send(msg).unwrap_or(());
+                                    let _ = send_playback_device_message(&tx_dev, msg);
                                     break;
                                 }
                             }
@@ -1763,9 +1808,11 @@ impl CaptureDevice for AlsaCaptureDevice {
                             }
 
                             if device_stalled {
-                                state = ProcessingState::Stalled;
-                                if !send_capture_audio(&channel, AudioMessage::Pause) {
-                                    break;
+                                if state != ProcessingState::Stalled {
+                                    state = ProcessingState::Stalled;
+                                    if !send_capture_audio(&channel, AudioMessage::Pause) {
+                                        break;
+                                    }
                                 }
                                 continue;
                             }

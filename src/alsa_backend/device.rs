@@ -56,7 +56,7 @@ use crate::alsa_backend::utils::{
 };
 use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
-use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
 static ALSA_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -255,6 +255,9 @@ fn capture_buffer(
     params: &mut CaptureParams,
     processing_params: &Arc<ProcessingParameters>,
 ) -> Res<CaptureResult> {
+    if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok(CaptureResult::Done);
+    }
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("Prepare capture device");
@@ -292,12 +295,23 @@ fn capture_buffer(
             None
         };
         trace!("Capture pcmdevice.wait with timeout {timeout_millis} ms");
+        let mut remaining_timeout_millis = timeout_millis;
         loop {
-            match fds.wait(timeout_millis as i32) {
+            if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+                return Ok(CaptureResult::Done);
+            }
+            let poll_slice_millis = remaining_timeout_millis.min(20);
+            match fds.wait(poll_slice_millis as i32) {
                 Ok(pollresult) => {
                     if pollresult.poll_res == 0 {
-                        trace!("Wait timed out, capture device takes too long to capture frames");
-                        return Ok(CaptureResult::Stalled);
+                        if remaining_timeout_millis <= poll_slice_millis {
+                            trace!(
+                                "Wait timed out, capture device takes too long to capture frames"
+                            );
+                            return Ok(CaptureResult::Stalled);
+                        }
+                        remaining_timeout_millis -= poll_slice_millis;
+                        continue;
                     }
                     if pollresult.ctl {
                         trace!("Got a control event");
@@ -319,6 +333,8 @@ fn capture_buffer(
                         trace!("Capture waited for {:?}", start.map(|s| s.elapsed()));
                         break;
                     }
+                    remaining_timeout_millis =
+                        remaining_timeout_millis.saturating_sub(poll_slice_millis);
                 }
                 Err(err) => match Errno::from_raw(err.errno()) {
                     Errno::EPIPE => {
@@ -345,6 +361,9 @@ fn capture_buffer(
                     }
                 },
             }
+        }
+        if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(CaptureResult::Done);
         }
         match io.readi(buffer) {
             Ok(frames_read) => {
