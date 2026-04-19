@@ -516,7 +516,7 @@ pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String
         #[cfg(target_os = "macos")]
         "coreaudio" => coreaudio_backend::device::list_available_devices(input),
         #[cfg(target_os = "windows")]
-        "wasapi" => wasapi_backend::device::list_device_names(input),
+        "wasapi" => wasapi_backend::capabilities::list_device_names(input),
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
         "asio" => asio_backend::device::list_available_devices(),
         _ => Vec::new(),
@@ -541,7 +541,7 @@ pub fn get_device_capabilities(
         #[cfg(target_os = "macos")]
         "coreaudio" => coreaudio_backend::device::get_device_capabilities(device_name, input),
         #[cfg(target_os = "windows")]
-        "wasapi" => wasapi_backend::device::get_device_capabilities(device_name, input),
+        "wasapi" => wasapi_backend::capabilities::get_device_capabilities(device_name, input),
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
         "asio" => asio_backend::device::get_device_capabilities(device_name, input),
         _ => Err(DeviceError::Other("Unsupported backend".to_string())),
