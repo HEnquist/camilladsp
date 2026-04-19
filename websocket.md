@@ -332,6 +332,10 @@ The capability commands return an object with the following structure:
 }
 ```
 
+For ALSA, these capability results are representative rather than exhaustive.
+Continuous sample-rate ranges are reduced to the standard rates that CamillaDSP probes,
+and channel probing is capped to a practical maximum instead of attempting a full enumeration.
+
 Each entry in `capability_sets` has a `mode` field that indicates which operating mode the capabilities belong to:
 - `Unified`: used by ALSA, CoreAudio, and ASIO, which have a single capability model.
 - `Shared`: WASAPI shared mode. Derived directly from the Windows audio engine mix format.
