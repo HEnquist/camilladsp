@@ -32,10 +32,7 @@ use std::time::Duration;
 
 use crate::ProcessingParameters;
 
-const STANDARD_RATES: [u32; 17] = [
-    5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
-    352800, 384000, 705600, 768000,
-];
+use crate::STANDARD_RATES;
 
 #[derive(Debug)]
 pub enum SupportedValues {
@@ -162,6 +159,88 @@ pub fn list_device_names(input: bool) -> Vec<(String, String)> {
     hw_names
 }
 
+pub fn get_device_capabilities(
+    device_name: &str,
+    input: bool,
+) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
+    let direction = if input {
+        Direction::Capture
+    } else {
+        Direction::Playback
+    };
+
+    let pcm = match alsa::PCM::new(device_name, direction, false) {
+        Ok(p) => p,
+        Err(e) => {
+            let errno = Errno::from_raw(e.errno());
+            return Err(match errno {
+                Errno::EBUSY => crate::DeviceError::DeviceBusy(device_name.to_string()),
+                Errno::ENOENT | Errno::ENODEV => {
+                    crate::DeviceError::DeviceNotFound(device_name.to_string())
+                }
+                _ => crate::DeviceError::Other(format!("{e}")),
+            });
+        }
+    };
+
+    let mut channel_capabilities = Vec::new();
+    if let Ok(hwp) = HwParams::any(&pcm)
+        && let (Ok(min_ch), Ok(max_ch)) = (hwp.get_channels_min(), hwp.get_channels_max())
+    {
+        let max_ch = max_ch.min(128);
+        for channels in min_ch..=max_ch {
+            let mut samplerates = Vec::new();
+            if let Ok(hwp_ch) = HwParams::any(&pcm)
+                && hwp_ch.set_channels(channels).is_ok()
+                && let Ok(rates_values) = list_samplerates(&hwp_ch)
+            {
+                let rates = match rates_values {
+                    SupportedValues::Discrete(r) => r,
+                    SupportedValues::Range(min, max) => STANDARD_RATES
+                        .iter()
+                        .filter(|&&r| r >= min && r <= max)
+                        .copied()
+                        .collect(),
+                };
+
+                for rate in rates {
+                    let mut formats = Vec::new();
+                    if let Ok(hwp_rate) = HwParams::any(&pcm)
+                        && hwp_rate.set_channels(channels).is_ok()
+                        && hwp_rate.set_rate(rate, alsa::ValueOr::Nearest).is_ok()
+                        && let Ok(supported_formats) = list_formats(&hwp_rate)
+                    {
+                        for fmt in supported_formats {
+                            formats.push(alsa_format_to_str(fmt).to_string());
+                        }
+                    }
+                    if !formats.is_empty() {
+                        samplerates.push(crate::SamplerateCapability {
+                            samplerate: rate as usize,
+                            formats,
+                        });
+                    }
+                }
+            }
+            if !samplerates.is_empty() {
+                channel_capabilities.push(crate::ChannelCapability {
+                    channels: channels as usize,
+                    samplerates,
+                });
+            }
+        }
+    }
+
+    Ok(crate::AudioDeviceDescriptor {
+        name: device_name.to_string(),
+        description: device_name.to_string(), // In ALSA we only have device_name as name
+        capability_sets: vec![crate::DeviceCapabilitySet {
+            mode: crate::CapabilityMode::Unified,
+            capabilities: channel_capabilities,
+        }],
+    })
+}
+
 pub fn state_desc(state: u32) -> String {
     match state {
         alsa_sys::SND_PCM_STATE_OPEN => "SND_PCM_STATE_OPEN, Open".to_string(),
@@ -277,6 +356,17 @@ pub fn list_channels_as_text(hwp: &HwParams) -> String {
         format!("supported channels, min: {min_ch}, max: {max_ch}, list: {ch_list:?}")
     } else {
         "failed checking supported channels".to_string()
+    }
+}
+
+pub fn alsa_format_to_str(fmt: AlsaSampleFormat) -> &'static str {
+    match fmt {
+        AlsaSampleFormat::S16_LE => "S16_LE",
+        AlsaSampleFormat::S24_3_LE => "S24_3_LE",
+        AlsaSampleFormat::S24_4_LE => "S24_4_LE",
+        AlsaSampleFormat::S32_LE => "S32_LE",
+        AlsaSampleFormat::F32_LE => "F32_LE",
+        AlsaSampleFormat::F64_LE => "F64_LE",
     }
 }
 

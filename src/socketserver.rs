@@ -39,8 +39,8 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::utils::decibels::linear_to_db_inplace;
 use crate::{
-    CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus, StopReason,
-    list_available_devices, list_supported_devices,
+    AudioDeviceDescriptor, CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus,
+    StopReason, list_available_devices, list_supported_devices,
 };
 use crate::{ControllerMessage, config};
 
@@ -152,6 +152,8 @@ enum WsCommand {
     GetSupportedDeviceTypes,
     GetAvailableCaptureDevices(String),
     GetAvailablePlaybackDevices(String),
+    GetCaptureDeviceCapabilities(String, String),
+    GetPlaybackDeviceCapabilities(String, String),
     GetProcessingLoad,
     GetResamplerLoad,
     Exit,
@@ -169,6 +171,9 @@ enum WsResult {
     ConfigReadError(String),
     InvalidValueError(String),
     InvalidRequestError(String),
+    DeviceNotFoundError(String),
+    DeviceBusyError(String),
+    DeviceError(String),
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -448,6 +453,14 @@ enum WsReply {
     GetAvailablePlaybackDevices {
         result: WsResult,
         value: Vec<(String, String)>,
+    },
+    GetCaptureDeviceCapabilities {
+        result: WsResult,
+        value: AudioDeviceDescriptor,
+    },
+    GetPlaybackDeviceCapabilities {
+        result: WsResult,
+        value: AudioDeviceDescriptor,
     },
     GetProcessingLoad {
         result: WsResult,
@@ -1622,6 +1635,56 @@ fn handle_command(
                 result: WsResult::Ok,
                 value: devs,
             })
+        }
+        WsCommand::GetCaptureDeviceCapabilities(backend, device_name) => {
+            match crate::get_device_capabilities(&backend, &device_name, true) {
+                Ok(dev) => Some(WsReply::GetCaptureDeviceCapabilities {
+                    result: WsResult::Ok,
+                    value: dev,
+                }),
+                Err(err) => {
+                    let ws_err = match err {
+                        crate::DeviceError::DeviceNotFound(msg) => {
+                            WsResult::DeviceNotFoundError(msg)
+                        }
+                        crate::DeviceError::DeviceBusy(msg) => WsResult::DeviceBusyError(msg),
+                        crate::DeviceError::Other(msg) => WsResult::DeviceError(msg),
+                    };
+                    Some(WsReply::GetCaptureDeviceCapabilities {
+                        result: ws_err,
+                        value: crate::AudioDeviceDescriptor {
+                            name: device_name,
+                            description: "".to_string(),
+                            capability_sets: Vec::new(),
+                        },
+                    })
+                }
+            }
+        }
+        WsCommand::GetPlaybackDeviceCapabilities(backend, device_name) => {
+            match crate::get_device_capabilities(&backend, &device_name, false) {
+                Ok(dev) => Some(WsReply::GetPlaybackDeviceCapabilities {
+                    result: WsResult::Ok,
+                    value: dev,
+                }),
+                Err(err) => {
+                    let ws_err = match err {
+                        crate::DeviceError::DeviceNotFound(msg) => {
+                            WsResult::DeviceNotFoundError(msg)
+                        }
+                        crate::DeviceError::DeviceBusy(msg) => WsResult::DeviceBusyError(msg),
+                        crate::DeviceError::Other(msg) => WsResult::DeviceError(msg),
+                    };
+                    Some(WsReply::GetPlaybackDeviceCapabilities {
+                        result: ws_err,
+                        value: crate::AudioDeviceDescriptor {
+                            name: device_name,
+                            description: "".to_string(),
+                            capability_sets: Vec::new(),
+                        },
+                    })
+                }
+            }
         }
         WsCommand::GetProcessingLoad => {
             let load = shared_data_inst.processing_params.processing_load();

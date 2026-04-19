@@ -49,7 +49,7 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 use crate::asio_backend::utils::{
-    asio_sample_type_name, copy_from_queue_at_offset, create_asio_buffers,
+    asio_format_to_str, asio_sample_type_name, copy_from_queue_at_offset, create_asio_buffers,
     fixed_cstr_buf_to_string, get_preferred_buffer_size, make_buffer_infos,
     read_current_asio_sample_rate_hz, resolve_binary_format, resolve_format,
 };
@@ -1050,11 +1050,7 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
     debug!("ASIO current sample rate: {current_rate} Hz");
 
     // Log supported sample rates
-    const COMMON_RATES: &[u32] = &[
-        8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000, 352800,
-        384000, 705600, 768000,
-    ];
-    let supported: Vec<u32> = COMMON_RATES
+    let supported: Vec<u32> = crate::STANDARD_RATES
         .iter()
         .copied()
         .filter(|&r| unsafe { can_sample_rate(r as f64) } == 0)
@@ -1214,6 +1210,104 @@ pub fn list_device_names() -> Vec<String> {
 pub fn list_available_devices() -> Vec<(String, String)> {
     let names = list_device_names();
     names.iter().map(|n| (n.clone(), n.clone())).collect()
+}
+
+pub fn get_device_capabilities(
+    device_name: &str,
+    input: bool,
+) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
+    // Refuse to probe if an in-process ASIO driver is already loaded (live stream).
+    // load_driver_by_name() unconditionally tears down any loaded driver, which
+    // would silently interrupt active playback or capture.
+    if ASIO_DRIVER_INITIALIZED.load(Ordering::Acquire) {
+        return Err(crate::DeviceError::DeviceBusy(format!(
+            "ASIO driver is already in use; cannot probe '{device_name}' while a stream is active"
+        )));
+    }
+
+    let names = list_device_names();
+    if !names.contains(&device_name.to_string()) {
+        return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
+    }
+
+    // Probing ASIO requires loading the driver.
+    if let Err(e) = load_driver_by_name(device_name) {
+        return Err(crate::DeviceError::Other(format!("{e}")));
+    }
+
+    let mut supported_rates = Vec::new();
+    for &rate in crate::STANDARD_RATES {
+        if unsafe { can_sample_rate(rate as f64) } == 0 {
+            supported_rates.push(rate);
+        }
+    }
+
+    // ASIO uses one fixed format for all channels and rates within a driver.
+    let direction_name = if input { "capture" } else { "playback" };
+    let fmt = match resolve_format(&None, input) {
+        Ok(fmt) => fmt,
+        Err(_) => {
+            teardown_asio_driver();
+            return Err(crate::DeviceError::Other(format!(
+                "Failed to detect {direction_name} sample format for ASIO device '{device_name}'"
+            )));
+        }
+    };
+    let fmt_str = asio_format_to_str(fmt).to_string();
+
+    // Get channel count for the requested direction.
+    // A non-zero return from ASIOGetChannels indicates a real driver error; treat
+    // it as a probe failure rather than silently returning empty capabilities.
+    let mut input_channels: i32 = 0;
+    let mut output_channels: i32 = 0;
+    let ch_res = unsafe { ASIOGetChannels(&mut input_channels, &mut output_channels) };
+    if ch_res != 0 {
+        teardown_asio_driver();
+        return Err(crate::DeviceError::Other(format!(
+            "ASIOGetChannels failed for '{device_name}' (error code {ch_res})"
+        )));
+    }
+
+    teardown_asio_driver();
+
+    let channels = if input {
+        input_channels as usize
+    } else {
+        output_channels as usize
+    };
+
+    // A driver that only supports the opposite direction will report 0 channels
+    // for the requested direction — filter that out rather than emitting a
+    // zero-channel capability entry.
+    if channels == 0 || supported_rates.is_empty() {
+        return Ok(crate::AudioDeviceDescriptor {
+            name: device_name.to_string(),
+            description: device_name.to_string(),
+            capability_sets: Vec::new(),
+        });
+    }
+
+    let samplerates: Vec<crate::SamplerateCapability> = supported_rates
+        .iter()
+        .map(|&rate| crate::SamplerateCapability {
+            samplerate: rate as usize,
+            formats: vec![fmt_str.clone()],
+        })
+        .collect();
+
+    let capabilities = vec![crate::ChannelCapability {
+        channels,
+        samplerates,
+    }];
+
+    Ok(crate::AudioDeviceDescriptor {
+        name: device_name.to_string(),
+        description: device_name.to_string(),
+        capability_sets: vec![crate::DeviceCapabilitySet {
+            mode: crate::CapabilityMode::Unified,
+            capabilities,
+        }],
+    })
 }
 
 // ---------------------------------------------------------------------------
