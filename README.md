@@ -23,7 +23,7 @@ The CamillaDSP project encompasses:
     *   **[camilladsp-controller](https://github.com/HEnquist/camilladsp-controller):**
         A controller for automatic sample rate switching.
 
-# CamillaDSP engine v4.1
+# CamillaDSP engine v4.2
 
 The CamillaDSP engine is a command-line application that runs on Linux, macOS, and Windows.
 

@@ -1,3 +1,8 @@
+# 4.2.0
+New features:
+- Websocket commands for subscribing to signal level and state change events.
+- Websocket command for getting device capabilities.
+
 # 4.1.3
 Bugfixes:
 - Increased capture ringbuffer sizes in CoreAudio, WASAPI, ASIO, and threaded ALSA
