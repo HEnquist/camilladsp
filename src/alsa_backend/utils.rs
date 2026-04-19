@@ -183,51 +183,62 @@ pub fn get_device_capabilities(
         }
     };
 
-    let mut channel_capabilities = Vec::new();
-    if let Ok(hwp) = HwParams::any(&pcm)
-        && let (Ok(min_ch), Ok(max_ch)) = (hwp.get_channels_min(), hwp.get_channels_max())
-    {
-        let max_ch = max_ch.min(128);
-        for channels in min_ch..=max_ch {
-            let mut samplerates = Vec::new();
-            if let Ok(hwp_ch) = HwParams::any(&pcm)
-                && hwp_ch.set_channels(channels).is_ok()
-                && let Ok(rates_values) = list_samplerates(&hwp_ch)
-            {
-                let rates = match rates_values {
-                    SupportedValues::Discrete(r) => r,
-                    SupportedValues::Range(min, max) => STANDARD_RATES
-                        .iter()
-                        .filter(|&&r| r >= min && r <= max)
-                        .copied()
-                        .collect(),
-                };
+    let hwp = HwParams::any(&pcm).map_err(|err| {
+        crate::DeviceError::Other(format!(
+            "Failed to query ALSA hardware parameters for '{device_name}': {err}"
+        ))
+    })?;
+    let (min_ch, max_ch) = hwp
+        .get_channels_min()
+        .and_then(|min_ch| hwp.get_channels_max().map(|max_ch| (min_ch, max_ch)))
+        .map_err(|err| {
+            crate::DeviceError::Other(format!(
+                "Failed to query ALSA channel limits for '{device_name}': {err}"
+            ))
+        })?;
 
-                for rate in rates {
-                    let mut formats = Vec::new();
-                    if let Ok(hwp_rate) = HwParams::any(&pcm)
-                        && hwp_rate.set_channels(channels).is_ok()
-                        && hwp_rate.set_rate(rate, alsa::ValueOr::Nearest).is_ok()
-                        && let Ok(supported_formats) = list_formats(&hwp_rate)
-                    {
-                        for fmt in supported_formats {
-                            formats.push(alsa_format_to_str(fmt).to_string());
-                        }
-                    }
-                    if !formats.is_empty() {
-                        samplerates.push(crate::SamplerateCapability {
-                            samplerate: rate as usize,
-                            formats,
-                        });
+    let mut channel_capabilities = Vec::new();
+    let max_ch = max_ch.min(128);
+    for channels in min_ch..=max_ch {
+        let mut samplerates = Vec::new();
+        if let Ok(hwp_ch) = HwParams::any(&pcm)
+            && hwp_ch.set_channels(channels).is_ok()
+            && let Ok(rates_values) = list_samplerates(&hwp_ch)
+        {
+            let rates = match rates_values {
+                SupportedValues::Discrete(r) => r,
+                SupportedValues::Range(min, max) => STANDARD_RATES
+                    .iter()
+                    .filter(|&&r| r >= min && r <= max)
+                    .copied()
+                    .collect(),
+            };
+
+            for rate in rates {
+                let mut formats = Vec::new();
+                if let Ok(hwp_rate) = HwParams::any(&pcm)
+                    && hwp_rate.set_channels(channels).is_ok()
+                    && hwp_rate.set_rate(rate, alsa::ValueOr::Nearest).is_ok()
+                    && hwp_rate.get_rate().ok() == Some(rate)
+                    && let Ok(supported_formats) = list_formats(&hwp_rate)
+                {
+                    for fmt in supported_formats {
+                        formats.push(alsa_format_to_str(fmt).to_string());
                     }
                 }
+                if !formats.is_empty() {
+                    samplerates.push(crate::SamplerateCapability {
+                        samplerate: rate as usize,
+                        formats,
+                    });
+                }
             }
-            if !samplerates.is_empty() {
-                channel_capabilities.push(crate::ChannelCapability {
-                    channels: channels as usize,
-                    samplerates,
-                });
-            }
+        }
+        if !samplerates.is_empty() {
+            channel_capabilities.push(crate::ChannelCapability {
+                channels: channels as usize,
+                samplerates,
+            });
         }
     }
 
