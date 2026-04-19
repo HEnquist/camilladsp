@@ -31,13 +31,13 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Duration;
 use wasapi;
-use wasapi::DeviceCollection;
 use wasapi::StreamMode;
 
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 
+use super::capabilities::list_device_names_in_collection;
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingParameters;
@@ -89,256 +89,136 @@ enum DisconnectReason {
     Error,
 }
 
-pub fn list_device_names(input: bool) -> Vec<(String, String)> {
-    let direction = if input {
-        wasapi::Direction::Capture
-    } else {
-        wasapi::Direction::Render
-    };
-    let _ = wasapi::initialize_mta();
-    let enumerator = wasapi::DeviceEnumerator::new();
-
-    let names = enumerator
-        .map(|en| {
-            en.get_device_collection(&direction)
-                .map(|coll| list_device_names_in_collection(&coll).unwrap_or_default())
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
-    names.iter().map(|n| (n.clone(), n.clone())).collect()
-}
-
-/// Convert a `WasapiSampleFormat` to the canonical string used in YAML configs.
-fn wasapi_format_to_str(fmt: WasapiSampleFormat) -> &'static str {
-    match fmt {
-        WasapiSampleFormat::S16 => "S16",
-        WasapiSampleFormat::S24 => "S24",
-        WasapiSampleFormat::S32 => "S32",
-        WasapiSampleFormat::F32 => "F32",
-    }
-}
-
-pub fn get_device_capabilities(
-    device_name: &str,
-    input: bool,
-) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
-    let direction = if input {
-        wasapi::Direction::Capture
-    } else {
-        wasapi::Direction::Render
-    };
-    let _ = wasapi::initialize_mta();
-
-    let enumerator = match wasapi::DeviceEnumerator::new() {
-        Ok(e) => e,
-        Err(_) => {
-            return Err(crate::DeviceError::Other(
-                "Failed to initialize DeviceEnumerator".to_string(),
-            ));
-        }
-    };
-
-    let collection = match enumerator.get_device_collection(&direction) {
-        Ok(c) => c,
-        Err(_) => {
-            return Err(crate::DeviceError::Other(
-                "Failed to get device collection".to_string(),
-            ));
-        }
-    };
-
-    let count = collection.get_nbr_devices().unwrap_or(0);
-    let mut target_device = None;
-
-    for n in 0..count {
-        if let Ok(device) = collection.get_device_at_index(n)
-            && let Ok(name) = device.get_friendlyname()
-            && name == device_name
-        {
-            target_device = Some(device);
-            break;
-        }
-    }
-
-    let device = match target_device {
-        Some(d) => d,
-        None => {
-            return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
-        }
-    };
-
-    let audio_client = match device.get_iaudioclient() {
-        Ok(c) => c,
-        Err(e) => {
-            return Err(crate::DeviceError::Other(format!("{e}")));
-        }
-    };
-
-    let mut capability_sets = Vec::new();
-
-    // --- Shared mode: use GetMixFormat as the sole authoritative descriptor ---
-    // WASAPI shared mode operates through the audio engine at a single fixed mix
-    // format; probing a synthetic channel/rate grid would misrepresent what the
-    // shared path can actually honour (CamillaDSP uses autoconvert=false).
-    if let Ok(mix_fmt) = audio_client.get_mixformat() {
-        let channels = mix_fmt.get_nchannels() as usize;
-        let rate = mix_fmt.get_samplespersec() as usize;
-        let fmt = WasapiSampleFormat::F32;
-        // CamillaDSP always presents F32 to the shared-mode audio engine.
-        let shared_caps = vec![crate::ChannelCapability {
-            channels,
-            samplerates: vec![crate::SamplerateCapability {
-                samplerate: rate,
-                formats: vec![wasapi_format_to_str(fmt).to_string()],
-            }],
-        }];
-        capability_sets.push(crate::DeviceCapabilitySet {
-            mode: crate::CapabilityMode::Shared,
-            capabilities: shared_caps,
-        });
-    }
-
-    // --- Exclusive mode: probe independently with a generous channel ceiling ---
-    // GetMixFormat describes the shared-mode engine format and is not a valid upper
-    // bound for exclusive-mode channel support. Probe up to MAX_EXCLUSIVE_CHANNELS
-    // so that e.g. 8-channel or multi-channel exclusive devices are not under-reported.
-    const MAX_EXCLUSIVE_CHANNELS: usize = 32;
-    let mut exclusive_caps = Vec::new();
-    for channels in 1..=MAX_EXCLUSIVE_CHANNELS {
-        let mut samplerates = Vec::new();
-        for &rate in crate::STANDARD_RATES {
-            let rate = rate as usize;
-            let mut formats = Vec::new();
-            for fmt in &[
-                WasapiSampleFormat::S16,
-                WasapiSampleFormat::S24,
-                WasapiSampleFormat::S32,
-                WasapiSampleFormat::F32,
-            ] {
-                if get_supported_wave_format(
-                    &audio_client,
-                    fmt,
-                    rate,
-                    channels,
-                    &wasapi::ShareMode::Exclusive,
-                )
-                .is_ok()
-                {
-                    formats.push(wasapi_format_to_str(*fmt).to_string());
-                }
-            }
-            formats.sort();
-            formats.dedup();
-            if !formats.is_empty() {
-                samplerates.push(crate::SamplerateCapability {
-                    samplerate: rate,
-                    formats,
-                });
-            }
-        }
-        if !samplerates.is_empty() {
-            exclusive_caps.push(crate::ChannelCapability {
-                channels,
-                samplerates,
-            });
-        }
-    }
-    if !exclusive_caps.is_empty() {
-        capability_sets.push(crate::DeviceCapabilitySet {
-            mode: crate::CapabilityMode::Exclusive,
-            capabilities: exclusive_caps,
-        });
-    }
-
-    Ok(crate::AudioDeviceDescriptor {
-        name: device_name.to_string(),
-        description: device_name.to_string(),
-        capability_sets,
-    })
-}
-
-fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<String>> {
-    let mut names = Vec::new();
-    let count = collection.get_nbr_devices()?;
-    for n in 0..count {
-        let device = collection.get_device_at_index(n)?;
-        let name = device.get_friendlyname()?;
-        names.push(name);
-    }
-    Ok(names)
-}
-
 fn build_wave_format(
     sample_format: &BinarySampleFormat,
     samplerate: usize,
     channels: usize,
+    channel_mask: Option<u32>,
 ) -> wasapi::WaveFormat {
     match sample_format {
-        BinarySampleFormat::S16_LE => {
-            wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
-        BinarySampleFormat::S24_4_LJ_LE => {
-            wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
-        BinarySampleFormat::S24_3_LE => {
-            wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
-        BinarySampleFormat::S32_LE => {
-            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
+        BinarySampleFormat::S16_LE => wasapi::WaveFormat::new(
+            16,
+            16,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
+        BinarySampleFormat::S24_4_LJ_LE => wasapi::WaveFormat::new(
+            32,
+            24,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
+        BinarySampleFormat::S24_3_LE => wasapi::WaveFormat::new(
+            24,
+            24,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
+        BinarySampleFormat::S32_LE => wasapi::WaveFormat::new(
+            32,
+            32,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
         BinarySampleFormat::F32_LE => wasapi::WaveFormat::new(
             32,
             32,
             &wasapi::SampleType::Float,
             samplerate,
             channels,
-            None,
+            channel_mask,
         ),
         _ => unreachable!(),
     }
 }
 
-fn get_supported_wave_format(
+pub(super) fn get_supported_wave_format(
     audio_client: &wasapi::AudioClient,
     sample_format: &WasapiSampleFormat,
     samplerate: usize,
     channels: usize,
     sharemode: &wasapi::ShareMode,
 ) -> Res<(wasapi::WaveFormat, BinarySampleFormat)> {
+    get_supported_wave_format_with_channel_mask(
+        audio_client,
+        sample_format,
+        samplerate,
+        channels,
+        sharemode,
+        None,
+    )
+}
+
+pub(super) fn get_supported_wave_format_with_channel_mask(
+    audio_client: &wasapi::AudioClient,
+    sample_format: &WasapiSampleFormat,
+    samplerate: usize,
+    channels: usize,
+    sharemode: &wasapi::ShareMode,
+    channel_mask: Option<u32>,
+) -> Res<(wasapi::WaveFormat, BinarySampleFormat)> {
     match sharemode {
         wasapi::ShareMode::Exclusive => match sample_format {
             WasapiSampleFormat::S16 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S16_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S16_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::S16_LE,
                 ))
             }
             WasapiSampleFormat::S32 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S32_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S32_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::S32_LE,
                 ))
             }
             WasapiSampleFormat::F32 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::F32_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::F32_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::F32_LE,
                 ))
             }
             WasapiSampleFormat::S24 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S24_3_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S24_3_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 if let Ok(wavefmt) = audio_client.is_supported_exclusive_with_quirks(&wave_format) {
                     return Ok((wavefmt, BinarySampleFormat::S24_3_LE));
                 }
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S24_4_LJ_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S24_4_LJ_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::S24_4_LJ_LE,
@@ -346,7 +226,8 @@ fn get_supported_wave_format(
             }
         },
         wasapi::ShareMode::Shared => {
-            let wave_format = build_wave_format(&BinarySampleFormat::F32_LE, samplerate, channels);
+            let wave_format =
+                build_wave_format(&BinarySampleFormat::F32_LE, samplerate, channels, None);
             match audio_client.is_supported(&wave_format, sharemode) {
                 Ok(None) => {
                     debug!("Device supports format {wave_format:?}.");

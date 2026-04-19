@@ -342,6 +342,10 @@ Each entry in `capability_sets` has a `mode` field that indicates which operatin
   There is always exactly one channel count and one sample rate in this set, and the format is always `F32`.
 - `Exclusive`: WASAPI exclusive mode. Probed independently of shared mode.
   Supports multiple channel counts, sample rates, and formats.
+  WASAPI does not provide a structured capability API, so the exclusive-mode
+  scan must probe individual configurations one at a time. Heuristics are used
+  to keep the probe time reasonable, which means there is no guarantee that
+  every valid stream configuration is included for very unusual devices.
 
 For WASAPI, the response contains two sets — one `Shared` and one `Exclusive`:
 ```json
