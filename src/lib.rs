@@ -62,6 +62,8 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
+pub static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
 // Logging macros to give extra logs
 // when the "debug" feature is enabled.
 #[allow(unused)]
@@ -489,6 +491,49 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     (playbacktypes, capturetypes)
 }
 
+/// Curated list of standard audio sample rates used across all backends
+/// for capability probing. Backends should use this instead of defining
+/// their own local rate tables.
+pub const STANDARD_RATES: &[u32] = &[
+    5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
+    352800, 384000, 705600, 768000,
+];
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct SamplerateCapability {
+    pub samplerate: usize,
+    pub formats: Vec<String>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct ChannelCapability {
+    pub channels: usize,
+    pub samplerates: Vec<SamplerateCapability>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub enum CapabilityMode {
+    /// Device uses a unified capability model (ALSA, CoreAudio, ASIO).
+    Unified,
+    /// WASAPI shared-mode capabilities (derived from the mix format).
+    Shared,
+    /// WASAPI exclusive-mode capabilities (probed independently).
+    Exclusive,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct DeviceCapabilitySet {
+    pub mode: CapabilityMode,
+    pub capabilities: Vec<ChannelCapability>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct AudioDeviceDescriptor {
+    pub name: String,
+    pub description: String,
+    pub capability_sets: Vec<DeviceCapabilitySet>,
+}
+
 // Return a list of supported devices.
 // Returns two strings per device, the device name and a readable name.
 // Some backends do not make a diference between these, and return the same name twice.
@@ -499,9 +544,34 @@ pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String
         #[cfg(target_os = "macos")]
         "coreaudio" => coreaudio_backend::device::list_available_devices(input),
         #[cfg(target_os = "windows")]
-        "wasapi" => wasapi_backend::device::list_device_names(input),
+        "wasapi" => wasapi_backend::capabilities::list_device_names(input),
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
         "asio" => asio_backend::device::list_available_devices(),
         _ => Vec::new(),
+    }
+}
+
+#[derive(Debug, PartialEq, serde::Serialize)]
+pub enum DeviceError {
+    DeviceNotFound(String),
+    DeviceBusy(String),
+    Other(String),
+}
+
+pub fn get_device_capabilities(
+    backend: &str,
+    device_name: &str,
+    input: bool,
+) -> Result<AudioDeviceDescriptor, DeviceError> {
+    match backend.to_lowercase().as_str() {
+        #[cfg(target_os = "linux")]
+        "alsa" => alsa_backend::utils::get_device_capabilities(device_name, input),
+        #[cfg(target_os = "macos")]
+        "coreaudio" => coreaudio_backend::device::get_device_capabilities(device_name, input),
+        #[cfg(target_os = "windows")]
+        "wasapi" => wasapi_backend::capabilities::get_device_capabilities(device_name, input),
+        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        "asio" => asio_backend::device::get_device_capabilities(device_name, input),
+        _ => Err(DeviceError::Other("Unsupported backend".to_string())),
     }
 }

@@ -58,7 +58,9 @@ use objc2_core_audio::{
     kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput,
     kAudioObjectPropertyScopeOutput,
 };
-use objc2_core_audio_types::{AudioBuffer, AudioValueTranslation};
+use objc2_core_audio_types::{
+    AudioBuffer, AudioStreamBasicDescription, AudioValueTranslation, kAudioFormatFlagIsFloat,
+};
 use objc2_core_foundation::CFString;
 
 use audio_thread_priority::{
@@ -186,6 +188,96 @@ pub fn list_available_devices(input: bool) -> Vec<(String, String)> {
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
+fn get_physical_capabilities(device_id: AudioDeviceID, capabilities_map: &mut CapabilitiesMap) {
+    if let Ok(supported_formats) = get_supported_physical_stream_formats(device_id) {
+        for ranged_desc in supported_formats {
+            let asbd = ranged_desc.mFormat;
+            let channels = asbd.mChannelsPerFrame as usize;
+
+            let format_str = match get_format_from_asbd(&asbd) {
+                Some(fmt) => coreaudio_format_to_str(fmt).to_string(),
+                None => continue,
+            };
+
+            let rates =
+                if ranged_desc.mSampleRateRange.mMinimum == ranged_desc.mSampleRateRange.mMaximum {
+                    vec![ranged_desc.mSampleRateRange.mMinimum as usize]
+                } else {
+                    // Expand continuous ranges against the shared standard rate
+                    // table so clients see all usable discrete rates, not just
+                    // the endpoints.
+                    let min = ranged_desc.mSampleRateRange.mMinimum as usize;
+                    let max = ranged_desc.mSampleRateRange.mMaximum as usize;
+                    crate::STANDARD_RATES
+                        .iter()
+                        .filter(|&&r| (r as usize) >= min && (r as usize) <= max)
+                        .map(|&r| r as usize)
+                        .collect()
+                };
+
+            let rate_map = capabilities_map.entry(channels).or_default();
+            for rate in rates {
+                rate_map.entry(rate).or_default().push(format_str.clone());
+            }
+        }
+    }
+}
+
+pub fn get_device_capabilities(
+    device_name: &str,
+    input: bool,
+) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
+    let device_id = match get_device_id_from_name_and_scope(device_name, input) {
+        Some(id) => id,
+        None => return Err(crate::DeviceError::DeviceNotFound(device_name.to_string())),
+    };
+
+    if !device_supports_scope(device_id, input) {
+        return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
+    }
+
+    let mut capabilities_map: CapabilitiesMap = std::collections::HashMap::new();
+
+    get_physical_capabilities(device_id, &mut capabilities_map);
+
+    Ok(crate::AudioDeviceDescriptor {
+        name: device_name.to_string(),
+        description: device_name.to_string(),
+        capability_sets: vec![crate::DeviceCapabilitySet {
+            mode: crate::CapabilityMode::Unified,
+            capabilities: capabilities_from_map(capabilities_map),
+        }],
+    })
+}
+
+fn coreaudio_format_to_str(fmt: CoreAudioSampleFormat) -> &'static str {
+    match fmt {
+        CoreAudioSampleFormat::S16 => "S16",
+        CoreAudioSampleFormat::S24 => "S24",
+        CoreAudioSampleFormat::S32 => "S32",
+        CoreAudioSampleFormat::F32 => "F32",
+    }
+}
+
+fn get_format_from_asbd(asbd: &AudioStreamBasicDescription) -> Option<CoreAudioSampleFormat> {
+    let is_float = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0;
+    let bit_depth = asbd.mBitsPerChannel;
+    if is_float {
+        if bit_depth == 32 {
+            Some(CoreAudioSampleFormat::F32)
+        } else {
+            None
+        }
+    } else {
+        match bit_depth {
+            16 => Some(CoreAudioSampleFormat::S16),
+            24 => Some(CoreAudioSampleFormat::S24),
+            32 => Some(CoreAudioSampleFormat::S32),
+            _ => None,
+        }
+    }
+}
+
 fn device_supports_scope(device_id: u32, input: bool) -> bool {
     let scope = if input {
         kAudioObjectPropertyScopeInput
@@ -215,6 +307,36 @@ fn device_supports_scope(device_id: u32, input: bool) -> bool {
     let nbr_buffers =
         (data_size - mem::size_of::<u32>() as u32) / mem::size_of::<AudioBuffer>() as u32;
     nbr_buffers > 0
+}
+
+type CapabilitiesMap =
+    std::collections::HashMap<usize, std::collections::HashMap<usize, Vec<String>>>;
+
+/// Convert a capabilities map into a sorted Vec<ChannelCapability>.
+fn capabilities_from_map(map: CapabilitiesMap) -> Vec<crate::ChannelCapability> {
+    let mut capabilities: Vec<crate::ChannelCapability> = map
+        .into_iter()
+        .map(|(channels, rate_map)| {
+            let mut samplerates: Vec<crate::SamplerateCapability> = rate_map
+                .into_iter()
+                .map(|(samplerate, mut formats)| {
+                    formats.sort_unstable();
+                    formats.dedup();
+                    crate::SamplerateCapability {
+                        samplerate,
+                        formats,
+                    }
+                })
+                .collect();
+            samplerates.sort_unstable_by_key(|s| s.samplerate);
+            crate::ChannelCapability {
+                channels,
+                samplerates,
+            }
+        })
+        .collect();
+    capabilities.sort_unstable_by_key(|c| c.channels);
+    capabilities
 }
 
 fn open_coreaudio_playback(
@@ -757,7 +879,12 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let semaphore = Semaphore::new(0);
                 let device_sph = semaphore.clone();
 
-                let ringbuffer = HeapRb::<u8>::new(blockalign * ( 2 * chunksize + 2 * callback_frames ));
+                let buffer_capacity_frames = if let Some(resamp) = &resampler {
+                    resamp.resampler.input_frames_max()
+                } else {
+                    chunksize
+                };
+                let ringbuffer = HeapRb::<u8>::new(blockalign * ( 2 * buffer_capacity_frames + 2 * callback_frames ));
                 let (mut device_producer, mut device_consumer) = ringbuffer.split();
 
                 trace!("Build input stream.");

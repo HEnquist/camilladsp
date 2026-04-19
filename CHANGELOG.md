@@ -1,3 +1,8 @@
+# 4.1.3
+Bugfixes:
+- Increased capture ringbuffer sizes in CoreAudio, WASAPI, ASIO, and threaded ALSA
+  to avoid stalling capture with very large downsampling ratios.
+
 # 4.1.2
 Bugfixes:
 - Removed memory allocations in real time audio paths to improve stability.

@@ -75,8 +75,8 @@ use std::net::IpAddr;
 
 use camillalib::{
     CaptureStatus, CommandMessage, ExitState, PlaybackStatus, ProcessingParameters,
-    ProcessingState, ProcessingStatus, SharedConfigs, StatusMessage, StatusStructs, StopReason,
-    list_supported_devices,
+    ProcessingState, ProcessingStatus, SHUTDOWN_REQUESTED, SharedConfigs, StatusMessage,
+    StatusStructs, StopReason, list_supported_devices,
 };
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
@@ -1100,6 +1100,7 @@ fn main_process() -> i32 {
                     }
                     info!("Shutting down");
                     exit_requested = true;
+                    SHUTDOWN_REQUESTED.store(true, std::sync::atomic::Ordering::Relaxed);
                     if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
                         error!("Error sending exit message: {e}");
                     }
@@ -1125,6 +1126,7 @@ fn main_process() -> i32 {
                 }
                 info!("Shutting down");
                 exit_requested = true;
+                SHUTDOWN_REQUESTED.store(true, std::sync::atomic::Ordering::Relaxed);
                 if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
                     error!("Error sending exit message: {e}");
                 }
@@ -1274,6 +1276,7 @@ fn main_process() -> i32 {
         };
 
         debug!("Config ready, start processing");
+        SHUTDOWN_REQUESTED.store(false, std::sync::atomic::Ordering::Relaxed);
         let exitstatus = run(shared_configs, status_structs.clone(), rx_command.clone());
         debug!("Processing ended with status {exitstatus:?}");
 

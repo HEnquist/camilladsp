@@ -439,11 +439,14 @@ They accept a backend name as input, and return a list of names.
 - `GetAvailableCaptureDevices` : get a list of available capture devices. 
 - `GetAvailablePlaybackDevices` : get a list of available playback devices. 
 
-Each element in the returned list consists of one string for the device identifier,
+- `GetCaptureDeviceCapabilities` : get the capabilities of a specific capture device. Requires two arguments: backend name and device name.
+- `GetPlaybackDeviceCapabilities` : get the capabilities of a specific playback device. Requires two arguments: backend name and device name.
+
+Each element in the returned list for the non-detailed commands consists of one string for the device identifier,
 and one optional string for the name.
 Some backends use the name as identifier, they then return `null` as name.
 
-The currently supported backend names are `Alsa`, `CoreAudio` and `Wasapi`.
+The currently supported backend names are `Alsa`, `CoreAudio`, `Wasapi` and `Asio`.
 
 Example entries for Wasapi:
 ```
@@ -460,6 +463,93 @@ Example entries for Alsa:
   ["hw:Generic,0,0", "HD-Audio Generic, ALC236 Analog, subdevice #0"]
 ]
 ```
+
+The capability commands return an object with the following structure:
+```json
+{
+  "name": "Device name",
+  "description": "Readable description",
+  "capability_sets": [
+    {
+      "mode": "Unified",
+      "capabilities": [
+        {
+          "channels": 2,
+          "samplerates": [
+            {
+              "samplerate": 44100,
+              "formats": ["S16_LE", "S32_LE"]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+For ALSA, these capability results are representative rather than exhaustive.
+Continuous sample-rate ranges are reduced to the standard rates that CamillaDSP probes,
+and channel probing is capped to a practical maximum instead of attempting a full enumeration.
+
+Each entry in `capability_sets` has a `mode` field that indicates which operating mode the capabilities belong to:
+- `Unified`: used by ALSA, CoreAudio, and ASIO, which have a single capability model.
+- `Shared`: WASAPI shared mode. Derived directly from the Windows audio engine mix format.
+  There is always exactly one channel count and one sample rate in this set, and the format is always `F32`.
+- `Exclusive`: WASAPI exclusive mode. Probed independently of shared mode.
+  Supports multiple channel counts, sample rates, and formats.
+  WASAPI does not provide a structured capability API, so the exclusive-mode
+  scan must probe individual configurations one at a time. Heuristics are used
+  to keep the probe time reasonable, which means there is no guarantee that
+  every valid stream configuration is included for very unusual devices.
+
+For WASAPI, the response contains two sets — one `Shared` and one `Exclusive`:
+```json
+{
+  "name": "Speakers (Realtek HD Audio)",
+  "description": "Speakers (Realtek HD Audio)",
+  "capability_sets": [
+    {
+      "mode": "Shared",
+      "capabilities": [
+        {
+          "channels": 2,
+          "samplerates": [
+            {
+              "samplerate": 48000,
+              "formats": ["F32"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "Exclusive",
+      "capabilities": [
+        {
+          "channels": 2,
+          "samplerates": [
+            {
+              "samplerate": 44100,
+              "formats": ["S16", "S24", "S32", "F32"]
+            },
+            {
+              "samplerate": 48000,
+              "formats": ["S16", "S24", "S32", "F32"]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+If the device is not found, busy, or the probe fails, the result field will contain an error
+and `capability_sets` will be an empty list. The possible errors are:
+- `DeviceNotFoundError`: the named device does not exist.
+- `DeviceBusyError`: the device is currently in use and cannot be probed (e.g. an active ASIO stream).
+- `DeviceError`: the probe failed for another reason. The error includes a description.
 
 ## Error responses
 If a command succeeds, CamillaDSP will reply with the string `Ok` in the `result` field.

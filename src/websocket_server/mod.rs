@@ -1618,6 +1618,56 @@ fn handle_command(
                 value: devs,
             })
         }
+        WsCommand::GetCaptureDeviceCapabilities(backend, device_name) => {
+            match crate::get_device_capabilities(&backend, &device_name, true) {
+                Ok(dev) => Some(WsReply::GetCaptureDeviceCapabilities {
+                    result: WsResult::Ok,
+                    value: dev,
+                }),
+                Err(err) => {
+                    let ws_err = match err {
+                        crate::DeviceError::DeviceNotFound(msg) => {
+                            WsResult::DeviceNotFoundError(msg)
+                        }
+                        crate::DeviceError::DeviceBusy(msg) => WsResult::DeviceBusyError(msg),
+                        crate::DeviceError::Other(msg) => WsResult::DeviceError(msg),
+                    };
+                    Some(WsReply::GetCaptureDeviceCapabilities {
+                        result: ws_err,
+                        value: crate::AudioDeviceDescriptor {
+                            name: device_name,
+                            description: "".to_string(),
+                            capability_sets: Vec::new(),
+                        },
+                    })
+                }
+            }
+        }
+        WsCommand::GetPlaybackDeviceCapabilities(backend, device_name) => {
+            match crate::get_device_capabilities(&backend, &device_name, false) {
+                Ok(dev) => Some(WsReply::GetPlaybackDeviceCapabilities {
+                    result: WsResult::Ok,
+                    value: dev,
+                }),
+                Err(err) => {
+                    let ws_err = match err {
+                        crate::DeviceError::DeviceNotFound(msg) => {
+                            WsResult::DeviceNotFoundError(msg)
+                        }
+                        crate::DeviceError::DeviceBusy(msg) => WsResult::DeviceBusyError(msg),
+                        crate::DeviceError::Other(msg) => WsResult::DeviceError(msg),
+                    };
+                    Some(WsReply::GetPlaybackDeviceCapabilities {
+                        result: ws_err,
+                        value: crate::AudioDeviceDescriptor {
+                            name: device_name,
+                            description: "".to_string(),
+                            capability_sets: Vec::new(),
+                        },
+                    })
+                }
+            }
+        }
         WsCommand::GetProcessingLoad => {
             let load = shared_data_inst.processing_params.processing_load();
             Some(WsReply::GetProcessingLoad {

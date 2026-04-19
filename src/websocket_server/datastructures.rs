@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json;
 
-use crate::{ProcessingState, StopReason};
+use crate::{AudioDeviceDescriptor, ProcessingState, StopReason};
 
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(untagged)]
@@ -97,6 +97,8 @@ pub(crate) enum WsCommand {
     GetSupportedDeviceTypes,
     GetAvailableCaptureDevices(String),
     GetAvailablePlaybackDevices(String),
+    GetCaptureDeviceCapabilities(String, String),
+    GetPlaybackDeviceCapabilities(String, String),
     GetProcessingLoad,
     GetResamplerLoad,
     Exit,
@@ -114,6 +116,9 @@ pub(crate) enum WsResult {
     ConfigReadError(String),
     InvalidValueError(String),
     InvalidRequestError(String),
+    DeviceNotFoundError(String),
+    DeviceBusyError(String),
+    DeviceError(String),
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -439,6 +444,14 @@ pub(crate) enum WsReply {
     GetAvailablePlaybackDevices {
         result: WsResult,
         value: Vec<(String, String)>,
+    },
+    GetCaptureDeviceCapabilities {
+        result: WsResult,
+        value: AudioDeviceDescriptor,
+    },
+    GetPlaybackDeviceCapabilities {
+        result: WsResult,
+        value: AudioDeviceDescriptor,
     },
     GetProcessingLoad {
         result: WsResult,

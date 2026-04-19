@@ -31,13 +31,13 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Duration;
 use wasapi;
-use wasapi::DeviceCollection;
 use wasapi::StreamMode;
 
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 
+use super::capabilities::list_device_names_in_collection;
 use crate::CommandMessage;
 use crate::PrcFmt;
 use crate::ProcessingParameters;
@@ -89,107 +89,136 @@ enum DisconnectReason {
     Error,
 }
 
-pub fn list_device_names(input: bool) -> Vec<(String, String)> {
-    let direction = if input {
-        wasapi::Direction::Capture
-    } else {
-        wasapi::Direction::Render
-    };
-    let _ = wasapi::initialize_mta();
-    let enumerator = wasapi::DeviceEnumerator::new();
-
-    let names = enumerator
-        .map(|en| {
-            en.get_device_collection(&direction)
-                .map(|coll| list_device_names_in_collection(&coll).unwrap_or_default())
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
-    names.iter().map(|n| (n.clone(), n.clone())).collect()
-}
-
-fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<String>> {
-    let mut names = Vec::new();
-    let count = collection.get_nbr_devices()?;
-    for n in 0..count {
-        let device = collection.get_device_at_index(n)?;
-        let name = device.get_friendlyname()?;
-        names.push(name);
-    }
-    Ok(names)
-}
-
 fn build_wave_format(
     sample_format: &BinarySampleFormat,
     samplerate: usize,
     channels: usize,
+    channel_mask: Option<u32>,
 ) -> wasapi::WaveFormat {
     match sample_format {
-        BinarySampleFormat::S16_LE => {
-            wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
-        BinarySampleFormat::S24_4_LJ_LE => {
-            wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
-        BinarySampleFormat::S24_3_LE => {
-            wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
-        BinarySampleFormat::S32_LE => {
-            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
+        BinarySampleFormat::S16_LE => wasapi::WaveFormat::new(
+            16,
+            16,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
+        BinarySampleFormat::S24_4_LJ_LE => wasapi::WaveFormat::new(
+            32,
+            24,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
+        BinarySampleFormat::S24_3_LE => wasapi::WaveFormat::new(
+            24,
+            24,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
+        BinarySampleFormat::S32_LE => wasapi::WaveFormat::new(
+            32,
+            32,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
         BinarySampleFormat::F32_LE => wasapi::WaveFormat::new(
             32,
             32,
             &wasapi::SampleType::Float,
             samplerate,
             channels,
-            None,
+            channel_mask,
         ),
         _ => unreachable!(),
     }
 }
 
-fn get_supported_wave_format(
+pub(super) fn get_supported_wave_format(
     audio_client: &wasapi::AudioClient,
     sample_format: &WasapiSampleFormat,
     samplerate: usize,
     channels: usize,
     sharemode: &wasapi::ShareMode,
 ) -> Res<(wasapi::WaveFormat, BinarySampleFormat)> {
+    get_supported_wave_format_with_channel_mask(
+        audio_client,
+        sample_format,
+        samplerate,
+        channels,
+        sharemode,
+        None,
+    )
+}
+
+pub(super) fn get_supported_wave_format_with_channel_mask(
+    audio_client: &wasapi::AudioClient,
+    sample_format: &WasapiSampleFormat,
+    samplerate: usize,
+    channels: usize,
+    sharemode: &wasapi::ShareMode,
+    channel_mask: Option<u32>,
+) -> Res<(wasapi::WaveFormat, BinarySampleFormat)> {
     match sharemode {
         wasapi::ShareMode::Exclusive => match sample_format {
             WasapiSampleFormat::S16 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S16_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S16_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::S16_LE,
                 ))
             }
             WasapiSampleFormat::S32 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S32_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S32_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::S32_LE,
                 ))
             }
             WasapiSampleFormat::F32 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::F32_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::F32_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::F32_LE,
                 ))
             }
             WasapiSampleFormat::S24 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S24_3_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S24_3_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 if let Ok(wavefmt) = audio_client.is_supported_exclusive_with_quirks(&wave_format) {
                     return Ok((wavefmt, BinarySampleFormat::S24_3_LE));
                 }
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S24_4_LJ_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S24_4_LJ_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::S24_4_LJ_LE,
@@ -197,7 +226,8 @@ fn get_supported_wave_format(
             }
         },
         wasapi::ShareMode::Shared => {
-            let wave_format = build_wave_format(&BinarySampleFormat::F32_LE, samplerate, channels);
+            let wave_format =
+                build_wave_format(&BinarySampleFormat::F32_LE, samplerate, channels, None);
             match audio_client.is_supported(&wave_format, sharemode) {
                 Ok(None) => {
                     debug!("Device supports format {wave_format:?}.");
@@ -1201,7 +1231,13 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let (tx_disconnectreason, rx_disconnectreason) = unbounded();
 
                 // Use 4 bytes per sample (the maximum) for the ring buffer
-                let ringbuffer = HeapRb::<u8>::new(channels * 4 * ( 2 * chunksize + 2048 ));
+                let buffer_capacity_frames = if let Some(resamp) = &resampler {
+                    resamp.resampler.input_frames_max()
+                } else {
+                    chunksize
+                };
+                let ringbuffer =
+                    HeapRb::<u8>::new(channels * 4 * (2 * buffer_capacity_frames + 2048));
                 let (device_producer, mut device_consumer) = ringbuffer.split();
 
                 trace!("Build input stream.");
