@@ -34,6 +34,9 @@ use crate::ProcessingParameters;
 
 use crate::STANDARD_RATES;
 
+const CHANNEL_LIST_LIMIT: u32 = 32;
+const CAPABILITY_PROBE_CHANNEL_LIMIT: u32 = 128;
+
 #[derive(Debug)]
 pub enum SupportedValues {
     Range(u32, u32),
@@ -188,18 +191,15 @@ pub fn get_device_capabilities(
             "Failed to query ALSA hardware parameters for '{device_name}': {err}"
         ))
     })?;
-    let (min_ch, max_ch) = hwp
-        .get_channels_min()
-        .and_then(|min_ch| hwp.get_channels_max().map(|max_ch| (min_ch, max_ch)))
-        .map_err(|err| {
+    let channel_values =
+        supported_channel_values(&hwp, CAPABILITY_PROBE_CHANNEL_LIMIT).map_err(|err| {
             crate::DeviceError::Other(format!(
                 "Failed to query ALSA channel limits for '{device_name}': {err}"
             ))
         })?;
 
     let mut channel_capabilities = Vec::new();
-    let max_ch = max_ch.min(128);
-    for channels in min_ch..=max_ch {
+    for channels in channel_values {
         let mut samplerates = Vec::new();
         if let Ok(hwp_ch) = HwParams::any(&pcm)
             && hwp_ch.set_channels(channels).is_ok()
@@ -339,34 +339,58 @@ pub fn list_samplerates_as_text(hwp: &HwParams) -> String {
     }
 }
 
-pub fn list_nbr_channels(hwp: &HwParams) -> Res<(u32, u32, Vec<u32>)> {
+fn supported_channel_values(hwp: &HwParams, limit: u32) -> Res<Vec<u32>> {
     let min_channels = hwp.get_channels_min()?;
     let max_channels = hwp.get_channels_max()?;
     if min_channels == max_channels {
-        return Ok((min_channels, max_channels, vec![min_channels]));
+        return Ok(vec![min_channels]);
     }
 
-    let mut check_max = max_channels;
-    if check_max > 32 {
-        check_max = 32;
-    }
+    let check_max = max_channels.min(limit);
 
-    let mut channels = Vec::with_capacity(check_max as usize);
+    let mut channels = Vec::with_capacity((check_max - min_channels + 1) as usize);
     for chan in min_channels..=check_max {
         if hwp.test_channels(chan).is_ok() {
             channels.push(chan);
         }
     }
     channels.shrink_to_fit();
+    Ok(channels)
+}
+
+pub fn list_nbr_channels(hwp: &HwParams) -> Res<(u32, u32, Vec<u32>)> {
+    let min_channels = hwp.get_channels_min()?;
+    let max_channels = hwp.get_channels_max()?;
+    let channels = supported_channel_values(hwp, CHANNEL_LIST_LIMIT)?;
     Ok((min_channels, max_channels, channels))
 }
 
 pub fn list_channels_as_text(hwp: &HwParams) -> String {
-    let supported_channels_res = list_nbr_channels(hwp);
-    if let Ok((min_ch, max_ch, ch_list)) = supported_channels_res {
-        format!("supported channels, min: {min_ch}, max: {max_ch}, list: {ch_list:?}")
-    } else {
-        "failed checking supported channels".to_string()
+    let min_ch = match hwp.get_channels_min() {
+        Ok(value) => value,
+        Err(_) => return "failed checking supported channels".to_string(),
+    };
+    let max_ch = match hwp.get_channels_max() {
+        Ok(value) => value,
+        Err(_) => return "failed checking supported channels".to_string(),
+    };
+
+    if min_ch == max_ch {
+        return format!("supported channels: exactly {min_ch}");
+    }
+
+    match supported_channel_values(hwp, CHANNEL_LIST_LIMIT) {
+        Ok(ch_list) => {
+            let omitted_note = if CHANNEL_LIST_LIMIT < max_ch {
+                format!(", channel counts above {CHANNEL_LIST_LIMIT} omitted")
+            } else {
+                String::new()
+            };
+            format!(
+                "supported channels: discrete values {ch_list:?} (reported min: {min_ch}, max: {max_ch}{omitted_note})"
+            )
+        }
+        Err(_) => "failed checking supported channels".to_string(),
     }
 }
 
