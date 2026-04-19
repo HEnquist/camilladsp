@@ -62,6 +62,8 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
+pub static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
 // Logging macros to give extra logs
 // when the "debug" feature is enabled.
 #[allow(unused)]
