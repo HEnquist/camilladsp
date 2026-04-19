@@ -14,6 +14,8 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+#![cfg_attr(feature = "32bit", allow(clippy::collapsible_if))]
+
 // Based on https://github.com/korken89/biquad-rs
 // coeffs: https://arachnoid.com/BiQuadDesigner/index.html
 
@@ -520,10 +522,10 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
         | config::BiquadParameters::Allpass(config::NotchWidth::Q { q, .. })
         | config::BiquadParameters::Highshelf(config::ShelfSteepness::Q { q, .. })
         | config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { q, .. })
-        | config::BiquadParameters::GeneralNotch(config::GeneralNotchParams { q_p: q, .. }) => {
-            if *q <= 0.0 {
-                return Err(config::ConfigError::new("Q must be > 0").into());
-            }
+        | config::BiquadParameters::GeneralNotch(config::GeneralNotchParams { q_p: q, .. })
+            if *q <= 0.0 =>
+        {
+            return Err(config::ConfigError::new("Q must be > 0").into());
         }
         _ => {}
     }
@@ -534,10 +536,10 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
         })
         | config::BiquadParameters::Notch(config::NotchWidth::Bandwidth { bandwidth, .. })
         | config::BiquadParameters::Bandpass(config::NotchWidth::Bandwidth { bandwidth, .. })
-        | config::BiquadParameters::Allpass(config::NotchWidth::Bandwidth { bandwidth, .. }) => {
-            if *bandwidth <= 0.0 {
-                return Err(config::ConfigError::new("Bandwidth must be > 0").into());
-            }
+        | config::BiquadParameters::Allpass(config::NotchWidth::Bandwidth { bandwidth, .. })
+            if *bandwidth <= 0.0 =>
+        {
+            return Err(config::ConfigError::new("Bandwidth must be > 0").into());
         }
         _ => {}
     }

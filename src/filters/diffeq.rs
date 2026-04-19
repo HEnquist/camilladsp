@@ -140,6 +140,7 @@ pub fn validate_config(_parameters: &config::DiffEqParameters) -> Res<()> {
 }
 
 #[cfg(test)]
+#[cfg_attr(feature = "32bit", allow(clippy::excessive_precision))]
 mod tests {
     use crate::PrcFmt;
     use crate::filters::Filter;

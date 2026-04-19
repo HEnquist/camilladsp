@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "32bit", allow(clippy::excessive_precision))]
+
 // CamillaDSP - A flexible tool for processing audio
 // Copyright (C) 2026 Henrik Enquist
 //
