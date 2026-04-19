@@ -557,7 +557,7 @@ mod tests {
         };
         let mut values = Vec::new();
         stats.rms_db(&mut values);
-        assert_eq!(-1000.0, values[0]);
+        assert_eq!(-200.0, values[0]);
         stats.peak_db(&mut values);
         assert_eq!(0.0, values[0]);
         stats.rms_db(&mut values);

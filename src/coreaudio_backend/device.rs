@@ -1098,7 +1098,10 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             capture_status.measured_samplerate = 0;
                             capture_status.signal_range = 0.0;
                             capture_status.rate_adjust = 0.0;
-                            capture_status.state = ProcessingState::Stalled;
+                            crate::update_capture_state(
+                                &mut capture_status,
+                                ProcessingState::Stalled,
+                            );
                         }
                         else {
                             xtrace!("Capture status blocked, skip update.");
@@ -1133,7 +1136,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                                 capture_status.measured_samplerate = measured_rate_f as usize;
                                 capture_status.signal_range = value_range as f32;
                                 capture_status.rate_adjust = rate_adjust as f32;
-                                capture_status.state = state;
+                                crate::update_capture_state(&mut capture_status, state);
                             }
                             else {
                                 xtrace!("Capture status upgrade blocked, skip update.");
@@ -1201,7 +1204,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         }
                     };
                 }
-                capture_status.write().state = ProcessingState::Inactive;
+                crate::set_capture_state(&capture_status, ProcessingState::Inactive);
             })?;
         Ok(Box::new(handle))
     }

@@ -1657,7 +1657,10 @@ impl CaptureDevice for AlsaCaptureDevice {
                                         }
                                     };
                                 }
-                                cap_params.capture_status.write().state = ProcessingState::Inactive;
+                                crate::set_capture_state(
+                                    &cap_params.capture_status,
+                                    ProcessingState::Inactive,
+                                );
                             }
                             Err(err) => {
                                 tx_state_dev
@@ -1833,7 +1836,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     capture_status.measured_samplerate = measured_rate_f as usize;
                                     capture_status.signal_range = value_range as f32;
                                     capture_status.rate_adjust = rate_adjust as f32;
-                                    capture_status.state = state;
+                                    crate::update_capture_state(&mut capture_status, state);
                                 }
                             }
 
@@ -1900,7 +1903,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 }
                             };
                         }
-                        capture_status.write().state = ProcessingState::Inactive;
+                        crate::set_capture_state(&capture_status, ProcessingState::Inactive);
                     }
                     Ok(AlsaThreadState::Error(err)) => {
                         status_channel
