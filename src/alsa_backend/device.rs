@@ -594,6 +594,7 @@ fn playback_loop_bytes(
                 );
                 //trace!("PB: Avail at chunk rcvd: {:?}", avail_at_chunk_recvd);
                 chunk.update_stats(&mut chunk_stats);
+                crate::push_playback_audio_buffer(&params.playback_status, &chunk);
                 conversion_result =
                     chunk_to_buffer_rawbytes(chunk, &mut buffer, &params.sample_format);
 
@@ -1062,6 +1063,7 @@ fn capture_loop_bytes(
             false,
         );
         chunk.update_stats(&mut chunk_stats);
+        crate::push_capture_audio_buffer(&params.capture_status, &chunk);
         crate::update_capture_signal_status(
             &params.capture_status,
             &chunk_stats,

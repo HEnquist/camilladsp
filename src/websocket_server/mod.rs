@@ -33,8 +33,9 @@ use tungstenite::Message;
 use tungstenite::WebSocket;
 
 use self::datastructures::{
-    AllLevels, ChannelLabels, Fader, PbCapLevels, ValueWithOptionalLimits, VuLevels,
-    VuSubscription, WsCommand, WsReply, WsResult, WsSignalLevelSide,
+    AllLevels, ChannelLabels, Fader, PbCapLevels, SpectrumRequest, SpectrumSide,
+    ValueWithOptionalLimits, VuLevels, VuSubscription, WsCommand, WsReply, WsResult,
+    WsSignalLevelSide,
 };
 use self::utils::{
     accept_plain_stream, capture_signal_global_peak, capture_signal_peak,
@@ -1682,7 +1683,102 @@ fn handle_command(
                 value: load,
             })
         }
+        WsCommand::GetSpectrum(req) => Some(handle_get_spectrum(req, shared_data_inst)),
         WsCommand::None => None,
+    }
+}
+
+fn handle_get_spectrum(req: SpectrumRequest, shared_data: &SharedData) -> WsReply {
+    // Validate parameters that don't require the lock.
+    if req.n_bins < 2 {
+        return WsReply::GetSpectrum {
+            result: WsResult::InvalidRequestError("n_bins must be at least 2".to_string()),
+            value: None,
+        };
+    }
+    if req.min_freq <= 0.0 || req.min_freq >= req.max_freq {
+        return WsReply::GetSpectrum {
+            result: WsResult::InvalidRequestError(
+                "Invalid frequency range: min_freq must be > 0 and < max_freq".to_string(),
+            ),
+            value: None,
+        };
+    }
+    let samplerate = shared_data
+        .active_config
+        .lock()
+        .as_ref()
+        .map(|c| c.devices.samplerate)
+        .unwrap_or(0);
+    if samplerate == 0 {
+        return WsReply::GetSpectrum {
+            result: WsResult::InvalidRequestError("Sample rate not available".to_string()),
+            value: None,
+        };
+    }
+
+    let fft_len = crate::spectrum::fft_length_for(req.min_freq, samplerate);
+
+    // Hold the lock only for the memcopy; release before the FFT runs.
+    let signal_result: Result<Vec<_>, String> = match req.side {
+        SpectrumSide::Capture => {
+            let status = shared_data.capture_status.read();
+            let n_ch = status.audio_buffer.channel_count();
+            if n_ch == 0 {
+                Err("No audio data available".to_string())
+            } else if let Some(ch) = req.channel
+                && ch >= n_ch
+            {
+                Err(format!(
+                    "Channel {ch} out of range ({n_ch} channels available)"
+                ))
+            } else {
+                status
+                    .audio_buffer
+                    .read_latest(fft_len, req.channel)
+                    .ok_or_else(|| "Insufficient data in buffer".to_string())
+            }
+        }
+        SpectrumSide::Playback => {
+            let status = shared_data.playback_status.read();
+            let n_ch = status.audio_buffer.channel_count();
+            if n_ch == 0 {
+                Err("No audio data available".to_string())
+            } else if let Some(ch) = req.channel
+                && ch >= n_ch
+            {
+                Err(format!(
+                    "Channel {ch} out of range ({n_ch} channels available)"
+                ))
+            } else {
+                status
+                    .audio_buffer
+                    .read_latest(fft_len, req.channel)
+                    .ok_or_else(|| "Insufficient data in buffer".to_string())
+            }
+        }
+    };
+    // Lock is released here; FFT runs without holding it.
+
+    let result = signal_result.and_then(|signal| {
+        crate::spectrum::compute_spectrum_from_signal(
+            signal,
+            req.min_freq,
+            req.max_freq,
+            req.n_bins,
+            samplerate,
+        )
+    });
+
+    match result {
+        Ok(data) => WsReply::GetSpectrum {
+            result: WsResult::Ok,
+            value: Some(data),
+        },
+        Err(msg) => WsReply::GetSpectrum {
+            result: WsResult::InvalidRequestError(msg),
+            value: None,
+        },
     }
 }
 

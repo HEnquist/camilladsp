@@ -600,7 +600,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                                     }
                                 }
                                 chunk.update_stats(&mut chunk_stats);
-
+                                crate::push_playback_audio_buffer(&playback_status_clone, &chunk);
                                 conversion_result = chunk_to_buffer_rawbytes(
                                     chunk,
                                     &mut raw_buffer,

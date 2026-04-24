@@ -138,6 +138,7 @@ pub mod processors;
 #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
 pub mod pulse_backend;
 pub mod signal_monitor;
+pub mod spectrum;
 pub mod statefile;
 pub mod utils;
 #[cfg(target_os = "windows")]
@@ -201,6 +202,7 @@ pub struct CaptureStatus {
     pub state: ProcessingState,
     pub rate_adjust: f32,
     pub used_channels: Vec<bool>,
+    pub audio_buffer: spectrum::AudioRingBuffer,
 }
 
 #[derive(Clone, Debug)]
@@ -210,6 +212,7 @@ pub struct PlaybackStatus {
     pub buffer_level: usize,
     pub signal_rms: utils::countertimer::ValueHistory,
     pub signal_peak: utils::countertimer::ValueHistory,
+    pub audio_buffer: spectrum::AudioRingBuffer,
 }
 
 pub(crate) fn update_capture_signal_status(
@@ -226,6 +229,24 @@ pub(crate) fn update_capture_signal_status(
         signal_monitor::mark_capture_updated();
     } else {
         xtrace!("capture status blocked, skip update");
+    }
+}
+
+pub(crate) fn push_capture_audio_buffer(
+    capture_status: &Arc<RwLock<CaptureStatus>>,
+    chunk: &audiochunk::AudioChunk,
+) {
+    if let Some(mut status) = capture_status.try_write() {
+        status.audio_buffer.push_chunk(chunk);
+    }
+}
+
+pub(crate) fn push_playback_audio_buffer(
+    playback_status: &Arc<RwLock<PlaybackStatus>>,
+    chunk: &audiochunk::AudioChunk,
+) {
+    if let Some(mut status) = playback_status.try_write() {
+        status.audio_buffer.push_chunk(chunk);
     }
 }
 

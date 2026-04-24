@@ -193,6 +193,7 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, params.chunksize, params.chunksize);
 
         chunk.update_stats(&mut chunk_stats);
+        crate::push_capture_audio_buffer(&params.capture_status, &chunk);
         crate::update_capture_signal_status(
             &params.capture_status,
             &chunk_stats,

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json;
 
+use crate::spectrum::SpectrumData;
 use crate::{AudioDeviceDescriptor, ProcessingState, StopReason};
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -16,6 +17,22 @@ pub(crate) enum WsSignalLevelSide {
     Playback,
     Capture,
     Both,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum SpectrumSide {
+    Playback,
+    Capture,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub(crate) struct SpectrumRequest {
+    pub side: SpectrumSide,
+    pub channel: Option<usize>,
+    pub min_freq: f64,
+    pub max_freq: f64,
+    pub n_bins: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
@@ -101,6 +118,7 @@ pub(crate) enum WsCommand {
     GetPlaybackDeviceCapabilities(String, String),
     GetProcessingLoad,
     GetResamplerLoad,
+    GetSpectrum(SpectrumRequest),
     Exit,
     Stop,
     None,
@@ -460,6 +478,11 @@ pub(crate) enum WsReply {
     GetResamplerLoad {
         result: WsResult,
         value: f32,
+    },
+    GetSpectrum {
+        result: WsResult,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value: Option<SpectrumData>,
     },
     Exit {
         result: WsResult,

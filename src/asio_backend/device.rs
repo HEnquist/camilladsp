@@ -1645,6 +1645,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             }
 
                             chunk.update_stats(&mut chunk_stats);
+                            crate::push_playback_audio_buffer(&playback_status, &chunk);
                             conversion_result =
                                 chunk_to_buffer_rawbytes(chunk, &mut buf, &binary_format);
                             crate::update_playback_signal_status(
@@ -2186,6 +2187,7 @@ impl CaptureDevice for AsioCaptureDevice {
 
                     // Signal statistics
                     chunk.update_stats(&mut chunk_stats);
+                    crate::push_capture_audio_buffer(&capture_status, &chunk);
                     crate::update_capture_signal_status(
                         &capture_status,
                         &chunk_stats,
