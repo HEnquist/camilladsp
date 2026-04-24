@@ -113,8 +113,8 @@ pub struct SpectrumData {
     pub magnitudes: Vec<f32>,
 }
 
-static FREQ_CACHE: LazyLock<Mutex<HashMap<(u64, u64, usize), Arc<[f32]>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+type FreqCacheMap = Mutex<HashMap<(u64, u64, usize), Arc<[f32]>>>;
+static FREQ_CACHE: LazyLock<FreqCacheMap> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn get_frequencies(min_freq: f64, max_freq: f64, n_bins: usize) -> Arc<[f32]> {
     let key = (min_freq.to_bits(), max_freq.to_bits(), n_bins);

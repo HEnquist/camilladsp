@@ -34,8 +34,8 @@ use tungstenite::WebSocket;
 
 use self::datastructures::{
     AllLevels, ChannelLabels, Fader, PbCapLevels, SpectrumRequest, SpectrumSide,
-    ValueWithOptionalLimits, VuLevels, VuSubscription, WsCommand, WsReply, WsResult,
-    WsSignalLevelSide,
+    SpectrumSubscription, ValueWithOptionalLimits, VuLevels, VuSubscription, WsCommand, WsReply,
+    WsResult, WsSignalLevelSide,
 };
 use self::utils::{
     accept_plain_stream, capture_signal_global_peak, capture_signal_peak,
@@ -234,9 +234,23 @@ impl VuSubscriptionState {
 }
 
 #[derive(Debug)]
+struct SpectrumSubscriptionState {
+    side: SpectrumSide,
+    channel: Option<usize>,
+    min_freq: f64,
+    max_freq: f64,
+    n_bins: usize,
+    fft_len: usize,
+    samplerate: usize,
+    min_interval: Duration,
+    last_compute: Option<Instant>,
+}
+
+#[derive(Debug)]
 enum ActiveStream {
     SignalLevels(WsSignalLevelSide),
     VuLevels(VuSubscriptionState),
+    Spectrum(SpectrumSubscriptionState),
     State,
 }
 
@@ -451,6 +465,57 @@ macro_rules! make_handler {
                                         }
                                     }
                                 }
+                                ActiveStream::Spectrum(state) => {
+                                    let now = Instant::now();
+                                    let elapsed = state
+                                        .last_compute
+                                        .map(|l| now.duration_since(l))
+                                        .unwrap_or(Duration::MAX);
+                                    if elapsed >= state.min_interval {
+                                        state.last_compute = Some(now);
+                                        let signal_opt = match state.side {
+                                            SpectrumSide::Capture => {
+                                                let status =
+                                                    shared_data_inst.capture_status.read();
+                                                status
+                                                    .audio_buffer
+                                                    .read_latest(state.fft_len, state.channel)
+                                            }
+                                            SpectrumSide::Playback => {
+                                                let status =
+                                                    shared_data_inst.playback_status.read();
+                                                status
+                                                    .audio_buffer
+                                                    .read_latest(state.fft_len, state.channel)
+                                            }
+                                        };
+                                        if let Some(signal) = signal_opt {
+                                            let reply = match crate::spectrum::compute_spectrum_from_signal(
+                                                signal,
+                                                state.min_freq,
+                                                state.max_freq,
+                                                state.n_bins,
+                                                state.samplerate,
+                                            ) {
+                                                Ok(data) => WsReply::SpectrumEvent {
+                                                    result: WsResult::Ok,
+                                                    value: Some(data),
+                                                },
+                                                Err(e) => WsReply::SpectrumEvent {
+                                                    result: WsResult::InvalidRequestError(e),
+                                                    value: None,
+                                                },
+                                            };
+                                            let write_result = websocket.send(Message::text(
+                                                serde_json::to_string(&reply).unwrap(),
+                                            ));
+                                            if let Err(err) = write_result {
+                                                warn!("Failed to write: {}", err);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
                                 ActiveStream::State => {
                                     let generation = signal_monitor::wait_for_state_change(
                                         last_state_stream_generation,
@@ -568,6 +633,32 @@ macro_rules! make_handler {
                                                     Some(WsReply::SubscribeState {
                                                         result: WsResult::Ok,
                                                     })
+                                                }
+                                                WsCommand::SubscribeSpectrum(sub) => {
+                                                    match make_spectrum_subscription(
+                                                        sub,
+                                                        shared_data_inst,
+                                                    ) {
+                                                        Ok(state) => {
+                                                            active_stream = Some(
+                                                                ActiveStream::Spectrum(state),
+                                                            );
+                                                            set_stream_timeout(
+                                                                &mut websocket,
+                                                                Some(Duration::from_millis(
+                                                                    SUBSCRIPTION_READ_TIMEOUT_MS,
+                                                                )),
+                                                            );
+                                                            Some(WsReply::SubscribeSpectrum {
+                                                                result: WsResult::Ok,
+                                                            })
+                                                        }
+                                                        Err(result) => {
+                                                            Some(WsReply::SubscribeSpectrum {
+                                                                result,
+                                                            })
+                                                        }
+                                                    }
                                                 }
                                                 WsCommand::StopSubscription => {
                                                     Some(WsReply::Invalid {
@@ -827,6 +918,9 @@ fn handle_command(
         }),
         WsCommand::SubscribeState => Some(WsReply::Invalid {
             error: "SubscribeState can only be handled by the websocket stream loop".to_string(),
+        }),
+        WsCommand::SubscribeSpectrum(_) => Some(WsReply::Invalid {
+            error: "SubscribeSpectrum can only be handled by the websocket stream loop".to_string(),
         }),
         WsCommand::StopSubscription => Some(WsReply::Invalid {
             error: "No active subscription".to_string(),
@@ -1686,6 +1780,57 @@ fn handle_command(
         WsCommand::GetSpectrum(req) => Some(handle_get_spectrum(req, shared_data_inst)),
         WsCommand::None => None,
     }
+}
+
+fn make_spectrum_subscription(
+    sub: SpectrumSubscription,
+    shared_data: &SharedData,
+) -> Result<SpectrumSubscriptionState, WsResult> {
+    if sub.n_bins < 2 {
+        return Err(WsResult::InvalidRequestError(
+            "n_bins must be at least 2".to_string(),
+        ));
+    }
+    if sub.min_freq <= 0.0 || sub.min_freq >= sub.max_freq {
+        return Err(WsResult::InvalidRequestError(
+            "Invalid frequency range: min_freq must be > 0 and < max_freq".to_string(),
+        ));
+    }
+    if let Some(rate) = sub.max_rate
+        && rate <= 0.0
+    {
+        return Err(WsResult::InvalidRequestError(
+            "max_rate must be > 0".to_string(),
+        ));
+    }
+    let samplerate = shared_data
+        .active_config
+        .lock()
+        .as_ref()
+        .map(|c| c.devices.samplerate)
+        .unwrap_or(0);
+    if samplerate == 0 {
+        return Err(WsResult::InvalidRequestError(
+            "Sample rate not available".to_string(),
+        ));
+    }
+    let fft_len = crate::spectrum::fft_length_for(sub.min_freq, samplerate);
+    let hop_interval = Duration::from_secs_f64(fft_len as f64 / 2.0 / samplerate as f64);
+    let min_interval = match sub.max_rate {
+        Some(rate) => hop_interval.max(Duration::from_secs_f32(1.0 / rate)),
+        None => hop_interval,
+    };
+    Ok(SpectrumSubscriptionState {
+        side: sub.side,
+        channel: sub.channel,
+        min_freq: sub.min_freq,
+        max_freq: sub.max_freq,
+        n_bins: sub.n_bins,
+        fft_len,
+        samplerate,
+        min_interval,
+        last_compute: None,
+    })
 }
 
 fn handle_get_spectrum(req: SpectrumRequest, shared_data: &SharedData) -> WsReply {

@@ -35,6 +35,17 @@ pub(crate) struct SpectrumRequest {
     pub n_bins: usize,
 }
 
+#[derive(Debug, PartialEq, Deserialize)]
+pub(crate) struct SpectrumSubscription {
+    pub side: SpectrumSide,
+    pub channel: Option<usize>,
+    pub min_freq: f64,
+    pub max_freq: f64,
+    pub n_bins: usize,
+    /// Maximum push rate in Hz. `None` = natural rate (one push per 50 % overlap hop).
+    pub max_rate: Option<f32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 pub(crate) struct VuSubscription {
     pub(crate) max_rate: f32,
@@ -119,6 +130,7 @@ pub(crate) enum WsCommand {
     GetProcessingLoad,
     GetResamplerLoad,
     GetSpectrum(SpectrumRequest),
+    SubscribeSpectrum(SpectrumSubscription),
     Exit,
     Stop,
     None,
@@ -480,6 +492,14 @@ pub(crate) enum WsReply {
         value: f32,
     },
     GetSpectrum {
+        result: WsResult,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value: Option<SpectrumData>,
+    },
+    SubscribeSpectrum {
+        result: WsResult,
+    },
+    SpectrumEvent {
         result: WsResult,
         #[serde(skip_serializing_if = "Option::is_none")]
         value: Option<SpectrumData>,
