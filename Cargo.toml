@@ -7,6 +7,7 @@ description = "A flexible tool for processing audio"
 rust-version = "1.90"
 license = "GPL-3.0-only OR MPL-2.0"
 readme = "README.crates.md"
+repository = "https://github.com/HEnquist/camilladsp"
 
 [features]
 default = ["websocket"]
