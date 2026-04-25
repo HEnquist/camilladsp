@@ -237,13 +237,9 @@ impl VuSubscriptionState {
 struct SpectrumSubscriptionState {
     side: SpectrumSide,
     channel: Option<usize>,
-    min_freq: f64,
-    max_freq: f64,
-    n_bins: usize,
-    fft_len: usize,
-    samplerate: usize,
     min_interval: Duration,
     last_compute: Option<Instant>,
+    computer: crate::spectrum::SpectrumComputer,
 }
 
 #[derive(Debug)]
@@ -473,45 +469,43 @@ macro_rules! make_handler {
                                         .unwrap_or(Duration::MAX);
                                     if elapsed >= state.min_interval {
                                         state.last_compute = Some(now);
-                                        let signal_opt = match state.side {
+                                        // Hold the lock only for the memcopy into the
+                                        // pre-allocated scratch buffer; release before FFT.
+                                        let filled = match state.side {
                                             SpectrumSide::Capture => {
                                                 let status =
                                                     shared_data_inst.capture_status.read();
-                                                status
-                                                    .audio_buffer
-                                                    .read_latest(state.fft_len, state.channel)
+                                                state.computer.fill_from_buffer(
+                                                    &status.audio_buffer,
+                                                    state.channel,
+                                                )
                                             }
                                             SpectrumSide::Playback => {
                                                 let status =
                                                     shared_data_inst.playback_status.read();
-                                                status
-                                                    .audio_buffer
-                                                    .read_latest(state.fft_len, state.channel)
+                                                state.computer.fill_from_buffer(
+                                                    &status.audio_buffer,
+                                                    state.channel,
+                                                )
                                             }
                                         };
-                                        if let Some(signal) = signal_opt {
-                                            let reply = match crate::spectrum::compute_spectrum_from_signal(
-                                                signal,
-                                                state.min_freq,
-                                                state.max_freq,
-                                                state.n_bins,
-                                                state.samplerate,
-                                            ) {
-                                                Ok(data) => WsReply::SpectrumEvent {
+                                        // Lock released; FFT and bin-mapping run here.
+                                        if filled {
+                                            if let Some(data) =
+                                                state.computer.compute_from_windowed()
+                                            {
+                                                let reply = WsReply::SpectrumEvent {
                                                     result: WsResult::Ok,
                                                     value: Some(data),
-                                                },
-                                                Err(e) => WsReply::SpectrumEvent {
-                                                    result: WsResult::InvalidRequestError(e),
-                                                    value: None,
-                                                },
-                                            };
-                                            let write_result = websocket.send(Message::text(
-                                                serde_json::to_string(&reply).unwrap(),
-                                            ));
-                                            if let Err(err) = write_result {
-                                                warn!("Failed to write: {}", err);
-                                                break;
+                                                };
+                                                let write_result =
+                                                    websocket.send(Message::text(
+                                                        serde_json::to_string(&reply).unwrap(),
+                                                    ));
+                                                if let Err(err) = write_result {
+                                                    warn!("Failed to write: {}", err);
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
@@ -1820,16 +1814,19 @@ fn make_spectrum_subscription(
         Some(rate) => hop_interval.max(Duration::from_secs_f32(1.0 / rate)),
         None => hop_interval,
     };
+    let computer = crate::spectrum::SpectrumComputer::new(
+        fft_len,
+        sub.n_bins,
+        sub.min_freq,
+        sub.max_freq,
+        samplerate,
+    );
     Ok(SpectrumSubscriptionState {
         side: sub.side,
         channel: sub.channel,
-        min_freq: sub.min_freq,
-        max_freq: sub.max_freq,
-        n_bins: sub.n_bins,
-        fft_len,
-        samplerate,
         min_interval,
         last_compute: None,
+        computer,
     })
 }
 

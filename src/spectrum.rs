@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
-use realfft::RealFftPlanner;
+use num_complex::Complex;
+use realfft::{RealFftPlanner, RealToComplex};
 
 use crate::PrcFmt;
 use crate::audiochunk::AudioChunk;
@@ -47,32 +48,46 @@ impl AudioRingBuffer {
         self.channels.len()
     }
 
-    /// Copy the last `n_frames` samples in chronological order, mixing channels as requested.
-    /// `None` averages all channels; `Some(idx)` returns channel `idx` only.
-    pub fn read_latest(&self, n_frames: usize, channel: Option<usize>) -> Option<Vec<PrcFmt>> {
+    /// Like [`read_latest`](Self::read_latest) but writes into a pre-allocated buffer,
+    /// avoiding a heap allocation. Returns `false` if insufficient data.
+    pub fn read_latest_into(
+        &self,
+        n_frames: usize,
+        channel: Option<usize>,
+        buf: &mut Vec<PrcFmt>,
+    ) -> bool {
         if self.channels.is_empty() {
-            return None;
+            return false;
         }
         let available = self.total_written.min(RING_BUFFER_CAPACITY);
         if available < n_frames {
-            return None;
+            return false;
         }
         let start = (self.write_pos + RING_BUFFER_CAPACITY - n_frames) % RING_BUFFER_CAPACITY;
-        let result = match channel {
-            Some(ch_idx) => (0..n_frames)
-                .map(|i| self.channels[ch_idx][(start + i) % RING_BUFFER_CAPACITY])
-                .collect(),
+        buf.resize(n_frames, PrcFmt::default());
+        match channel {
+            Some(ch_idx) => {
+                for (i, sample) in buf.iter_mut().enumerate() {
+                    *sample = self.channels[ch_idx][(start + i) % RING_BUFFER_CAPACITY];
+                }
+            }
             None => {
                 let n = self.channels.len() as PrcFmt;
-                (0..n_frames)
-                    .map(|i| {
-                        let idx = (start + i) % RING_BUFFER_CAPACITY;
-                        self.channels.iter().map(|ch| ch[idx]).sum::<PrcFmt>() / n
-                    })
-                    .collect()
+                for (i, sample) in buf.iter_mut().enumerate() {
+                    let idx = (start + i) % RING_BUFFER_CAPACITY;
+                    *sample = self.channels.iter().map(|ch| ch[idx]).sum::<PrcFmt>() / n;
+                }
             }
-        };
-        Some(result)
+        }
+        true
+    }
+
+    /// Copy the last `n_frames` samples in chronological order, mixing channels as requested.
+    /// `None` averages all channels; `Some(idx)` returns channel `idx` only.
+    pub fn read_latest(&self, n_frames: usize, channel: Option<usize>) -> Option<Vec<PrcFmt>> {
+        let mut buf = Vec::new();
+        self.read_latest_into(n_frames, channel, &mut buf)
+            .then_some(buf)
     }
 }
 
@@ -128,6 +143,147 @@ fn get_frequencies(min_freq: f64, max_freq: f64, n_bins: usize) -> Arc<[f32]> {
         .collect();
     cache.insert(key, Arc::clone(&freqs));
     freqs
+}
+
+/// Reusable scratch buffers for a spectrum subscription with fixed parameters.
+///
+/// Pre-allocates the FFT input and output buffers once at construction so that
+/// each [`compute_from_windowed`](Self::compute_from_windowed) call only allocates
+/// the small `magnitudes` vector (`n_bins × 4` bytes).
+pub struct SpectrumComputer {
+    n_bins: usize,
+    min_freq: f64,
+    max_freq: f64,
+    freq_res: f64,
+    log_ratio: f64,
+    sqrt_log_ratio: f64,
+    inv_w2: PrcFmt,
+    fft: Arc<dyn RealToComplex<PrcFmt>>,
+    window: Arc<[PrcFmt]>,
+    /// FFT input / windowed signal scratch — pre-allocated to `fft_len` elements.
+    windowed: Vec<PrcFmt>,
+    /// FFT output scratch — pre-allocated to `fft_len / 2 + 1` complex elements.
+    spectrum_buf: Vec<Complex<PrcFmt>>,
+    frequencies: Arc<[f32]>,
+}
+
+impl std::fmt::Debug for SpectrumComputer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpectrumComputer")
+            .field("fft_len", &self.windowed.len())
+            .field("n_bins", &self.n_bins)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SpectrumComputer {
+    pub fn new(
+        fft_len: usize,
+        n_bins: usize,
+        min_freq: f64,
+        max_freq: f64,
+        samplerate: usize,
+    ) -> Self {
+        let fft = FFT_PLANNER.lock().unwrap().plan_fft_forward(fft_len);
+        let windowed = fft.make_input_vec();
+        let spectrum_buf = fft.make_output_vec();
+        let window = get_hann_window(fft_len);
+        let window_sum: PrcFmt = window.iter().sum();
+        let inv_w2 = 1.0 / (window_sum * window_sum);
+        let freq_res = samplerate as f64 / fft_len as f64;
+        let log_ratio = (max_freq / min_freq).powf(1.0 / (n_bins - 1) as f64);
+        let sqrt_log_ratio = log_ratio.sqrt();
+        let frequencies = get_frequencies(min_freq, max_freq, n_bins);
+        Self {
+            n_bins,
+            min_freq,
+            max_freq,
+            freq_res,
+            log_ratio,
+            sqrt_log_ratio,
+            inv_w2,
+            fft,
+            window,
+            windowed,
+            spectrum_buf,
+            frequencies,
+        }
+    }
+
+    /// Read from the ring buffer into the internal scratch buffer.
+    /// Returns `false` if the buffer has insufficient data; the scratch is unspecified in that case.
+    /// Call [`compute_from_windowed`](Self::compute_from_windowed) after this returns `true`.
+    pub fn fill_from_buffer(&mut self, buffer: &AudioRingBuffer, channel: Option<usize>) -> bool {
+        let n = self.windowed.len();
+        buffer.read_latest_into(n, channel, &mut self.windowed)
+    }
+
+    /// Apply the Hann window, run the FFT, and map to output bins.
+    /// Must be called after [`fill_from_buffer`](Self::fill_from_buffer) returns `true`.
+    /// Returns `None` only if the FFT itself errors (should not happen with valid inputs).
+    /// Only `magnitudes` (`n_bins × 4` bytes) is allocated per call.
+    pub fn compute_from_windowed(&mut self) -> Option<SpectrumData> {
+        // Apply Hann window in-place.
+        self.windowed
+            .iter_mut()
+            .zip(self.window.iter())
+            .for_each(|(s, w)| *s *= w);
+
+        self.fft
+            .process(&mut self.windowed, &mut self.spectrum_buf)
+            .ok()?;
+
+        let n_fft = self.spectrum_buf.len();
+        let inv_w2 = self.inv_w2;
+        let freq_res = self.freq_res;
+        let sqrt_log_ratio = self.sqrt_log_ratio;
+
+        let mut magnitudes = Vec::with_capacity(self.n_bins);
+        // Advance f_center multiplicatively to avoid repeated powi() calls.
+        let mut f_center = self.min_freq;
+        for i in 0..self.n_bins {
+            let f_low = if i == 0 {
+                self.min_freq
+            } else {
+                f_center / sqrt_log_ratio
+            };
+            let f_high = if i == self.n_bins - 1 {
+                self.max_freq
+            } else {
+                f_center * sqrt_log_ratio
+            };
+            let k_low = (f_low / freq_res).floor() as usize;
+            let k_high = ((f_high / freq_res).ceil() as usize).min(n_fft - 1);
+
+            // Power is computed inline from spectrum_buf, eliminating the intermediate
+            // power Vec that compute_spectrum_from_signal allocates.
+            let peak_power: PrcFmt = if k_low <= k_high {
+                self.spectrum_buf[k_low..=k_high]
+                    .iter()
+                    .enumerate()
+                    .map(|(j, c)| {
+                        let k = k_low + j;
+                        let scale: PrcFmt = if k == 0 || k == n_fft - 1 { 1.0 } else { 4.0 };
+                        scale * c.norm_sqr() * inv_w2
+                    })
+                    .fold(0.0, PrcFmt::max)
+            } else {
+                let k_nearest = ((f_center / freq_res).round() as usize).min(n_fft - 1);
+                let scale: PrcFmt = if k_nearest == 0 || k_nearest == n_fft - 1 {
+                    1.0
+                } else {
+                    4.0
+                };
+                scale * self.spectrum_buf[k_nearest].norm_sqr() * inv_w2
+            };
+            magnitudes.push((10.0 * peak_power.max(1e-30).log10()) as f32);
+            f_center *= self.log_ratio;
+        }
+        Some(SpectrumData {
+            frequencies: Arc::clone(&self.frequencies),
+            magnitudes,
+        })
+    }
 }
 
 /// Smallest power-of-two FFT length that provides at least one bin at `min_freq`.
