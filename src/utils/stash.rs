@@ -136,9 +136,7 @@ mod tests {
     fn recycled_container_returns_empty_container_with_capacity() {
         let vector_queue = ArrayQueue::new(4);
         let container_queue = ArrayQueue::new(1);
-        let mut container = Vec::with_capacity(2);
-        container.push(vec![1.0, 2.0]);
-        container.push(vec![3.0]);
+        let container = vec![vec![1.0, 2.0], vec![3.0]];
 
         recycle_container_to_queue(&container_queue, &vector_queue, container);
 

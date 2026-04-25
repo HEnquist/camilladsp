@@ -331,6 +331,115 @@ These are intended for display, for example in VU meters, and are not used by Ca
   The labels are returned as a json object with keys `playback` and `capture`.
 
 
+### Spectrum analysis
+
+CamillaDSP can compute a frequency spectrum from the audio currently passing through the capture or playback side.
+The spectrum is computed from a Hann-windowed FFT and the magnitudes are returned in dBFS,
+where 0 dBFS corresponds to a full-scale sine wave (amplitude 1.0).
+The output bins are logarithmically spaced between `min_freq` and `max_freq`.
+
+#### Single request
+
+- `GetSpectrum`
+
+Takes an object with the following parameters:
+- `side` : which side to analyze, either `"capture"` or `"playback"`.
+- `channel` : channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
+- `min_freq` : lower edge of the frequency range in Hz (must be > 0).
+- `max_freq` : upper edge of the frequency range in Hz (must be > `min_freq`).
+- `n_bins` : number of output bins (must be ≥ 2).
+
+The response contains two arrays of equal length:
+- `frequencies` : center frequency of each output bin in Hz.
+- `magnitudes` : level of each bin in dBFS.
+
+Example request:
+```json
+{
+  "GetSpectrum": {
+    "side": "capture",
+    "channel": null,
+    "min_freq": 20.0,
+    "max_freq": 20000.0,
+    "n_bins": 100
+  }
+}
+```
+
+Example response:
+```json
+{
+  "GetSpectrum": {
+    "result": "Ok",
+    "value": {
+      "frequencies": [20.0, 22.4, 25.1, "..."],
+      "magnitudes": [-42.3, -45.1, -38.7, "..."]
+    }
+  }
+}
+```
+
+#### Subscription
+
+Subscribe to pushed spectrum updates instead of polling.
+
+- `SubscribeSpectrum`
+
+Takes an object with the same `side`, `channel`, `min_freq`, `max_freq`, and `n_bins` parameters as `GetSpectrum`, plus one optional parameter:
+- `max_rate` : maximum push rate in Hz. When omitted, CamillaDSP pushes one update per 50 % overlap hop (i.e. every time half an FFT window of new audio has accumulated). A `max_rate` cap can only slow the updates down, not speed them up beyond the natural hop rate.
+
+When subscribed, CamillaDSP sends a `SpectrumEvent` message each time a new spectrum is ready.
+The event payload has the same `frequencies` and `magnitudes` fields as the `GetSpectrum` response.
+If the ring buffer does not yet contain enough audio (e.g. immediately after startup), that tick is silently skipped.
+
+Example subscribe request with a 30 Hz rate cap:
+```json
+{
+  "SubscribeSpectrum": {
+    "side": "capture",
+    "channel": null,
+    "min_freq": 20.0,
+    "max_freq": 20000.0,
+    "n_bins": 100,
+    "max_rate": 30.0
+  }
+}
+```
+
+Example subscribe request at the natural rate (no cap):
+```json
+{
+  "SubscribeSpectrum": {
+    "side": "playback",
+    "channel": 0,
+    "min_freq": 20.0,
+    "max_freq": 20000.0,
+    "n_bins": 100
+  }
+}
+```
+
+Example pushed event:
+```json
+{
+  "SpectrumEvent": {
+    "result": "Ok",
+    "value": {
+      "frequencies": [20.0, 22.4, 25.1, "..."],
+      "magnitudes": [-42.3, -45.1, -38.7, "..."]
+    }
+  }
+}
+```
+
+While spectrum streaming is active, only the stop command is accepted:
+- `StopSubscription`
+
+Any other command sent during an active spectrum subscription gets an `Invalid` response.
+
+For a minimal end-to-end example client, see `testscripts/spectrum_analyzer.py`.
+
+
 ### Volume control
 
 Commands for setting and getting the volume and mute of the default volume control on control `Main`.

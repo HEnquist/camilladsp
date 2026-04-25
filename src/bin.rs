@@ -1146,6 +1146,7 @@ fn main_process() -> i32 {
         signal_rms: countertimer::ValueHistory::new(1024, 2),
         signal_peak: countertimer::ValueHistory::new(1024, 2),
         used_channels: Vec::new(),
+        audio_buffer: Default::default(),
     }));
     let playback_status = Arc::new(RwLock::new(PlaybackStatus {
         buffer_level: 0,
@@ -1153,6 +1154,7 @@ fn main_process() -> i32 {
         update_interval: 1000,
         signal_rms: countertimer::ValueHistory::new(1024, 2),
         signal_peak: countertimer::ValueHistory::new(1024, 2),
+        audio_buffer: Default::default(),
     }));
     let processing_params = Arc::new(ProcessingParameters::new(&initial_volumes, &initial_mutes));
     let processing_status = Arc::new(RwLock::new(ProcessingStatus {

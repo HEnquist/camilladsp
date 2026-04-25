@@ -170,6 +170,7 @@ impl PlaybackDevice for PulsePlaybackDevice {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     chunk.update_stats(&mut chunk_stats);
+                                    crate::push_playback_audio_buffer(&playback_status, &chunk);
                                     conversion_result = chunk_to_buffer_rawbytes(
                                         chunk,
                                         &mut buffer,
@@ -383,6 +384,7 @@ impl CaptureDevice for PulseCaptureDevice {
                             };
                             let mut chunk = buffer_to_chunk_rawbytes(&buf[0..capture_bytes],channels, &binary_format, capture_bytes, &capture_status.read().used_channels, false);
                             chunk.update_stats(&mut chunk_stats);
+                            crate::push_capture_audio_buffer(&capture_status, &chunk);
                             crate::update_capture_signal_status(
                                 &capture_status,
                                 &chunk_stats,

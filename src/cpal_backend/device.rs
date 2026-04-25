@@ -403,6 +403,7 @@ impl PlaybackDevice for CpalPlaybackDevice {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     chunk.update_stats(&mut chunk_stats);
+                                    crate::push_playback_audio_buffer(&playback_status, &chunk);
                                     crate::update_playback_signal_status(
                                         &playback_status,
                                         &chunk_stats,
@@ -727,6 +728,7 @@ impl CaptureDevice for CpalCaptureDevice {
                                 trace!("Measured sample rate is {:.1} Hz", measured_rate_f);
                             }
                             chunk.update_stats(&mut chunk_stats);
+                            crate::push_capture_audio_buffer(&capture_status, &chunk);
                             crate::update_capture_signal_status(
                                 &capture_status,
                                 &chunk_stats,

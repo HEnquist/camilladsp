@@ -179,6 +179,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     chunk.update_stats(&mut chunk_stats);
+                                    crate::push_playback_audio_buffer(&playback_status, &chunk);
                                     let (valid_bytes, nbr_clipped) = chunk_to_buffer_rawbytes(
                                         chunk,
                                         &mut buffer,
@@ -501,6 +502,7 @@ fn capture_loop(
             true,
         );
         chunk.update_stats(&mut chunk_stats);
+        crate::push_capture_audio_buffer(&params.capture_status, &chunk);
         crate::update_capture_signal_status(
             &params.capture_status,
             &chunk_stats,
