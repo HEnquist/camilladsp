@@ -6,6 +6,7 @@ edition = "2024"
 description = "A flexible tool for processing audio"
 rust-version = "1.90"
 license = "GPL-3.0-only OR MPL-2.0"
+readme = "README.crates.md"
 
 [features]
 default = ["websocket"]
