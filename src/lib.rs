@@ -14,6 +14,16 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+#![doc = include_str!("../README.crates.md")]
+//!
+//! # API cross-references
+//!
+//! Key modules: [`filters`], [`mixer`], [`processors`], [`pipeline`],
+//! [`config`], [`engine`], [`processing`].
+//!
+//! Key types in this crate root: [`StatusMessage`], [`CommandMessage`],
+//! [`CaptureStatus`], [`PlaybackStatus`], [`PrcFmt`].
+
 #[cfg(target_os = "linux")]
 extern crate alsa;
 #[cfg(target_os = "linux")]
@@ -126,6 +136,7 @@ pub mod config;
 pub mod coreaudio_backend;
 #[cfg(feature = "cpal-backend")]
 pub mod cpal_backend;
+pub mod engine;
 pub mod file_backend;
 pub mod filters;
 pub mod generatordevice;
