@@ -126,6 +126,7 @@ pub mod config;
 pub mod coreaudio_backend;
 #[cfg(feature = "cpal-backend")]
 pub mod cpal_backend;
+pub mod engine;
 pub mod file_backend;
 pub mod filters;
 pub mod generatordevice;
