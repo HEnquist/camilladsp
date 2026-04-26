@@ -49,3 +49,14 @@ messages flow through the types defined in the crate root
 
 The `32bit` feature switches the internal processing format from `f64` to `f32`
 (`PrcFmt`).
+
+## Versioning policy
+
+Version numbers follow the releases of the CamillaDSP binary. The primary users
+are those running the binary, and their stability is the first priority.
+
+As a consequence, semantic versioning is not guaranteed from a library
+consumer's perspective. A patch release that introduces no breaking changes for
+binary users may still contain breaking changes to the library API. If you
+depend on this crate, pin to an exact version and review the changes before
+upgrading.
