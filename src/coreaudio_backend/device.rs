@@ -652,6 +652,12 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     warn!("Unable to register playback device alive listener, error: {err}.");
                 }
 
+                let (rate_tx, rate_rx) = mpsc::channel();
+                let mut rate_listener = RateListener::new(device_id, Some(rate_tx));
+                if let Err(err) = rate_listener.register() {
+                    warn!("Unable to register playback rate listener, error: {err}.");
+                }
+
                 match status_channel.send(StatusMessage::PlaybackReady) {
                     Ok(()) => {}
                     Err(_err) => {}
@@ -699,6 +705,21 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             ))
                             .unwrap_or(());
                         break 'deviceloop;
+                    }
+                    match rate_rx.try_recv() {
+                        Ok(rate) => {
+                            debug!("Playback rate change event, new rate: {rate}.");
+                            if rate as usize != samplerate {
+                                status_channel.send(StatusMessage::PlaybackFormatChange(rate as usize)).unwrap_or(());
+                                break 'deviceloop;
+                            }
+                        },
+                        Err(mpsc::TryRecvError::Empty) => {}
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            error!("Rate event queue closed!");
+                            status_channel.send(StatusMessage::PlaybackError("Rate listener channel closed".to_string())).unwrap_or(());
+                            break 'deviceloop;
+                        }
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
