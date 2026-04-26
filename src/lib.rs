@@ -462,6 +462,48 @@ pub struct StatusStructs {
     pub status: Arc<RwLock<ProcessingStatus>>,
 }
 
+impl Default for CaptureStatus {
+    fn default() -> Self {
+        Self {
+            measured_samplerate: 0,
+            update_interval: 1000,
+            signal_range: 0.0,
+            rate_adjust: 0.0,
+            state: ProcessingState::Inactive,
+            signal_rms: utils::countertimer::ValueHistory::new(1024, 2),
+            signal_peak: utils::countertimer::ValueHistory::new(1024, 2),
+            used_channels: Vec::new(),
+            audio_buffer: Default::default(),
+        }
+    }
+}
+
+impl Default for PlaybackStatus {
+    fn default() -> Self {
+        Self {
+            buffer_level: 0,
+            clipped_samples: 0,
+            update_interval: 1000,
+            signal_rms: utils::countertimer::ValueHistory::new(1024, 2),
+            signal_peak: utils::countertimer::ValueHistory::new(1024, 2),
+            audio_buffer: Default::default(),
+        }
+    }
+}
+
+impl Default for StatusStructs {
+    fn default() -> Self {
+        Self {
+            capture: Arc::new(RwLock::new(CaptureStatus::default())),
+            playback: Arc::new(RwLock::new(PlaybackStatus::default())),
+            processing: Arc::new(ProcessingParameters::default()),
+            status: Arc::new(RwLock::new(ProcessingStatus {
+                stop_reason: StopReason::None,
+            })),
+        }
+    }
+}
+
 pub struct SharedConfigs {
     pub active: Arc<Mutex<Option<config::Configuration>>>,
     pub previous: Arc<Mutex<Option<config::Configuration>>>,

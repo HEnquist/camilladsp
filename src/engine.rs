@@ -15,7 +15,7 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crossbeam_channel::select;
-use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
+use parking_lot::{Mutex, RwLockUpgradableReadGuard};
 #[cfg(any(windows, feature = "websocket"))]
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
@@ -30,13 +30,11 @@ use signal_hook::consts::signal::*;
 #[cfg(not(windows))]
 use signal_hook::iterator::{SignalsInfo, exfiltrator::SignalOnly};
 
-use crate::utils::countertimer;
 #[cfg(feature = "websocket")]
 use crate::websocket_server;
 use crate::{
-    CaptureStatus, CommandMessage, ControllerMessage, ExitState, PlaybackStatus,
-    ProcessingParameters, ProcessingState, ProcessingStatus, SHUTDOWN_REQUESTED, SharedConfigs,
-    StatusMessage, StatusStructs, StopReason,
+    CommandMessage, ControllerMessage, ExitState, ProcessingState, SHUTDOWN_REQUESTED,
+    SharedConfigs, StatusMessage, StatusStructs, StopReason,
 };
 use crate::{audiodevice, config, processing, statefile};
 
@@ -61,7 +59,7 @@ pub struct EngineConfig {
     pub ws_pass: Option<String>,
 }
 
-fn run(
+pub fn run(
     shared_configs: SharedConfigs,
     status_structs: StatusStructs,
     rx_ctrl: crossbeam_channel::Receiver<ControllerMessage>,
@@ -541,36 +539,17 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
         }
     });
 
-    let capture_status = Arc::new(RwLock::new(CaptureStatus {
-        measured_samplerate: 0,
-        update_interval: 1000,
-        signal_range: 0.0,
-        rate_adjust: 0.0,
-        state: ProcessingState::Inactive,
-        signal_rms: countertimer::ValueHistory::new(1024, 2),
-        signal_peak: countertimer::ValueHistory::new(1024, 2),
-        used_channels: Vec::new(),
-        audio_buffer: Default::default(),
-    }));
-    let playback_status = Arc::new(RwLock::new(PlaybackStatus {
-        buffer_level: 0,
-        clipped_samples: 0,
-        update_interval: 1000,
-        signal_rms: countertimer::ValueHistory::new(1024, 2),
-        signal_peak: countertimer::ValueHistory::new(1024, 2),
-        audio_buffer: Default::default(),
-    }));
-    let processing_params = Arc::new(ProcessingParameters::new(&initial_volumes, &initial_mutes));
-    let processing_status = Arc::new(RwLock::new(ProcessingStatus {
-        stop_reason: StopReason::None,
-    }));
+    let status_structs = StatusStructs::default();
+    let capture_status = status_structs.capture.clone();
+    let playback_status = status_structs.playback.clone();
+    let processing_params = status_structs.processing.clone();
+    let processing_status = status_structs.status.clone();
 
-    let status_structs = StatusStructs {
-        capture: capture_status.clone(),
-        playback: playback_status.clone(),
-        processing: processing_params.clone(),
-        status: processing_status.clone(),
-    };
+    for fader in 0..5 {
+        processing_params.set_target_volume(fader, initial_volumes[fader]);
+        processing_params.set_current_volume(fader, initial_volumes[fader]);
+        processing_params.set_mute(fader, initial_mutes[fader]);
+    }
     let active_config = Arc::new(Mutex::new(None));
     let previous_config = Arc::new(Mutex::new(None));
 
