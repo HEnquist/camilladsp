@@ -14,6 +14,16 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+#![doc = include_str!("../README.crates.md")]
+//!
+//! # API cross-references
+//!
+//! Key modules: [`filters`], [`mixer`], [`processors`], [`pipeline`],
+//! [`config`], [`engine`], [`processing`].
+//!
+//! Key types in this crate root: [`StatusMessage`], [`CommandMessage`],
+//! [`CaptureStatus`], [`PlaybackStatus`], [`PrcFmt`].
+
 #[cfg(target_os = "linux")]
 extern crate alsa;
 #[cfg(target_os = "linux")]
@@ -126,6 +136,7 @@ pub mod config;
 pub mod coreaudio_backend;
 #[cfg(feature = "cpal-backend")]
 pub mod cpal_backend;
+pub mod engine;
 pub mod file_backend;
 pub mod filters;
 pub mod generatordevice;
@@ -449,6 +460,48 @@ pub struct StatusStructs {
     pub playback: Arc<RwLock<PlaybackStatus>>,
     pub processing: Arc<ProcessingParameters>,
     pub status: Arc<RwLock<ProcessingStatus>>,
+}
+
+impl Default for CaptureStatus {
+    fn default() -> Self {
+        Self {
+            measured_samplerate: 0,
+            update_interval: 1000,
+            signal_range: 0.0,
+            rate_adjust: 0.0,
+            state: ProcessingState::Inactive,
+            signal_rms: utils::countertimer::ValueHistory::new(1024, 2),
+            signal_peak: utils::countertimer::ValueHistory::new(1024, 2),
+            used_channels: Vec::new(),
+            audio_buffer: Default::default(),
+        }
+    }
+}
+
+impl Default for PlaybackStatus {
+    fn default() -> Self {
+        Self {
+            buffer_level: 0,
+            clipped_samples: 0,
+            update_interval: 1000,
+            signal_rms: utils::countertimer::ValueHistory::new(1024, 2),
+            signal_peak: utils::countertimer::ValueHistory::new(1024, 2),
+            audio_buffer: Default::default(),
+        }
+    }
+}
+
+impl Default for StatusStructs {
+    fn default() -> Self {
+        Self {
+            capture: Arc::new(RwLock::new(CaptureStatus::default())),
+            playback: Arc::new(RwLock::new(PlaybackStatus::default())),
+            processing: Arc::new(ProcessingParameters::default()),
+            status: Arc::new(RwLock::new(ProcessingStatus {
+                stop_reason: StopReason::None,
+            })),
+        }
+    }
 }
 
 pub struct SharedConfigs {

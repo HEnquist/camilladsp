@@ -397,3 +397,20 @@ jobs:
           file: camilladsp.tar.gz
           asset_name: camilladsp-macos-aarch64.tar.gz
           tag: ${{ github.event.release.tag_name }}
+
+  publish_crate:
+    name: Publish to crates.io
+    if: github.event_name == 'release' && github.event.action == 'created'
+    needs: [linux_amd64, linux_aarch64, linux_armv7, linux_armv6, windows, macos, macos_arm]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tag is a plain release version
+        run: echo "${{ github.event.release.tag_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'
+      - name: Checkout sources
+        uses: actions/checkout@v5
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Publish
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
