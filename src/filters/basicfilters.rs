@@ -110,7 +110,7 @@ impl Volume {
         processing_params: Arc<ProcessingParameters>,
     ) -> Self {
         let fader = conf.fader as usize;
-        let current_volume = processing_params.current_volume(fader);
+        let current_volume = processing_params.target_volume(fader);
         let mute = processing_params.is_mute(fader);
         Self::new(
             name,

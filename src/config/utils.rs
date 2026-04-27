@@ -487,10 +487,21 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     if let (Some(newprocs), Some(oldprocs)) = (&newconf.processors, &currentconf.processors) {
         for (proc, params) in newprocs {
             // The pipeline didn't change, any added processor isn't included and can be skipped
-            if let Some(current_proc) = oldprocs.get(proc)
-                && params != current_proc
-            {
-                processors.push(proc.to_string());
+            if let Some(current_proc) = oldprocs.get(proc) {
+                // Did the processor change type?
+                match (params, current_proc) {
+                    (Processor::Compressor { .. }, Processor::Compressor { .. })
+                    | (Processor::NoiseGate { .. }, Processor::NoiseGate { .. })
+                    | (Processor::RACE { .. }, Processor::RACE { .. }) => {}
+                    _ => {
+                        // A processor changed type, need to rebuild the pipeline
+                        return ConfigChange::Pipeline;
+                    }
+                };
+                // Only parameters changed, ok to update
+                if params != current_proc {
+                    processors.push(proc.to_string());
+                }
             }
         }
     }
