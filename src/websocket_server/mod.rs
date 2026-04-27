@@ -329,7 +329,13 @@ macro_rules! make_handler {
                     let mut last_capture_stream_generation = 0_u64;
                     let mut last_state_stream_generation = 0_u64;
                     let mut last_state_stream_value = ProcessingState::Inactive;
+                    let mut stop_spectrum_subscription = false;
                     loop {
+                        if stop_spectrum_subscription {
+                            stop_spectrum_subscription = false;
+                            active_stream = None;
+                            set_stream_timeout(&mut websocket, None);
+                        }
                         if let Some(stream) = active_stream.as_mut() {
                             match stream {
                                 ActiveStream::SignalLevels(side) => match *side {
@@ -462,49 +468,67 @@ macro_rules! make_handler {
                                     }
                                 }
                                 ActiveStream::Spectrum(state) => {
-                                    let now = Instant::now();
-                                    let elapsed = state
-                                        .last_compute
-                                        .map(|l| now.duration_since(l))
-                                        .unwrap_or(Duration::MAX);
-                                    if elapsed >= state.min_interval {
-                                        state.last_compute = Some(now);
-                                        // Hold the lock only for the memcopy into the
-                                        // pre-allocated scratch buffer; release before FFT.
-                                        let filled = match state.side {
-                                            SpectrumSide::Capture => {
-                                                let status =
-                                                    shared_data_inst.capture_status.read();
-                                                state.computer.fill_from_buffer(
-                                                    &status.audio_buffer,
-                                                    state.channel,
-                                                )
-                                            }
-                                            SpectrumSide::Playback => {
-                                                let status =
-                                                    shared_data_inst.playback_status.read();
-                                                state.computer.fill_from_buffer(
-                                                    &status.audio_buffer,
-                                                    state.channel,
-                                                )
-                                            }
+                                    if current_processing_state(shared_data_inst)
+                                        == ProcessingState::Inactive
+                                    {
+                                        let reply = WsReply::SpectrumEvent {
+                                            result: WsResult::ProcessingStopped,
+                                            value: None,
                                         };
-                                        // Lock released; FFT and bin-mapping run here.
-                                        if filled {
-                                            if let Some(data) =
-                                                state.computer.compute_from_windowed()
-                                            {
-                                                let reply = WsReply::SpectrumEvent {
-                                                    result: WsResult::Ok,
-                                                    value: Some(data),
-                                                };
-                                                let write_result =
-                                                    websocket.send(Message::text(
-                                                        serde_json::to_string(&reply).unwrap(),
-                                                    ));
-                                                if let Err(err) = write_result {
-                                                    warn!("Failed to write: {}", err);
-                                                    break;
+                                        let write_result = websocket.send(Message::text(
+                                            serde_json::to_string(&reply).unwrap(),
+                                        ));
+                                        if let Err(err) = write_result {
+                                            warn!("Failed to write: {}", err);
+                                            break;
+                                        }
+                                        stop_spectrum_subscription = true;
+                                    } else {
+                                        let now = Instant::now();
+                                        let elapsed = state
+                                            .last_compute
+                                            .map(|l| now.duration_since(l))
+                                            .unwrap_or(Duration::MAX);
+                                        if elapsed >= state.min_interval {
+                                            state.last_compute = Some(now);
+                                            // Hold the lock only for the memcopy into the
+                                            // pre-allocated scratch buffer; release before FFT.
+                                            let filled = match state.side {
+                                                SpectrumSide::Capture => {
+                                                    let status =
+                                                        shared_data_inst.capture_status.read();
+                                                    state.computer.fill_from_buffer(
+                                                        &status.audio_buffer,
+                                                        state.channel,
+                                                    )
+                                                }
+                                                SpectrumSide::Playback => {
+                                                    let status =
+                                                        shared_data_inst.playback_status.read();
+                                                    state.computer.fill_from_buffer(
+                                                        &status.audio_buffer,
+                                                        state.channel,
+                                                    )
+                                                }
+                                            };
+                                            // Lock released; FFT and bin-mapping run here.
+                                            if filled {
+                                                if let Some(data) =
+                                                    state.computer.compute_from_windowed()
+                                                {
+                                                    let reply = WsReply::SpectrumEvent {
+                                                        result: WsResult::Ok,
+                                                        value: Some(data),
+                                                    };
+                                                    let write_result =
+                                                        websocket.send(Message::text(
+                                                            serde_json::to_string(&reply)
+                                                                .unwrap(),
+                                                        ));
+                                                    if let Err(err) = write_result {
+                                                        warn!("Failed to write: {}", err);
+                                                        break;
+                                                    }
                                                 }
                                             }
                                         }

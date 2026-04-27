@@ -1,7 +1,11 @@
 # 4.2.0
 New features:
-- Websocket commands for subscribing to signal level and state change events.
+- Websocket commands for streaming signal level and state change events.
+- Websocket commands for audio spectrum data (single read & streaming).
 - Websocket command for getting device capabilities.
+
+Changes:
+- Improved DSP library separation for easier external integration.
 
 # 4.1.3
 Bugfixes:
@@ -21,6 +25,7 @@ New features:
 - Experimental optional multi-threaded Alsa backend.
 - Added SIMD acceleration for FFT convolution,
   using NEON on aarch64 and AVX/FMA on amd64.
+
 Bugfixes:
 - Linux: fix stuttering on PipeWire playback.
 
@@ -37,6 +42,7 @@ New features:
 - Support polling mode for WASAPI.
 - Websocket commands for reading and writing partial configs.
 - Websocket command for reading resampler load.
+
 Changes:
 - New sample format names on all backends.
 - Removed sample format selection for Pulse backend.
@@ -45,6 +51,7 @@ Changes:
 - Change mixer config rules to not allow duplicated channels.
 - Improved accuracy of subsample delay.
 - Windows: Optional automatic sample format selection.
+
 Bugfixes:
 - Windows: Fix Wasapi exclusive mode for padded 24-bit samples.
 - Windows & macOS: Fix audio data loss in playback when using
@@ -72,10 +79,12 @@ New features:
 - Add noise gate.
 - Add optional channel labels for capture devices and mixers.
 - Optional log file rotation.
+
 Changes:
 - Remove the optional use of FFTW instead of RustFFT.
 - Rename `File` capture device to `RawFile`.
 - Filter pipeline steps take a list of channels to filter instead of a single one.
+
 Bugfixes:
 - Windows: Fix compatibility issues for some WASAPI devices.
 - MacOS: Support devices appearing as separate capture and playback devices.

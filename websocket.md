@@ -437,6 +437,16 @@ While spectrum streaming is active, only the stop command is accepted:
 
 Any other command sent during an active spectrum subscription gets an `Invalid` response.
 
+If processing stops while a spectrum subscription is active, CamillaDSP sends a final `SpectrumEvent` with an error result and no value, then cancels the subscription:
+```json
+{
+  "SpectrumEvent": {
+    "result": "ProcessingStopped"
+  }
+}
+```
+The client must resubscribe once processing has resumed.
+
 For a minimal end-to-end example client, see `testscripts/spectrum_analyzer.py`.
 
 
