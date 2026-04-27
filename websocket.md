@@ -388,6 +388,8 @@ Subscribe to pushed spectrum updates instead of polling.
 Takes an object with the same `side`, `channel`, `min_freq`, `max_freq`, and `n_bins` parameters as `GetSpectrum`, plus one optional parameter:
 - `max_rate` : maximum push rate in Hz. When omitted, CamillaDSP pushes one update per 50 % overlap hop (i.e. every time half an FFT window of new audio has accumulated). A `max_rate` cap can only slow the updates down, not speed them up beyond the natural hop rate.
 
+If processing is not running when `SubscribeSpectrum` is sent, the response has result `ProcessingNotRunningError` and no subscription is started.
+
 When subscribed, CamillaDSP sends a `SpectrumEvent` message each time a new spectrum is ready.
 The event payload has the same `frequencies` and `magnitudes` fields as the `GetSpectrum` response.
 If the ring buffer does not yet contain enough audio (e.g. immediately after startup), that tick is silently skipped.

@@ -1828,9 +1828,7 @@ fn make_spectrum_subscription(
         .map(|c| c.devices.samplerate)
         .unwrap_or(0);
     if samplerate == 0 {
-        return Err(WsResult::InvalidRequestError(
-            "Sample rate not available".to_string(),
-        ));
+        return Err(WsResult::ProcessingNotRunningError);
     }
     let fft_len = crate::spectrum::fft_length_for(sub.min_freq, samplerate);
     let hop_interval = Duration::from_secs_f64(fft_len as f64 / 2.0 / samplerate as f64);
@@ -1878,7 +1876,7 @@ fn handle_get_spectrum(req: SpectrumRequest, shared_data: &SharedData) -> WsRepl
         .unwrap_or(0);
     if samplerate == 0 {
         return WsReply::GetSpectrum {
-            result: WsResult::InvalidRequestError("Sample rate not available".to_string()),
+            result: WsResult::ProcessingNotRunningError,
             value: None,
         };
     }

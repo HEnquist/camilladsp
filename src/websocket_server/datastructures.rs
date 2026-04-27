@@ -150,6 +150,7 @@ pub(crate) enum WsResult {
     DeviceBusyError(String),
     DeviceError(String),
     ProcessingStopped,
+    ProcessingNotRunningError,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
