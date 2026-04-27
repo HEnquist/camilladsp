@@ -387,6 +387,11 @@ pub fn run(
                         StatusMessage::SetVolume(vol) => {
                             debug!("SetVolume message to  {vol} dB received");
                             status_structs.processing.set_target_volume(0, vol);
+                            let state = status_structs.capture.read().state;
+                            if state == ProcessingState::Inactive || state == ProcessingState::Starting {
+                                status_structs.processing.set_current_volume(0, vol);
+                            }
+
                         }
                         StatusMessage::SetMute(mute) => {
                             debug!("SetMute message to {mute} received");

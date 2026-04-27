@@ -1046,6 +1046,12 @@ fn handle_command(
             shared_data_inst
                 .processing_params
                 .set_target_volume(0, new_vol);
+            let state = shared_data_inst.capture_status.read().state;
+            if state == ProcessingState::Inactive || state == ProcessingState::Starting {
+                shared_data_inst
+                    .processing_params
+                    .set_current_volume(0, new_vol);
+            }
             shared_data_inst
                 .unsaved_state_change
                 .store(true, Ordering::Relaxed);
@@ -1084,6 +1090,12 @@ fn handle_command(
             shared_data_inst
                 .processing_params
                 .set_target_volume(0, tempvol);
+            let state = shared_data_inst.capture_status.read().state;
+            if state == ProcessingState::Inactive || state == ProcessingState::Starting {
+                shared_data_inst
+                    .processing_params
+                    .set_current_volume(0, tempvol);
+            }
             shared_data_inst
                 .unsaved_state_change
                 .store(true, Ordering::Relaxed);
@@ -1165,6 +1177,12 @@ fn handle_command(
             shared_data_inst
                 .processing_params
                 .set_target_volume(ctrl, new_vol);
+            let state = shared_data_inst.capture_status.read().state;
+            if state == ProcessingState::Inactive || state == ProcessingState::Starting {
+                shared_data_inst
+                    .processing_params
+                    .set_current_volume(ctrl, new_vol);
+            }
             shared_data_inst
                 .unsaved_state_change
                 .store(true, Ordering::Relaxed);
@@ -1232,6 +1250,12 @@ fn handle_command(
             shared_data_inst
                 .processing_params
                 .set_target_volume(ctrl, tempvol);
+            let state = shared_data_inst.capture_status.read().state;
+            if state == ProcessingState::Inactive || state == ProcessingState::Starting {
+                shared_data_inst
+                    .processing_params
+                    .set_current_volume(ctrl, tempvol);
+            }
             shared_data_inst
                 .unsaved_state_change
                 .store(true, Ordering::Relaxed);
