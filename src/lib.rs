@@ -383,6 +383,13 @@ impl ProcessingParameters {
         f32::from_bits(self.current_volume[fader].load(Ordering::Relaxed))
     }
 
+    pub fn sync_volumes_to_target(&self) {
+        for fader in 0..Self::NUM_FADERS {
+            let target = self.target_volume(fader);
+            self.set_current_volume(fader, target);
+        }
+    }
+
     pub fn set_current_volume(&self, fader: usize, current: f32) {
         self.current_volume[fader].store(current.to_bits(), Ordering::Relaxed)
     }
