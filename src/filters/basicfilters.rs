@@ -31,6 +31,7 @@ use crate::NewValue;
 use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::Res;
+use crate::nanos_since_epoch;
 use crate::utils::decibels::gain_from_value;
 
 #[derive(Clone, Debug)]
@@ -60,6 +61,7 @@ pub struct Volume {
     processing_params: Arc<ProcessingParameters>,
     fader: usize,
     volume_limit: f32,
+    stale_ramp_threshold_ns: u64,
 }
 
 impl Volume {
@@ -78,6 +80,7 @@ impl Volume {
         let name = name.to_string();
         let ramptime_in_chunks =
             (ramp_time_ms / (1000.0 * chunksize as f32 / samplerate as f32)).round() as usize;
+        let stale_ramp_threshold_ns = 1_500_000_000u64 * chunksize as u64 / samplerate as u64;
         let current_volume_with_mute = if mute { -100.0 } else { current_volume };
         let target_linear_gain = if mute {
             0.0
@@ -99,6 +102,7 @@ impl Volume {
             processing_params,
             fader,
             volume_limit: limit,
+            stale_ramp_threshold_ns,
         }
     }
 
@@ -156,7 +160,10 @@ impl Volume {
 
         // Volume setting changed
         if (target_volume - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
-            if self.ramptime_in_chunks > 0 {
+            let set_at = self.processing_params.target_volume_set_at(self.fader);
+            let ramp_is_stale =
+                nanos_since_epoch().saturating_sub(set_at) > self.stale_ramp_threshold_ns;
+            if self.ramptime_in_chunks > 0 && !ramp_is_stale {
                 trace!(
                     "starting ramp: {} -> {}, mute: {}",
                     self.current_volume, target_volume, shared_mute

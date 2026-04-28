@@ -75,6 +75,7 @@ pub fn run_processing(
                    Performance can improve by adding more threads or disabling multithreading."
             );
         }
+        processing_params.sync_volumes_to_target();
         let mut pipeline = pipeline::Pipeline::from_config(conf_proc, processing_params.clone());
         debug!("build filters, waiting to start processing loop");
 
@@ -175,6 +176,7 @@ pub fn run_processing(
                 match diff {
                     config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
                         debug!("Rebuilding pipeline.");
+                        processing_params.sync_volumes_to_target();
                         let new_pipeline =
                             pipeline::Pipeline::from_config(new_config, processing_params.clone());
                         pipeline = new_pipeline;

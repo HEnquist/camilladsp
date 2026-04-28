@@ -68,9 +68,10 @@ use serde::Serialize;
 use std::error;
 use std::fmt;
 use std::sync::{
-    Arc,
-    atomic::{AtomicBool, AtomicU32, Ordering},
+    Arc, OnceLock,
+    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
 };
+use std::time::Instant;
 
 pub static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
@@ -305,12 +306,19 @@ pub(crate) fn update_playback_signal_status(
     }
 }
 
+static PARAMS_EPOCH: OnceLock<Instant> = OnceLock::new();
+
+pub fn nanos_since_epoch() -> u64 {
+    PARAMS_EPOCH.get_or_init(Instant::now).elapsed().as_nanos() as u64
+}
+
 #[derive(Debug)]
 pub struct ProcessingParameters {
     // Optimization: volumes are actually `f32`s, but by representing their
     // bits as a `u32` of equal size we can use atomic operations instead of a
     // mutex.
     target_volume: [AtomicU32; Self::NUM_FADERS],
+    target_volume_set_at: [AtomicU64; Self::NUM_FADERS],
     current_volume: [AtomicU32; Self::NUM_FADERS],
     mute: [AtomicBool; Self::NUM_FADERS],
     processing_load: AtomicU32,
@@ -331,6 +339,13 @@ impl ProcessingParameters {
                 AtomicU32::new(initial_volumes[2].to_bits()),
                 AtomicU32::new(initial_volumes[3].to_bits()),
                 AtomicU32::new(initial_volumes[4].to_bits()),
+            ],
+            target_volume_set_at: [
+                AtomicU64::new(0),
+                AtomicU64::new(0),
+                AtomicU64::new(0),
+                AtomicU64::new(0),
+                AtomicU64::new(0),
             ],
             current_volume: [
                 AtomicU32::new(initial_volumes[0].to_bits()),
@@ -356,11 +371,23 @@ impl ProcessingParameters {
     }
 
     pub fn set_target_volume(&self, fader: usize, target: f32) {
-        self.target_volume[fader].store(target.to_bits(), Ordering::Relaxed)
+        self.target_volume[fader].store(target.to_bits(), Ordering::Relaxed);
+        self.target_volume_set_at[fader].store(nanos_since_epoch(), Ordering::Relaxed);
+    }
+
+    pub fn target_volume_set_at(&self, fader: usize) -> u64 {
+        self.target_volume_set_at[fader].load(Ordering::Relaxed)
     }
 
     pub fn current_volume(&self, fader: usize) -> f32 {
         f32::from_bits(self.current_volume[fader].load(Ordering::Relaxed))
+    }
+
+    pub fn sync_volumes_to_target(&self) {
+        for fader in 0..Self::NUM_FADERS {
+            let target = self.target_volume(fader);
+            self.set_current_volume(fader, target);
+        }
     }
 
     pub fn set_current_volume(&self, fader: usize, current: f32) {
