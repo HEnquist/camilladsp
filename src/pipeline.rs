@@ -424,3 +424,59 @@ fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Ve
     }
     new_steps
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Pipeline;
+    use crate::PrcFmt;
+    use crate::ProcessingParameters;
+    use crate::audiochunk::AudioChunk;
+    use std::sync::Arc;
+
+    // Regression test: volume set before config load must be applied to the very first chunk.
+    // Set volume to -100 dB, then load a config,
+    // and verify no full-scale burst comes out of the first processed chunk.
+    #[test]
+    fn volume_preset_before_pipeline_build() {
+        const CONFIG: &str = "
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  capture:
+    type: SignalGenerator
+    channels: 2
+    signal:
+      type: Sine
+      freq: 1000
+      level: 0.0
+  playback:
+    type: Stdout
+    channels: 2
+    format: S16_LE
+";
+        let conf: crate::config::Configuration = yaml_serde::from_str(CONFIG).unwrap();
+        let chunksize = conf.devices.chunksize;
+        let channels = conf.devices.capture.channels();
+
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, -100.0);
+        params.sync_volumes_to_target();
+
+        let mut pipeline = Pipeline::from_config(conf, params);
+
+        let waveforms = vec![vec![1.0 as PrcFmt; chunksize]; channels];
+        let chunk = AudioChunk::new(waveforms, 1.0, -1.0, chunksize, chunksize);
+        let out = pipeline.process_chunk(chunk);
+
+        let max_val = out
+            .waveforms
+            .iter()
+            .flat_map(|w| w.iter())
+            .map(|x| x.abs())
+            .fold(0.0_f64 as PrcFmt, PrcFmt::max);
+        assert!(
+            max_val < 1e-3,
+            "First chunk after preset volume should be near-silent, got max={max_val}"
+        );
+    }
+}
