@@ -27,10 +27,12 @@ pub fn linear_to_db(value: f32) -> f32 {
     }
 }
 
+/// Convert a dB value to a linear amplitude ratio.
 pub fn db_to_linear(value: PrcFmt) -> PrcFmt {
     (10.0 as PrcFmt).powf(value / 20.0)
 }
 
+/// Compute a gain factor from a gain value that may be linear or dB, optionally inverted or muted.
 pub fn gain_from_value(gain_value: PrcFmt, linear: bool, inverted: bool, mute: bool) -> PrcFmt {
     let mut gain = if linear {
         gain_value
@@ -43,7 +45,7 @@ pub fn gain_from_value(gain_value: PrcFmt, linear: bool, inverted: bool, mute: b
     if mute { 0.0 } else { gain }
 }
 
-// Inplace recalculation of values positive values 0..1 to dB.
+/// Convert a slice of linear amplitude values (0..1) to dB in place.
 pub fn linear_to_db_inplace(values: &mut [f32]) {
     values.iter_mut().for_each(|val| {
         *val = linear_to_db(*val);

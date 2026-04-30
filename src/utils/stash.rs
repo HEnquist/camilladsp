@@ -23,8 +23,10 @@ use crate::audiochunk::AudioChunk;
 const MAX_STASH_SIZE: usize = 1024;
 const MAX_CONTAINER_STASH_SIZE: usize = 128;
 
+/// Global stash of reusable `Vec<PrcFmt>` audio waveform buffers, avoiding repeated allocations.
 pub static BUFFERSTASH: LazyLock<ArrayQueue<Vec<PrcFmt>>> =
     LazyLock::new(|| ArrayQueue::new(MAX_STASH_SIZE));
+/// Global stash of reusable `Vec<Vec<PrcFmt>>` channel-container buffers.
 pub static CONTAINERSTASH: LazyLock<ArrayQueue<Vec<Vec<PrcFmt>>>> =
     LazyLock::new(|| ArrayQueue::new(MAX_CONTAINER_STASH_SIZE));
 
@@ -98,22 +100,27 @@ fn recycle_container_to_queue(
     }
 }
 
+/// Borrow a zeroed `Vec<PrcFmt>` of the given length from the stash, allocating if empty.
 pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
     vec_from_queue(&BUFFERSTASH, capacity)
 }
 
+/// Borrow a `Vec<Vec<PrcFmt>>` container of the given capacity from the stash, allocating if empty.
 pub fn container_from_stash(capacity: usize) -> Vec<Vec<PrcFmt>> {
     container_from_queue(&CONTAINERSTASH, capacity)
 }
 
+/// Return a `Vec<PrcFmt>` to the stash for reuse. The vector is zeroed before stashing.
 pub fn recycle_vec(vector: Vec<PrcFmt>) {
     recycle_vec_to_queue(&BUFFERSTASH, vector);
 }
 
+/// Return a channel container and all its inner waveform vectors to the stash.
 pub fn recycle_container(container: Vec<Vec<PrcFmt>>) {
     recycle_container_to_queue(&CONTAINERSTASH, &BUFFERSTASH, container);
 }
 
+/// Return all waveform buffers of an [`AudioChunk`] to the stash.
 pub fn recycle_chunk(chunk: AudioChunk) {
     recycle_container(chunk.waveforms);
 }

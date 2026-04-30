@@ -34,11 +34,16 @@ use std::sync::LazyLock;
 // Keep same result type used by config module utility functions.
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
+/// Runtime overrides that replace specific fields in a loaded configuration.
 #[derive(Clone)]
 pub struct OverridesState {
+    /// Override the capture/playback sample rate.
     pub samplerate: Option<usize>,
+    /// Override the sample format for binary backends.
     pub sample_format: Option<BinarySampleFormat>,
+    /// Override the number of extra (silent) samples the capture device prepends.
     pub extra_samples: Option<usize>,
+    /// Override the number of capture/playback channels.
     pub channels: Option<usize>,
 }
 
@@ -51,6 +56,7 @@ pub static OVERRIDES: LazyLock<RwLock<OverridesState>> = LazyLock::new(|| {
     })
 });
 
+/// Error type for configuration parsing and validation failures.
 #[derive(Debug)]
 pub struct ConfigErrorType {
     desc: String,
@@ -69,6 +75,7 @@ impl error::Error for ConfigErrorType {
 }
 
 impl ConfigErrorType {
+    /// Create a new config error with the given description message.
     pub fn new(desc: &str) -> Self {
         ConfigErrorType {
             desc: desc.to_owned(),
@@ -90,6 +97,7 @@ where
     Ok(value)
 }
 
+/// Parse a YAML configuration file and apply any active [`OVERRIDES`].
 pub fn load_config(filename: &str) -> Res<Configuration> {
     let file = match File::open(filename) {
         Ok(f) => f,
@@ -424,12 +432,14 @@ fn check_and_replace_relative_path(path_str: &mut String, config_path: &Path) {
     }
 }
 
+/// Parse, apply overrides, and fully validate a configuration file.
 pub fn load_validate_config(configname: &str) -> Res<Configuration> {
     let mut configuration = load_config(configname)?;
     validate_config(&mut configuration, Some(configname))?;
     Ok(configuration)
 }
 
+/// Compare two configurations and return the most significant [`ConfigChange`] between them.
 pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> ConfigChange {
     if currentconf == newconf {
         return ConfigChange::None;
@@ -822,6 +832,7 @@ pub fn used_capture_channels(conf: &Configuration) -> Vec<bool> {
     vec![true; capture_channels]
 }
 
+/// Return the capture channel labels from `config`, or `None` if no config is active.
 pub fn capture_channel_labels(config: &Option<Configuration>) -> Option<Vec<Option<String>>> {
     if let Some(conf) = config {
         conf.devices.capture.labels()
@@ -830,6 +841,7 @@ pub fn capture_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opti
     }
 }
 
+/// Return the playback channel labels from `config`, or `None` if no config is active.
 pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Option<String>>> {
     if let Some(conf) = config {
         if let Some(pipeline) = &conf.pipeline {

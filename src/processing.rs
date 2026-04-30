@@ -42,6 +42,7 @@ fn forward_to_playback(tx_pb: &crossbeam_channel::Sender<AudioMessage>, msg: Aud
     }
 }
 
+/// Spawn the processing thread: builds the pipeline, runs the chunk loop, and handles config updates.
 pub fn run_processing(
     conf_proc: config::Configuration,
     barrier_proc: Arc<Barrier>,

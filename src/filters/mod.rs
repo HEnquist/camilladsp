@@ -14,13 +14,21 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+/// Basic gain, delay, and volume filters.
 pub mod basicfilters;
+/// Second-order IIR biquad filters.
 pub mod biquad;
+/// Multi-section biquad combinations (shelves, butterworth, etc.).
 pub mod biquadcombo;
+/// Difference-equation (IIR) filter with arbitrary coefficients.
 pub mod diffeq;
+/// Dithering noise filters.
 pub mod dither;
+/// Convolution filter via FFT overlap-save.
 pub mod fftconv;
+/// Hard-clipping limiter filter.
 pub mod limiter;
+/// Loudness compensation filter.
 pub mod loudness;
 
 use crate::config;
@@ -36,15 +44,19 @@ use crate::Res;
 
 use crate::utils::wavtools::find_data_in_wav;
 
+/// Trait implemented by all single-channel audio filters.
 pub trait Filter {
-    // Filter a Vec
+    /// Apply the filter to `waveform` in place.
     fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()>;
 
+    /// Hot-reload filter coefficients from a new configuration without rebuilding.
     fn update_parameters(&mut self, config: config::Filter);
 
+    /// Return the filter's name as given in the configuration.
     fn name(&self) -> &str;
 }
 
+/// Zero-pad `values` to at least `length` elements (never truncates).
 pub fn pad_vector(values: &[PrcFmt], length: usize) -> Vec<PrcFmt> {
     let new_len = if values.len() > length {
         values.len()
@@ -56,6 +68,10 @@ pub fn pad_vector(values: &[PrcFmt], length: usize) -> Vec<PrcFmt> {
     new_values
 }
 
+/// Read filter coefficients from a file in the specified sample format.
+///
+/// `skip_bytes_lines` is a byte offset for binary formats or a line count for TEXT.
+/// `read_bytes_lines` limits the number of bytes/lines read (0 means read all).
 pub fn read_coeff_file(
     filename: &str,
     format: &config::FileSampleFormat,
@@ -178,6 +194,7 @@ pub fn read_coeff_file(
     Ok(coefficients)
 }
 
+/// Read a single channel of samples from a WAV file, returned as filter coefficients.
 pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
     let params = find_data_in_wav(filename)?;
     if channel >= params.channels {

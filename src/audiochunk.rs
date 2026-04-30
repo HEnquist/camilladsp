@@ -67,6 +67,7 @@ impl ChunkStats {
 }
 
 impl AudioChunk {
+    /// Create a new chunk from `waveforms`, recording the expected max/min values and frame count.
     pub fn new(
         waveforms: Vec<Vec<PrcFmt>>,
         maxval: PrcFmt,

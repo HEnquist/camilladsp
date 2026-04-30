@@ -38,27 +38,42 @@ use crate::{
 };
 use crate::{audiodevice, config, processing, statefile};
 
+/// Process exit code: clean exit.
 pub const EXIT_OK: i32 = 0;
+/// Process exit code: configuration error on startup.
 pub const EXIT_BAD_CONFIG: i32 = 101;
+/// Process exit code: unrecoverable processing error.
 pub const EXIT_PROCESSING_ERROR: i32 = 102;
+/// Process exit code: forced exit (e.g. repeated restarts exceeded limit).
 pub const EXIT_FORCED: i32 = 103;
 
+/// Top-level configuration passed to [`run_engine`].
 pub struct EngineConfig {
+    /// Path to the initial configuration YAML file, or `None` to start in standby.
     pub configname: Option<String>,
+    /// Path to the state file for persisting volume/mute across restarts.
     pub statefilename: Option<String>,
+    /// Initial volume (dB) for each fader.
     pub initial_volumes: [f32; 5],
+    /// Initial mute state for each fader.
     pub initial_mutes: [bool; 5],
+    /// If `true`, wait for a configuration via WebSocket rather than exiting when none is provided.
     pub wait: bool,
+    /// WebSocket server port (requires `websocket` feature).
     #[cfg(feature = "websocket")]
     pub ws_port: Option<usize>,
+    /// WebSocket server bind address (requires `websocket` feature).
     #[cfg(feature = "websocket")]
     pub ws_address: String,
+    /// Path to TLS certificate for the secure WebSocket server (requires `secure-websocket` feature).
     #[cfg(feature = "secure-websocket")]
     pub ws_cert: Option<String>,
+    /// Password for the TLS certificate (requires `secure-websocket` feature).
     #[cfg(feature = "secure-websocket")]
     pub ws_pass: Option<String>,
 }
 
+/// Run one processing session: open devices, process audio, and return an [`ExitState`].
 pub fn run(
     shared_configs: SharedConfigs,
     status_structs: StatusStructs,
@@ -414,6 +429,8 @@ pub fn run(
     }
 }
 
+/// Entry point for the full CamillaDSP engine: initialises state, spawns threads, and runs until exit.
+/// Returns a process exit code (one of `EXIT_OK`, `EXIT_BAD_CONFIG`, etc.).
 pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandle) -> i32 {
     let configname = engine_params.configname;
     let statefilename = engine_params.statefilename;

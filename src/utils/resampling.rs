@@ -15,6 +15,7 @@ use std::time::Instant;
 
 const LOAD_WARN_CONSECUTIVE_CHUNKS: usize = 10;
 
+/// Wraps a `rubato` resampler for processing [`AudioChunk`]s and tracking resampler load.
 pub struct ChunkResampler {
     pub resampler: Box<dyn Resampler<PrcFmt>>,
     pub indexing: Indexing,
@@ -23,6 +24,7 @@ pub struct ChunkResampler {
     pub processing_params: Arc<ProcessingParameters>,
 }
 
+/// Returns `true` if the resampler configuration uses an asynchronous algorithm.
 pub fn resampler_is_async(conf: &Option<config::Resampler>) -> bool {
     matches!(
         &conf,
@@ -30,6 +32,7 @@ pub fn resampler_is_async(conf: &Option<config::Resampler>) -> bool {
     )
 }
 
+/// Build `rubato` [`SincInterpolationParameters`] from a config profile or free parameters.
 pub fn new_async_sinc_parameters(
     resampler_conf: &config::AsyncSincParameters,
 ) -> SincInterpolationParameters {
@@ -136,6 +139,7 @@ pub fn new_async_sinc_parameters(
     }
 }
 
+/// Construct a [`ChunkResampler`] from the configuration, or `None` if no resampling is needed.
 pub fn new_resampler(
     resampler_conf: &Option<config::Resampler>,
     num_channels: usize,
@@ -223,6 +227,7 @@ pub fn new_resampler(
 }
 
 impl ChunkResampler {
+    /// Resample `chunk` in place to `chunksize` output frames across `channels` channels.
     pub fn resample_chunk(&mut self, chunk: &mut AudioChunk, chunksize: usize, channels: usize) {
         let start = Instant::now();
         chunk.update_channel_mask(self.indexing.active_channels_mask.as_mut().unwrap());

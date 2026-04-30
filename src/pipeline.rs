@@ -30,6 +30,7 @@ use std::time::Instant;
 
 const LOAD_WARN_CONSECUTIVE_CHUNKS: usize = 10;
 
+/// An ordered chain of filters applied to a single channel.
 pub struct FilterGroup {
     channel: usize,
     filters: Vec<Box<dyn Filter + Send>>,
@@ -102,6 +103,7 @@ impl FilterGroup {
         FilterGroup { channel, filters }
     }
 
+    /// Hot-reload parameters for any filters whose names appear in `changed`.
     pub fn update_parameters(
         &mut self,
         filterconfigs: HashMap<String, config::Filter>,
@@ -125,11 +127,13 @@ impl FilterGroup {
     }
 }
 
+/// Merged filter groups for all channels that can run in parallel via rayon.
 pub struct ParallelFilters {
     filters: Vec<Vec<Box<dyn Filter + Send>>>,
 }
 
 impl ParallelFilters {
+    /// Hot-reload parameters for any filters whose names appear in `changed`.
     pub fn update_parameters(
         &mut self,
         filterconfigs: HashMap<String, config::Filter>,
@@ -168,6 +172,8 @@ pub enum PipelineStep {
     ProcessorStep(Box<dyn Processor>),
 }
 
+/// The complete processing pipeline: an ordered list of mixer, filter, and processor steps
+/// with a master volume applied before the first step.
 pub struct Pipeline {
     steps: Vec<PipelineStep>,
     volume: filters::basicfilters::Volume,
@@ -293,6 +299,7 @@ impl Pipeline {
         }
     }
 
+    /// Hot-reload changed filters, mixers, and processors without rebuilding the pipeline.
     pub fn update_parameters(
         &mut self,
         conf: config::Configuration,

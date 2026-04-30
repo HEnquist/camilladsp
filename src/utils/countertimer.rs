@@ -20,6 +20,7 @@ use crate::ProcessingState;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+/// Estimates the current device buffer level by extrapolating from the last known value.
 pub struct DeviceBufferEstimator {
     update_time: Instant,
     frames: usize,
@@ -27,6 +28,7 @@ pub struct DeviceBufferEstimator {
 }
 
 impl DeviceBufferEstimator {
+    /// Create a new estimator for a device running at `sample_rate` Hz.
     pub fn new(sample_rate: usize) -> Self {
         DeviceBufferEstimator {
             update_time: Instant::now(),
@@ -60,6 +62,7 @@ pub struct SilenceCounter {
 }
 
 impl SilenceCounter {
+    /// Create a counter that triggers pause after `silence_timeout` seconds below `silence_threshold_db`.
     pub fn new(
         silence_threshold_db: PrcFmt,
         silence_timeout: PrcFmt,
@@ -106,6 +109,7 @@ pub struct Stopwatch {
 }
 
 impl Stopwatch {
+    /// Create a new stopwatch, started at the current instant.
     pub fn new() -> Stopwatch {
         let start_time = Instant::now();
         let value = Duration::new(0, 0);
@@ -150,6 +154,7 @@ pub struct Averager {
 }
 
 impl Averager {
+    /// Create a new, empty averager.
     pub fn new() -> Averager {
         Averager {
             sum: 0.0,
@@ -191,6 +196,7 @@ pub struct TimeAverage {
 }
 
 impl TimeAverage {
+    /// Create a new time-average counter, started at the current instant.
     pub fn new() -> TimeAverage {
         TimeAverage {
             sum: 0,
@@ -235,6 +241,7 @@ pub struct ValueWatcher {
 }
 
 impl ValueWatcher {
+    /// Create a watcher that fires after `count_limit` consecutive values outside `target ± max_rel_diff`.
     pub fn new(target_value: f32, max_rel_diff: f32, count_limit: usize) -> ValueWatcher {
         let min_value = target_value / (1.0 + max_rel_diff);
         let max_value = target_value * (1.0 + max_rel_diff);
@@ -260,12 +267,16 @@ impl ValueWatcher {
     }
 }
 
+/// A timestamped snapshot of per-channel values.
 #[derive(Clone, Debug)]
 pub struct HistoryRecord {
+    /// Instant at which this record was captured.
     pub time: Instant,
+    /// Per-channel signal values for this record.
     pub values: Vec<f32>,
 }
 
+/// Rolling history of timestamped per-channel values, with time-windowed average and peak queries.
 #[derive(Clone, Debug)]
 pub struct ValueHistory {
     buffer: VecDeque<HistoryRecord>,
@@ -276,6 +287,7 @@ pub struct ValueHistory {
 }
 
 impl ValueHistory {
+    /// Create a history buffer holding `history_length` records, each with `nbr_values` channels.
     pub fn new(history_length: usize, nbr_values: usize) -> Self {
         let mut history = Self {
             buffer: VecDeque::<HistoryRecord>::with_capacity(history_length),

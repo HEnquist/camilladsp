@@ -7,6 +7,7 @@ use realfft::{RealFftPlanner, RealToComplex};
 use crate::PrcFmt;
 use crate::audiochunk::AudioChunk;
 
+/// Maximum number of frames stored per channel in [`AudioRingBuffer`].
 pub const RING_BUFFER_CAPACITY: usize = 262144;
 
 /// Circular ring buffer storing the last [`RING_BUFFER_CAPACITY`] frames per channel.
@@ -19,6 +20,7 @@ pub struct AudioRingBuffer {
 }
 
 impl AudioRingBuffer {
+    /// Create an empty ring buffer; channel storage is allocated on the first [`push_chunk`](Self::push_chunk) call.
     pub fn new() -> Self {
         Self {
             channels: Vec::new(),
@@ -122,9 +124,12 @@ fn get_hann_window(n: usize) -> Arc<[PrcFmt]> {
 
 // --- Spectrum computation ---
 
+/// Log-spaced spectrum result returned by [`compute_spectrum`] and related functions.
 #[derive(Debug, serde::Serialize, PartialEq)]
 pub struct SpectrumData {
+    /// Center frequency of each output bin in Hz.
     pub frequencies: Arc<[f32]>,
+    /// Per-bin peak magnitude in dBFS (0 dBFS = full-scale sine wave).
     pub magnitudes: Vec<f32>,
 }
 
@@ -177,6 +182,8 @@ impl std::fmt::Debug for SpectrumComputer {
 }
 
 impl SpectrumComputer {
+    /// Create a computer for `n_bins` log-spaced bins between `min_freq` and `max_freq` Hz,
+    /// using an FFT of `fft_len` points at `samplerate` Hz.
     pub fn new(
         fft_len: usize,
         n_bins: usize,

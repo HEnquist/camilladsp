@@ -21,17 +21,25 @@ use crate::config;
 use crate::utils::decibels::gain_from_value;
 use crate::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
 
+/// A runtime mixer that combines and routes channels with per-source gain.
 #[derive(Clone)]
 pub struct Mixer {
+    /// Name of this mixer as defined in the configuration.
     pub name: String,
+    /// Number of input channels.
     pub channels_in: usize,
+    /// Number of output channels.
     pub channels_out: usize,
+    /// `mapping[out_channel]` is the list of sources summed into that output channel.
     pub mapping: Vec<Vec<MixerSource>>,
 }
 
+/// A single source contribution within a [`Mixer`] output channel.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MixerSource {
+    /// Index of the input channel.
     pub channel: usize,
+    /// Linear gain applied to this source.
     pub gain: PrcFmt,
 }
 

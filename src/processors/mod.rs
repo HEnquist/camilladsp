@@ -18,15 +18,21 @@ use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 
+/// Dynamic range compressor processor.
 pub mod compressor;
+/// Noise gate processor.
 pub mod noisegate;
+/// RACE (Recursive Ambiophonic Crosstalk Elimination) processor.
 pub mod race;
 
+/// Trait implemented by all multi-channel audio processors.
 pub trait Processor {
-    // Process a chunk containing several channels.
+    /// Apply the processor to all channels of `chunk` in place.
     fn process_chunk(&mut self, chunk: &mut AudioChunk) -> Res<()>;
 
+    /// Hot-reload processor parameters from a new configuration without rebuilding.
     fn update_parameters(&mut self, config: config::Processor);
 
+    /// Return the processor's name as given in the configuration.
     fn name(&self) -> &str;
 }

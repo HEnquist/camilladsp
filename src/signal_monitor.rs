@@ -3,9 +3,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
+/// Selects which side of the processing chain (capture or playback) a signal-level query applies to.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SignalLevelSide {
+    /// Playback (output) side.
     Playback,
+    /// Capture (input) side.
     Capture,
 }
 
@@ -65,18 +68,22 @@ static SIGNAL_MONITOR: LazyLock<SignalMonitor> = LazyLock::new(|| SignalMonitor 
     state: EventCounter::new(),
 });
 
+/// Notify waiters that new playback signal levels are available.
 pub fn mark_playback_updated() {
     SIGNAL_MONITOR.playback.mark_updated();
 }
 
+/// Notify waiters that new capture signal levels are available.
 pub fn mark_capture_updated() {
     SIGNAL_MONITOR.capture.mark_updated();
 }
 
+/// Notify waiters that the processing state has changed.
 pub fn mark_state_updated() {
     SIGNAL_MONITOR.state.mark_updated();
 }
 
+/// Return the current event generation counter for the given side.
 pub fn generation(side: SignalLevelSide) -> u64 {
     match side {
         SignalLevelSide::Playback => SIGNAL_MONITOR.playback.generation(),
@@ -84,10 +91,12 @@ pub fn generation(side: SignalLevelSide) -> u64 {
     }
 }
 
+/// Return the current state-change generation counter.
 pub fn state_generation() -> u64 {
     SIGNAL_MONITOR.state.generation()
 }
 
+/// Block until the state generation advances past `last_seen` or `timeout` elapses; returns the new generation.
 pub fn wait_for_state_change(last_seen: u64, timeout: Duration) -> u64 {
     SIGNAL_MONITOR.state.wait_for_change(last_seen, timeout)
 }
