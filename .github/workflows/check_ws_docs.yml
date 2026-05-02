@@ -1,0 +1,35 @@
+on: [push, pull_request]
+
+name: Check websocket docs are up to date
+
+concurrency:
+  group: ws-docs-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  check_ws_docs:
+    name: Regenerate websocket.md and check for diff
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install ALSA development files
+        run: sudo apt-get update && sudo apt-get install libasound2-dev -y
+
+      - name: Install Python dependencies
+        run: pip install jinja2 pyyaml
+
+      - name: Regenerate websocket.md
+        run: python3 scripts/gen_ws_docs.py
+
+      - name: Check websocket.md is up to date
+        run: |
+          if ! git diff --exit-code websocket.md; then
+            echo ""
+            echo "websocket.md is out of date. Run 'python3 scripts/gen_ws_docs.py' and commit the result."
+            exit 1
+          fi

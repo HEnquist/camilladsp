@@ -14,6 +14,56 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+//! Websocket server for controlling CamillaDSP.
+//!
+//! Connect to the server at `ws://127.0.0.1:<port>` (or a custom address set with `-a`).
+//! All messages are UTF-8 text frames containing a JSON value.
+//!
+//! ## Command syntax
+//!
+//! Commands without arguments are sent as a JSON string:
+//! ```json
+//! "GetVersion"
+//! ```
+//!
+//! Commands with a single argument are sent as a JSON object with one key:
+//! ```json
+//! {"SetUpdateInterval": 500}
+//! ```
+//!
+//! ## Response format
+//!
+//! Commands that do not return a value:
+//! ```json
+//! {"SetUpdateInterval": {"result": "Ok"}}
+//! ```
+//!
+//! Commands that return a value include a `"value"` field:
+//! ```json
+//! {"GetUpdateInterval": {"result": "Ok", "value": 500}}
+//! ```
+//!
+//! If a command fails the `"result"` field contains an error string instead of `"Ok"`.
+//! Errors with a message are a JSON object: `{"ConfigValidationError": "details..."}`.
+//! Simple errors are a plain string: `"InvalidFaderError"`.
+//!
+//! Unrecognised commands get an `{"Invalid": {"error": "..."}}` response.
+//!
+//! ## Subscription commands
+//!
+//! Some commands start a push stream (`SubscribeState`,
+//! `SubscribeSignalLevels`, `SubscribeVuLevels`, `SubscribeSpectrum`).
+//! While a subscription is active only `StopSubscription` is accepted;
+//! any other command gets an `Invalid` response.
+//! Sending `StopSubscription` when no subscription is active also gets an `Invalid` response.
+//!
+//! ## Generating API docs
+//!
+//! ```sh
+//! cargo doc --document-private-items --no-deps --open
+//! ```
+//! then navigate to **`camilladsp::websocket_server`**.
+
 mod datastructures;
 mod utils;
 
@@ -2087,6 +2137,34 @@ mod tests {
                 attack: 0.0,
                 release: 60_000.0,
             })
+        );
+    }
+
+    #[test]
+    fn adjust_volume_serde_format() {
+        use super::datastructures::{ValueWithOptionalLimits, WsCommand};
+        let plain: WsCommand = serde_json::from_str("{\"AdjustVolume\": -3.0}").unwrap();
+        assert_eq!(
+            plain,
+            WsCommand::AdjustVolume(ValueWithOptionalLimits::Plain(-3.0))
+        );
+        let limited: WsCommand =
+            serde_json::from_str("{\"AdjustVolume\": [-3.0, -50.0, 10.0]}").unwrap();
+        assert_eq!(
+            limited,
+            WsCommand::AdjustVolume(ValueWithOptionalLimits::Limited(-3.0, -50.0, 10.0))
+        );
+        let fader_plain: WsCommand =
+            serde_json::from_str("{\"AdjustFaderVolume\": [1, -3.0]}").unwrap();
+        assert_eq!(
+            fader_plain,
+            WsCommand::AdjustFaderVolume(1, ValueWithOptionalLimits::Plain(-3.0))
+        );
+        let fader_limited: WsCommand =
+            serde_json::from_str("{\"AdjustFaderVolume\": [1, [-3.0, -50.0, 10.0]]}").unwrap();
+        assert_eq!(
+            fader_limited,
+            WsCommand::AdjustFaderVolume(1, ValueWithOptionalLimits::Limited(-3.0, -50.0, 10.0))
         );
     }
 }

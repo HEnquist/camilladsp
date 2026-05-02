@@ -241,15 +241,15 @@ pub enum ControllerMessage {
 
 #[derive(Clone, Debug, Copy, Serialize, Eq, PartialEq)]
 pub enum ProcessingState {
-    // Processing is running normally.
+    /// Processing is running normally.
     Running,
-    // Processing is paused because input is silent.
+    /// Processing is paused because the input signal is silent.
     Paused,
-    // Processing is off and devices are closed, waiting for a new config.
+    /// Processing is off and devices are closed, waiting for a new configuration.
     Inactive,
-    // Opening devices and starting up processing.
+    /// Opening devices and starting up processing with a new configuration.
     Starting,
-    // Capture device isnt providing data, processing is stalled.
+    /// Capture device is not providing data; processing is stalled.
     Stalled,
 }
 

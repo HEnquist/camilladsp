@@ -1,0 +1,336 @@
+# Controlling via websocket
+
+If the websocket server is enabled with the `-p` option,
+CamillaDSP will listen to incoming websocket connections on the specified port.
+
+If additionally the "wait" flag is given, it will wait for a config to be uploaded
+via the websocket server before starting the processing.
+
+By default the websocket server binds to the address 127.0.0.1,
+which means it's only accessible locally (on the same machine).
+If it should be also available to remote machines, give the IP address
+of the interface where it should be available with the `-a` option.
+Giving 0.0.0.0 will bind to all interfaces.
+
+
+## Command syntax
+For commands without arguments, this is just a string *with the command name within quotes*:
+```
+"GetVersion"
+```
+For commands that take an argument, they are instead given as a key and a value:
+```json
+{"SetUpdateInterval": 500}
+```
+
+The return values are also JSON (in string format).
+The commands that don't return a value return a structure containing the command name and the result,
+which is either Ok or Error:
+```json
+{
+  "SetUpdateInterval": {
+    "result": "Ok"
+  }
+}
+```
+
+The commands that return a value also include a "value" field:
+```json
+{
+  "GetUpdateInterval": {
+    "result": "Ok",
+    "value": 500
+  }
+}
+```
+
+## String formatting, notably for NodeJS etc
+
+All commands and responses are sent as the string text representation of a JSON object.
+Your system/language may automatically do the "stringify" / "parse" processes automatically for you, many won't.
+
+IE if you are using NodeJS/javascript then simply wrap your JSON object with JSON.stringify() before sending.
+```
+ws.send(JSON.stringify({"SetUpdateInterval": 1000}))
+```
+
+Likewise on receiving the value from the websocket server, the JSON **will be in string format**.
+Complicating it further, if you're using the defacto 'ws' NodeJS library,
+it's likely received as a buffer array that you need to convert to string first.
+Either way, you'll need to parse the text with the JSON.parse function.
+```
+ws.on('message', function message(data) {
+    // data is buffer array
+    let replyString = Buffer.from(data).toString();
+    let parsed = {};
+    try {
+      parsed = JSON.parse(replyString);
+    }
+    catch (err){
+      console.error('Parse error', err);
+    }
+
+    if (parsed.hasOwnProperty('GetVolume')){
+      console.log('GetVolume response received', parsed.GetVolume.value);
+    }
+});
+```
+*Wrapping the parse with a try/catch is good practice to avoid crashes with improperly formatted JSON etc.*
+
+
+## All commands
+
+The available commands are listed below.
+All commands return a result, and for those that also return a value it is described here.
+
+{% for group in groups %}
+### {{ group.name }}
+
+{{ group.description }}
+
+{% for cmd in group.commands %}
+#### `{{ cmd.name }}`
+
+{{ cmd.docs }}
+
+{% for t in cmd.linked_types %}
+**`{{ t.name }}` {{ t.kind }}:**
+
+{% for entry in t.entries %}
+- `{{ entry.name }}`{% if entry.type %}: `{{ entry.type }}`{% endif %} — {{ entry.docs }}
+{% endfor %}
+
+{% endfor %}
+{% if cmd.returns_line %}
+Returns: {{ cmd.returns_line }}
+
+{% for t in cmd.returns_types %}
+**`{{ t.name }}` {{ t.kind }}:**
+
+{% for entry in t.entries %}
+- `{{ entry.name }}`{% if entry.type %}: `{{ entry.type }}`{% endif %} — {{ entry.docs }}
+{% endfor %}
+
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endfor %}
+
+## Audio device capability response format
+
+The capability commands return an `AudioDeviceDescriptor` object:
+```json
+{
+  "name": "Device name",
+  "description": "Readable description",
+  "capability_sets": [
+    {
+      "mode": "Unified",
+      "capabilities": [
+        {
+          "channels": 2,
+          "samplerates": [
+            {
+              "samplerate": 44100,
+              "formats": ["S16_LE", "S32_LE"]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Each entry in `capability_sets` has a `mode` field:
+- `Unified` — used by ALSA, CoreAudio, and ASIO, which have a single capability model.
+- `Shared` — WASAPI shared mode. Always exactly one channel count and one sample rate; format is always `F32`.
+- `Exclusive` — WASAPI exclusive mode. Probed independently; supports multiple channel counts, sample rates, and formats.
+  WASAPI does not provide a structured capability API, so the exclusive-mode scan must probe configurations one at a time.
+  Heuristics keep probe time reasonable, so not every valid configuration is guaranteed to appear for unusual devices.
+
+For WASAPI, the response contains two sets — one `Shared` and one `Exclusive`:
+```json
+{
+  "name": "Speakers (Realtek HD Audio)",
+  "description": "Speakers (Realtek HD Audio)",
+  "capability_sets": [
+    {
+      "mode": "Shared",
+      "capabilities": [{"channels": 2, "samplerates": [{"samplerate": 48000, "formats": ["F32"]}]}]
+    },
+    {
+      "mode": "Exclusive",
+      "capabilities": [
+        {
+          "channels": 2,
+          "samplerates": [
+            {"samplerate": 44100, "formats": ["S16", "S24", "S32", "F32"]},
+            {"samplerate": 48000, "formats": ["S16", "S24", "S32", "F32"]}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+For ALSA, capability results are representative rather than exhaustive: continuous sample-rate ranges are reduced
+to the standard rates that CamillaDSP probes, and channel probing is capped to a practical maximum.
+
+Example device list entries for ALSA:
+```
+[
+  ["hw:Loopback,0,0", "Loopback, Loopback PCM, subdevice #0"],
+  ["hw:Generic,0,0", "HD-Audio Generic, ALC236 Analog, subdevice #0"]
+]
+```
+
+Example device list entries for WASAPI (identifier is the display name; name field is `null`):
+```
+[
+  ["Microphone (USB Microphone)", null],
+  ["In 3-4 (MOTU M Series)", null]
+]
+```
+
+If the device is not found, busy, or the probe fails, the result field contains an error
+and `capability_sets` is an empty list.
+
+## Error responses
+
+If a command succeeds, CamillaDSP will reply with `Ok` in the `result` field.
+If not, this field will instead contain an error string.
+
+Errors without a message are returned as a plain string:
+```json
+"result": "InvalidFaderError"
+```
+
+Errors with a message are returned as a JSON object with one key:
+```json
+"result": {"ConfigValidationError": "Description of the error"}
+```
+
+{% for err in errors %}
+### `{{ err.name }}`
+
+{{ err.docs }}
+
+{% endfor %}
+
+## Controlling from Python using pyCamillaDSP
+
+The recommended way of controlling CamillaDSP with Python is by using the
+[pyCamillaDSP library](https://github.com/HEnquist/pycamilladsp).
+
+Please see the readme in that library for instructions.
+
+
+## Controlling directly using Python
+
+You need the websocket_client module installed for this to work.
+The package is called `python-websocket-client` on Fedora and `python3-websocket` on Debian/Ubuntu.
+
+First start CamillaDSP with the -p option:
+```
+camilladsp -v -p1234 /path/to/someconfig.yml
+```
+
+Start Ipython. Import the websocket client and make a connection:
+```ipython
+In [1]: from websocket import create_connection
+In [2]: import json
+In [3]: ws = create_connection("ws://127.0.0.1:1234")
+```
+
+### Get the name of the current config file
+```ipython
+In [4]: ws.send(json.dumps("GetConfigFilePath"))
+Out[4]: 19
+
+In [5]: print(ws.recv())
+{"GetConfigFilePath":{"result":"Ok","value":"/path/to/someconfig.yml"}}
+```
+
+### Switch to a different config file
+The new config is applied when the "reload" command is sent.
+```ipython
+In [6]: ws.send(json.dumps({"SetConfigFilePath": "/path/to/otherconfig.yml"}))
+Out[6]: 52
+
+In [7]: print(ws.recv())
+{"GetConfigFilePath":{"result":"Ok","value":"/path/to/someconfig.yml"}}
+
+In [8]: ws.send(json.dumps("Reload"))
+Out[8]: 12
+
+In [9]: print(ws.recv())
+{"Reload":{"result":"Ok"}}
+```
+
+
+### Get the current configuration
+Use json.loads to parse the json response.
+```
+In [10]: ws.send(json.dumps("GetConfig"))
+Out[10]: 15
+
+In [11]: reply = json.loads(ws.recv())
+In [12]: print(reply["GetConfig"]["value"])
+OK:GETCONFIG:---
+devices:
+  samplerate: 44100
+  buffersize: 1024
+  silence_threshold: 0.0
+  silence_timeout: 0.0
+  capture:
+    type: Alsa
+    ...
+```
+
+### Send a new config as yaml
+The new config is applied directly.
+```ipython
+In [12]: with open('/path/to/newconfig.yml') as f:
+    ...:     cfg=f.read()
+    ...:
+
+In [13]: ws.send(json.dumps({"SetConfig": cfg}))
+Out[13]: 957
+
+In [14]: print(ws.recv())
+{"SetConfig":{"result":"Ok"}}
+```
+
+## Secure websocket, wss://
+By compiling with the optional feature `secure-websocket`,
+the websocket server also supports loading an identity from a .pfx file.
+This is enabled by providing the two optional parameters "cert" and "pass",
+where "cert" is the path to the .pfx-file containing the identity, and "pass" is the password for the file.
+How to properly generate the identity is outside the scope of this readme,
+but for simple tests a self-signed certificate can be used.
+
+### Generate self-signed identity
+First generate rsa keys:
+```sh
+openssl req -newkey rsa:2048 -new -nodes -x509 -days 3650 -keyout key.pem -out cert.pem
+```
+
+Then use these to generate the identity:
+```sh
+openssl pkcs12 -export -out identity.pfx -inkey key.pem -in cert.pem
+```
+This will prompt for an Export password. This is the password that must then be provided to CamillaDSP.
+
+
+To connect with a Python client, do this:
+```python
+import websocket
+import ssl
+
+ws = websocket.WebSocket(sslopt={"cert_reqs": ssl.CERT_NONE})
+ws.connect("wss://localhost:1234")
+```
+Note the "wss" instead of "ws" in the address. Since the certificate is self-signed,
+it must be used with `ssl.CERT_NONE` to skip certificate verification.
