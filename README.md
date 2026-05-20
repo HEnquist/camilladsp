@@ -275,6 +275,16 @@ These projects are part of the CamillaDSP family:
 ## GUI
 [CamillaGUI](https://github.com/HEnquist/camillagui-backend) is a user interface for CamillaDSP that is accessed via a web browser.
 
+## Versioning and compatibility
+
+CamillaDSP uses version numbers in the form MAJOR.MINOR.PATCH, for example 2.1.3.
+- MAJOR (first number): a release with breaking changes, such as 2.1.3 → 3.0.0. May require updates to configuration files or integrations.
+  Old configuration formats are not kept working alongside new ones, as supporting multiple formats adds complexity without long-term benefit.
+- MINOR (second number): new features and improvements that do not break existing configurations, such as 2.1.3 → 2.2.0.
+- PATCH (third number): bug fixes with no changes to features or configuration, such as 2.1.3 → 2.1.4.
+
+Before a new major version is released, preview releases are published to give users and downstream maintainers time to test.
+Feedback during the preview phase is very welcome and is the best time to influence the final release.
 
 # Installing
 
@@ -2720,28 +2730,13 @@ If using [CamillaGUI](#gui), it is also possible to import the filters into an e
 ## Tools, utilities and libraries
 * https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels.
 * https://github.com/raptorlightning/I2S-Hat - An SPDIF Hat for the Raspberry Pi 2-X for SPDIF Communication, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/375834-i2s-hat-raspberry-pi-hat-spdif-i2s-communication-dsp.html).
-* https://github.com/daverz/camilla-remote-control - Interface for remote control of CamillaDSP using a FLIRC USB infrared receiver or remote keyboard.
-* https://github.com/Wang-Yue/CamillaDSP-Monitor - A script that provides a DSP pipeline and a spectral analyzer similar to those of the RME ADI-2 DAC/Pro.
 * https://github.com/worstenbrood/CamillaDsp.Client - CamillaDSP websocket client library for .NET, [also available on NuGet](https://www.nuget.org/packages/CamillaDsp.Client/).
 * https://github.com/AlfredJKwack/camillaEQ - A browser-based interactive graphical equalizer and spectrum analyzer for CamillaDSP, and a pipeline editor.
 
 ## Music players
 * https://moodeaudio.org/ - moOde audio player, audiophile-quality music playback for Raspberry Pi.
-* https://github.com/thoelf/Linux-Stream-Player - Play local files or streamed music with room EQ on Linux.
-* https://github.com/Lykkedk/SuperPlayer-v8.0.0---SamplerateChanger-v1.0.0 - Automatic filter switching at sample rate change for squeezelite, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/361429-superplayer-dsp_engine-camilladsp-samplerate-switching-esp32-remote-control.html).
 * https://github.com/JWahle/piCoreCDSP - Installs CamillaDSP and GUI on piCorePlayer
 * [FusionDsp](https://docs.google.com/document/d/e/2PACX-1vRhU4i830YaaUlB6-FiDAdvl69T3Iej_9oSbNTeSpiW0DlsyuTLSv5IsVSYMmkwbFvNbdAT0Tj6Yjjh/pub) a plugin based on CamillaDsp for [Volumio](https://volumio.com), the music player, with graphic equalizer, parametric equalizer, FIR filters, Loudness, AutoEq profile for headphone and more!
-
-## Guides and example configs
-* https://github.com/ynot123/CamillaDSP-Cfgs-FIR-Examples - Example Filter Configuration and Convolver Coefficients.
-* https://github.com/hughpyle/raspot - Hugh's raspotify config
-* https://github.com/Wang-Yue/camilladsp-crossfeed - Bauer stereophonic-to-binaural crossfeed for headphones
-* https://github.com/jensgk/akg_k702_camilladsp_eq - Headphone EQ and Crossfeed for the AKG K702 headphones
-* https://github.com/phelluy/room_eq_mac_m1 - Room Equalization HowTo with REW and Apple Silicon
-
-## Projects of general nature which can be useful together with CamillaDSP
-* https://github.com/scripple/alsa_hook_hwparams - ALSA hooks for reacting to sample rate and format changes.
-* https://github.com/HEnquist/cpal-listdevices - List audio devices with names and supported formats under Windows and macOS.
 
 ## Measurement and filter generation tools
 ### rePhase 
@@ -2754,9 +2749,8 @@ loudspeaker measurement and audio device measurement.
 https://drc-fir.sourceforge.net/ - DRC is a program used to generate correction filters
 for acoustic compensation of HiFi and audio systems in general,
 including listening room compensation.
-### CamillaFIR
-https://github.com/VilhoValittu/CamillaFIR - Automated FIR filter generator for REW measurements.
-Creates phase-linear correction files (WAV/TXT) for Equalizer like APO, Roon, and CamillaDSP.
+### DecayCore
+https://github.com/VilhoValittu/DecayCore - Free acoustic measurement tool and FIR room correction filter generator for CamillaDSP and other FIR-capable DSP engines.
 
 # Getting help
 
