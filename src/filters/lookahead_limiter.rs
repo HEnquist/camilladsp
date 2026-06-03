@@ -19,7 +19,7 @@ use crate::Res;
 use crate::config;
 use crate::filters::Filter;
 use crate::utils::decibels::db_to_linear;
-use crate::utils::time::{time_to_samples, time_to_seconds};
+use crate::utils::time::time_to_samples;
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
@@ -86,8 +86,7 @@ impl LookaheadLimiter {
         // When release gain reduction is less than -80dB, just pass the signal through
         let epsilon = 10f64.powf(-80.0 / 20.0);
         // Release exponential factor
-        let alpha = epsilon
-            .powf(1.0 / (samplerate as PrcFmt * time_to_seconds(config.release, unit, samplerate)));
+        let alpha = epsilon.powf(1.0 / time_to_samples(config.release, unit, samplerate));
 
         (limit, attack, release, epsilon, alpha)
     }
