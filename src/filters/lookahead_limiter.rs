@@ -92,15 +92,15 @@ impl LookaheadLimiter {
     }
 
     fn apply_lookahead_limiter(&mut self, input: &mut [PrcFmt]) {
-        let n = input.len();
-        if n == 0 {
+        let len = input.len();
+        if len == 0 {
             return;
         }
 
         // Backward pass turning peaks into linear ramps.
         let mut peak = 1.0;
-        let mut samples_since_peak = self.attack;
-        for i in (0..(self.attack + n)).rev() {
+        let mut samples_since_peak = self.attack + 1;
+        for i in (0..(self.attack + len)).rev() {
             // Get sample amplitude
             let amplitude = (if i < self.attack {
                 self.lookahead_buffer[self.samplerate - self.attack + i]
@@ -120,15 +120,15 @@ impl LookaheadLimiter {
             let mut ramp_gain = 1.0;
             if samples_since_peak <= self.attack {
                 let ramp =
-                    (self.attack - samples_since_peak) as PrcFmt / (self.attack + 1) as PrcFmt;
-                ramp_gain = 1.0 - (ramp * peak);
+                    (self.attack - samples_since_peak) as PrcFmt / self.attack.max(1) as PrcFmt;
+                ramp_gain = 1.0 - (ramp * (1.0 - peak));
                 samples_since_peak += 1;
             }
 
             // Peak found, start new ramp
             if gain < ramp_gain {
                 peak = gain;
-                samples_since_peak = 0;
+                samples_since_peak = 1;
             } else {
                 gain = ramp_gain;
             }
@@ -140,7 +140,7 @@ impl LookaheadLimiter {
         }
 
         // Forward pass turning peaks into exponential decay.
-        for i in 0..n {
+        for i in 0..len {
             self.release_gain = 1.0 - (1.0 - self.release_gain) * self.alpha;
             if self.release_gain > 1.0 - self.epsilon {
                 self.release_gain = 1.0
@@ -153,7 +153,7 @@ impl LookaheadLimiter {
         }
 
         // Apply gain reduction to delayed samples
-        for i in 0..n {
+        for i in 0..len {
             self.output_buffer[i] *= if i < self.attack {
                 self.lookahead_buffer[self.samplerate - self.attack + i]
             } else {
@@ -162,11 +162,11 @@ impl LookaheadLimiter {
         }
 
         // Drop old samples from beginning of lookahead buffer and copy input samples to its end
-        self.lookahead_buffer.drain(..n);
+        self.lookahead_buffer.drain(..len);
         self.lookahead_buffer.extend(input.iter().copied());
 
         // Ouput
-        input[..n].copy_from_slice(&self.output_buffer[..n]);
+        input[..len].copy_from_slice(&self.output_buffer[..len]);
     }
 }
 
@@ -242,8 +242,8 @@ mod tests {
             1.0, 1.0,
         ];
         let expected = vec![
-            0.0, 0.0, 0.0, 0.0, 1.0, 0.9, 0.8, 0.7, 0.6, 1.0, -1.0, 0.7, 0.6, 1.0, 0.95, 0.995,
-            0.9995, 1.0, 1.0,
+            0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.875, 0.75, 0.625, 1.0, -1.0, 0.75, 0.625, 1.0, 0.95,
+            0.995, 0.9995, 1.0, 1.0,
         ];
         limiter.apply_lookahead_limiter(&mut input);
         assert_close(&input, &expected, 1e-6);
@@ -290,12 +290,12 @@ mod tests {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
             unit: TimeUnit::Samples,
-            attack: 4.0,
+            attack: 5.0,
             release: 4.0,
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
-        let mut buf1 = vec![1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0];
-        let expected1 = vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.9, 0.8, 0.7, 0.6, 1.0];
+        let mut buf1 = vec![1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+        let expected1 = vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.9, 0.8, 0.7, 0.6, 1.0];
         limiter.apply_lookahead_limiter(&mut buf1);
         assert_close(&buf1, &expected1, 1e-6);
 
