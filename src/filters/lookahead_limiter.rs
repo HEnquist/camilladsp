@@ -55,7 +55,7 @@ impl LookaheadLimiter {
             attack_samples,
             release_coeff,
             samplerate,
-            lookahead_buffer: vec![0.0; samplerate].into(),
+            lookahead_buffer: vec![0.0; samplerate.max(chunksize)].into(),
             release_gain: 1.0,
             output_buffer: vec![0.0 as PrcFmt; chunksize],
         }
@@ -86,10 +86,12 @@ impl LookaheadLimiter {
         // Backward pass turning peaks into linear ramps.
         let mut peak = 1.0;
         let mut samples_since_peak = self.attack_samples + 1;
+        let lookahead_start = self.lookahead_buffer.len() - self.attack_samples;
+
         for i in (0..(self.attack_samples + len)).rev() {
             // Get sample amplitude
             let amplitude = (if i < self.attack_samples {
-                self.lookahead_buffer[self.samplerate - self.attack_samples + i]
+                self.lookahead_buffer[lookahead_start + i]
             } else {
                 input[i - self.attack_samples]
             })
@@ -140,7 +142,7 @@ impl LookaheadLimiter {
         // Apply gain reduction to delayed samples
         for i in 0..len {
             self.output_buffer[i] *= if i < self.attack_samples {
-                self.lookahead_buffer[self.samplerate - self.attack_samples + i]
+                self.lookahead_buffer[lookahead_start + i]
             } else {
                 input[i - self.attack_samples]
             }
@@ -380,5 +382,23 @@ mod tests {
             release: 4.0,
         };
         assert!(validate_config(&config, 48000).is_err());
+    }
+
+    #[test]
+    fn test_lookahead_limiter_chunksize_larger_than_samplerate() {
+        let samplerate = 4;
+        let chunksize = 8;
+        let config = config::LookaheadLimiterParameters {
+            limit: 0.0,
+            unit: TimeUnit::Samples,
+            attack: 4.0,
+            release: 1.0,
+        };
+        let mut limiter = LookaheadLimiter::from_config("test", config, samplerate, chunksize);
+        let mut input = vec![1.0, 1.0, 2.0, 1.0, 1.0, -2.0, 1.0, 1.0];
+
+        limiter.apply_lookahead_limiter(&mut input);
+
+        assert_eq!(input.len(), chunksize);
     }
 }
