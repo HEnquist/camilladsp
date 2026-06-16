@@ -27,9 +27,8 @@ pub struct LookaheadLimiter {
     pub name: String,
     pub limit: PrcFmt,
     pub attack_samples: usize,
+    pub release_coeff: PrcFmt,
     pub samplerate: usize,
-    epsilon: PrcFmt,
-    alpha: PrcFmt,
     lookahead_buffer: VecDeque<PrcFmt>,
     release_gain: PrcFmt,
     output_buffer: Vec<PrcFmt>,
@@ -42,21 +41,20 @@ impl LookaheadLimiter {
         samplerate: usize,
         chunksize: usize,
     ) -> Self {
-        let (limit, attack_samples, release, epsilon, alpha) =
+        let (limit, attack_samples, release_coeff) =
             LookaheadLimiter::configure(&config, samplerate);
 
         debug!(
-            "Creating lookahead limiter '{}', limit dB: {}, linear: {}, attack/lookahead: {} samples, release: {} samples, alpha: {}",
-            name, config.limit, limit, attack_samples, release, alpha
+            "Creating lookahead limiter '{}', limit dB: {}, linear: {}, attack/lookahead: {} samples, release coefficient: {}",
+            name, config.limit, limit, attack_samples, release_coeff
         );
 
         LookaheadLimiter {
             name: name.to_string(),
             limit,
             attack_samples,
+            release_coeff,
             samplerate,
-            epsilon,
-            alpha,
             lookahead_buffer: vec![0.0; samplerate].into(),
             release_gain: 1.0,
             output_buffer: vec![0.0 as PrcFmt; chunksize],
@@ -66,20 +64,17 @@ impl LookaheadLimiter {
     fn configure(
         config: &config::LookaheadLimiterParameters,
         samplerate: usize,
-    ) -> (f64, usize, usize, f64, f64) {
+    ) -> (PrcFmt, usize, PrcFmt) {
         let limit = db_to_linear(config.limit);
 
         let unit = config.unit();
 
         let attack_samples = time_to_samples(config.attack, unit, samplerate).round() as usize;
 
-        let release = time_to_samples(config.release, unit, samplerate) as usize;
-        // When release gain reduction is less than -80dB, just pass the signal through
-        let epsilon = 10f64.powf(-80.0 / 20.0);
-        // Release exponential factor
-        let alpha = epsilon.powf(1.0 / time_to_samples(config.release, unit, samplerate));
+        let release_samples = time_to_samples(config.release, unit, samplerate);
+        let release_coeff = (-1.0 / release_samples).exp();
 
-        (limit, attack_samples, release, epsilon, alpha)
+        (limit, attack_samples, release_coeff)
     }
 
     fn apply_lookahead_limiter(&mut self, input: &mut [PrcFmt]) {
@@ -131,11 +126,10 @@ impl LookaheadLimiter {
         }
 
         // Forward pass turning peaks into exponential decay.
+        // Release uses the same 1/e time constant coefficient as Compressor.
+        // They are not exactly equal because Compressor works in the dB domain and has 1e-6 bias.
         for i in 0..len {
-            self.release_gain = 1.0 - (1.0 - self.release_gain) * self.alpha;
-            if self.release_gain > 1.0 - self.epsilon {
-                self.release_gain = 1.0
-            }
+            self.release_gain = self.release_gain.powf(self.release_coeff);
             if self.output_buffer[i] < self.release_gain {
                 self.release_gain = self.output_buffer[i];
             } else {
@@ -176,13 +170,12 @@ impl Filter for LookaheadLimiter {
             parameters: config, ..
         } = config
         {
-            let release;
-            (self.limit, self.attack_samples, release, self.epsilon, self.alpha) =
+            (self.limit, self.attack_samples, self.release_coeff) =
                 LookaheadLimiter::configure(&config, self.samplerate);
 
             debug!(
-                "Updated lookahead limiter '{}', limit dB: {}, linear: {}, attack/lookahead: {} samples, release: {} samples, alpha: {}",
-                self.name, config.limit, self.limit, self.attack_samples, release, self.alpha
+                "Updated lookahead limiter '{}', limit dB: {}, linear: {}, attack/lookahead: {} samples, release coefficient: {}",
+                self.name, config.limit, self.limit, self.attack_samples, self.release_coeff
             );
         } else {
             panic!("Invalid config change!");
@@ -201,7 +194,7 @@ pub fn validate_config(config: &config::LookaheadLimiterParameters, samplerate: 
         return Err(config::ConfigError::new(msg).into());
     }
     if config.release < 0.0 {
-        let msg = "Release time must be non-negative.";
+        let msg = "Release time must be greater than or equal to 0.";
         return Err(config::ConfigError::new(msg).into());
     }
     Ok(())
@@ -210,7 +203,9 @@ pub fn validate_config(config: &config::LookaheadLimiterParameters, samplerate: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audiochunk::AudioChunk;
     use crate::config::TimeUnit;
+    use crate::processors::Processor;
 
     fn assert_close(left: &[PrcFmt], right: &[PrcFmt], epsilon: PrcFmt) {
         assert_eq!(left.len(), right.len());
@@ -230,7 +225,7 @@ mod tests {
             limit: 0.0,
             unit: TimeUnit::Samples,
             attack: 4.0,
-            release: 4.0,
+            release: 1.0 / std::f64::consts::LN_2,
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
         let mut input = vec![
@@ -238,8 +233,25 @@ mod tests {
             1.0, 1.0,
         ];
         let expected = vec![
-            0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.875, 0.75, 0.625, 1.0, -1.0, 0.75, 0.625, 1.0, 0.95,
-            0.995, 0.9995, 1.0, 1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            0.875,
+            0.75,
+            0.625,
+            1.0,
+            -1.0,
+            0.5_f64.powf(1.0 / 2.0),
+            0.625,
+            1.0,
+            0.5_f64.powf(1.0 / 2.0),
+            0.5_f64.powf(1.0 / 4.0),
+            0.5_f64.powf(1.0 / 8.0),
+            0.5_f64.powf(1.0 / 16.0),
+            0.5_f64.powf(1.0 / 32.0),
         ];
         limiter.apply_lookahead_limiter(&mut input);
         assert_close(&input, &expected, 1e-6);
@@ -273,6 +285,52 @@ mod tests {
     }
 
     #[test]
+    fn test_lookahead_limiter_zero_attack_matches_compressor() {
+        let release_samples: PrcFmt = 4.0;
+        let samplerate = 48000;
+        let mut limiter_input = vec![2.0, 1.0, 1.0, 1.0, 1.0];
+        let chunksize = limiter_input.len();
+        let config = config::LookaheadLimiterParameters {
+            limit: 0.0,
+            unit: TimeUnit::Samples,
+            attack: 0.0,
+            release: release_samples,
+        };
+        let mut limiter = LookaheadLimiter::from_config("test", config, samplerate, chunksize);
+        let mut compressor = crate::processors::compressor::Compressor::from_config(
+            "test",
+            config::CompressorParameters {
+                channels: 1,
+                monitor_channels: None,
+                process_channels: None,
+                attack: 0.0,
+                release: release_samples / samplerate as PrcFmt,
+                threshold: 0.0,
+                factor: 1.0e20,
+                makeup_gain: None,
+                soft_clip: None,
+                clip_limit: None,
+            },
+            samplerate,
+            chunksize,
+        );
+
+        let mut compressor_chunk = AudioChunk::new(
+            vec![limiter_input.clone()],
+            1.0,
+            -1.0,
+            limiter_input.len(),
+            limiter_input.len(),
+        );
+
+        limiter.apply_lookahead_limiter(&mut limiter_input);
+        compressor.process_chunk(&mut compressor_chunk).unwrap();
+
+        // The values are not exactly equal because compressor works in the dB domain and has 1e-6 bias.
+        assert_close(&limiter_input, &compressor_chunk.waveforms[0], 1e-6);
+    }
+
+    #[test]
     fn test_lookahead_limiter_zero_release() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
@@ -294,7 +352,7 @@ mod tests {
             limit: 0.0,
             unit: TimeUnit::Samples,
             attack: 5.0,
-            release: 4.0,
+            release: 1.0 / std::f64::consts::LN_2,
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
         let mut buf1 = vec![1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0];
@@ -303,7 +361,12 @@ mod tests {
         assert_close(&buf1, &expected1, 1e-6);
 
         let mut buf2 = vec![1.0, 1.0, 1.0, 1.0];
-        let expected2 = vec![0.95, 0.995, 0.9995, 1.0];
+        let expected2 = vec![
+            0.5_f64.powf(1.0 / 2.0),
+            0.5_f64.powf(1.0 / 4.0),
+            0.5_f64.powf(1.0 / 8.0),
+            0.5_f64.powf(1.0 / 16.0),
+        ];
         limiter.apply_lookahead_limiter(&mut buf2);
         assert_close(&buf2, &expected2, 1e-6);
     }

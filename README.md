@@ -2396,21 +2396,23 @@ Example:
   example_lookahead_limiter:
     type: LookaheadLimiter
     parameters:
-      limit: 0.0 (*)
+      limit: 0.0
       unit: ms (*)
       attack: 2.0 (*)
-      release: 100.0
+      release: 100.0 (*)
 ```
 
 Parameters:
   * `limit`: Maximum output level in dB. Optional, defaults to 0.0 dB.
-  * `unit`: Unit for the attack and release times. Required.
+  * `unit`: Unit for the attack and release times.
+    Can be `ms`, `us`, `mm` or `samples`.
   * `attack`: Attack/lookahead/delay time. This determines how far ahead the limiter looks for peaks.
     Must be greater than or eaqual to 0 and less than or equal to 1 second.
     Input signal is delayed by this amount rounded to whole samples, as in the Delay filter without subsample.
     Gain is reduced using a linear ramp of this length.
-  * `release`: Release time in milliseconds. This controls how quickly the gain reduction is released after a peak.
-    Must be greater than or equal to 0 ms.
+  * `release`: Release time. This controls how quickly the gain reduction is released after a peak.
+    Must be greater than or equal to 0.
+    Gain is restored using an exponential curve, as in the Compressor processor.
 
 ### Difference equation
 The "DiffEq" filter implements a generic difference equation filter with transfer function:
