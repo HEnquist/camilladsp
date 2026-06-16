@@ -2398,15 +2398,17 @@ Example:
     parameters:
       limit: 0.0 (*)
       unit: ms (*)
-      attack: 2.0
+      attack: 2.0 (*)
       release: 100.0
 ```
 
 Parameters:
   * `limit`: Maximum output level in dB. Optional, defaults to 0.0 dB.
   * `unit`: Unit for the attack and release times. Required.
-  * `attack`: Attack/lookahead time in milliseconds. This determines how far ahead the limiter looks for peaks.
-    Must be greater than or eaqual to 0 and less than or equal to 1000 ms.
+  * `attack`: Attack/lookahead/delay time. This determines how far ahead the limiter looks for peaks.
+    Must be greater than or eaqual to 0 and less than or equal to 1 second.
+    Input signal is delayed by this amount rounded to whole samples, as in the Delay filter without subsample.
+    Gain is reduced using a linear ramp of this length.
   * `release`: Release time in milliseconds. This controls how quickly the gain reduction is released after a peak.
     Must be greater than or equal to 0 ms.
 

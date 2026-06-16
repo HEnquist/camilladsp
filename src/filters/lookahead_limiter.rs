@@ -26,7 +26,7 @@ use std::collections::VecDeque;
 pub struct LookaheadLimiter {
     pub name: String,
     pub limit: PrcFmt,
-    pub attack: usize,
+    pub attack_samples: usize,
     pub samplerate: usize,
     epsilon: PrcFmt,
     alpha: PrcFmt,
@@ -42,18 +42,18 @@ impl LookaheadLimiter {
         samplerate: usize,
         chunksize: usize,
     ) -> Self {
-        let (limit, attack, release, epsilon, alpha) =
+        let (limit, attack_samples, release, epsilon, alpha) =
             LookaheadLimiter::configure(&config, samplerate);
 
         debug!(
             "Creating lookahead limiter '{}', limit dB: {}, linear: {}, attack/lookahead: {} samples, release: {} samples, alpha: {}",
-            name, config.limit, limit, attack, release, alpha
+            name, config.limit, limit, attack_samples, release, alpha
         );
 
         LookaheadLimiter {
             name: name.to_string(),
             limit,
-            attack,
+            attack_samples,
             samplerate,
             epsilon,
             alpha,
@@ -71,16 +71,7 @@ impl LookaheadLimiter {
 
         let unit = config.unit();
 
-        let attack_raw = time_to_samples(config.attack, unit, samplerate) as usize;
-        let attack = if attack_raw <= samplerate {
-            attack_raw
-        } else {
-            warn!(
-                "Lookahead limiter attack time exceeds 1 second ({} samples > {} samplerate), limiting to 1 second.",
-                attack_raw, samplerate
-            );
-            samplerate
-        };
+        let attack_samples = time_to_samples(config.attack, unit, samplerate).round() as usize;
 
         let release = time_to_samples(config.release, unit, samplerate) as usize;
         // When release gain reduction is less than -80dB, just pass the signal through
@@ -88,7 +79,7 @@ impl LookaheadLimiter {
         // Release exponential factor
         let alpha = epsilon.powf(1.0 / time_to_samples(config.release, unit, samplerate));
 
-        (limit, attack, release, epsilon, alpha)
+        (limit, attack_samples, release, epsilon, alpha)
     }
 
     fn apply_lookahead_limiter(&mut self, input: &mut [PrcFmt]) {
@@ -99,13 +90,13 @@ impl LookaheadLimiter {
 
         // Backward pass turning peaks into linear ramps.
         let mut peak = 1.0;
-        let mut samples_since_peak = self.attack + 1;
-        for i in (0..(self.attack + len)).rev() {
+        let mut samples_since_peak = self.attack_samples + 1;
+        for i in (0..(self.attack_samples + len)).rev() {
             // Get sample amplitude
-            let amplitude = (if i < self.attack {
-                self.lookahead_buffer[self.samplerate - self.attack + i]
+            let amplitude = (if i < self.attack_samples {
+                self.lookahead_buffer[self.samplerate - self.attack_samples + i]
             } else {
-                input[i - self.attack]
+                input[i - self.attack_samples]
             })
             .abs();
 
@@ -118,9 +109,9 @@ impl LookaheadLimiter {
 
             // Compute ramp
             let mut ramp_gain = 1.0;
-            if samples_since_peak <= self.attack {
-                let ramp =
-                    (self.attack - samples_since_peak) as PrcFmt / self.attack.max(1) as PrcFmt;
+            if samples_since_peak <= self.attack_samples {
+                let ramp = (self.attack_samples - samples_since_peak) as PrcFmt
+                    / self.attack_samples.max(1) as PrcFmt;
                 ramp_gain = 1.0 - (ramp * (1.0 - peak));
                 samples_since_peak += 1;
             }
@@ -154,10 +145,10 @@ impl LookaheadLimiter {
 
         // Apply gain reduction to delayed samples
         for i in 0..len {
-            self.output_buffer[i] *= if i < self.attack {
-                self.lookahead_buffer[self.samplerate - self.attack + i]
+            self.output_buffer[i] *= if i < self.attack_samples {
+                self.lookahead_buffer[self.samplerate - self.attack_samples + i]
             } else {
-                input[i - self.attack]
+                input[i - self.attack_samples]
             }
         }
 
@@ -186,12 +177,12 @@ impl Filter for LookaheadLimiter {
         } = config
         {
             let release;
-            (self.limit, self.attack, release, self.epsilon, self.alpha) =
+            (self.limit, self.attack_samples, release, self.epsilon, self.alpha) =
                 LookaheadLimiter::configure(&config, self.samplerate);
 
             debug!(
                 "Updated lookahead limiter '{}', limit dB: {}, linear: {}, attack/lookahead: {} samples, release: {} samples, alpha: {}",
-                self.name, config.limit, self.limit, self.attack, release, self.alpha
+                self.name, config.limit, self.limit, self.attack_samples, release, self.alpha
             );
         } else {
             panic!("Invalid config change!");
@@ -199,9 +190,14 @@ impl Filter for LookaheadLimiter {
     }
 }
 
-pub fn validate_config(config: &config::LookaheadLimiterParameters) -> Res<()> {
-    if config.attack <= 0.0 {
-        let msg = "Attack time must be positive.";
+pub fn validate_config(config: &config::LookaheadLimiterParameters, samplerate: usize) -> Res<()> {
+    if config.attack < 0.0 {
+        let msg = "Attack time must be greater than or equal to 0.";
+        return Err(config::ConfigError::new(msg).into());
+    }
+    let attack_samples = time_to_samples(config.attack, config.unit(), samplerate).round() as usize;
+    if attack_samples > samplerate {
+        let msg = "Lookahead limiter attack time must be less than or equal to 1 second.";
         return Err(config::ConfigError::new(msg).into());
     }
     if config.release < 0.0 {
@@ -251,22 +247,29 @@ mod tests {
 
     /// Zero attack and release should behave like a peak limiter
     #[test]
-    fn test_lookahead_limiter_peak() {
+    fn test_lookahead_limiter_same_as_limiter() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
             unit: TimeUnit::Samples,
             attack: 0.0,
             release: 0.0,
         };
-        let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
-        let mut input = vec![
-            1.0, 1.0, 1.0, 1.0, 2.0, -2.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-        ];
-        let expected = vec![
-            1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-        ];
-        limiter.apply_lookahead_limiter(&mut input);
-        assert_close(&input, &expected, 1e-6);
+        let mut lookahead_limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
+        let limiter = crate::filters::limiter::Limiter::from_config(
+            "test",
+            config::LimiterParameters {
+                soft_clip: None,
+                clip_limit: 0.0,
+            },
+        );
+
+        let mut lookahead_input = vec![0.5, 1.0, 2.0, -2.0, -1.0, -0.5, 1.5, -1.5, 0.0];
+        let mut limiter_input = lookahead_input.clone();
+
+        lookahead_limiter.apply_lookahead_limiter(&mut lookahead_input);
+        limiter.apply_clip(&mut limiter_input);
+
+        assert_eq!(lookahead_input, limiter_input);
     }
 
     #[test]
@@ -274,14 +277,14 @@ mod tests {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
             unit: TimeUnit::Samples,
-            attack: 4.0,
+            attack: 2.0,
             release: 0.0,
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
-        let mut input = vec![2.0, 2.0, 2.0, 2.0, 2.0];
+        let mut input = vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0];
         limiter.apply_lookahead_limiter(&mut input);
         for &val in &input {
-            assert!(val.abs() <= 1.0 + 1e-6);
+            assert!(val.abs() <= 1.0);
         }
     }
 
@@ -306,14 +309,13 @@ mod tests {
     }
 
     #[test]
-    fn test_lookahead_limiter_attack_clamped_to_one_second() {
+    fn test_lookahead_limiter_attack_over_one_second_rejected() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
             unit: TimeUnit::Samples,
             attack: 48001.0,
             release: 4.0,
         };
-        let limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
-        assert_eq!(limiter.attack, 48000);
+        assert!(validate_config(&config, 48000).is_err());
     }
 }

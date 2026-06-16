@@ -250,7 +250,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
         }
         config::Filter::Limiter { parameters, .. } => limiter::validate_config(parameters),
         config::Filter::LookaheadLimiter { parameters, .. } => {
-            lookahead_limiter::validate_config(parameters)
+            lookahead_limiter::validate_config(parameters, fs)
         }
     }
 }
