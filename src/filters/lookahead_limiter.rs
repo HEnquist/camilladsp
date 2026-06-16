@@ -20,16 +20,17 @@ use crate::config;
 use crate::filters::Filter;
 use crate::utils::decibels::db_to_linear;
 use crate::utils::time::time_to_samples;
-use std::collections::VecDeque;
+use ringbuf::LocalRb;
+use ringbuf::storage::Heap;
+use ringbuf::traits::*;
 
-#[derive(Debug, Clone)]
 pub struct LookaheadLimiter {
     pub name: String,
     pub limit: PrcFmt,
     pub attack_samples: usize,
     pub release_coeff: PrcFmt,
     pub samplerate: usize,
-    lookahead_buffer: VecDeque<PrcFmt>,
+    lookahead_buffer: LocalRb<Heap<PrcFmt>>,
     release_gain: PrcFmt,
     output_buffer: Vec<PrcFmt>,
 }
@@ -49,13 +50,16 @@ impl LookaheadLimiter {
             name, config.limit, limit, attack_samples, release_coeff
         );
 
+        let lookahead_buffer_len = samplerate.max(chunksize);
+        let lookahead_buffer = LocalRb::from(vec![0.0 as PrcFmt; lookahead_buffer_len]);
+
         LookaheadLimiter {
             name: name.to_string(),
             limit,
             attack_samples,
             release_coeff,
             samplerate,
-            lookahead_buffer: vec![0.0; samplerate.max(chunksize)].into(),
+            lookahead_buffer,
             release_gain: 1.0,
             output_buffer: vec![0.0 as PrcFmt; chunksize],
         }
@@ -83,19 +87,28 @@ impl LookaheadLimiter {
             return;
         }
 
+        let lookahead_start = self.lookahead_buffer.occupied_len() - self.attack_samples;
+        let (first, second) = self.lookahead_buffer.as_slices();
+        let get_input_sample = |i: usize| -> PrcFmt {
+            if i < self.attack_samples {
+                let idx = lookahead_start + i;
+                if idx < first.len() {
+                    first[idx]
+                } else {
+                    second[idx - first.len()]
+                }
+            } else {
+                input[i - self.attack_samples]
+            }
+        };
+
         // Backward pass turning peaks into linear ramps.
         let mut peak = 1.0;
         let mut samples_since_peak = self.attack_samples + 1;
-        let lookahead_start = self.lookahead_buffer.len() - self.attack_samples;
 
         for i in (0..(self.attack_samples + len)).rev() {
             // Get sample amplitude
-            let amplitude = (if i < self.attack_samples {
-                self.lookahead_buffer[lookahead_start + i]
-            } else {
-                input[i - self.attack_samples]
-            })
-            .abs();
+            let amplitude = get_input_sample(i).abs();
 
             // Compute reduction gain for current sample
             let mut gain = if amplitude > self.limit {
@@ -141,16 +154,11 @@ impl LookaheadLimiter {
 
         // Apply gain reduction to delayed samples
         for i in 0..len {
-            self.output_buffer[i] *= if i < self.attack_samples {
-                self.lookahead_buffer[lookahead_start + i]
-            } else {
-                input[i - self.attack_samples]
-            }
+            self.output_buffer[i] *= get_input_sample(i);
         }
 
         // Drop old samples from beginning of lookahead buffer and copy input samples to its end
-        self.lookahead_buffer.drain(..len);
-        self.lookahead_buffer.extend(input.iter().copied());
+        self.lookahead_buffer.push_slice_overwrite(input);
 
         // Ouput
         input[..len].copy_from_slice(&self.output_buffer[..len]);
