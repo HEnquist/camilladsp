@@ -2502,7 +2502,6 @@ processors:
       filename: "recording"
       format: S32_LE
       wav_header: false (*)
-      buffer_seconds: 10.0 (*)
 
 pipeline:
   - type: Processor
@@ -2514,7 +2513,6 @@ pipeline:
   * `filename`: output file name.
   * `format`: file sample format, one of `S16_LE`, `S24_4_RJ_LE`, `S24_4_LJ_LE`, `S24_3_LE`, `S32_LE`, `F32_LE`, `F64_LE`.
   * `wav_header`: write a wav header before the samples. Optional, defaults to `false`. Wav files do not support `S24_4_RJ_LE`.
-  * `buffer_seconds`: size of the file writer buffer in seconds. Optional, defaults to 10 seconds.
 
 ### RACE
 The "RACE" processor implements the recursive part of the

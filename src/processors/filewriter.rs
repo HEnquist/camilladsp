@@ -68,13 +68,12 @@ impl FileWriter {
         chunksize: usize,
     ) -> Self {
         debug!(
-            "Creating FileWriter processor '{}', channels: {}, filename: {}, format: {}, wav_header: {}, buffer_seconds: {}",
+            "Creating FileWriter processor '{}', channels: {}, filename: {}, format: {}, wav_header: {}",
             name,
             config.channels,
             config.filename,
             config.format,
-            config.wav_header(),
-            config.buffer_seconds()
+            config.wav_header()
         );
         let consumer = Self::start_consumer(name, &config, samplerate, chunksize);
         FileWriter {
@@ -135,13 +134,12 @@ impl FileWriter {
         self.playback_done = false;
         self.config = config;
         debug!(
-            "Updated FileWriter processor '{}', channels: {}, filename: {}, format: {}, wav_header: {}, buffer_seconds: {}",
+            "Updated FileWriter processor '{}', channels: {}, filename: {}, format: {}, wav_header: {}",
             self.name,
             self.config.channels,
             self.config.filename,
             self.config.format,
-            self.config.wav_header(),
-            self.config.buffer_seconds()
+            self.config.wav_header()
         );
     }
 
@@ -278,12 +276,6 @@ pub fn validate_filewriter(config: &config::FileWriterParameters) -> Res<()> {
             config::ConfigError::new("FileWriter processor filename must not be empty.").into(),
         );
     }
-    if !config.buffer_seconds().is_finite() || config.buffer_seconds() <= 0.0 {
-        return Err(config::ConfigError::new(
-            "FileWriter processor buffer_seconds must be greater than zero.",
-        )
-        .into());
-    }
     if config.wav_header() && config.format == BinarySampleFormat::S24_4_RJ_LE {
         return Err(config::ConfigError::new(
             "Wav files do not support the S24_4_RJ_LE sample format.",
@@ -334,7 +326,6 @@ mod tests {
             filename,
             format: BinarySampleFormat::F32_LE,
             wav_header: Some(false),
-            buffer_seconds: Some(1.0),
         }
     }
 
@@ -345,7 +336,6 @@ mod tests {
             filename,
             format: BinarySampleFormat::S16_LE,
             wav_header: Some(false),
-            buffer_seconds: Some(2.0),
         }
     }
 
@@ -389,7 +379,6 @@ mod tests {
                 filename: unique_test_filename(),
                 format: BinarySampleFormat::F32_LE,
                 wav_header: Some(false),
-                buffer_seconds: Some(1.0),
             },
             samplerate: 48_000,
             chunksize,
@@ -618,7 +607,6 @@ mod tests {
             filename: filename.clone(),
             format: BinarySampleFormat::S16_LE,
             wav_header: Some(true),
-            buffer_seconds: Some(1.0),
         };
         let mut fw = FileWriter::from_config("test", config, 48_000, 2);
         let mut chunk = mono_chunk([0.5, -0.5], 2);
