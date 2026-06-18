@@ -235,9 +235,15 @@ impl Processor for FileWriter {
         }
 
         let chunk = AudioChunk::from(input, input.waveforms.clone());
-        match self.consumer.channel.send(AudioMessage::Audio(chunk)) {
+        match self.consumer.channel.try_send(AudioMessage::Audio(chunk)) {
             Ok(()) => self.playback_done = false,
-            Err(_) => {
+            Err(TrySendError::Full(_)) => {
+                trace!(
+                    "FileWriter processor '{}' writer is busy, dropping samples",
+                    self.name
+                );
+            }
+            Err(TrySendError::Disconnected(_)) => {
                 if !self.playback_done {
                     warn!(
                         "FileWriter processor '{}' writer has stopped, dropping samples",
