@@ -81,7 +81,6 @@ use camillalib::{
 
 const EXIT_BAD_CONFIG: i32 = 101; // Error in config file
 const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
-const EXIT_FORCED: i32 = 103; // Exit was forced by a second SIGINT
 const EXIT_OK: i32 = 0; // All ok
 const GIT_HASH: &str = git_version!(fallback = "unknown");
 
@@ -1020,82 +1019,13 @@ fn main_process() -> i32 {
     let tx_command_thread = tx_command.clone();
 
     #[cfg(not(windows))]
-    let active_path_thread = active_config_path.clone();
-
-    #[cfg(not(windows))]
-    thread::spawn(move || {
-        let mut sigs = vec![SIGHUP, SIGUSR1];
-        sigs.extend(TERM_SIGNALS);
-        let mut signals = SignalsInfo::<SignalOnly>::new(&sigs).unwrap();
-        let mut exit_requested = false;
-        for info in &mut signals {
-            debug!("Received signal: {info}");
-            match info {
-                SIGHUP => {
-                    let path = (*active_path_thread.lock()).clone();
-                    if let Some(path) = path {
-                        match config::load_validate_config(path.as_str()) {
-                            Ok(conf) => {
-                                debug!("Config is valid");
-                                if let Err(e) = tx_command_thread
-                                    .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
-                                {
-                                    error!("Error sending reload message: {e}");
-                                }
-                            }
-                            Err(err) => {
-                                error!("Config error during reload: {err}");
-                            }
-                        };
-                    } else {
-                        error!("Config path not specified, cannot reload");
-                    }
-                }
-                SIGUSR1 => {
-                    if let Err(e) = tx_command_thread.try_send(ControllerMessage::Stop) {
-                        error!("Error sending stop message: {e}");
-                    }
-                }
-                _ => {
-                    if exit_requested {
-                        warn!("Forcing a shutdown");
-                        logger.flush();
-                        std::process::exit(EXIT_FORCED);
-                    }
-                    info!("Shutting down");
-                    exit_requested = true;
-                    if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
-                        error!("Error sending exit message: {e}");
-                    }
-                }
-            };
-        }
-    });
+    {
+        let active_path_thread = active_config_path.clone();
+        camillalib::signals::handle_signals(logger, tx_command_thread, active_path_thread);
+    }
 
     #[cfg(windows)]
-    thread::spawn(move || {
-        // On windows we don't have signal_hook::iterator, so we just poll for signal...
-        const DELAY: Duration = Duration::from_millis(100);
-        let signal_exit = Arc::new(AtomicBool::new(false));
-        signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&signal_exit)).unwrap();
-        let mut exit_requested = false;
-        loop {
-            if signal_exit.load(std::sync::atomic::Ordering::Relaxed) {
-                signal_exit.store(false, std::sync::atomic::Ordering::Relaxed);
-                if exit_requested {
-                    warn!("Forcing a shutdown");
-                    logger.flush();
-                    std::process::exit(EXIT_FORCED);
-                }
-                info!("Shutting down");
-                exit_requested = true;
-                if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
-                    error!("Error sending exit message: {e}");
-                }
-            }
-            thread::sleep(DELAY);
-        }
-    });
+    camillalib::signals::handle_signals(logger, tx_command_thread);
 
     let wait = matches.get_flag("wait");
 
