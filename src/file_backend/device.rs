@@ -125,6 +125,99 @@ pub trait Reader {
     fn read(&mut self, data: &mut [u8]) -> Result<ReadResult, Box<dyn Error>>;
 }
 
+pub(crate) struct AudioWriter {
+    pub channel: crossbeam_channel::Receiver<AudioMessage>,
+    pub status_channel: crossbeam_channel::Sender<StatusMessage>,
+    pub chunksize: usize,
+    pub channels: usize,
+    pub samplerate: usize,
+    pub sample_format: BinarySampleFormat,
+    pub wav_header: bool,
+}
+
+pub(crate) struct AudioWriterStats {
+    chunk_stats: ChunkStats,
+    rms_values: Vec<f32>,
+    peak_values: Vec<f32>,
+}
+
+impl AudioWriter {
+    pub fn write(
+        &self,
+        mut file: &mut dyn Write,
+        mut playback_state: Option<(&Arc<RwLock<PlaybackStatus>>, &mut AudioWriterStats)>,
+    ) {
+        let channel = &self.channel;
+        let status_channel = &self.status_channel;
+        let channels = self.channels;
+        let sample_format = self.sample_format;
+        let samplerate = self.samplerate;
+        let chunksize = self.chunksize;
+        let wav_header = self.wav_header;
+
+        if wav_header {
+            match write_wav_header(&mut file, channels, sample_format, samplerate) {
+                Ok(()) => debug!("Wrote Wav header"),
+                Err(err) => {
+                    status_channel
+                        .send(StatusMessage::PlaybackError(err.to_string()))
+                        .unwrap_or(());
+                }
+            }
+        }
+
+        let store_bytes_per_sample = sample_format.bytes_per_sample();
+        let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
+
+        loop {
+            match channel.recv() {
+                Ok(AudioMessage::Audio(chunk)) => {
+                    if let Some((playback_status, stats)) = &mut playback_state {
+                        chunk.update_stats(&mut stats.chunk_stats);
+                        crate::push_playback_audio_buffer(playback_status, &chunk);
+                    }
+                    let (valid_bytes, nbr_clipped) =
+                        chunk_to_buffer_rawbytes(chunk, &mut buffer, &sample_format);
+                    let write_res = file.write_all(&buffer[0..valid_bytes]);
+                    match write_res {
+                        Ok(_) => {}
+                        Err(err) => {
+                            status_channel
+                                .send(StatusMessage::PlaybackError(err.to_string()))
+                                .unwrap_or(());
+                        }
+                    };
+                    if let Some((playback_status, stats)) = &mut playback_state {
+                        crate::update_playback_signal_status(
+                            playback_status,
+                            &stats.chunk_stats,
+                            &mut stats.rms_values,
+                            &mut stats.peak_values,
+                            nbr_clipped,
+                        );
+                    }
+                }
+                Ok(AudioMessage::Pause) => {
+                    trace!("Pause message received");
+                }
+                Ok(AudioMessage::EndOfStream) => {
+                    status_channel
+                        .send(StatusMessage::PlaybackDone)
+                        .unwrap_or(());
+                    break;
+                }
+                Err(err) => {
+                    error!("Message channel error: {err}");
+                    status_channel
+                        .send(StatusMessage::PlaybackError(err.to_string()))
+                        .unwrap_or(());
+                    break;
+                }
+            }
+        }
+    }
+}
+
 /// Start a playback thread listening for AudioMessages via a channel.
 impl PlaybackDevice for FilePlaybackDevice {
     fn start(
@@ -137,10 +230,19 @@ impl PlaybackDevice for FilePlaybackDevice {
         let destination = self.destination.clone();
         let chunksize = self.chunksize;
         let channels = self.channels;
-        let store_bytes_per_sample = self.sample_format.bytes_per_sample();
-        let sample_format = self.sample_format;
         let samplerate = self.samplerate;
+        let sample_format = self.sample_format;
         let wav_header = self.wav_header;
+
+        let writer = AudioWriter {
+            channel,
+            status_channel,
+            chunksize,
+            channels,
+            samplerate,
+            sample_format,
+            wav_header,
+        };
         let handle = thread::Builder::new()
             .name("FilePlayback".to_string())
             .spawn(move || {
@@ -152,78 +254,27 @@ impl PlaybackDevice for FilePlaybackDevice {
                 };
                 match file_res {
                     Ok(mut file) => {
-                        match status_channel.send(StatusMessage::PlaybackReady) {
+                        match writer.status_channel.send(StatusMessage::PlaybackReady) {
                             Ok(()) => {}
                             Err(_err) => {}
                         }
-                        let mut chunk_stats = ChunkStats {
-                            rms: vec![0.0; channels],
-                            peak: vec![0.0; channels],
+                        let mut stats = AudioWriterStats {
+                            chunk_stats: ChunkStats {
+                                rms: vec![0.0; channels],
+                                peak: vec![0.0; channels],
+                            },
+                            rms_values: Vec::new(),
+                            peak_values: Vec::new(),
                         };
-                        let mut rms_values = Vec::new();
-                        let mut peak_values = Vec::new();
+
                         barrier.wait();
                         debug!("starting playback loop");
-                        if wav_header {
-                            match write_wav_header(&mut file, channels, sample_format, samplerate) {
-                                Ok(()) => debug!("Wrote Wav header"),
-                                Err(err) => {
-                                    status_channel
-                                        .send(StatusMessage::PlaybackError(err.to_string()))
-                                        .unwrap_or(());
-                                }
-                            }
-                        }
-                        let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
-                        loop {
-                            match channel.recv() {
-                                Ok(AudioMessage::Audio(chunk)) => {
-                                    chunk.update_stats(&mut chunk_stats);
-                                    crate::push_playback_audio_buffer(&playback_status, &chunk);
-                                    let (valid_bytes, nbr_clipped) = chunk_to_buffer_rawbytes(
-                                        chunk,
-                                        &mut buffer,
-                                        &sample_format,
-                                    );
-                                    let write_res = file.write_all(&buffer[0..valid_bytes]);
-                                    match write_res {
-                                        Ok(_) => {}
-                                        Err(err) => {
-                                            status_channel
-                                                .send(StatusMessage::PlaybackError(err.to_string()))
-                                                .unwrap_or(());
-                                        }
-                                    };
-                                    crate::update_playback_signal_status(
-                                        &playback_status,
-                                        &chunk_stats,
-                                        &mut rms_values,
-                                        &mut peak_values,
-                                        nbr_clipped,
-                                    );
-                                }
-                                Ok(AudioMessage::Pause) => {
-                                    trace!("Pause message received");
-                                }
-                                Ok(AudioMessage::EndOfStream) => {
-                                    status_channel
-                                        .send(StatusMessage::PlaybackDone)
-                                        .unwrap_or(());
-                                    break;
-                                }
-                                Err(err) => {
-                                    error!("Message channel error: {err}");
-                                    status_channel
-                                        .send(StatusMessage::PlaybackError(err.to_string()))
-                                        .unwrap_or(());
-                                    break;
-                                }
-                            }
-                        }
+                        writer.write(file.as_mut(), Some((&playback_status, &mut stats)));
                     }
                     Err(err) => {
-                        let send_result =
-                            status_channel.send(StatusMessage::PlaybackError(err.to_string()));
+                        let send_result = writer
+                            .status_channel
+                            .send(StatusMessage::PlaybackError(err.to_string()));
                         if send_result.is_err() {
                             error!("Playback error: {err}");
                         }

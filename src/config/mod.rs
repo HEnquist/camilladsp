@@ -1550,6 +1550,11 @@ pub enum Processor {
         description: Option<String>,
         parameters: RACEParameters,
     },
+    FileWriter {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: FileWriterParameters,
+    },
 }
 
 /// Parameters for the dynamic range compressor processor.
@@ -1642,6 +1647,28 @@ impl RACEParameters {
 }
 
 /// Parameters for the hard/soft-clipping limiter filter.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct FileWriterParameters {
+    pub channels: usize,
+    pub filename: String,
+    pub format: BinarySampleFormat,
+    #[serde(default)]
+    pub wav_header: Option<bool>,
+    #[serde(default)]
+    pub buffer_seconds: Option<f32>,
+}
+
+impl FileWriterParameters {
+    pub fn wav_header(&self) -> bool {
+        self.wav_header.unwrap_or_default()
+    }
+
+    pub fn buffer_seconds(&self) -> f32 {
+        self.buffer_seconds.unwrap_or(10.0)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LimiterParameters {

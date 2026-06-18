@@ -133,6 +133,7 @@ and the Mozilla Public License Version 2.0:
 - **[Processors](#processors)**
    - **[Compressor](#compressor)**
    - **[NoiseGate](#noise-gate)**
+   - **[FileWriter](#filewriter)**
 - **[Pipeline](#pipeline)**
    - **[Filter step](#filter-step)**
    - **[Mixer and Processor step](#mixer-and-processor-step)**
@@ -2485,6 +2486,35 @@ pipeline:
   * `attenuation`: the amount of attenuation in dB to apply when the gate is "closed".
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
+
+### FileWriter
+The "FileWriter" processor copies the samples passing through the pipeline to a separate file writer buffer.
+A writer thread drains this buffer and writes the data to a file, so file writing does not modify the audio stream.
+If the file writer cannot keep up and the ring buffer becomes full, new recorded bytes are dropped and processing continues.
+
+Example:
+```
+processors:
+  recorder:
+    type: FileWriter
+    parameters:
+      channels: 2
+      filename: "recording"
+      format: S32_LE
+      wav_header: false (*)
+      buffer_seconds: 10.0 (*)
+
+pipeline:
+  - type: Processor
+    name: recorder
+```
+
+  Parameters:
+  * `channels`: number of channels, must match the number of channels of the pipeline where the recorder is inserted.
+  * `filename`: output file name.
+  * `format`: file sample format, one of `S16_LE`, `S24_4_RJ_LE`, `S24_4_LJ_LE`, `S24_3_LE`, `S32_LE`, `F32_LE`, `F64_LE`.
+  * `wav_header`: write a wav header before the samples. Optional, defaults to `false`. Wav files do not support `S24_4_RJ_LE`.
+  * `buffer_seconds`: size of the file writer buffer in seconds. Optional, defaults to 10 seconds.
 
 ### RACE
 The "RACE" processor implements the recursive part of the

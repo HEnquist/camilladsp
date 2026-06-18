@@ -17,6 +17,7 @@
 use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
+use std::thread::JoinHandle;
 
 /// Dynamic range compressor processor.
 pub mod compressor;
@@ -24,6 +25,8 @@ pub mod compressor;
 pub mod noisegate;
 /// RACE (Recursive Ambiophonic Crosstalk Elimination) processor.
 pub mod race;
+/// File Writer.
+pub mod filewriter;
 
 /// Trait implemented by all multi-channel audio processors.
 pub trait Processor {
@@ -35,4 +38,8 @@ pub trait Processor {
 
     /// Return the processor's name as given in the configuration.
     fn name(&self) -> &str;
+
+    fn shutdown(&mut self) -> Vec<JoinHandle<()>> {
+        Vec::new()
+    }
 }

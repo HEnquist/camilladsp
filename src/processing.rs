@@ -78,6 +78,7 @@ pub fn run_processing(
         }
         processing_params.sync_volumes_to_target();
         let mut pipeline = pipeline::Pipeline::from_config(conf_proc, processing_params.clone());
+        let mut shutdown_handles = Vec::<thread::JoinHandle<()>>::new();
         debug!("build filters, waiting to start processing loop");
 
         let thread_handle =
@@ -180,7 +181,8 @@ pub fn run_processing(
                         processing_params.sync_volumes_to_target();
                         let new_pipeline =
                             pipeline::Pipeline::from_config(new_config, processing_params.clone());
-                        pipeline = new_pipeline;
+                        let old_pipeline = std::mem::replace(&mut pipeline, new_pipeline);
+                        shutdown_handles.extend(old_pipeline.shutdown());
                     }
                     config::ConfigChange::FilterParameters {
                         filters,
@@ -198,6 +200,7 @@ pub fn run_processing(
                     _ => {}
                 };
             };
+            join_finished_handles(&mut shutdown_handles);
         }
         processing_params.set_processing_load(0.0);
         processing_params.set_resampler_load(0.0);
@@ -211,5 +214,31 @@ pub fn run_processing(
                 }
             };
         }
+        shutdown_handles.extend(pipeline.shutdown());
+        join_handles(shutdown_handles);
     })
+}
+
+fn join_finished_handles(handles: &mut Vec<thread::JoinHandle<()>>) {
+    let mut index = 0;
+    while index < handles.len() {
+        if handles[index].is_finished() {
+            let handle = handles.swap_remove(index);
+            join_handle(handle);
+        } else {
+            index += 1;
+        }
+    }
+}
+
+fn join_handles(handles: Vec<thread::JoinHandle<()>>) {
+    for handle in handles {
+        join_handle(handle);
+    }
+}
+
+fn join_handle(handle: thread::JoinHandle<()>) {
+    if handle.join().is_err() {
+        error!("Processor thread panicked during pipeline shutdown");
+    }
 }

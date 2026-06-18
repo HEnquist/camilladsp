@@ -18,6 +18,7 @@ use crate::config::*;
 use crate::filters;
 use crate::mixer;
 use crate::processors::compressor;
+use crate::processors::filewriter;
 use crate::processors::noisegate;
 use crate::processors::race;
 use crate::utils::wavtools::find_data_in_wav_stream;
@@ -384,6 +385,14 @@ fn replace_tokens_in_config(config: &mut Configuration) {
             }
         }
     }
+    if let Some(processors) = &mut config.processors {
+        for (_name, processor) in processors.iter_mut() {
+            if let Processor::FileWriter { parameters, .. } = processor {
+                parameters.filename =
+                    replace_tokens(&parameters.filename, samplerate, num_channels);
+            }
+        }
+    }
 }
 
 // Check if coefficent files with relative paths are relative to the config file path, replace path if they are
@@ -502,7 +511,8 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
                 match (params, current_proc) {
                     (Processor::Compressor { .. }, Processor::Compressor { .. })
                     | (Processor::NoiseGate { .. }, Processor::NoiseGate { .. })
-                    | (Processor::RACE { .. }, Processor::RACE { .. }) => {}
+                    | (Processor::RACE { .. }, Processor::RACE { .. })
+                    | (Processor::FileWriter { .. }, Processor::FileWriter { .. }) => {}
                     _ => {
                         // A processor changed type, need to rebuild the pipeline
                         return ConfigChange::Pipeline;
@@ -788,6 +798,26 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                             Err(err) => {
                                                 let msg = format!(
                                                     "Invalid RACE processor '{}'. Reason: {}",
+                                                    step.name, err
+                                                );
+                                                return Err(ConfigError::new(&msg).into());
+                                            }
+                                        }
+                                    }
+                                    Processor::FileWriter { parameters, .. } => {
+                                        let channels = parameters.channels;
+                                        if channels != num_channels {
+                                            let msg = format!(
+                                                "FileWriter processor '{}' has wrong number of channels. Expected {}, found {}.",
+                                                step.name, num_channels, channels
+                                            );
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
+                                        match filewriter::validate_filewriter(parameters) {
+                                            Ok(_) => {}
+                                            Err(err) => {
+                                                let msg = format!(
+                                                    "Invalid FileWriter processor '{}'. Reason: {}",
                                                     step.name, err
                                                 );
                                                 return Err(ConfigError::new(&msg).into());

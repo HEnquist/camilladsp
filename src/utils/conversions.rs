@@ -26,8 +26,8 @@ use num_traits;
 #[cfg(feature = "cpal-backend")]
 use std::collections::VecDeque;
 
-fn chunk_to_buffer_with_adapter<'a, A>(
-    chunk: AudioChunk,
+fn copy_chunk_to_adapter<'a, A>(
+    chunk: &AudioChunk,
     adapter: &'a mut A,
     bytes_per_sample: usize,
 ) -> (usize, usize)
@@ -63,7 +63,6 @@ where
             peak * 100.0
         );
     }
-    recycle_chunk(chunk);
     (num_valid_bytes, clipped)
 }
 
@@ -131,11 +130,22 @@ pub fn chunk_to_buffer_rawbytes(
     buf: &mut [u8],
     sample_format: &BinarySampleFormat,
 ) -> (usize, usize) {
+    let result = chunk_to_buffer_rawbytes_borrowed(&chunk, buf, sample_format);
+    recycle_chunk(chunk);
+    result
+}
+
+/// Convert a borrowed AudioChunk to an interleaved buffer of u8.
+pub fn chunk_to_buffer_rawbytes_borrowed(
+    chunk: &AudioChunk,
+    buf: &mut [u8],
+    sample_format: &BinarySampleFormat,
+) -> (usize, usize) {
     let frames = chunk.frames;
     let channels = chunk.channels;
     let bytes_per_sample = sample_format.bytes_per_sample();
     match *sample_format {
-        BinarySampleFormat::S16_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::S16_LE => copy_chunk_to_adapter(
             chunk,
             &mut InterleavedNumbers::<&mut [I16_LE], PrcFmt>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -143,7 +153,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::S24_3_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::S24_3_LE => copy_chunk_to_adapter(
             chunk,
             &mut InterleavedNumbers::<&mut [I24_LE], PrcFmt>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -151,7 +161,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::S24_4_RJ_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::S24_4_RJ_LE => copy_chunk_to_adapter(
             chunk,
             &mut InterleavedNumbers::<&mut [I24_4RJ_LE], PrcFmt>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -159,7 +169,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::S24_4_LJ_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::S24_4_LJ_LE => copy_chunk_to_adapter(
             chunk,
             &mut InterleavedNumbers::<&mut [I24_4LJ_LE], PrcFmt>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -167,7 +177,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::S32_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::S32_LE => copy_chunk_to_adapter(
             chunk,
             &mut InterleavedNumbers::<&mut [I32_LE], PrcFmt>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -175,7 +185,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::F32_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::F32_LE => copy_chunk_to_adapter(
             chunk,
             &mut InterleavedNumbers::<&mut [F32_LE], PrcFmt>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -183,7 +193,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::F64_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::F64_LE => copy_chunk_to_adapter(
             chunk,
             &mut InterleavedNumbers::<&mut [F64_LE], PrcFmt>::new_from_bytes_mut(
                 buf, channels, frames,

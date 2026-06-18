@@ -26,6 +26,7 @@ use crate::processors::Processor;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::Instant;
 
 const LOAD_WARN_CONSECUTIVE_CHUNKS: usize = 10;
@@ -267,6 +268,15 @@ impl Pipeline {
                                 );
                                 Box::new(race) as Box<dyn Processor>
                             }
+                            config::Processor::FileWriter { parameters, .. } => {
+                                let filewriter = processors::filewriter::FileWriter::from_config(
+                                    &step.name,
+                                    parameters,
+                                    conf.devices.samplerate,
+                                    conf.devices.chunksize,
+                                );
+                                Box::new(filewriter) as Box<dyn Processor>
+                            }
                         };
                         steps.push(PipelineStep::ProcessorStep(proc));
                     }
@@ -330,6 +340,16 @@ impl Pipeline {
                 }
             }
         }
+    }
+
+    pub fn shutdown(mut self) -> Vec<JoinHandle<()>> {
+        let mut handles = Vec::new();
+        for step in &mut self.steps {
+            if let PipelineStep::ProcessorStep(proc) = step {
+                handles.extend(proc.shutdown());
+            }
+        }
+        handles
     }
 
     /// Process an AudioChunk by calling either a MixerStep or a FilterStep
