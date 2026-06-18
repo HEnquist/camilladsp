@@ -22,7 +22,7 @@ use crate::config;
 use crate::config::BinarySampleFormat;
 use crate::file_backend::device::AudioWriter;
 use crate::processors::Processor;
-use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
+use crossbeam_channel::{Receiver, Sender, TrySendError, bounded, unbounded};
 use std::fs::File;
 use std::io::Write;
 use std::thread::{self, JoinHandle};

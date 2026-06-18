@@ -2487,33 +2487,6 @@ pipeline:
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
 
-### FileWriter
-The "FileWriter" processor copies the samples passing through the pipeline to a separate file writer buffer.
-A writer thread drains this buffer and writes the data to a file, so file writing does not modify the audio stream.
-If the file writer cannot keep up and the ring buffer becomes full, new recorded bytes are dropped and processing continues.
-
-Example:
-```
-processors:
-  recorder:
-    type: FileWriter
-    parameters:
-      channels: 2
-      filename: "recording"
-      format: S32_LE
-      wav_header: false (*)
-
-pipeline:
-  - type: Processor
-    name: recorder
-```
-
-  Parameters:
-  * `channels`: number of channels, must match the number of channels of the pipeline where the recorder is inserted.
-  * `filename`: output file name.
-  * `format`: file sample format, one of `S16_LE`, `S24_4_RJ_LE`, `S24_4_LJ_LE`, `S24_3_LE`, `S32_LE`, `F32_LE`, `F64_LE`.
-  * `wav_header`: write a wav header before the samples. Optional, defaults to `false`. Wav files do not support `S24_4_RJ_LE`.
-
 ### RACE
 The "RACE" processor implements the recursive part of the
 [Recursive Ambiophonic Crosstalk Elimination (RACE)](http://www.filmaker.com/papers/RGRM-RACE_rev.pdf) algorithm.
@@ -2661,6 +2634,31 @@ pipeline:
   - type: Mixer
     name: 6to2
 ```
+
+### FileWriter
+The "FileWriter" processor writes audio data to a file. It also passes on the input unmodified.
+
+Example:
+```
+processors:
+  filewriter:
+    type: FileWriter
+    parameters:
+      channels: 2
+      filename: "recording"
+      format: S32_LE
+      wav_header: false (*)
+
+pipeline:
+  - type: Processor
+    name: filewriter
+```
+
+  Parameters:
+  * `channels`: number of channels, must match the number of channels of the pipeline where the file writer is inserted.
+  * `filename`: output file name. Existing files are overwritten.
+  * `format`: file sample format, one of `S16_LE`, `S24_4_RJ_LE`, `S24_4_LJ_LE`, `S24_3_LE`, `S32_LE`, `F32_LE`, `F64_LE`.
+  * `wav_header`: write a wav header before the samples. Optional, defaults to `false`. Wav files do not support `S24_4_RJ_LE`.
 
 ## Pipeline
 The pipeline section defines the processing steps between input and output.
