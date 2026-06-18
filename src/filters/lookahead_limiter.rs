@@ -183,6 +183,10 @@ impl Filter for LookaheadLimiter {
             (self.limit, self.attack_samples, self.release_coeff) =
                 LookaheadLimiter::configure(&config, self.samplerate);
 
+            for _ in 0..self.attack_samples {
+                self.lookahead_buffer.push_overwrite(0.0);
+            }
+
             debug!(
                 "Updated lookahead limiter '{}', limit dB: {}, linear: {}, attack/lookahead: {} samples, release coefficient: {}",
                 self.name, config.limit, self.limit, self.attack_samples, self.release_coeff
