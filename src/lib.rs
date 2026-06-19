@@ -24,6 +24,13 @@
 //! Key types in this crate root: [`StatusMessage`], [`CommandMessage`],
 //! [`CaptureStatus`], [`PlaybackStatus`], [`PrcFmt`].
 
+// These two are aliased to shorter names used throughout the pulse backend,
+// so the `extern crate ... as ...` renames are required and not redundant.
+#[cfg(feature = "pulse-backend")]
+extern crate libpulse_binding as pulse;
+#[cfg(feature = "pulse-backend")]
+extern crate libpulse_simple_binding as psimple;
+
 #[macro_use]
 extern crate log;
 
