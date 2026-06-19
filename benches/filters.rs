@@ -1,6 +1,4 @@
-extern crate criterion;
 use criterion::{Bencher, BenchmarkId, Criterion, criterion_group, criterion_main};
-extern crate camillalib;
 
 use camillalib::PrcFmt;
 use camillalib::filters::Filter;

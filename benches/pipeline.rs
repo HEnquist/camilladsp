@@ -1,6 +1,4 @@
-extern crate criterion;
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
-extern crate camillalib;
 
 use camillalib::PrcFmt;
 use camillalib::ProcessingParameters;

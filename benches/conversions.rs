@@ -1,7 +1,5 @@
-extern crate criterion;
 use camillalib::utils::stash::{recycle_chunk, vec_from_stash};
 use criterion::{Criterion, criterion_group, criterion_main};
-extern crate camillalib;
 
 use camillalib::audiochunk::AudioChunk;
 use camillalib::config::BinarySampleFormat;
