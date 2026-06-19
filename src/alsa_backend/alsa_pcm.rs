@@ -1,5 +1,5 @@
-use std::sync::LazyLock;
 use parking_lot::Mutex;
+use std::sync::LazyLock;
 
 use alsa::{
     Direction, ValueOr,

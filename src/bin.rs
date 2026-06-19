@@ -26,7 +26,6 @@ use std::path::PathBuf;
 #[cfg(any(windows, feature = "websocket"))]
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
-use std::thread;
 #[cfg(any(windows, feature = "websocket"))]
 use std::time::Duration;
 
@@ -1075,9 +1074,9 @@ fn main_process() -> i32 {
         if let Some(fname) = &statefilename {
             let fname = fname.clone();
 
-            thread::spawn(move || {
+            std::thread::spawn(move || {
                 loop {
-                    thread::sleep(Duration::from_millis(1000));
+                    std::thread::sleep(Duration::from_millis(1000));
                     match rx_state.recv() {
                         Ok(()) => {
                             debug!("saving state to {}", &fname);
