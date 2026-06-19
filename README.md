@@ -85,6 +85,8 @@ and the Mozilla Public License Version 2.0:
 - **[Dependencies](#dependencies)**
 - **[Companion libraries and tools](#companion-libraries-and-tools)**
 - **[GUI](#gui)**
+- **[Versioning and compatibility](#versioning-and-compatibility)**
+- **[Contributing](#contributing)**
 
 **[Installing](#installing)**
 
@@ -285,6 +287,19 @@ CamillaDSP uses version numbers in the form MAJOR.MINOR.PATCH, for example 2.1.3
 
 Before a new major version is released, preview releases are published to give users and downstream maintainers time to test.
 Feedback during the preview phase is very welcome and is the best time to influence the final release.
+
+## Contributing
+
+Contributions are welcome, both bug reports and pull requests. Before opening a pull request, it helps
+to understand the branch layout:
+- `master` always matches the latest release. It does not contain any unreleased work.
+- Active development happens on a separate branch named after the upcoming version. This is usually,
+  but not always, a major release named with just the major number such as `next6`, or a minor or
+  patch release named with the full version such as `next5.2.0` or `next5.2.1`.
+
+Because `master` is usually behind the development branch, please ask which branch to target, or check
+which `next*` branch is currently active, before starting work. This avoids basing changes on code that
+has already been reworked.
 
 # Installing
 
