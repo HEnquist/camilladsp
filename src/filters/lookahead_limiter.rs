@@ -12,7 +12,7 @@
 //
 // You should have received copies of the GNU General Public License and the
 // Mozilla Public License along with this program. If not, see
-// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/en-US/MPL/2.0/>.
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::PrcFmt;
 use crate::Res;
@@ -160,7 +160,7 @@ impl LookaheadLimiter {
         // Drop old samples from beginning of lookahead buffer and copy input samples to its end
         self.lookahead_buffer.push_slice_overwrite(input);
 
-        // Ouput
+        // Output
         input[..len].copy_from_slice(&self.output_buffer[..len]);
     }
 }
@@ -239,14 +239,14 @@ mod tests {
             limit: 0.0,
             unit: TimeUnit::Samples,
             attack: 4.0,
-            release: 1.0 / std::f64::consts::LN_2,
+            release: 1.0 / (std::f64::consts::LN_2 as PrcFmt),
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
         let mut input = vec![
             1.0, 1.0, 1.0, 1.0, 1.0, 2.0, -2.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
             1.0, 1.0,
         ];
-        let expected = vec![
+        let expected: Vec<PrcFmt> = vec![
             0.0,
             0.0,
             0.0,
@@ -258,14 +258,14 @@ mod tests {
             0.625,
             1.0,
             -1.0,
-            0.5_f64.powf(1.0 / 2.0),
+            (0.5 as PrcFmt).powf(1.0 / 2.0),
             0.625,
             1.0,
-            0.5_f64.powf(1.0 / 2.0),
-            0.5_f64.powf(1.0 / 4.0),
-            0.5_f64.powf(1.0 / 8.0),
-            0.5_f64.powf(1.0 / 16.0),
-            0.5_f64.powf(1.0 / 32.0),
+            (0.5 as PrcFmt).powf(1.0 / 2.0),
+            (0.5 as PrcFmt).powf(1.0 / 4.0),
+            (0.5 as PrcFmt).powf(1.0 / 8.0),
+            (0.5 as PrcFmt).powf(1.0 / 16.0),
+            (0.5 as PrcFmt).powf(1.0 / 32.0),
         ];
         limiter.apply_lookahead_limiter(&mut input);
         assert_close(&input, &expected, 1e-6);
@@ -366,7 +366,7 @@ mod tests {
             limit: 0.0,
             unit: TimeUnit::Samples,
             attack: 5.0,
-            release: 1.0 / std::f64::consts::LN_2,
+            release: 1.0 / (std::f64::consts::LN_2 as PrcFmt),
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
         let mut buf1 = vec![1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0];
@@ -375,11 +375,11 @@ mod tests {
         assert_close(&buf1, &expected1, 1e-6);
 
         let mut buf2 = vec![1.0, 1.0, 1.0, 1.0];
-        let expected2 = vec![
-            0.5_f64.powf(1.0 / 2.0),
-            0.5_f64.powf(1.0 / 4.0),
-            0.5_f64.powf(1.0 / 8.0),
-            0.5_f64.powf(1.0 / 16.0),
+        let expected2: Vec<PrcFmt> = vec![
+            (0.5 as PrcFmt).powf(1.0 / 2.0),
+            (0.5 as PrcFmt).powf(1.0 / 4.0),
+            (0.5 as PrcFmt).powf(1.0 / 8.0),
+            (0.5 as PrcFmt).powf(1.0 / 16.0),
         ];
         limiter.apply_lookahead_limiter(&mut buf2);
         assert_close(&buf2, &expected2, 1e-6);
