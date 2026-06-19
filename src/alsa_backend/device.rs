@@ -16,8 +16,6 @@
 
 #![cfg_attr(feature = "32bit", allow(clippy::unnecessary_cast))]
 
-extern crate alsa;
-extern crate nix;
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config::{AlsaSampleFormat, Resampler};

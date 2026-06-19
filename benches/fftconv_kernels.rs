@@ -1,10 +1,6 @@
 //! Micro-benchmarks for fftconv complex-multiply kernels.
 //! Compares scalar with AVX+FMA on x86_64 and NEON on aarch64.
 
-extern crate camillalib;
-extern crate criterion;
-extern crate num_complex;
-
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use num_complex::Complex;
 use std::hint::black_box;

@@ -24,42 +24,6 @@
 //! Key types in this crate root: [`StatusMessage`], [`CommandMessage`],
 //! [`CaptureStatus`], [`PlaybackStatus`], [`PrcFmt`].
 
-#[cfg(target_os = "linux")]
-extern crate alsa;
-#[cfg(target_os = "linux")]
-extern crate alsa_sys;
-extern crate clap;
-#[cfg(target_os = "macos")]
-extern crate coreaudio;
-#[cfg(feature = "cpal-backend")]
-extern crate cpal;
-extern crate crossbeam_channel;
-#[cfg(target_os = "macos")]
-extern crate dispatch;
-#[cfg(feature = "pulse-backend")]
-extern crate libpulse_binding as pulse;
-#[cfg(feature = "pulse-backend")]
-extern crate libpulse_simple_binding as psimple;
-#[cfg(feature = "secure-websocket")]
-extern crate native_tls;
-#[cfg(target_os = "linux")]
-extern crate nix;
-extern crate num_complex;
-extern crate num_traits;
-#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-extern crate pipewire;
-extern crate rand;
-extern crate rand_distr;
-extern crate realfft;
-extern crate rubato;
-extern crate serde;
-extern crate serde_with;
-extern crate signal_hook;
-#[cfg(feature = "websocket")]
-extern crate tungstenite;
-//#[cfg(target_os = "windows")]
-//extern crate winapi;
-
 #[macro_use]
 extern crate log;
 

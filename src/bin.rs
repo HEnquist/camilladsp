@@ -14,10 +14,6 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-extern crate camillalib;
-extern crate chrono;
-extern crate clap;
-extern crate flexi_logger;
 #[macro_use]
 extern crate log;
 
