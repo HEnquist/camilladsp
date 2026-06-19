@@ -14,6 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::alsa_backend::alsa_pcm::open_pcm;
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config::{AlsaSampleFormat, BinarySampleFormat, Resampler};
@@ -21,9 +22,8 @@ use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbyt
 use crate::utils::countertimer;
 use alsa::ctl::{Ctl, ElemId, ElemIface, ElemType, ElemValue};
 use alsa::hctl::HCtl;
-use alsa::pcm::{Access, Format, Frames, HwParams};
+use alsa::pcm::Frames;
 use alsa::poll::Descriptors;
-use alsa::{Direction, ValueOr};
 use alsa_sys;
 use audio_thread_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -34,7 +34,6 @@ use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{HeapRb, traits::*};
 use std::ffi::CString;
 use std::fmt::Debug;
-use std::sync::LazyLock;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -49,14 +48,11 @@ use crate::alsa_backend::threaded_buffermanager::{
 };
 use crate::alsa_backend::utils::{
     CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, find_elem,
-    list_channels_as_text, list_device_names, list_formats_as_text, list_samplerates_as_text,
-    pick_preferred_format, process_events, recover_suspended_pcm, state_desc, sync_linked_controls,
+    process_events, recover_suspended_pcm, state_desc, sync_linked_controls,
 };
 use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
-
-static ALSA_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 pub struct AlsaPlaybackDevice {
     pub devname: String,
@@ -852,86 +848,6 @@ fn capture_buffer(
             }
         },
     }
-}
-
-/// Open an Alsa PCM device
-fn open_pcm(
-    devname: String,
-    samplerate: u32,
-    channels: u32,
-    sample_format: &Option<AlsaSampleFormat>,
-    buf_manager: &mut dyn DeviceBufferManager,
-    capture: bool,
-) -> Res<(alsa::PCM, AlsaSampleFormat)> {
-    let direction = if capture { "Capture" } else { "Playback" };
-    debug!(
-        "Available {} devices: {:?}",
-        direction,
-        list_device_names(capture)
-    );
-    // Acquire the lock
-    let _lock = ALSA_MUTEX.lock();
-    // Open the device
-    let pcmdev = if capture {
-        alsa::PCM::new(&devname, Direction::Capture, true)?
-    } else {
-        alsa::PCM::new(&devname, Direction::Playback, true)?
-    };
-    // Set hardware parameters
-    let chosen_format;
-    {
-        let hwp = HwParams::any(&pcmdev)?;
-
-        // Set number of channels
-        debug!("{}: {}", direction, list_channels_as_text(&hwp));
-        debug!("{direction}: setting channels to {channels}");
-        hwp.set_channels(channels)?;
-
-        // Set samplerate
-        debug!("{}: {}", direction, list_samplerates_as_text(&hwp));
-        debug!("{direction}: setting rate to {samplerate}");
-        hwp.set_rate(samplerate, ValueOr::Nearest)?;
-
-        // Set sample format
-        debug!("{}: {}", direction, list_formats_as_text(&hwp));
-        chosen_format = match sample_format {
-            Some(sfmt) => *sfmt,
-            None => {
-                let preferred = pick_preferred_format(&hwp)
-                    .ok_or(DeviceError::new("Unable to find a supported sample format"))?;
-                debug!("{direction}: Picked sample format {preferred:?}");
-                preferred
-            }
-        };
-        debug!("{direction}: setting format to {chosen_format:?}");
-        match chosen_format {
-            AlsaSampleFormat::S16_LE => hwp.set_format(Format::s16())?,
-            AlsaSampleFormat::S24_4_LE => hwp.set_format(Format::s24())?,
-            AlsaSampleFormat::S24_3_LE => hwp.set_format(Format::s24_3())?,
-            AlsaSampleFormat::S32_LE => hwp.set_format(Format::s32())?,
-            AlsaSampleFormat::F32_LE => hwp.set_format(Format::float())?,
-            AlsaSampleFormat::F64_LE => hwp.set_format(Format::float64())?,
-        }
-
-        // Set access mode, buffersize and periods
-        hwp.set_access(Access::RWInterleaved)?;
-        buf_manager.apply_buffer_size(&hwp)?;
-        buf_manager.apply_period_size(&hwp)?;
-
-        // Apply
-        pcmdev.hw_params(&hwp)?;
-    }
-    {
-        // Set software parameters
-        let hwp = pcmdev.hw_params_current()?;
-        let swp = pcmdev.sw_params_current()?;
-        buf_manager.apply_start_threshold(&swp)?;
-        buf_manager.apply_avail_min(&swp)?;
-        debug!("Opening {direction} device \"{devname}\" with parameters: {hwp:?}, {swp:?}");
-        pcmdev.sw_params(&swp)?;
-        debug!("{direction} device \"{devname}\" successfully opened");
-    }
-    Ok((pcmdev, chosen_format))
 }
 
 fn send_capture_audio(
