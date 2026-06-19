@@ -227,10 +227,6 @@ impl Processor for FileWriter {
 
         let valid_frames = input.valid_frames.min(self.chunksize);
         if valid_frames == 0 {
-            self.consumer
-                .channel
-                .send(AudioMessage::EndOfStream)
-                .unwrap_or(());
             return Ok(());
         }
 
@@ -238,7 +234,7 @@ impl Processor for FileWriter {
         match self.consumer.channel.try_send(AudioMessage::Audio(chunk)) {
             Ok(()) => self.playback_done = false,
             Err(TrySendError::Full(_)) => {
-                trace!(
+                warn!(
                     "FileWriter processor '{}' writer is busy, dropping samples",
                     self.name
                 );
