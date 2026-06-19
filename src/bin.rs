@@ -53,12 +53,6 @@ use std::time::Duration;
 
 use flexi_logger::DeferredNow;
 use log::Record;
-#[cfg(not(windows))]
-use signal_hook::consts::TERM_SIGNALS;
-#[cfg(not(windows))]
-use signal_hook::consts::signal::*;
-#[cfg(not(windows))]
-use signal_hook::iterator::{SignalsInfo, exfiltrator::SignalOnly};
 
 use camillalib::Res;
 
