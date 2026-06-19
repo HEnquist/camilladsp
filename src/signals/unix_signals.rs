@@ -1,6 +1,6 @@
 use std::{sync::Arc, thread};
 
-use nix::libc::{SIGHUP, SIGUSR1};
+use signal_hook::consts::{SIGHUP, SIGUSR1};
 use signal_hook::{
     consts::TERM_SIGNALS,
     iterator::{SignalsInfo, exfiltrator::SignalOnly},

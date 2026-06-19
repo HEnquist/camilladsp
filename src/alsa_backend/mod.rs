@@ -19,6 +19,7 @@ mod alsa_pcm;
 pub mod buffermanager;
 #[cfg(not(feature = "threaded-alsa"))]
 pub mod device;
+pub mod device_buffer_manager;
 #[cfg(feature = "threaded-alsa")]
 pub mod threaded_buffermanager;
 #[cfg(feature = "threaded-alsa")]

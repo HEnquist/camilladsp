@@ -15,6 +15,7 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::alsa_backend::alsa_pcm::open_pcm;
+use crate::alsa_backend::device_buffer_manager::DeviceBufferManager;
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config::{AlsaSampleFormat, BinarySampleFormat, Resampler};
@@ -43,9 +44,7 @@ use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
-use crate::alsa_backend::threaded_buffermanager::{
-    CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
-};
+use crate::alsa_backend::threaded_buffermanager::{CaptureBufferManager, PlaybackBufferManager};
 use crate::alsa_backend::utils::{
     CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, find_elem,
     process_events, recover_suspended_pcm, state_desc, sync_linked_controls,

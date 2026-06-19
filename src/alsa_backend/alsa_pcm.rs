@@ -1,4 +1,5 @@
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
+use parking_lot::Mutex;
 
 use alsa::{
     Direction, ValueOr,
@@ -8,7 +9,7 @@ use alsa::{
 use crate::{
     Res,
     alsa_backend::{
-        threaded_buffermanager::DeviceBufferManager,
+        device_buffer_manager::DeviceBufferManager,
         utils::{
             list_channels_as_text, list_device_names, list_formats_as_text,
             list_samplerates_as_text, pick_preferred_format,
