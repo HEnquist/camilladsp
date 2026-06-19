@@ -33,6 +33,7 @@ use crate::ProcessingParameters;
 use crate::Res;
 use crate::nanos_since_epoch;
 use crate::utils::decibels::gain_from_value;
+use crate::utils::time::time_to_samples;
 
 #[derive(Clone, Debug)]
 pub struct Gain {
@@ -411,12 +412,7 @@ impl Delay {
     }
 
     pub fn from_config(name: &str, samplerate: usize, conf: config::DelayParameters) -> Self {
-        let delay_samples = match conf.unit() {
-            config::TimeUnit::Microseconds => conf.delay / 1000000.0 * (samplerate as PrcFmt),
-            config::TimeUnit::Milliseconds => conf.delay / 1000.0 * (samplerate as PrcFmt),
-            config::TimeUnit::Millimetres => conf.delay / 1000.0 * (samplerate as PrcFmt) / 343.0,
-            config::TimeUnit::Samples => conf.delay,
-        };
+        let delay_samples = time_to_samples(conf.delay, conf.unit(), samplerate);
 
         Self::new(name, samplerate, delay_samples, conf.subsample())
     }
