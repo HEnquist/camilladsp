@@ -14,8 +14,8 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use psimple::Simple;
-use pulse;
+use libpulse_binding as pulse;
+use libpulse_simple_binding::Simple;
 use pulse::sample;
 use pulse::stream::Direction;
 

@@ -14,27 +14,6 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#[cfg(target_os = "linux")]
-extern crate alsa;
-extern crate camillalib;
-extern crate clap;
-#[cfg(feature = "pulse-backend")]
-extern crate libpulse_binding as pulse;
-#[cfg(feature = "pulse-backend")]
-extern crate libpulse_simple_binding as psimple;
-extern crate parking_lot;
-extern crate rand;
-extern crate rand_distr;
-extern crate realfft;
-extern crate rubato;
-extern crate serde;
-extern crate serde_with;
-extern crate signal_hook;
-#[cfg(feature = "websocket")]
-extern crate tungstenite;
-
-extern crate chrono;
-extern crate flexi_logger;
 #[macro_use]
 extern crate log;
 
