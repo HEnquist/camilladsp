@@ -20,6 +20,8 @@ use crate::config;
 
 /// Dynamic range compressor processor.
 pub mod compressor;
+/// File writer processor.
+pub mod filewriter;
 /// Multichannel lookahead limiter processor.
 pub mod lookahead_limiter;
 /// Noise gate processor.

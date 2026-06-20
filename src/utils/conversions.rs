@@ -22,9 +22,9 @@ use audioadapter::{Adapter, AdapterMut};
 use audioadapter_buffers::number_to_float::InterleavedNumbers;
 use audioadapter_sample::sample::{F32_LE, F64_LE, I16_LE, I24_4LJ_LE, I24_4RJ_LE, I24_LE, I32_LE};
 
-fn chunk_to_buffer_with_adapter<A>(
-    chunk: AudioChunk,
-    adapter: &mut A,
+fn chunk_to_buffer_with_adapter_borrowed<'a, A>(
+    chunk: &AudioChunk,
+    adapter: &'a mut A,
     bytes_per_sample: usize,
 ) -> (usize, usize)
 where
@@ -59,7 +59,6 @@ where
             peak * 100.0
         );
     }
-    recycle_chunk(chunk);
     (num_valid_bytes, clipped)
 }
 
@@ -127,11 +126,22 @@ pub fn chunk_to_buffer_rawbytes(
     buf: &mut [u8],
     sample_format: &BinarySampleFormat,
 ) -> (usize, usize) {
+    let result = chunk_to_buffer_rawbytes_borrowed(&chunk, buf, sample_format);
+    recycle_chunk(chunk);
+    result
+}
+
+/// Convert a borrowed AudioChunk to an interleaved buffer of u8.
+pub fn chunk_to_buffer_rawbytes_borrowed(
+    chunk: &AudioChunk,
+    buf: &mut [u8],
+    sample_format: &BinarySampleFormat,
+) -> (usize, usize) {
     let frames = chunk.frames;
     let channels = chunk.channels;
     let bytes_per_sample = sample_format.bytes_per_sample();
     match *sample_format {
-        BinarySampleFormat::S16_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::S16_LE => chunk_to_buffer_with_adapter_borrowed(
             chunk,
             &mut InterleavedNumbers::<&mut [I16_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -139,7 +149,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::S24_3_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::S24_3_LE => chunk_to_buffer_with_adapter_borrowed(
             chunk,
             &mut InterleavedNumbers::<&mut [I24_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -147,7 +157,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::S24_4_RJ_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::S24_4_RJ_LE => chunk_to_buffer_with_adapter_borrowed(
             chunk,
             &mut InterleavedNumbers::<&mut [I24_4RJ_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -155,7 +165,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::S24_4_LJ_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::S24_4_LJ_LE => chunk_to_buffer_with_adapter_borrowed(
             chunk,
             &mut InterleavedNumbers::<&mut [I24_4LJ_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -163,7 +173,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::S32_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::S32_LE => chunk_to_buffer_with_adapter_borrowed(
             chunk,
             &mut InterleavedNumbers::<&mut [I32_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -171,7 +181,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::F32_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::F32_LE => chunk_to_buffer_with_adapter_borrowed(
             chunk,
             &mut InterleavedNumbers::<&mut [F32_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
@@ -179,7 +189,7 @@ pub fn chunk_to_buffer_rawbytes(
             .unwrap(),
             bytes_per_sample,
         ),
-        BinarySampleFormat::F64_LE => chunk_to_buffer_with_adapter(
+        BinarySampleFormat::F64_LE => chunk_to_buffer_with_adapter_borrowed(
             chunk,
             &mut InterleavedNumbers::<&mut [F64_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,

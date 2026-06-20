@@ -136,6 +136,7 @@ and the Mozilla Public License Version 2.0:
    - **[NoiseGate](#noise-gate)**
    - **[Lookahead limiter](#lookahead-limiter-processor)**
    - **[RACE](#race)**
+   - **[FileWriter](#filewriter)**
 - **[Pipeline](#pipeline)**
    - **[Filter step](#filter-step)**
    - **[Mixer and Processor step](#mixer-and-processor-step)**
@@ -2622,6 +2623,28 @@ pipeline:
   - type: Mixer
     name: 6to2
 ```
+
+### FileWriter
+The "FileWriter" processor writes the audio to a file.
+This is useful for recording the (un)processed audio, or for capturing intermediate stages of the pipeline for analysis.
+
+Example:
+```yml
+processors:
+  recorder:
+    type: FileWriter
+    parameters:
+      channels: 2
+      filename: /tmp/recording.wav
+      format: S16_LE
+      wav_header: true (*)
+```
+
+  Parameters:
+  * `channels`: number of channels, must match the number of channels of the pipeline where the FileWriter is inserted.
+  * `filename`: path to the output file. The file is overwritten if it already exists.
+  * `format`: sample format of the output file. One of `S16_LE`, `S24_3_LE`, `S24_4_RJ_LE`, `S24_4_LJ_LE`, `S32_LE`, `F32_LE`, `F64_LE`.
+  * `wav_header`: prepend a WAV header to the file. Optional, defaults to `false`. When `true`, the format must not be `S24_4_RJ_LE`.
 
 ## Pipeline
 The pipeline section defines the processing steps between input and output.

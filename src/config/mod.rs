@@ -1444,6 +1444,11 @@ pub enum Processor {
         description: Option<String>,
         parameters: RACEParameters,
     },
+    FileWriter {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: FileWriterParameters,
+    },
 }
 
 /// Parameters for the dynamic range compressor processor.
@@ -1605,6 +1610,23 @@ impl LookaheadLimiterParameters {
 
     pub fn release_unit(&self) -> TimeUnit {
         self.release_unit
+    }
+}
+
+/// Parameters for the file writer processor.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct FileWriterParameters {
+    pub channels: usize,
+    pub filename: String,
+    pub format: BinarySampleFormat,
+    #[serde(default)]
+    pub wav_header: Option<bool>,
+}
+
+impl FileWriterParameters {
+    pub fn wav_header(&self) -> bool {
+        self.wav_header.unwrap_or_default()
     }
 }
 
