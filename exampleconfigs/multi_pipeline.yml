@@ -1,0 +1,82 @@
+---
+# Example: two independent I/O pipelines.
+#
+# `devices` is a list of device groups. Each group is a fully independent
+# capture -> processing -> playback chain with its own sample rate and chunk
+# size, so two soundcards can be processed separately and simultaneously.
+#
+# Each entry in `pipelines` is the processing chain for one device group,
+# selected by its `device_group` index (0 = the first group in `devices`).
+
+devices:
+  # Device group 0: first soundcard, running at 48 kHz.
+  - samplerate: 48000
+    chunksize: 1024
+    capture:
+      type: Alsa
+      channels: 2
+      device: "hw:0"
+    playback:
+      type: Alsa
+      channels: 2
+      device: "hw:0"
+  # Device group 1: second soundcard, running at 44.1 kHz.
+  - samplerate: 44100
+    chunksize: 1024
+    capture:
+      type: Alsa
+      channels: 2
+      device: "hw:1"
+    playback:
+      type: Alsa
+      channels: 2
+      device: "hw:1"
+
+filters:
+  # Two biquads used by pipeline 0.
+  hp_80hz:
+    type: Biquad
+    parameters:
+      type: Highpass
+      freq: 80
+      q: 0.7
+  dip_1k:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 1000
+      gain: -3.0
+      q: 1.5
+  # Two biquads used by pipeline 1.
+  bass_shelf:
+    type: Biquad
+    parameters:
+      type: Lowshelf
+      freq: 200
+      gain: 4.0
+      q: 0.7
+  treble_shelf:
+    type: Biquad
+    parameters:
+      type: Highshelf
+      freq: 5000
+      gain: -2.0
+      q: 0.7
+
+pipelines:
+  # First soundcard: high-pass, then a peaking dip.
+  - device_group: 0
+    steps:
+      - type: Filter
+        channels: [0, 1]
+        names:
+          - hp_80hz
+          - dip_1k
+  # Second soundcard: low-shelf boost, then high-shelf cut.
+  - device_group: 1
+    steps:
+      - type: Filter
+        channels: [0, 1]
+        names:
+          - bass_shelf
+          - treble_shelf

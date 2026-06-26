@@ -608,6 +608,20 @@ impl Default for StatusStructs {
     }
 }
 
+impl StatusStructs {
+    /// Create a fresh set of status structs for an additional device group:
+    /// independent capture/playback/processing state, but sharing this one's
+    /// run-level [`status`](StatusStructs::status) (stop reason).
+    pub fn new_with_shared_run_status(&self) -> Self {
+        Self {
+            capture: Arc::new(RwLock::new(CaptureStatus::default())),
+            playback: Arc::new(RwLock::new(PlaybackStatus::default())),
+            processing: Arc::new(ProcessingParameters::default()),
+            status: self.status.clone(),
+        }
+    }
+}
+
 /// Shared access to the active and previous configurations, used when hot-reloading.
 pub struct SharedConfigs {
     /// The configuration currently driving the running pipeline, if any.

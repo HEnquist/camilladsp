@@ -127,9 +127,16 @@ pub fn load_config(filename: &str) -> Res<Configuration> {
 
 fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
     let mut overrides = OVERRIDES.read().clone();
+    if configuration.devices.is_empty() {
+        // No device groups to override; validation reports the missing devices.
+        return Ok(());
+    }
+    // CLI overrides (rate/channels/format/extra_samples) have no group dimension,
+    // so they apply to the first device group only.
+    let devices = configuration.devices.group_mut(0);
     // Only one match arm for now, might be more later.
     #[allow(clippy::single_match)]
-    match &configuration.devices.capture {
+    match &devices.capture {
         CaptureDevice::WavFile(dev) => {
             if let Ok(wav_info) = dev.wav_info() {
                 overrides.channels = Some(wav_info.channels);
@@ -144,12 +151,12 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
         _ => {}
     }
     if let Some(rate) = overrides.samplerate {
-        let cfg_rate = configuration.devices.samplerate;
-        let cfg_chunksize = configuration.devices.chunksize;
+        let cfg_rate = devices.samplerate;
+        let cfg_chunksize = devices.chunksize;
 
-        if configuration.devices.resampler.is_none() {
+        if devices.resampler.is_none() {
             debug!("Apply override for samplerate: {rate}");
-            configuration.devices.samplerate = rate;
+            devices.samplerate = rate;
             let scaled_chunksize = if rate > cfg_rate {
                 cfg_chunksize * (rate as f32 / cfg_rate as f32).round() as usize
             } else {
@@ -158,9 +165,9 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             debug!(
                 "Samplerate changed, adjusting chunksize: {cfg_chunksize} -> {scaled_chunksize}"
             );
-            configuration.devices.chunksize = scaled_chunksize;
+            devices.chunksize = scaled_chunksize;
             #[allow(unreachable_patterns)]
-            match &mut configuration.devices.capture {
+            match &mut devices.capture {
                 CaptureDevice::RawFile(dev) => {
                     let new_extra = dev.extra_samples() * rate / cfg_rate;
                     debug!(
@@ -183,17 +190,17 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             }
         } else {
             debug!("Apply override for capture_samplerate: {rate}");
-            configuration.devices.capture_samplerate = Some(rate);
-            if rate == cfg_rate && !configuration.devices.rate_adjust() {
+            devices.capture_samplerate = Some(rate);
+            if rate == cfg_rate && !devices.rate_adjust() {
                 debug!("Disabling unneccesary 1:1 resampling");
-                configuration.devices.resampler = None;
+                devices.resampler = None;
             }
         }
     }
     if let Some(extra) = overrides.extra_samples {
         debug!("Apply override for extra_samples: {extra}");
         #[allow(unreachable_patterns)]
-        match &mut configuration.devices.capture {
+        match &mut devices.capture {
             CaptureDevice::RawFile(dev) => {
                 dev.extra_samples = Some(extra);
             }
@@ -205,7 +212,7 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
     }
     if let Some(chans) = overrides.channels {
         debug!("Apply override for capture channels: {chans}");
-        match &mut configuration.devices.capture {
+        match &mut devices.capture {
             CaptureDevice::RawFile(dev) => {
                 dev.channels = chans;
             }
@@ -261,7 +268,7 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
     }
     if let Some(fmt) = overrides.sample_format {
         debug!("Apply override for capture sample format: {fmt}");
-        match &mut configuration.devices.capture {
+        match &mut devices.capture {
             CaptureDevice::RawFile(dev) => {
                 dev.format = fmt;
             }
@@ -346,8 +353,16 @@ fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
 }
 
 fn replace_tokens_in_config(config: &mut Configuration) {
-    let samplerate = config.devices.samplerate;
-    let num_channels = config.devices.capture.channels();
+    // The `$samplerate$`/`$channels$` tokens are resolved against the first
+    // device group. Filters and mixers form a single shared library, so token
+    // substitution can only target one rate; multi-rate setups that rely on
+    // tokenized shared filters are not supported (use explicit filter names per
+    // group instead). See the multi-device notes in the README.
+    if config.devices.is_empty() {
+        return;
+    }
+    let samplerate = config.devices.group(0).samplerate;
+    let num_channels = config.devices.group(0).capture.channels();
     if let Some(filters) = &mut config.filters {
         for (_name, filter) in filters.iter_mut() {
             match filter {
@@ -367,9 +382,9 @@ fn replace_tokens_in_config(config: &mut Configuration) {
             }
         }
     }
-    if let Some(pipeline) = &mut config.pipeline {
-        for mut step in pipeline.iter_mut() {
-            match &mut step {
+    let replace_in_steps = |steps: &mut Vec<PipelineStep>| {
+        for step in steps.iter_mut() {
+            match step {
                 PipelineStep::Filter(step) => {
                     for name in step.names.iter_mut() {
                         *name = replace_tokens(name, samplerate, num_channels);
@@ -382,6 +397,14 @@ fn replace_tokens_in_config(config: &mut Configuration) {
                     step.name = replace_tokens(&step.name, samplerate, num_channels);
                 }
             }
+        }
+    };
+    if let Some(pipeline) = &mut config.pipeline {
+        replace_in_steps(pipeline);
+    }
+    if let Some(pipelines) = &mut config.pipelines {
+        for pipeline in pipelines.iter_mut() {
+            replace_in_steps(&mut pipeline.steps);
         }
     }
 }
@@ -447,7 +470,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     if currentconf.devices != newconf.devices {
         return ConfigChange::Devices;
     }
-    if currentconf.pipeline != newconf.pipeline {
+    if currentconf.pipeline != newconf.pipeline || currentconf.pipelines != newconf.pipelines {
         return ConfigChange::Pipeline;
     }
     if currentconf.mixers != newconf.mixers {
@@ -522,53 +545,47 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     }
 }
 
-/// Validate the loaded configuration, stop on errors and print a helpful message.
-pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<()> {
-    // pre-process by applying overrides and replacing tokens
-    apply_overrides(conf)?;
-    replace_tokens_in_config(conf);
-    if let Some(fname) = filename {
-        replace_relative_paths_in_config(conf, fname);
-    }
+/// Validate the timing and device-specific settings of a single device group.
+fn validate_device_group(devices: &Devices) -> Res<()> {
     #[cfg(target_os = "linux")]
-    let target_level_limit = if matches!(conf.devices.playback, PlaybackDevice::Alsa { .. }) {
-        (4 + conf.devices.queuelimit()) * conf.devices.chunksize
+    let target_level_limit = if matches!(devices.playback, PlaybackDevice::Alsa { .. }) {
+        (4 + devices.queuelimit()) * devices.chunksize
     } else {
-        (2 + conf.devices.queuelimit()) * conf.devices.chunksize
+        (2 + devices.queuelimit()) * devices.chunksize
     };
     #[cfg(not(target_os = "linux"))]
-    let target_level_limit = (2 + conf.devices.queuelimit()) * conf.devices.chunksize;
+    let target_level_limit = (2 + devices.queuelimit()) * devices.chunksize;
 
-    if conf.devices.target_level() > target_level_limit {
+    if devices.target_level() > target_level_limit {
         let msg = format!("target_level cannot be larger than {target_level_limit}");
         return Err(ConfigError::new(&msg).into());
     }
-    if let Some(period) = conf.devices.adjust_period
+    if let Some(period) = devices.adjust_period
         && period <= 0.0
     {
         return Err(ConfigError::new("adjust_period must be positive and > 0").into());
     }
-    if let Some(threshold) = conf.devices.silence_threshold
+    if let Some(threshold) = devices.silence_threshold
         && threshold > 0.0
     {
         return Err(ConfigError::new("silence_threshold must be less than or equal to 0").into());
     }
-    if let Some(timeout) = conf.devices.silence_timeout
+    if let Some(timeout) = devices.silence_timeout
         && timeout < 0.0
     {
         return Err(ConfigError::new("silence_timeout cannot be negative").into());
     }
-    if conf.devices.ramp_time() < 0.0 {
+    if devices.ramp_time() < 0.0 {
         return Err(ConfigError::new("Volume ramp time cannot be negative").into());
     }
-    if conf.devices.volume_limit() > 50.0 {
+    if devices.volume_limit() > 50.0 {
         return Err(ConfigError::new("Volume limit cannot be above +50 dB").into());
     }
-    if conf.devices.volume_limit() < -150.0 {
+    if devices.volume_limit() < -150.0 {
         return Err(ConfigError::new("Volume limit cannot be less than -150 dB").into());
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture
+    if let CaptureDevice::Wasapi(dev) = &devices.capture
         && let Some(format) = dev.format
         && format != WasapiSampleFormat::F32
         && !dev.is_exclusive()
@@ -578,7 +595,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         );
     }
     #[cfg(target_os = "windows")]
-    if let CaptureDevice::Wasapi(dev) = &conf.devices.capture
+    if let CaptureDevice::Wasapi(dev) = &devices.capture
         && dev.is_loopback()
         && dev.is_exclusive()
     {
@@ -587,7 +604,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         );
     }
     #[cfg(target_os = "windows")]
-    if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback
+    if let PlaybackDevice::Wasapi(dev) = &devices.playback
         && let Some(format) = dev.format
         && format != WasapiSampleFormat::F32
         && !dev.is_exclusive()
@@ -598,7 +615,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     #[cfg(all(target_os = "windows", feature = "asio-backend"))]
     if let (CaptureDevice::Asio(cap_dev), PlaybackDevice::Asio(pb_dev)) =
-        (&conf.devices.capture, &conf.devices.playback)
+        (&devices.capture, &devices.playback)
     {
         if cap_dev.device != pb_dev.device {
             return Err(ConfigError::new(
@@ -607,7 +624,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             )
             .into());
         }
-        if conf.devices.resampler.is_some() {
+        if devices.resampler.is_some() {
             return Err(ConfigError::new(
                 "Resampling is not supported in full-duplex ASIO mode. \
                  Both capture and playback share the same driver and sample rate",
@@ -617,7 +634,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     if let PlaybackDevice::File {
         format, wav_header, ..
-    } = &conf.devices.playback
+    } = &devices.playback
         && *format == BinarySampleFormat::S24_4_RJ_LE
         && *wav_header == Some(true)
     {
@@ -625,7 +642,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             ConfigError::new("Wav files do not support the S24_4_RJ_LE sample format").into(),
         );
     }
-    if let CaptureDevice::RawFile(dev) = &conf.devices.capture {
+    if let CaptureDevice::RawFile(dev) = &devices.capture {
         let fname = &dev.filename;
         match File::open(fname) {
             Ok(f) => f,
@@ -635,7 +652,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             }
         };
     }
-    if let CaptureDevice::WavFile(dev) = &conf.devices.capture {
+    if let CaptureDevice::WavFile(dev) = &devices.capture {
         let fname = &dev.filename;
         let f = match File::open(fname) {
             Ok(f) => f,
@@ -650,174 +667,218 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             ConfigError::new(&msg)
         })?;
     }
-    let mut num_channels = conf.devices.capture.channels();
-    let fs = conf.devices.samplerate;
-    if let Some(pipeline) = &conf.pipeline {
-        for step in pipeline {
-            match step {
-                PipelineStep::Mixer(step) => {
-                    if !step.is_bypassed() {
-                        if let Some(mixers) = &conf.mixers {
-                            if !mixers.contains_key(&step.name) {
+    Ok(())
+}
+
+/// Validate the loaded configuration, stop on errors and print a helpful message.
+pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<()> {
+    // pre-process by applying overrides and replacing tokens
+    apply_overrides(conf)?;
+    replace_tokens_in_config(conf);
+    if let Some(fname) = filename {
+        replace_relative_paths_in_config(conf, fname);
+    }
+    if conf.devices.is_empty() {
+        return Err(ConfigError::new("No device groups are defined").into());
+    }
+    for devices in conf.devices.iter() {
+        validate_device_group(devices)?;
+    }
+    // Validate the processing chain feeding each device group independently.
+    // Reject chains targeting a non-existent group, and groups targeted by more
+    // than one chain (e.g. both the legacy `pipeline` and a `pipelines` entry
+    // for group 0, or duplicate `pipelines` entries).
+    let chains = conf.chains();
+    let mut seen_groups = Vec::with_capacity(chains.len());
+    for (group, _) in &chains {
+        if *group >= conf.devices.len() {
+            let msg = format!(
+                "A processing chain targets device group {group}, but only {} device group(s) are defined",
+                conf.devices.len()
+            );
+            return Err(ConfigError::new(&msg).into());
+        }
+        if seen_groups.contains(group) {
+            let msg = format!("More than one processing chain targets device group {group}");
+            return Err(ConfigError::new(&msg).into());
+        }
+        seen_groups.push(*group);
+    }
+    for group in 0..conf.devices.len() {
+        let devices = conf.devices.group(group);
+        let mut num_channels = devices.capture.channels();
+        let fs = devices.samplerate;
+        if let Some(pipeline) = conf.chain_for_group(group) {
+            for step in pipeline {
+                match step {
+                    PipelineStep::Mixer(step) => {
+                        if !step.is_bypassed() {
+                            if let Some(mixers) = &conf.mixers {
+                                if !mixers.contains_key(&step.name) {
+                                    let msg = format!("Use of missing mixer '{}'", &step.name);
+                                    return Err(ConfigError::new(&msg).into());
+                                } else {
+                                    let chan_in = mixers.get(&step.name).unwrap().channels.r#in;
+                                    if chan_in != num_channels {
+                                        let msg = format!(
+                                            "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
+                                            &step.name, num_channels, chan_in
+                                        );
+                                        return Err(ConfigError::new(&msg).into());
+                                    }
+                                    num_channels = mixers.get(&step.name).unwrap().channels.out;
+                                    match mixer::validate_mixer(mixers.get(&step.name).unwrap()) {
+                                        Ok(_) => {}
+                                        Err(err) => {
+                                            let msg = format!(
+                                                "Invalid mixer '{}'. Reason: {}",
+                                                &step.name, err
+                                            );
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
+                                    }
+                                }
+                            } else {
                                 let msg = format!("Use of missing mixer '{}'", &step.name);
                                 return Err(ConfigError::new(&msg).into());
-                            } else {
-                                let chan_in = mixers.get(&step.name).unwrap().channels.r#in;
-                                if chan_in != num_channels {
-                                    let msg = format!(
-                                        "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
-                                        &step.name, num_channels, chan_in
-                                    );
-                                    return Err(ConfigError::new(&msg).into());
+                            }
+                        }
+                    }
+                    PipelineStep::Filter(step) => {
+                        if !step.is_bypassed() {
+                            if let Some(channels) = &step.channels {
+                                for channel in channels {
+                                    if *channel >= num_channels {
+                                        let msg = format!("Use of non existing channel {channel}");
+                                        return Err(ConfigError::new(&msg).into());
+                                    }
                                 }
-                                num_channels = mixers.get(&step.name).unwrap().channels.out;
-                                match mixer::validate_mixer(mixers.get(&step.name).unwrap()) {
-                                    Ok(_) => {}
-                                    Err(err) => {
+                                for idx in 1..channels.len() {
+                                    if channels[idx..].contains(&channels[idx - 1]) {
                                         let msg = format!(
-                                            "Invalid mixer '{}'. Reason: {}",
-                                            &step.name, err
+                                            "Use of duplicated channel {}",
+                                            &channels[idx - 1]
                                         );
                                         return Err(ConfigError::new(&msg).into());
                                     }
                                 }
                             }
-                        } else {
-                            let msg = format!("Use of missing mixer '{}'", &step.name);
-                            return Err(ConfigError::new(&msg).into());
-                        }
-                    }
-                }
-                PipelineStep::Filter(step) => {
-                    if !step.is_bypassed() {
-                        if let Some(channels) = &step.channels {
-                            for channel in channels {
-                                if *channel >= num_channels {
-                                    let msg = format!("Use of non existing channel {channel}");
-                                    return Err(ConfigError::new(&msg).into());
-                                }
-                            }
-                            for idx in 1..channels.len() {
-                                if channels[idx..].contains(&channels[idx - 1]) {
-                                    let msg =
-                                        format!("Use of duplicated channel {}", &channels[idx - 1]);
-                                    return Err(ConfigError::new(&msg).into());
-                                }
-                            }
-                        }
-                        for name in &step.names {
-                            if let Some(filters) = &conf.filters {
-                                if !filters.contains_key(name) {
+                            for name in &step.names {
+                                if let Some(filters) = &conf.filters {
+                                    if !filters.contains_key(name) {
+                                        let msg = format!("Use of missing filter '{name}'");
+                                        return Err(ConfigError::new(&msg).into());
+                                    }
+                                    match filters::validate_filter(fs, filters.get(name).unwrap()) {
+                                        Ok(_) => {}
+                                        Err(err) => {
+                                            let msg =
+                                                format!("Invalid filter '{name}'. Reason: {err}");
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
+                                    }
+                                } else {
                                     let msg = format!("Use of missing filter '{name}'");
                                     return Err(ConfigError::new(&msg).into());
                                 }
-                                match filters::validate_filter(fs, filters.get(name).unwrap()) {
-                                    Ok(_) => {}
-                                    Err(err) => {
-                                        let msg = format!("Invalid filter '{name}'. Reason: {err}");
-                                        return Err(ConfigError::new(&msg).into());
-                                    }
-                                }
-                            } else {
-                                let msg = format!("Use of missing filter '{name}'");
-                                return Err(ConfigError::new(&msg).into());
                             }
                         }
                     }
-                }
-                PipelineStep::Processor(step) => {
-                    if !step.is_bypassed() {
-                        if let Some(processors) = &conf.processors {
-                            if !processors.contains_key(&step.name) {
-                                let msg = format!("Use of missing processor '{}'", step.name);
-                                return Err(ConfigError::new(&msg).into());
-                            } else {
-                                let procconf = processors.get(&step.name).unwrap();
-                                match procconf {
-                                    Processor::Compressor { parameters, .. } => {
-                                        let channels = parameters.channels;
-                                        if channels != num_channels {
-                                            let msg = format!(
-                                                "Compressor '{}' has wrong number of channels. Expected {}, found {}.",
-                                                step.name, num_channels, channels
-                                            );
-                                            return Err(ConfigError::new(&msg).into());
-                                        }
-                                        match compressor::validate_compressor(parameters) {
-                                            Ok(_) => {}
-                                            Err(err) => {
+                    PipelineStep::Processor(step) => {
+                        if !step.is_bypassed() {
+                            if let Some(processors) = &conf.processors {
+                                if !processors.contains_key(&step.name) {
+                                    let msg = format!("Use of missing processor '{}'", step.name);
+                                    return Err(ConfigError::new(&msg).into());
+                                } else {
+                                    let procconf = processors.get(&step.name).unwrap();
+                                    match procconf {
+                                        Processor::Compressor { parameters, .. } => {
+                                            let channels = parameters.channels;
+                                            if channels != num_channels {
                                                 let msg = format!(
-                                                    "Invalid processor '{}'. Reason: {}",
-                                                    step.name, err
+                                                    "Compressor '{}' has wrong number of channels. Expected {}, found {}.",
+                                                    step.name, num_channels, channels
                                                 );
                                                 return Err(ConfigError::new(&msg).into());
                                             }
+                                            match compressor::validate_compressor(parameters) {
+                                                Ok(_) => {}
+                                                Err(err) => {
+                                                    let msg = format!(
+                                                        "Invalid processor '{}'. Reason: {}",
+                                                        step.name, err
+                                                    );
+                                                    return Err(ConfigError::new(&msg).into());
+                                                }
+                                            }
                                         }
-                                    }
-                                    Processor::NoiseGate { parameters, .. } => {
-                                        let channels = parameters.channels;
-                                        if channels != num_channels {
-                                            let msg = format!(
-                                                "NoiseGate '{}' has wrong number of channels. Expected {}, found {}.",
-                                                step.name, num_channels, channels
-                                            );
-                                            return Err(ConfigError::new(&msg).into());
-                                        }
-                                        match noisegate::validate_noise_gate(parameters) {
-                                            Ok(_) => {}
-                                            Err(err) => {
+                                        Processor::NoiseGate { parameters, .. } => {
+                                            let channels = parameters.channels;
+                                            if channels != num_channels {
                                                 let msg = format!(
-                                                    "Invalid noise gate '{}'. Reason: {}",
-                                                    step.name, err
+                                                    "NoiseGate '{}' has wrong number of channels. Expected {}, found {}.",
+                                                    step.name, num_channels, channels
                                                 );
                                                 return Err(ConfigError::new(&msg).into());
                                             }
+                                            match noisegate::validate_noise_gate(parameters) {
+                                                Ok(_) => {}
+                                                Err(err) => {
+                                                    let msg = format!(
+                                                        "Invalid noise gate '{}'. Reason: {}",
+                                                        step.name, err
+                                                    );
+                                                    return Err(ConfigError::new(&msg).into());
+                                                }
+                                            }
                                         }
-                                    }
-                                    Processor::RACE { parameters, .. } => {
-                                        let channels = parameters.channels;
-                                        if channels != num_channels {
-                                            let msg = format!(
-                                                "RACE processor '{}' has wrong number of channels. Expected {}, found {}.",
-                                                step.name, num_channels, channels
-                                            );
-                                            return Err(ConfigError::new(&msg).into());
-                                        }
-                                        match race::validate_race(parameters) {
-                                            Ok(_) => {}
-                                            Err(err) => {
+                                        Processor::RACE { parameters, .. } => {
+                                            let channels = parameters.channels;
+                                            if channels != num_channels {
                                                 let msg = format!(
-                                                    "Invalid RACE processor '{}'. Reason: {}",
-                                                    step.name, err
+                                                    "RACE processor '{}' has wrong number of channels. Expected {}, found {}.",
+                                                    step.name, num_channels, channels
                                                 );
                                                 return Err(ConfigError::new(&msg).into());
+                                            }
+                                            match race::validate_race(parameters) {
+                                                Ok(_) => {}
+                                                Err(err) => {
+                                                    let msg = format!(
+                                                        "Invalid RACE processor '{}'. Reason: {}",
+                                                        step.name, err
+                                                    );
+                                                    return Err(ConfigError::new(&msg).into());
+                                                }
                                             }
                                         }
                                     }
                                 }
+                            } else {
+                                let msg = format!("Use of missing processor '{}'", step.name);
+                                return Err(ConfigError::new(&msg).into());
                             }
-                        } else {
-                            let msg = format!("Use of missing processor '{}'", step.name);
-                            return Err(ConfigError::new(&msg).into());
                         }
                     }
                 }
             }
         }
-    }
-    let num_channels_out = conf.devices.playback.channels();
-    if num_channels != num_channels_out {
-        let msg = format!(
-            "Pipeline outputs {num_channels} channels, playback device has {num_channels_out}."
-        );
-        return Err(ConfigError::new(&msg).into());
+        let num_channels_out = devices.playback.channels();
+        if num_channels != num_channels_out {
+            let msg = format!(
+                "Pipeline for device group {group} outputs {num_channels} channels, playback device has {num_channels_out}."
+            );
+            return Err(ConfigError::new(&msg).into());
+        }
     }
     Ok(())
 }
 
-/// Get a vector telling which channels are actually used in the pipeline
-pub fn used_capture_channels(conf: &Configuration) -> Vec<bool> {
-    if let Some(pipeline) = &conf.pipeline {
+/// Get a vector telling which channels are actually used in the pipeline of the
+/// given device group.
+pub fn used_capture_channels(conf: &Configuration, device_group: usize) -> Vec<bool> {
+    if let Some(pipeline) = conf.chain_for_group(device_group) {
         for step in pipeline.iter() {
             if let PipelineStep::Mixer(mix) = step
                 && !mix.is_bypassed()
@@ -828,23 +889,29 @@ pub fn used_capture_channels(conf: &Configuration) -> Vec<bool> {
             }
         }
     }
-    let capture_channels = conf.devices.capture.channels();
+    let capture_channels = conf.devices.group(device_group).capture.channels();
     vec![true; capture_channels]
 }
 
-/// Return the capture channel labels from `config`, or `None` if no config is active.
+/// Return the capture channel labels of the first device group from `config`, or
+/// `None` if no config is active.
 pub fn capture_channel_labels(config: &Option<Configuration>) -> Option<Vec<Option<String>>> {
-    if let Some(conf) = config {
-        conf.devices.capture.labels()
+    if let Some(conf) = config
+        && !conf.devices.is_empty()
+    {
+        conf.devices.group(0).capture.labels()
     } else {
         None
     }
 }
 
-/// Return the playback channel labels from `config`, or `None` if no config is active.
+/// Return the playback channel labels of the first device group from `config`,
+/// or `None` if no config is active.
 pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Option<String>>> {
-    if let Some(conf) = config {
-        if let Some(pipeline) = &conf.pipeline {
+    if let Some(conf) = config
+        && !conf.devices.is_empty()
+    {
+        if let Some(pipeline) = conf.chain_for_group(0) {
             for step in pipeline.iter().rev() {
                 if let PipelineStep::Mixer(mixerstep) = step
                     && let Some(mixers) = &conf.mixers
@@ -854,8 +921,145 @@ pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opt
                 }
             }
         }
-        conf.devices.capture.labels()
+        conf.devices.group(0).capture.labels()
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A single device group (two channels in and out) with no pipeline.
+    const SINGLE_GROUP: &str = "
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  capture:
+    type: SignalGenerator
+    channels: 2
+    signal:
+      type: Sine
+      freq: 1000
+      level: 0.0
+  playback:
+    type: Stdout
+    channels: 2
+    format: S16_LE
+";
+
+    // Two independent device groups, with a chain for the second group provided
+    // via the `pipelines` list and the first group's chain via `pipeline`.
+    const TWO_GROUPS: &str = "
+devices:
+  - samplerate: 48000
+    chunksize: 1024
+    capture:
+      type: SignalGenerator
+      channels: 2
+      signal: {type: Sine, freq: 1000, level: 0.0}
+    playback:
+      type: Stdout
+      channels: 2
+      format: S16_LE
+  - samplerate: 44100
+    chunksize: 512
+    capture:
+      type: SignalGenerator
+      channels: 2
+      signal: {type: Sine, freq: 2000, level: 0.0}
+    playback:
+      type: Stdout
+      channels: 2
+      format: S16_LE
+pipeline: []
+pipelines:
+  - device_group: 1
+    steps: []
+";
+
+    fn parse(yaml: &str) -> Configuration {
+        yaml_serde::from_str(yaml).unwrap()
+    }
+
+    // A single device group serializes back to a bare mapping (not a sequence),
+    // keeping single-device configs byte-compatible through get/set config.
+    #[test]
+    fn single_group_round_trips_as_mapping() {
+        let conf = parse(SINGLE_GROUP);
+        assert_eq!(conf.devices.len(), 1);
+        let serialized = yaml_serde::to_string(&conf).unwrap();
+        let value: yaml_serde::Value = yaml_serde::from_str(&serialized).unwrap();
+        assert!(
+            value["devices"].is_mapping(),
+            "single group should serialize as a mapping, got:\n{serialized}"
+        );
+    }
+
+    // Multiple device groups parse from, and serialize back to, a sequence.
+    #[test]
+    fn multiple_groups_round_trip_as_sequence() {
+        let conf = parse(TWO_GROUPS);
+        assert_eq!(conf.devices.len(), 2);
+        let serialized = yaml_serde::to_string(&conf).unwrap();
+        let value: yaml_serde::Value = yaml_serde::from_str(&serialized).unwrap();
+        assert!(
+            value["devices"].is_sequence(),
+            "multiple groups should serialize as a sequence, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn two_group_config_validates() {
+        let mut conf = parse(TWO_GROUPS);
+        validate_config(&mut conf, None).expect("two-group config should validate");
+    }
+
+    // A chain whose device_group is out of range is rejected.
+    #[test]
+    fn pipeline_targeting_missing_group_is_rejected() {
+        let mut conf = parse(SINGLE_GROUP);
+        conf.pipelines = Some(vec![PipelineChain {
+            device_group: 5,
+            description: None,
+            steps: vec![],
+        }]);
+        let err = validate_config(&mut conf, None).unwrap_err().to_string();
+        assert!(err.contains("device group 5"), "unexpected error: {err}");
+    }
+
+    // The legacy `pipeline` field and a `pipelines` entry for group 0 are
+    // mutually exclusive.
+    #[test]
+    fn duplicate_chain_for_group_zero_is_rejected() {
+        let mut conf = parse(SINGLE_GROUP);
+        conf.pipeline = Some(vec![]);
+        conf.pipelines = Some(vec![PipelineChain {
+            device_group: 0,
+            description: None,
+            steps: vec![],
+        }]);
+        let err = validate_config(&mut conf, None).unwrap_err().to_string();
+        assert!(
+            err.contains("More than one processing chain"),
+            "unexpected error: {err}"
+        );
+    }
+
+    // A passthrough group (no chain) whose capture and playback channel counts
+    // differ is rejected.
+    #[test]
+    fn passthrough_channel_mismatch_is_rejected() {
+        let mut conf = parse(SINGLE_GROUP);
+        // Capture stays at 2 channels; widen playback to 4.
+        if let PlaybackDevice::Stdout { channels, .. } = &mut conf.devices.group_mut(0).playback {
+            *channels = 4;
+        }
+        let err = validate_config(&mut conf, None).unwrap_err().to_string();
+        assert!(
+            err.contains("outputs 2 channels, playback device has 4"),
+            "unexpected error: {err}"
+        );
     }
 }

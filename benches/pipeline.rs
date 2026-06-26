@@ -163,7 +163,7 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, with_conv: bool) -> Pip
     let conf = config::Configuration {
         title: None,
         description: None,
-        devices: config::Devices {
+        devices: config::DeviceGroups(vec![config::Devices {
             samplerate: 48000,
             chunksize,
             queuelimit: None,
@@ -193,7 +193,7 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, with_conv: bool) -> Pip
             volume_limit: None,
             multithreaded: Some(multithreaded),
             worker_threads: None,
-        },
+        }]),
         mixers: Some(mixers),
         filters: Some(filters),
         processors: None,
@@ -216,10 +216,11 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, with_conv: bool) -> Pip
                 bypassed: Some(false),
             }),
         ]),
+        pipelines: None,
     };
 
     let processing_params = Arc::new(ProcessingParameters::new(&[0.0_f32; 5], &[false; 5]));
-    Pipeline::from_config(conf, processing_params)
+    Pipeline::from_config(conf, 0, processing_params)
 }
 
 fn make_chunk(channels: usize, frames: usize) -> AudioChunk {

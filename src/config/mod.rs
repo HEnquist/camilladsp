@@ -906,6 +906,99 @@ impl Devices {
     }
 }
 
+/// A list of device groups, describing an independent capture/playback pair
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviceGroups(pub Vec<Devices>);
+
+impl DeviceGroups {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Device group at `index`. Panics if out of range.
+    pub fn group(&self, index: usize) -> &Devices {
+        &self.0[index]
+    }
+
+    pub fn group_mut(&mut self, index: usize) -> &mut Devices {
+        &mut self.0[index]
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, Devices> {
+        self.0.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Devices> {
+        self.0.iter_mut()
+    }
+}
+
+impl std::ops::Index<usize> for DeviceGroups {
+    type Output = Devices;
+    fn index(&self, index: usize) -> &Devices {
+        &self.0[index]
+    }
+}
+
+impl Serialize for DeviceGroups {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // A single group serializes as a bare mapping, to stay byte-for-byte
+        // compatible with historical single-device configurations.
+        if self.0.len() == 1 {
+            self.0[0].serialize(serializer)
+        } else {
+            self.0.serialize(serializer)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for DeviceGroups {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct DeviceGroupsVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for DeviceGroupsVisitor {
+            type Value = DeviceGroups;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a device group mapping or a sequence of device group mappings")
+            }
+
+            // A bare mapping is a single device group. Deserializing the inner
+            // `Devices` directly (rather than via `#[serde(untagged)]`) preserves
+            // its `deny_unknown_fields` errors, e.g. "unknown field `chunksze`".
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let devices =
+                    Devices::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+                Ok(DeviceGroups(vec![devices]))
+            }
+
+            fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let groups =
+                    Vec::<Devices>::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(DeviceGroups(groups))
+            }
+        }
+
+        deserializer.deserialize_any(DeviceGroupsVisitor)
+    }
+}
+
 /// Sinc interpolation quality for the async sinc resampler.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum AsyncSincInterpolation {
@@ -1741,6 +1834,19 @@ impl PipelineStepProcessor {
     }
 }
 
+/// A processing chain bound to one device group.
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PipelineChain {
+    /// The device group index this chain uses
+    #[serde(default)]
+    pub device_group: usize,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Same ordered list of pipeline steps as the top-level [`Configuration::pipeline`]
+    pub steps: Vec<PipelineStep>,
+}
+
 /// A complete CamillaDSP configuration: devices, filters, mixers, processors, and the pipeline.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1749,20 +1855,58 @@ pub struct Configuration {
     pub title: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
-    pub devices: Devices,
+    pub devices: DeviceGroups,
     #[serde(default)]
     pub mixers: Option<HashMap<String, Mixer>>,
     #[serde(default)]
     pub filters: Option<HashMap<String, Filter>>,
     #[serde(default)]
     pub processors: Option<HashMap<String, Processor>>,
+    /// Processing chain for the first device group (the historical single
+    /// pipeline). Mutually exclusive with a `pipelines` entry for group 0.
     #[serde(default)]
     pub pipeline: Option<Vec<PipelineStep>>,
+    /// Additional per-device-group processing chains. Each entry carries its own
+    /// `device_group` index.
+    #[serde(default)]
+    pub pipelines: Option<Vec<PipelineChain>>,
+}
+
+impl Configuration {
+    /// Returns the processing chains in this configuration, each paired with the
+    /// index of the device group it feeds.
+    ///
+    /// The legacy top-level [`pipeline`](Configuration::pipeline) field, if
+    /// present, is yielded first as the chain for device group `0`. Entries from
+    /// the [`pipelines`](Configuration::pipelines) field follow, each carrying
+    /// its own `device_group`. Validation rejects duplicate groups, so the
+    /// result has at most one chain per group.
+    pub fn chains(&self) -> Vec<(usize, &Vec<PipelineStep>)> {
+        let mut chains = Vec::new();
+        if let Some(pipeline) = &self.pipeline {
+            chains.push((0, pipeline));
+        }
+        if let Some(pipelines) = &self.pipelines {
+            for entry in pipelines {
+                chains.push((entry.device_group, &entry.steps));
+            }
+        }
+        chains
+    }
+
+    /// Returns the steps of the processing chain feeding `device_group`, or
+    /// `None` if no chain targets that group (a passthrough group).
+    pub fn chain_for_group(&self, device_group: usize) -> Option<&Vec<PipelineStep>> {
+        self.chains()
+            .into_iter()
+            .find(|(group, _)| *group == device_group)
+            .map(|(_, steps)| steps)
+    }
 }
 
 /// Describes what changed between two successive configurations, used to decide how much of the
 /// pipeline must be rebuilt on a hot-reload.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ConfigChange {
     /// Only filter/mixer/processor coefficients changed; names in each vec were affected.
     FilterParameters {

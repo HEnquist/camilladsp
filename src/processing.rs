@@ -45,6 +45,7 @@ fn forward_to_playback(tx_pb: &crossbeam_channel::Sender<AudioMessage>, msg: Aud
 /// Spawn the processing thread: builds the pipeline, runs the chunk loop, and handles config updates.
 pub fn run_processing(
     conf_proc: config::Configuration,
+    device_group: usize,
     barrier_proc: Arc<Barrier>,
     tx_pb: crossbeam_channel::Sender<AudioMessage>,
     rx_cap: crossbeam_channel::Receiver<AudioMessage>,
@@ -52,10 +53,11 @@ pub fn run_processing(
     processing_params: Arc<ProcessingParameters>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let chunksize = conf_proc.devices.chunksize;
-        let samplerate = conf_proc.devices.samplerate;
-        let multithreaded = conf_proc.devices.multithreaded();
-        let nbr_threads = conf_proc.devices.worker_threads();
+        let devices = conf_proc.devices.group(device_group);
+        let chunksize = devices.chunksize;
+        let samplerate = devices.samplerate;
+        let multithreaded = devices.multithreaded();
+        let nbr_threads = devices.worker_threads();
         let hw_threads = std::thread::available_parallelism()
             .map(|p| p.get())
             .unwrap_or_default();
@@ -77,7 +79,8 @@ pub fn run_processing(
             );
         }
         processing_params.sync_volumes_to_target();
-        let mut pipeline = pipeline::Pipeline::from_config(conf_proc, processing_params.clone());
+        let mut pipeline =
+            pipeline::Pipeline::from_config(conf_proc, device_group, processing_params.clone());
         debug!("build filters, waiting to start processing loop");
 
         let thread_handle =
@@ -92,7 +95,11 @@ pub fn run_processing(
                 }
             };
 
-        // Initialize rayon thread pool
+        // Initialize rayon thread pool. The pool is process-global, so with
+        // multiple device groups it is built once by whichever multithreaded
+        // group starts first and shared by the rest (its `worker_threads` then
+        // applies to all). A later group finding it already built is expected,
+        // not an error. (Probably this is worth reconsidering)
         if multithreaded {
             match rayon::ThreadPoolBuilder::new()
                 .num_threads(nbr_threads)
@@ -125,7 +132,7 @@ pub fn run_processing(
                     });
                 }
                 Err(err) => {
-                    warn!("Failed to build thread pool, error: {err}");
+                    debug!("Global thread pool already initialized, sharing it ({err})");
                 }
             };
         }
@@ -178,8 +185,11 @@ pub fn run_processing(
                     config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
                         debug!("Rebuilding pipeline.");
                         processing_params.sync_volumes_to_target();
-                        let new_pipeline =
-                            pipeline::Pipeline::from_config(new_config, processing_params.clone());
+                        let new_pipeline = pipeline::Pipeline::from_config(
+                            new_config,
+                            device_group,
+                            processing_params.clone(),
+                        );
                         pipeline = new_pipeline;
                     }
                     config::ConfigChange::FilterParameters {
