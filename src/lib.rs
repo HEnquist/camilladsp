@@ -121,6 +121,8 @@ pub mod coreaudio_backend;
 pub mod cpal_backend;
 /// Top-level engine: device startup, supervisor loop, and restart logic.
 pub mod engine;
+/// Structural wrapper for pipeline signals and channels.
+pub mod engine_pipeline;
 /// File, stdin/stdout, and WAV audio backends.
 pub mod file_backend;
 /// Audio filter implementations and the [`filters::Filter`] trait.

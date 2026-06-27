@@ -16,9 +16,9 @@
 
 use crossbeam_channel::select;
 use parking_lot::{Mutex, RwLockUpgradableReadGuard};
+use std::sync::Arc;
 #[cfg(any(windows, feature = "websocket"))]
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier};
 use std::thread;
 #[cfg(any(windows, feature = "websocket"))]
 use std::time::Duration;
@@ -30,13 +30,14 @@ use signal_hook::consts::signal::*;
 #[cfg(not(windows))]
 use signal_hook::iterator::{SignalsInfo, exfiltrator::SignalOnly};
 
+use crate::engine_pipeline::{EnginePipeline, start_pipeline};
 #[cfg(feature = "websocket")]
 use crate::websocket_server;
 use crate::{
     CommandMessage, ControllerMessage, ExitState, ProcessingState, SHUTDOWN_REQUESTED,
     SharedConfigs, StatusMessage, StatusStructs, StopReason,
 };
-use crate::{audiodevice, config, processing, statefile};
+use crate::{config, statefile};
 
 /// Process exit code: clean exit.
 pub const EXIT_OK: i32 = 0;
@@ -73,6 +74,29 @@ pub struct EngineConfig {
     pub ws_pass: Option<String>,
 }
 
+/// Stop the pipeline after a fatal device event, record the stop reason, clear
+/// the active config, and return [`ExitState::Restart`].
+fn fail_and_restart(
+    pipeline: EnginePipeline,
+    is_starting: bool,
+    stop_reason: StopReason,
+    active_config: config::Configuration,
+    shared_configs: &SharedConfigs,
+    status_structs: &StatusStructs,
+) -> crate::Res<ExitState> {
+    crate::set_stop_reason(&status_structs.status, stop_reason);
+    pipeline.stop(is_starting);
+    {
+        let mut active_cfg_shared = shared_configs.active.lock();
+        let mut prev_cfg_shared = shared_configs.previous.lock();
+        *active_cfg_shared = None;
+        *prev_cfg_shared = Some(active_config);
+    }
+    crate::set_capture_state(&status_structs.capture, ProcessingState::Inactive);
+    trace!("All threads stopped, returning");
+    Ok(ExitState::Restart)
+}
+
 /// Run one processing session: open devices, process audio, and return an [`ExitState`].
 pub fn run(
     shared_configs: SharedConfigs,
@@ -87,64 +111,8 @@ pub fn run(
             return Ok(ExitState::Exit);
         }
     };
-    let (tx_pb, rx_pb) = crossbeam_channel::bounded(active_config.devices.queuelimit());
-    let (tx_cap, rx_cap) = crossbeam_channel::bounded(active_config.devices.queuelimit());
 
-    let (tx_status, rx_status) = crossbeam_channel::unbounded();
-    let tx_status_pb = tx_status.clone();
-    let tx_status_cap = tx_status;
-
-    let (tx_command_cap, rx_command_cap) = crossbeam_channel::unbounded();
-    let (tx_pipeconf, rx_pipeconf) = crossbeam_channel::unbounded();
-
-    let barrier = Arc::new(Barrier::new(4));
-    let barrier_pb = barrier.clone();
-    let barrier_cap = barrier.clone();
-    let barrier_proc = barrier.clone();
-
-    let conf_pb = active_config.clone();
-    let conf_cap = active_config.clone();
-    let conf_proc = active_config.clone();
-
-    // Processing thread
-    processing::run_processing(
-        conf_proc,
-        barrier_proc,
-        tx_pb,
-        rx_cap,
-        rx_pipeconf,
-        status_structs.processing.clone(),
-    );
-
-    // Playback thread
-    let mut playback_dev = audiodevice::new_playback_device(conf_pb.devices);
-    let pb_handle = playback_dev
-        .start(rx_pb, barrier_pb, tx_status_pb, status_structs.playback)
-        .unwrap();
-
-    let used_channels = config::used_capture_channels(&active_config);
-    debug!("Using channels {used_channels:?}");
-    {
-        let mut capture_status = status_structs.capture.write();
-        crate::update_capture_state(&mut capture_status, ProcessingState::Starting);
-        capture_status.used_channels = used_channels;
-    }
-
-    // Capture thread
-    let mut capture_dev = audiodevice::new_capture_device(conf_cap.devices);
-    let cap_handle = capture_dev
-        .start(
-            tx_cap,
-            barrier_cap,
-            tx_status_cap,
-            rx_command_cap,
-            status_structs.capture.clone(),
-            status_structs.processing.clone(),
-        )
-        .unwrap();
-
-    let mut pb_ready = false;
-    let mut cap_ready = false;
+    let (mut pipeline, rx_status) = start_pipeline(&active_config, &status_structs);
 
     loop {
         // If startup procedure is not finished, do not process config change or exit
@@ -168,7 +136,7 @@ pub fn run(
                             config::ConfigChange::Pipeline
                             | config::ConfigChange::MixerParameters
                             | config::ConfigChange::FilterParameters { .. } => {
-                                tx_pipeconf.send((comp, *new_conf.clone())).unwrap();
+                                pipeline.update_processing_config(comp, *new_conf.clone());
                                 active_config = *new_conf;
                                 *shared_configs.active.lock() = Some(active_config.clone());
                                 let used_channels = config::used_capture_channels(&active_config);
@@ -178,13 +146,7 @@ pub fn run(
                             }
                             config::ConfigChange::Devices => {
                                 debug!("Devices changed, restart required.");
-                                if tx_command_cap.send(CommandMessage::Exit).is_err() {
-                                    debug!("Capture thread has already exited");
-                                }
-                                trace!("Wait for playback thread to exit..");
-                                pb_handle.join().unwrap();
-                                trace!("Wait for capture thread to exit..");
-                                cap_handle.join().unwrap();
+                                pipeline.stop(is_starting);
                                 *shared_configs.active.lock() = Some(*new_conf);
                                 trace!("All threads stopped, returning");
                                 return Ok(ExitState::Restart);
@@ -196,13 +158,7 @@ pub fn run(
                     },
                     Ok(ControllerMessage::Stop) => {
                         debug!("Stop requested...");
-                        if tx_command_cap.send(CommandMessage::Exit).is_err() {
-                            debug!("Capture thread has already exited");
-                        }
-                        trace!("Wait for playback thread to exit..");
-                        pb_handle.join().unwrap();
-                        trace!("Wait for capture thread to exit..");
-                        cap_handle.join().unwrap();
+                        pipeline.stop(is_starting);
                         {
                             let mut active_cfg_shared = shared_configs.active.lock();
                             let mut prev_cfg_shared = shared_configs.previous.lock();
@@ -214,13 +170,7 @@ pub fn run(
                     },
                     Ok(ControllerMessage::Exit) => {
                         debug!("Exit requested...");
-                        if tx_command_cap.send(CommandMessage::Exit).is_err() {
-                            debug!("Capture thread has already exited");
-                        }
-                        trace!("Wait for playback thread to exit..");
-                        pb_handle.join().unwrap();
-                        trace!("Wait for capture thread to exit..");
-                        cap_handle.join().unwrap();
+                        pipeline.stop(is_starting);
                         *shared_configs.previous.lock() = Some(active_config);
                         trace!("All threads stopped, exiting");
                         return Ok(ExitState::Exit);
@@ -231,137 +181,52 @@ pub fn run(
                 }
             },
             recv(rx_status) -> msg => {
+                /// local shortcut for bailing out with fail_and_restart()
+                macro_rules! fail_and_restart {
+                    ($stop_reason:expr) => {
+                        return fail_and_restart(
+                            pipeline,
+                            is_starting,
+                            $stop_reason,
+                            active_config,
+                            &shared_configs,
+                            &status_structs,
+                        );
+                    };
+                }
+
                 match msg {
                     Ok(msg) => match msg {
                         StatusMessage::PlaybackReady => {
                             debug!("Playback thread ready to start");
-                            pb_ready = true;
-                            if cap_ready {
-                                debug!("Both capture and playback ready, release barrier");
-                                barrier.wait();
-                                debug!("Supervisor loop starts now!");
+                            pipeline.set_playback_ready();
+                            if pipeline.release_barrier_if_ready() {
                                 is_starting = false;
                             }
                         }
                         StatusMessage::CaptureReady => {
                             debug!("Capture thread ready to start");
-                            cap_ready = true;
-                            if pb_ready {
-                                debug!("Both capture and playback ready, release barrier");
-                                barrier.wait();
-                                debug!("Supervisor loop starts now!");
+                            pipeline.set_capture_ready();
+                            if pipeline.release_barrier_if_ready() {
                                 is_starting = false;
-                                crate::set_stop_reason(
-                                    &status_structs.status,
-                                    StopReason::None,
-                                );
+                                crate::set_stop_reason(&status_structs.status, StopReason::None);
                             }
                         }
                         StatusMessage::PlaybackError(message) => {
                             error!("Playback error: {message}");
-                            if tx_command_cap.send(CommandMessage::Exit).is_err() {
-                                debug!("Capture thread has already exited");
-                            }
-                            if is_starting {
-                                debug!("Error while starting, release barrier");
-                                barrier.wait();
-                            }
-                            debug!("Wait for capture thread to exit..");
-                            crate::set_stop_reason(
-                                &status_structs.status,
-                                StopReason::PlaybackError(message),
-                            );
-                            cap_handle.join().unwrap();
-                            {
-                                let mut active_cfg_shared = shared_configs.active.lock();
-                                let mut prev_cfg_shared = shared_configs.previous.lock();
-                                *active_cfg_shared = None;
-                                *prev_cfg_shared = Some(active_config);
-                            }
-                            crate::set_capture_state(
-                                &status_structs.capture,
-                                ProcessingState::Inactive,
-                            );
-                            trace!("All threads stopped, returning");
-                            return Ok(ExitState::Restart);
+                            fail_and_restart!(StopReason::PlaybackError(message));
                         }
                         StatusMessage::CaptureError(message) => {
                             error!("Capture error: {message}");
-                            if is_starting {
-                                debug!("Error while starting, release barrier");
-                                barrier.wait();
-                            }
-                            debug!("Wait for playback thread to exit..");
-                            crate::set_stop_reason(
-                                &status_structs.status,
-                                StopReason::CaptureError(message),
-                            );
-                            pb_handle.join().unwrap();
-                            {
-                                let mut active_cfg_shared = shared_configs.active.lock();
-                                let mut prev_cfg_shared = shared_configs.previous.lock();
-                                *active_cfg_shared = None;
-                                *prev_cfg_shared = Some(active_config);
-                            }
-                            crate::set_capture_state(
-                                &status_structs.capture,
-                                ProcessingState::Inactive,
-                            );
-                            trace!("All threads stopped, returning");
-                            return Ok(ExitState::Restart);
+                            fail_and_restart!(StopReason::CaptureError(message));
                         }
                         StatusMessage::PlaybackFormatChange(rate) => {
                             error!("Playback stopped due to external format change");
-                            if tx_command_cap.send(CommandMessage::Exit).is_err() {
-                                debug!("Capture thread has already exited");
-                            }
-                            if is_starting {
-                                debug!("Error while starting, release barrier");
-                                barrier.wait();
-                            }
-                            debug!("Wait for capture thread to exit..");
-                            crate::set_stop_reason(
-                                &status_structs.status,
-                                StopReason::PlaybackFormatChange(rate),
-                            );
-                            cap_handle.join().unwrap();
-                            {
-                                let mut active_cfg_shared = shared_configs.active.lock();
-                                let mut prev_cfg_shared = shared_configs.previous.lock();
-                                *active_cfg_shared = None;
-                                *prev_cfg_shared = Some(active_config);
-                            }
-                            crate::set_capture_state(
-                                &status_structs.capture,
-                                ProcessingState::Inactive,
-                            );
-                            trace!("All threads stopped, returning");
-                            return Ok(ExitState::Restart);
+                            fail_and_restart!(StopReason::PlaybackFormatChange(rate));
                         }
                         StatusMessage::CaptureFormatChange(rate) => {
                             error!("Capture stopped due to external format change");
-                            if is_starting {
-                                debug!("Error while starting, release barrier");
-                                barrier.wait();
-                            }
-                            crate::set_stop_reason(
-                                &status_structs.status,
-                                StopReason::CaptureFormatChange(rate),
-                            );
-                            debug!("Wait for playback thread to exit..");
-                            pb_handle.join().unwrap();
-                            {
-                                let mut active_cfg_shared = shared_configs.active.lock();
-                                let mut prev_cfg_shared = shared_configs.previous.lock();
-                                *active_cfg_shared = None;
-                                *prev_cfg_shared = Some(active_config);
-                            }
-                            crate::set_capture_state(
-                                &status_structs.capture,
-                                ProcessingState::Inactive,
-                            );
-                            trace!("All threads stopped, returning");
-                            return Ok(ExitState::Restart);
+                            fail_and_restart!(StopReason::CaptureFormatChange(rate));
                         }
                         StatusMessage::PlaybackDone => {
                             info!("Playback finished");
@@ -380,10 +245,7 @@ pub fn run(
                                 *active_cfg_shared = None;
                                 *prev_cfg_shared = Some(active_config);
                             }
-                            trace!("Wait for playback thread to exit..");
-                            pb_handle.join().unwrap();
-                            trace!("Wait for capture thread to exit..");
-                            cap_handle.join().unwrap();
+                            pipeline.stop(is_starting);
                             trace!("All threads stopped, returning");
                             return Ok(ExitState::Restart);
                         }
@@ -392,12 +254,7 @@ pub fn run(
                         }
                         StatusMessage::SetSpeed(speed) => {
                             debug!("SetSpeed message received");
-                            if tx_command_cap
-                                .send(CommandMessage::SetSpeed { speed })
-                                .is_err()
-                            {
-                                debug!("Capture thread has already exited");
-                            }
+                            pipeline.send_capture_command(CommandMessage::SetSpeed { speed });
                         }
                         StatusMessage::SetVolume(vol) => {
                             debug!("SetVolume message to  {vol} dB received");
