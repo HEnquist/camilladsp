@@ -23,6 +23,7 @@ use crate::filters::Filter;
 use crate::mixer;
 use crate::processors;
 use crate::processors::Processor;
+use audio_thread_priority::promote_current_thread_to_real_time;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -138,6 +139,7 @@ impl FilterGroup {
 /// Merged filter groups for all channels that can run in parallel via rayon.
 pub struct ParallelFilters {
     filters: Vec<Vec<Box<dyn Filter + Send>>>,
+    filter_pool: Arc<rayon::ThreadPool>,
 }
 
 impl ParallelFilters {
@@ -158,15 +160,17 @@ impl ParallelFilters {
 
     /// Apply all the filters to an AudioChunk.
     fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
-        self.filters
-            .par_iter_mut()
-            .zip(input.waveforms.par_iter_mut())
-            .filter(|(f, w)| !f.is_empty() && !w.is_empty())
-            .for_each(|(f, w)| {
-                for filt in f {
-                    let _ = filt.process_waveform(w);
-                }
-            });
+        self.filter_pool.install(|| {
+            self.filters
+                .par_iter_mut()
+                .zip(input.waveforms.par_iter_mut())
+                .filter(|(f, w)| !f.is_empty() && !w.is_empty())
+                .for_each(|(f, w)| {
+                    for filt in f {
+                        let _ = filt.process_waveform(w);
+                    }
+                });
+        });
         Ok(())
     }
 }
@@ -296,7 +300,36 @@ impl Pipeline {
         );
         let secs_per_chunk = conf.devices.chunksize as f32 / conf.devices.samplerate as f32;
         if conf.devices.multithreaded() {
-            steps = parallelize_filters(&mut steps, conf.devices.capture.channels());
+            // Worker threads are promoted to real-time priority as they start.
+            // If the pool can't be built, fall back to single-threaded processing.
+            let chunksize = conf.devices.chunksize;
+            let samplerate = conf.devices.samplerate;
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(conf.devices.worker_threads())
+                .thread_name(|i| format!("process-wrk-{i}"))
+                .start_handler(move |idx| {
+                    match promote_current_thread_to_real_time(chunksize as u32, samplerate as u32) {
+                        Ok(_) => debug!("Filter worker thread {idx} has real-time priority."),
+                        Err(err) => warn!(
+                            "Filter worker thread {idx} could not get real time priority, error: {err}"
+                        ),
+                    }
+                })
+                .build();
+            match pool {
+                Ok(pool) => {
+                    steps = parallelize_filters(
+                        &mut steps,
+                        conf.devices.capture.channels(),
+                        &Arc::new(pool),
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        "Failed to build filter thread pool, running single-threaded. Error: {err}"
+                    );
+                }
+            }
         }
         Pipeline {
             steps,
@@ -379,9 +412,13 @@ impl Pipeline {
     }
 }
 
-// Loop trough the pipeline to merge individual filter steps,
+// Loop through the pipeline to merge individual filter steps,
 // in order use rayon to apply them in parallel.
-fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Vec<PipelineStep> {
+fn parallelize_filters(
+    steps: &mut Vec<PipelineStep>,
+    nbr_channels: usize,
+    pool: &Arc<rayon::ThreadPool>,
+) -> Vec<PipelineStep> {
     debug!("Merging filter steps to enable parallel processing");
     let mut new_steps: Vec<PipelineStep> = Vec::new();
     let mut parfilt = None;
@@ -420,7 +457,10 @@ fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Ve
                     for _ in 0..active_channels {
                         filters.push(Vec::new());
                     }
-                    parfilt = Some(ParallelFilters { filters });
+                    parfilt = Some(ParallelFilters {
+                        filters,
+                        filter_pool: pool.clone(),
+                    });
                 }
                 if let Some(ref mut f) = parfilt {
                     debug!(
