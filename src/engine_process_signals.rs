@@ -15,6 +15,13 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use parking_lot::Mutex;
+// `signal_hook` gates these to non-windows internally, so the import carries the
+// same gate to keep them out of the windows build.
+#[cfg(not(windows))]
+use signal_hook::{
+    consts::{SIGHUP, SIGUSR1, TERM_SIGNALS},
+    iterator::{SignalsInfo, exfiltrator::SignalOnly},
+};
 use std::sync::Arc;
 use std::thread;
 
@@ -43,11 +50,6 @@ fn monitor_signals(
     tx_command_thread: crossbeam_channel::Sender<ControllerMessage>,
     logger: flexi_logger::LoggerHandle,
 ) {
-    // these are internally gated to non-windows configs in signal-hook.
-    // they're only used in this fn, so local import keeps the gate trim.
-    use signal_hook::consts::{SIGHUP, SIGUSR1, TERM_SIGNALS};
-    use signal_hook::iterator::{SignalsInfo, exfiltrator::SignalOnly};
-
     let mut sigs = vec![SIGHUP, SIGUSR1];
     sigs.extend(TERM_SIGNALS);
     let mut signals = SignalsInfo::<SignalOnly>::new(&sigs).unwrap();
