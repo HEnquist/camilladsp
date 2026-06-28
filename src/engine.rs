@@ -379,23 +379,26 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
         if let Some(fname) = &statefilename {
             let fname = fname.clone();
 
-            thread::spawn(move || {
-                loop {
-                    thread::sleep(Duration::from_millis(1000));
-                    match rx_state.recv() {
-                        Ok(()) => {
-                            debug!("saving state to {}", &fname);
-                            statefile::save_state(
-                                &fname,
-                                &active_config_path_clone,
-                                &processing_params_clone,
-                                &unsaved_state_changes,
-                            );
+            thread::Builder::new()
+                .name("statefile".to_string())
+                .spawn(move || {
+                    loop {
+                        thread::sleep(Duration::from_millis(1000));
+                        match rx_state.recv() {
+                            Ok(()) => {
+                                debug!("saving state to {}", &fname);
+                                statefile::save_state(
+                                    &fname,
+                                    &active_config_path_clone,
+                                    &processing_params_clone,
+                                    &unsaved_state_changes,
+                                );
+                            }
+                            Err(_) => break,
                         }
-                        Err(_) => break,
                     }
-                }
-            });
+                })
+                .expect("can spawn statefile thread");
         }
     }
 
