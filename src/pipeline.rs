@@ -23,7 +23,6 @@ use crate::filters::Filter;
 use crate::mixer;
 use crate::processors;
 use crate::processors::Processor;
-use audio_thread_priority::promote_current_thread_to_real_time;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -196,9 +195,13 @@ pub struct Pipeline {
 
 impl Pipeline {
     /// Create a new pipeline from a configuration structure.
+    ///
+    /// `filter_pool` is the thread pool to use for parallel filter processing.
+    /// `None` means single-threaded processing.
     pub fn from_config(
         conf: config::Configuration,
         processing_params: Arc<ProcessingParameters>,
+        filter_pool: Option<Arc<rayon::ThreadPool>>,
     ) -> Self {
         debug!("Build new pipeline");
         trace!("Pipeline config {:?}", conf.pipeline);
@@ -299,37 +302,11 @@ impl Pipeline {
             0,
         );
         let secs_per_chunk = conf.devices.chunksize as f32 / conf.devices.samplerate as f32;
-        if conf.devices.multithreaded() {
-            // Worker threads are promoted to real-time priority as they start.
-            // If the pool can't be built, fall back to single-threaded processing.
-            let chunksize = conf.devices.chunksize;
-            let samplerate = conf.devices.samplerate;
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(conf.devices.worker_threads())
-                .thread_name(|i| format!("process-wrk-{i}"))
-                .start_handler(move |idx| {
-                    match promote_current_thread_to_real_time(chunksize as u32, samplerate as u32) {
-                        Ok(_) => debug!("Filter worker thread {idx} has real-time priority."),
-                        Err(err) => warn!(
-                            "Filter worker thread {idx} could not get real time priority, error: {err}"
-                        ),
-                    }
-                })
-                .build();
-            match pool {
-                Ok(pool) => {
-                    steps = parallelize_filters(
-                        &mut steps,
-                        conf.devices.capture.channels(),
-                        &Arc::new(pool),
-                    );
-                }
-                Err(err) => {
-                    warn!(
-                        "Failed to build filter thread pool, running single-threaded. Error: {err}"
-                    );
-                }
-            }
+        // When a rayon pool is available, merge the per-channel filter
+        // steps into parallel steps that run on it. With no pool the
+        // filters run sequentially.
+        if let Some(pool) = &filter_pool {
+            steps = parallelize_filters(&mut steps, conf.devices.capture.channels(), pool);
         }
         Pipeline {
             steps,
@@ -517,7 +494,7 @@ devices:
         params.set_target_volume(0, -100.0);
         params.sync_volumes_to_target();
 
-        let mut pipeline = Pipeline::from_config(conf, params);
+        let mut pipeline = Pipeline::from_config(conf, params, None);
 
         let waveforms = vec![vec![1.0 as PrcFmt; chunksize]; channels];
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, chunksize, chunksize);

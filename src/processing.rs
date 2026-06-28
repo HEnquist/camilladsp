@@ -97,7 +97,14 @@ fn processing(
         );
     }
     processing_params.sync_volumes_to_target();
-    let mut pipeline = pipeline::Pipeline::from_config(conf_proc, processing_params.clone());
+    // The shared thread pool for this processing session's parallelizable tasks.
+    let processing_pool =
+        build_processing_threadpool(multithreaded, nbr_threads, chunksize, samplerate);
+    let mut pipeline = pipeline::Pipeline::from_config(
+        conf_proc,
+        processing_params.clone(),
+        processing_pool.clone(),
+    );
     debug!("build filters, waiting to start processing loop");
 
     let thread_handle =
@@ -160,8 +167,11 @@ fn processing(
                 config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
                     debug!("Rebuilding pipeline.");
                     processing_params.sync_volumes_to_target();
-                    let new_pipeline =
-                        pipeline::Pipeline::from_config(new_config, processing_params.clone());
+                    let new_pipeline = pipeline::Pipeline::from_config(
+                        new_config,
+                        processing_params.clone(),
+                        processing_pool.clone(),
+                    );
                     pipeline = new_pipeline;
                 }
                 config::ConfigChange::FilterParameters {
@@ -192,5 +202,40 @@ fn processing(
                 warn!("Could not bring the processing thread back to normal priority.")
             }
         };
+    }
+}
+
+/// Build the shared processing thread pool. It's used for parallel filter processing.
+///
+/// When `multithreaded` is false, or the pool fails to build, you get None.
+///
+/// Workers are promoted to real-time priority as they start.
+pub fn build_processing_threadpool(
+    multithreaded: bool,
+    worker_threads: usize,
+    chunksize: usize,
+    samplerate: usize,
+) -> Option<Arc<rayon::ThreadPool>> {
+    if !multithreaded {
+        return None;
+    }
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(worker_threads)
+        .thread_name(|i| format!("process-wrk-{i}"))
+        .start_handler(move |idx| {
+            match promote_current_thread_to_real_time(chunksize as u32, samplerate as u32) {
+                Ok(_) => debug!("Filter worker thread {idx} has real-time priority."),
+                Err(err) => warn!(
+                    "Filter worker thread {idx} could not get real time priority, error: {err}"
+                ),
+            }
+        })
+        .build();
+    match pool {
+        Ok(pool) => Some(Arc::new(pool)),
+        Err(err) => {
+            warn!("Failed to build filter thread pool, running single-threaded. Error: {err}");
+            None
+        }
     }
 }

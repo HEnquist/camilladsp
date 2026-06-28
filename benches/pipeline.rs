@@ -219,7 +219,13 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, with_conv: bool) -> Pip
     };
 
     let processing_params = Arc::new(ProcessingParameters::new(&[0.0_f32; 5], &[false; 5]));
-    Pipeline::from_config(conf, processing_params)
+    let filter_pool = camillalib::processing::build_processing_threadpool(
+        multithreaded,
+        conf.devices.worker_threads(),
+        conf.devices.chunksize,
+        conf.devices.samplerate,
+    );
+    Pipeline::from_config(conf, processing_params, filter_pool)
 }
 
 fn make_chunk(channels: usize, frames: usize) -> AudioChunk {
