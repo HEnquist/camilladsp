@@ -123,6 +123,8 @@ pub mod cpal_backend;
 pub mod engine;
 /// Structural wrapper for pipeline signals and channels.
 pub mod engine_pipeline;
+/// The thread that watches for process signals.
+pub mod engine_process_signals;
 /// File, stdin/stdout, and WAV audio backends.
 pub mod file_backend;
 /// Audio filter implementations and the [`filters::Filter`] trait.
