@@ -14,40 +14,40 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use parking_lot::lock_api::Mutex;
-use signal_hook::consts::{SIGHUP, SIGUSR1, TERM_SIGNALS};
-use signal_hook::iterator::{SignalsInfo, exfiltrator::SignalOnly};
+use parking_lot::Mutex;
 use std::sync::Arc;
 use std::thread;
 
 use crate::engine::EXIT_FORCED;
-use crate::{ControllerMessage, SHUTDOWN_REQUESTED, config};
+use crate::{ControllerMessage, SHUTDOWN_REQUESTED};
 
 /// Launch a thread that watches for sigint, sighup, etc.
 pub fn launch_process_signals_thread(
-    active_path_thread: Arc<Mutex<parking_lot::RawMutex, Option<String>>>,
+    active_path_thread: Arc<Mutex<Option<String>>>,
     tx_command_thread: crossbeam_channel::Sender<ControllerMessage>,
     logger: flexi_logger::LoggerHandle,
 ) {
     if let Err(e) = thread::Builder::new()
         .name("signal-monitor".to_string())
         .spawn(move || {
-            if cfg!(not(windows)) {
-                monitor_unix_signals(active_path_thread, tx_command_thread, logger);
-            } else {
-                monitor_windows_signals(tx_command_thread, logger);
-            }
+            monitor_signals(active_path_thread, tx_command_thread, logger);
         })
     {
         error!("could not launch process signals monitor thread: {e:?}");
     }
 }
 
-fn monitor_unix_signals(
-    active_path_thread: Arc<Mutex<parking_lot::RawMutex, Option<String>>>,
+#[cfg(not(windows))]
+fn monitor_signals(
+    active_path_thread: Arc<Mutex<Option<String>>>,
     tx_command_thread: crossbeam_channel::Sender<ControllerMessage>,
     logger: flexi_logger::LoggerHandle,
 ) {
+    // these are internally gated to non-windows configs in signal-hook.
+    // they're only used in this fn, so local import keeps the gate trim.
+    use signal_hook::consts::{SIGHUP, SIGUSR1, TERM_SIGNALS};
+    use signal_hook::iterator::{SignalsInfo, exfiltrator::SignalOnly};
+
     let mut sigs = vec![SIGHUP, SIGUSR1];
     sigs.extend(TERM_SIGNALS);
     let mut signals = SignalsInfo::<SignalOnly>::new(&sigs).unwrap();
@@ -58,7 +58,7 @@ fn monitor_unix_signals(
             SIGHUP => {
                 let path = (*active_path_thread.lock()).clone();
                 if let Some(path) = path {
-                    match config::load_validate_config(path.as_str()) {
+                    match crate::config::load_validate_config(path.as_str()) {
                         Ok(conf) => {
                             debug!("Config is valid");
                             if let Err(e) = tx_command_thread
@@ -97,7 +97,9 @@ fn monitor_unix_signals(
     }
 }
 
-fn monitor_windows_signals(
+#[cfg(windows)]
+fn monitor_signals(
+    _active_path_thread: Arc<Mutex<Option<String>>>,
     tx_command_thread: crossbeam_channel::Sender<ControllerMessage>,
     logger: flexi_logger::LoggerHandle,
 ) {
