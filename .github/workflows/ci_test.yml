@@ -26,6 +26,8 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - uses: Swatinem/rust-cache@v2
+
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
@@ -77,6 +79,8 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - uses: Swatinem/rust-cache@v2
+
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
@@ -104,6 +108,8 @@ jobs:
         with:
           targets: armv7-unknown-linux-gnueabihf
 
+      - uses: Swatinem/rust-cache@v2
+
       - name: Install cross
         run: cargo install cross --git https://github.com/cross-rs/cross
 
@@ -127,6 +133,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: arm-unknown-linux-gnueabihf
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Install cross
         run: cargo install cross --git https://github.com/cross-rs/cross
@@ -154,6 +162,8 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - uses: Swatinem/rust-cache@v2
+
       - name: Run cargo check
         run: cargo check --no-default-features
 
@@ -179,6 +189,8 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - uses: Swatinem/rust-cache@v2
+
       - name: Run cargo check
         run: cargo check --no-default-features
 
@@ -196,6 +208,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Run cargo check
         run: cargo check --no-default-features
