@@ -23,14 +23,8 @@ use std::thread;
 #[cfg(any(windows, feature = "websocket"))]
 use std::time::Duration;
 
-#[cfg(not(windows))]
-use signal_hook::consts::TERM_SIGNALS;
-#[cfg(not(windows))]
-use signal_hook::consts::signal::*;
-#[cfg(not(windows))]
-use signal_hook::iterator::{SignalsInfo, exfiltrator::SignalOnly};
-
 use crate::engine_pipeline::{EnginePipeline, start_pipeline};
+use crate::engine_process_signals::launch_process_signals_thread;
 #[cfg(feature = "websocket")]
 use crate::websocket_server;
 use crate::{
@@ -328,90 +322,9 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
         }
     }
 
-    #[cfg(any(not(windows), feature = "websocket"))]
     let active_config_path = Arc::new(Mutex::new(configname));
 
-    let tx_command_thread = tx_command.clone();
-
-    #[cfg(not(windows))]
-    let active_path_thread = active_config_path.clone();
-
-    #[cfg(not(windows))]
-    thread::spawn(move || {
-        let mut sigs = vec![SIGHUP, SIGUSR1];
-        sigs.extend(TERM_SIGNALS);
-        let mut signals = SignalsInfo::<SignalOnly>::new(&sigs).unwrap();
-        let mut exit_requested = false;
-        for info in &mut signals {
-            debug!("Received signal: {info}");
-            match info {
-                SIGHUP => {
-                    let path = (*active_path_thread.lock()).clone();
-                    if let Some(path) = path {
-                        match config::load_validate_config(path.as_str()) {
-                            Ok(conf) => {
-                                debug!("Config is valid");
-                                if let Err(e) = tx_command_thread
-                                    .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
-                                {
-                                    error!("Error sending reload message: {e}");
-                                }
-                            }
-                            Err(err) => {
-                                error!("Config error during reload: {err}");
-                            }
-                        };
-                    } else {
-                        error!("Config path not specified, cannot reload");
-                    }
-                }
-                SIGUSR1 => {
-                    if let Err(e) = tx_command_thread.try_send(ControllerMessage::Stop) {
-                        error!("Error sending stop message: {e}");
-                    }
-                }
-                _ => {
-                    if exit_requested {
-                        warn!("Forcing a shutdown");
-                        logger.flush();
-                        std::process::exit(EXIT_FORCED);
-                    }
-                    info!("Shutting down");
-                    exit_requested = true;
-                    SHUTDOWN_REQUESTED.store(true, std::sync::atomic::Ordering::Relaxed);
-                    if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
-                        error!("Error sending exit message: {e}");
-                    }
-                }
-            };
-        }
-    });
-
-    #[cfg(windows)]
-    thread::spawn(move || {
-        // On windows we don't have signal_hook::iterator, so we just poll for signal...
-        const DELAY: Duration = Duration::from_millis(100);
-        let signal_exit = Arc::new(AtomicBool::new(false));
-        signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&signal_exit)).unwrap();
-        let mut exit_requested = false;
-        loop {
-            if signal_exit.load(std::sync::atomic::Ordering::Relaxed) {
-                signal_exit.store(false, std::sync::atomic::Ordering::Relaxed);
-                if exit_requested {
-                    warn!("Forcing a shutdown");
-                    logger.flush();
-                    std::process::exit(EXIT_FORCED);
-                }
-                info!("Shutting down");
-                exit_requested = true;
-                SHUTDOWN_REQUESTED.store(true, std::sync::atomic::Ordering::Relaxed);
-                if let Err(e) = tx_command_thread.try_send(ControllerMessage::Exit) {
-                    error!("Error sending exit message: {e}");
-                }
-            }
-            thread::sleep(DELAY);
-        }
-    });
+    launch_process_signals_thread(active_config_path.clone(), tx_command.clone(), logger);
 
     let status_structs = StatusStructs::default();
     let capture_status = status_structs.capture.clone();
