@@ -138,6 +138,7 @@ impl FilterGroup {
 /// Merged filter groups for all channels that can run in parallel via rayon.
 pub struct ParallelFilters {
     filters: Vec<Vec<Box<dyn Filter + Send>>>,
+    filter_pool: Arc<rayon::ThreadPool>,
 }
 
 impl ParallelFilters {
@@ -158,15 +159,17 @@ impl ParallelFilters {
 
     /// Apply all the filters to an AudioChunk.
     fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
-        self.filters
-            .par_iter_mut()
-            .zip(input.waveforms.par_iter_mut())
-            .filter(|(f, w)| !f.is_empty() && !w.is_empty())
-            .for_each(|(f, w)| {
-                for filt in f {
-                    let _ = filt.process_waveform(w);
-                }
-            });
+        self.filter_pool.install(|| {
+            self.filters
+                .par_iter_mut()
+                .zip(input.waveforms.par_iter_mut())
+                .filter(|(f, w)| !f.is_empty() && !w.is_empty())
+                .for_each(|(f, w)| {
+                    for filt in f {
+                        let _ = filt.process_waveform(w);
+                    }
+                });
+        });
         Ok(())
     }
 }
@@ -192,9 +195,13 @@ pub struct Pipeline {
 
 impl Pipeline {
     /// Create a new pipeline from a configuration structure.
+    ///
+    /// `filter_pool` is the thread pool to use for parallel filter processing.
+    /// `None` means single-threaded processing.
     pub fn from_config(
         conf: config::Configuration,
         processing_params: Arc<ProcessingParameters>,
+        filter_pool: Option<Arc<rayon::ThreadPool>>,
     ) -> Self {
         debug!("Build new pipeline");
         trace!("Pipeline config {:?}", conf.pipeline);
@@ -295,8 +302,11 @@ impl Pipeline {
             0,
         );
         let secs_per_chunk = conf.devices.chunksize as f32 / conf.devices.samplerate as f32;
-        if conf.devices.multithreaded() {
-            steps = parallelize_filters(&mut steps, conf.devices.capture.channels());
+        // When a rayon pool is available, merge the per-channel filter
+        // steps into parallel steps that run on it. With no pool the
+        // filters run sequentially.
+        if let Some(pool) = &filter_pool {
+            steps = parallelize_filters(&mut steps, conf.devices.capture.channels(), pool);
         }
         Pipeline {
             steps,
@@ -379,9 +389,13 @@ impl Pipeline {
     }
 }
 
-// Loop trough the pipeline to merge individual filter steps,
+// Loop through the pipeline to merge individual filter steps,
 // in order use rayon to apply them in parallel.
-fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Vec<PipelineStep> {
+fn parallelize_filters(
+    steps: &mut Vec<PipelineStep>,
+    nbr_channels: usize,
+    pool: &Arc<rayon::ThreadPool>,
+) -> Vec<PipelineStep> {
     debug!("Merging filter steps to enable parallel processing");
     let mut new_steps: Vec<PipelineStep> = Vec::new();
     let mut parfilt = None;
@@ -420,7 +434,10 @@ fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Ve
                     for _ in 0..active_channels {
                         filters.push(Vec::new());
                     }
-                    parfilt = Some(ParallelFilters { filters });
+                    parfilt = Some(ParallelFilters {
+                        filters,
+                        filter_pool: pool.clone(),
+                    });
                 }
                 if let Some(ref mut f) = parfilt {
                     debug!(
@@ -477,7 +494,7 @@ devices:
         params.set_target_volume(0, -100.0);
         params.sync_volumes_to_target();
 
-        let mut pipeline = Pipeline::from_config(conf, params);
+        let mut pipeline = Pipeline::from_config(conf, params, None);
 
         let waveforms = vec![vec![1.0 as PrcFmt; chunksize]; channels];
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, chunksize, chunksize);
