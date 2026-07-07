@@ -83,7 +83,7 @@ parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
 crossbeam-channel = "0.5"
 crossbeam-queue = "0.3"
 rayon = "1.10.0"
-audio_thread_priority = { version = "0.33.0", default-features = false }
+audio_thread_priority = { version = "0.33.0" }
 ringbuf = "0.4.7"
 #audioadapter = { version = "2.0.0", default-features = false, path = "../audioadapter-rs/audioadapter" }
 #audioadapter-sample = { version = "2.0.0", default-features = false,path = "../audioadapter-rs/audioadapter-sample" }
