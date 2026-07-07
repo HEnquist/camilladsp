@@ -159,6 +159,7 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
         }
     };
 
+    crate::set_capture_state(&params.capture_status, ProcessingState::Running);
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {

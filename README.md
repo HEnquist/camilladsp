@@ -1425,6 +1425,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
   `Sine` and `Square` also require a frequency, defined by the `freq` parameter.
 
   When using the `SignalGenerator`, the resampler config and capture samplerate are ignored.
+  The `silence_threshold` and `silence_timeout` settings are also ignored,
+  since the generator produces a continuous signal and never pauses on silence.
   The same signal is generated on every channel.
 
   Example config for sine wave at 440 Hz and -20 dB:
