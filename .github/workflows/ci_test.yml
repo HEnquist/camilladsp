@@ -29,6 +29,9 @@ jobs:
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
+      - name: Install DBus development files
+        run: sudo apt-get install libdbus-1-dev -y
+
       - name: Install PipeWire development files
         run: sudo apt-get install libpipewire-0.3-dev -y
 
@@ -79,6 +82,9 @@ jobs:
 
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
+
+      - name: Install DBus development files
+        run: sudo apt-get install libdbus-1-dev -y
 
       - name: Run cargo check
         run: cargo check

@@ -27,6 +27,9 @@ jobs:
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
+      - name: Install DBus development files
+        run: sudo apt-get install libdbus-1-dev -y
+
       - name: Install OpenSSL
         run: sudo apt-get install openssl libssl-dev -y
 
@@ -121,6 +124,9 @@ jobs:
 
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
+
+      - name: Install DBus development files
+        run: sudo apt-get install libdbus-1-dev -y
 
       - name: Install OpenSSL
         run: sudo apt-get install openssl libssl-dev -y
