@@ -1618,6 +1618,8 @@ impl LookaheadLimiterParameters {
 #[serde(deny_unknown_fields)]
 pub struct FileWriterParameters {
     pub channels: usize,
+    #[serde(default)]
+    pub process_channels: Option<Vec<usize>>,
     pub filename: String,
     pub format: BinarySampleFormat,
     #[serde(default)]
@@ -1625,6 +1627,10 @@ pub struct FileWriterParameters {
 }
 
 impl FileWriterParameters {
+    pub fn process_channels(&self) -> Vec<usize> {
+        self.process_channels.clone().unwrap_or_default()
+    }
+
     pub fn wav_header(&self) -> bool {
         self.wav_header.unwrap_or_default()
     }

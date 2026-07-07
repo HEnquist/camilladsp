@@ -35,6 +35,7 @@ const MIN_CHUNKS: usize = 4;
 pub struct FileWriter {
     name: String,
     config: config::FileWriterParameters,
+    process_channels: Vec<usize>,
     chunksize: usize,
     producer: HeapProd<PrcFmt>,
     tx_notify: Sender<()>,
@@ -63,20 +64,28 @@ impl FileWriter {
         chunksize: usize,
     ) -> Self {
         debug!(
-            "Creating FileWriter processor '{}', channels: {}, filename: {}, format: {}, wav_header: {}",
+            "Creating FileWriter processor '{}', channels: {}, process_channels: {:?}, filename: {}, format: {}, wav_header: {}",
             name,
             config.channels,
+            config.process_channels(),
             config.filename,
             config.format,
             config.wav_header()
         );
-        let channels = config.channels;
+        let input_channels = config.channels;
+        let mut process_channels = config.process_channels();
+        if process_channels.is_empty() {
+            for n in 0..input_channels {
+                process_channels.push(n);
+            }
+        }
+        let write_channels = process_channels.len();
         let sample_format = config.format;
         let wav_header = config.wav_header();
         let filename = config.filename.clone();
-        let samples_per_chunk = (chunksize * channels).max(1);
+        let samples_per_chunk = (chunksize * write_channels).max(1);
         let bytes_per_chunk = samples_per_chunk * sample_format.bytes_per_sample();
-        let ring_size = channels * samplerate.max(MIN_CHUNKS * chunksize * channels);
+        let ring_size = write_channels * samplerate.max(MIN_CHUNKS * chunksize * write_channels);
         let ringbuffer = HeapRb::<PrcFmt>::new(ring_size);
         let (producer, consumer) = ringbuffer.split();
         let (tx_notify, rx_notify) = bounded::<()>(2);
@@ -84,12 +93,12 @@ impl FileWriter {
         if let Err(err) = thread::Builder::new()
             .name(format!("FileWriter-{proc_name}"))
             .spawn(move || {
-                let waveforms = (0..channels).map(|_| vec![0.0; chunksize]).collect();
+                let waveforms = (0..write_channels).map(|_| vec![0.0; chunksize]).collect();
                 let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunksize, chunksize);
                 let bytes = vec![0_u8; bytes_per_chunk];
                 let writer = WriterThread {
                     samplerate,
-                    channels,
+                    channels: write_channels,
                     samples_per_chunk,
                     sample_format,
                     filename,
@@ -112,6 +121,7 @@ impl FileWriter {
         FileWriter {
             name: name.to_string(),
             config,
+            process_channels,
             chunksize,
             producer,
             tx_notify,
@@ -132,7 +142,7 @@ impl Processor for FileWriter {
             return Ok(());
         }
 
-        if self.producer.vacant_len() < input.valid_frames * self.config.channels {
+        if self.producer.vacant_len() < input.valid_frames * self.process_channels.len() {
             if !self.warned {
                 warn!(
                     "FileWriter processor '{}' buffer overrun, dropping chunks",
@@ -142,8 +152,8 @@ impl Processor for FileWriter {
             }
             return Ok(());
         }
-        for channel in 0..self.config.channels {
-            let slice = &input.waveforms[channel][..input.valid_frames];
+        for channel in self.process_channels.iter() {
+            let slice = &input.waveforms[*channel][..input.valid_frames];
             let _ = self.producer.push_slice(slice);
         }
         let _ = self.tx_notify.try_send(());
@@ -211,6 +221,16 @@ pub fn validate_file_writer(config: &config::FileWriterParameters) -> Res<()> {
         )
         .into());
     }
+    for ch in config.process_channels().iter() {
+        if *ch >= config.channels {
+            let msg = format!(
+                "Invalid channel to process: {}, max is: {}.",
+                *ch,
+                config.channels - 1
+            );
+            return Err(config::ConfigError::new(&msg).into());
+        }
+    }
     if config.filename.is_empty() {
         return Err(
             config::ConfigError::new("FileWriter processor filename must not be empty.").into(),
@@ -259,6 +279,7 @@ mod tests {
     fn f32_config(filename: String) -> config::FileWriterParameters {
         config::FileWriterParameters {
             channels: 2,
+            process_channels: None,
             filename,
             format: BinarySampleFormat::F32_LE,
             wav_header: Some(false),
@@ -293,10 +314,19 @@ mod tests {
     fn validate_rejects_right_justified_wav() {
         let config = config::FileWriterParameters {
             channels: 2,
+            process_channels: None,
             filename: "test.wav".to_string(),
             format: BinarySampleFormat::S24_4_RJ_LE,
             wav_header: Some(true),
         };
+        assert!(validate_file_writer(&config).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_process_channel() {
+        let mut config = f32_config("test.raw".to_string());
+        config.process_channels = Some(vec![2]);
+
         assert!(validate_file_writer(&config).is_err());
     }
 
@@ -351,6 +381,27 @@ mod tests {
     }
 
     #[test]
+    fn writes_only_process_channels_in_configured_order() {
+        let filename = unique_test_filename();
+        let mut config = f32_config(filename.clone());
+        config.process_channels = Some(vec![1, 0]);
+        let mut fw = FileWriter::from_config("test", config, 48_000, 2);
+
+        let mut chunk = stereo_chunk([0.25, -0.5], [0.75, -1.0], 2);
+
+        fw.process_chunk(&mut chunk).unwrap();
+        shutdown(fw);
+
+        let data = fs::read(&filename).unwrap();
+        let mut expected = Vec::new();
+        for &value in &[0.75f32, 0.25f32, -1.0f32, -0.5f32] {
+            expected.extend_from_slice(&value.to_le_bytes());
+        }
+        assert_eq!(data, expected);
+        let _ = fs::remove_file(filename);
+    }
+
+    #[test]
     fn drops_chunk_when_ring_buffer_is_full() {
         let filename = unique_test_filename();
         let mut fw = FileWriter::from_config("test", f32_config(filename.clone()), 48_000, 2);
@@ -393,6 +444,7 @@ mod tests {
         let filename = unique_test_filename();
         let config = config::FileWriterParameters {
             channels: 1,
+            process_channels: None,
             filename: filename.clone(),
             format: BinarySampleFormat::S16_LE,
             wav_header: Some(true),
