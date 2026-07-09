@@ -567,6 +567,14 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     if conf.devices.volume_limit() < -150.0 {
         return Err(ConfigError::new("Volume limit cannot be less than -150 dB").into());
     }
+    if matches!(conf.devices.resampler, Some(Resampler::Slip))
+        && conf.devices.capture_samplerate() != conf.devices.samplerate
+    {
+        return Err(ConfigError::new(
+            "The Slip resampler requires matching samplerate and capture_samplerate",
+        )
+        .into());
+    }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture
         && let Some(format) = dev.format

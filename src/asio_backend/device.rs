@@ -2054,7 +2054,6 @@ impl CaptureDevice for AsioCaptureDevice {
                                 debug!("Adjusting resampler rate to {speed}.");
                                 if async_src {
                                     if resampl
-                                        .resampler
                                         .set_resample_ratio_relative(speed, true)
                                         .is_err()
                                     {

@@ -924,11 +924,7 @@ fn capture_loop_bytes(
                 } else if let Some(resampl) = &mut resampler {
                     if params.async_src {
                         debug!("Setting async resampler speed to {speed}");
-                        if resampl
-                            .resampler
-                            .set_resample_ratio_relative(speed, true)
-                            .is_err()
-                        {
+                        if resampl.set_resample_ratio_relative(speed, true).is_err() {
                             debug!("Failed to set resampling speed to {speed}");
                         }
                     } else {

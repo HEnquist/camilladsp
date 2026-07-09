@@ -26,13 +26,13 @@ use num_traits;
 #[cfg(feature = "cpal-backend")]
 use std::collections::VecDeque;
 
-fn chunk_to_buffer_with_adapter<'a, A>(
+fn chunk_to_buffer_with_adapter<A>(
     chunk: AudioChunk,
-    adapter: &'a mut A,
+    adapter: &mut A,
     bytes_per_sample: usize,
 ) -> (usize, usize)
 where
-    A: AdapterMut<'a, PrcFmt>,
+    A: AdapterMut<PrcFmt>,
 {
     let mut clipped = 0;
     let mut peak: PrcFmt = 0.0;
@@ -67,8 +67,8 @@ where
     (num_valid_bytes, clipped)
 }
 
-fn buffer_to_chunk_with_adapter<'a, A>(
-    adapter: &'a A,
+fn buffer_to_chunk_with_adapter<A>(
+    adapter: &A,
     channels: usize,
     num_frames: usize,
     num_valid_frames: usize,
@@ -76,7 +76,7 @@ fn buffer_to_chunk_with_adapter<'a, A>(
     check_for_nan: bool,
 ) -> AudioChunk
 where
-    A: Adapter<'a, PrcFmt>,
+    A: Adapter<PrcFmt>,
 {
     let mut maxvalue: PrcFmt = 0.0;
     let mut minvalue: PrcFmt = 0.0;

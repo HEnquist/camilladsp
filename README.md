@@ -1519,6 +1519,7 @@ The resampler type is given by `type`, and the available options are:
 * AsyncSinc
 * AsyncPoly
 * Synchronous
+* Slip
 
 The types `AsyncPoly` and `AsyncSinc` need additional parameters, see each type below for details.
 
@@ -1640,10 +1641,29 @@ The `Synchronous` type takes no additional parameters:
     type: Synchronous
 ```
 
+### `Slip`: Rate adjust for independent clocks at the same nominal rate
+
+The `Slip` type is a very cheap resampler meant only for rate adjust.
+Instead of running a full resampler it compensates for clock drift by occasionally
+slipping (inserting or dropping) a single frame, hidden by a short crossfade.
+It adds no delay and no high-frequency roll-off, and uses almost no CPU.
+Since the clocks only drift slowly, these slips happen rarely, and the small glitch each
+one produces is well masked by music and normally inaudible.
+
+Because it only corrects a very small drift, it cannot convert between different sample rates.
+The `samplerate` and `capture_samplerate` must therefore be equal, and rate adjust must be enabled.
+Use it when the capture and playback devices run at the same nominal rate but on separate clocks.
+
+The `Slip` type takes no additional parameters:
+```
+  resampler:
+    type: Slip
+```
+
 ### Rate adjust via resampling
 When using the rate adjust feature to match capture and playback devices,
-one of the "Async" types must be used.
-These asynchronous resamplers do not rely on a fixed resampling ratio.
+one of the "Async" types or the `Slip` type must be used.
+These resamplers do not rely on a fixed resampling ratio.
 When rate adjust is enabled the resampling ratio is dynamically adjusted in order to compensate
 for drifts and mismatches between the input and output sample clocks.
 Using the "Synchronous" type with rate adjust enabled will print warnings,

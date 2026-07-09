@@ -975,6 +975,12 @@ pub enum Resampler {
     AsyncSinc(AsyncSincParameters),
     /// Synchronous FFT resampler for fixed integer ratios.
     Synchronous,
+    /// Slip resampler for compensating small clock drift at equal nominal rates.
+    ///
+    /// Very low CPU, rate-adjustable, and adds no delay or high-frequency roll-off.
+    /// It only handles ratios close to 1.0, so it cannot convert between different
+    /// capture and playback sample rates.
+    Slip,
 }
 
 /// Filter type selector; each variant carries its own parameter struct.

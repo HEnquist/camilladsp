@@ -1733,7 +1733,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     if let Some(resampl) = &mut resampler {
                                         if async_src {
                                             if resampl
-                                                .resampler
                                                 .set_resample_ratio_relative(speed, true)
                                                 .is_err()
                                             {

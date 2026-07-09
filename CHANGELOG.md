@@ -3,6 +3,7 @@ New features:
 - Websocket commands for streaming signal level and state change events.
 - Websocket commands for audio spectrum data (single read & streaming).
 - Websocket command for getting device capabilities.
+- New `Slip` resampler for very cheap rate adjust between independent clocks at the same nominal rate.
 
 Changes:
 - Improved DSP library separation for easier external integration.
