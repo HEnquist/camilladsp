@@ -51,6 +51,16 @@ use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async
 use crate::utils::wavtools::{find_data_in_wav, write_wav_header};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
+/// Number of header bytes written before the audio data by [`write_wav_header`].
+/// RIFF (12) + `fmt ` chunk (24) + data chunk header (8).
+const WAV_HEADER_BYTES: u64 = 44;
+
+/// Maximum number of audio data bytes that can be stored in a plain wav file.
+/// The RIFF and data chunk sizes are 32-bit, so the whole file (header + data)
+/// minus the 8-byte RIFF id/size must fit in a `u32`. Writing past this produces
+/// an invalid file, so playback stops when the limit is reached.
+const MAX_WAV_DATA_BYTES: u64 = u32::MAX as u64 - (WAV_HEADER_BYTES - 8);
+
 pub struct FilePlaybackDevice {
     pub destination: PlaybackDest,
     pub chunksize: usize,
@@ -175,6 +185,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                             }
                         }
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
+                        let mut wav_data_bytes: u64 = 0;
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
@@ -185,7 +196,20 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         &mut buffer,
                                         &sample_format,
                                     );
+                                    if wav_header
+                                        && wav_data_bytes + valid_bytes as u64 > MAX_WAV_DATA_BYTES
+                                    {
+                                        warn!(
+                                            "Wav file reached the maximum size of a plain wav file. \
+                                             Stopping playback to avoid writing an invalid file."
+                                        );
+                                        status_channel
+                                            .send(StatusMessage::PlaybackDone)
+                                            .unwrap_or(());
+                                        break;
+                                    }
                                     let write_res = file.write_all(&buffer[0..valid_bytes]);
+                                    wav_data_bytes += valid_bytes as u64;
                                     match write_res {
                                         Ok(_) => {}
                                         Err(err) => {

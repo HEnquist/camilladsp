@@ -44,7 +44,8 @@ use std::io::{BufRead, Seek, SeekFrom};
 use crate::PrcFmt;
 use crate::Res;
 
-use crate::utils::wavtools::find_data_in_wav;
+use audioadapter::Adapter;
+use waveadapter::read_wav_file;
 
 /// Trait implemented by all single-channel audio filters.
 pub trait Filter {
@@ -198,35 +199,29 @@ pub fn read_coeff_file(
 
 /// Read a single channel of samples from a WAV file, returned as filter coefficients.
 pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<PrcFmt>> {
-    let params = find_data_in_wav(filename)?;
-    if channel >= params.channels {
+    let audio = read_wav_file::<PrcFmt, _>(filename).map_err(|err| {
+        config::ConfigError::new(&format!("Can't read wav file '{filename}'. Reason: {err}"))
+    })?;
+    let channels = audio.channels();
+    if channel >= channels {
         let msg = format!(
             "Cant read channel {} of file '{}' which contains {} channels.",
-            channel, filename, params.channels
+            channel, filename, channels
         );
         return Err(config::ConfigError::new(&msg).into());
     }
 
-    let alldata = read_coeff_file(
-        filename,
-        &params.sample_format.to_file_sample_format(),
-        params.data_length,
-        params.data_offset,
-    )?;
-
-    let data = alldata
-        .iter()
-        .skip(channel)
-        .step_by(params.channels)
-        .copied()
-        .collect::<Vec<PrcFmt>>();
+    let frames = audio.frames();
+    let mut data = vec![0.0; frames];
+    audio
+        .samples
+        .copy_from_channel_to_slice(channel, 0, &mut data);
     debug!(
-        "Read wav file '{}', format: {:?}, channel: {} of {}, samplerate: {}, length: {}",
+        "Read wav file '{}', channel: {} of {}, samplerate: {}, length: {}",
         filename,
-        params.sample_format,
         channel,
-        params.channels,
-        params.sample_rate,
+        channels,
+        audio.sample_rate,
         data.len()
     );
     Ok(data)
@@ -421,6 +416,16 @@ mod tests {
         let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
         assert!(compare_waveforms(&values, &expected, 1e-9));
         let bad = read_wav("testdata/int32.wav", 1);
+        assert!(bad.is_err());
+    }
+
+    #[test]
+    pub fn test_read_wav_rf64() {
+        let values = read_wav("testdata/int32_rf64.wav", 0).unwrap();
+        println!("{values:?}");
+        let expected: Vec<PrcFmt> = vec![-1.0, -0.5, 0.0, 0.5, 1.0];
+        assert!(compare_waveforms(&values, &expected, 1e-9));
+        let bad = read_wav("testdata/int32_rf64.wav", 1);
         assert!(bad.is_err());
     }
 }
