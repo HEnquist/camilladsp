@@ -1,3 +1,7 @@
+// Full-precision f64 literals look excessive when the `32bit` feature makes
+// `PrcFmt` an `f32`; silence that only in the 32-bit build.
+#![cfg_attr(feature = "32bit", allow(clippy::excessive_precision))]
+
 use criterion::{Bencher, BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use camillalib::PrcFmt;

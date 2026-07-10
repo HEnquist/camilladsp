@@ -339,7 +339,7 @@ pub enum CaptureDevice {
     #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
     #[serde(alias = "BLUEZ", alias = "bluez")]
     Bluez(CaptureDeviceBluez),
-    #[cfg(feature = "pulse-backend")]
+    #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
     #[serde(alias = "PULSE", alias = "pulse")]
     Pulse {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -411,7 +411,7 @@ impl CaptureDevice {
             CaptureDevice::Alsa { channels, .. } => *channels,
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
             CaptureDevice::Bluez(dev) => dev.channels,
-            #[cfg(feature = "pulse-backend")]
+            #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
             CaptureDevice::Pulse { channels, .. } => *channels,
             #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { channels, .. } => *channels,
@@ -447,7 +447,7 @@ impl CaptureDevice {
             CaptureDevice::Alsa { labels, .. } => labels.clone(),
             #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
             CaptureDevice::Bluez(dev) => dev.labels.clone(),
-            #[cfg(feature = "pulse-backend")]
+            #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
             CaptureDevice::Pulse { labels, .. } => labels.clone(),
             #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { labels, .. } => labels.clone(),
@@ -657,7 +657,7 @@ pub enum PlaybackDevice {
         #[serde(default)]
         format: Option<AlsaSampleFormat>,
     },
-    #[cfg(feature = "pulse-backend")]
+    #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
     #[serde(alias = "PULSE", alias = "pulse")]
     Pulse {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -727,7 +727,7 @@ impl PlaybackDevice {
         match self {
             #[cfg(target_os = "linux")]
             PlaybackDevice::Alsa { channels, .. } => *channels,
-            #[cfg(feature = "pulse-backend")]
+            #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
             PlaybackDevice::Pulse { channels, .. } => *channels,
             #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             PlaybackDevice::PipeWire { channels, .. } => *channels,

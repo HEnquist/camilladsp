@@ -24,11 +24,19 @@
 //! Key types in this crate root: [`StatusMessage`], [`CommandMessage`],
 //! [`CaptureStatus`], [`PlaybackStatus`], [`PrcFmt`].
 
+// With the `32bit` feature `PrcFmt` is `f32`, which makes `x as f32` casts and
+// full-precision `f64` literals (both correct for the default `f64` build) look
+// redundant. Silence those lints only in the 32-bit build; the f64 build is unaffected.
+#![cfg_attr(
+    feature = "32bit",
+    allow(clippy::unnecessary_cast, clippy::excessive_precision)
+)]
+
 // These two are aliased to shorter names used throughout the pulse backend,
 // so the `extern crate ... as ...` renames are required and not redundant.
-#[cfg(feature = "pulse-backend")]
+#[cfg(all(target_os = "linux", feature = "pulse-backend"))]
 extern crate libpulse_binding as pulse;
-#[cfg(feature = "pulse-backend")]
+#[cfg(all(target_os = "linux", feature = "pulse-backend"))]
 extern crate libpulse_simple_binding as psimple;
 
 #[macro_use]

@@ -71,7 +71,7 @@ use clap::crate_version;
 use crossbeam_channel::TrySendError;
 use json_patch::merge;
 #[cfg(feature = "secure-websocket")]
-use native_tls::{TlsAcceptor, TlsStream};
+use native_tls::TlsStream;
 use parking_lot::{Mutex, RwLock};
 use serde_json;
 use std::net::{TcpListener, TcpStream};

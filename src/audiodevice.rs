@@ -39,7 +39,7 @@ use crate::file_backend::device as filedevice;
 use crate::generatordevice;
 #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
 use crate::pipewire_backend::device as pipewiredevice;
-#[cfg(feature = "pulse-backend")]
+#[cfg(all(target_os = "linux", feature = "pulse-backend"))]
 use crate::pulse_backend::device as pulsedevice;
 #[cfg(target_os = "windows")]
 use crate::wasapi_backend::device as wasapidevice;
@@ -133,7 +133,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             adjust_period: conf.adjust_period(),
             enable_rate_adjust: conf.rate_adjust(),
         }),
-        #[cfg(feature = "pulse-backend")]
+        #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
         config::PlaybackDevice::Pulse { channels, device } => {
             Box::new(pulsedevice::PulsePlaybackDevice {
                 devname: device,
@@ -329,7 +329,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             link_volume_control: link_volume_control.clone(),
             link_mute_control: link_mute_control.clone(),
         }),
-        #[cfg(feature = "pulse-backend")]
+        #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
         config::CaptureDevice::Pulse {
             channels,
             ref device,

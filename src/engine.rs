@@ -386,7 +386,7 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
                         thread::sleep(Duration::from_millis(1000));
                         match rx_state.recv() {
                             Ok(()) => {
-                                debug!("saving state to {}", &fname);
+                                debug!("saving state to {}", fname);
                                 statefile::save_state(
                                     &fname,
                                     &active_config_path_clone,

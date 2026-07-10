@@ -48,7 +48,7 @@ fn custom_colored_logger_format(
         record.module_path().unwrap_or("*unknown module*"),
         record.file().unwrap_or("*unknown file*"),
         record.line().unwrap_or(0),
-        &record.args()
+        record.args()
     )
 }
 
@@ -66,7 +66,7 @@ pub fn custom_logger_format(
         record.module_path().unwrap_or("*unknown module*"),
         record.file().unwrap_or("*unknown file*"),
         record.line().unwrap_or(0),
-        &record.args()
+        record.args()
     )
 }
 

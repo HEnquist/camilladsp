@@ -411,17 +411,15 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                             stride,
                             chunksize,
                         );
-                        if !logged_playback_quantum {
-                            if let Some((quantum_frames, quantum_bytes)) =
+                        if !logged_playback_quantum
+                            && let Some((quantum_frames, quantum_bytes)) =
                                 pipewire_logged_quantum(&[requested_bytes, callback_bytes, max_bytes], stride)
-                            {
-                                debug!(
-                                    "PipeWire playback callback quantum is {} frames ({} bytes)",
-                                    quantum_frames,
-                                    quantum_bytes
-                                );
-                                logged_playback_quantum = true;
-                            }
+                        {
+                            debug!(
+                                "PipeWire playback callback quantum is {} frames ({} bytes)",
+                                quantum_frames, quantum_bytes
+                            );
+                            logged_playback_quantum = true;
                         }
                         xtrace!(
                             "PW playback callback with {} bytes due (chunk {} / max {})",
@@ -877,17 +875,15 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         let offset = chunk_data.offset() as usize;
                         let size = chunk_data.size() as usize;
                         let available_bytes = data.data().map(|slice| slice.len()).unwrap_or_default();
-                        if !logged_capture_quantum {
-                            if let Some((quantum_frames, quantum_bytes)) =
+                        if !logged_capture_quantum
+                            && let Some((quantum_frames, quantum_bytes)) =
                                 pipewire_logged_quantum(&[size, available_bytes], stride)
-                            {
-                                debug!(
-                                    "PipeWire capture callback quantum is {} frames ({} bytes)",
-                                    quantum_frames,
-                                    quantum_bytes
-                                );
-                                logged_capture_quantum = true;
-                            }
+                        {
+                            debug!(
+                                "PipeWire capture callback quantum is {} frames ({} bytes)",
+                                quantum_frames, quantum_bytes
+                            );
+                            logged_capture_quantum = true;
                         }
                         xtrace!("PW capture callback with data size {} bytes", size);
 
