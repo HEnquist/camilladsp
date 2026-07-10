@@ -117,7 +117,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             sample_format: format,
             target_level: conf.target_level(),
-            adjust_period: conf.adjust_period(),
+            adjust_period: conf.adjust_interval_s(),
             enable_rate_adjust: conf.rate_adjust(),
         }),
         #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
@@ -136,7 +136,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             chunksize: conf.chunksize,
             channels,
             target_level: conf.target_level(),
-            adjust_period: conf.adjust_period(),
+            adjust_period: conf.adjust_interval_s(),
             enable_rate_adjust: conf.rate_adjust(),
         }),
         config::PlaybackDevice::File {
@@ -178,7 +178,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
                 channels: dev.channels,
                 sample_format: dev.format,
                 target_level: conf.target_level(),
-                adjust_period: conf.adjust_period(),
+                adjust_period: conf.adjust_interval_s(),
                 enable_rate_adjust: conf.rate_adjust(),
                 exclusive: dev.is_exclusive(),
             })
@@ -192,7 +192,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels: dev.channels,
             sample_format: dev.format,
             target_level: conf.target_level(),
-            adjust_period: conf.adjust_period(),
+            adjust_period: conf.adjust_interval_s(),
             enable_rate_adjust: conf.rate_adjust(),
             polling: dev.is_polling(),
         }),
@@ -210,7 +210,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
                 channels: dev.channels,
                 sample_format: dev.format,
                 target_level: conf.target_level(),
-                adjust_period: conf.adjust_period(),
+                adjust_period: conf.adjust_interval_s(),
                 enable_rate_adjust: conf.rate_adjust(),
                 full_duplex,
             })
@@ -279,9 +279,9 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels,
             sample_format: format,
             silence_threshold: conf.silence_threshold(),
-            silence_timeout: conf.silence_timeout(),
+            silence_timeout: conf.silence_timeout_s(),
             stop_on_rate_change: conf.stop_on_rate_change(),
-            rate_measure_interval: conf.rate_measure_interval(),
+            rate_measure_interval: conf.rate_measure_interval_s(),
             stop_on_inactive: stop_on_inactive.unwrap_or_default(),
             link_volume_control: link_volume_control.clone(),
             link_mute_control: link_mute_control.clone(),
@@ -305,7 +305,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             chunksize: conf.chunksize,
             channels,
             silence_threshold: conf.silence_threshold(),
-            silence_timeout: conf.silence_timeout(),
+            silence_timeout: conf.silence_timeout_s(),
         }),
         config::CaptureDevice::RawFile(ref dev) => Box::new(filedevice::FileCaptureDevice {
             source: filedevice::CaptureSource::Filename(dev.filename.clone()),
@@ -317,11 +317,11 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             sample_format: Some(dev.format),
             extra_samples: dev.extra_samples(),
             silence_threshold: conf.silence_threshold(),
-            silence_timeout: conf.silence_timeout(),
+            silence_timeout: conf.silence_timeout_s(),
             skip_bytes: dev.skip_bytes(),
             read_bytes: dev.read_bytes(),
             stop_on_rate_change: conf.stop_on_rate_change(),
-            rate_measure_interval: conf.rate_measure_interval(),
+            rate_measure_interval: conf.rate_measure_interval_s(),
         }),
         config::CaptureDevice::WavFile(ref dev) => Box::new(filedevice::FileCaptureDevice {
             source: filedevice::CaptureSource::Filename(dev.filename.clone()),
@@ -333,11 +333,11 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             sample_format: None,
             extra_samples: dev.extra_samples(),
             silence_threshold: conf.silence_threshold(),
-            silence_timeout: conf.silence_timeout(),
+            silence_timeout: conf.silence_timeout_s(),
             skip_bytes: 0,
             read_bytes: 0,
             stop_on_rate_change: conf.stop_on_rate_change(),
-            rate_measure_interval: conf.rate_measure_interval(),
+            rate_measure_interval: conf.rate_measure_interval_s(),
         }),
         config::CaptureDevice::Stdin(ref dev) => Box::new(filedevice::FileCaptureDevice {
             source: filedevice::CaptureSource::Stdin,
@@ -349,11 +349,11 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             sample_format: Some(dev.format),
             extra_samples: dev.extra_samples(),
             silence_threshold: conf.silence_threshold(),
-            silence_timeout: conf.silence_timeout(),
+            silence_timeout: conf.silence_timeout_s(),
             skip_bytes: dev.skip_bytes(),
             read_bytes: dev.read_bytes(),
             stop_on_rate_change: conf.stop_on_rate_change(),
-            rate_measure_interval: conf.rate_measure_interval(),
+            rate_measure_interval: conf.rate_measure_interval_s(),
         }),
         config::CaptureDevice::SignalGenerator {
             signal, channels, ..
@@ -374,9 +374,9 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
                 channels: dev.channels,
                 sample_format: dev.format,
                 silence_threshold: conf.silence_threshold(),
-                silence_timeout: conf.silence_timeout(),
+                silence_timeout: conf.silence_timeout_s(),
                 stop_on_rate_change: conf.stop_on_rate_change(),
-                rate_measure_interval: conf.rate_measure_interval(),
+                rate_measure_interval: conf.rate_measure_interval_s(),
             })
         }
         #[cfg(target_os = "windows")]
@@ -391,9 +391,9 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels: dev.channels,
             sample_format: dev.format,
             silence_threshold: conf.silence_threshold(),
-            silence_timeout: conf.silence_timeout(),
+            silence_timeout: conf.silence_timeout_s(),
             stop_on_rate_change: conf.stop_on_rate_change(),
-            rate_measure_interval: conf.rate_measure_interval(),
+            rate_measure_interval: conf.rate_measure_interval_s(),
             polling: dev.is_polling(),
         }),
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
@@ -412,9 +412,9 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
                 channels: dev.channels,
                 sample_format: dev.format,
                 silence_threshold: conf.silence_threshold(),
-                silence_timeout: conf.silence_timeout(),
+                silence_timeout: conf.silence_timeout_s(),
                 stop_on_rate_change: conf.stop_on_rate_change(),
-                rate_measure_interval: conf.rate_measure_interval(),
+                rate_measure_interval: conf.rate_measure_interval_s(),
                 full_duplex,
             })
         }

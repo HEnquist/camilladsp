@@ -94,8 +94,8 @@ impl FilterGroup {
                 config::Filter::DiffEq { parameters, .. } => {
                     Box::new(filters::diffeq::DiffEq::from_config(name, parameters))
                 }
-                config::Filter::Limiter { parameters, .. } => {
-                    Box::new(filters::limiter::Limiter::from_config(name, parameters))
+                config::Filter::Clipper { parameters, .. } => {
+                    Box::new(filters::clipper::Clipper::from_config(name, parameters))
                 }
                 config::Filter::LookaheadLimiter { parameters, .. } => {
                     Box::new(filters::lookahead_limiter::LookaheadLimiter::from_config(
@@ -292,7 +292,7 @@ impl Pipeline {
         let mute = processing_params.is_mute(0);
         let volume = filters::basicfilters::Volume::new(
             "default",
-            conf.devices.ramp_time(),
+            conf.devices.volume_ramp_time_ms(),
             conf.devices.volume_limit(),
             current_volume,
             mute,

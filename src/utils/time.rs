@@ -15,7 +15,7 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::PrcFmt;
-use crate::config::TimeUnit;
+use crate::config::{DelayUnit, TimeUnit};
 
 /// Convert a time value with a given unit to a number of samples (floating point).
 /// The result is exact, not rounded.
@@ -23,7 +23,19 @@ pub fn time_to_samples(value: PrcFmt, unit: TimeUnit, samplerate: usize) -> PrcF
     match unit {
         TimeUnit::Microseconds => value / 1_000_000.0 * samplerate as PrcFmt,
         TimeUnit::Milliseconds => value / 1000.0 * samplerate as PrcFmt,
-        TimeUnit::Millimetres => value / 1000.0 * samplerate as PrcFmt / 343.0,
+        TimeUnit::Seconds => value * samplerate as PrcFmt,
         TimeUnit::Samples => value,
+    }
+}
+
+/// Convert a time or distance value with a given delay unit to a number of samples
+/// (floating point). The result is exact, not rounded.
+pub fn delay_to_samples(value: PrcFmt, unit: DelayUnit, samplerate: usize) -> PrcFmt {
+    match unit {
+        DelayUnit::Microseconds => value / 1_000_000.0 * samplerate as PrcFmt,
+        DelayUnit::Milliseconds => value / 1000.0 * samplerate as PrcFmt,
+        DelayUnit::Seconds => value * samplerate as PrcFmt,
+        DelayUnit::Millimetres => value / 1000.0 * samplerate as PrcFmt / 343.0,
+        DelayUnit::Samples => value,
     }
 }

@@ -33,7 +33,7 @@ use crate::ProcessingParameters;
 use crate::Res;
 use crate::nanos_since_epoch;
 use crate::utils::decibels::gain_from_value;
-use crate::utils::time::time_to_samples;
+use crate::utils::time::delay_to_samples;
 
 #[derive(Clone, Debug)]
 pub struct Gain {
@@ -119,7 +119,7 @@ impl Volume {
         let mute = processing_params.is_mute(fader);
         Self::new(
             name,
-            conf.ramp_time(),
+            conf.ramp_time_ms(),
             conf.limit(),
             current_volume,
             mute,
@@ -269,7 +269,7 @@ impl Filter for Volume {
             parameters: conf, ..
         } = conf
         {
-            self.ramptime_in_chunks = (conf.ramp_time()
+            self.ramptime_in_chunks = (conf.ramp_time_ms()
                 / (1000.0 * self.chunksize as f32 / self.samplerate as f32))
                 .round() as usize;
             self.fader = conf.fader as usize;
@@ -412,7 +412,7 @@ impl Delay {
     }
 
     pub fn from_config(name: &str, samplerate: usize, conf: config::DelayParameters) -> Self {
-        let delay_samples = time_to_samples(conf.delay, conf.unit(), samplerate);
+        let delay_samples = delay_to_samples(conf.delay, conf.delay_unit(), samplerate);
 
         Self::new(name, samplerate, delay_samples, conf.subsample())
     }
@@ -468,7 +468,7 @@ pub fn validate_delay_config(conf: &config::DelayParameters) -> Res<()> {
 
 /// Validate a Volume config.
 pub fn validate_volume_config(conf: &config::VolumeParameters) -> Res<()> {
-    if conf.ramp_time() < 0.0 {
+    if conf.ramp_time_ms() < 0.0 {
         return Err(config::ConfigError::new("Ramp time cannot be negative").into());
     }
     Ok(())

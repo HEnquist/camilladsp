@@ -71,11 +71,10 @@ impl LookaheadLimiter {
     ) -> (PrcFmt, usize, PrcFmt) {
         let limit = db_to_linear(config.limit);
 
-        let unit = config.unit();
+        let attack_samples =
+            time_to_samples(config.attack, config.attack_unit(), samplerate).round() as usize;
 
-        let attack_samples = time_to_samples(config.attack, unit, samplerate).round() as usize;
-
-        let release_samples = time_to_samples(config.release, unit, samplerate);
+        let release_samples = time_to_samples(config.release, config.release_unit(), samplerate);
         let release_coeff = (-1.0 / release_samples).exp();
 
         (limit, attack_samples, release_coeff)
@@ -202,7 +201,8 @@ pub fn validate_config(config: &config::LookaheadLimiterParameters, samplerate: 
         let msg = "Attack time must be greater than or equal to 0.";
         return Err(config::ConfigError::new(msg).into());
     }
-    let attack_samples = time_to_samples(config.attack, config.unit(), samplerate).round() as usize;
+    let attack_samples =
+        time_to_samples(config.attack, config.attack_unit(), samplerate).round() as usize;
     if attack_samples > samplerate {
         let msg = "Lookahead limiter attack time must be less than or equal to 1 second.";
         return Err(config::ConfigError::new(msg).into());
@@ -237,7 +237,8 @@ mod tests {
     fn test_lookahead_limiter_basic() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
-            unit: TimeUnit::Samples,
+            attack_unit: TimeUnit::Samples,
+            release_unit: TimeUnit::Samples,
             attack: 4.0,
             release: 1.0 / std::f64::consts::LN_2 as PrcFmt,
         };
@@ -276,26 +277,27 @@ mod tests {
     fn test_lookahead_limiter_same_as_limiter() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
-            unit: TimeUnit::Samples,
+            attack_unit: TimeUnit::Samples,
+            release_unit: TimeUnit::Samples,
             attack: 0.0,
             release: 0.0,
         };
         let mut lookahead_limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
-        let limiter = crate::filters::limiter::Limiter::from_config(
+        let clipper = crate::filters::clipper::Clipper::from_config(
             "test",
-            config::LimiterParameters {
+            config::ClipperParameters {
                 soft_clip: None,
                 clip_limit: 0.0,
             },
         );
 
         let mut lookahead_input = vec![0.5, 1.0, 2.0, -2.0, -1.0, -0.5, 1.5, -1.5, 0.0];
-        let mut limiter_input = lookahead_input.clone();
+        let mut clipper_input = lookahead_input.clone();
 
         lookahead_limiter.apply_lookahead_limiter(&mut lookahead_input);
-        limiter.apply_clip(&mut limiter_input);
+        clipper.apply_clip(&mut clipper_input);
 
-        assert_eq!(lookahead_input, limiter_input);
+        assert_eq!(lookahead_input, clipper_input);
     }
 
     #[test]
@@ -306,7 +308,8 @@ mod tests {
         let chunksize = limiter_input.len();
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
-            unit: TimeUnit::Samples,
+            attack_unit: TimeUnit::Samples,
+            release_unit: TimeUnit::Samples,
             attack: 0.0,
             release: release_samples,
         };
@@ -318,7 +321,9 @@ mod tests {
                 monitor_channels: None,
                 process_channels: None,
                 attack: 0.0,
+                attack_unit: TimeUnit::Seconds,
                 release: release_samples / samplerate as PrcFmt,
+                release_unit: TimeUnit::Seconds,
                 threshold: 0.0,
                 factor: 1.0e20,
                 makeup_gain: None,
@@ -348,7 +353,8 @@ mod tests {
     fn test_lookahead_limiter_zero_release() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
-            unit: TimeUnit::Samples,
+            attack_unit: TimeUnit::Samples,
+            release_unit: TimeUnit::Samples,
             attack: 2.0,
             release: 0.0,
         };
@@ -364,7 +370,8 @@ mod tests {
     fn test_lookahead_limiter_state_persistence() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
-            unit: TimeUnit::Samples,
+            attack_unit: TimeUnit::Samples,
+            release_unit: TimeUnit::Samples,
             attack: 5.0,
             release: 1.0 / std::f64::consts::LN_2 as PrcFmt,
         };
@@ -389,7 +396,8 @@ mod tests {
     fn test_lookahead_limiter_attack_over_one_second_rejected() {
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
-            unit: TimeUnit::Samples,
+            attack_unit: TimeUnit::Samples,
+            release_unit: TimeUnit::Samples,
             attack: 48001.0,
             release: 4.0,
         };
@@ -402,7 +410,8 @@ mod tests {
         let chunksize = 8;
         let config = config::LookaheadLimiterParameters {
             limit: 0.0,
-            unit: TimeUnit::Samples,
+            attack_unit: TimeUnit::Samples,
+            release_unit: TimeUnit::Samples,
             attack: 4.0,
             release: 1.0,
         };

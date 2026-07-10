@@ -44,16 +44,17 @@ pub struct RACE {
 fn delay_config(config: &config::RACEParameters, samplerate: usize) -> DelayParameters {
     // compensate the delay by subtracting one sample period from the delay, clamp at zero
     let sample_period_in_delay_unit = match config.delay_unit() {
-        config::TimeUnit::Microseconds => 1000000.0 / samplerate as PrcFmt,
-        config::TimeUnit::Milliseconds => 1000.0 / samplerate as PrcFmt,
-        config::TimeUnit::Millimetres => 343.0 * 1000.0 / samplerate as PrcFmt,
-        config::TimeUnit::Samples => 1.0,
+        config::DelayUnit::Microseconds => 1000000.0 / samplerate as PrcFmt,
+        config::DelayUnit::Milliseconds => 1000.0 / samplerate as PrcFmt,
+        config::DelayUnit::Seconds => 1.0 / samplerate as PrcFmt,
+        config::DelayUnit::Millimetres => 343.0 * 1000.0 / samplerate as PrcFmt,
+        config::DelayUnit::Samples => 1.0,
     };
     let compensated_delay = (config.delay - sample_period_in_delay_unit).max(0.0);
 
     config::DelayParameters {
         delay: compensated_delay,
-        unit: config.delay_unit,
+        delay_unit: config.delay_unit,
         subsample: config.subsample_delay,
     }
 }

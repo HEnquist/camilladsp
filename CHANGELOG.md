@@ -10,6 +10,25 @@ Changes:
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
 
+Config changes (breaking):
+- Time values no longer accept unitless numbers. Every time-valued parameter now states its unit.
+- Tunable times take a mandatory companion unit field:
+  - `Delay` filter: `unit` renamed to `delay_unit` (now required).
+  - `RACE` processor: `delay_unit` now required.
+  - `Compressor` and `NoiseGate` processors: added required `attack_unit` and `release_unit`.
+    The previous `attack`/`release` values were in seconds, so add `attack_unit: s` and `release_unit: s`
+    to keep the old behavior.
+  - `LookaheadLimiter` filter: the shared `unit` is split into `attack_unit` and `release_unit`.
+- Fixed-unit times bake the unit into the field name:
+  - `adjust_period` renamed to `adjust_interval_s` (also aligns wording with `rate_measure_interval_s`).
+  - `silence_timeout` renamed to `silence_timeout_s`.
+  - `rate_measure_interval` renamed to `rate_measure_interval_s`.
+  - `volume_ramp_time` renamed to `volume_ramp_time_ms`.
+  - `Volume` filter: `ramp_time` renamed to `ramp_time_ms`.
+- Delay and RACE now also accept `s` (seconds) as a unit.
+- The `Limiter` filter is renamed to `Clipper` (`type: Limiter` becomes `type: Clipper`), to avoid
+  confusion with the new `LookaheadLimiter`. Its parameters are unchanged.
+
 Removed:
 - Dropped the Jack, Pulse and Bluez backends. On Linux, use the native PipeWire backend, or
   PipeWire's Pulse/JACK compatibility layers. PipeWire can also bridge Bluetooth A2DP directly.

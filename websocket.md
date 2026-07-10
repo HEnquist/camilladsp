@@ -992,7 +992,7 @@ devices:
   samplerate: 44100
   buffersize: 1024
   silence_threshold: 0.0
-  silence_timeout: 0.0
+  silence_timeout_s: 0.0
   capture:
     type: Alsa
     ...

@@ -18,9 +18,10 @@ use crate::PrcFmt;
 use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
-use crate::filters::limiter::Limiter;
+use crate::filters::clipper::Clipper;
 use crate::processors::Processor;
 use crate::utils::decibels::db_to_linear;
+use crate::utils::time::time_to_samples;
 
 #[derive(Clone, Debug)]
 pub struct Compressor {
@@ -33,7 +34,7 @@ pub struct Compressor {
     pub threshold: PrcFmt,
     pub factor: PrcFmt,
     pub makeup_gain: PrcFmt,
-    pub limiter: Option<Limiter>,
+    pub clipper: Option<Clipper>,
     pub samplerate: usize,
     pub scratch: Vec<PrcFmt>,
     pub prev_loudness: PrcFmt,
@@ -49,7 +50,6 @@ impl Compressor {
     ) -> Self {
         let name = name.to_string();
         let channels = config.channels;
-        let srate = samplerate as PrcFmt;
         let mut monitor_channels = config.monitor_channels();
         if monitor_channels.is_empty() {
             for n in 0..channels {
@@ -62,8 +62,10 @@ impl Compressor {
                 process_channels.push(n);
             }
         }
-        let attack = (-1.0 / srate / config.attack).exp();
-        let release = (-1.0 / srate / config.release).exp();
+        let attack_samples = time_to_samples(config.attack, config.attack_unit, samplerate);
+        let release_samples = time_to_samples(config.release, config.release_unit, samplerate);
+        let attack = (-1.0 / attack_samples).exp();
+        let release = (-1.0 / release_samples).exp();
         let clip_limit = config.clip_limit.map(db_to_linear);
 
         let scratch = vec![0.0; chunksize];
@@ -82,12 +84,12 @@ impl Compressor {
             config.soft_clip(),
             clip_limit
         );
-        let limiter = if let Some(limit) = config.clip_limit {
-            let limitconf = config::LimiterParameters {
+        let clipper = if let Some(limit) = config.clip_limit {
+            let clipconf = config::ClipperParameters {
                 clip_limit: limit,
                 soft_clip: config.soft_clip,
             };
-            Some(Limiter::from_config("Limiter", limitconf))
+            Some(Clipper::from_config("Clipper", clipconf))
         } else {
             None
         };
@@ -102,7 +104,7 @@ impl Compressor {
             threshold: config.threshold,
             factor: config.factor,
             makeup_gain: config.makeup_gain(),
-            limiter,
+            clipper,
             samplerate,
             scratch,
             prev_loudness: -100.0,
@@ -153,9 +155,9 @@ impl Compressor {
         }
     }
 
-    fn apply_limiter(&self, input: &mut [PrcFmt]) {
-        if let Some(limiter) = &self.limiter {
-            limiter.apply_clip(input);
+    fn apply_clipper(&self, input: &mut [PrcFmt]) {
+        if let Some(clipper) = &self.clipper {
+            clipper.apply_clip(input);
         }
     }
 }
@@ -172,7 +174,7 @@ impl Processor for Compressor {
         self.calculate_linear_gain();
         for ch in self.process_channels.iter() {
             self.apply_gain(&mut input.waveforms[*ch]);
-            self.apply_limiter(&mut input.waveforms[*ch]);
+            self.apply_clipper(&mut input.waveforms[*ch]);
         }
         Ok(())
     }
@@ -183,7 +185,7 @@ impl Processor for Compressor {
         } = config
         {
             let channels = config.channels;
-            let srate = self.samplerate as PrcFmt;
+            let samplerate = self.samplerate;
             let mut monitor_channels = config.monitor_channels();
             if monitor_channels.is_empty() {
                 for n in 0..channels {
@@ -196,16 +198,18 @@ impl Processor for Compressor {
                     process_channels.push(n);
                 }
             }
-            let attack = (-1.0 / srate / config.attack).exp();
-            let release = (-1.0 / srate / config.release).exp();
+            let attack_samples = time_to_samples(config.attack, config.attack_unit, samplerate);
+            let release_samples = time_to_samples(config.release, config.release_unit, samplerate);
+            let attack = (-1.0 / attack_samples).exp();
+            let release = (-1.0 / release_samples).exp();
             let clip_limit = config.clip_limit.map(db_to_linear);
 
-            let limiter = if let Some(limit) = config.clip_limit {
-                let limitconf = config::LimiterParameters {
+            let clipper = if let Some(limit) = config.clip_limit {
+                let clipconf = config::ClipperParameters {
                     clip_limit: limit,
                     soft_clip: config.soft_clip,
                 };
-                Some(Limiter::from_config("Limiter", limitconf))
+                Some(Clipper::from_config("Clipper", clipconf))
             } else {
                 None
             };
@@ -217,7 +221,7 @@ impl Processor for Compressor {
             self.threshold = config.threshold;
             self.factor = config.factor;
             self.makeup_gain = config.makeup_gain();
-            self.limiter = limiter;
+            self.clipper = clipper;
 
             debug!(
                 "Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",

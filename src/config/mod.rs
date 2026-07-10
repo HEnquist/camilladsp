@@ -320,7 +320,6 @@ pub enum Signal {
 #[serde(tag = "type")]
 pub enum CaptureDevice {
     #[cfg(target_os = "linux")]
-    #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
@@ -337,7 +336,6 @@ pub enum CaptureDevice {
         labels: Option<Vec<Option<String>>>,
     },
     #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-    #[serde(alias = "PIPEWIRE", alias = "pipewire")]
     PipeWire {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
@@ -354,16 +352,12 @@ pub enum CaptureDevice {
     },
     RawFile(CaptureDeviceRawFile),
     WavFile(CaptureDeviceWavFile),
-    #[serde(alias = "STDIN", alias = "stdin")]
     Stdin(CaptureDeviceStdin),
     #[cfg(target_os = "macos")]
-    #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio(CaptureDeviceCA),
     #[cfg(target_os = "windows")]
-    #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi(CaptureDeviceWasapi),
     #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-    #[serde(alias = "ASIO", alias = "asio")]
     Asio(CaptureDeviceAsio),
     SignalGenerator {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -566,7 +560,6 @@ pub struct CaptureDeviceCA {
 #[serde(tag = "type")]
 pub enum PlaybackDevice {
     #[cfg(target_os = "linux")]
-    #[serde(alias = "ALSA", alias = "alsa")]
     Alsa {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
@@ -575,7 +568,6 @@ pub enum PlaybackDevice {
         format: Option<AlsaSampleFormat>,
     },
     #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-    #[serde(alias = "PIPEWIRE", alias = "pipewire")]
     PipeWire {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
@@ -588,7 +580,6 @@ pub enum PlaybackDevice {
         #[serde(default)]
         autoconnect_to: Option<String>,
     },
-    #[serde(alias = "FILE", alias = "file")]
     File {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
@@ -601,7 +592,6 @@ pub enum PlaybackDevice {
         #[serde(default)]
         use_rf64: Option<bool>,
     },
-    #[serde(alias = "STDOUT", alias = "stdout")]
     Stdout {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
@@ -610,13 +600,10 @@ pub enum PlaybackDevice {
         wav_header: Option<bool>,
     },
     #[cfg(target_os = "macos")]
-    #[serde(alias = "COREAUDIO", alias = "coreaudio")]
     CoreAudio(PlaybackDeviceCA),
     #[cfg(target_os = "windows")]
-    #[serde(alias = "WASAPI", alias = "wasapi")]
     Wasapi(PlaybackDeviceWasapi),
     #[cfg(all(target_os = "windows", feature = "asio-backend"))]
-    #[serde(alias = "ASIO", alias = "asio")]
     Asio(PlaybackDeviceAsio),
 }
 
@@ -709,7 +696,7 @@ pub struct Devices {
     #[serde(default)]
     pub silence_threshold: Option<PrcFmt>,
     #[serde(default)]
-    pub silence_timeout: Option<PrcFmt>,
+    pub silence_timeout_s: Option<PrcFmt>,
     pub capture: CaptureDevice,
     pub playback: PlaybackDevice,
     #[serde(default)]
@@ -717,7 +704,7 @@ pub struct Devices {
     #[serde(default)]
     pub target_level: Option<usize>,
     #[serde(default)]
-    pub adjust_period: Option<f32>,
+    pub adjust_interval_s: Option<f32>,
     #[serde(default)]
     pub resampler: Option<Resampler>,
     #[serde(default)]
@@ -725,9 +712,9 @@ pub struct Devices {
     #[serde(default)]
     pub stop_on_rate_change: Option<bool>,
     #[serde(default)]
-    pub rate_measure_interval: Option<f32>,
+    pub rate_measure_interval_s: Option<f32>,
     #[serde(default)]
-    pub volume_ramp_time: Option<f32>,
+    pub volume_ramp_time_ms: Option<f32>,
     #[serde(default)]
     pub volume_limit: Option<f32>,
     #[serde(default)]
@@ -742,20 +729,20 @@ impl Devices {
         self.queuelimit.unwrap_or(4)
     }
 
-    pub fn adjust_period(&self) -> f32 {
-        self.adjust_period.unwrap_or(10.0)
+    pub fn adjust_interval_s(&self) -> f32 {
+        self.adjust_interval_s.unwrap_or(10.0)
     }
 
-    pub fn rate_measure_interval(&self) -> f32 {
-        self.rate_measure_interval.unwrap_or(1.0)
+    pub fn rate_measure_interval_s(&self) -> f32 {
+        self.rate_measure_interval_s.unwrap_or(1.0)
     }
 
     pub fn silence_threshold(&self) -> PrcFmt {
         self.silence_threshold.unwrap_or(0.0)
     }
 
-    pub fn silence_timeout(&self) -> PrcFmt {
-        self.silence_timeout.unwrap_or(0.0)
+    pub fn silence_timeout_s(&self) -> PrcFmt {
+        self.silence_timeout_s.unwrap_or(0.0)
     }
 
     pub fn capture_samplerate(&self) -> usize {
@@ -774,8 +761,8 @@ impl Devices {
         self.enable_rate_adjust.unwrap_or(false)
     }
 
-    pub fn ramp_time(&self) -> f32 {
-        self.volume_ramp_time.unwrap_or(400.0)
+    pub fn volume_ramp_time_ms(&self) -> f32 {
+        self.volume_ramp_time_ms.unwrap_or(400.0)
     }
 
     pub fn volume_limit(&self) -> f32 {
@@ -918,10 +905,10 @@ pub enum Filter {
         description: Option<String>,
         parameters: DiffEqParameters,
     },
-    Limiter {
+    Clipper {
         #[serde(default)]
         description: Option<String>,
-        parameters: LimiterParameters,
+        parameters: ClipperParameters,
     },
     LookaheadLimiter {
         #[serde(default)]
@@ -1177,14 +1164,14 @@ pub enum VolumeFader {
 #[serde(deny_unknown_fields)]
 pub struct VolumeParameters {
     #[serde(default)]
-    pub ramp_time: Option<f32>,
+    pub ramp_time_ms: Option<f32>,
     pub fader: VolumeFader,
     pub limit: Option<f32>,
 }
 
 impl VolumeParameters {
-    pub fn ramp_time(&self) -> f32 {
-        self.ramp_time.unwrap_or(400.0)
+    pub fn ramp_time_ms(&self) -> f32 {
+        self.ramp_time_ms.unwrap_or(400.0)
     }
 
     pub fn limit(&self) -> f32 {
@@ -1276,15 +1263,14 @@ impl GainParameters {
 #[serde(deny_unknown_fields)]
 pub struct DelayParameters {
     pub delay: PrcFmt,
-    #[serde(default)]
-    pub unit: Option<TimeUnit>,
+    pub delay_unit: DelayUnit,
     #[serde(default)]
     pub subsample: Option<bool>,
 }
 
 impl DelayParameters {
-    pub fn unit(&self) -> TimeUnit {
-        self.unit.unwrap_or(TimeUnit::Milliseconds)
+    pub fn delay_unit(&self) -> DelayUnit {
+        self.delay_unit
     }
 
     pub fn subsample(&self) -> bool {
@@ -1292,7 +1278,7 @@ impl DelayParameters {
     }
 }
 
-/// Unit for time/distance values used by the delay filter.
+/// Unit for a time value (attack, release, envelope times).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum TimeUnit {
@@ -1300,6 +1286,22 @@ pub enum TimeUnit {
     Microseconds,
     #[serde(rename = "ms")]
     Milliseconds,
+    #[serde(rename = "s")]
+    Seconds,
+    #[serde(rename = "samples")]
+    Samples,
+}
+
+/// Unit for a time or distance value used by delays (Delay filter, RACE processor).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub enum DelayUnit {
+    #[serde(rename = "us")]
+    Microseconds,
+    #[serde(rename = "ms")]
+    Milliseconds,
+    #[serde(rename = "s")]
+    Seconds,
     #[serde(rename = "mm")]
     Millimetres,
     #[serde(rename = "samples")]
@@ -1458,7 +1460,9 @@ pub struct CompressorParameters {
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
     pub attack: PrcFmt,
+    pub attack_unit: TimeUnit,
     pub release: PrcFmt,
+    pub release_unit: TimeUnit,
     pub threshold: PrcFmt,
     pub factor: PrcFmt,
     #[serde(default)]
@@ -1497,7 +1501,9 @@ pub struct NoiseGateParameters {
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
     pub attack: PrcFmt,
+    pub attack_unit: TimeUnit,
     pub release: PrcFmt,
+    pub release_unit: TimeUnit,
     pub threshold: PrcFmt,
     pub attenuation: PrcFmt,
 }
@@ -1522,8 +1528,7 @@ pub struct RACEParameters {
     pub delay: PrcFmt,
     #[serde(default)]
     pub subsample_delay: Option<bool>,
-    #[serde(default)]
-    pub delay_unit: Option<TimeUnit>,
+    pub delay_unit: DelayUnit,
     pub attenuation: PrcFmt,
 }
 
@@ -1532,22 +1537,22 @@ impl RACEParameters {
         self.subsample_delay.unwrap_or_default()
     }
 
-    pub fn delay_unit(&self) -> TimeUnit {
-        self.delay_unit.unwrap_or(TimeUnit::Milliseconds)
+    pub fn delay_unit(&self) -> DelayUnit {
+        self.delay_unit
     }
 }
 
-/// Parameters for the hard/soft-clipping limiter filter.
+/// Parameters for the hard/soft-clipping filter.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct LimiterParameters {
+pub struct ClipperParameters {
     #[serde(default)]
     pub soft_clip: Option<bool>,
     #[serde(default)]
     pub clip_limit: PrcFmt,
 }
 
-impl LimiterParameters {
+impl ClipperParameters {
     pub fn soft_clip(&self) -> bool {
         self.soft_clip.unwrap_or_default()
     }
@@ -1559,13 +1564,18 @@ pub struct LookaheadLimiterParameters {
     #[serde(default)]
     pub limit: PrcFmt,
     pub attack: PrcFmt,
+    pub attack_unit: TimeUnit,
     pub release: PrcFmt,
-    pub unit: TimeUnit,
+    pub release_unit: TimeUnit,
 }
 
 impl LookaheadLimiterParameters {
-    pub fn unit(&self) -> TimeUnit {
-        self.unit
+    pub fn attack_unit(&self) -> TimeUnit {
+        self.attack_unit
+    }
+
+    pub fn release_unit(&self) -> TimeUnit {
+        self.release_unit
     }
 }
 

@@ -429,7 +429,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
                     | (Filter::DiffEq { .. }, Filter::DiffEq { .. })
                     | (Filter::Volume { .. }, Filter::Volume { .. })
                     | (Filter::Loudness { .. }, Filter::Loudness { .. })
-                    | (Filter::Limiter { .. }, Filter::Limiter { .. }) => {}
+                    | (Filter::Clipper { .. }, Filter::Clipper { .. }) => {}
                     _ => {
                         // A filter changed type, need to rebuild the pipeline
                         return ConfigChange::Pipeline;
@@ -501,22 +501,22 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         let msg = format!("target_level cannot be larger than {target_level_limit}");
         return Err(ConfigError::new(&msg).into());
     }
-    if let Some(period) = conf.devices.adjust_period
-        && period <= 0.0
+    if let Some(interval) = conf.devices.adjust_interval_s
+        && interval <= 0.0
     {
-        return Err(ConfigError::new("adjust_period must be positive and > 0").into());
+        return Err(ConfigError::new("adjust_interval_s must be positive and > 0").into());
     }
     if let Some(threshold) = conf.devices.silence_threshold
         && threshold > 0.0
     {
         return Err(ConfigError::new("silence_threshold must be less than or equal to 0").into());
     }
-    if let Some(timeout) = conf.devices.silence_timeout
+    if let Some(timeout) = conf.devices.silence_timeout_s
         && timeout < 0.0
     {
-        return Err(ConfigError::new("silence_timeout cannot be negative").into());
+        return Err(ConfigError::new("silence_timeout_s cannot be negative").into());
     }
-    if conf.devices.ramp_time() < 0.0 {
+    if conf.devices.volume_ramp_time_ms() < 0.0 {
         return Err(ConfigError::new("Volume ramp time cannot be negative").into());
     }
     if conf.devices.volume_limit() > 50.0 {

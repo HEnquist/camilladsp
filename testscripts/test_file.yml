@@ -3,7 +3,7 @@ devices:
   samplerate: 44100
   chunksize: 1027
   target_level: 512
-  adjust_period: 10
+  adjust_interval_s: 10
   playback:
     type: RawFile
     channels: 2

@@ -20,14 +20,14 @@ pub mod basicfilters;
 pub mod biquad;
 /// Multi-section biquad combinations (shelves, butterworth, etc.).
 pub mod biquadcombo;
+/// Hard/soft-clipping filter.
+pub mod clipper;
 /// Difference-equation (IIR) filter with arbitrary coefficients.
 pub mod diffeq;
 /// Dithering noise filters.
 pub mod dither;
 /// Convolution filter via FFT overlap-save.
 pub mod fftconv;
-/// Hard-clipping limiter filter.
-pub mod limiter;
 /// Lookahead limiter.
 pub mod lookahead_limiter;
 /// Loudness compensation filter.
@@ -243,7 +243,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
         config::Filter::BiquadCombo { parameters, .. } => {
             biquadcombo::validate_config(fs, parameters)
         }
-        config::Filter::Limiter { parameters, .. } => limiter::validate_config(parameters),
+        config::Filter::Clipper { parameters, .. } => clipper::validate_config(parameters),
         config::Filter::LookaheadLimiter { parameters, .. } => {
             lookahead_limiter::validate_config(parameters, fs)
         }

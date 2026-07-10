@@ -128,7 +128,7 @@ and the Mozilla Public License Version 2.0:
    - **[FIR](#fir)**
    - **[IIR](#iir)**
    - **[Dither](#dither)**
-   - **[Limiter](#limiter)**
+   - **[Clipper](#clipper)**
    - **[Lookahead limiter](#lookahead-limiter)**
    - **[Difference equation](#difference-equation)**
 - **[Processors](#processors)**
@@ -933,7 +933,7 @@ There is a volume control that is enabled regardless of what configuration file 
 CamillaDSP defines a total of five control "channels" for volume called "faders".
 The default volume control reacts to the `Main` fader.
 When the volume or mute setting is changed, the gain is smoothly ramped to the new setting.
-The duration of this ramp can be customized via the `volume_ramp_time` parameter
+The duration of this ramp can be customized via the `volume_ramp_time_ms` parameter
 in the `devices` section.
 The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
 
@@ -953,15 +953,15 @@ devices:
   chunksize: 2048
   queuelimit: 4 (*)
   silence_threshold: -60 (*)
-  silence_timeout: 3.0 (*)
+  silence_timeout_s: 3.0 (*)
   target_level: 500 (*)
-  adjust_period: 10 (*)
+  adjust_interval_s: 10 (*)
   enable_rate_adjust: true (*)
   resampler: null (*)
   capture_samplerate: 44100 (*)
   stop_on_rate_change: false (*)
-  rate_measure_interval: 1.0 (*)
-  volume_ramp_time: 400.0 (*)
+  rate_measure_interval_s: 1.0 (*)
+  volume_ramp_time_ms: 400.0 (*)
   volume_limit: -12.0 (*)
   multithreaded: false (*)
   worker_threads: 4 (*)
@@ -1078,9 +1078,9 @@ A parameter marked (*) in any example is optional. If they are left out from the
   with tight latency requirements,
   to a maximum of `(2 + queuelimit) * chunksize` for minimal underrun risk when latency is not a concern.
 
-* `adjust_period` (optional, defaults to 10)
+* `adjust_interval_s` (optional, defaults to 10)
 
-  The `adjust_period` parameter is used to set the interval between corrections, in seconds.
+  The `adjust_interval_s` parameter is used to set the interval between corrections, in seconds.
   The default is 10 seconds. Only applies when `enable_rate_adjust` is set to `true`.
   A smaller value reacts faster but can be less smooth,
   while a larger value is steadier but slower to react.
@@ -1089,14 +1089,14 @@ A parameter marked (*) in any example is optional. If they are left out from the
   See [Rate adjust: what problem it solves, and how it works](#rate-adjust-what-problem-it-solves-and-how-it-works)
   for how these periodic corrections are computed and applied.
 
-* `silence_threshold` & `silence_timeout` (optional)
-  The fields `silence_threshold` and `silence_timeout` are optional
+* `silence_threshold` & `silence_timeout_s` (optional)
+  The fields `silence_threshold` and `silence_timeout_s` are optional
   and used to pause processing if the input is silent.
   The threshold is the threshold level in dB, and the level is calculated as the difference
   between the minimum and maximum sample values for all channels in the capture buffer.
   0 dB is full level. Some experimentation might be needed to find the right threshold.
 
-  The `silence_timeout` (in seconds) is for how long the signal should be silent before pausing processing.
+  The `silence_timeout_s` (in seconds) is for how long the signal should be silent before pausing processing.
   Set this to zero, or leave it out, to never pause.
 
 * `resampler` (optional, defaults to `null`)
@@ -1113,18 +1113,18 @@ A parameter marked (*) in any example is optional. If they are left out from the
   If the resampler is only used for rate-matching, then the capture samplerate
   is the same as the overall samplerate, and this setting can be left out.
 
-* `stop_on_rate_change` and `rate_measure_interval` (both optional)
+* `stop_on_rate_change` and `rate_measure_interval_s` (both optional)
 
   Setting `stop_on_rate_change` to `true` makes CamillaDSP stop the processing
   if the measured capture sample rate changes.
   Default is `false`.
-  The `rate_measure_interval` setting is used for adjusting the measurement period.
+  The `rate_measure_interval_s` setting is used for adjusting the measurement period.
   A longer period gives a more accurate measurement of the rate, at the cost of slower response when the rate changes.
   The default is 1.0 seconds.
   Processing will stop after 3 measurements in a row are more than 4% off from the configured rate.
   The value of 4% is chosen to allow some variation, while still catching changes between for example 44.1 to 48 kHz.
 
-* `volume_ramp_time` (optional, defaults to 400 ms)
+* `volume_ramp_time_ms` (optional, defaults to 400 ms)
   This setting controls the duration of this ramp when changing volume of the default volume control.
   The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
 
@@ -1308,7 +1308,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   `Sine` and `Square` also require a frequency, defined by the `freq` parameter.
 
   When using the `SignalGenerator`, the resampler config and capture samplerate are ignored.
-  The `silence_threshold` and `silence_timeout` settings are also ignored,
+  The `silence_threshold` and `silence_timeout_s` settings are also ignored,
   since the generator produces a continuous signal and never pauses on silence.
   The same signal is generated on every channel.
 
@@ -1546,7 +1546,7 @@ A higher playback buffer level gives more underrun safety, but also more delay.
 
 When `enable_rate_adjust: true`, CamillaDSP monitors playback buffer level
 and compares it to `target_level`.
-Every `adjust_period` seconds it computes a small correction request.
+Every `adjust_interval_s` seconds it computes a small correction request.
 The goal is to keep the long-term average buffer level near `target_level`.
 
 ### How CamillaDSP applies the correction
@@ -1573,7 +1573,7 @@ CamillaDSP applies the correction from the capture side, using the first availab
 - `target_level`
   Desired steady-state level of the playback buffer, in samples.
   Higher values increase underrun margin but also increase end-to-end delay.
-- `adjust_period`
+- `adjust_interval_s`
   How often corrections are updated.
   Smaller values react faster but may be less smooth;
   larger values are steadier but slower to react.
@@ -1733,7 +1733,7 @@ The volume can then be changed via the websocket, by changing the corresponding 
 A request to set the volume will be applied to all Volume filters listening to the affected `fader`.
 
 When the volume or mute state is changed, the gain is ramped smoothly to the new value.
-The duration of this ramp is set by the `ramp_time` parameter (unit milliseconds).
+The duration of this ramp is set by the `ramp_time_ms` parameter (unit milliseconds).
 The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
 The value will be rounded to the nearest number of chunks.
 
@@ -1747,7 +1747,7 @@ filters:
   volumeexample:
     type: Volume
     parameters:
-      ramp_time: 200 (*)
+      ramp_time_ms: 200 (*)
       limit: 10.0 (*)
       fader: Aux1
 ```
@@ -1804,10 +1804,10 @@ Allowed ranges:
 - low_boost: 0 to 20
 
 ### Delay
-The delay filter provides a delay in milliseconds, microseconds, millimetres or samples.
+The delay filter provides a delay in seconds, milliseconds, microseconds, millimetres or samples.
 The delay value must be positive or zero.
 
-The `unit` can be `ms`, `us`, `mm` or `samples`, and if left out it defaults to `ms`.
+The `delay_unit` is required and can be `s`, `ms`, `us`, `mm` or `samples`.
 When giving the delay in millimetres, the speed of sound of is assumed to be 343 m/s (dry air at 20 degrees Celsius).
 
 When `subsample` is set to `false`, the provided delay value is rounded to the nearest number of full samples.
@@ -1830,7 +1830,7 @@ filters:
     type: Delay
     parameters:
       delay: 12.3
-      unit: ms
+      delay_unit: ms
       subsample: false
 ```
 
@@ -2262,14 +2262,14 @@ Example:
       bits: 16
 ```
 
-### Limiter
-The "Limiter" filter is used to limit the signal to a given level. It can use hard or soft clipping.
+### Clipper
+The "Clipper" filter is used to limit the signal to a given level. It can use hard or soft clipping.
 Note that soft clipping introduces some harmonic distortion to the signal.
 
 Example:
 ```
-  example_limiter:
-    type: Limiter
+  example_clipper:
+    type: Clipper
     parameters:
       soft_clip: false (*)
       clip_limit: -10.0
@@ -2288,22 +2288,23 @@ Example:
     type: LookaheadLimiter
     parameters:
       limit: 0.0 (*)
-      unit: ms
       attack: 2.0
+      attack_unit: ms
       release: 100.0
+      release_unit: ms
 ```
 
 Parameters:
   * `limit`: Maximum output level in dB. Optional, defaults to 0.0 dB.
-  * `unit`: Unit for the attack and release times.
-    Can be `ms`, `us`, `mm` or `samples`.
   * `attack`: Attack/lookahead/delay time. This determines how far ahead the limiter looks for peaks.
     Must be greater than or equal to 0 and less than or equal to 1 second.
     Input signal is delayed by this amount rounded to whole samples, as in the Delay filter without subsample.
     Gain is reduced using a linear ramp of this length.
+  * `attack_unit`: Unit for the attack time. Can be `s`, `ms`, `us` or `samples`.
   * `release`: Release time. This controls how quickly the gain reduction is released after a peak.
     Must be greater than or equal to 0.
     Gain is restored using an exponential curve, as in the Compressor processor.
+  * `release_unit`: Unit for the release time. Can be `s`, `ms`, `us` or `samples`.
 
 ### Difference equation
 The "DiffEq" filter implements a generic difference equation filter with transfer function:
@@ -2339,7 +2340,9 @@ processors:
     parameters:
       channels: 2
       attack: 0.025
+      attack_unit: s
       release: 1.0
+      release_unit: s
       threshold: -25
       factor: 5.0
       makeup_gain: 15 (*)
@@ -2355,8 +2358,10 @@ pipeline:
 
   Parameters:
   * `channels`: number of channels, must match the number of channels of the pipeline where the compressor is inserted.
-  * `attack`: time constant in seconds for attack, how fast the compressor reacts to an increase of the loudness.
-  * `release`: time constant in seconds for release, how fast the compressor scales back the compression when the loudness decreases.
+  * `attack`: time constant for attack, how fast the compressor reacts to an increase of the loudness.
+  * `attack_unit`: Unit for the attack time. Can be `s`, `ms`, `us` or `samples`.
+  * `release`: time constant for release, how fast the compressor scales back the compression when the loudness decreases.
+  * `release_unit`: Unit for the release time. Can be `s`, `ms`, `us` or `samples`.
   * `threshold`: the loudness threshold in dB where compression sets in.
   * `factor`: the compression factor, giving the amount of compression over the threshold.
     A factor of 4 means a sound that is 4 dB over the threshold will be attenuated to 1 dB over the threshold.
@@ -2384,7 +2389,9 @@ processors:
     parameters:
       channels: 2
       attack: 0.025
+      attack_unit: s
       release: 1.0
+      release_unit: s
       threshold: -25
       attenuation: 50.0
       monitor_channels: [0, 1] (*)
@@ -2397,8 +2404,10 @@ pipeline:
 
   Parameters:
   * `channels`: number of channels, must match the number of channels of the pipeline where the compressor is inserted.
-  * `attack`: time constant in seconds for attack, how fast the gate reacts to an increase of the loudness.
-  * `release`: time constant in seconds for release, how fast the gate reacts when the loudness decreases.
+  * `attack`: time constant for attack, how fast the gate reacts to an increase of the loudness.
+  * `attack_unit`: Unit for the attack time. Can be `s`, `ms`, `us` or `samples`.
+  * `release`: time constant for release, how fast the gate reacts when the loudness decreases.
+  * `release_unit`: Unit for the release time. Can be `s`, `ms`, `us` or `samples`.
   * `threshold`: the loudness threshold in dB where gate "opens".
   * `attenuation`: the amount of attenuation in dB to apply when the gate is "closed".
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
@@ -2416,7 +2425,7 @@ Parameters:
 * `channel_b`: channel number of second channel of the pair.
 * `attenuation`: attenuation in dB, must be larger than zero. Typical values are 2 - 3 dB.
 * `delay`: delay value, must be larger than zero. Typical values are in the range 0.06 - 0.1 ms
-* `delay_unit`: unit for delay, see the `Delay` filter.
+* `delay_unit`: required unit for delay, see the `Delay` filter.
 * `subsample_delay`: enable subsample delay values, see the `Delay` filter.
 
 The RACE algorithm is normally used with filters,
@@ -2439,6 +2448,7 @@ processors:
       channel_b: 3
       attenuation: 3
       delay: 0.09
+      delay_unit: ms
 
 mixers:
   2to6:

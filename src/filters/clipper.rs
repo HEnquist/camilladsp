@@ -23,26 +23,26 @@ use crate::utils::decibels::db_to_linear;
 const CUBEFACTOR: PrcFmt = 1.0 / 6.75; // = 1 / (2 * 1.5^3)
 
 #[derive(Clone, Debug)]
-pub struct Limiter {
+pub struct Clipper {
     pub name: String,
     pub soft_clip: bool,
     pub clip_limit: PrcFmt,
 }
 
-impl Limiter {
-    /// Creates a Compressor from a config struct
-    pub fn from_config(name: &str, config: config::LimiterParameters) -> Self {
+impl Clipper {
+    /// Creates a Clipper from a config struct
+    pub fn from_config(name: &str, config: config::ClipperParameters) -> Self {
         let clip_limit = db_to_linear(config.clip_limit);
 
         debug!(
-            "Creating limiter '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
+            "Creating clipper '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
             name,
             config.soft_clip(),
             config.clip_limit,
             clip_limit
         );
 
-        Limiter {
+        Clipper {
             name: name.to_string(),
             soft_clip: config.soft_clip(),
             clip_limit,
@@ -73,7 +73,7 @@ impl Limiter {
     }
 }
 
-impl Filter for Limiter {
+impl Filter for Clipper {
     fn name(&self) -> &str {
         &self.name
     }
@@ -84,7 +84,7 @@ impl Filter for Limiter {
     }
 
     fn update_parameters(&mut self, config: config::Filter) {
-        if let config::Filter::Limiter {
+        if let config::Filter::Clipper {
             parameters: config, ..
         } = config
         {
@@ -93,7 +93,7 @@ impl Filter for Limiter {
             self.soft_clip = config.soft_clip();
             self.clip_limit = clip_limit;
             debug!(
-                "Updated limiter '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
+                "Updated clipper '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
                 self.name,
                 config.soft_clip(),
                 config.clip_limit,
@@ -106,7 +106,7 @@ impl Filter for Limiter {
     }
 }
 
-/// Validate the limiter config, always return ok to allow any config.
-pub fn validate_config(_config: &config::LimiterParameters) -> Res<()> {
+/// Validate the clipper config, always return ok to allow any config.
+pub fn validate_config(_config: &config::ClipperParameters) -> Res<()> {
     Ok(())
 }
