@@ -287,16 +287,43 @@ Feedback during the preview phase is very welcome and is the best time to influe
 
 ## Contributing
 
-Contributions are welcome, both bug reports and pull requests. Before opening a pull request, it helps
-to understand the branch layout:
-- `master` always matches the latest release. It does not contain any unreleased work.
-- Active development happens on a separate branch named after the upcoming version. This is usually,
-  but not always, a major release named with just the major number such as `next6`, or a minor or
-  patch release named with the full version such as `next5.2.0` or `next5.2.1`.
+Contributions are welcome, but it is worth understanding how this project is maintained before you
+start. CamillaDSP has a single long-term maintainer, and in practice all ongoing maintenance falls
+to that one person.
 
-Because `master` is usually behind the development branch, please ask which branch to target, or check
-which `next*` branch is currently active, before starting work. This avoids basing changes on code that
-has already been reworked.
+Every merged change cuts both ways. The benefit side is how many users actually want it: a feature
+that a large part of the user base will use is a very different proposition from one a single user
+has asked for. The cost side is that each new feature grows the project. It becomes more code to keep
+compiling, more behaviour to keep working as everything else changes, and more to test, document,
+and support, for years. Whether a change gets merged mostly comes down to how those two balance out.
+
+That cost is easy to underestimate. Writing a feature has never been cheaper, and with AI assistance
+a working pull request for a substantial new feature can be put together in an afternoon. The effort
+to keep it working afterwards has dropped far less, and it falls on the maintainer, not the
+contributor. Code that works today is only the beginning.
+
+**Bug fixes and small changes** can go straight to a pull request. Fixing a crash, correcting the
+docs, or tightening an error message: just send it.
+
+**New features need to be discussed first.** Open an issue describing what you want and why, and
+agree on the approach before writing code. Please ask first, otherwise you risk spending a lot of
+time on something that will not be merged. Whether a feature is accepted depends not only on whether
+the code works, but on whether it is worth maintaining for years. If the expected maintenance burden
+is large compared to the likely benefit, it will not be merged even if the implementation is correct.
+It is up to you to convince the maintainer that a feature is worth adding.
+
+**A fork is a legitimate home for some features.** There are several reasons a feature might be better
+off in a fork: it may be too niche to be worth the upkeep, it may complicate or worsen things for the
+average user even if it helps a few, or it may rely on a dependency with license or maintenance
+problems. Keeping it in your own fork can be the right call.
+
+**Target the right branch.** `master` always matches the latest release and contains no unreleased
+work. Active development happens on a separate branch named after the upcoming version. This is
+usually, but not always, a major release named with just the major number such as `next6`, or a minor
+or patch release named with the full version such as `next5.2.0` or `next5.2.1`. Because `master` is
+usually behind the development branch, please ask which branch to target, or check which `next*`
+branch is currently active, before starting work. This avoids basing changes on code that has already
+been reworked.
 
 # Installing
 
