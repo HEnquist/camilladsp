@@ -181,15 +181,27 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
                 break;
             }
         };
-        let mut waveform = vec_from_stash(params.chunksize);
-        for (sample, value) in waveform.iter_mut().zip(&mut generator) {
+        // White noise must be generated independently per channel so the channels are
+        // uncorrelated. Periodic signals (sine, square) are generated once and copied to
+        // keep all channels in phase.
+        let independent = matches!(params.signal, config::Signal::WhiteNoise { .. });
+        let mut first = vec_from_stash(params.chunksize);
+        for (sample, value) in first.iter_mut().zip(&mut generator) {
             *sample = value;
         }
         let mut waveforms = container_from_stash(params.channels);
         for _ in 1..params.channels {
-            waveforms.push(waveform.clone());
+            let mut waveform = vec_from_stash(params.chunksize);
+            if independent {
+                for (sample, value) in waveform.iter_mut().zip(&mut generator) {
+                    *sample = value;
+                }
+            } else {
+                waveform.copy_from_slice(&first);
+            }
+            waveforms.push(waveform);
         }
-        waveforms.insert(0, waveform);
+        waveforms.push(first);
 
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, params.chunksize, params.chunksize);
 
