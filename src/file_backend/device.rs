@@ -114,6 +114,9 @@ fn open_playback_sink(
         PlaybackDest::Filename(filename) => {
             let mut file = File::create(&filename)?;
             if !wav_header {
+                if use_rf64 {
+                    warn!("RF64 output requires a wav header, ignoring `use_rf64`");
+                }
                 return Ok(PlaybackSink::Plain(Box::new(file)));
             }
             // A regular file is seekable, but the filename may point at a pipe or
@@ -139,6 +142,11 @@ fn open_playback_sink(
             }
         }
         PlaybackDest::Stdout => {
+            if use_rf64 {
+                warn!(
+                    "RF64 output requires a seekable file, writing a streaming wav header instead"
+                );
+            }
             let mut out: Box<dyn Write> = Box::new(stdout());
             if wav_header {
                 write_wav_header(&mut out, channels, sample_format, samplerate)?;
@@ -306,9 +314,16 @@ impl PlaybackDevice for FilePlaybackDevice {
                             }
                         };
                         // Flush and patch the header sizes before reporting status.
-                        if let Err(err) = sink.finish() {
-                            warn!("Failed to finalize output file: {err}");
-                        }
+                        // A finalize failure can leave a truncated or corrupt file,
+                        // so treat it as a playback error unless one already occurred.
+                        let playback_error = match (playback_error, sink.finish()) {
+                            (Some(msg), _) => Some(msg),
+                            (None, Err(err)) => {
+                                error!("Failed to finalize output file: {err}");
+                                Some(err.to_string())
+                            }
+                            (None, Ok(())) => None,
+                        };
                         match playback_error {
                             Some(msg) => {
                                 status_channel
