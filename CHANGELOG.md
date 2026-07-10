@@ -4,9 +4,11 @@ New features:
 - Websocket commands for audio spectrum data (single read & streaming).
 - Websocket command for getting device capabilities.
 - New `Slip` resampler for very cheap rate adjust between independent clocks at the same nominal rate.
+- RF64 support for reading and writing wav files larger than 4 GB (`use_rf64` for File playback).
 
 Changes:
 - Improved DSP library separation for easier external integration.
+- File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
 
 # 4.1.3
 Bugfixes:

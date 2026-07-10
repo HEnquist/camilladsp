@@ -50,7 +50,7 @@ fn to_binary_format(format: SampleFormat) -> BinarySampleFormat {
 }
 
 /// Map a CamillaDSP config format to a `waveadapter` sample format.
-fn to_wave_format(format: BinarySampleFormat) -> Res<SampleFormat> {
+pub fn to_wave_format(format: BinarySampleFormat) -> Res<SampleFormat> {
     match format {
         BinarySampleFormat::S16_LE => Ok(SampleFormat::I16),
         BinarySampleFormat::S24_3_LE => Ok(SampleFormat::I24_3),

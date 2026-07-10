@@ -27,7 +27,7 @@ use std::error::Error;
 use std::fs::File;
 #[cfg(target_os = "linux")]
 use std::fs::OpenOptions;
-use std::io::{Write, stdin, stdout};
+use std::io::{Seek, Write, stdin, stdout};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::{Arc, Barrier};
@@ -48,18 +48,16 @@ use crate::file_backend::filereader::BlockingReader;
 #[cfg(target_os = "linux")]
 use crate::file_backend::filereader_nonblock::NonBlockingReader;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
-use crate::utils::wavtools::{find_data_in_wav, write_wav_header};
+use crate::utils::wavtools::{find_data_in_wav, to_wave_format, write_wav_header};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
+use waveadapter::{WavSpec, WavWriter};
 
-/// Number of header bytes written before the audio data by [`write_wav_header`].
-/// RIFF (12) + `fmt ` chunk (24) + data chunk header (8).
-const WAV_HEADER_BYTES: u64 = 44;
-
-/// Maximum number of audio data bytes that can be stored in a plain wav file.
-/// The RIFF and data chunk sizes are 32-bit, so the whole file (header + data)
-/// minus the 8-byte RIFF id/size must fit in a `u32`. Writing past this produces
-/// an invalid file, so playback stops when the limit is reached.
-const MAX_WAV_DATA_BYTES: u64 = u32::MAX as u64 - (WAV_HEADER_BYTES - 8);
+/// Maximum number of audio data bytes for a plain (non-RF64) wav file. The RIFF
+/// and data chunk sizes are 32-bit, so the whole file must fit in a `u32`. The
+/// small margin below the ceiling covers the header and any optional chunks, so
+/// playback stops cleanly before an invalid file would be written. RF64 output
+/// has no such limit.
+const MAX_WAV_DATA_BYTES: u64 = u32::MAX as u64 - 256;
 
 pub struct FilePlaybackDevice {
     pub destination: PlaybackDest,
@@ -68,6 +66,94 @@ pub struct FilePlaybackDevice {
     pub channels: usize,
     pub sample_format: BinarySampleFormat,
     pub wav_header: bool,
+    pub use_rf64: bool,
+}
+
+/// Output sink for the file playback backend.
+enum PlaybackSink {
+    /// Raw bytes with no wav framing, or a non-seekable wav (stdout) whose header
+    /// was written up front and whose sizes stay at the placeholder.
+    Plain(Box<dyn Write>),
+    /// Wav written to a seekable file. The header size fields are patched on
+    /// [`finish`](PlaybackSink::finish). Plain RIFF or RF64, chosen at creation.
+    SeekableWav(WavWriter<File>),
+}
+
+impl PlaybackSink {
+    fn write_bytes(&mut self, bytes: &[u8]) -> Res<()> {
+        match self {
+            PlaybackSink::Plain(writer) => Ok(writer.write_all(bytes)?),
+            PlaybackSink::SeekableWav(writer) => Ok(writer.write_raw_interleaved(bytes)?),
+        }
+    }
+
+    /// Flush the sink and, for a seekable wav file, patch the header size fields.
+    fn finish(self) -> Res<()> {
+        match self {
+            PlaybackSink::Plain(mut writer) => Ok(writer.flush()?),
+            PlaybackSink::SeekableWav(writer) => {
+                writer.finalize()?;
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Open the output sink, writing the wav (or RF64) header up front when requested.
+/// A seekable file gets a `WavWriter` so its sizes are patched on `finish`; stdout
+/// gets a plain streaming header.
+fn open_playback_sink(
+    destination: PlaybackDest,
+    wav_header: bool,
+    use_rf64: bool,
+    channels: usize,
+    samplerate: usize,
+    sample_format: BinarySampleFormat,
+) -> Res<PlaybackSink> {
+    match destination {
+        PlaybackDest::Filename(filename) => {
+            let mut file = File::create(&filename)?;
+            if !wav_header {
+                if use_rf64 {
+                    warn!("RF64 output requires a wav header, ignoring `use_rf64`");
+                }
+                return Ok(PlaybackSink::Plain(Box::new(file)));
+            }
+            // A regular file is seekable, but the filename may point at a pipe or
+            // /dev/stdout, which is not. Only a seekable file can have its header
+            // sizes patched on finish or hold an RF64 ds64 chunk; other targets get
+            // a streaming header with placeholder sizes.
+            if file.stream_position().is_ok() {
+                let spec = WavSpec::new(channels, samplerate, to_wave_format(sample_format)?);
+                let writer = if use_rf64 {
+                    WavWriter::new_rf64(file, spec)?
+                } else {
+                    WavWriter::new(file, spec)?
+                };
+                Ok(PlaybackSink::SeekableWav(writer))
+            } else {
+                if use_rf64 {
+                    warn!(
+                        "RF64 output requires a seekable file, writing a streaming wav header instead"
+                    );
+                }
+                write_wav_header(&mut file, channels, sample_format, samplerate)?;
+                Ok(PlaybackSink::Plain(Box::new(file)))
+            }
+        }
+        PlaybackDest::Stdout => {
+            if use_rf64 {
+                warn!(
+                    "RF64 output requires a seekable file, writing a streaming wav header instead"
+                );
+            }
+            let mut out: Box<dyn Write> = Box::new(stdout());
+            if wav_header {
+                write_wav_header(&mut out, channels, sample_format, samplerate)?;
+            }
+            Ok(PlaybackSink::Plain(out))
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -151,21 +237,23 @@ impl PlaybackDevice for FilePlaybackDevice {
         let sample_format = self.sample_format;
         let samplerate = self.samplerate;
         let wav_header = self.wav_header;
+        let use_rf64 = self.use_rf64;
         let handle = thread::Builder::new()
             .name("FilePlayback".to_string())
             .spawn(move || {
-                let file_res: Result<Box<dyn Write>, std::io::Error> = match destination {
-                    PlaybackDest::Filename(filename) => {
-                        File::create(filename).map(|f| Box::new(f) as Box<dyn Write>)
-                    }
-                    PlaybackDest::Stdout => Ok(Box::new(stdout())),
-                };
-                match file_res {
-                    Ok(mut file) => {
-                        match status_channel.send(StatusMessage::PlaybackReady) {
-                            Ok(()) => {}
-                            Err(_err) => {}
-                        }
+                let sink_res = open_playback_sink(
+                    destination,
+                    wav_header,
+                    use_rf64,
+                    channels,
+                    samplerate,
+                    sample_format,
+                );
+                match sink_res {
+                    Ok(mut sink) => {
+                        status_channel
+                            .send(StatusMessage::PlaybackReady)
+                            .unwrap_or(());
                         let mut chunk_stats = ChunkStats {
                             rms: vec![0.0; channels],
                             peak: vec![0.0; channels],
@@ -174,19 +262,15 @@ impl PlaybackDevice for FilePlaybackDevice {
                         let mut peak_values = Vec::new();
                         barrier.wait();
                         debug!("starting playback loop");
-                        if wav_header {
-                            match write_wav_header(&mut file, channels, sample_format, samplerate) {
-                                Ok(()) => debug!("Wrote Wav header"),
-                                Err(err) => {
-                                    status_channel
-                                        .send(StatusMessage::PlaybackError(err.to_string()))
-                                        .unwrap_or(());
-                                }
-                            }
-                        }
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
                         let mut wav_data_bytes: u64 = 0;
-                        loop {
+                        // A seekable plain wav file is capped at the 4 GB RIFF limit, since
+                        // its size fields are patched with real u32 values on finish. RF64
+                        // output has no limit, and a streaming wav (stdout or a non-seekable
+                        // file) keeps its u32::MAX placeholder sizes, so it can run past 4 GB
+                        // and be read to EOF.
+                        let capped = matches!(sink, PlaybackSink::SeekableWav(_)) && !use_rf64;
+                        let playback_error = loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     chunk.update_stats(&mut chunk_stats);
@@ -196,28 +280,19 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         &mut buffer,
                                         &sample_format,
                                     );
-                                    if wav_header
+                                    if capped
                                         && wav_data_bytes + valid_bytes as u64 > MAX_WAV_DATA_BYTES
                                     {
                                         warn!(
                                             "Wav file reached the maximum size of a plain wav file. \
                                              Stopping playback to avoid writing an invalid file."
                                         );
-                                        status_channel
-                                            .send(StatusMessage::PlaybackDone)
-                                            .unwrap_or(());
-                                        break;
+                                        break None;
                                     }
-                                    let write_res = file.write_all(&buffer[0..valid_bytes]);
+                                    if let Err(err) = sink.write_bytes(&buffer[0..valid_bytes]) {
+                                        break Some(err.to_string());
+                                    }
                                     wav_data_bytes += valid_bytes as u64;
-                                    match write_res {
-                                        Ok(_) => {}
-                                        Err(err) => {
-                                            status_channel
-                                                .send(StatusMessage::PlaybackError(err.to_string()))
-                                                .unwrap_or(());
-                                        }
-                                    };
                                     crate::update_playback_signal_status(
                                         &playback_status,
                                         &chunk_stats,
@@ -230,18 +305,35 @@ impl PlaybackDevice for FilePlaybackDevice {
                                     trace!("Pause message received");
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
-                                    status_channel
-                                        .send(StatusMessage::PlaybackDone)
-                                        .unwrap_or(());
-                                    break;
+                                    break None;
                                 }
                                 Err(err) => {
                                     error!("Message channel error: {err}");
-                                    status_channel
-                                        .send(StatusMessage::PlaybackError(err.to_string()))
-                                        .unwrap_or(());
-                                    break;
+                                    break Some(err.to_string());
                                 }
+                            }
+                        };
+                        // Flush and patch the header sizes before reporting status.
+                        // A finalize failure can leave a truncated or corrupt file,
+                        // so treat it as a playback error unless one already occurred.
+                        let playback_error = match (playback_error, sink.finish()) {
+                            (Some(msg), _) => Some(msg),
+                            (None, Err(err)) => {
+                                error!("Failed to finalize output file: {err}");
+                                Some(err.to_string())
+                            }
+                            (None, Ok(())) => None,
+                        };
+                        match playback_error {
+                            Some(msg) => {
+                                status_channel
+                                    .send(StatusMessage::PlaybackError(msg))
+                                    .unwrap_or(());
+                            }
+                            None => {
+                                status_channel
+                                    .send(StatusMessage::PlaybackDone)
+                                    .unwrap_or(());
                             }
                         }
                     }
@@ -732,5 +824,70 @@ fn sleep_until_next(bytes_per_frame: usize, samplerate: usize, nbr_bytes: usize)
         Duration::from_millis((1000 * nbr_bytes) as u64 / (bytes_per_frame * samplerate) as u64);
     if io_duration > Duration::from_millis(2) {
         thread::sleep(io_duration - Duration::from_millis(2));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> String {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "camilladsp_test_{}_{}.wav",
+            name,
+            std::process::id()
+        ));
+        path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn write_normal_wav_patches_sizes() {
+        let path = temp_path("normal");
+        let mut sink = open_playback_sink(
+            PlaybackDest::Filename(path.clone()),
+            true,
+            false,
+            2,
+            44100,
+            BinarySampleFormat::S16_LE,
+        )
+        .unwrap();
+        sink.write_bytes(&[0u8; 100]).unwrap();
+        sink.finish().unwrap();
+
+        let info = find_data_in_wav(&path).unwrap();
+        assert_eq!(info.sample_format, BinarySampleFormat::S16_LE);
+        assert_eq!(info.channels, 2);
+        assert_eq!(info.sample_rate, 44100);
+        // The size was patched on finalize, not left at the u32::MAX placeholder.
+        assert_eq!(info.data_length, 100);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn write_rf64_wav() {
+        let path = temp_path("rf64");
+        let mut sink = open_playback_sink(
+            PlaybackDest::Filename(path.clone()),
+            true,
+            true,
+            1,
+            48000,
+            BinarySampleFormat::S32_LE,
+        )
+        .unwrap();
+        sink.write_bytes(&[0u8; 40]).unwrap();
+        sink.finish().unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[0..4], b"RF64");
+
+        let info = find_data_in_wav(&path).unwrap();
+        assert_eq!(info.sample_format, BinarySampleFormat::S32_LE);
+        assert_eq!(info.channels, 1);
+        assert_eq!(info.sample_rate, 48000);
+        assert_eq!(info.data_length, 40);
+        std::fs::remove_file(&path).ok();
     }
 }
