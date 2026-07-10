@@ -1356,6 +1356,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
   to avoid writing an invalid file. To record larger files, set `use_rf64` to `true`,
   which writes an RF64 header that can hold the 64-bit sizes. This option applies only to
   the `File` device (RF64 requires a seekable output) and is ignored without `wav_header`.
+  The streaming header used by `Stdout` has no such limit, since its size fields are left
+  at a placeholder and readers use the stream length instead.
 
   To read from a wav file, use the `WavFile` capture device.
   The samplerate and number of channels of the file is used to override the values in the config,

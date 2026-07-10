@@ -220,6 +220,7 @@ impl PlaybackDevice for FilePlaybackDevice {
         let handle = thread::Builder::new()
             .name("FilePlayback".to_string())
             .spawn(move || {
+                let seekable = matches!(destination, PlaybackDest::Filename(_));
                 let sink_res = open_playback_sink(
                     destination,
                     wav_header,
@@ -243,9 +244,11 @@ impl PlaybackDevice for FilePlaybackDevice {
                         debug!("starting playback loop");
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
                         let mut wav_data_bytes: u64 = 0;
-                        // Plain wav (including streaming to stdout) is capped at the 4 GB
-                        // RIFF limit; RF64 output has no such limit.
-                        let capped = wav_header && !use_rf64;
+                        // A seekable plain wav file is capped at the 4 GB RIFF limit, since
+                        // its size fields are patched with real u32 values on finish. RF64
+                        // output has no limit, and a streaming (stdout) wav keeps its u32::MAX
+                        // placeholder sizes, so it can run past 4 GB and be read to EOF.
+                        let capped = seekable && wav_header && !use_rf64;
                         let playback_error = loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
