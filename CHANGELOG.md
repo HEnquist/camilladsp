@@ -1,4 +1,4 @@
-# 4.2.0
+# 5.0.0
 New features:
 - Websocket commands for streaming signal level and state change events.
 - Websocket commands for audio spectrum data (single read & streaming).
@@ -9,6 +9,10 @@ New features:
 Changes:
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
+
+Removed:
+- Dropped the Jack, Pulse and Bluez backends. On Linux, use the native PipeWire backend, or
+  PipeWire's Pulse/JACK compatibility layers. PipeWire can also bridge Bluetooth A2DP directly.
 
 # 4.1.3
 Bugfixes:

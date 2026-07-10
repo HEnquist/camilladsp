@@ -77,31 +77,6 @@ jobs:
           asset_name: camilladsp-linux-pipewire-amd64.tar.gz
           tag: ${{ github.event.release.tag_name }}
 
-      - name: Install PulseAudio development files
-        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
-
-      - name: Build with PulseAudio
-        run: cargo build --release --features pulse-backend
-
-      - name: Compress binary with PulseAudio
-        run: tar -zcvf camilladsp-pulse.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
-
-      - name: Upload binary with PulseAudio artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: camilladsp-linux-pulseaudio-amd64
-          path: camilladsp-pulse.tar.gz
-          retention-days: 14
-
-      - name: Upload binary with PulseAudio to release
-        if: github.event_name == 'release' && github.event.action == 'created'
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: camilladsp-pulse.tar.gz
-          asset_name: camilladsp-linux-pulseaudio-amd64.tar.gz
-          tag: ${{ github.event.release.tag_name }}
-
   linux_aarch64:
     name: Linux aarch64
     runs-on: ubuntu-24.04-arm
@@ -170,31 +145,6 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp-pipewire.tar.gz
           asset_name: camilladsp-linux-pipewire-aarch64.tar.gz
-          tag: ${{ github.event.release.tag_name }}
-
-      - name: Install PulseAudio development files
-        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
-
-      - name: Build with PulseAudio
-        run: cargo build --release --features pulse-backend
-
-      - name: Compress binary with PulseAudio
-        run: tar -zcvf camilladsp-pulse.tar.gz -C target/release camilladsp --owner=0 --group=0 --numeric-owner
-
-      - name: Upload binary with PulseAudio artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: camilladsp-linux-pulseaudio-aarch64
-          path: camilladsp-pulse.tar.gz
-          retention-days: 14
-
-      - name: Upload binary with PulseAudio to release
-        if: github.event_name == 'release' && github.event.action == 'created'
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: camilladsp-pulse.tar.gz
-          asset_name: camilladsp-linux-pulseaudio-aarch64.tar.gz
           tag: ${{ github.event.release.tag_name }}
 
   linux_armv7:

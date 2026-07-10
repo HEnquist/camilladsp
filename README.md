@@ -28,7 +28,7 @@ The CamillaDSP project encompasses:
 The CamillaDSP engine is a command-line application that runs on Linux, macOS, and Windows.
 
 Audio data is captured from a capture device and sent to a playback device.
-ALSA, PulseAudio, PipeWire, Jack, Wasapi, ASIO and CoreAudio are
+ALSA, PipeWire, Wasapi, ASIO and CoreAudio are
 currently supported for both capture and playback.
 
 The processing pipeline consists of any number of filters and mixers.
@@ -104,14 +104,12 @@ and the Mozilla Public License Version 2.0:
 
 **[Processing audio](#processing-audio)**
 - **[Cross-platform](#cross-platform)**
-  - **[Jack](#jack)**
   - **[File or pipe](#file-or-pipe)**
 - **[Windows](#windows)**
   - **[ASIO](#asio)**
 - **[macOS (CoreAudio)](#macos-coreaudio)**
 - **[Linux](#linux)**
   - **[ALSA](#alsa)**
-  - **[PulseAudio](#pulseaudio)**
   - **[PipeWire](#pipewire)**
 
 **[Configuration](#configuration)**
@@ -259,8 +257,6 @@ These are the key dependencies for CamillaDSP.
 * https://crates.io/crates/pipewire - PipeWire bindings
 * https://crates.io/crates/asio-sys
 * https://crates.io/crates/wasapi
-* https://crates.io/crates/cpal - Cross platform audio library used to provide Jack support
-* https://crates.io/crates/libpulse-simple-binding - PulseAudio audio backend
 * https://crates.io/crates/clap - Command line argument parsing
 * https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
 * https://crates.io/crates/rustfft - FFT used for FIR filters
@@ -316,12 +312,10 @@ The following configurations are provided:
 | Filename | Description | Backends |
 |----------|-------------|----------|
 | `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA |
-| `camilladsp-linux-pulseaudio-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA, PulseAudio |
 | `camilladsp-linux-pipewire-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA, PipeWire |
 | `camilladsp-linux-armv6.tar.gz` | Linux on Armv6 (32-bit), intended for Raspberry Pi 1 and Pi Zero but should also work on others | ALSA |
 | `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon (32-bit), intended for Raspberry Pi 2 and up but should also work on others | ALSA |
 | `camilladsp-linux-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA |
-| `camilladsp-linux-pulseaudio-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA, PulseAudio |
 | `camilladsp-linux-pipewire-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA, PipeWire |
 | `camilladsp-macos-amd64.tar.gz` | macOS on 64-bit Intel CPU | CoreAudio |
 | `camilladsp-macos-aarch64.tar.gz` | macOS on Apple silicon | CoreAudio |
@@ -365,9 +359,6 @@ Similarly, building on Windows always enables the Wasapi backend.
 The optional ASIO backend can be enabled with the `asio-backend` feature (see [Customized build](#customized-build)).
 And building on macOS always enables the CoreAudio backend.
 
-By default both the PulseAudio and Jack backends are disabled, but they can be enabled if desired.
-Leaving them disabled also means that the corresponding system Jack/Pulse packages aren't needed.
-
 By default the internal processing is done using 64-bit floats.
 There is a possibility to switch this to 32-bit floats.
 This might be useful for speeding up the processing when running on a 32-bit CPU (or a 64-bit CPU running in 32-bit mode),
@@ -409,13 +400,9 @@ If possible, it's recommended to use a pre-built binary on these systems.
 
 ## Customized build
 All the available options, or "features" are:
-- `pulse-backend`: PulseAudio support.
 - `pipewire-backend`: Native PipeWire support (Linux only).
-- `cpal-backend`: Used for Jack support (automatically enabled when needed).
-- `jack-backend`: Jack support (Linux only).
 - `asio-backend`: ASIO support (Windows only, requires the ASIO SDK).
 - `threaded-alsa`: Experimental ALSA backend implementation (Linux only). When enabled, it replaces the legacy ALSA backend.
-- `bluez-backend`: Bluetooth support via BlueALSA (Linux only).
 - `websocket`: Websocket server for control.
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
 - `32bit`: Perform all calculations with 32-bit floats (instead of 64).
@@ -428,11 +415,11 @@ Cargo doesn't allow disabling a single default feature,
 but you can disable the whole group with the `--no-default-features` flag.
 Then you have to manually add all the ones you want.
 
-Example 1: You want `websocket` and `pulse-backend`. The first one is included by default so you only need to add `pulse-backend`:
+Example 1: You want `websocket` and `pipewire-backend`. The first one is included by default so you only need to add `pipewire-backend`:
 ```
-cargo build --release --features pulse-backend
+cargo build --release --features pipewire-backend
 (or)
-cargo install --path . --features pulse-backend
+cargo install --path . --features pipewire-backend
 ```
 
 Example 2: You want only `32bit`. Since you don't want `websocket` you have to disable the defaults:
@@ -443,16 +430,6 @@ cargo install --path . --no-default-features --features 32bit
 ```
 
 ### Additional dependencies
-
-The `pulse-backend` feature requires PulseAudio and its development files. To install:
-- Fedora: ```sudo dnf install pulseaudio-libs-devel```
-- Debian/Ubuntu etc: ```sudo apt-get install libpulse-dev```
-- Arch:  ```sudo pacman -S libpulse```
-
-The `jack-backend` feature requires jack and its development files. To install:
-- Fedora: ```sudo dnf install jack-audio-connection-kit jack-audio-connection-kit-devel```
-- Debian/Ubuntu etc: ```sudo apt-get install jack libjack-dev```
-- Arch:  ```sudo pacman -S jack```
 
 The `pipewire-backend` feature requires PipeWire and its development files. To install:
 - Fedora: ```sudo dnf install pipewire-devel```
@@ -494,13 +471,6 @@ Windows (PowerShell):
 ```
 $env:RUSTFLAGS="-C target-cpu=native"
 cargo build --release
-```
-
-The PulseAudio backend can be used on macOS.
-The necessary dependencies can be installed with brew:
-```
-brew install pkg-config
-brew install pulseaudio
 ```
 
 ## Building with ASIO backend (Windows)
@@ -754,21 +724,6 @@ without going via a virtual soundcard.
 Wav files can be read using the `WavFile` device type.
 See [the capture device section](#file-rawfile-wavfile-stdin-stdout) for more details.
 
-### Jack
-Jack is most commonly used with Linux, but can also be used with both Windows and MacOS.
-The Jack support of CamillaDSP version should be considered experimental.
-It is implemented using the CPAL library, which currently only supports Jack on Linux.
-
-#### Using Jack
-The Jack server must be running.
-
-Set `device` to "default" for both capture and playback.
-The sample format is fixed at 32-bit float.
-
-The samplerate must match the samplerate configured for the Jack server.
-
-CamillaDSP will show up in Jack as "cpal_client_in" and "cpal_client_out".
-
 
 ## Windows
 See the [separate readme for Wasapi](./backend_wasapi.md).
@@ -842,20 +797,6 @@ Linux offers several audio APIs that CamillaDSP can use.
 ### ALSA
 See the [separate readme for ALSA](./backend_alsa.md).
 
-### PulseAudio
-PulseAudio provides a null-sink that can be used to capture audio from applications. To create a null sink type:
-```
-pacmd load-module module-null-sink sink_name=MySink
-```
-This device can be set as the default output, meaning any application using PulseAudio will use it.
-The audio sent to this device can then be captured from the monitor output named "MySink.monitor".
-
-All available sinks and sources can be listed with the commands:
-```
-pacmd list-sinks
-pacmd list-sources
-```
-
 ### PipeWire
 
 #### Native PipeWire backend
@@ -863,11 +804,8 @@ CamillaDSP has native PipeWire support via the `pipewire-backend` feature.
 This creates filter nodes in the PipeWire graph that can be connected to other nodes using WirePlumber rules or tools like Helvum.
 See [backend_pipewire.md](backend_pipewire.md) for configuration details.
 
-#### Using PipeWire via PulseAudio or Jack compatibility
-PipeWire implements both the PulseAudio and Jack APIs.
-CamillaDSP can therefore also be used with PipeWire via the Pulse and Jack backends.
-
-PipeWire supports creating null-sinks like PulseAudio. Create one with:
+#### Capturing desktop audio via a null-sink
+PipeWire supports creating null-sinks. Create one with:
 ```
 pactl load-module module-null-sink sink_name=MySink object.linger=1 media.class=Audio/Sink
 ```
@@ -886,7 +824,7 @@ This will list all devices, and the null-sink should be included like this:
  		media.class = "Audio/Sink"
 ```
 This device can be set as the default output in the Gnome sound settings, meaning all desktop audio will use it.
-The audio sent to this device can then be captured from the monitor output named "MySink.monitor" using the PulseAudio backend.
+The audio sent to this device can then be captured from the monitor output named "MySink.monitor" using the native PipeWire backend.
 
 To configure PipeWire so that this null-sink is loaded on startup, create the file `/usr/share/pipewire/pipewire-pulse.conf.d/camilladsp-sink.conf` containing:
 ```
@@ -899,70 +837,6 @@ PipeWire can also be configured to output to an ALSA Loopback.
 This is done by adding an ALSA sink in the PipeWire configuration.
 This sink then becomes available as an output device in the Gnome sound settings.
 See the "camilladsp-config" repository under [Related projects](#related-projects) for an example PipeWire configuration.
-
-TODO test with Jack.
-
-### BlueALSA
-BlueALSA ([bluez-alsa](https://github.com/Arkq/bluez-alsa)) is a project to receive or send audio through Bluetooth A2DP.
-The `Bluez` source will connect to BlueALSA via D-Bus to get a file descriptor.
-It will then read the audio directly from there, avoiding the need to go via ALSA.
-Currently only capture (a2dp-sink) is supported.
-BlueALSA is supported on Linux only, and requires building CamillaDSP with the `bluez-backend` Cargo feature.
-
-#### Prerequisites
-Start by installing `bluez-alsa`.
-Both PipeWire and PulseAudio will interfere with BlueALSA and must be disabled.
-The source device should be paired after disabling PipeWire or PulseAudio and enabling BlueALSA.
-
-#### Configuration
-
-Example configuration:
-```
-devices:
-  samplerate: 44100
-  chunksize: 4096
-  target_level: 8000
-  adjust_period: 3
-  resampler:
-    type: AsyncSinc
-    profile: Balanced
-  enable_rate_adjust: true
-  capture:
-    type: Bluez
-    format: S16_LE
-    channels: 2
-    dbus_path: /org/bluealsa/hci0/dev_A0_B1_C2_D3_E4_F5/a2dpsnk/source
-    service: org.bluealsa (*)
-```
-
-After connecting an A2DP device, for example a mobile phone, the D-Bus path can be found with this command:
-```
-gdbus call -y --dest org.bluealsa -o /org/bluealsa -m org.freedesktop.DBus.ObjectManager.GetManagedObjects
-```
-This should produce output similar to this:
-```
-({objectpath '/org/bluealsa/hci0/dev_A0_B1_C2_D3_E4_F5/a2dpsnk/source': {'org.bluealsa.PCM1': {'Device': <objectpath '/org/bluez/hci0/dev_A0_B1_C2_D3_E4_F5'>, 'Sequence': <uint32 0>, 'Transport': <'A2DP-sink'>, 'Mode': <'source'>, 'Format': <uint16 33296>, 'Channels': <byte 0x02>, 'Sampling': <uint32 44100>, 'Codec': <'AAC'>, 'CodecConfiguration': <[byte 0x80, 0x01, 0x04, 0x03, 0x5b, 0x60]>, 'Delay': <uint16 150>, 'SoftVolume': <true>, 'Volume': <uint16 32639>}}},)
-```
-The wanted path is the string after `objectpath`.
-If the output is looking like `(@a{oa{sa{sv}}} {},)`, then no A2DP source is connected or detected.
-Connect an A2DP device and try again. If a device is already connected, try removing and pairing the device again.
-
-The `service` property can be left out to get the default. This only needs changing if there is more than one instance of BlueALSA running.
-
-You have to specify correct capture sample rate, number of channel and sample format.
-These parameters can be found with `bluealsa-aplay`:
-```
-> bluealsa-aplay -L
-
-bluealsa:DEV=A0:B1:C2:D3:E4:F5,PROFILE=a2dp,SRV=org.bluealsa
-    MyPhone, trusted phone, capture
-    A2DP (AAC): S16_LE 2 channels 44100 Hz
-```
-
-Note that Bluetooth transfers data in chunks, and the time between chunks can vary.
-To avoid underruns, use a large chunksize and a large target_level.
-The values in the example above are a good starting point.
-Rate adjust should also be enabled.
 
 # Configuration
 
@@ -1092,9 +966,9 @@ devices:
   multithreaded: false (*)
   worker_threads: 4 (*)
   capture:
-    type: Pulse
+    type: Alsa
     channels: 2
-    device: "MySink.monitor"
+    device: "hw:Loopback,1"
     labels: ["L", "R"] (*)
   playback:
     type: Alsa
@@ -1291,23 +1165,20 @@ A parameter marked (*) in any example is optional. If they are left out from the
     * `SignalGenerator` (capture only)
     * `Stdin` (capture only)
     * `Stdout` (playback only)
-    * `Bluez` (capture only)
-    * `Jack`
     * `Wasapi`
     * `Asio`
     * `CoreAudio`
     * `Alsa`
-    * `Pulse`
   * `channels`: number of channels
-  * `device`: device name (for `Alsa`, `Pulse`, `Wasapi`, `Asio`, `CoreAudio`).
+  * `device`: device name (for `Alsa`, `Wasapi`, `Asio`, `CoreAudio`).
      For `CoreAudio` and `Wasapi`, `null` will give the default device.
      For `Asio`, use the ASIO driver name.
   * `filename` path to the file (for `File`, `RawFile` and `WavFile`)
-  * `format`: sample format (for all except `Jack` and `Pulse`).
+  * `format`: sample format.
 
     The available choices for `format` depend on the backend.
 
-    For `File`, `Stdin`, `Stdout` `RawFile` and `Bluez`, the choices are signed
+    For `File`, `Stdin`, `Stdout` and `RawFile`, the choices are signed
     little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
     - [S16_LE](sample_formats.md#s16_le)
     - [S24_3_LE](sample_formats.md#s24_3_le)
@@ -1471,37 +1342,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
   ### CoreAudio
   See the [separate readme for CoreAudio](./backend_coreaudio.md#configuration-of-devices).
 
-  ### Pulse
-  The `Pulse` capture and playback devices have no advanced options.
-
-  Example config for Pulse:
-  ```
-    capture:
-      type: Pulse
-      channels: 2
-      device: "MySink.monitor"
-    playback:
-      type: Pulse
-      channels: 2
-      device: "alsa_output.pci-0000_03_00.6.analog-stereo"
-  ```
-
-  ### Jack
-  The `Jack` capture and playback devices do not have a `format` parameter, since they always uses the F32_LE format.
-  It seems that the `device` property should always be set to "default".
-  This parameter may be removed in a future version.
-
-  Example config for Jack:
-  ```
-    capture:
-      type: Jack
-      channels: 2
-      device: "default"
-    playback:
-      type: Jack
-      channels: 2
-      device: "default"
-  ```
+  ### PipeWire
+  See the [separate readme for PipeWire](./backend_pipewire.md).
 
   ### Channel labels
   All capture device types have an optional `labels` property.

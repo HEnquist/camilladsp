@@ -32,13 +32,6 @@
     allow(clippy::unnecessary_cast, clippy::excessive_precision)
 )]
 
-// These two are aliased to shorter names used throughout the pulse backend,
-// so the `extern crate ... as ...` renames are required and not redundant.
-#[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-extern crate libpulse_binding as pulse;
-#[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-extern crate libpulse_simple_binding as psimple;
-
 #[macro_use]
 extern crate log;
 
@@ -124,9 +117,6 @@ pub mod config;
 /// CoreAudio backend (macOS only).
 #[cfg(target_os = "macos")]
 pub mod coreaudio_backend;
-/// CPAL/JACK audio backend (requires `cpal-backend` feature).
-#[cfg(feature = "cpal-backend")]
-pub mod cpal_backend;
 /// Top-level engine: device startup, supervisor loop, and restart logic.
 pub mod engine;
 /// Structural wrapper for pipeline signals and channels.
@@ -150,9 +140,6 @@ pub mod pipewire_backend;
 pub mod processing;
 /// Audio processor implementations and the [`processors::Processor`] trait.
 pub mod processors;
-/// PulseAudio backend (Linux only, requires `pulse-backend` feature).
-#[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-pub mod pulse_backend;
 /// Signal-level event notifications for WebSocket subscribers.
 pub mod signal_monitor;
 /// FFT-based spectrum analysis and the audio ring buffer.
@@ -655,20 +642,9 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         playbacktypes.push("Alsa".to_owned());
         capturetypes.push("Alsa".to_owned());
     }
-    if cfg!(all(target_os = "linux", feature = "pulse-backend")) {
-        playbacktypes.push("Pulse".to_owned());
-        capturetypes.push("Pulse".to_owned());
-    }
     if cfg!(all(target_os = "linux", feature = "pipewire-backend")) {
         playbacktypes.push("PipeWire".to_owned());
         capturetypes.push("PipeWire".to_owned());
-    }
-    if cfg!(all(target_os = "linux", feature = "bluez-backend")) {
-        capturetypes.push("Bluez".to_owned());
-    }
-    if cfg!(all(target_os = "linux", feature = "jack-backend")) {
-        playbacktypes.push("Jack".to_owned());
-        capturetypes.push("Jack".to_owned());
     }
     if cfg!(target_os = "macos") {
         playbacktypes.push("CoreAudio".to_owned());

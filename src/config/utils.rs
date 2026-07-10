@@ -217,14 +217,6 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             CaptureDevice::Alsa { channels, .. } => {
                 *channels = chans;
             }
-            #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez(dev) => {
-                dev.channels = chans;
-            }
-            #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-            CaptureDevice::Pulse { channels, .. } => {
-                *channels = chans;
-            }
             #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { channels, .. } => {
                 *channels = chans;
@@ -240,19 +232,6 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             #[cfg(all(target_os = "windows", feature = "asio-backend"))]
             CaptureDevice::Asio(dev) => {
                 dev.channels = chans;
-            }
-            #[cfg(all(
-                feature = "cpal-backend",
-                feature = "jack-backend",
-                any(
-                    target_os = "linux",
-                    target_os = "dragonfly",
-                    target_os = "freebsd",
-                    target_os = "netbsd"
-                )
-            ))]
-            CaptureDevice::Jack { channels, .. } => {
-                *channels = chans;
             }
             CaptureDevice::SignalGenerator { channels, .. } => {
                 *channels = chans;
@@ -273,14 +252,6 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             CaptureDevice::Alsa { format, .. } => {
                 let mapped_format = AlsaSampleFormat::from_binary_format(&fmt);
                 *format = Some(mapped_format);
-            }
-            #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez(dev) => {
-                dev.format = fmt;
-            }
-            #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-            CaptureDevice::Pulse { .. } => {
-                error!("Not possible to override capture format for Pulse, ignoring");
             }
             #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { .. } => {
@@ -317,19 +288,6 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                     let msg = format!("ASIO does not have a sample format corresponding to {fmt}");
                     return Err(ConfigError::new(&msg).into());
                 }
-            }
-            #[cfg(all(
-                feature = "cpal-backend",
-                feature = "jack-backend",
-                any(
-                    target_os = "linux",
-                    target_os = "dragonfly",
-                    target_os = "freebsd",
-                    target_os = "netbsd"
-                )
-            ))]
-            CaptureDevice::Jack { .. } => {
-                error!("Not possible to override capture format for Jack, ignoring");
             }
             CaptureDevice::SignalGenerator { .. } => {}
         }

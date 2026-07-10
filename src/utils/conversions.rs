@@ -21,10 +21,6 @@ use crate::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
 use audioadapter::{Adapter, AdapterMut};
 use audioadapter_buffers::number_to_float::InterleavedNumbers;
 use audioadapter_sample::sample::{F32_LE, F64_LE, I16_LE, I24_4LJ_LE, I24_4RJ_LE, I24_LE, I32_LE};
-#[cfg(feature = "cpal-backend")]
-use num_traits;
-#[cfg(feature = "cpal-backend")]
-use std::collections::VecDeque;
 
 fn chunk_to_buffer_with_adapter<A>(
     chunk: AudioChunk,
@@ -276,191 +272,11 @@ pub fn buffer_to_chunk_rawbytes(
     }
 }
 
-/// Convert an AudioChunk to an interleaved queue of ints, only used by CPAL backend.
-#[cfg(feature = "cpal-backend")]
-pub fn chunk_to_queue_int<T: num_traits::cast::NumCast>(
-    chunk: &AudioChunk,
-    queue: &mut VecDeque<T>,
-    scalefactor: PrcFmt,
-) -> usize {
-    let _num_samples = chunk.channels * chunk.frames;
-    let mut value: T;
-    let mut clipped = 0;
-    let mut peak = 0.0;
-    let maxval = if (scalefactor >= 2_147_483_648.0) && cfg!(feature = "32bit") {
-        (scalefactor - 128.0) / scalefactor
-    } else {
-        (scalefactor - 1.0) / scalefactor
-    };
-    let minval = -1.0;
-    for frame in 0..chunk.frames {
-        for chan in 0..chunk.channels {
-            let mut float_val = if chunk.waveforms[chan].is_empty() {
-                0.0
-            } else {
-                chunk.waveforms[chan][frame]
-            };
-            if float_val > maxval {
-                clipped += 1;
-                if float_val > peak {
-                    peak = float_val;
-                }
-                float_val = maxval;
-            } else if float_val < minval {
-                clipped += 1;
-                if -float_val > peak {
-                    peak = -float_val;
-                }
-                float_val = minval;
-            }
-            value = match num_traits::cast(float_val * scalefactor) {
-                Some(val) => val,
-                None => {
-                    debug!("bad float {}", float_val);
-                    num_traits::cast(0.0).unwrap()
-                }
-            };
-            queue.push_back(value);
-        }
-    }
-    if clipped > 0 {
-        warn!(
-            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
-            clipped,
-            20.0 * peak.log10(),
-            peak * 100.0
-        );
-    }
-    clipped
-}
-
-/// Convert a buffer of interleaved ints to an AudioChunk, only used by CPAL backend.
-#[cfg(feature = "cpal-backend")]
-pub fn queue_to_chunk_int<T: num_traits::cast::AsPrimitive<PrcFmt>>(
-    queue: &mut VecDeque<T>,
-    num_frames: usize,
-    channels: usize,
-    scalefactor: PrcFmt,
-) -> AudioChunk {
-    let mut value: PrcFmt;
-    let mut maxvalue: PrcFmt = 0.0;
-    let mut minvalue: PrcFmt = 0.0;
-    let mut wfs = Vec::with_capacity(channels);
-    for _chan in 0..channels {
-        wfs.push(Vec::with_capacity(num_frames));
-    }
-    for _frame in 0..num_frames {
-        for wf in wfs.iter_mut().take(channels) {
-            value = queue.pop_front().unwrap().as_();
-            value /= scalefactor;
-            if value > maxvalue {
-                maxvalue = value;
-            }
-            if value < minvalue {
-                minvalue = value;
-            }
-            wf.push(value);
-        }
-    }
-    AudioChunk::new(wfs, maxvalue, minvalue, num_frames, num_frames)
-}
-
-/// Convert an AudioChunk to an interleaved buffer of floats, only used by cpal backend.
-#[cfg(feature = "cpal-backend")]
-pub fn chunk_to_queue_float<T: num_traits::cast::NumCast>(
-    chunk: &AudioChunk,
-    queue: &mut VecDeque<T>,
-) -> usize {
-    let _num_samples = chunk.channels * chunk.frames;
-    //let mut buf = Vec::with_capacity(num_samples);
-    let mut value: T;
-    let mut clipped = 0;
-    let mut peak = 0.0;
-    let maxval = 1.0;
-    let minval = -1.0;
-    for frame in 0..chunk.frames {
-        for chan in 0..chunk.channels {
-            let mut float_val = if chunk.waveforms[chan].is_empty() {
-                0.0
-            } else {
-                chunk.waveforms[chan][frame]
-            };
-            if float_val > maxval {
-                clipped += 1;
-                if float_val > peak {
-                    peak = float_val;
-                }
-                float_val = maxval;
-            } else if float_val < minval {
-                clipped += 1;
-                if -float_val > peak {
-                    peak = -float_val;
-                }
-                float_val = minval;
-            }
-            value = match num_traits::cast(float_val) {
-                Some(val) => val,
-                None => {
-                    debug!("bad float{}", float_val);
-                    num_traits::cast(0.0).unwrap()
-                }
-            };
-            queue.push_back(value);
-        }
-    }
-    if clipped > 0 {
-        warn!(
-            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
-            clipped,
-            20.0 * peak.log10(),
-            peak * 100.0
-        );
-    }
-    clipped
-}
-
-/// Convert a buffer of interleaved floats to an AudioChunk, only used by CPAL backend.
-#[cfg(feature = "cpal-backend")]
-pub fn queue_to_chunk_float<T: num_traits::cast::AsPrimitive<PrcFmt>>(
-    queue: &mut VecDeque<T>,
-    num_frames: usize,
-    channels: usize,
-) -> AudioChunk {
-    let mut value: PrcFmt;
-    let mut maxvalue: PrcFmt = 0.0;
-    let mut minvalue: PrcFmt = 0.0;
-    let mut wfs = Vec::with_capacity(channels);
-    for _chan in 0..channels {
-        wfs.push(Vec::with_capacity(num_frames));
-    }
-    for _frame in 0..num_frames {
-        for wf in wfs.iter_mut().take(channels) {
-            value = queue.pop_front().unwrap().as_();
-            if value > maxvalue {
-                maxvalue = value;
-            }
-            if value < minvalue {
-                minvalue = value;
-            }
-            wf.push(value);
-        }
-    }
-    AudioChunk::new(wfs, maxvalue, minvalue, num_frames, num_frames)
-}
-
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "cpal-backend")]
-    use crate::PrcFmt;
     use crate::audiochunk::AudioChunk;
     use crate::config::BinarySampleFormat;
     use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-    #[cfg(feature = "cpal-backend")]
-    use crate::utils::conversions::{
-        chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
-    };
-    #[cfg(feature = "cpal-backend")]
-    use std::collections::VecDeque;
 
     #[test]
     fn to_buffer_int16() {
@@ -757,33 +573,5 @@ mod tests {
             false,
         );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
-    }
-
-    #[cfg(feature = "cpal-backend")]
-    #[test]
-    fn to_from_queue_i16() {
-        let bits = 16;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
-        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
-        let mut queue = VecDeque::<i16>::new();
-        chunk_to_queue_int(&chunk, &mut queue, scalefactor);
-        assert_eq!(queue.len(), 3);
-        let chunk2 = queue_to_chunk_int(&mut queue, 3, 1, scalefactor);
-        assert_eq!(waveforms[0], chunk2.waveforms[0]);
-        assert_eq!(queue.len(), 0);
-    }
-
-    #[cfg(feature = "cpal-backend")]
-    #[test]
-    fn to_from_queue_f32() {
-        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
-        let mut queue = VecDeque::<f32>::new();
-        chunk_to_queue_float(&chunk, &mut queue);
-        assert_eq!(queue.len(), 3);
-        let chunk2 = queue_to_chunk_float(&mut queue, 3, 1);
-        assert_eq!(waveforms[0], chunk2.waveforms[0]);
-        assert_eq!(queue.len(), 0);
     }
 }

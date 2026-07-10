@@ -336,18 +336,6 @@ pub enum CaptureDevice {
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
     },
-    #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-    #[serde(alias = "BLUEZ", alias = "bluez")]
-    Bluez(CaptureDeviceBluez),
-    #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-    #[serde(alias = "PULSE", alias = "pulse")]
-    Pulse {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-        #[serde(default)]
-        labels: Option<Vec<Option<String>>>,
-    },
     #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
     #[serde(alias = "PIPEWIRE", alias = "pipewire")]
     PipeWire {
@@ -377,24 +365,6 @@ pub enum CaptureDevice {
     #[cfg(all(target_os = "windows", feature = "asio-backend"))]
     #[serde(alias = "ASIO", alias = "asio")]
     Asio(CaptureDeviceAsio),
-    #[cfg(all(
-        feature = "cpal-backend",
-        feature = "jack-backend",
-        any(
-            target_os = "linux",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "netbsd"
-        )
-    ))]
-    #[serde(alias = "JACK", alias = "jack")]
-    Jack {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-        #[serde(default)]
-        labels: Option<Vec<Option<String>>>,
-    },
     SignalGenerator {
         #[serde(deserialize_with = "validate_nonzero_usize")]
         channels: usize,
@@ -409,10 +379,6 @@ impl CaptureDevice {
         match self {
             #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { channels, .. } => *channels,
-            #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez(dev) => dev.channels,
-            #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-            CaptureDevice::Pulse { channels, .. } => *channels,
             #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { channels, .. } => *channels,
             CaptureDevice::RawFile(dev) => dev.channels,
@@ -426,17 +392,6 @@ impl CaptureDevice {
             CaptureDevice::Wasapi(dev) => dev.channels,
             #[cfg(all(target_os = "windows", feature = "asio-backend"))]
             CaptureDevice::Asio(dev) => dev.channels,
-            #[cfg(all(
-                feature = "cpal-backend",
-                feature = "jack-backend",
-                any(
-                    target_os = "linux",
-                    target_os = "dragonfly",
-                    target_os = "freebsd",
-                    target_os = "netbsd"
-                )
-            ))]
-            CaptureDevice::Jack { channels, .. } => *channels,
             CaptureDevice::SignalGenerator { channels, .. } => *channels,
         }
     }
@@ -445,10 +400,6 @@ impl CaptureDevice {
         match self {
             #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { labels, .. } => labels.clone(),
-            #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez(dev) => dev.labels.clone(),
-            #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-            CaptureDevice::Pulse { labels, .. } => labels.clone(),
             #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { labels, .. } => labels.clone(),
             CaptureDevice::RawFile(dev) => dev.labels.clone(),
@@ -460,17 +411,6 @@ impl CaptureDevice {
             CaptureDevice::Wasapi(dev) => dev.labels.clone(),
             #[cfg(all(target_os = "windows", feature = "asio-backend"))]
             CaptureDevice::Asio(dev) => dev.labels.clone(),
-            #[cfg(all(
-                feature = "cpal-backend",
-                feature = "jack-backend",
-                any(
-                    target_os = "linux",
-                    target_os = "dragonfly",
-                    target_os = "freebsd",
-                    target_os = "netbsd"
-                )
-            ))]
-            CaptureDevice::Jack { labels, .. } => labels.clone(),
             CaptureDevice::SignalGenerator { labels, .. } => labels.clone(),
         }
     }
@@ -562,29 +502,6 @@ impl CaptureDeviceStdin {
     }
 }
 
-#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct CaptureDeviceBluez {
-    #[serde(default)]
-    service: Option<String>,
-    // TODO: Allow the user to specify mac address rather than D-Bus path
-    pub dbus_path: String,
-    // TODO: sample format, sample rate and channel count should be determined
-    // from D-Bus properties
-    pub format: BinarySampleFormat,
-    pub channels: usize,
-    #[serde(default)]
-    pub labels: Option<Vec<Option<String>>>,
-}
-
-#[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-impl CaptureDeviceBluez {
-    pub fn service(&self) -> String {
-        self.service.clone().unwrap_or("org.bluealsa".to_string())
-    }
-}
-
 #[cfg(target_os = "windows")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -657,13 +574,6 @@ pub enum PlaybackDevice {
         #[serde(default)]
         format: Option<AlsaSampleFormat>,
     },
-    #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-    #[serde(alias = "PULSE", alias = "pulse")]
-    Pulse {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-    },
     #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
     #[serde(alias = "PIPEWIRE", alias = "pipewire")]
     PipeWire {
@@ -708,22 +618,6 @@ pub enum PlaybackDevice {
     #[cfg(all(target_os = "windows", feature = "asio-backend"))]
     #[serde(alias = "ASIO", alias = "asio")]
     Asio(PlaybackDeviceAsio),
-    #[cfg(all(
-        feature = "cpal-backend",
-        feature = "jack-backend",
-        any(
-            target_os = "linux",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "netbsd"
-        )
-    ))]
-    #[serde(alias = "JACK", alias = "jack")]
-    Jack {
-        #[serde(deserialize_with = "validate_nonzero_usize")]
-        channels: usize,
-        device: String,
-    },
 }
 
 impl PlaybackDevice {
@@ -731,8 +625,6 @@ impl PlaybackDevice {
         match self {
             #[cfg(target_os = "linux")]
             PlaybackDevice::Alsa { channels, .. } => *channels,
-            #[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-            PlaybackDevice::Pulse { channels, .. } => *channels,
             #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             PlaybackDevice::PipeWire { channels, .. } => *channels,
             PlaybackDevice::File { channels, .. } => *channels,
@@ -743,17 +635,6 @@ impl PlaybackDevice {
             PlaybackDevice::Wasapi(dev) => dev.channels,
             #[cfg(all(target_os = "windows", feature = "asio-backend"))]
             PlaybackDevice::Asio(dev) => dev.channels,
-            #[cfg(all(
-                feature = "cpal-backend",
-                feature = "jack-backend",
-                any(
-                    target_os = "linux",
-                    target_os = "dragonfly",
-                    target_os = "freebsd",
-                    target_os = "netbsd"
-                )
-            ))]
-            PlaybackDevice::Jack { channels, .. } => *channels,
         }
     }
 }

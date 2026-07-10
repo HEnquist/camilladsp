@@ -34,12 +34,6 @@ jobs:
       - name: Install PipeWire development files
         run: sudo apt-get install libpipewire-0.3-dev -y
 
-      - name: Install PulseAudio
-        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpulse0 libpulse-dev -y
-
-      - name: Install Jack
-        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libjack-dev -y
-
       - name: Install OpenSSL
         run: sudo apt-get install openssl libssl-dev -y
 
@@ -50,7 +44,7 @@ jobs:
         run: cargo check --no-default-features
 
       - name: Run cargo test with all supported backends
-        run: cargo test --features bluez-backend,cpal-backend,jack-backend,pulse-backend,pipewire-backend
+        run: cargo test --features pipewire-backend
 
       - name: Run cargo test with all optional features
         run: cargo test --features 32bit,debug,secure-websocket
