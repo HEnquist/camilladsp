@@ -27,7 +27,7 @@ use std::error::Error;
 use std::fs::File;
 #[cfg(target_os = "linux")]
 use std::fs::OpenOptions;
-use std::io::{Write, stdin, stdout};
+use std::io::{Seek, Write, stdin, stdout};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::{Arc, Barrier};
@@ -112,8 +112,15 @@ fn open_playback_sink(
 ) -> Res<PlaybackSink> {
     match destination {
         PlaybackDest::Filename(filename) => {
-            let file = File::create(&filename)?;
-            if wav_header {
+            let mut file = File::create(&filename)?;
+            if !wav_header {
+                return Ok(PlaybackSink::Plain(Box::new(file)));
+            }
+            // A regular file is seekable, but the filename may point at a pipe or
+            // /dev/stdout, which is not. Only a seekable file can have its header
+            // sizes patched on finish or hold an RF64 ds64 chunk; other targets get
+            // a streaming header with placeholder sizes.
+            if file.stream_position().is_ok() {
                 let spec = WavSpec::new(channels, samplerate, to_wave_format(sample_format)?);
                 let writer = if use_rf64 {
                     WavWriter::new_rf64(file, spec)?
@@ -122,6 +129,12 @@ fn open_playback_sink(
                 };
                 Ok(PlaybackSink::SeekableWav(writer))
             } else {
+                if use_rf64 {
+                    warn!(
+                        "RF64 output requires a seekable file, writing a streaming wav header instead"
+                    );
+                }
+                write_wav_header(&mut file, channels, sample_format, samplerate)?;
                 Ok(PlaybackSink::Plain(Box::new(file)))
             }
         }
@@ -220,7 +233,6 @@ impl PlaybackDevice for FilePlaybackDevice {
         let handle = thread::Builder::new()
             .name("FilePlayback".to_string())
             .spawn(move || {
-                let seekable = matches!(destination, PlaybackDest::Filename(_));
                 let sink_res = open_playback_sink(
                     destination,
                     wav_header,
@@ -246,9 +258,10 @@ impl PlaybackDevice for FilePlaybackDevice {
                         let mut wav_data_bytes: u64 = 0;
                         // A seekable plain wav file is capped at the 4 GB RIFF limit, since
                         // its size fields are patched with real u32 values on finish. RF64
-                        // output has no limit, and a streaming (stdout) wav keeps its u32::MAX
-                        // placeholder sizes, so it can run past 4 GB and be read to EOF.
-                        let capped = seekable && wav_header && !use_rf64;
+                        // output has no limit, and a streaming wav (stdout or a non-seekable
+                        // file) keeps its u32::MAX placeholder sizes, so it can run past 4 GB
+                        // and be read to EOF.
+                        let capped = matches!(sink, PlaybackSink::SeekableWav(_)) && !use_rf64;
                         let playback_error = loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
