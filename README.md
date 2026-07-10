@@ -1344,24 +1344,26 @@ A parameter marked (*) in any example is optional. If they are left out from the
   The `File` and `Stdout` playback devices can write a wav-header to the output.
   Enable this by setting `wav_header` to `true`.
   Setting it to `false`, `null`, or leaving it out disables the wav header.
-  For the `File` device the header size fields are updated with the correct values
-  when playback stops (the file is seekable, so the header is patched at the end).
-  For the `Stdout` device the header is a _streaming_ header with a dummy value for
-  the file length, since a pipe cannot be rewound. Most applications ignore this and
-  calculate the correct length from the file size.
+
+  How the header is written depends on whether the output is seekable:
+  - A regular file is seekable, and its header size fields are patched with the correct
+    values when playback stops.
+  - A non-seekable output (`Stdout`, or the `File` device pointed at a pipe or `/dev/stdout`)
+    gets a _streaming_ header with a placeholder length, since it cannot be rewound. Most
+    applications ignore this and use the actual stream length.
+
   The wav format does not support right justified padded data, and therefore it is not
   possible to enable the wav-header if the format is `S24_4_RJ_LE`.
 
-  A plain wav file is limited to 4 GB. When this limit is reached, `File` playback stops
-  to avoid writing an invalid file. To record larger files, set `use_rf64` to `true`,
-  which writes an RF64 header that can hold the 64-bit sizes. This option applies only to
-  the `File` device (RF64 requires a seekable output) and is ignored without `wav_header`.
-  The streaming header used by `Stdout` has no such limit, since its size fields are left
-  at a placeholder and readers use the stream length instead.
+  A plain wav file is limited to 4 GB. A seekable file stops when it reaches this limit,
+  to avoid writing an invalid file; set `use_rf64` to `true` to write an RF64 header that
+  holds 64-bit sizes instead. RF64 needs a seekable file, so it is ignored (with a warning)
+  for non-seekable outputs and without `wav_header`. A streaming header has no such limit.
 
   To read from a wav file, use the `WavFile` capture device.
   The samplerate and number of channels of the file is used to override the values in the config,
   similar to how these values can be [overridden from the command line](#overriding-config-values).
+  Both plain wav and RF64 files (larger than 4 GB) are supported.
   Note that `WavFile` only supports reading from files. Reading from a pipe is not supported.
 
   Example config for raw files:
