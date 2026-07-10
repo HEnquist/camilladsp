@@ -166,6 +166,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             filename,
             format,
             wav_header,
+            use_rf64,
             ..
         } => Box::new(filedevice::FilePlaybackDevice {
             destination: filedevice::PlaybackDest::Filename(filename),
@@ -174,6 +175,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             sample_format: format,
             wav_header: wav_header.unwrap_or(false),
+            use_rf64: use_rf64.unwrap_or(false),
         }),
         config::PlaybackDevice::Stdout {
             channels,
@@ -187,6 +189,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             channels,
             sample_format: format,
             wav_header: wav_header.unwrap_or(false),
+            use_rf64: false,
         }),
         #[cfg(target_os = "macos")]
         config::PlaybackDevice::CoreAudio(ref dev) => {

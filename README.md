@@ -1344,10 +1344,18 @@ A parameter marked (*) in any example is optional. If they are left out from the
   The `File` and `Stdout` playback devices can write a wav-header to the output.
   Enable this by setting `wav_header` to `true`.
   Setting it to `false`, `null`, or leaving it out disables the wav header.
-  This is a _streaming_ header, meaning it contains a dummy value for the file length.
-  Most applications ignore this and calculate the correct length from the file size.
+  For the `File` device the header size fields are updated with the correct values
+  when playback stops (the file is seekable, so the header is patched at the end).
+  For the `Stdout` device the header is a _streaming_ header with a dummy value for
+  the file length, since a pipe cannot be rewound. Most applications ignore this and
+  calculate the correct length from the file size.
   The wav format does not support right justified padded data, and therefore it is not
   possible to enable the wav-header if the format is `S24_4_RJ_LE`.
+
+  A plain wav file is limited to 4 GB. When this limit is reached, `File` playback stops
+  to avoid writing an invalid file. To record larger files, set `use_rf64` to `true`,
+  which writes an RF64 header that can hold the 64-bit sizes. This option applies only to
+  the `File` device (RF64 requires a seekable output) and is ignored without `wav_header`.
 
   To read from a wav file, use the `WavFile` capture device.
   The samplerate and number of channels of the file is used to override the values in the config,

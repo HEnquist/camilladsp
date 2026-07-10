@@ -686,6 +686,10 @@ pub enum PlaybackDevice {
         format: BinarySampleFormat,
         #[serde(default)]
         wav_header: Option<bool>,
+        /// Write an RF64 header so the file can grow past the 4 GB limit of plain
+        /// wav. Only applies when `wav_header` is true; ignored otherwise.
+        #[serde(default)]
+        use_rf64: Option<bool>,
     },
     #[serde(alias = "STDOUT", alias = "stdout")]
     Stdout {
