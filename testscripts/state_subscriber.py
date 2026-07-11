@@ -8,39 +8,37 @@ WS_URL = "ws://127.0.0.1:1234"
 # CamillaDSP websocket state streaming quick reference:
 #
 # Subscribe command:
-#   "SubscribeState"
+#   {"command": "SubscribeState"}
 #
 # Stop command:
-#   "StopSubscription"
+#   {"command": "StopSubscription"}
 #
 # Typical pushed response while running:
 # {
-#   "StateEvent": {
-#     "result": "Ok",
-#     "value": {
-#       "state": "Running"
-#     }
+#   "reply": "StateEvent",
+#   "result": "Ok",
+#   "value": {
+#     "state": "Running"
 #   }
 # }
 #
 # Typical pushed response when stopped/inactive:
 # {
-#   "StateEvent": {
-#     "result": "Ok",
-#     "value": {
-#       "state": "Inactive",
-#       "stop_reason": "Done"
-#     }
+#   "reply": "StateEvent",
+#   "result": "Ok",
+#   "value": {
+#     "state": "Inactive",
+#     "stop_reason": "Done"
 #   }
 # }
 
 ws = websocket.create_connection(WS_URL)
 
 # Command 1: start streaming processing state changes.
-ws.send(json.dumps("SubscribeState"))
+ws.send(json.dumps({"command": "SubscribeState"}))
 
 start_reply = json.loads(ws.recv())
-start_status = start_reply.get("SubscribeState", {}).get("result")
+start_status = start_reply.get("result")
 if start_status != "Ok":
     raise RuntimeError(f"Failed to start subscription: {start_reply}")
 
@@ -50,9 +48,8 @@ try:
     while True:
         message = ws.recv()
         payload = json.loads(message)
-        event = payload.get("StateEvent")
-        if event:
-            value = event.get("value", {})
+        if payload.get("reply") == "StateEvent":
+            value = payload.get("value", {})
             state = value.get("state")
             stop_reason = value.get("stop_reason")
             timestamp = datetime.now().isoformat(timespec="milliseconds")
@@ -64,10 +61,10 @@ except KeyboardInterrupt:
     print("Stopping state subscription...")
 
     # Command 2: stop the active subscription.
-    ws.send(json.dumps("StopSubscription"))
+    ws.send(json.dumps({"command": "StopSubscription"}))
 
     stop_reply = json.loads(ws.recv())
-    stop_status = stop_reply.get("StopSubscription", {}).get("result")
+    stop_status = stop_reply.get("result")
     if stop_status != "Ok":
         raise RuntimeError(f"Failed to stop subscription: {stop_reply}")
 

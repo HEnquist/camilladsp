@@ -4,20 +4,6 @@ use serde_json;
 use crate::spectrum::SpectrumData;
 use crate::{AudioDeviceDescriptor, ProcessingState, StopReason};
 
-/// Volume adjustment: either a plain delta or a delta with explicit min/max limits.
-///
-/// The plain form is a bare number (e.g. `-3.0`);
-/// the limited form is a three-element array (e.g. `[-3.0, -50.0, 10.0]`).
-/// All values are in dB.
-#[derive(Debug, PartialEq, Deserialize)]
-#[serde(untagged)]
-pub(crate) enum ValueWithOptionalLimits {
-    /// Adjust by `delta` dB, clamped to the global −150 to +50 dB range.
-    Plain(f32),
-    /// Adjust by `delta` dB, clamped to `[min, max]` instead of the global range.
-    Limited(f32, f32, f32),
-}
-
 /// Side selector for [`WsCommand::SubscribeSignalLevels`] subscriptions.
 ///
 /// Serialised as a lowercase string: `"playback"`, `"capture"`, or `"both"`.
@@ -105,28 +91,29 @@ pub(crate) struct VuSubscription {
 
 /// All commands accepted by the websocket server.
 ///
-/// Commands without arguments are serialised as a plain JSON string, e.g. `"GetVersion"`.
-/// Commands with arguments are serialised as a JSON object with one key, e.g.
-/// `{"SetUpdateInterval": 500}`.
+/// Every command is a JSON object with a `"command"` field holding the command name.
+/// Commands with arguments carry them in additional named fields, e.g.
+/// `{"command": "SetUpdateInterval", "value": 500}`.
 ///
 /// See the [module-level documentation](self) for the general message format.
 #[derive(Debug, PartialEq, Deserialize)]
+#[serde(tag = "command")]
 pub(crate) enum WsCommand {
     // ── Config management ──────────────────────────────────────────────────
     /// Change the active config file path. Not applied until [`Reload`](Self::Reload) is called.
     ///
     /// Argument: file path as a string.
-    SetConfigFilePath(String),
+    SetConfigFilePath { value: String },
 
     /// Upload and immediately apply a new configuration as a YAML string.
     ///
     /// Argument: config in YAML format as a string.
-    SetConfig(String),
+    SetConfig { value: String },
 
     /// Upload and immediately apply a new configuration as a JSON string.
     ///
     /// Argument: config in JSON format as a string.
-    SetConfigJson(String),
+    SetConfigJson { value: String },
 
     /// Apply a partial patch to the active configuration.
     ///
@@ -134,13 +121,16 @@ pub(crate) enum WsCommand {
     /// If the resulting config is valid it is applied immediately.
     ///
     /// Argument: partial config as a JSON value.
-    PatchConfig(serde_json::Value),
+    PatchConfig { value: serde_json::Value },
 
     /// Set a single value in the active configuration using a JSON Pointer (RFC 6901).
     ///
-    /// Arguments: `[pointer, value]` where `pointer` is a JSON Pointer string such as
-    /// `"/devices/samplerate"`.
-    SetConfigValue(String, serde_json::Value),
+    /// Fields: `pointer` is a JSON Pointer string such as `"/devices/samplerate"`, and `value`
+    /// is the JSON value to store there.
+    SetConfigValue {
+        pointer: String,
+        value: serde_json::Value,
+    },
 
     /// Reload the current config file from disk. Equivalent to sending `SIGHUP`.
     Reload,
@@ -151,7 +141,7 @@ pub(crate) enum WsCommand {
     /// Read a single value from the active configuration using a JSON Pointer (RFC 6901).
     ///
     /// Argument: JSON Pointer string, e.g. `"/devices/samplerate"`.
-    GetConfigValue(String),
+    GetConfigValue { value: String },
 
     /// Read the `title` field from the active configuration.
     GetConfigTitle,
@@ -165,27 +155,27 @@ pub(crate) enum WsCommand {
     /// Parse and fill defaults for a YAML config string without changing the active config.
     ///
     /// Argument: config in YAML format as a string.
-    ReadConfig(String),
+    ReadConfig { value: String },
 
     /// Parse and fill defaults for a JSON config string without changing the active config.
     ///
     /// Argument: config in JSON format as a string.
-    ReadConfigJson(String),
+    ReadConfigJson { value: String },
 
     /// Parse and fill defaults for a config file without changing the active config.
     ///
     /// Argument: path to the config file as a string.
-    ReadConfigFile(String),
+    ReadConfigFile { value: String },
 
     /// Like [`ReadConfig`](Self::ReadConfig) but performs more extensive validation checks.
     ///
     /// Argument: config in YAML format as a string.
-    ValidateConfig(String),
+    ValidateConfig { value: String },
 
     /// Like [`ReadConfigJson`](Self::ReadConfigJson) but performs more extensive validation checks.
     ///
     /// Argument: config in JSON format as a string.
-    ValidateConfigJson(String),
+    ValidateConfigJson { value: String },
 
     /// Read the active configuration as JSON.
     GetConfigJson,
@@ -212,7 +202,7 @@ pub(crate) enum WsCommand {
     /// Get the RMS level averaged over the last `n` seconds on the capture side, per channel.
     ///
     /// Argument: time window in seconds as a float.
-    GetCaptureSignalRmsSince(f32),
+    GetCaptureSignalRmsSince { value: f32 },
 
     /// Get the RMS level since the last call to this command from this client, per channel.
     ///
@@ -226,7 +216,7 @@ pub(crate) enum WsCommand {
     /// Get the peak level over the last `n` seconds on the capture side, per channel.
     ///
     /// Argument: time window in seconds as a float.
-    GetCaptureSignalPeakSince(f32),
+    GetCaptureSignalPeakSince { value: f32 },
 
     /// Get the peak level since the last call to this command from this client, per channel.
     GetCaptureSignalPeakSinceLast,
@@ -237,7 +227,7 @@ pub(crate) enum WsCommand {
     /// Get the RMS level averaged over the last `n` seconds on the playback side, per channel.
     ///
     /// Argument: time window in seconds as a float.
-    GetPlaybackSignalRmsSince(f32),
+    GetPlaybackSignalRmsSince { value: f32 },
 
     /// Get the RMS level since the last call to this command from this client, per channel.
     GetPlaybackSignalRmsSinceLast,
@@ -248,7 +238,7 @@ pub(crate) enum WsCommand {
     /// Get the peak level over the last `n` seconds on the playback side, per channel.
     ///
     /// Argument: time window in seconds as a float.
-    GetPlaybackSignalPeakSince(f32),
+    GetPlaybackSignalPeakSince { value: f32 },
 
     /// Get the peak level since the last call to this command from this client, per channel.
     GetPlaybackSignalPeakSinceLast,
@@ -259,7 +249,7 @@ pub(crate) enum WsCommand {
     /// Get RMS and peak levels over the last `n` seconds for both sides.
     ///
     /// Argument: time window in seconds as a float.
-    GetSignalLevelsSince(f32),
+    GetSignalLevelsSince { value: f32 },
 
     /// Get RMS and peak levels since the last call to this command from this client, for both sides.
     GetSignalLevelsSinceLast,
@@ -271,7 +261,7 @@ pub(crate) enum WsCommand {
     /// While subscribed, CamillaDSP sends a [`WsReply::SignalLevelsEvent`] message each time a
     /// new chunk is analyzed. The event rate therefore depends on the configured chunk size and
     /// sample rate. Send [`StopSubscription`](Self::StopSubscription) to end the stream.
-    SubscribeSignalLevels(WsSignalLevelSide),
+    SubscribeSignalLevels { value: WsSignalLevelSide },
 
     /// Subscribe to smoothed, rate-capped VU-meter level events.
     ///
@@ -281,7 +271,7 @@ pub(crate) enum WsCommand {
     /// While subscribed, CamillaDSP sends [`WsReply::VuLevelsEvent`] messages containing
     /// smoothed `playback_rms`, `playback_peak`, `capture_rms`, and `capture_peak` vectors.
     /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
-    SubscribeVuLevels(VuSubscription),
+    SubscribeVuLevels { value: VuSubscription },
 
     /// Stop an active subscription (signal levels, VU levels, state, or spectrum).
     ///
@@ -316,7 +306,7 @@ pub(crate) enum WsCommand {
     /// Set the update interval for capture rate and signal range polling.
     ///
     /// Argument: interval in milliseconds as an integer.
-    SetUpdateInterval(usize),
+    SetUpdateInterval { value: usize },
 
     // ── Volume control (Main fader) ───────────────────────────────────────
     /// Get the current volume of the Main fader.
@@ -325,12 +315,19 @@ pub(crate) enum WsCommand {
     /// Set the volume of the Main fader. Clamped to −150 to +50 dB.
     ///
     /// Argument: volume in dB as a float.
-    SetVolume(f32),
+    SetVolume { value: f32 },
 
-    /// Adjust the volume of the Main fader by a delta in dB.
+    /// Adjust the volume of the Main fader by `value` dB.
     ///
-    /// Argument: either `delta` or `[delta, min, max]`.
-    AdjustVolume(ValueWithOptionalLimits),
+    /// The optional `min` and `max` fields clamp the resulting volume; when omitted they default
+    /// to the global −150 to +50 dB range.
+    AdjustVolume {
+        value: f32,
+        #[serde(default)]
+        min: Option<f32>,
+        #[serde(default)]
+        max: Option<f32>,
+    },
 
     /// Get the mute state of the Main fader.
     GetMute,
@@ -338,7 +335,7 @@ pub(crate) enum WsCommand {
     /// Set the mute state of the Main fader.
     ///
     /// Argument: `true` to mute, `false` to unmute.
-    SetMute(bool),
+    SetMute { value: bool },
 
     /// Toggle the mute state of the Main fader.
     ToggleMute,
@@ -349,39 +346,47 @@ pub(crate) enum WsCommand {
 
     /// Get the volume of a specific fader.
     ///
-    /// Argument: fader index — 0 for Main, 1–4 for Aux1–Aux4.
-    GetFaderVolume(usize),
+    /// Field: `fader` index — 0 for Main, 1–4 for Aux1–Aux4.
+    GetFaderVolume { fader: usize },
 
     /// Set the volume of a specific fader. Clamped to −150 to +50 dB.
     ///
-    /// Arguments: `[fader_index, volume_dB]`.
-    SetFaderVolume(usize, f32),
+    /// Fields: `fader` index and `value` (volume in dB).
+    SetFaderVolume { fader: usize, value: f32 },
 
     /// Special volume setter for use with a Loudness filter and an external volume control
     /// (without a Volume filter). Clamped to −150 to +50 dB.
     ///
-    /// Arguments: `[fader_index, volume_dB]`.
-    SetFaderExternalVolume(usize, f32),
+    /// Fields: `fader` index and `value` (volume in dB).
+    SetFaderExternalVolume { fader: usize, value: f32 },
 
-    /// Adjust the volume of a specific fader by a delta in dB.
+    /// Adjust the volume of a specific fader by `value` dB.
     ///
-    /// Arguments: `[fader_index, delta]` or `[fader_index, [delta, min, max]]`.
-    AdjustFaderVolume(usize, ValueWithOptionalLimits),
+    /// Fields: `fader` index and `value` (delta in dB). The optional `min` and `max` fields clamp
+    /// the resulting volume; when omitted they default to the global −150 to +50 dB range.
+    AdjustFaderVolume {
+        fader: usize,
+        value: f32,
+        #[serde(default)]
+        min: Option<f32>,
+        #[serde(default)]
+        max: Option<f32>,
+    },
 
     /// Get the mute state of a specific fader.
     ///
-    /// Argument: fader index.
-    GetFaderMute(usize),
+    /// Field: `fader` index.
+    GetFaderMute { fader: usize },
 
     /// Set the mute state of a specific fader.
     ///
-    /// Arguments: `[fader_index, mute_bool]`.
-    SetFaderMute(usize, bool),
+    /// Fields: `fader` index and `value` (`true` to mute).
+    SetFaderMute { fader: usize, value: bool },
 
     /// Toggle the mute state of a specific fader.
     ///
-    /// Argument: fader index.
-    ToggleFaderMute(usize),
+    /// Field: `fader` index.
+    ToggleFaderMute { fader: usize },
 
     // ── General ───────────────────────────────────────────────────────────
     /// Get the CamillaDSP version string.
@@ -411,27 +416,27 @@ pub(crate) enum WsCommand {
     // ── Audio device listing ──────────────────────────────────────────────
     /// List available capture devices for a given backend.
     ///
-    /// Argument: backend name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
-    GetAvailableCaptureDevices(String),
+    /// Field: `backend` name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+    GetAvailableCaptureDevices { backend: String },
 
     /// List available playback devices for a given backend.
     ///
-    /// Argument: backend name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
-    GetAvailablePlaybackDevices(String),
+    /// Field: `backend` name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+    GetAvailablePlaybackDevices { backend: String },
 
     /// Get the capabilities of a specific capture device.
     ///
-    /// Arguments: `[backend_name, device_name]`.
+    /// Fields: `backend` and `device` names.
     ///
     /// Errors: [`WsResult::DeviceNotFoundError`], [`WsResult::DeviceBusyError`], [`WsResult::DeviceError`].
-    GetCaptureDeviceCapabilities(String, String),
+    GetCaptureDeviceCapabilities { backend: String, device: String },
 
     /// Get the capabilities of a specific playback device.
     ///
-    /// Arguments: `[backend_name, device_name]`.
+    /// Fields: `backend` and `device` names.
     ///
     /// Errors: [`WsResult::DeviceNotFoundError`], [`WsResult::DeviceBusyError`], [`WsResult::DeviceError`].
-    GetPlaybackDeviceCapabilities(String, String),
+    GetPlaybackDeviceCapabilities { backend: String, device: String },
 
     // ── Performance ───────────────────────────────────────────────────────
     /// Get the current pipeline processing load.
@@ -442,7 +447,7 @@ pub(crate) enum WsCommand {
 
     // ── Spectrum analysis ─────────────────────────────────────────────────
     /// Compute a one-shot frequency spectrum from the audio currently passing through the pipeline.
-    GetSpectrum(SpectrumRequest),
+    GetSpectrum { value: SpectrumRequest },
 
     /// Subscribe to pushed spectrum events.
     ///
@@ -454,7 +459,7 @@ pub(crate) enum WsCommand {
     /// the subscription is cancelled. Resubscribe once processing has resumed.
     ///
     /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
-    SubscribeSpectrum(SpectrumSubscription),
+    SubscribeSpectrum { value: SpectrumSubscription },
 
     // ── Shutdown ──────────────────────────────────────────────────────────
     /// Stop processing and exit CamillaDSP.
@@ -472,8 +477,9 @@ pub(crate) enum WsCommand {
 
 /// Result status returned in every websocket response.
 ///
-/// Serialised as a JSON string (simple variants) or a JSON object with one key (variants with a
-/// message). See the [module-level documentation](self) for the full response format.
+/// Serialised as a JSON string (simple variants) or a JSON object with one key wrapping a
+/// `{ "message": ... }` object (variants that carry a message). See the
+/// [module-level documentation](self) for the full response format.
 #[derive(Debug, Eq, PartialEq, Serialize)]
 pub(crate) enum WsResult {
     /// The command succeeded.
@@ -487,31 +493,31 @@ pub(crate) enum WsResult {
     /// The configuration could be parsed but contains a logical error.
     ///
     /// Includes a message describing the problem.
-    ConfigValidationError(String),
+    ConfigValidationError { message: String },
     /// The configuration could not be read (file missing, YAML/JSON syntax error, etc.).
     ///
     /// Includes a message describing the problem.
-    ConfigReadError(String),
+    ConfigReadError { message: String },
     /// A parameter value was outside the accepted range.
     ///
     /// Includes a message describing the problem.
-    InvalidValueError(String),
+    InvalidValueError { message: String },
     /// The request itself was malformed or not valid in the current state.
     ///
     /// Includes a message describing the problem.
-    InvalidRequestError(String),
+    InvalidRequestError { message: String },
     /// The named audio device does not exist.
     ///
-    /// Includes the device name.
-    DeviceNotFoundError(String),
+    /// The `message` contains the device name.
+    DeviceNotFoundError { message: String },
     /// The audio device is currently in use and cannot be probed.
     ///
-    /// Includes the device name.
-    DeviceBusyError(String),
+    /// The `message` contains the device name.
+    DeviceBusyError { message: String },
     /// The device probe failed for another reason.
     ///
-    /// Includes a description.
-    DeviceError(String),
+    /// The `message` contains a description.
+    DeviceError { message: String },
     /// Processing stopped while a subscription was active.
     ///
     /// Sent as the final event of a spectrum subscription when processing stops.
@@ -600,9 +606,11 @@ pub(crate) struct StateUpdate {
 
 /// All possible reply messages sent by the websocket server.
 ///
-/// Each variant mirrors the corresponding [`WsCommand`] and is serialised as a JSON object
-/// keyed by the variant name, e.g. `{"GetVersion": {"result": "Ok", "value": "2.0.0"}}`.
+/// Each variant mirrors the corresponding [`WsCommand`]. Every reply is a JSON object with a
+/// `"reply"` field holding the reply name, e.g. `{"reply": "GetVersion", "result": "Ok",
+/// "value": "2.0.0"}`.
 #[derive(Debug, PartialEq, Serialize)]
+#[serde(tag = "reply")]
 pub(crate) enum WsReply {
     SetConfigFilePath {
         result: WsResult,

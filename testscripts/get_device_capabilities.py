@@ -45,14 +45,18 @@ def main():
             if args.direction == "capture"
             else "GetAvailablePlaybackDevices"
         )
-        command = {command_name: args.backend}
+        command = {"command": command_name, "backend": args.backend}
     else:
         command_name = (
             "GetCaptureDeviceCapabilities"
             if args.direction == "capture"
             else "GetPlaybackDeviceCapabilities"
         )
-        command = {command_name: [args.backend, args.device]}
+        command = {
+            "command": command_name,
+            "backend": args.backend,
+            "device": args.device,
+        }
 
     ws = websocket.create_connection(ws_url)
     try:

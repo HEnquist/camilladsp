@@ -14,33 +14,32 @@ Giving 0.0.0.0 will bind to all interfaces.
 
 
 ## Command syntax
-For commands without arguments, this is just a string *with the command name within quotes*:
-```
-"GetVersion"
-```
-For commands that take an argument, they are instead given as a key and a value:
+Every command is a JSON object with a `"command"` field holding the command name:
 ```json
-{"SetUpdateInterval": 500}
+{"command": "GetVersion"}
+```
+Commands that take arguments carry them in additional named fields:
+```json
+{"command": "SetUpdateInterval", "value": 500}
 ```
 
 The return values are also JSON (in string format).
-The commands that don't return a value return a structure containing the command name and the result,
-which is either Ok or Error:
+Every reply is a JSON object with a `"reply"` field holding the reply name and a `"result"` field,
+which is either Ok or an error.
+The commands that don't return a value reply with just the name and result:
 ```json
 {
-  "SetUpdateInterval": {
-    "result": "Ok"
-  }
+  "reply": "SetUpdateInterval",
+  "result": "Ok"
 }
 ```
 
 The commands that return a value also include a "value" field:
 ```json
 {
-  "GetUpdateInterval": {
-    "result": "Ok",
-    "value": 500
-  }
+  "reply": "GetUpdateInterval",
+  "result": "Ok",
+  "value": 500
 }
 ```
 
@@ -51,7 +50,7 @@ Your system/language may automatically do the "stringify" / "parse" processes au
 
 IE if you are using NodeJS/javascript then simply wrap your JSON object with JSON.stringify() before sending.
 ```
-ws.send(JSON.stringify({"SetUpdateInterval": 1000}))
+ws.send(JSON.stringify({"command": "SetUpdateInterval", "value": 1000}))
 ```
 
 Likewise on receiving the value from the websocket server, the JSON **will be in string format**.
@@ -70,8 +69,8 @@ ws.on('message', function message(data) {
       console.error('Parse error', err);
     }
 
-    if (parsed.hasOwnProperty('GetVolume')){
-      console.log('GetVolume response received', parsed.GetVolume.value);
+    if (parsed.reply === 'GetVolume'){
+      console.log('GetVolume response received', parsed.value);
     }
 });
 ```
@@ -207,9 +206,9 @@ Errors without a message are returned as a plain string:
 "result": "InvalidFaderError"
 ```
 
-Errors with a message are returned as a JSON object with one key:
+Errors with a message are returned as a JSON object with one key wrapping a `"message"` field:
 ```json
-"result": {"ConfigValidationError": "Description of the error"}
+"result": {"ConfigValidationError": {"message": "Description of the error"}}
 ```
 
 {% for err in errors %}
@@ -246,39 +245,39 @@ In [3]: ws = create_connection("ws://127.0.0.1:1234")
 
 ### Get the name of the current config file
 ```ipython
-In [4]: ws.send(json.dumps("GetConfigFilePath"))
-Out[4]: 19
+In [4]: ws.send(json.dumps({"command": "GetConfigFilePath"}))
+Out[4]: 34
 
 In [5]: print(ws.recv())
-{"GetConfigFilePath":{"result":"Ok","value":"/path/to/someconfig.yml"}}
+{"reply":"GetConfigFilePath","result":"Ok","value":"/path/to/someconfig.yml"}
 ```
 
 ### Switch to a different config file
 The new config is applied when the "reload" command is sent.
 ```ipython
-In [6]: ws.send(json.dumps({"SetConfigFilePath": "/path/to/otherconfig.yml"}))
-Out[6]: 52
+In [6]: ws.send(json.dumps({"command": "SetConfigFilePath", "value": "/path/to/otherconfig.yml"}))
+Out[6]: 84
 
 In [7]: print(ws.recv())
-{"GetConfigFilePath":{"result":"Ok","value":"/path/to/someconfig.yml"}}
+{"reply":"SetConfigFilePath","result":"Ok"}
 
-In [8]: ws.send(json.dumps("Reload"))
-Out[8]: 12
+In [8]: ws.send(json.dumps({"command": "Reload"}))
+Out[8]: 22
 
 In [9]: print(ws.recv())
-{"Reload":{"result":"Ok"}}
+{"reply":"Reload","result":"Ok"}
 ```
 
 
 ### Get the current configuration
 Use json.loads to parse the json response.
 ```
-In [10]: ws.send(json.dumps("GetConfig"))
-Out[10]: 15
+In [10]: ws.send(json.dumps({"command": "GetConfig"}))
+Out[10]: 25
 
 In [11]: reply = json.loads(ws.recv())
-In [12]: print(reply["GetConfig"]["value"])
-OK:GETCONFIG:---
+In [12]: print(reply["value"])
+---
 devices:
   samplerate: 44100
   buffersize: 1024
@@ -296,11 +295,11 @@ In [12]: with open('/path/to/newconfig.yml') as f:
     ...:     cfg=f.read()
     ...:
 
-In [13]: ws.send(json.dumps({"SetConfig": cfg}))
-Out[13]: 957
+In [13]: ws.send(json.dumps({"command": "SetConfig", "value": cfg}))
+Out[13]: 969
 
 In [14]: print(ws.recv())
-{"SetConfig":{"result":"Ok"}}
+{"reply":"SetConfig","result":"Ok"}
 ```
 
 ## Secure websocket, wss://

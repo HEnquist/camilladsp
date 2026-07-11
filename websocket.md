@@ -14,33 +14,32 @@ Giving 0.0.0.0 will bind to all interfaces.
 
 
 ## Command syntax
-For commands without arguments, this is just a string *with the command name within quotes*:
-```
-"GetVersion"
-```
-For commands that take an argument, they are instead given as a key and a value:
+Every command is a JSON object with a `"command"` field holding the command name:
 ```json
-{"SetUpdateInterval": 500}
+{"command": "GetVersion"}
+```
+Commands that take arguments carry them in additional named fields:
+```json
+{"command": "SetUpdateInterval", "value": 500}
 ```
 
 The return values are also JSON (in string format).
-The commands that don't return a value return a structure containing the command name and the result,
-which is either Ok or Error:
+Every reply is a JSON object with a `"reply"` field holding the reply name and a `"result"` field,
+which is either Ok or an error.
+The commands that don't return a value reply with just the name and result:
 ```json
 {
-  "SetUpdateInterval": {
-    "result": "Ok"
-  }
+  "reply": "SetUpdateInterval",
+  "result": "Ok"
 }
 ```
 
 The commands that return a value also include a "value" field:
 ```json
 {
-  "GetUpdateInterval": {
-    "result": "Ok",
-    "value": 500
-  }
+  "reply": "GetUpdateInterval",
+  "result": "Ok",
+  "value": 500
 }
 ```
 
@@ -51,7 +50,7 @@ Your system/language may automatically do the "stringify" / "parse" processes au
 
 IE if you are using NodeJS/javascript then simply wrap your JSON object with JSON.stringify() before sending.
 ```
-ws.send(JSON.stringify({"SetUpdateInterval": 1000}))
+ws.send(JSON.stringify({"command": "SetUpdateInterval", "value": 1000}))
 ```
 
 Likewise on receiving the value from the websocket server, the JSON **will be in string format**.
@@ -70,8 +69,8 @@ ws.on('message', function message(data) {
       console.error('Parse error', err);
     }
 
-    if (parsed.hasOwnProperty('GetVolume')){
-      console.log('GetVolume response received', parsed.GetVolume.value);
+    if (parsed.reply === 'GetVolume'){
+      console.log('GetVolume response received', parsed.value);
     }
 });
 ```
@@ -486,14 +485,10 @@ Argument: `number` — volume in dB as a float.
 
 #### `AdjustVolume`
 
-Adjust the volume of the Main fader by a delta in dB.
+Adjust the volume of the Main fader by `value` dB.
 
-Argument: `ValueWithOptionalLimits` — either `delta` or `[delta, min, max]`.
-
-**`ValueWithOptionalLimits` values:**
-
-- `Plain` — Adjust by `delta` dB, clamped to the global −150 to +50 dB range.
-- `Limited` — Adjust by `delta` dB, clamped to `[min, max]` instead of the global range.
+The optional `min` and `max` fields clamp the resulting volume; when omitted they default
+to the global −150 to +50 dB range.
 
 Returns: `number` — New volume in dB after the adjustment.
 
@@ -530,7 +525,7 @@ Returns: `Fader[]` — List of faders: Main (index 0) followed by Aux1–Aux4 (i
 
 Get the volume of a specific fader.
 
-Argument: `integer (≥ 0)` — fader index — 0 for Main, 1–4 for Aux1–Aux4.
+Field: `fader` index — 0 for Main, 1–4 for Aux1–Aux4.
 
 Returns: `[integer (≥ 0), number]` — `[fader_index, volume_dB]`.
 
@@ -538,25 +533,21 @@ Returns: `[integer (≥ 0), number]` — `[fader_index, volume_dB]`.
 
 Set the volume of a specific fader. Clamped to −150 to +50 dB.
 
-Arguments: `[integer (≥ 0), number]` — `[fader_index, volume_dB]`.
+Fields: `fader` index and `value` (volume in dB).
 
 #### `SetFaderExternalVolume`
 
 Special volume setter for use with a Loudness filter and an external volume control
 (without a Volume filter). Clamped to −150 to +50 dB.
 
-Arguments: `[integer (≥ 0), number]` — `[fader_index, volume_dB]`.
+Fields: `fader` index and `value` (volume in dB).
 
 #### `AdjustFaderVolume`
 
-Adjust the volume of a specific fader by a delta in dB.
+Adjust the volume of a specific fader by `value` dB.
 
-Arguments: `[integer (≥ 0), ValueWithOptionalLimits]` — `[fader_index, delta]` or `[fader_index, [delta, min, max]]`.
-
-**`ValueWithOptionalLimits` values:**
-
-- `Plain` — Adjust by `delta` dB, clamped to the global −150 to +50 dB range.
-- `Limited` — Adjust by `delta` dB, clamped to `[min, max]` instead of the global range.
+Fields: `fader` index and `value` (delta in dB). The optional `min` and `max` fields clamp
+the resulting volume; when omitted they default to the global −150 to +50 dB range.
 
 Returns: `[integer (≥ 0), number]` — `[fader_index, new_volume_dB]` after the adjustment.
 
@@ -564,7 +555,7 @@ Returns: `[integer (≥ 0), number]` — `[fader_index, new_volume_dB]` after th
 
 Get the mute state of a specific fader.
 
-Argument: `integer (≥ 0)` — fader index.
+Field: `fader` index.
 
 Returns: `[integer (≥ 0), boolean]` — `[fader_index, is_muted]`.
 
@@ -572,13 +563,13 @@ Returns: `[integer (≥ 0), boolean]` — `[fader_index, is_muted]`.
 
 Set the mute state of a specific fader.
 
-Arguments: `[integer (≥ 0), boolean]` — `[fader_index, mute_bool]`.
+Fields: `fader` index and `value` (`true` to mute).
 
 #### `ToggleFaderMute`
 
 Toggle the mute state of a specific fader.
 
-Argument: `integer (≥ 0)` — fader index.
+Field: `fader` index.
 
 Returns: `[integer (≥ 0), boolean]` — `[fader_index, new_mute_state]` after the toggle.
 
@@ -661,8 +652,8 @@ Returns: `any` — Value at the specified JSON Pointer path.
 
 Set a single value in the active configuration using a JSON Pointer (RFC 6901).
 
-Arguments: `[string, any]` — `[pointer, value]` where `pointer` is a JSON Pointer string such as
-`"/devices/samplerate"`.
+Fields: `pointer` is a JSON Pointer string such as `"/devices/samplerate"`, and `value`
+is the JSON value to store there.
 
 #### `Reload`
 
@@ -720,7 +711,7 @@ Enumerate available audio devices for a given backend and query their supported 
 
 List available capture devices for a given backend.
 
-Argument: `string` — backend name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+Field: `backend` name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
 
 Returns: `[string, string][]` — List of `[identifier, name_or_null]` pairs.
 
@@ -728,7 +719,7 @@ Returns: `[string, string][]` — List of `[identifier, name_or_null]` pairs.
 
 List available playback devices for a given backend.
 
-Argument: `string` — backend name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+Field: `backend` name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
 
 Returns: `[string, string][]` — List of `[identifier, name_or_null]` pairs.
 
@@ -736,7 +727,7 @@ Returns: `[string, string][]` — List of `[identifier, name_or_null]` pairs.
 
 Get the capabilities of a specific capture device.
 
-Arguments: `[string, string]` — `[backend_name, device_name]`.
+Fields: `backend` and `device` names.
 
 Errors: `WsResult::DeviceNotFoundError`, `WsResult::DeviceBusyError`, `WsResult::DeviceError`.
 
@@ -752,7 +743,7 @@ Returns: `AudioDeviceDescriptor` — Capabilities of the requested capture devic
 
 Get the capabilities of a specific playback device.
 
-Arguments: `[string, string]` — `[backend_name, device_name]`.
+Fields: `backend` and `device` names.
 
 Errors: `WsResult::DeviceNotFoundError`, `WsResult::DeviceBusyError`, `WsResult::DeviceError`.
 
@@ -856,9 +847,9 @@ Errors without a message are returned as a plain string:
 "result": "InvalidFaderError"
 ```
 
-Errors with a message are returned as a JSON object with one key:
+Errors with a message are returned as a JSON object with one key wrapping a `"message"` field:
 ```json
-"result": {"ConfigValidationError": "Description of the error"}
+"result": {"ConfigValidationError": {"message": "Description of the error"}}
 ```
 
 ### `ShutdownInProgressError`
@@ -901,19 +892,19 @@ Includes a message describing the problem.
 
 The named audio device does not exist.
 
-Includes the device name.
+The `message` contains the device name.
 
 ### `DeviceBusyError`
 
 The audio device is currently in use and cannot be probed.
 
-Includes the device name.
+The `message` contains the device name.
 
 ### `DeviceError`
 
 The device probe failed for another reason.
 
-Includes a description.
+The `message` contains a description.
 
 ### `ProcessingStopped`
 
@@ -955,44 +946,44 @@ In [3]: ws = create_connection("ws://127.0.0.1:1234")
 
 ### Get the name of the current config file
 ```ipython
-In [4]: ws.send(json.dumps("GetConfigFilePath"))
-Out[4]: 19
+In [4]: ws.send(json.dumps({"command": "GetConfigFilePath"}))
+Out[4]: 34
 
 In [5]: print(ws.recv())
-{"GetConfigFilePath":{"result":"Ok","value":"/path/to/someconfig.yml"}}
+{"reply":"GetConfigFilePath","result":"Ok","value":"/path/to/someconfig.yml"}
 ```
 
 ### Switch to a different config file
 The new config is applied when the "reload" command is sent.
 ```ipython
-In [6]: ws.send(json.dumps({"SetConfigFilePath": "/path/to/otherconfig.yml"}))
-Out[6]: 52
+In [6]: ws.send(json.dumps({"command": "SetConfigFilePath", "value": "/path/to/otherconfig.yml"}))
+Out[6]: 84
 
 In [7]: print(ws.recv())
-{"GetConfigFilePath":{"result":"Ok","value":"/path/to/someconfig.yml"}}
+{"reply":"SetConfigFilePath","result":"Ok"}
 
-In [8]: ws.send(json.dumps("Reload"))
-Out[8]: 12
+In [8]: ws.send(json.dumps({"command": "Reload"}))
+Out[8]: 22
 
 In [9]: print(ws.recv())
-{"Reload":{"result":"Ok"}}
+{"reply":"Reload","result":"Ok"}
 ```
 
 
 ### Get the current configuration
 Use json.loads to parse the json response.
 ```
-In [10]: ws.send(json.dumps("GetConfig"))
-Out[10]: 15
+In [10]: ws.send(json.dumps({"command": "GetConfig"}))
+Out[10]: 25
 
 In [11]: reply = json.loads(ws.recv())
-In [12]: print(reply["GetConfig"]["value"])
-OK:GETCONFIG:---
+In [12]: print(reply["value"])
+---
 devices:
   samplerate: 44100
   buffersize: 1024
   silence_threshold: 0.0
-  silence_timeout_s: 0.0
+  silence_timeout: 0.0
   capture:
     type: Alsa
     ...
@@ -1005,11 +996,11 @@ In [12]: with open('/path/to/newconfig.yml') as f:
     ...:     cfg=f.read()
     ...:
 
-In [13]: ws.send(json.dumps({"SetConfig": cfg}))
-Out[13]: 957
+In [13]: ws.send(json.dumps({"command": "SetConfig", "value": cfg}))
+Out[13]: 969
 
 In [14]: print(ws.recv())
-{"SetConfig":{"result":"Ok"}}
+{"reply":"SetConfig","result":"Ok"}
 ```
 
 ## Secure websocket, wss://
