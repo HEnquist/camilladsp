@@ -166,6 +166,7 @@ pub enum PipelineStep {
     FilterStep(FilterGroup),
     ParallelFiltersStep(ParallelFilters),
     ProcessorStep(Box<dyn Processor>),
+    DefaultVolumeStep,
 }
 
 pub struct Pipeline {
@@ -174,6 +175,7 @@ pub struct Pipeline {
     secs_per_chunk: f32,
     processing_params: Arc<ProcessingParameters>,
     overloaded_chunks: usize,
+    has_explicit_volume_step: bool,
 }
 
 impl Pipeline {
@@ -185,9 +187,20 @@ impl Pipeline {
         debug!("Build new pipeline");
         trace!("Pipeline config {:?}", conf.pipeline);
         let mut steps = Vec::<PipelineStep>::new();
+        let mut has_explicit_volume_step = false;
         let mut num_channels = conf.devices.capture.channels();
         for step in conf.pipeline.unwrap_or_default() {
             match step {
+                config::PipelineStep::DefaultVolume(step) => {
+                    if !step.is_bypassed() {
+                        if has_explicit_volume_step {
+                            warn!("Ignoring duplicate DefaultVolume pipeline step");
+                        } else {
+                            has_explicit_volume_step = true;
+                            steps.push(PipelineStep::DefaultVolumeStep);
+                        }
+                    }
+                }
                 config::PipelineStep::Mixer(step) => {
                     if !step.is_bypassed() {
                         let mixconf = conf.mixers.as_ref().unwrap()[&step.name].clone();
@@ -261,6 +274,16 @@ impl Pipeline {
                                 );
                                 Box::new(race) as Box<dyn Processor>
                             }
+                            config::Processor::PureroadCharacter { parameters, .. } => {
+                                let character =
+                                    processors::pureroad_character::PureroadCharacter::from_config(
+                                        &step.name,
+                                        parameters,
+                                        conf.devices.samplerate,
+                                        conf.devices.chunksize,
+                                    );
+                                Box::new(character) as Box<dyn Processor>
+                            }
                         };
                         steps.push(PipelineStep::ProcessorStep(proc));
                     }
@@ -290,6 +313,7 @@ impl Pipeline {
             secs_per_chunk,
             processing_params,
             overloaded_chunks: 0,
+            has_explicit_volume_step,
         }
     }
 
@@ -321,6 +345,7 @@ impl Pipeline {
                         );
                     }
                 }
+                PipelineStep::DefaultVolumeStep => {}
             }
         }
     }
@@ -328,7 +353,9 @@ impl Pipeline {
     /// Process an AudioChunk by calling either a MixerStep or a FilterStep
     pub fn process_chunk(&mut self, mut chunk: AudioChunk) -> AudioChunk {
         let start = Instant::now();
-        self.volume.process_chunk(&mut chunk);
+        if !self.has_explicit_volume_step {
+            self.volume.process_chunk(&mut chunk);
+        }
         for mut step in &mut self.steps {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {
@@ -343,6 +370,7 @@ impl Pipeline {
                 PipelineStep::ProcessorStep(comp) => {
                     comp.process_chunk(&mut chunk).unwrap();
                 }
+                PipelineStep::DefaultVolumeStep => self.volume.process_chunk(&mut chunk),
             }
         }
         let secs_elapsed = start.elapsed().as_secs_f32();
@@ -396,6 +424,13 @@ fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Ve
                     new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
                 }
                 debug!("Append existing parallel filter step to pipeline");
+                new_steps.push(step);
+            }
+            PipelineStep::DefaultVolumeStep => {
+                if let Some(filters) = parfilt.take() {
+                    debug!("Append parallel filter step to pipeline");
+                    new_steps.push(PipelineStep::ParallelFiltersStep(filters));
+                }
                 new_steps.push(step);
             }
             PipelineStep::FilterStep(mut flt) => {

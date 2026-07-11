@@ -19,6 +19,7 @@ use crate::filters;
 use crate::mixer;
 use crate::processors::compressor;
 use crate::processors::noisegate;
+use crate::processors::pureroad_character;
 use crate::processors::race;
 use crate::utils::wavtools::find_data_in_wav_stream;
 use parking_lot::RwLock;
@@ -373,6 +374,7 @@ fn replace_tokens_in_config(config: &mut Configuration) {
                 PipelineStep::Processor(step) => {
                     step.name = replace_tokens(&step.name, samplerate, num_channels);
                 }
+                PipelineStep::DefaultVolume(_) => {}
             }
         }
     }
@@ -487,10 +489,18 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     if let (Some(newprocs), Some(oldprocs)) = (&newconf.processors, &currentconf.processors) {
         for (proc, params) in newprocs {
             // The pipeline didn't change, any added processor isn't included and can be skipped
-            if let Some(current_proc) = oldprocs.get(proc)
-                && params != current_proc
-            {
-                processors.push(proc.to_string());
+            if let Some(current_proc) = oldprocs.get(proc) {
+                match (params, current_proc) {
+                    (Processor::Compressor { .. }, Processor::Compressor { .. })
+                    | (Processor::NoiseGate { .. }, Processor::NoiseGate { .. })
+                    | (Processor::RACE { .. }, Processor::RACE { .. })
+                    | (Processor::PureroadCharacter { .. }, Processor::PureroadCharacter { .. }) => {
+                    }
+                    _ => return ConfigChange::Pipeline,
+                }
+                if params != current_proc {
+                    processors.push(proc.to_string());
+                }
             }
         }
     }
@@ -634,6 +644,11 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     if let Some(pipeline) = &conf.pipeline {
         for step in pipeline {
             match step {
+                PipelineStep::DefaultVolume(step) => {
+                    if !step.is_bypassed() {
+                        // The default volume does not change the channel count.
+                    }
+                }
                 PipelineStep::Mixer(step) => {
                     if !step.is_bypassed() {
                         if let Some(mixers) = &conf.mixers {
@@ -767,6 +782,28 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                             Err(err) => {
                                                 let msg = format!(
                                                     "Invalid RACE processor '{}'. Reason: {}",
+                                                    step.name, err
+                                                );
+                                                return Err(ConfigError::new(&msg).into());
+                                            }
+                                        }
+                                    }
+                                    Processor::PureroadCharacter { parameters, .. } => {
+                                        let channels = parameters.channels;
+                                        if channels != num_channels {
+                                            let msg = format!(
+                                                "PureroadCharacter processor '{}' has wrong number of channels. Expected {}, found {}.",
+                                                step.name, num_channels, channels
+                                            );
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
+                                        match pureroad_character::validate_pureroad_character(
+                                            parameters,
+                                        ) {
+                                            Ok(_) => {}
+                                            Err(err) => {
+                                                let msg = format!(
+                                                    "Invalid PureroadCharacter processor '{}'. Reason: {}",
                                                     step.name, err
                                                 );
                                                 return Err(ConfigError::new(&msg).into());

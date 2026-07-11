@@ -1503,6 +1503,82 @@ pub enum Processor {
         description: Option<String>,
         parameters: RACEParameters,
     },
+    PureroadCharacter {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: PureroadCharacterParameters,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
+pub enum PureroadCharacterAlgorithm {
+    #[default]
+    Original,
+    Acceleration2,
+    ToTape8,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ToTape8Parameters {
+    #[serde(default = "default_half")]
+    pub input: PrcFmt,
+    #[serde(default = "default_half")]
+    pub tilt: PrcFmt,
+    #[serde(default = "default_half")]
+    pub shape: PrcFmt,
+    #[serde(default = "default_half")]
+    pub flutter: PrcFmt,
+    #[serde(default = "default_half")]
+    pub flutter_speed: PrcFmt,
+    #[serde(default = "default_half")]
+    pub bias: PrcFmt,
+    #[serde(default = "default_half")]
+    pub head_bump: PrcFmt,
+    #[serde(default = "default_half")]
+    pub head_bump_frequency: PrcFmt,
+    #[serde(default = "default_half")]
+    pub output: PrcFmt,
+}
+
+impl Default for ToTape8Parameters {
+    fn default() -> Self {
+        Self {
+            input: default_half(),
+            tilt: default_half(),
+            shape: default_half(),
+            flutter: default_half(),
+            flutter_speed: default_half(),
+            bias: default_half(),
+            head_bump: default_half(),
+            head_bump_frequency: default_half(),
+            output: default_half(),
+        }
+    }
+}
+
+fn default_half() -> PrcFmt {
+    0.5
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PureroadCharacterParameters {
+    pub channels: usize,
+    #[serde(default)]
+    pub algorithm: PureroadCharacterAlgorithm,
+    #[serde(default)]
+    pub intensity: PrcFmt,
+    #[serde(default)]
+    pub mix: PrcFmt,
+    #[serde(default = "default_character_transition_ms")]
+    pub transition_ms: f32,
+    #[serde(default)]
+    pub totape8: ToTape8Parameters,
+}
+
+fn default_character_transition_ms() -> f32 {
+    100.0
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1613,6 +1689,22 @@ pub enum PipelineStep {
     Mixer(PipelineStepMixer),
     Filter(PipelineStepFilter),
     Processor(PipelineStepProcessor),
+    DefaultVolume(PipelineStepDefaultVolume),
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PipelineStepDefaultVolume {
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub bypassed: Option<bool>,
+}
+
+impl PipelineStepDefaultVolume {
+    pub fn is_bypassed(&self) -> bool {
+        self.bypassed.unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]

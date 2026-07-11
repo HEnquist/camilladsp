@@ -20,6 +20,7 @@ use crate::config;
 
 pub mod compressor;
 pub mod noisegate;
+pub mod pureroad_character;
 pub mod race;
 
 pub trait Processor {
