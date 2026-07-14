@@ -295,6 +295,11 @@ impl PureroadCharacter {
 
     fn apply_parameters(&mut self, parameters: config::PureroadCharacterParameters) {
         let algorithm_changed = self.algorithm != parameters.algorithm;
+        let next_target_mix = effective_mix(parameters.algorithm, prc_to_f64(parameters.mix));
+        let resumes_from_full_bypass = !algorithm_changed
+            && self.current_mix == 0.0
+            && self.target_mix == 0.0
+            && next_target_mix > 0.0;
         if algorithm_changed {
             self.previous_algorithm = Some(self.algorithm);
             self.previous_intensity = self.intensity;
@@ -303,7 +308,7 @@ impl PureroadCharacter {
         self.algorithm = parameters.algorithm;
         self.intensity = prc_to_f64(parameters.intensity.clamp(0.0, 1.0));
         self.totape8 = totape8_values(parameters.totape8);
-        self.target_mix = effective_mix(parameters.algorithm, prc_to_f64(parameters.mix));
+        self.target_mix = next_target_mix;
         self.transition_samples = transition_samples(parameters.transition_ms, self.samplerate);
         self.transition_remaining = self.transition_samples;
         if algorithm_changed {
@@ -318,6 +323,15 @@ impl PureroadCharacter {
         }
         if algorithm_changed && parameters.algorithm != config::PureroadCharacterAlgorithm::Original
         {
+            match parameters.algorithm {
+                config::PureroadCharacterAlgorithm::Original => {}
+                config::PureroadCharacterAlgorithm::Acceleration2 => self.native.reset(),
+                config::PureroadCharacterAlgorithm::ToTape8 => self.native_totape8.reset(),
+            }
+        } else if resumes_from_full_bypass {
+            // A fully dry processor does not advance its native delay and filter state.
+            // Reset before fading it back in so audio captured before the bypass cannot
+            // leak into the resumed wet path.
             match parameters.algorithm {
                 config::PureroadCharacterAlgorithm::Original => {}
                 config::PureroadCharacterAlgorithm::Acceleration2 => self.native.reset(),
@@ -523,7 +537,16 @@ fn prc_from_f64(value: f64) -> PrcFmt {
     value as f32
 }
 
-pub fn validate_pureroad_character(parameters: &config::PureroadCharacterParameters) -> Res<()> {
+pub fn validate_pureroad_character(
+    parameters: &config::PureroadCharacterParameters,
+    samplerate: usize,
+) -> Res<()> {
+    if samplerate <= 40_000 {
+        return Err(config::ConfigError::new(
+            "PureroadCharacter requires a sample rate above 40000 Hz.",
+        )
+        .into());
+    }
     if parameters.channels != 2 {
         return Err(config::ConfigError::new(
             "PureroadCharacter currently requires exactly two channels.",
@@ -729,6 +752,48 @@ mod tests {
         (channel(997.0, 13_117.0), channel(503.0, 17_003.0))
     }
 
+    fn tone(frames: usize, samplerate: usize, frequency: f64, amplitude: f64) -> Vec<PrcFmt> {
+        (0..frames)
+            .map(|frame| {
+                to_prc(
+                    amplitude
+                        * (std::f64::consts::TAU * frequency * frame as f64 / samplerate as f64)
+                            .sin(),
+                )
+            })
+            .collect()
+    }
+
+    fn rms(samples: &[PrcFmt]) -> f64 {
+        (samples
+            .iter()
+            .map(|sample| f64::from(*sample).powi(2))
+            .sum::<f64>()
+            / samples.len() as f64)
+            .sqrt()
+    }
+
+    fn amplitude_at(samples: &[PrcFmt], samplerate: usize, frequency: f64) -> f64 {
+        let (sin_sum, cos_sum) =
+            samples
+                .iter()
+                .enumerate()
+                .fold((0.0, 0.0), |(sin_sum, cos_sum), (frame, sample)| {
+                    let phase =
+                        std::f64::consts::TAU * frequency * frame as f64 / samplerate as f64;
+                    let sample = f64::from(*sample);
+                    (
+                        sin_sum + sample * phase.sin(),
+                        cos_sum + sample * phase.cos(),
+                    )
+                });
+        2.0 * sin_sum.hypot(cos_sum) / samples.len() as f64
+    }
+
+    fn db_ratio(numerator: f64, denominator: f64) -> f64 {
+        20.0 * (numerator / denominator).max(1e-30).log10()
+    }
+
     fn processor(
         rate: usize,
         frames: usize,
@@ -753,18 +818,19 @@ mod tests {
             1.0,
             100.0,
         );
-        assert!(validate_pureroad_character(&value).is_ok());
+        assert!(validate_pureroad_character(&value, 48_000).is_ok());
+        assert!(validate_pureroad_character(&value, 40_000).is_err());
         value.channels = 1;
-        assert!(validate_pureroad_character(&value).is_err());
+        assert!(validate_pureroad_character(&value, 48_000).is_err());
         value.channels = 2;
         value.intensity = PrcFmt::NAN;
-        assert!(validate_pureroad_character(&value).is_err());
+        assert!(validate_pureroad_character(&value, 48_000).is_err());
         value.intensity = 0.5;
         value.mix = -0.1;
-        assert!(validate_pureroad_character(&value).is_err());
+        assert!(validate_pureroad_character(&value, 48_000).is_err());
         value.mix = 0.5;
         value.transition_ms = f32::INFINITY;
-        assert!(validate_pureroad_character(&value).is_err());
+        assert!(validate_pureroad_character(&value, 48_000).is_err());
     }
 
     #[test]
@@ -820,6 +886,10 @@ pipeline:
     name: gentle_character
   - type: DefaultVolume
 "#;
+        let mut unsupported: config::Configuration =
+            yaml_serde::from_str(&yaml.replace("samplerate: 96000", "samplerate: 40000")).unwrap();
+        assert!(crate::config::validate_config(&mut unsupported, None).is_err());
+
         let mut configuration: config::Configuration = yaml_serde::from_str(yaml).unwrap();
         crate::config::validate_config(&mut configuration, None).unwrap();
         let processing =
@@ -1023,6 +1093,55 @@ pipeline:
     }
 
     #[test]
+    fn totape8_extreme_parameters_remain_safety_bounded() {
+        let parameter_sets = [
+            [0.0; 9],
+            [0.5; 9],
+            [1.0; 9],
+            [1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0],
+        ];
+        let mut random = SmallRng::seed_from_u64(0x5441_5045_424f_554e);
+        for rate in [44_100, 48_000, 96_000, 192_000] {
+            for values in parameter_sets {
+                let mut parameters =
+                    params(config::PureroadCharacterAlgorithm::ToTape8, 0.0, 1.0, 0.0);
+                parameters.totape8 = config::ToTape8Parameters {
+                    input: to_prc(values[0]),
+                    tilt: to_prc(values[1]),
+                    shape: to_prc(values[2]),
+                    flutter: to_prc(values[3]),
+                    flutter_speed: to_prc(values[4]),
+                    bias: to_prc(values[5]),
+                    head_bump: to_prc(values[6]),
+                    head_bump_frequency: to_prc(values[7]),
+                    output: to_prc(values[8]),
+                };
+                let left = (0..16_384)
+                    .map(|_| to_prc(random.random_range(-8.0..8.0)))
+                    .collect();
+                let right = (0..16_384)
+                    .map(|_| to_prc(random.random_range(-8.0..8.0)))
+                    .collect();
+                let mut audio = chunk(left, right);
+                PureroadCharacter::from_config("bounded", parameters, rate, 16_384)
+                    .process_chunk(&mut audio)
+                    .unwrap();
+                let peak = audio
+                    .waveforms
+                    .iter()
+                    .flatten()
+                    .map(|sample| sample.abs())
+                    .fold(0.0, PrcFmt::max);
+                assert!(
+                    peak <= to_prc(1.0),
+                    "rate={rate} values={values:?} peak={peak}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn totape8_spacing_sixteen_boundary_is_memory_safe_and_finite() {
         let rate = 705_600;
         let (left, right) = signal(4096, rate);
@@ -1050,10 +1169,10 @@ pipeline:
     fn totape8_parameter_validation_rejects_non_finite_and_out_of_range() {
         let mut value = params(config::PureroadCharacterAlgorithm::ToTape8, 0.0, 1.0, 100.0);
         value.totape8.input = 1.1;
-        assert!(validate_pureroad_character(&value).is_err());
+        assert!(validate_pureroad_character(&value, 48_000).is_err());
         value.totape8.input = 0.5;
         value.totape8.bias = PrcFmt::NAN;
-        assert!(validate_pureroad_character(&value).is_err());
+        assert!(validate_pureroad_character(&value, 48_000).is_err());
     }
 
     #[test]
@@ -1230,6 +1349,253 @@ pipeline:
         assert_eq!(proc.algorithm, config::PureroadCharacterAlgorithm::Original);
         assert!(proc.previous_algorithm.is_none());
         assert!(proc.pending_parameters.is_none());
+    }
+
+    #[test]
+    fn resuming_totape8_from_zero_mix_discards_pre_bypass_state() {
+        let rate = 48_000;
+        let frames = 2048;
+        let mut wet = params(config::PureroadCharacterAlgorithm::ToTape8, 0.0, 1.0, 0.0);
+        wet.totape8.flutter = 1.0;
+        wet.totape8.flutter_speed = 1.0;
+        wet.totape8.head_bump = 1.0;
+
+        let mut resumed = PureroadCharacter::from_config("resumed", wet.clone(), rate, frames);
+        resumed
+            .process_chunk(&mut chunk(vec![0.8; frames], vec![-0.8; frames]))
+            .unwrap();
+
+        let mut dry = wet.clone();
+        dry.mix = 0.0;
+        resumed.update_parameters(config::Processor::PureroadCharacter {
+            description: None,
+            parameters: dry,
+        });
+        resumed
+            .process_chunk(&mut chunk(vec![0.2; frames], vec![-0.2; frames]))
+            .unwrap();
+        resumed.update_parameters(config::Processor::PureroadCharacter {
+            description: None,
+            parameters: wet.clone(),
+        });
+
+        let mut actual = chunk(vec![0.0; frames], vec![0.0; frames]);
+        resumed.process_chunk(&mut actual).unwrap();
+
+        let mut fresh = PureroadCharacter::from_config("fresh", wet, rate, frames);
+        let mut expected = chunk(vec![0.0; frames], vec![0.0; frames]);
+        fresh.process_chunk(&mut expected).unwrap();
+        assert_eq!(actual.waveforms, expected.waveforms);
+    }
+
+    #[test]
+    fn default_resume_transition_starts_near_bit_exact_dry() {
+        let rate = 48_000;
+        let frames = 4096;
+        let mut wet = params(config::PureroadCharacterAlgorithm::ToTape8, 0.0, 1.0, 100.0);
+        wet.totape8.flutter = 1.0;
+        wet.totape8.flutter_speed = 1.0;
+        wet.totape8.head_bump = 1.0;
+        let mut proc = PureroadCharacter::from_config("resume", wet.clone(), rate, frames);
+        proc.process_chunk(&mut chunk(vec![0.8; frames], vec![-0.8; frames]))
+            .unwrap();
+        let mut dry = wet.clone();
+        dry.mix = 0.0;
+        dry.transition_ms = 0.0;
+        proc.update_parameters(config::Processor::PureroadCharacter {
+            description: None,
+            parameters: dry,
+        });
+        proc.process_chunk(&mut chunk(vec![0.2; frames], vec![-0.2; frames]))
+            .unwrap();
+        proc.update_parameters(config::Processor::PureroadCharacter {
+            description: None,
+            parameters: wet,
+        });
+
+        // Start away from a sine-wave zero crossing so the first-sample
+        // assertion actually measures the dry/wet ramp.
+        let left = vec![to_prc(0.8); frames];
+        let right = vec![to_prc(-0.8); frames];
+        let mut actual = chunk(left.clone(), right.clone());
+        proc.process_chunk(&mut actual).unwrap();
+        for channel in 0..2 {
+            let dry = if channel == 0 { &left } else { &right };
+            assert!(
+                (actual.waveforms[channel][0] - dry[0]).abs() < to_prc(0.0005),
+                "channel={channel} actual={} dry={}",
+                actual.waveforms[channel][0],
+                dry[0]
+            );
+        }
+    }
+
+    #[test]
+    fn resuming_acceleration2_from_zero_mix_matches_fresh_state() {
+        let rate = 96_000;
+        let frames = 2048;
+        let wet = params(
+            config::PureroadCharacterAlgorithm::Acceleration2,
+            0.73,
+            1.0,
+            0.0,
+        );
+        let mut resumed = PureroadCharacter::from_config("resumed", wet.clone(), rate, frames);
+        resumed
+            .process_chunk(&mut chunk(vec![0.8; frames], vec![-0.8; frames]))
+            .unwrap();
+        let mut dry = wet.clone();
+        dry.mix = 0.0;
+        resumed.update_parameters(config::Processor::PureroadCharacter {
+            description: None,
+            parameters: dry,
+        });
+        resumed
+            .process_chunk(&mut chunk(vec![0.2; frames], vec![-0.2; frames]))
+            .unwrap();
+        resumed.update_parameters(config::Processor::PureroadCharacter {
+            description: None,
+            parameters: wet.clone(),
+        });
+        let mut actual = chunk(vec![0.0; frames], vec![0.0; frames]);
+        resumed.process_chunk(&mut actual).unwrap();
+
+        let mut expected = chunk(vec![0.0; frames], vec![0.0; frames]);
+        PureroadCharacter::from_config("fresh", wet, rate, frames)
+            .process_chunk(&mut expected)
+            .unwrap();
+        assert_eq!(actual.waveforms, expected.waveforms);
+    }
+
+    #[test]
+    #[ignore = "objective character report; run explicitly with --nocapture"]
+    fn objective_character_diagnostic() {
+        let rate = 48_000;
+        let frames = rate * 2;
+        let analysis_start = rate;
+        let input = tone(frames, rate, 1_000.0, 0.25);
+
+        let mut tape = chunk(input.clone(), input.clone());
+        processor(
+            rate,
+            frames,
+            config::PureroadCharacterAlgorithm::ToTape8,
+            0.0,
+            1.0,
+            0.0,
+        )
+        .process_chunk(&mut tape)
+        .unwrap();
+        let tape_samples = &tape.waveforms[0][analysis_start..];
+        let fundamental = amplitude_at(tape_samples, rate, 1_000.0);
+        let harmonics: Vec<f64> = (2..=10)
+            .map(|harmonic| {
+                db_ratio(
+                    amplitude_at(tape_samples, rate, 1_000.0 * harmonic as f64),
+                    fundamental,
+                )
+            })
+            .collect();
+        let tape_peak = tape_samples
+            .iter()
+            .map(|sample| sample.abs())
+            .fold(0.0, PrcFmt::max);
+        let tape_gain = db_ratio(rms(tape_samples), rms(&input[analysis_start..]));
+        eprintln!(
+            "ToTape8 default: gain={tape_gain:.3} dB peak={tape_peak:.6} harmonics(2..10)dBc={harmonics:?}"
+        );
+        assert!(tape_peak <= to_prc(1.0));
+        assert!(fundamental > 0.01);
+
+        for intensity in [0.1, 0.2, 0.32] {
+            let mut gains = Vec::new();
+            for frequency in [1_000.0, 5_000.0, 10_000.0, 15_000.0, 19_000.0] {
+                let input = tone(frames, rate, frequency, 0.25);
+                let mut audio = chunk(input.clone(), input.clone());
+                processor(
+                    rate,
+                    frames,
+                    config::PureroadCharacterAlgorithm::Acceleration2,
+                    to_prc(intensity),
+                    1.0,
+                    0.0,
+                )
+                .process_chunk(&mut audio)
+                .unwrap();
+                gains.push(db_ratio(
+                    rms(&audio.waveforms[0][analysis_start..]),
+                    rms(&input[analysis_start..]),
+                ));
+            }
+            eprintln!("Acceleration2 intensity={intensity:.2}: gain@1/5/10/15/19kHz={gains:?} dB");
+        }
+    }
+
+    #[test]
+    fn default_character_profiles_have_expected_objective_shape() {
+        let rate = 48_000;
+        let frames = rate;
+        let analysis_start = rate / 2;
+
+        let tape_input = tone(frames, rate, 1_000.0, 0.25);
+        let mut tape = chunk(tape_input.clone(), tape_input.clone());
+        processor(
+            rate,
+            frames,
+            config::PureroadCharacterAlgorithm::ToTape8,
+            0.0,
+            1.0,
+            0.0,
+        )
+        .process_chunk(&mut tape)
+        .unwrap();
+        let tape_samples = &tape.waveforms[0][analysis_start..];
+        let tape_fundamental = amplitude_at(tape_samples, rate, 1_000.0);
+        let tape_gain = db_ratio(rms(tape_samples), rms(&tape_input[analysis_start..]));
+        let tape_third_harmonic =
+            db_ratio(amplitude_at(tape_samples, rate, 3_000.0), tape_fundamental);
+        assert!(
+            (-0.2..=0.1).contains(&tape_gain),
+            "unexpected default ToTape8 gain: {tape_gain} dB"
+        );
+        assert!(
+            (-55.0..=-40.0).contains(&tape_third_harmonic),
+            "unexpected default ToTape8 third harmonic: {tape_third_harmonic} dBc"
+        );
+
+        let acceleration_gain = |frequency: f64| {
+            let input = tone(frames, rate, frequency, 0.25);
+            let mut audio = chunk(input.clone(), input.clone());
+            processor(
+                rate,
+                frames,
+                config::PureroadCharacterAlgorithm::Acceleration2,
+                to_prc(0.32),
+                1.0,
+                0.0,
+            )
+            .process_chunk(&mut audio)
+            .unwrap();
+            db_ratio(
+                rms(&audio.waveforms[0][analysis_start..]),
+                rms(&input[analysis_start..]),
+            )
+        };
+        let gain_1k = acceleration_gain(1_000.0);
+        let gain_10k = acceleration_gain(10_000.0);
+        let gain_19k = acceleration_gain(19_000.0);
+        assert!(
+            gain_1k.abs() < 0.05,
+            "Acceleration2 should leave 1 kHz essentially flat: {gain_1k} dB"
+        );
+        assert!(
+            (-2.0..=-0.5).contains(&gain_10k),
+            "Acceleration2 10 kHz profile drifted: {gain_10k} dB"
+        );
+        assert!(
+            (-4.0..=-1.5).contains(&gain_19k),
+            "Acceleration2 19 kHz profile drifted: {gain_19k} dB"
+        );
     }
 
     #[test]

@@ -799,6 +799,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                         }
                                         match pureroad_character::validate_pureroad_character(
                                             parameters,
+                                            conf.devices.samplerate,
                                         ) {
                                             Ok(_) => {}
                                             Err(err) => {
