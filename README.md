@@ -963,6 +963,8 @@ When the volume or mute setting is changed, the gain is smoothly ramped to the n
 The duration of this ramp can be customized via the `volume_ramp_time_ms` parameter
 in the `devices` section.
 The value must not be negative. If left out or set to `null`, it defaults to 400 ms.
+Changes made while playback is paused or stalled are applied directly when playback resumes,
+since ramping from the level that was current before the pause would fade in at the wrong volume.
 
 The range of the volume control can be limited.
 Set the `volume_limit` to the desired maximum volume value.

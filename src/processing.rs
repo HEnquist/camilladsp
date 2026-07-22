@@ -142,6 +142,9 @@ fn processing(
             }
             Ok(AudioMessage::Pause) => {
                 trace!("AudioMessage::Pause received");
+                // Audio is not flowing, so volume changes made from now until playback
+                // resumes must be applied without ramping.
+                processing_params.bump_pause_count();
                 let msg = AudioMessage::Pause;
                 if !forward_to_playback(&tx_pb, msg) {
                     info!("Playback thread has already stopped.");
