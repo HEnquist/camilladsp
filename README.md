@@ -756,64 +756,7 @@ See [the capture device section](#file-rawfile-wavfile-stdin-stdout) for more de
 See the [separate readme for Wasapi](./backend_wasapi.md).
 
 ### ASIO
-The ASIO backend is an optional alternative audio backend for Windows.
-It provides low-latency access to audio devices via ASIO drivers.
-To use it, CamillaDSP must be compiled with the `asio-backend` feature enabled.
-
-Note that the ASIO backend is licensed under GPLv3 only,
-due to the ASIO SDK license requirements.
-See the [ASIO backend and license implications](#asio-backend-and-license-implications)
-section for details.
-
-Set the device `type` to `Asio` for both capture and playback.
-The `device` parameter should be set to the name of the ASIO driver to use.
-Available ASIO drivers are listed in the log output at startup (at debug level).
-Note that ASIO exposes drivers rather than actual device availability,
-so drivers for disconnected or powered‑off devices are still included
-in the listing.
-
-Set the `channels` property to the number of channels you want to use.
-The value may be lower than the number of channels the device provides,
-any channels above the specified count are simply ignored.
-
-The supported sample formats are:
-- `S16_LE` - 16-bit signed integer
-- `S24_4_LE` - 24-bit signed integer (in 32-bit container)
-- `S24_3_LE` - 24-bit signed integer (packed 3-byte)
-- `S32_LE` - 32-bit signed integer
-- `F32_LE` - 32-bit float
-- `F64_LE` - 64-bit float
-
-If the `format` parameter is omitted, CamillaDSP will query the device
-for its native sample format and use it automatically.
-ASIO drivers do not perform sample format conversion,
-so if a format is specified it must match the device's native format.
-A mismatch will result in an error at startup.
-
-#### Full-duplex limitations
-When both capture and playback use the ASIO backend,
-CamillaDSP operates them in full-duplex mode
-through a single shared driver instance. This implies:
-- **Same device:** Capture and playback must specify the same ASIO driver name.
-  ASIO only supports one driver loaded at a time.
-- **Same sample rate:** Resampling is not supported in full-duplex ASIO mode.
-  Both directions share the same hardware clock,
-  so `capture_samplerate` must equal `samplerate`
-  and no `resampler` should be configured.
-
-Example configuration:
-```yaml
-capture:
-  type: Asio
-  channels: 2
-  device: "My ASIO Driver"
-  format: S32_LE
-playback:
-  type: Asio
-  channels: 2
-  device: "My ASIO Driver"
-  format: S32_LE
-```
+See the [separate readme for ASIO](./backend_asio.md).
 
 ## MacOS (CoreAudio)
 See the [separate readme for CoreAudio](./backend_coreaudio.md).
@@ -1215,7 +1158,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
     - [F32_LE](sample_formats.md#f32_le)
     - [F64_LE](sample_formats.md#f64_le)
 
-    For [ALSA](./backend_alsa.md), [CoreAudio](./backend_coreaudio.md), [Wasapi](./backend_wasapi.md) and [ASIO](#asio), see the respective backend documentation.
+    For [ALSA](./backend_alsa.md), [CoreAudio](./backend_coreaudio.md), [Wasapi](./backend_wasapi.md) and [ASIO](./backend_asio.md), see the respective backend documentation.
 
     __Note that there are three different 24-bit formats! Make sure to select the correct one.__
 
