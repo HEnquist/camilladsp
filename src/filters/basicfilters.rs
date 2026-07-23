@@ -31,7 +31,6 @@ use crate::NewValue;
 use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::Res;
-use crate::nanos_since_epoch;
 use crate::utils::decibels::gain_from_value;
 use crate::utils::time::delay_to_samples;
 
@@ -62,7 +61,9 @@ pub struct Volume {
     processing_params: Arc<ProcessingParameters>,
     fader: usize,
     volume_limit: f32,
-    stale_ramp_threshold_ns: u64,
+    /// Value of the shared pause counter when this filter last ran, used to detect
+    /// whether audio flow was interrupted since the previous chunk.
+    last_pause_count: u64,
 }
 
 impl Volume {
@@ -81,7 +82,9 @@ impl Volume {
         let name = name.to_string();
         let ramptime_in_chunks =
             (ramp_time_ms / (1000.0 * chunksize as f32 / samplerate as f32)).round() as usize;
-        let stale_ramp_threshold_ns = 1_500_000_000u64 * chunksize as u64 / samplerate as u64;
+        // Start in sync with the shared counter, so the first chunk is not mistaken
+        // for a resume after a pause.
+        let last_pause_count = processing_params.pause_count();
         let current_volume_with_mute = if mute { -100.0 } else { current_volume };
         let target_linear_gain = if mute {
             0.0
@@ -103,7 +106,7 @@ impl Volume {
             processing_params,
             fader,
             volume_limit: limit,
-            stale_ramp_threshold_ns,
+            last_pause_count,
         }
     }
 
@@ -159,12 +162,17 @@ impl Volume {
         // are we above the set limit?
         let target_volume = shared_vol.min(self.volume_limit);
 
+        // Did audio flow stop between the previous chunk and this one? If so, any volume
+        // change we are seeing now was made while paused, and ramping it would fade in
+        // from a level that is no longer relevant. Track this on every chunk, so that a
+        // pause is only ever attributed to the chunk that directly follows it.
+        let pause_count = self.processing_params.pause_count();
+        let resumed_after_pause = pause_count != self.last_pause_count;
+        self.last_pause_count = pause_count;
+
         // Volume setting changed
         if (target_volume - self.target_volume).abs() > 0.01 || self.mute != shared_mute {
-            let set_at = self.processing_params.target_volume_set_at(self.fader);
-            let ramp_is_stale =
-                nanos_since_epoch().saturating_sub(set_at) > self.stale_ramp_threshold_ns;
-            if self.ramptime_in_chunks > 0 && !ramp_is_stale {
+            if self.ramptime_in_chunks > 0 && !resumed_after_pause {
                 trace!(
                     "starting ramp: {} -> {}, mute: {}",
                     self.current_volume, target_volume, shared_mute
@@ -493,8 +501,10 @@ pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use crate::PrcFmt;
+    use crate::ProcessingParameters;
     use crate::filters::Filter;
-    use crate::filters::basicfilters::{Delay, Gain};
+    use crate::filters::basicfilters::{Delay, Gain, Volume};
+    use std::sync::Arc;
 
     fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
         println!("{left} - {right}");
@@ -576,5 +586,247 @@ mod tests {
         let mut delay = Delay::new("test", 44100, 1.7, true);
         delay.process_waveform(&mut waveform).unwrap();
         assert!(compare_waveforms(waveform, expected_waveform, 1.0e-6));
+    }
+
+    const VOL_CHUNKSIZE: usize = 1024;
+    const VOL_SAMPLERATE: usize = 44100;
+
+    /// Build a volume filter with a ramp time of `ramp_chunks` chunks, at 0 dB.
+    fn make_volume(params: &Arc<ProcessingParameters>, ramp_chunks: f32) -> Volume {
+        make_volume_full(params, ramp_chunks, 50.0, 0.0, false, VOL_CHUNKSIZE)
+    }
+
+    /// Build a volume filter, with the ramp time expressed as a number of chunks.
+    fn make_volume_full(
+        params: &Arc<ProcessingParameters>,
+        ramp_chunks: f32,
+        limit: f32,
+        current_volume: f32,
+        mute: bool,
+        chunksize: usize,
+    ) -> Volume {
+        let ramp_time_ms = 1000.0 * (chunksize as f32) / (VOL_SAMPLERATE as f32) * ramp_chunks;
+        Volume::new(
+            "volume",
+            ramp_time_ms,
+            limit,
+            current_volume,
+            mute,
+            chunksize,
+            VOL_SAMPLERATE,
+            params.clone(),
+            0,
+        )
+    }
+
+    fn gain_at(db: PrcFmt) -> PrcFmt {
+        (10.0 as PrcFmt).powf(db / 20.0)
+    }
+
+    /// A volume change made while audio is flowing is ramped, and the ramp
+    /// decreases monotonically until it settles at the target.
+    #[test]
+    fn volume_ramps_while_running() {
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, 0.0);
+        let mut filter = make_volume(&params, 2.0);
+
+        // No change yet, unity gain.
+        let mut chunk = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut chunk).unwrap();
+        assert!(chunk.iter().all(|s| (s - 1.0).abs() < 1e-10));
+
+        params.set_target_volume(0, -20.0);
+
+        // First ramp chunk: stays inside the range and falls across the chunk.
+        let mut chunk1 = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut chunk1).unwrap();
+        assert!(chunk1.iter().all(|s| *s <= gain_at(0.0) + 1e-6));
+        assert!(chunk1.iter().all(|s| *s >= gain_at(-20.0) - 1e-6));
+        assert!(chunk1[0] > chunk1[VOL_CHUNKSIZE - 1]);
+
+        // Second ramp chunk continues downwards.
+        let mut chunk2 = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut chunk2).unwrap();
+        assert!(chunk2[VOL_CHUNKSIZE - 1] < chunk1[VOL_CHUNKSIZE - 1]);
+        assert!(chunk2[VOL_CHUNKSIZE - 1] >= gain_at(-20.0) - 1e-6);
+
+        // Ramp is done, the target is applied flat.
+        let mut chunk3 = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut chunk3).unwrap();
+        assert!(chunk3.iter().all(|s| (s - gain_at(-20.0)).abs() < 1e-6));
+    }
+
+    /// A volume change made while paused is applied directly on resume, with no ramp.
+    #[test]
+    fn volume_change_during_pause_is_not_ramped() {
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, 0.0);
+        let mut filter = make_volume(&params, 2.0);
+
+        let mut chunk = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut chunk).unwrap();
+
+        // Audio stops, volume is changed while paused, then playback resumes.
+        params.bump_pause_count();
+        params.bump_pause_count();
+        params.set_target_volume(0, -20.0);
+
+        let mut resumed = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut resumed).unwrap();
+        assert!(resumed.iter().all(|s| (s - gain_at(-20.0)).abs() < 1e-6));
+    }
+
+    /// A pause is only attributed to the chunk right after it, so a change made
+    /// later, while running again, is still ramped.
+    #[test]
+    fn volume_ramps_again_after_resuming() {
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, 0.0);
+        let mut filter = make_volume(&params, 2.0);
+
+        let mut chunk = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut chunk).unwrap();
+
+        // A pause happens, but no volume change is made during it.
+        params.bump_pause_count();
+        let mut resumed = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut resumed).unwrap();
+
+        // Now change the volume while running, this must ramp.
+        params.set_target_volume(0, -20.0);
+        let mut chunk1 = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut chunk1).unwrap();
+        assert!(chunk1[0] > chunk1[VOL_CHUNKSIZE - 1]);
+        assert!(chunk1[VOL_CHUNKSIZE - 1] > gain_at(-20.0) + 1e-6);
+    }
+
+    /// With no ramp time configured, changes are always applied directly.
+    #[test]
+    fn volume_without_ramptime_switches_directly() {
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, 0.0);
+        let mut filter = make_volume(&params, 0.0);
+
+        let mut chunk = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut chunk).unwrap();
+
+        params.set_target_volume(0, -20.0);
+        let mut chunk1 = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut chunk1).unwrap();
+        assert!(chunk1.iter().all(|s| (s - gain_at(-20.0)).abs() < 1e-6));
+    }
+
+    /// A mute toggled while paused is applied directly on resume, like a volume change.
+    #[test]
+    fn mute_during_pause_is_not_ramped() {
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, 0.0);
+        let mut filter = make_volume(&params, 2.0);
+
+        let mut chunk = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut chunk).unwrap();
+
+        params.bump_pause_count();
+        params.set_mute(0, true);
+
+        let mut resumed = vec![1.0; VOL_CHUNKSIZE];
+        filter.process_waveform(&mut resumed).unwrap();
+        assert!(resumed.iter().all(|s| s.abs() < 1e-10));
+    }
+
+    /// A filter built at a fixed level applies that gain with no ramping.
+    #[test]
+    fn volume_applies_initial_level() {
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, -20.0);
+        let mut filter = make_volume_full(&params, 0.0, 50.0, -20.0, false, 4);
+
+        let mut waveform: Vec<PrcFmt> = vec![1.0, -1.0, 0.5, -0.5];
+        filter.process_waveform(&mut waveform).unwrap();
+
+        let gain = gain_at(-20.0);
+        let expected: Vec<PrcFmt> = vec![gain, -gain, 0.5 * gain, -0.5 * gain];
+        assert!(compare_waveforms(waveform, expected, 1e-10));
+    }
+
+    /// A filter built muted outputs silence.
+    #[test]
+    fn volume_muted_outputs_silence() {
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, 0.0);
+        params.set_mute(0, true);
+        let mut filter = make_volume_full(&params, 0.0, 50.0, 0.0, true, 4);
+
+        let mut waveform: Vec<PrcFmt> = vec![1.0, 0.5, -0.5, -1.0];
+        filter.process_waveform(&mut waveform).unwrap();
+        assert!(waveform.iter().all(|s| s.abs() < 1e-10));
+    }
+
+    /// Changes smaller than the 0.01 dB detection threshold are ignored.
+    #[test]
+    fn volume_ignores_changes_below_threshold() {
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, 0.0);
+        let mut filter = make_volume_full(&params, 0.0, 50.0, 0.0, false, 4);
+
+        let mut wave1: Vec<PrcFmt> = vec![1.0; 4];
+        filter.process_waveform(&mut wave1).unwrap();
+
+        // Below the threshold, so the gain stays at unity.
+        params.set_target_volume(0, 0.005);
+        let mut wave2: Vec<PrcFmt> = vec![1.0; 4];
+        filter.process_waveform(&mut wave2).unwrap();
+        assert!(wave2.iter().all(|s| (s - 1.0).abs() < 1e-10));
+
+        // Above the threshold, so it is applied.
+        params.set_target_volume(0, 0.02);
+        let mut wave3: Vec<PrcFmt> = vec![1.0; 4];
+        filter.process_waveform(&mut wave3).unwrap();
+        assert!(wave3.iter().all(|s| (s - gain_at(0.02)).abs() < 1e-6));
+    }
+
+    /// A target above the configured limit is clamped to the limit.
+    #[test]
+    fn volume_limit_clamps_target() {
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, 0.0);
+        let mut filter = make_volume_full(&params, 0.0, 10.0, 0.0, false, 4);
+
+        params.set_target_volume(0, 20.0);
+        let mut waveform: Vec<PrcFmt> = vec![1.0; 4];
+        filter.process_waveform(&mut waveform).unwrap();
+        assert!(waveform.iter().all(|s| (s - gain_at(10.0)).abs() < 1e-6));
+    }
+
+    /// Ramping must not depend on chunk size or wall clock timing. With a tiny chunk
+    /// size the old timestamp based staleness check had a threshold of a few hundred
+    /// microseconds, which made this ramp get skipped whenever the test thread was
+    /// descheduled between chunks.
+    #[test]
+    fn volume_ramps_with_tiny_chunksize() {
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, 0.0);
+        let mut filter = make_volume_full(&params, 2.0, 50.0, 0.0, false, 4);
+
+        let mut chunk0: Vec<PrcFmt> = vec![1.0; 4];
+        filter.process_waveform(&mut chunk0).unwrap();
+        assert!(chunk0.iter().all(|s| (s - 1.0).abs() < 1e-10));
+
+        params.set_target_volume(0, -20.0);
+
+        let mut chunk1: Vec<PrcFmt> = vec![1.0; 4];
+        filter.process_waveform(&mut chunk1).unwrap();
+        assert!(chunk1[0] > chunk1[3]);
+        assert!(chunk1.iter().all(|s| *s <= gain_at(0.0) + 1e-6));
+        assert!(chunk1.iter().all(|s| *s >= gain_at(-20.0) - 1e-6));
+
+        let mut chunk2: Vec<PrcFmt> = vec![1.0; 4];
+        filter.process_waveform(&mut chunk2).unwrap();
+        assert!(chunk2[3] < chunk1[3]);
+
+        let mut chunk3: Vec<PrcFmt> = vec![1.0; 4];
+        filter.process_waveform(&mut chunk3).unwrap();
+        assert!(chunk3.iter().all(|s| (s - gain_at(-20.0)).abs() < 1e-6));
     }
 }

@@ -40,10 +40,9 @@ use serde::Serialize;
 use std::error;
 use std::fmt;
 use std::sync::{
-    Arc, OnceLock,
+    Arc,
     atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
 };
-use std::time::Instant;
 
 /// Global flag set to `true` when a graceful shutdown has been requested (e.g. by SIGTERM).
 pub static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -346,13 +345,6 @@ pub(crate) fn update_playback_signal_status(
     }
 }
 
-static PARAMS_EPOCH: OnceLock<Instant> = OnceLock::new();
-
-/// Nanoseconds elapsed since the first call to this function (monotonic, process-local epoch).
-pub fn nanos_since_epoch() -> u64 {
-    PARAMS_EPOCH.get_or_init(Instant::now).elapsed().as_nanos() as u64
-}
-
 /// Lock-free shared state for volume, mute, and load metrics, accessible from any thread.
 #[derive(Debug)]
 pub struct ProcessingParameters {
@@ -360,11 +352,11 @@ pub struct ProcessingParameters {
     // bits as a `u32` of equal size we can use atomic operations instead of a
     // mutex.
     target_volume: [AtomicU32; Self::NUM_FADERS],
-    target_volume_set_at: [AtomicU64; Self::NUM_FADERS],
     current_volume: [AtomicU32; Self::NUM_FADERS],
     mute: [AtomicBool; Self::NUM_FADERS],
     processing_load: AtomicU32,
     resampler_load: AtomicU32,
+    pause_count: AtomicU64,
 }
 
 impl ProcessingParameters {
@@ -386,13 +378,6 @@ impl ProcessingParameters {
                 AtomicU32::new(initial_volumes[3].to_bits()),
                 AtomicU32::new(initial_volumes[4].to_bits()),
             ],
-            target_volume_set_at: [
-                AtomicU64::new(0),
-                AtomicU64::new(0),
-                AtomicU64::new(0),
-                AtomicU64::new(0),
-                AtomicU64::new(0),
-            ],
             current_volume: [
                 AtomicU32::new(initial_volumes[0].to_bits()),
                 AtomicU32::new(initial_volumes[1].to_bits()),
@@ -409,6 +394,7 @@ impl ProcessingParameters {
             ],
             processing_load: AtomicU32::new(0.0f32.to_bits()),
             resampler_load: AtomicU32::new(0.0f32.to_bits()),
+            pause_count: AtomicU64::new(0),
         }
     }
 
@@ -417,15 +403,23 @@ impl ProcessingParameters {
         f32::from_bits(self.target_volume[fader].load(Ordering::Relaxed))
     }
 
-    /// Set the target volume (dB) for `fader` and record the timestamp of the change.
+    /// Set the target volume (dB) for `fader`.
     pub fn set_target_volume(&self, fader: usize, target: f32) {
         self.target_volume[fader].store(target.to_bits(), Ordering::Relaxed);
-        self.target_volume_set_at[fader].store(nanos_since_epoch(), Ordering::Relaxed);
     }
 
-    /// Return the [`nanos_since_epoch`] timestamp when the target volume for `fader` was last set.
-    pub fn target_volume_set_at(&self, fader: usize) -> u64 {
-        self.target_volume_set_at[fader].load(Ordering::Relaxed)
+    /// Record that audio flow was interrupted, because capture is paused or stalled.
+    ///
+    /// Volume filters compare this counter against the value seen when they last ran, to tell
+    /// whether a volume change was made while audio was flowing (ramp it) or during a pause
+    /// (apply it directly, since ramping from a stale level would fade in at the wrong volume).
+    pub fn bump_pause_count(&self) {
+        self.pause_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Return the number of audio flow interruptions recorded so far.
+    pub fn pause_count(&self) -> u64 {
+        self.pause_count.load(Ordering::Relaxed)
     }
 
     /// Return the currently applied volume (dB) for `fader` (may lag behind the target during a ramp).
