@@ -44,7 +44,14 @@ The commands that return a value also include a "value" field:
 ```
 
 When a command fails, the `"result"` field holds the error name instead of `"Ok"`,
-and there is no `"value"` field. Errors that carry a description add a `"message"` field:
+and there is no `"value"` field. Some errors are just the name:
+```json
+{
+  "reply": "SetFaderVolume",
+  "result": "InvalidFaderError"
+}
+```
+Errors that carry a description add a top-level `"message"` field:
 ```json
 {
   "reply": "SetConfig",
@@ -841,25 +848,9 @@ and `capability_sets` is an empty list.
 
 ## Error responses
 
-If a command succeeds, the `"result"` field is `"Ok"`.
-If not, it holds the error name as a plain string, and no `"value"` field is present.
-
-Errors without a message have just the name in `"result"`:
-```json
-{
-  "reply": "SetFaderVolume",
-  "result": "InvalidFaderError"
-}
-```
-
-Errors that carry a description add a top-level `"message"` field:
-```json
-{
-  "reply": "SetConfig",
-  "result": "ConfigValidationError",
-  "message": "Invalid value for samplerate"
-}
-```
+The possible values of `"result"` when a command fails are listed below. Those noted as including a
+message also carry a top-level `"message"` field with the details; see
+[Command syntax](#command-syntax) for the reply shape.
 
 ### `ShutdownInProgressError`
 
