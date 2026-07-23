@@ -44,10 +44,12 @@
 //! {"reply": "GetUpdateInterval", "result": "Ok", "value": 500}
 //! ```
 //!
-//! If a command fails the `"result"` field contains an error instead of `"Ok"`.
-//! Errors with a message are a JSON object wrapping a `"message"` field:
-//! `{"ConfigValidationError": {"message": "details..."}}`.
-//! Simple errors are a plain string: `"InvalidFaderError"`.
+//! If a command fails the `"result"` field holds the error name instead of `"Ok"`, and there is
+//! no `"value"` field. Errors that carry a description add a top-level `"message"` field:
+//! ```json
+//! {"reply": "SetConfig", "result": "ConfigValidationError", "message": "details..."}
+//! ```
+//! Errors without a message have just the name: `{"reply": "SetFaderVolume", "result": "InvalidFaderError"}`.
 //!
 //! Unrecognised commands get a `{"reply": "Invalid", "error": "..."}` response.
 //!

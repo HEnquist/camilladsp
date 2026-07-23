@@ -43,38 +43,40 @@ The commands that return a value also include a "value" field:
 }
 ```
 
-## String formatting, notably for NodeJS etc
-
-All commands and responses are sent as the string text representation of a JSON object.
-Your system/language may automatically do the "stringify" / "parse" processes automatically for you, many won't.
-
-IE if you are using NodeJS/javascript then simply wrap your JSON object with JSON.stringify() before sending.
+When a command fails, the `"result"` field holds the error name instead of `"Ok"`,
+and there is no `"value"` field. Errors that carry a description add a `"message"` field:
+```json
+{
+  "reply": "SetConfig",
+  "result": "ConfigValidationError",
+  "message": "Invalid value for samplerate"
+}
 ```
-ws.send(JSON.stringify({"command": "SetUpdateInterval", "value": 1000}))
-```
+See [Error responses](#error-responses) for the full list.
 
-Likewise on receiving the value from the websocket server, the JSON **will be in string format**.
-Complicating it further, if you're using the defacto 'ws' NodeJS library,
-it's likely received as a buffer array that you need to convert to string first.
-Either way, you'll need to parse the text with the JSON.parse function.
-```
-ws.on('message', function message(data) {
-    // data is buffer array
-    let replyString = Buffer.from(data).toString();
-    let parsed = {};
-    try {
-      parsed = JSON.parse(replyString);
-    }
-    catch (err){
-      console.error('Parse error', err);
-    }
+## Message encoding
 
-    if (parsed.reply === 'GetVolume'){
-      console.log('GetVolume response received', parsed.value);
-    }
-});
-```
-*Wrapping the parse with a try/catch is good practice to avoid crashes with improperly formatted JSON etc.*
+Every message, in both directions, is a websocket text frame whose payload is a JSON document
+encoded as a UTF-8 string. There is no binary framing and no extra envelope: the string *is* the
+JSON.
+
+This means:
+
+- **Sending:** serialize your command object to a JSON string before handing it to the websocket
+  library. Sending a native object or map directly will not work unless the library serializes it
+  for you.
+- **Receiving:** parse the received string back into an object. Some libraries deliver text frames
+  as raw bytes or a buffer rather than a string; if so, decode them as UTF-8 first, then parse.
+- **Be defensive:** guard the parse step so a malformed or unexpected frame does not crash your
+  handler.
+
+Whether any of these steps happen automatically depends on your language and websocket library, so
+check what yours does. For example, in JavaScript you would serialize with `JSON.stringify()`
+before sending and parse with `JSON.parse()` on receipt; in Python the `json` module's `dumps` and
+`loads` do the same. Most languages ship an equivalent JSON encoder and decoder.
+
+If you use Python, the pyCamillaDSP library handles all of this for you. See
+[Controlling from Python](#controlling-from-python) below.
 
 
 ## All commands
@@ -839,17 +841,24 @@ and `capability_sets` is an empty list.
 
 ## Error responses
 
-If a command succeeds, CamillaDSP will reply with `Ok` in the `result` field.
-If not, this field will instead contain an error string.
+If a command succeeds, the `"result"` field is `"Ok"`.
+If not, it holds the error name as a plain string, and no `"value"` field is present.
 
-Errors without a message are returned as a plain string:
+Errors without a message have just the name in `"result"`:
 ```json
-"result": "InvalidFaderError"
+{
+  "reply": "SetFaderVolume",
+  "result": "InvalidFaderError"
+}
 ```
 
-Errors with a message are returned as a JSON object with one key wrapping a `"message"` field:
+Errors that carry a description add a top-level `"message"` field:
 ```json
-"result": {"ConfigValidationError": {"message": "Description of the error"}}
+{
+  "reply": "SetConfig",
+  "result": "ConfigValidationError",
+  "message": "Invalid value for samplerate"
+}
 ```
 
 ### `ShutdownInProgressError`
@@ -919,89 +928,13 @@ Processing is not currently running.
 Returned by `WsCommand::SubscribeSpectrum` when processing is inactive.
 
 
-## Controlling from Python using pyCamillaDSP
+## Controlling from Python
 
 The recommended way of controlling CamillaDSP with Python is by using the
 [pyCamillaDSP library](https://github.com/HEnquist/pycamilladsp).
 
 Please see the readme in that library for instructions.
 
-
-## Controlling directly using Python
-
-You need the websocket_client module installed for this to work.
-The package is called `python-websocket-client` on Fedora and `python3-websocket` on Debian/Ubuntu.
-
-First start CamillaDSP with the -p option:
-```
-camilladsp -v -p1234 /path/to/someconfig.yml
-```
-
-Start Ipython. Import the websocket client and make a connection:
-```ipython
-In [1]: from websocket import create_connection
-In [2]: import json
-In [3]: ws = create_connection("ws://127.0.0.1:1234")
-```
-
-### Get the name of the current config file
-```ipython
-In [4]: ws.send(json.dumps({"command": "GetConfigFilePath"}))
-Out[4]: 34
-
-In [5]: print(ws.recv())
-{"reply":"GetConfigFilePath","result":"Ok","value":"/path/to/someconfig.yml"}
-```
-
-### Switch to a different config file
-The new config is applied when the "reload" command is sent.
-```ipython
-In [6]: ws.send(json.dumps({"command": "SetConfigFilePath", "value": "/path/to/otherconfig.yml"}))
-Out[6]: 84
-
-In [7]: print(ws.recv())
-{"reply":"SetConfigFilePath","result":"Ok"}
-
-In [8]: ws.send(json.dumps({"command": "Reload"}))
-Out[8]: 22
-
-In [9]: print(ws.recv())
-{"reply":"Reload","result":"Ok"}
-```
-
-
-### Get the current configuration
-Use json.loads to parse the json response.
-```
-In [10]: ws.send(json.dumps({"command": "GetConfig"}))
-Out[10]: 25
-
-In [11]: reply = json.loads(ws.recv())
-In [12]: print(reply["value"])
----
-devices:
-  samplerate: 44100
-  buffersize: 1024
-  silence_threshold: 0.0
-  silence_timeout: 0.0
-  capture:
-    type: Alsa
-    ...
-```
-
-### Send a new config as yaml
-The new config is applied directly.
-```ipython
-In [12]: with open('/path/to/newconfig.yml') as f:
-    ...:     cfg=f.read()
-    ...:
-
-In [13]: ws.send(json.dumps({"command": "SetConfig", "value": cfg}))
-Out[13]: 969
-
-In [14]: print(ws.recv())
-{"reply":"SetConfig","result":"Ok"}
-```
 
 ## Secure websocket, wss://
 By compiling with the optional feature `secure-websocket`,

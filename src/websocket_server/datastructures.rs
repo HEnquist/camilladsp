@@ -477,10 +477,11 @@ pub(crate) enum WsCommand {
 
 /// Result status returned in every websocket response.
 ///
-/// Serialised as a JSON string (simple variants) or a JSON object with one key wrapping a
-/// `{ "message": ... }` object (variants that carry a message). See the
-/// [module-level documentation](self) for the full response format.
+/// Flattened into each [`WsReply`] variant, so its tag becomes the reply's `"result"` field
+/// (always a plain string) and any message rides alongside as a top-level `"message"` field.
+/// See the [module-level documentation](self) for the full response format.
 #[derive(Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "result")]
 pub(crate) enum WsResult {
     /// The command succeeded.
     Ok,
@@ -613,381 +614,461 @@ pub(crate) struct StateUpdate {
 #[serde(tag = "reply")]
 pub(crate) enum WsReply {
     SetConfigFilePath {
+        #[serde(flatten)]
         result: WsResult,
     },
     SetConfig {
+        #[serde(flatten)]
         result: WsResult,
     },
     SetConfigJson {
+        #[serde(flatten)]
         result: WsResult,
     },
     PatchConfig {
+        #[serde(flatten)]
         result: WsResult,
     },
     SetConfigValue {
+        #[serde(flatten)]
         result: WsResult,
     },
     Reload {
+        #[serde(flatten)]
         result: WsResult,
     },
     GetConfig {
+        #[serde(flatten)]
         result: WsResult,
         /// Active config in YAML format.
         value: String,
     },
     GetConfigJson {
+        #[serde(flatten)]
         result: WsResult,
         /// Active config in JSON format.
         value: String,
     },
     GetConfigValue {
+        #[serde(flatten)]
         result: WsResult,
         /// Value at the specified JSON Pointer path.
         value: serde_json::Value,
     },
     GetConfigTitle {
+        #[serde(flatten)]
         result: WsResult,
         /// Title string from the active config.
         value: String,
     },
     GetConfigDescription {
+        #[serde(flatten)]
         result: WsResult,
         /// Description string from the active config.
         value: String,
     },
     GetPreviousConfig {
+        #[serde(flatten)]
         result: WsResult,
         /// Previously active config in YAML format.
         value: String,
     },
     ReadConfig {
+        #[serde(flatten)]
         result: WsResult,
         /// Config with all optional fields filled with defaults, or an error message.
         value: String,
     },
     ReadConfigJson {
+        #[serde(flatten)]
         result: WsResult,
         /// Config with all optional fields filled with defaults, or an error message.
         value: String,
     },
     ReadConfigFile {
+        #[serde(flatten)]
         result: WsResult,
         /// Config with all optional fields filled with defaults, or an error message.
         value: String,
     },
     ValidateConfig {
+        #[serde(flatten)]
         result: WsResult,
         /// Validated config with defaults, or an error message.
         value: String,
     },
     ValidateConfigJson {
+        #[serde(flatten)]
         result: WsResult,
         /// Validated config with defaults, or an error message.
         value: String,
     },
     GetConfigFilePath {
+        #[serde(flatten)]
         result: WsResult,
         /// File path of the active config, or `null` if no file is loaded.
         value: Option<String>,
     },
     GetStateFilePath {
+        #[serde(flatten)]
         result: WsResult,
         /// File path of the state file, or `null` if no state file is used.
         value: Option<String>,
     },
     GetStateFileUpdated {
+        #[serde(flatten)]
         result: WsResult,
         /// `true` if all changes have been saved to the state file.
         value: bool,
     },
     GetSignalRange {
+        #[serde(flatten)]
         result: WsResult,
         /// Peak-to-peak amplitude range of the last chunk (2.0 = full level).
         value: f32,
     },
     GetPlaybackSignalRms {
+        #[serde(flatten)]
         result: WsResult,
         /// RMS level per playback channel in dB (0 dB = full level).
         value: Vec<f32>,
     },
     GetPlaybackSignalRmsSince {
+        #[serde(flatten)]
         result: WsResult,
         /// RMS level per playback channel in dB, averaged over the requested window.
         value: Vec<f32>,
     },
     GetPlaybackSignalRmsSinceLast {
+        #[serde(flatten)]
         result: WsResult,
         /// RMS level per playback channel in dB since the last call; empty if no new data.
         value: Vec<f32>,
     },
     GetPlaybackSignalPeak {
+        #[serde(flatten)]
         result: WsResult,
         /// Peak level per playback channel in dB (0 dB = full level).
         value: Vec<f32>,
     },
     GetPlaybackSignalPeakSince {
+        #[serde(flatten)]
         result: WsResult,
         /// Peak level per playback channel in dB over the requested window.
         value: Vec<f32>,
     },
     GetPlaybackSignalPeakSinceLast {
+        #[serde(flatten)]
         result: WsResult,
         /// Peak level per playback channel in dB since the last call; empty if no new data.
         value: Vec<f32>,
     },
     GetCaptureSignalRms {
+        #[serde(flatten)]
         result: WsResult,
         /// RMS level per capture channel in dB (0 dB = full level).
         value: Vec<f32>,
     },
     GetCaptureSignalRmsSince {
+        #[serde(flatten)]
         result: WsResult,
         /// RMS level per capture channel in dB, averaged over the requested window.
         value: Vec<f32>,
     },
     GetCaptureSignalRmsSinceLast {
+        #[serde(flatten)]
         result: WsResult,
         /// RMS level per capture channel in dB since the last call; empty if no new data.
         value: Vec<f32>,
     },
     GetCaptureSignalPeak {
+        #[serde(flatten)]
         result: WsResult,
         /// Peak level per capture channel in dB (0 dB = full level).
         value: Vec<f32>,
     },
     GetCaptureSignalPeakSince {
+        #[serde(flatten)]
         result: WsResult,
         /// Peak level per capture channel in dB over the requested window.
         value: Vec<f32>,
     },
     GetCaptureSignalPeakSinceLast {
+        #[serde(flatten)]
         result: WsResult,
         /// Peak level per capture channel in dB since the last call; empty if no new data.
         value: Vec<f32>,
     },
     GetSignalLevels {
+        #[serde(flatten)]
         result: WsResult,
         /// RMS and peak levels for both sides.
         value: AllLevels,
     },
     GetSignalLevelsSince {
+        #[serde(flatten)]
         result: WsResult,
         /// RMS and peak levels for both sides, averaged over the requested window.
         value: AllLevels,
     },
     GetSignalLevelsSinceLast {
+        #[serde(flatten)]
         result: WsResult,
         /// RMS and peak levels for both sides since the last call; empty if no new data.
         value: AllLevels,
     },
     SubscribeSignalLevels {
+        #[serde(flatten)]
         result: WsResult,
     },
     SubscribeVuLevels {
+        #[serde(flatten)]
         result: WsResult,
     },
     SubscribeState {
+        #[serde(flatten)]
         result: WsResult,
     },
     StopSubscription {
+        #[serde(flatten)]
         result: WsResult,
     },
     /// Pushed to subscribed clients each time the signal levels are updated.
     SignalLevelsEvent {
+        #[serde(flatten)]
         result: WsResult,
         /// Levels for the subscribed side.
         value: StreamLevels,
     },
     /// Pushed to subscribed clients each time smoothed VU levels are updated.
     VuLevelsEvent {
+        #[serde(flatten)]
         result: WsResult,
         /// Smoothed RMS and peak levels for both sides.
         value: VuLevels,
     },
     /// Pushed to subscribed clients each time the processing state changes.
     StateEvent {
+        #[serde(flatten)]
         result: WsResult,
         /// New processing state, with stop reason if the state is `Inactive`.
         value: StateUpdate,
     },
     GetSignalPeaksSinceStart {
+        #[serde(flatten)]
         result: WsResult,
         /// Peak levels since processing started, for both sides.
         value: PbCapLevels,
     },
     ResetSignalPeaksSinceStart {
+        #[serde(flatten)]
         result: WsResult,
     },
     GetChannelLabels {
+        #[serde(flatten)]
         result: WsResult,
         /// Display labels for capture and playback channels.
         value: ChannelLabels,
     },
     GetCaptureRate {
+        #[serde(flatten)]
         result: WsResult,
         /// Measured capture sample rate in Hz.
         value: usize,
     },
     GetUpdateInterval {
+        #[serde(flatten)]
         result: WsResult,
         /// Update interval in milliseconds.
         value: usize,
     },
     SetUpdateInterval {
+        #[serde(flatten)]
         result: WsResult,
     },
     SetVolume {
+        #[serde(flatten)]
         result: WsResult,
     },
     GetVolume {
+        #[serde(flatten)]
         result: WsResult,
         /// Current volume in dB.
         value: f32,
     },
     AdjustVolume {
+        #[serde(flatten)]
         result: WsResult,
         /// New volume in dB after the adjustment.
         value: f32,
     },
     SetMute {
+        #[serde(flatten)]
         result: WsResult,
     },
     GetMute {
+        #[serde(flatten)]
         result: WsResult,
         /// `true` if muted.
         value: bool,
     },
     ToggleMute {
+        #[serde(flatten)]
         result: WsResult,
         /// New mute state after the toggle.
         value: bool,
     },
     SetFaderVolume {
+        #[serde(flatten)]
         result: WsResult,
     },
     SetFaderExternalVolume {
+        #[serde(flatten)]
         result: WsResult,
     },
     GetFaders {
+        #[serde(flatten)]
         result: WsResult,
         /// List of faders: Main (index 0) followed by Aux1–Aux4 (indices 1–4).
         value: Vec<Fader>,
     },
     GetFaderVolume {
+        #[serde(flatten)]
         result: WsResult,
         /// `[fader_index, volume_dB]`.
         value: (usize, f32),
     },
     AdjustFaderVolume {
+        #[serde(flatten)]
         result: WsResult,
         /// `[fader_index, new_volume_dB]` after the adjustment.
         value: (usize, f32),
     },
     SetFaderMute {
+        #[serde(flatten)]
         result: WsResult,
     },
     GetFaderMute {
+        #[serde(flatten)]
         result: WsResult,
         /// `[fader_index, is_muted]`.
         value: (usize, bool),
     },
     ToggleFaderMute {
+        #[serde(flatten)]
         result: WsResult,
         /// `[fader_index, new_mute_state]` after the toggle.
         value: (usize, bool),
     },
     GetVersion {
+        #[serde(flatten)]
         result: WsResult,
         /// Version string, e.g. `"2.0.0"`.
         value: String,
     },
     GetState {
+        #[serde(flatten)]
         result: WsResult,
         /// Current processing state.
         value: ProcessingState,
     },
     GetStopReason {
+        #[serde(flatten)]
         result: WsResult,
         /// Reason the processing last stopped.
         value: StopReason,
     },
     GetRateAdjust {
+        #[serde(flatten)]
         result: WsResult,
         /// Rate adjustment factor applied to the async resampler (1.0 = no adjustment).
         value: f32,
     },
     GetBufferLevel {
+        #[serde(flatten)]
         result: WsResult,
         /// Playback device buffer fill level in frames; 0 if rate adjust is not enabled.
         value: usize,
     },
     GetClippedSamples {
+        #[serde(flatten)]
         result: WsResult,
         /// Number of clipped samples since the config was loaded.
         value: usize,
     },
     ResetClippedSamples {
+        #[serde(flatten)]
         result: WsResult,
     },
     GetSupportedDeviceTypes {
+        #[serde(flatten)]
         result: WsResult,
         /// `[list_of_playback_types, list_of_capture_types]`.
         value: (Vec<String>, Vec<String>),
     },
     GetAvailableCaptureDevices {
+        #[serde(flatten)]
         result: WsResult,
         /// List of `[identifier, name_or_null]` pairs.
         value: Vec<(String, String)>,
     },
     GetAvailablePlaybackDevices {
+        #[serde(flatten)]
         result: WsResult,
         /// List of `[identifier, name_or_null]` pairs.
         value: Vec<(String, String)>,
     },
     GetCaptureDeviceCapabilities {
+        #[serde(flatten)]
         result: WsResult,
         /// Capabilities of the requested capture device.
         value: AudioDeviceDescriptor,
     },
     GetPlaybackDeviceCapabilities {
+        #[serde(flatten)]
         result: WsResult,
         /// Capabilities of the requested playback device.
         value: AudioDeviceDescriptor,
     },
     GetProcessingLoad {
+        #[serde(flatten)]
         result: WsResult,
         /// Pipeline processing load in percent.
         value: f32,
     },
     GetResamplerLoad {
+        #[serde(flatten)]
         result: WsResult,
         /// Resampler processing load in percent.
         value: f32,
     },
     GetSpectrum {
+        #[serde(flatten)]
         result: WsResult,
         /// Computed spectrum with frequency and magnitude arrays.
         #[serde(skip_serializing_if = "Option::is_none")]
         value: Option<SpectrumData>,
     },
     SubscribeSpectrum {
+        #[serde(flatten)]
         result: WsResult,
     },
     /// Pushed to subscribed clients each time a new spectrum is ready.
     SpectrumEvent {
+        #[serde(flatten)]
         result: WsResult,
         /// Computed spectrum, or absent if processing has stopped.
         #[serde(skip_serializing_if = "Option::is_none")]
         value: Option<SpectrumData>,
     },
     Exit {
+        #[serde(flatten)]
         result: WsResult,
     },
     Stop {
+        #[serde(flatten)]
         result: WsResult,
     },
     /// Sent when the server cannot parse or dispatch the incoming command.
-    Invalid {
-        error: String,
-    },
+    Invalid { error: String },
 }
