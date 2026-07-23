@@ -273,7 +273,11 @@ pub unsafe extern "C" fn buffer_switch_playback(buffer_index: i32, _direct_proce
         }
         if !ctx.running {
             ctx.running = true;
-            let prefill_frames = ctx.target_level;
+            // Prefill at least one full callback's worth of frames so the loop
+            // below doesn't immediately re-drain the ring buffer to empty and
+            // re-trigger an underrun when target_level is smaller than the
+            // driver's actual buffer size (see issue #498).
+            let prefill_frames = ctx.target_level.max(ctx.buffer_size);
             // On first startup, start immediately without extra silence prefill.
             // On restart after underrun, keep target_level prefill to rebuild delay.
             let new_len = ctx.sample_queue.len() + prefill_frames * bytes_per_frame;
@@ -1380,7 +1384,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
 
                 // --- Device-specific setup (full-duplex vs single-direction) ---
                 // Format is resolved inside; bytes_per_sample depends on it.
-                let setup_result: Result<(Option<usize>, BinarySampleFormat, usize), String> = if full_duplex {
+                let setup_result: Result<(usize, BinarySampleFormat, usize), String> = if full_duplex {
                     // Full-duplex: shared driver coordination
                     let (_inputs, outputs, preferred_buf) = match init_shared_asio(&devname, samplerate) {
                         Ok(result) => result,
@@ -1421,7 +1425,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     let binary_format = resolve_binary_format(&resolved_format);
                     let bytes_per_sample = binary_format.bytes_per_sample();
                     let asio_buffer_size = preferred_buf as usize;
-                    Ok((Some(asio_buffer_size), binary_format, bytes_per_sample))
+                    Ok((asio_buffer_size, binary_format, bytes_per_sample))
                 } else {
                     // Single-direction: open device (also resolves format)
                     let resolved_format =
@@ -1439,7 +1443,22 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         };
                     let binary_format = resolve_binary_format(&resolved_format);
                     let bytes_per_sample = binary_format.bytes_per_sample();
-                    Ok((None, binary_format, bytes_per_sample))
+                    // Query the driver's actual buffer size now so the ring buffer below
+                    // can be sized to fit it (see issue #498: a driver buffer larger than
+                    // chunksize used to overflow the ring buffer capacity and cause underruns).
+                    let preferred_buf = match get_preferred_buffer_size() {
+                        Ok(result) => result,
+                        Err(err) => {
+                            let msg = format!("ASIO playback buffer size query error: {err}");
+                            error!("{msg}");
+                            status_channel
+                                .send(StatusMessage::PlaybackError(msg))
+                                .unwrap_or(());
+                            barrier.wait();
+                            return;
+                        }
+                    };
+                    Ok((preferred_buf as usize, binary_format, bytes_per_sample))
                 };
 
                 let (asio_buffer_size, binary_format, bytes_per_sample) = match setup_result {
@@ -1454,9 +1473,12 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     }
                 };
 
-                // Now create ring buffer and context with the resolved bytes_per_sample
+                // Size the ring buffer to fit at least the driver's actual buffer size,
+                // not just chunksize, so a single ASIO callback can never request more
+                // bytes than the ring buffer can hold.
+                let ring_frames = chunksize.max(asio_buffer_size);
                 let ringbuffer = HeapRb::<u8>::new(
-                    channels * bytes_per_sample * (2 * chunksize + 2048),
+                    channels * bytes_per_sample * (2 * ring_frames + 2048),
                 );
                 let (mut device_producer, device_consumer) = ringbuffer.split();
                 let mut _single_playback_buffer_infos: Option<Vec<ASIOBufferInfo>> = None;
@@ -1470,20 +1492,13 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     let ctx = Box::new(AsioPlaybackContext {
                         device_consumer,
                         sample_queue: VecDeque::with_capacity(
-                            (16 * chunksize + target_level) * bytes_per_sample * channels,
+                            (16 * ring_frames + target_level) * bytes_per_sample * channels,
                         ),
                         buffer_infos,
                         num_channels: channels,
-                        buffer_size: asio_buffer_size.expect(
-                            "full_duplex setup must provide asio_buffer_size",
-                        ),
+                        buffer_size: asio_buffer_size,
                         bytes_per_sample,
-                        read_tmp: vec![
-                            0u8;
-                            asio_buffer_size.expect("full_duplex setup must provide asio_buffer_size")
-                                * bytes_per_sample
-                                * channels
-                        ],
+                        read_tmp: vec![0u8; asio_buffer_size * bytes_per_sample * channels],
                         target_level,
                         buffer_fill: buffer_fill_clone,
                         running: false,
@@ -1505,18 +1520,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     }
                     ctx_raw
                 } else {
-                    let preferred_buf = match get_preferred_buffer_size() {
-                        Ok(result) => result,
-                        Err(err) => {
-                            let msg = format!("ASIO playback buffer size query error: {err}");
-                            error!("{msg}");
-                            status_channel
-                                .send(StatusMessage::PlaybackError(msg))
-                                .unwrap_or(());
-                            barrier.wait();
-                            return;
-                        }
-                    };
+                    let preferred_buf = asio_buffer_size as i32;
 
                     let mut driver_buffer_infos = make_buffer_infos(channels, false);
                     let mut callbacks_for_driver = Box::new(ASIOCallbacks {
@@ -1544,7 +1548,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     let ctx = Box::new(AsioPlaybackContext {
                         device_consumer,
                         sample_queue: VecDeque::with_capacity(
-                            (16 * chunksize + target_level) * bytes_per_sample * channels,
+                            (16 * ring_frames + target_level) * bytes_per_sample * channels,
                         ),
                         buffer_infos: driver_buffer_infos.clone(),
                         num_channels: channels,
@@ -1784,7 +1788,7 @@ impl CaptureDevice for AsioCaptureDevice {
 
                 // --- Device-specific setup (full-duplex vs single-direction) ---
                 // Format is resolved inside; bytes_per_sample depends on it.
-                let setup_result: Result<(Option<usize>, BinarySampleFormat, usize), String> = if full_duplex {
+                let setup_result: Result<(usize, BinarySampleFormat, usize), String> = if full_duplex {
                     // Full-duplex: shared driver coordination
                     let (inputs, _outputs, preferred_buf) = match init_shared_asio(&devname, samplerate) {
                         Ok(result) => result,
@@ -1827,7 +1831,7 @@ impl CaptureDevice for AsioCaptureDevice {
                     };
                     let binary_format = resolve_binary_format(&resolved_format);
                     let bytes_per_sample = binary_format.bytes_per_sample();
-                    Ok((Some(preferred_buf as usize), binary_format, bytes_per_sample))
+                    Ok((preferred_buf as usize, binary_format, bytes_per_sample))
                 } else {
                     // Single-direction: open device (also resolves format)
                     let resolved_format =
@@ -1846,7 +1850,22 @@ impl CaptureDevice for AsioCaptureDevice {
                         };
                     let binary_format = resolve_binary_format(&resolved_format);
                     let bytes_per_sample = binary_format.bytes_per_sample();
-                    Ok((None, binary_format, bytes_per_sample))
+                    // Query the driver's actual buffer size now so the ring buffer below
+                    // can be sized to fit it (see issue #498).
+                    let preferred_buf = match get_preferred_buffer_size() {
+                        Ok(result) => result,
+                        Err(err) => {
+                            let msg = format!("ASIO capture buffer size query error: {err}");
+                            error!("{msg}");
+                            channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                            status_channel
+                                .send(StatusMessage::CaptureError(msg))
+                                .unwrap_or(());
+                            barrier.wait();
+                            return;
+                        }
+                    };
+                    Ok((preferred_buf as usize, binary_format, bytes_per_sample))
                 };
 
                 let (asio_buffer_size, binary_format, bytes_per_sample) = match setup_result {
@@ -1868,8 +1887,11 @@ impl CaptureDevice for AsioCaptureDevice {
                 } else {
                     chunksize
                 };
-                let ringbuffer =
-                    HeapRb::<u8>::new(blockalign * (2 * buffer_capacity_frames + 2048));
+                // Size the ring buffer to fit at least the driver's actual buffer size,
+                // not just chunksize/resampler input, so a single ASIO callback can
+                // never push more bytes than the ring buffer can hold (see issue #498).
+                let ring_frames = buffer_capacity_frames.max(asio_buffer_size);
+                let ringbuffer = HeapRb::<u8>::new(blockalign * (2 * ring_frames + 2048));
                 let (device_producer, mut device_consumer) = ringbuffer.split();
                 let mut _single_capture_buffer_infos: Option<Vec<ASIOBufferInfo>> = None;
                 let mut _single_capture_callbacks: Option<Box<ASIOCallbacks>> = None;
@@ -1883,15 +1905,9 @@ impl CaptureDevice for AsioCaptureDevice {
                         tx_dev,
                         buffer_infos,
                         num_channels: channels,
-                        buffer_size: asio_buffer_size
-                            .expect("full_duplex setup must provide asio_buffer_size"),
+                        buffer_size: asio_buffer_size,
                         bytes_per_sample,
-                        interleaved_tmp: vec![
-                            0u8;
-                            asio_buffer_size.expect("full_duplex setup must provide asio_buffer_size")
-                                * bytes_per_sample
-                                * channels
-                        ],
+                        interleaved_tmp: vec![0u8; asio_buffer_size * bytes_per_sample * channels],
                         chunk_counter: 0,
                     });
                     let ctx_raw = Box::into_raw(ctx);
@@ -1912,19 +1928,7 @@ impl CaptureDevice for AsioCaptureDevice {
                     }
                     ctx_raw
                 } else {
-                    let preferred_buf = match get_preferred_buffer_size() {
-                        Ok(result) => result,
-                        Err(err) => {
-                            let msg = format!("ASIO capture buffer size query error: {err}");
-                            error!("{msg}");
-                            channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                            status_channel
-                                .send(StatusMessage::CaptureError(msg))
-                                .unwrap_or(());
-                            barrier.wait();
-                            return;
-                        }
-                    };
+                    let preferred_buf = asio_buffer_size as i32;
 
                     let mut driver_buffer_infos = make_buffer_infos(channels, true);
                     let mut callbacks_for_driver = Box::new(ASIOCallbacks {

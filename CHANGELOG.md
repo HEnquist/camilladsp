@@ -6,6 +6,10 @@ New features:
 - New `Slip` resampler for very cheap rate adjust between independent clocks at the same nominal rate.
 - RF64 support for reading and writing wav files larger than 4 GB (`use_rf64` for File playback).
 
+Bugfixes:
+- ASIO: size the ring buffer and prefill from the driver's actual buffer size instead of just
+  `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
+
 Changes:
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
