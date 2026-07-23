@@ -306,6 +306,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             channels,
             silence_threshold: conf.silence_threshold(),
             silence_timeout: conf.silence_timeout_s(),
+            rate_measure_interval: conf.rate_measure_interval_s(),
         }),
         config::CaptureDevice::RawFile(ref dev) => Box::new(filedevice::FileCaptureDevice {
             source: filedevice::CaptureSource::Filename(dev.filename.clone()),

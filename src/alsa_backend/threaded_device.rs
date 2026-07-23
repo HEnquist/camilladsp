@@ -1691,6 +1691,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                         let mut rms_values = Vec::new();
                         let mut peak_values = Vec::new();
                         let mut rate_adjust = 0.0;
+                        // Sample rate measured over the last completed `rate_measure_interval`
+                        // window, kept separate from the short update cadence.
+                        let mut measured_rate = 0.0;
                         let mut silence_counter = countertimer::SilenceCounter::new(
                             silence_threshold,
                             silence_timeout,
@@ -1824,14 +1827,11 @@ impl CaptureDevice for AlsaCaptureDevice {
                             if let Some(capture_status_guard) = capture_status.try_upgradable_read()
                                 && averager.larger_than_millis(capture_status_guard.update_interval as u64)
                             {
-                                let bytes_per_sec = averager.average();
                                 averager.restart();
-                                let measured_rate_f =
-                                    bytes_per_sec / (channels * bytes_per_sample) as f64;
                                 if let Ok(mut capture_status) =
                                     RwLockUpgradableReadGuard::try_upgrade(capture_status_guard)
                                 {
-                                    capture_status.measured_samplerate = measured_rate_f as usize;
+                                    capture_status.measured_samplerate = measured_rate as usize;
                                     capture_status.signal_range = value_range as f32;
                                     capture_status.rate_adjust = rate_adjust as f32;
                                     crate::update_capture_state(&mut capture_status, state);
@@ -1845,6 +1845,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 watcher_averager.restart();
                                 let measured_rate_f =
                                     bytes_per_sec / (channels * bytes_per_sample) as f64;
+                                measured_rate = measured_rate_f;
                                 let changed = valuewatcher.check_value(measured_rate_f as f32);
                                 if changed && stop_on_rate_change {
                                     let _ = send_capture_audio(&channel, AudioMessage::EndOfStream);

@@ -134,6 +134,7 @@ pub struct PipeWireCaptureDevice {
     pub channels: usize,
     pub silence_threshold: PrcFmt,
     pub silence_timeout: PrcFmt,
+    pub rate_measure_interval: f32,
 }
 
 /// Build audio format POD for stream parameters
@@ -748,6 +749,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
         let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
+        let rate_measure_interval_ms = (1000.0 * self.rate_measure_interval) as u64;
 
         let handle = thread::Builder::new()
             .name("PipeWireCapture".to_string())
@@ -1002,6 +1004,10 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         }
                     };
                     let mut averager = countertimer::TimeAverage::new();
+                    let mut watcher_averager = countertimer::TimeAverage::new();
+                    // Sample rate measured over the last completed `rate_measure_interval`
+                    // window, kept separate from the short update cadence.
+                    let mut measured_rate = 0.0;
                     let mut silence_counter = countertimer::SilenceCounter::new(
                         silence_threshold,
                         silence_timeout,
@@ -1087,6 +1093,14 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         // Pop exactly the needed bytes into pre-allocated buffer
                         rb_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
                         averager.add_value(capture_bytes);
+                        watcher_averager.add_value(capture_bytes);
+                        if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
+                            let bytes_per_sec = watcher_averager.average();
+                            watcher_averager.restart();
+                            measured_rate =
+                                bytes_per_sec / (channels * store_bytes_per_sample) as f64;
+                            trace!("Measured sample rate is {measured_rate:.1} Hz");
+                        }
 
                         // Update channel mask from capture status
                         {
@@ -1110,16 +1124,9 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         // Update capture status
                         if let Some(capture_status) = capture_status_clone.try_upgradable_read() {
                             if averager.larger_than_millis(capture_status.update_interval as u64) {
-                                let bytes_per_sec = averager.average();
                                 averager.restart();
-                                let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
-                                trace!(
-                                    "Measured sample rate is {:.1} Hz, signal RMS is {:?}",
-                                    measured_rate_f,
-                                    capture_status.signal_rms.last_sqrt(),
-                                );
                                 if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
-                                    capture_status.measured_samplerate = measured_rate_f as usize;
+                                    capture_status.measured_samplerate = measured_rate as usize;
                                     capture_status.signal_range = value_range as f32;
                                     capture_status.rate_adjust = rate_adjust as f32;
                                     crate::update_capture_state(&mut capture_status, state);
