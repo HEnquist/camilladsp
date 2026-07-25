@@ -29,6 +29,19 @@ Config changes (breaking):
 - The `Limiter` filter is renamed to `Clipper` (`type: Limiter` becomes `type: Clipper`), to avoid
   confusion with the new `LookaheadLimiter`. Its parameters are unchanged.
 
+Websocket protocol changes (breaking):
+- Messages are now internally tagged with a uniform object shape.
+  - Commands carry the name in a `command` field, with arguments in named fields:
+    `"GetVersion"` becomes `{"command": "GetVersion"}`, and `{"SetUpdateInterval": 500}` becomes
+    `{"command": "SetUpdateInterval", "value": 500}`.
+  - Replies carry the name in a `reply` field as a single flat object:
+    `{"GetUpdateInterval": {"result": "Ok", "value": 500}}` becomes
+    `{"reply": "GetUpdateInterval", "result": "Ok", "value": 500}`.
+  - Errors are flat too: `result` holds the error name, and any description rides at the top level
+    in a `message` field, replacing the previous double-nested shape.
+  - Commands that took multiple arguments now use named fields instead of an array, for example
+    `AdjustVolume` takes `value` plus optional `min` and `max`.
+
 Removed:
 - Dropped the Jack, Pulse and Bluez backends. On Linux, use the native PipeWire backend, or
   PipeWire's Pulse/JACK compatibility layers. PipeWire can also bridge Bluetooth A2DP directly.
