@@ -31,15 +31,15 @@ pub(crate) fn validate_vu_subscription(config: VuSubscription) -> Result<VuSubsc
 
 fn validate_vu_time_constant(name: &str, value: f32) -> Result<(), WsResult> {
     if !value.is_finite() {
-        return Err(WsResult::InvalidValueError(format!(
-            "{name} must be a finite number"
-        )));
+        return Err(WsResult::InvalidValueError {
+            message: format!("{name} must be a finite number"),
+        });
     }
 
     if !(0.0..=MAX_VU_TIME_CONSTANT_MS).contains(&value) {
-        return Err(WsResult::InvalidValueError(format!(
-            "{name} must be between 0 and {MAX_VU_TIME_CONSTANT_MS:.0} ms"
-        )));
+        return Err(WsResult::InvalidValueError {
+            message: format!("{name} must be between 0 and {MAX_VU_TIME_CONSTANT_MS:.0} ms"),
+        });
     }
 
     Ok(())

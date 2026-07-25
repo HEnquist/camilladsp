@@ -6,7 +6,8 @@ Polls GetSpectrum every POLL_INTERVAL seconds and draws a 30-band bar chart.
 
 GetSpectrum command format:
   {
-    "GetSpectrum": {
+    "command": "GetSpectrum",
+    "value": {
       "side":     "capture" | "playback",
       "channel":  null (average all) | 0, 1, 2, ...  (single channel),
       "min_freq": <Hz>,
@@ -17,12 +18,11 @@ GetSpectrum command format:
 
 Response:
   {
-    "GetSpectrum": {
-      "result": "Ok",
-      "value": {
-        "frequencies": [<Hz>, ...],
-        "magnitudes":  [<dBFS>, ...]
-      }
+    "reply": "GetSpectrum",
+    "result": "Ok",
+    "value": {
+      "frequencies": [<Hz>, ...],
+      "magnitudes":  [<dBFS>, ...]
     }
   }
 """
@@ -112,13 +112,14 @@ def main():
     ws = websocket.create_connection(WS_URL)
 
     request = json.dumps({
-        "GetSpectrum": {
+        "command": "GetSpectrum",
+        "value": {
             "side": SIDE,
             "channel": CHANNEL,
             "min_freq": MIN_FREQ,
             "max_freq": MAX_FREQ,
             "n_bins": N_BINS,
-        }
+        },
     })
 
     print(f"Spectrum analyzer: {N_BINS} bands, {MIN_FREQ:.0f}–{MAX_FREQ/1000:.0f}k Hz, "
@@ -128,8 +129,7 @@ def main():
     try:
         while True:
             ws.send(request)
-            reply = json.loads(ws.recv())
-            payload = reply.get("GetSpectrum", {})
+            payload = json.loads(ws.recv())
 
             if payload.get("result") != "Ok":
                 sys.stderr.write(f"Error: {payload.get('result')}\n")

@@ -21,33 +21,37 @@
 //!
 //! ## Command syntax
 //!
-//! Commands without arguments are sent as a JSON string:
+//! Every command is a JSON object with a `"command"` field naming the command:
 //! ```json
-//! "GetVersion"
+//! {"command": "GetVersion"}
 //! ```
 //!
-//! Commands with a single argument are sent as a JSON object with one key:
+//! Commands with arguments carry them in additional named fields:
 //! ```json
-//! {"SetUpdateInterval": 500}
+//! {"command": "SetUpdateInterval", "value": 500}
 //! ```
 //!
 //! ## Response format
 //!
-//! Commands that do not return a value:
+//! Every reply is a JSON object with a `"reply"` field naming the reply. Replies that do not
+//! return a value carry only the `"result"` status:
 //! ```json
-//! {"SetUpdateInterval": {"result": "Ok"}}
+//! {"reply": "SetUpdateInterval", "result": "Ok"}
 //! ```
 //!
-//! Commands that return a value include a `"value"` field:
+//! Replies that return a value add a `"value"` field:
 //! ```json
-//! {"GetUpdateInterval": {"result": "Ok", "value": 500}}
+//! {"reply": "GetUpdateInterval", "result": "Ok", "value": 500}
 //! ```
 //!
-//! If a command fails the `"result"` field contains an error string instead of `"Ok"`.
-//! Errors with a message are a JSON object: `{"ConfigValidationError": "details..."}`.
-//! Simple errors are a plain string: `"InvalidFaderError"`.
+//! If a command fails the `"result"` field holds the error name instead of `"Ok"`, and there is
+//! no `"value"` field. Errors that carry a description add a top-level `"message"` field:
+//! ```json
+//! {"reply": "SetConfig", "result": "ConfigValidationError", "message": "details..."}
+//! ```
+//! Errors without a message have just the name: `{"reply": "SetFaderVolume", "result": "InvalidFaderError"}`.
 //!
-//! Unrecognised commands get an `{"Invalid": {"error": "..."}}` response.
+//! Unrecognised commands get a `{"reply": "Invalid", "error": "..."}` response.
 //!
 //! ## Subscription commands
 //!
@@ -84,8 +88,8 @@ use tungstenite::WebSocket;
 
 use self::datastructures::{
     AllLevels, ChannelLabels, Fader, PbCapLevels, SpectrumRequest, SpectrumSide,
-    SpectrumSubscription, ValueWithOptionalLimits, VuLevels, VuSubscription, WsCommand, WsReply,
-    WsResult, WsSignalLevelSide,
+    SpectrumSubscription, VuLevels, VuSubscription, WsCommand, WsReply, WsResult,
+    WsSignalLevelSide,
 };
 use self::utils::{
     accept_plain_stream, capture_signal_global_peak, capture_signal_peak,
@@ -629,7 +633,7 @@ macro_rules! make_handler {
                                             }
                                         } else {
                                             match cmd {
-                                                WsCommand::SubscribeSignalLevels(side) => {
+                                                WsCommand::SubscribeSignalLevels { value: side } => {
                                                     active_stream =
                                                         Some(ActiveStream::SignalLevels(side));
                                                     set_stream_timeout(
@@ -650,7 +654,7 @@ macro_rules! make_handler {
                                                         result: WsResult::Ok,
                                                     })
                                                 }
-                                                WsCommand::SubscribeVuLevels(config) => {
+                                                WsCommand::SubscribeVuLevels { value: config } => {
                                                     match validate_vu_subscription(config) {
                                                         Ok(config) => {
                                                             let mut vu_state =
@@ -702,7 +706,7 @@ macro_rules! make_handler {
                                                         result: WsResult::Ok,
                                                     })
                                                 }
-                                                WsCommand::SubscribeSpectrum(sub) => {
+                                                WsCommand::SubscribeSpectrum { value: sub } => {
                                                     match make_spectrum_subscription(
                                                         sub,
                                                         shared_data_inst,
@@ -819,23 +823,27 @@ fn handle_command(
                         Err(err) => {
                             debug!("Invalid config file: {err}");
                             Some(WsReply::Reload {
-                                result: WsResult::ConfigReadError(err.to_string()),
+                                result: WsResult::ConfigReadError {
+                                    message: err.to_string(),
+                                },
                             })
                         }
                     },
                     Err(err) => {
                         debug!("Config file validation error: {err}");
                         Some(WsReply::Reload {
-                            result: WsResult::ConfigValidationError(err.to_string()),
+                            result: WsResult::ConfigValidationError {
+                                message: err.to_string(),
+                            },
                         })
                     }
                 },
                 None => {
                     warn!("Config path not given, cannot reload");
                     Some(WsReply::Reload {
-                        result: WsResult::InvalidRequestError(
-                            "Config path not given, cannot reload".to_string(),
-                        ),
+                        result: WsResult::InvalidRequestError {
+                            message: "Config path not given, cannot reload".to_string(),
+                        },
                     })
                 }
             }
@@ -861,7 +869,7 @@ fn handle_command(
                 value: values,
             })
         }
-        WsCommand::GetCaptureSignalRmsSince(secs) => {
+        WsCommand::GetCaptureSignalRmsSince { value: secs } => {
             let values = capture_signal_rms_since(shared_data_inst, secs);
             Some(WsReply::GetCaptureSignalRmsSince {
                 result: WsResult::Ok,
@@ -882,7 +890,7 @@ fn handle_command(
                 value: values,
             })
         }
-        WsCommand::GetPlaybackSignalRmsSince(secs) => {
+        WsCommand::GetPlaybackSignalRmsSince { value: secs } => {
             let values = playback_signal_rms_since(shared_data_inst, secs);
             Some(WsReply::GetPlaybackSignalRmsSince {
                 result: WsResult::Ok,
@@ -903,7 +911,7 @@ fn handle_command(
                 value: values,
             })
         }
-        WsCommand::GetCaptureSignalPeakSince(secs) => {
+        WsCommand::GetCaptureSignalPeakSince { value: secs } => {
             let values = capture_signal_peak_since(shared_data_inst, secs);
             Some(WsReply::GetCaptureSignalPeakSince {
                 result: WsResult::Ok,
@@ -924,7 +932,7 @@ fn handle_command(
                 value: values,
             })
         }
-        WsCommand::GetPlaybackSignalPeakSince(secs) => {
+        WsCommand::GetPlaybackSignalPeakSince { value: secs } => {
             let values = playback_signal_peak_since(shared_data_inst, secs);
             Some(WsReply::GetPlaybackSignalPeakSince {
                 result: WsResult::Ok,
@@ -951,7 +959,7 @@ fn handle_command(
             };
             Some(result)
         }
-        WsCommand::GetSignalLevelsSince(secs) => {
+        WsCommand::GetSignalLevelsSince { value: secs } => {
             let levels = AllLevels {
                 playback_rms: playback_signal_rms_since(shared_data_inst, secs),
                 playback_peak: playback_signal_peak_since(shared_data_inst, secs),
@@ -977,17 +985,17 @@ fn handle_command(
             };
             Some(result)
         }
-        WsCommand::SubscribeSignalLevels(_) => Some(WsReply::Invalid {
+        WsCommand::SubscribeSignalLevels { .. } => Some(WsReply::Invalid {
             error: "SubscribeSignalLevels can only be handled by the websocket stream loop"
                 .to_string(),
         }),
-        WsCommand::SubscribeVuLevels(_) => Some(WsReply::Invalid {
+        WsCommand::SubscribeVuLevels { .. } => Some(WsReply::Invalid {
             error: "SubscribeVuLevels can only be handled by the websocket stream loop".to_string(),
         }),
         WsCommand::SubscribeState => Some(WsReply::Invalid {
             error: "SubscribeState can only be handled by the websocket stream loop".to_string(),
         }),
-        WsCommand::SubscribeSpectrum(_) => Some(WsReply::Invalid {
+        WsCommand::SubscribeSpectrum { .. } => Some(WsReply::Invalid {
             error: "SubscribeSpectrum can only be handled by the websocket stream loop".to_string(),
         }),
         WsCommand::StopSubscription => Some(WsReply::Invalid {
@@ -1076,7 +1084,7 @@ fn handle_command(
                 value: capstat.update_interval,
             })
         }
-        WsCommand::SetUpdateInterval(nbr) => {
+        WsCommand::SetUpdateInterval { value: nbr } => {
             {
                 let mut captstat = shared_data_inst.capture_status.write();
                 let mut playstat = shared_data_inst.playback_status.write();
@@ -1091,7 +1099,7 @@ fn handle_command(
             result: WsResult::Ok,
             value: shared_data_inst.processing_params.target_volume(0),
         }),
-        WsCommand::SetVolume(nbr) => {
+        WsCommand::SetVolume { value: nbr } => {
             let new_vol = clamped_volume(nbr);
             shared_data_inst
                 .processing_params
@@ -1107,17 +1115,16 @@ fn handle_command(
                 result: WsResult::Ok,
             })
         }
-        WsCommand::AdjustVolume(value) => {
+        WsCommand::AdjustVolume { value, min, max } => {
             let mut tempvol = shared_data_inst.processing_params.target_volume(0);
-            let (volchange, minvol, maxvol) = match value {
-                ValueWithOptionalLimits::Plain(vol) => (vol, -150.0, 50.0),
-                ValueWithOptionalLimits::Limited(vol, min, max) => (vol, min, max),
-            };
+            let volchange = value;
+            let minvol = min.unwrap_or(-150.0);
+            let maxvol = max.unwrap_or(50.0);
             if maxvol < minvol {
                 return Some(WsReply::AdjustVolume {
-                    result: WsResult::InvalidValueError(
-                        "Max volume must be bigger than min volume".to_string(),
-                    ),
+                    result: WsResult::InvalidValueError {
+                        message: "Max volume must be bigger than min volume".to_string(),
+                    },
                     value: tempvol,
                 });
             }
@@ -1150,7 +1157,7 @@ fn handle_command(
             result: WsResult::Ok,
             value: shared_data_inst.processing_params.is_mute(0),
         }),
-        WsCommand::SetMute(mute) => {
+        WsCommand::SetMute { value: mute } => {
             shared_data_inst.processing_params.set_mute(0, mute);
             shared_data_inst
                 .unsaved_state_change
@@ -1193,7 +1200,7 @@ fn handle_command(
                 value: faders,
             })
         }
-        WsCommand::GetFaderVolume(ctrl) => {
+        WsCommand::GetFaderVolume { fader: ctrl } => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::GetFaderVolume {
                     result: WsResult::InvalidFaderError,
@@ -1205,7 +1212,10 @@ fn handle_command(
                 value: (ctrl, shared_data_inst.processing_params.target_volume(ctrl)),
             })
         }
-        WsCommand::SetFaderVolume(ctrl, nbr) => {
+        WsCommand::SetFaderVolume {
+            fader: ctrl,
+            value: nbr,
+        } => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::SetFaderVolume {
                     result: WsResult::InvalidFaderError,
@@ -1226,7 +1236,10 @@ fn handle_command(
                 result: WsResult::Ok,
             })
         }
-        WsCommand::SetFaderExternalVolume(ctrl, nbr) => {
+        WsCommand::SetFaderExternalVolume {
+            fader: ctrl,
+            value: nbr,
+        } => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::SetFaderExternalVolume {
                     result: WsResult::InvalidFaderError,
@@ -1250,11 +1263,15 @@ fn handle_command(
                 result: WsResult::Ok,
             })
         }
-        WsCommand::AdjustFaderVolume(ctrl, value) => {
-            let (volchange, minvol, maxvol) = match value {
-                ValueWithOptionalLimits::Plain(vol) => (vol, -150.0, 50.0),
-                ValueWithOptionalLimits::Limited(vol, min, max) => (vol, min, max),
-            };
+        WsCommand::AdjustFaderVolume {
+            fader: ctrl,
+            value,
+            min,
+            max,
+        } => {
+            let volchange = value;
+            let minvol = min.unwrap_or(-150.0);
+            let maxvol = max.unwrap_or(50.0);
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::AdjustFaderVolume {
                     result: WsResult::InvalidFaderError,
@@ -1264,9 +1281,9 @@ fn handle_command(
             let mut tempvol = shared_data_inst.processing_params.target_volume(ctrl);
             if maxvol < minvol {
                 return Some(WsReply::AdjustFaderVolume {
-                    result: WsResult::InvalidValueError(
-                        "Max volume must be bigger than min volume".to_string(),
-                    ),
+                    result: WsResult::InvalidValueError {
+                        message: "Max volume must be bigger than min volume".to_string(),
+                    },
                     value: (ctrl, tempvol),
                 });
             }
@@ -1294,7 +1311,7 @@ fn handle_command(
                 value: (ctrl, tempvol),
             })
         }
-        WsCommand::GetFaderMute(ctrl) => {
+        WsCommand::GetFaderMute { fader: ctrl } => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::GetFaderMute {
                     result: WsResult::InvalidFaderError,
@@ -1306,7 +1323,10 @@ fn handle_command(
                 value: (ctrl, shared_data_inst.processing_params.is_mute(ctrl)),
             })
         }
-        WsCommand::SetFaderMute(ctrl, mute) => {
+        WsCommand::SetFaderMute {
+            fader: ctrl,
+            value: mute,
+        } => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::SetFaderMute {
                     result: WsResult::InvalidFaderError,
@@ -1324,7 +1344,7 @@ fn handle_command(
                 result: WsResult::Ok,
             })
         }
-        WsCommand::ToggleFaderMute(ctrl) => {
+        WsCommand::ToggleFaderMute { fader: ctrl } => {
             if ctrl > ProcessingParameters::NUM_FADERS - 1 {
                 return Some(WsReply::ToggleFaderMute {
                     result: WsResult::InvalidFaderError,
@@ -1348,7 +1368,7 @@ fn handle_command(
             result: WsResult::Ok,
             value: yaml_serde::to_string(&*shared_data_inst.active_config.lock()).unwrap(),
         }),
-        WsCommand::GetConfigValue(pointer) => {
+        WsCommand::GetConfigValue { value: pointer } => {
             let conf_as_value =
                 serde_json::to_value(&*shared_data_inst.active_config.lock()).unwrap();
             let value = conf_as_value.pointer(&pointer);
@@ -1358,9 +1378,9 @@ fn handle_command(
                     value: v.clone(),
                 }),
                 None => Some(WsReply::GetConfigValue {
-                    result: WsResult::InvalidRequestError(format!(
-                        "The path '{pointer}' does not exit in the config"
-                    )),
+                    result: WsResult::InvalidRequestError {
+                        message: format!("The path '{pointer}' does not exit in the config"),
+                    },
                     value: serde_json::Value::Null,
                 }),
             }
@@ -1415,7 +1435,7 @@ fn handle_command(
                 .unsaved_state_change
                 .load(Ordering::Relaxed),
         }),
-        WsCommand::SetConfigFilePath(path) => match config::load_validate_config(&path) {
+        WsCommand::SetConfigFilePath { value: path } => match config::load_validate_config(&path) {
             Ok(_) => {
                 *shared_data_inst.active_config_path.lock() = Some(path.clone());
                 shared_data_inst
@@ -1432,11 +1452,13 @@ fn handle_command(
             Err(error) => {
                 debug!("Error setting config name: {error}");
                 Some(WsReply::SetConfigFilePath {
-                    result: WsResult::InvalidValueError(error.to_string()),
+                    result: WsResult::InvalidValueError {
+                        message: error.to_string(),
+                    },
                 })
             }
         },
-        WsCommand::SetConfig(config_yml) => {
+        WsCommand::SetConfig { value: config_yml } => {
             match yaml_serde::from_str::<config::Configuration>(&config_yml) {
                 Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => {
@@ -1464,19 +1486,23 @@ fn handle_command(
                     Err(error) => {
                         debug!("Error validating config: {error}");
                         Some(WsReply::SetConfig {
-                            result: WsResult::ConfigValidationError(error.to_string()),
+                            result: WsResult::ConfigValidationError {
+                                message: error.to_string(),
+                            },
                         })
                     }
                 },
                 Err(error) => {
                     debug!("Error parsing yaml: {error}");
                     Some(WsReply::SetConfig {
-                        result: WsResult::ConfigReadError(error.to_string()),
+                        result: WsResult::ConfigReadError {
+                            message: error.to_string(),
+                        },
                     })
                 }
             }
         }
-        WsCommand::SetConfigJson(config_json) => {
+        WsCommand::SetConfigJson { value: config_json } => {
             match serde_json::from_str::<config::Configuration>(&config_json) {
                 Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => {
@@ -1504,25 +1530,31 @@ fn handle_command(
                     Err(error) => {
                         debug!("Error validating config: {error}");
                         Some(WsReply::SetConfigJson {
-                            result: WsResult::ConfigValidationError(error.to_string()),
+                            result: WsResult::ConfigValidationError {
+                                message: error.to_string(),
+                            },
                         })
                     }
                 },
                 Err(error) => {
                     debug!("Error parsing json: {error}");
                     Some(WsReply::SetConfigJson {
-                        result: WsResult::ConfigReadError(error.to_string()),
+                        result: WsResult::ConfigReadError {
+                            message: error.to_string(),
+                        },
                     })
                 }
             }
         }
-        WsCommand::PatchConfig(value) => {
+        WsCommand::PatchConfig { value } => {
             let mut conf_as_value =
                 serde_json::to_value(&*shared_data_inst.active_config.lock()).unwrap();
             if conf_as_value.is_null() {
                 debug!("No active config to patch");
                 return Some(WsReply::PatchConfig {
-                    result: WsResult::InvalidRequestError("No active config to patch".to_string()),
+                    result: WsResult::InvalidRequestError {
+                        message: "No active config to patch".to_string(),
+                    },
                 });
             }
             merge(&mut conf_as_value, &value);
@@ -1554,25 +1586,31 @@ fn handle_command(
                     Err(error) => {
                         debug!("Error validating patched config: {error}");
                         Some(WsReply::PatchConfig {
-                            result: WsResult::ConfigValidationError(error.to_string()),
+                            result: WsResult::ConfigValidationError {
+                                message: error.to_string(),
+                            },
                         })
                     }
                 },
                 Err(error) => {
                     debug!("Error parsing patched config: {error}");
                     Some(WsReply::PatchConfig {
-                        result: WsResult::ConfigReadError(error.to_string()),
+                        result: WsResult::ConfigReadError {
+                            message: error.to_string(),
+                        },
                     })
                 }
             }
         }
-        WsCommand::SetConfigValue(pointer, value) => {
+        WsCommand::SetConfigValue { pointer, value } => {
             let mut conf_as_value =
                 serde_json::to_value(&*shared_data_inst.active_config.lock()).unwrap();
             if conf_as_value.is_null() {
                 debug!("No active config to patch");
                 return Some(WsReply::SetConfigValue {
-                    result: WsResult::InvalidRequestError("No active config to modify".to_string()),
+                    result: WsResult::InvalidRequestError {
+                        message: "No active config to modify".to_string(),
+                    },
                 });
             }
             let maybe_config_value = conf_as_value.pointer_mut(&pointer);
@@ -1580,9 +1618,9 @@ fn handle_command(
                 *config_value = value;
             } else {
                 return Some(WsReply::SetConfigValue {
-                    result: WsResult::InvalidRequestError(
-                        "The active config does not contain the path '{}'".to_string(),
-                    ),
+                    result: WsResult::InvalidRequestError {
+                        message: "The active config does not contain the path '{}'".to_string(),
+                    },
                 });
             }
             let updated_conf = serde_json::from_value::<config::Configuration>(conf_as_value);
@@ -1613,19 +1651,23 @@ fn handle_command(
                     Err(error) => {
                         debug!("Error validating patched config: {error}");
                         Some(WsReply::SetConfigValue {
-                            result: WsResult::ConfigValidationError(error.to_string()),
+                            result: WsResult::ConfigValidationError {
+                                message: error.to_string(),
+                            },
                         })
                     }
                 },
                 Err(error) => {
                     debug!("Error parsing patched config: {error}");
                     Some(WsReply::SetConfigValue {
-                        result: WsResult::ConfigReadError(error.to_string()),
+                        result: WsResult::ConfigReadError {
+                            message: error.to_string(),
+                        },
                     })
                 }
             }
         }
-        WsCommand::ReadConfig(config_yml) => {
+        WsCommand::ReadConfig { value: config_yml } => {
             match yaml_serde::from_str::<config::Configuration>(&config_yml) {
                 Ok(conf) => Some(WsReply::ReadConfig {
                     result: WsResult::Ok,
@@ -1634,13 +1676,15 @@ fn handle_command(
                 Err(error) => {
                     debug!("Error reading config: {error}");
                     Some(WsReply::ReadConfig {
-                        result: WsResult::ConfigReadError(error.to_string()),
+                        result: WsResult::ConfigReadError {
+                            message: error.to_string(),
+                        },
                         value: error.to_string(),
                     })
                 }
             }
         }
-        WsCommand::ReadConfigJson(config_json) => {
+        WsCommand::ReadConfigJson { value: config_json } => {
             match serde_json::from_str::<config::Configuration>(&config_json) {
                 Ok(conf) => Some(WsReply::ReadConfigJson {
                     result: WsResult::Ok,
@@ -1649,13 +1693,15 @@ fn handle_command(
                 Err(error) => {
                     error!("Error reading config: {}", error);
                     Some(WsReply::ReadConfigJson {
-                        result: WsResult::ConfigReadError(error.to_string()),
+                        result: WsResult::ConfigReadError {
+                            message: error.to_string(),
+                        },
                         value: error.to_string(),
                     })
                 }
             }
         }
-        WsCommand::ReadConfigFile(path) => match config::load_config(&path) {
+        WsCommand::ReadConfigFile { value: path } => match config::load_config(&path) {
             Ok(conf) => Some(WsReply::ReadConfigFile {
                 result: WsResult::Ok,
                 value: yaml_serde::to_string(&conf).unwrap(),
@@ -1663,12 +1709,14 @@ fn handle_command(
             Err(error) => {
                 debug!("Error reading config file: {error}");
                 Some(WsReply::ReadConfigFile {
-                    result: WsResult::ConfigReadError(error.to_string()),
+                    result: WsResult::ConfigReadError {
+                        message: error.to_string(),
+                    },
                     value: error.to_string(),
                 })
             }
         },
-        WsCommand::ValidateConfig(config_yml) => {
+        WsCommand::ValidateConfig { value: config_yml } => {
             match yaml_serde::from_str::<config::Configuration>(&config_yml) {
                 Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => Some(WsReply::ValidateConfig {
@@ -1678,7 +1726,9 @@ fn handle_command(
                     Err(error) => {
                         debug!("Config error: {error}");
                         Some(WsReply::ValidateConfig {
-                            result: WsResult::ConfigValidationError(error.to_string()),
+                            result: WsResult::ConfigValidationError {
+                                message: error.to_string(),
+                            },
                             value: error.to_string(),
                         })
                     }
@@ -1686,13 +1736,15 @@ fn handle_command(
                 Err(error) => {
                     debug!("Config error: {error}");
                     Some(WsReply::ValidateConfig {
-                        result: WsResult::ConfigReadError(error.to_string()),
+                        result: WsResult::ConfigReadError {
+                            message: error.to_string(),
+                        },
                         value: error.to_string(),
                     })
                 }
             }
         }
-        WsCommand::ValidateConfigJson(config_json) => {
+        WsCommand::ValidateConfigJson { value: config_json } => {
             match serde_json::from_str::<config::Configuration>(&config_json) {
                 Ok(mut conf) => match config::validate_config(&mut conf, None) {
                     Ok(()) => Some(WsReply::ValidateConfigJson {
@@ -1702,7 +1754,9 @@ fn handle_command(
                     Err(error) => {
                         debug!("Config error: {error}");
                         Some(WsReply::ValidateConfigJson {
-                            result: WsResult::ConfigValidationError(error.to_string()),
+                            result: WsResult::ConfigValidationError {
+                                message: error.to_string(),
+                            },
                             value: error.to_string(),
                         })
                     }
@@ -1710,7 +1764,9 @@ fn handle_command(
                 Err(error) => {
                     debug!("Config error: {error}");
                     Some(WsReply::ValidateConfigJson {
-                        result: WsResult::ConfigReadError(error.to_string()),
+                        result: WsResult::ConfigReadError {
+                            message: error.to_string(),
+                        },
                         value: error.to_string(),
                     })
                 }
@@ -1767,70 +1823,76 @@ fn handle_command(
                 value: devs,
             })
         }
-        WsCommand::GetAvailableCaptureDevices(backend) => {
+        WsCommand::GetAvailableCaptureDevices { backend } => {
             let devs = list_available_devices(&backend, true);
             Some(WsReply::GetAvailableCaptureDevices {
                 result: WsResult::Ok,
                 value: devs,
             })
         }
-        WsCommand::GetAvailablePlaybackDevices(backend) => {
+        WsCommand::GetAvailablePlaybackDevices { backend } => {
             let devs = list_available_devices(&backend, false);
             Some(WsReply::GetAvailablePlaybackDevices {
                 result: WsResult::Ok,
                 value: devs,
             })
         }
-        WsCommand::GetCaptureDeviceCapabilities(backend, device_name) => {
-            match crate::get_device_capabilities(&backend, &device_name, true) {
-                Ok(dev) => Some(WsReply::GetCaptureDeviceCapabilities {
-                    result: WsResult::Ok,
-                    value: dev,
-                }),
-                Err(err) => {
-                    let ws_err = match err {
-                        crate::DeviceError::DeviceNotFound(msg) => {
-                            WsResult::DeviceNotFoundError(msg)
-                        }
-                        crate::DeviceError::DeviceBusy(msg) => WsResult::DeviceBusyError(msg),
-                        crate::DeviceError::Other(msg) => WsResult::DeviceError(msg),
-                    };
-                    Some(WsReply::GetCaptureDeviceCapabilities {
-                        result: ws_err,
-                        value: crate::AudioDeviceDescriptor {
-                            name: device_name,
-                            description: "".to_string(),
-                            capability_sets: Vec::new(),
-                        },
-                    })
-                }
+        WsCommand::GetCaptureDeviceCapabilities {
+            backend,
+            device: device_name,
+        } => match crate::get_device_capabilities(&backend, &device_name, true) {
+            Ok(dev) => Some(WsReply::GetCaptureDeviceCapabilities {
+                result: WsResult::Ok,
+                value: dev,
+            }),
+            Err(err) => {
+                let ws_err = match err {
+                    crate::DeviceError::DeviceNotFound(msg) => {
+                        WsResult::DeviceNotFoundError { message: msg }
+                    }
+                    crate::DeviceError::DeviceBusy(msg) => {
+                        WsResult::DeviceBusyError { message: msg }
+                    }
+                    crate::DeviceError::Other(msg) => WsResult::DeviceError { message: msg },
+                };
+                Some(WsReply::GetCaptureDeviceCapabilities {
+                    result: ws_err,
+                    value: crate::AudioDeviceDescriptor {
+                        name: device_name,
+                        description: "".to_string(),
+                        capability_sets: Vec::new(),
+                    },
+                })
             }
-        }
-        WsCommand::GetPlaybackDeviceCapabilities(backend, device_name) => {
-            match crate::get_device_capabilities(&backend, &device_name, false) {
-                Ok(dev) => Some(WsReply::GetPlaybackDeviceCapabilities {
-                    result: WsResult::Ok,
-                    value: dev,
-                }),
-                Err(err) => {
-                    let ws_err = match err {
-                        crate::DeviceError::DeviceNotFound(msg) => {
-                            WsResult::DeviceNotFoundError(msg)
-                        }
-                        crate::DeviceError::DeviceBusy(msg) => WsResult::DeviceBusyError(msg),
-                        crate::DeviceError::Other(msg) => WsResult::DeviceError(msg),
-                    };
-                    Some(WsReply::GetPlaybackDeviceCapabilities {
-                        result: ws_err,
-                        value: crate::AudioDeviceDescriptor {
-                            name: device_name,
-                            description: "".to_string(),
-                            capability_sets: Vec::new(),
-                        },
-                    })
-                }
+        },
+        WsCommand::GetPlaybackDeviceCapabilities {
+            backend,
+            device: device_name,
+        } => match crate::get_device_capabilities(&backend, &device_name, false) {
+            Ok(dev) => Some(WsReply::GetPlaybackDeviceCapabilities {
+                result: WsResult::Ok,
+                value: dev,
+            }),
+            Err(err) => {
+                let ws_err = match err {
+                    crate::DeviceError::DeviceNotFound(msg) => {
+                        WsResult::DeviceNotFoundError { message: msg }
+                    }
+                    crate::DeviceError::DeviceBusy(msg) => {
+                        WsResult::DeviceBusyError { message: msg }
+                    }
+                    crate::DeviceError::Other(msg) => WsResult::DeviceError { message: msg },
+                };
+                Some(WsReply::GetPlaybackDeviceCapabilities {
+                    result: ws_err,
+                    value: crate::AudioDeviceDescriptor {
+                        name: device_name,
+                        description: "".to_string(),
+                        capability_sets: Vec::new(),
+                    },
+                })
             }
-        }
+        },
         WsCommand::GetProcessingLoad => {
             let load = shared_data_inst.processing_params.processing_load();
             Some(WsReply::GetProcessingLoad {
@@ -1845,7 +1907,7 @@ fn handle_command(
                 value: load,
             })
         }
-        WsCommand::GetSpectrum(req) => Some(handle_get_spectrum(req, shared_data_inst)),
+        WsCommand::GetSpectrum { value: req } => Some(handle_get_spectrum(req, shared_data_inst)),
         WsCommand::None => None,
     }
 }
@@ -1855,21 +1917,21 @@ fn make_spectrum_subscription(
     shared_data: &SharedData,
 ) -> Result<SpectrumSubscriptionState, WsResult> {
     if sub.n_bins < 2 {
-        return Err(WsResult::InvalidRequestError(
-            "n_bins must be at least 2".to_string(),
-        ));
+        return Err(WsResult::InvalidRequestError {
+            message: "n_bins must be at least 2".to_string(),
+        });
     }
     if sub.min_freq <= 0.0 || sub.min_freq >= sub.max_freq {
-        return Err(WsResult::InvalidRequestError(
-            "Invalid frequency range: min_freq must be > 0 and < max_freq".to_string(),
-        ));
+        return Err(WsResult::InvalidRequestError {
+            message: "Invalid frequency range: min_freq must be > 0 and < max_freq".to_string(),
+        });
     }
     if let Some(rate) = sub.max_rate
         && rate <= 0.0
     {
-        return Err(WsResult::InvalidRequestError(
-            "max_rate must be > 0".to_string(),
-        ));
+        return Err(WsResult::InvalidRequestError {
+            message: "max_rate must be > 0".to_string(),
+        });
     }
     let samplerate = shared_data
         .active_config
@@ -1906,15 +1968,17 @@ fn handle_get_spectrum(req: SpectrumRequest, shared_data: &SharedData) -> WsRepl
     // Validate parameters that don't require the lock.
     if req.n_bins < 2 {
         return WsReply::GetSpectrum {
-            result: WsResult::InvalidRequestError("n_bins must be at least 2".to_string()),
+            result: WsResult::InvalidRequestError {
+                message: "n_bins must be at least 2".to_string(),
+            },
             value: None,
         };
     }
     if req.min_freq <= 0.0 || req.min_freq >= req.max_freq {
         return WsReply::GetSpectrum {
-            result: WsResult::InvalidRequestError(
-                "Invalid frequency range: min_freq must be > 0 and < max_freq".to_string(),
-            ),
+            result: WsResult::InvalidRequestError {
+                message: "Invalid frequency range: min_freq must be > 0 and < max_freq".to_string(),
+            },
             value: None,
         };
     }
@@ -1990,7 +2054,7 @@ fn handle_get_spectrum(req: SpectrumRequest, shared_data: &SharedData) -> WsRepl
             value: Some(data),
         },
         Err(msg) => WsReply::GetSpectrum {
-            result: WsResult::InvalidRequestError(msg),
+            result: WsResult::InvalidRequestError { message: msg },
             value: None,
         },
     }
@@ -2007,7 +2071,7 @@ mod tests {
 
     #[test]
     fn parse_commands() {
-        let cmd = Message::text("\"Reload\"");
+        let cmd = Message::text("{\"command\": \"Reload\"}");
         let res = parse_command(cmd).unwrap();
         assert_eq!(res, WsCommand::Reload);
         let cmd = Message::text("asdfasdf");
@@ -2016,37 +2080,49 @@ mod tests {
         let cmd = Message::text("");
         let res = parse_command(cmd);
         assert!(res.is_err());
-        let cmd = Message::text("{\"SetConfigFilePath\": \"somefile\"}");
-        let res = parse_command(cmd).unwrap();
-        assert_eq!(res, WsCommand::SetConfigFilePath("somefile".to_string()));
-        let cmd = Message::text("{\"SubscribeSignalLevels\": \"playback\"}");
+        let cmd = Message::text("{\"command\": \"SetConfigFilePath\", \"value\": \"somefile\"}");
         let res = parse_command(cmd).unwrap();
         assert_eq!(
             res,
-            WsCommand::SubscribeSignalLevels(WsSignalLevelSide::Playback)
+            WsCommand::SetConfigFilePath {
+                value: "somefile".to_string()
+            }
         );
-        let cmd = Message::text("\"StopSubscription\"");
+        let cmd =
+            Message::text("{\"command\": \"SubscribeSignalLevels\", \"value\": \"playback\"}");
+        let res = parse_command(cmd).unwrap();
+        assert_eq!(
+            res,
+            WsCommand::SubscribeSignalLevels {
+                value: WsSignalLevelSide::Playback
+            }
+        );
+        let cmd = Message::text("{\"command\": \"StopSubscription\"}");
         let res = parse_command(cmd).unwrap();
         assert_eq!(res, WsCommand::StopSubscription);
-        let cmd = Message::text("{\"SubscribeSignalLevels\": \"both\"}");
+        let cmd = Message::text("{\"command\": \"SubscribeSignalLevels\", \"value\": \"both\"}");
         let res = parse_command(cmd).unwrap();
         assert_eq!(
             res,
-            WsCommand::SubscribeSignalLevels(WsSignalLevelSide::Both)
+            WsCommand::SubscribeSignalLevels {
+                value: WsSignalLevelSide::Both
+            }
         );
         let cmd = Message::text(
-            "{\"SubscribeVuLevels\": {\"max_rate\": 30.0, \"attack\": 10.0, \"release\": 200.0}}",
+            "{\"command\": \"SubscribeVuLevels\", \"value\": {\"max_rate\": 30.0, \"attack\": 10.0, \"release\": 200.0}}",
         );
         let res = parse_command(cmd).unwrap();
         assert_eq!(
             res,
-            WsCommand::SubscribeVuLevels(VuSubscription {
-                max_rate: 30.0,
-                attack: 10.0,
-                release: 200.0,
-            })
+            WsCommand::SubscribeVuLevels {
+                value: VuSubscription {
+                    max_rate: 30.0,
+                    attack: 10.0,
+                    release: 200.0,
+                }
+            }
         );
-        let cmd = Message::text("\"SubscribeState\"");
+        let cmd = Message::text("{\"command\": \"SubscribeState\"}");
         let res = parse_command(cmd).unwrap();
         assert_eq!(res, WsCommand::SubscribeState);
     }
@@ -2110,9 +2186,9 @@ mod tests {
                 attack: -1.0,
                 release: 100.0,
             }),
-            Err(WsResult::InvalidValueError(
-                "attack must be between 0 and 60000 ms".to_string()
-            ))
+            Err(WsResult::InvalidValueError {
+                message: "attack must be between 0 and 60000 ms".to_string()
+            })
         );
 
         assert_eq!(
@@ -2121,9 +2197,9 @@ mod tests {
                 attack: 100.0,
                 release: 60000.1,
             }),
-            Err(WsResult::InvalidValueError(
-                "release must be between 0 and 60000 ms".to_string()
-            ))
+            Err(WsResult::InvalidValueError {
+                message: "release must be between 0 and 60000 ms".to_string()
+            })
         );
 
         assert_eq!(
@@ -2142,29 +2218,54 @@ mod tests {
 
     #[test]
     fn adjust_volume_serde_format() {
-        use super::datastructures::{ValueWithOptionalLimits, WsCommand};
-        let plain: WsCommand = serde_json::from_str("{\"AdjustVolume\": -3.0}").unwrap();
+        use super::datastructures::WsCommand;
+        let plain: WsCommand =
+            serde_json::from_str("{\"command\": \"AdjustVolume\", \"value\": -3.0}").unwrap();
         assert_eq!(
             plain,
-            WsCommand::AdjustVolume(ValueWithOptionalLimits::Plain(-3.0))
+            WsCommand::AdjustVolume {
+                value: -3.0,
+                min: None,
+                max: None,
+            }
         );
-        let limited: WsCommand =
-            serde_json::from_str("{\"AdjustVolume\": [-3.0, -50.0, 10.0]}").unwrap();
+        let limited: WsCommand = serde_json::from_str(
+            "{\"command\": \"AdjustVolume\", \"value\": -3.0, \"min\": -50.0, \"max\": 10.0}",
+        )
+        .unwrap();
         assert_eq!(
             limited,
-            WsCommand::AdjustVolume(ValueWithOptionalLimits::Limited(-3.0, -50.0, 10.0))
+            WsCommand::AdjustVolume {
+                value: -3.0,
+                min: Some(-50.0),
+                max: Some(10.0),
+            }
         );
-        let fader_plain: WsCommand =
-            serde_json::from_str("{\"AdjustFaderVolume\": [1, -3.0]}").unwrap();
+        let fader_plain: WsCommand = serde_json::from_str(
+            "{\"command\": \"AdjustFaderVolume\", \"fader\": 1, \"value\": -3.0}",
+        )
+        .unwrap();
         assert_eq!(
             fader_plain,
-            WsCommand::AdjustFaderVolume(1, ValueWithOptionalLimits::Plain(-3.0))
+            WsCommand::AdjustFaderVolume {
+                fader: 1,
+                value: -3.0,
+                min: None,
+                max: None,
+            }
         );
-        let fader_limited: WsCommand =
-            serde_json::from_str("{\"AdjustFaderVolume\": [1, [-3.0, -50.0, 10.0]]}").unwrap();
+        let fader_limited: WsCommand = serde_json::from_str(
+            "{\"command\": \"AdjustFaderVolume\", \"fader\": 1, \"value\": -3.0, \"min\": -50.0, \"max\": 10.0}",
+        )
+        .unwrap();
         assert_eq!(
             fader_limited,
-            WsCommand::AdjustFaderVolume(1, ValueWithOptionalLimits::Limited(-3.0, -50.0, 10.0))
+            WsCommand::AdjustFaderVolume {
+                fader: 1,
+                value: -3.0,
+                min: Some(-50.0),
+                max: Some(10.0),
+            }
         );
     }
 }
