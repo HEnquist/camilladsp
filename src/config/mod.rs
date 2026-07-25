@@ -1443,6 +1443,11 @@ pub enum Processor {
         description: Option<String>,
         parameters: NoiseGateParameters,
     },
+    LookaheadLimiter {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: LookaheadLimiterProcessorParameters,
+    },
     RACE {
         #[serde(default)]
         description: Option<String>,
@@ -1515,6 +1520,39 @@ impl NoiseGateParameters {
 
     pub fn process_channels(&self) -> Vec<usize> {
         self.process_channels.clone().unwrap_or_default()
+    }
+}
+
+/// Parameters for the multichannel lookahead limiter processor.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LookaheadLimiterProcessorParameters {
+    pub channels: usize,
+    #[serde(default)]
+    pub monitor_channels: Option<Vec<usize>>,
+    #[serde(default)]
+    pub process_channels: Option<Vec<usize>>,
+    #[serde(default)]
+    pub limit: PrcFmt,
+    pub attack: PrcFmt,
+    pub attack_unit: TimeUnit,
+    pub release: PrcFmt,
+    pub release_unit: TimeUnit,
+    #[serde(default)]
+    pub delay_processed_only: Option<bool>,
+}
+
+impl LookaheadLimiterProcessorParameters {
+    pub fn monitor_channels(&self) -> Vec<usize> {
+        self.monitor_channels.clone().unwrap_or_default()
+    }
+
+    pub fn process_channels(&self) -> Vec<usize> {
+        self.process_channels.clone().unwrap_or_default()
+    }
+
+    pub fn delay_processed_only(&self) -> bool {
+        self.delay_processed_only.unwrap_or_default()
     }
 }
 

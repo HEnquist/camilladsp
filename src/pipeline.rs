@@ -274,6 +274,16 @@ impl Pipeline {
                                 );
                                 Box::new(gate) as Box<dyn Processor>
                             }
+                            config::Processor::LookaheadLimiter { parameters, .. } => {
+                                let limiter =
+                                    processors::lookahead_limiter::LookaheadLimiter::from_config(
+                                        &step.name,
+                                        parameters,
+                                        conf.devices.samplerate,
+                                        conf.devices.chunksize,
+                                    );
+                                Box::new(limiter) as Box<dyn Processor>
+                            }
                             config::Processor::RACE { parameters, .. } => {
                                 let race = processors::race::RACE::from_config(
                                     &step.name,
