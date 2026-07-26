@@ -14,7 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(feature = "32bit", allow(clippy::unnecessary_cast))]
+#![cfg_attr(camillafloat_f32, allow(clippy::unnecessary_cast))]
 
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
@@ -40,8 +40,8 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
+use crate::CamillaFloat;
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
@@ -79,8 +79,8 @@ pub struct AlsaCaptureDevice {
     pub chunksize: usize,
     pub channels: usize,
     pub sample_format: Option<AlsaSampleFormat>,
-    pub silence_threshold: PrcFmt,
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: f64,
+    pub silence_timeout: f64,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,

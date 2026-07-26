@@ -68,7 +68,6 @@ use audio_thread_priority::{
 };
 
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
@@ -163,8 +162,8 @@ pub struct CoreaudioCaptureDevice {
     pub chunksize: usize,
     pub channels: usize,
     pub sample_format: Option<CoreAudioSampleFormat>,
-    pub silence_threshold: PrcFmt,
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: f64,
+    pub silence_timeout: f64,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
 }

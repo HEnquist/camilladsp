@@ -14,7 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(feature = "32bit", allow(clippy::unnecessary_cast))]
+#![cfg_attr(camillafloat_f32, allow(clippy::unnecessary_cast))]
 
 use crate::config;
 use crate::filters::Filter;
@@ -22,7 +22,7 @@ use crate::filters::biquad;
 
 // Sample format
 //type SmpFmt = i16;
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
 
 #[derive(Clone, Debug)]
@@ -33,13 +33,13 @@ pub struct BiquadCombo {
 }
 
 impl BiquadCombo {
-    fn butterworth_q(order: usize) -> Vec<PrcFmt> {
+    fn butterworth_q(order: usize) -> Vec<f64> {
         let odd = !order.is_multiple_of(2);
-        let pi = std::f64::consts::PI as PrcFmt;
+        let pi = std::f64::consts::PI;
         let n_so = order / 2;
         let mut qvalues = Vec::with_capacity(n_so + usize::from(odd));
         for n in 0..n_so {
-            let q = 1.0 / (2.0 * (pi / (order as PrcFmt) * (n as PrcFmt + 0.5)).sin());
+            let q = 1.0 / (2.0 * (pi / (order as f64) * (n as f64 + 0.5)).sin());
             qvalues.push(q);
         }
         if odd {
@@ -48,7 +48,7 @@ impl BiquadCombo {
         qvalues
     }
 
-    fn make_highpass(fs: usize, freq: PrcFmt, qvalues: Vec<PrcFmt>) -> Vec<biquad::Biquad> {
+    fn make_highpass(fs: usize, freq: f64, qvalues: Vec<f64>) -> Vec<biquad::Biquad> {
         let mut filters = Vec::with_capacity(qvalues.len());
         for q in qvalues.iter() {
             let filtconf = if q >= &0.0 {
@@ -63,7 +63,7 @@ impl BiquadCombo {
         filters
     }
 
-    fn make_lowpass(fs: usize, freq: PrcFmt, qvalues: Vec<PrcFmt>) -> Vec<biquad::Biquad> {
+    fn make_lowpass(fs: usize, freq: f64, qvalues: Vec<f64>) -> Vec<biquad::Biquad> {
         let mut filters = Vec::with_capacity(qvalues.len());
         for q in qvalues.iter() {
             let filtconf = if q >= &0.0 {
@@ -78,7 +78,7 @@ impl BiquadCombo {
         filters
     }
 
-    fn linkwitzriley_q(order: usize) -> Vec<PrcFmt> {
+    fn linkwitzriley_q(order: usize) -> Vec<f64> {
         let mut q_temp = BiquadCombo::butterworth_q(order / 2);
         let mut qvalues;
         if !order.is_multiple_of(4) {
@@ -93,7 +93,7 @@ impl BiquadCombo {
         qvalues
     }
 
-    fn make_tilt(fs: usize, gain: PrcFmt) -> Vec<biquad::Biquad> {
+    fn make_tilt(fs: usize, gain: f64) -> Vec<biquad::Biquad> {
         let gain_low = -gain / 2.0;
         let gain_high = gain / 2.0;
         let lsconf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q {
@@ -118,9 +118,9 @@ impl BiquadCombo {
 
     fn make_peq5(
         samplerate: usize,
-        f_all: [PrcFmt; 5],
-        q_all: [PrcFmt; 5],
-        g_all: [PrcFmt; 5],
+        f_all: [f64; 5],
+        q_all: [f64; 5],
+        g_all: [f64; 5],
     ) -> Vec<biquad::Biquad> {
         let mut filters = Vec::with_capacity(5);
         for (n, ((f, q), g)) in f_all.iter().zip(q_all).zip(g_all).enumerate() {
@@ -167,9 +167,9 @@ impl BiquadCombo {
                 let freq_log = f_min_log + (band as f32 + 0.5) * bw;
                 let freq = 2.0_f32.powf(freq_log);
                 let filtconf = config::BiquadParameters::Peaking(config::PeakingWidth::Bandwidth {
-                    freq: freq as PrcFmt,
-                    bandwidth: bw as PrcFmt,
-                    gain: *gain as PrcFmt,
+                    freq: freq as f64,
+                    bandwidth: bw as f64,
+                    gain: *gain as f64,
                 });
                 let coeffs = biquad::BiquadCoefficients::from_config(samplerate, filtconf);
                 let filt = biquad::Biquad::new("", samplerate, coeffs);
@@ -281,7 +281,7 @@ impl Filter for BiquadCombo {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
         for filter in self.filters.iter_mut() {
             filter.process_waveform(waveform)?;
         }
@@ -304,7 +304,7 @@ impl Filter for BiquadCombo {
 
 /// Validate a BiquadCombo convolution config.
 pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) -> Res<()> {
-    let maxfreq = samplerate as PrcFmt / 2.0;
+    let maxfreq = samplerate as f64 / 2.0;
     match conf {
         config::BiquadComboParameters::LinkwitzRileyHighpass { freq, order }
         | config::BiquadComboParameters::LinkwitzRileyLowpass { freq, order } => {
@@ -397,16 +397,15 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
 
 #[cfg(test)]
 mod tests {
-    use crate::PrcFmt;
     use crate::config;
     use crate::filters::biquadcombo;
 
-    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
+    fn is_close(left: f64, right: f64, maxdiff: f64) -> bool {
         println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 
-    fn compare_vecs(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
+    fn compare_vecs(left: Vec<f64>, right: Vec<f64>, maxdiff: f64) -> bool {
         for (val_l, val_r) in left.iter().zip(right.iter()) {
             if !is_close(*val_l, *val_r, maxdiff) {
                 return false;

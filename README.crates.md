@@ -62,5 +62,13 @@ threads. `processing` contains the inner pipeline loop. Status and control
 messages flow through the types defined in the crate root
 (`StatusMessage`, `CommandMessage`, `CaptureStatus`, `PlaybackStatus`, …).
 
-The `32bit` feature switches the internal processing format from `f64` to `f32`
-(`PrcFmt`).
+## Sample precision
+
+Processing is done with `f64` by default. The type is aliased as `CamillaFloat`,
+which appears throughout the audio-processing API.
+
+Building with `RUSTFLAGS="--cfg camillafloat_f32"` switches `CamillaFloat` to
+`f32`. This is deliberately a raw compiler flag rather than a Cargo feature:
+features are unified across the whole dependency graph, so a feature would let
+any crate in the build change the precision, and with it the signature of every
+processing function, for every other consumer.

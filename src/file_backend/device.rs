@@ -14,7 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(feature = "32bit", allow(clippy::unnecessary_cast))]
+#![cfg_attr(camillafloat_f32, allow(clippy::unnecessary_cast))]
 
 use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
@@ -37,7 +37,6 @@ use std::time::Duration;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
@@ -174,8 +173,8 @@ pub struct FileCaptureDevice {
     pub resampler_config: Option<config::Resampler>,
     pub channels: usize,
     pub sample_format: Option<BinarySampleFormat>,
-    pub silence_threshold: PrcFmt,
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: f64,
+    pub silence_timeout: f64,
     pub extra_samples: usize,
     pub skip_bytes: usize,
     pub read_bytes: usize,
@@ -196,8 +195,8 @@ struct CaptureParams {
     extra_bytes: usize,
     buffer_bytes: usize,
     capture_samplerate: usize,
-    silence_timeout: PrcFmt,
-    silence_threshold: PrcFmt,
+    silence_timeout: f64,
+    silence_threshold: f64,
     chunksize: usize,
     resampling_ratio: f32,
     read_bytes: usize,

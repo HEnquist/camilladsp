@@ -22,13 +22,13 @@
 //! [`config`], [`engine`], [`processing`].
 //!
 //! Key types in this crate root: [`StatusMessage`], [`CommandMessage`],
-//! [`CaptureStatus`], [`PlaybackStatus`], [`PrcFmt`].
+//! [`CaptureStatus`], [`PlaybackStatus`], [`CamillaFloat`].
 
-// With the `32bit` feature `PrcFmt` is `f32`, which makes `x as f32` casts and
+// In an f32 build `CamillaFloat` is `f32`, which makes `x as f32` casts and
 // full-precision `f64` literals (both correct for the default `f64` build) look
-// redundant. Silence those lints only in the 32-bit build; the f64 build is unaffected.
+// redundant. Silence those lints only in the f32 build; the f64 build is unaffected.
 #![cfg_attr(
-    feature = "32bit",
+    camillafloat_f32,
     allow(clippy::unnecessary_cast, clippy::excessive_precision)
 )]
 
@@ -80,21 +80,43 @@ macro_rules! xerror { ($($x:tt)*) => (
     }
 ) }
 
-/// Internal floating-point sample type: `f32` with the `32bit` feature, `f64` otherwise.
-#[cfg(feature = "32bit")]
-pub type PrcFmt = f32;
-/// Internal floating-point sample type: `f32` with the `32bit` feature, `f64` otherwise.
-#[cfg(not(feature = "32bit"))]
-pub type PrcFmt = f64;
+/// Internal floating-point sample type: `f64` by default, `f32` in an f32 build.
+///
+/// `f64` is correct for nearly all use cases. `f32` is available for the few
+/// setups where it measurably helps, mainly resampling and FIR convolution on
+/// weak in-order CPUs, and is deliberately not a Cargo feature: features are
+/// unified across the whole dependency graph, so any crate depending on this one
+/// could silently flip the precision for everyone else in the build. It is a raw
+/// rustc cfg instead, set with:
+///
+/// ```text
+/// RUSTFLAGS="--cfg camillafloat_f32" cargo build --release
+/// ```
+#[cfg(camillafloat_f32)]
+pub type CamillaFloat = f32;
+/// Internal floating-point sample type: `f64` by default, `f32` in an f32 build.
+///
+/// See the f32 variant of this alias for how to select the other precision.
+#[cfg(not(camillafloat_f32))]
+pub type CamillaFloat = f64;
 
-/// Helper trait for lossless type coercion used internally when converting between `f32` and `f64`.
-pub trait NewValue<T> {
-    fn coerce(val: T) -> Self;
+/// Conversion from a setup-time `f64` value to the processing precision.
+///
+/// Configuration values and filter coefficient math always run in `f64`, no
+/// matter what [`CamillaFloat`] is, so that an f32 build gets the same
+/// coefficients as an f64 one and only rounds once, on the way in. This trait
+/// marks that single crossing point: a no-op in a default build, a narrowing
+/// conversion in an f32 build.
+pub trait ToCamillaFloat {
+    /// Convert a setup value into the processing precision.
+    fn to_camilla_float(self) -> CamillaFloat;
 }
 
-impl<PrcFmt> NewValue<PrcFmt> for PrcFmt {
-    fn coerce(val: PrcFmt) -> PrcFmt {
-        val
+impl ToCamillaFloat for f64 {
+    #[inline]
+    #[allow(clippy::unnecessary_cast)]
+    fn to_camilla_float(self) -> CamillaFloat {
+        self as CamillaFloat
     }
 }
 

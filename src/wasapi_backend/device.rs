@@ -38,8 +38,8 @@ use audio_thread_priority::{
 };
 
 use super::capabilities::list_device_names_in_collection;
+use crate::CamillaFloat;
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
@@ -76,8 +76,8 @@ pub struct WasapiCaptureDevice {
     pub chunksize: usize,
     pub channels: usize,
     pub sample_format: Option<WasapiSampleFormat>,
-    pub silence_threshold: PrcFmt,
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: f64,
+    pub silence_timeout: f64,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub polling: bool,

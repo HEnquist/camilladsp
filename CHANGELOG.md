@@ -13,6 +13,18 @@ Bugfixes:
 Changes:
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
+- The `32bit` build feature is gone. 32-bit float processing is now selected with the compiler
+  flag `RUSTFLAGS="--cfg camillafloat_f32"` instead. Cargo features are unified across the whole
+  dependency graph, so as a feature it could be switched on by any other crate in a build that
+  uses CamillaDSP as a library. Anyone building with `--features 32bit` needs to switch to the
+  new flag.
+- The sample type `PrcFmt` is renamed to `CamillaFloat`. The active precision is now shown as
+  `Sample precision` in `camilladsp --help`.
+- Configuration values and filter coefficient math are now always 64-bit, independent of the
+  processing precision. An f32 build therefore parses configs, serialises them over the websocket,
+  and computes filter coefficients exactly like a normal build, and rounds only once when the
+  finished coefficients enter the processing path. This noticeably improves f32 accuracy for
+  low-frequency biquads.
 
 Config changes (breaking):
 - Time values no longer accept unitless numbers. Every time-valued parameter now states its unit.

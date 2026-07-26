@@ -14,34 +14,34 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(feature = "32bit", allow(clippy::unnecessary_cast))]
+#![cfg_attr(camillafloat_f32, allow(clippy::unnecessary_cast))]
 
 use std::time::Instant;
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::utils::decibels::linear_to_db;
 
 /// Main container of audio data
 pub struct AudioChunk {
     pub frames: usize,
     pub channels: usize,
-    pub maxval: PrcFmt,
-    pub minval: PrcFmt,
+    pub maxval: CamillaFloat,
+    pub minval: CamillaFloat,
     pub timestamp: Instant,
     pub valid_frames: usize,
-    pub waveforms: Vec<Vec<PrcFmt>>,
+    pub waveforms: Vec<Vec<CamillaFloat>>,
 }
 
 /// Container for RMS and peak values of a chunk
 pub struct ChunkStats {
-    pub rms: Vec<PrcFmt>,
-    pub peak: Vec<PrcFmt>,
+    pub rms: Vec<CamillaFloat>,
+    pub peak: Vec<CamillaFloat>,
 }
 
 impl ChunkStats {
-    fn write_values<F>(&self, source: &[PrcFmt], values: &mut Vec<f32>, map: F)
+    fn write_values<F>(&self, source: &[CamillaFloat], values: &mut Vec<f32>, map: F)
     where
-        F: Fn(PrcFmt) -> f32,
+        F: Fn(CamillaFloat) -> f32,
     {
         values.resize(source.len(), 0.0);
         for (slot, value) in values.iter_mut().zip(source.iter()) {
@@ -69,9 +69,9 @@ impl ChunkStats {
 impl AudioChunk {
     /// Create a new chunk from `waveforms`, recording the expected max/min values and frame count.
     pub fn new(
-        waveforms: Vec<Vec<PrcFmt>>,
-        maxval: PrcFmt,
-        minval: PrcFmt,
+        waveforms: Vec<Vec<CamillaFloat>>,
+        maxval: CamillaFloat,
+        minval: CamillaFloat,
         frames: usize,
         valid_frames: usize,
     ) -> Self {
@@ -88,7 +88,7 @@ impl AudioChunk {
         }
     }
 
-    pub fn from(chunk: &AudioChunk, waveforms: Vec<Vec<PrcFmt>>) -> Self {
+    pub fn from(chunk: &AudioChunk, waveforms: Vec<Vec<CamillaFloat>>) -> Self {
         let timestamp = chunk.timestamp;
         let maxval = chunk.maxval;
         let minval = chunk.minval;
@@ -107,10 +107,10 @@ impl AudioChunk {
     }
 
     pub fn stats(&self) -> ChunkStats {
-        let rms_peak: Vec<(PrcFmt, PrcFmt)> =
+        let rms_peak: Vec<(CamillaFloat, CamillaFloat)> =
             self.waveforms.iter().map(|wf| rms_and_peak(wf)).collect();
-        let rms: Vec<PrcFmt> = rms_peak.iter().map(|rp| rp.0).collect();
-        let peak: Vec<PrcFmt> = rms_peak.iter().map(|rp| rp.1).collect();
+        let rms: Vec<CamillaFloat> = rms_peak.iter().map(|rp| rp.0).collect();
+        let peak: Vec<CamillaFloat> = rms_peak.iter().map(|rp| rp.1).collect();
         ChunkStats { rms, peak }
     }
 
@@ -137,7 +137,7 @@ impl AudioChunk {
 }
 
 /// Get RMS and peak value of a vector
-pub fn rms_and_peak(data: &[PrcFmt]) -> (PrcFmt, PrcFmt) {
+pub fn rms_and_peak(data: &[CamillaFloat]) -> (CamillaFloat, CamillaFloat) {
     if !data.is_empty() {
         let (squaresum, peakval) = data.iter().fold((0.0, 0.0), |(sqsum, peak), value| {
             let newpeak = if peak > value.abs() {
@@ -147,7 +147,7 @@ pub fn rms_and_peak(data: &[PrcFmt]) -> (PrcFmt, PrcFmt) {
             };
             (sqsum + *value * *value, newpeak)
         });
-        ((squaresum / data.len() as PrcFmt).sqrt(), peakval)
+        ((squaresum / data.len() as CamillaFloat).sqrt(), peakval)
     } else {
         (0.0, 0.0)
     }

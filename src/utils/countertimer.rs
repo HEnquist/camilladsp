@@ -14,9 +14,9 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::NewValue;
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::ProcessingState;
+use crate::ToCamillaFloat;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -56,7 +56,7 @@ impl DeviceBufferEstimator {
 /// A counter for watching if the signal has been silent
 /// for longer than a given limit.
 pub struct SilenceCounter {
-    silence_threshold: PrcFmt,
+    silence_threshold: CamillaFloat,
     silence_limit_nbr: usize,
     silent_nbr: usize,
 }
@@ -64,14 +64,16 @@ pub struct SilenceCounter {
 impl SilenceCounter {
     /// Create a counter that triggers pause after `silence_timeout` seconds below `silence_threshold_db`.
     pub fn new(
-        silence_threshold_db: PrcFmt,
-        silence_timeout: PrcFmt,
+        silence_threshold_db: f64,
+        silence_timeout: f64,
         samplerate: usize,
         chunksize: usize,
     ) -> SilenceCounter {
-        let silence_threshold = PrcFmt::coerce(10.0).powf(silence_threshold_db / 20.0);
+        // Setup math in f64; only the finished threshold, which is compared
+        // against sample values, crosses into the processing precision.
+        let silence_threshold = 10.0f64.powf(silence_threshold_db / 20.0).to_camilla_float();
         let silence_limit_nbr =
-            (silence_timeout * samplerate as PrcFmt / chunksize as PrcFmt).round() as usize;
+            (silence_timeout * samplerate as f64 / chunksize as f64).round() as usize;
         SilenceCounter {
             silence_threshold,
             silence_limit_nbr,
@@ -79,7 +81,7 @@ impl SilenceCounter {
         }
     }
 
-    pub fn update(&mut self, value_range: PrcFmt) -> ProcessingState {
+    pub fn update(&mut self, value_range: CamillaFloat) -> ProcessingState {
         let mut state = ProcessingState::Running;
         if self.silence_limit_nbr > 0 {
             if value_range > self.silence_threshold {

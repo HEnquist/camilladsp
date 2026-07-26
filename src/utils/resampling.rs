@@ -1,4 +1,4 @@
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::ProcessingParameters;
 use crate::audiochunk::AudioChunk;
 use crate::config;
@@ -17,7 +17,7 @@ const LOAD_WARN_CONSECUTIVE_CHUNKS: usize = 10;
 
 /// Wraps a `rubato` resampler for processing [`AudioChunk`]s and tracking resampler load.
 pub struct ChunkResampler {
-    pub resampler: Box<dyn Resampler<PrcFmt>>,
+    pub resampler: Box<dyn Resampler<CamillaFloat>>,
     pub indexing: Indexing,
     pub secs_per_chunk: f32,
     pub overloaded_chunks: usize,
@@ -160,7 +160,7 @@ pub fn new_resampler(
             );
             Some(ChunkResampler {
                 resampler: Box::new(
-                    Async::<PrcFmt>::new_sinc(
+                    Async::<CamillaFloat>::new_sinc(
                         samplerate as f64 / capture_samplerate as f64,
                         1.1,
                         &sinc_params,
@@ -185,7 +185,7 @@ pub fn new_resampler(
             };
             Some(ChunkResampler {
                 resampler: Box::new(
-                    Async::<PrcFmt>::new_poly(
+                    Async::<CamillaFloat>::new_poly(
                         samplerate as f64 / capture_samplerate as f64,
                         1.1,
                         degree,
@@ -203,7 +203,7 @@ pub fn new_resampler(
         }
         Some(config::Resampler::Synchronous) => Some(ChunkResampler {
             resampler: Box::new(
-                Fft::<PrcFmt>::new(
+                Fft::<CamillaFloat>::new(
                     capture_samplerate,
                     samplerate,
                     chunksize,
@@ -219,7 +219,7 @@ pub fn new_resampler(
         }),
         Some(config::Resampler::Slip) => Some(ChunkResampler {
             resampler: Box::new(
-                Slip::<PrcFmt>::new(chunksize, num_channels, FixedAsync::Output).unwrap(),
+                Slip::<CamillaFloat>::new(chunksize, num_channels, FixedAsync::Output).unwrap(),
             ),
             indexing,
             secs_per_chunk,
@@ -301,7 +301,7 @@ impl ChunkResampler {
         }
     }
 
-    pub fn pump_silence(&mut self, channels: usize, chunksize: usize) -> Vec<Vec<PrcFmt>> {
+    pub fn pump_silence(&mut self, channels: usize, chunksize: usize) -> Vec<Vec<CamillaFloat>> {
         let mut new_waves = Vec::with_capacity(channels);
         for _ in 0..channels {
             new_waves.push(vec![0.0; chunksize]);

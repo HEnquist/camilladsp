@@ -17,20 +17,20 @@
 use crossbeam_queue::ArrayQueue;
 use std::sync::LazyLock;
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::audiochunk::AudioChunk;
 
 const MAX_STASH_SIZE: usize = 1024;
 const MAX_CONTAINER_STASH_SIZE: usize = 128;
 
-/// Global stash of reusable `Vec<PrcFmt>` audio waveform buffers, avoiding repeated allocations.
-pub static BUFFERSTASH: LazyLock<ArrayQueue<Vec<PrcFmt>>> =
+/// Global stash of reusable `Vec<CamillaFloat>` audio waveform buffers, avoiding repeated allocations.
+pub static BUFFERSTASH: LazyLock<ArrayQueue<Vec<CamillaFloat>>> =
     LazyLock::new(|| ArrayQueue::new(MAX_STASH_SIZE));
-/// Global stash of reusable `Vec<Vec<PrcFmt>>` channel-container buffers.
-pub static CONTAINERSTASH: LazyLock<ArrayQueue<Vec<Vec<PrcFmt>>>> =
+/// Global stash of reusable `Vec<Vec<CamillaFloat>>` channel-container buffers.
+pub static CONTAINERSTASH: LazyLock<ArrayQueue<Vec<Vec<CamillaFloat>>>> =
     LazyLock::new(|| ArrayQueue::new(MAX_CONTAINER_STASH_SIZE));
 
-fn vec_from_queue(queue: &ArrayQueue<Vec<PrcFmt>>, capacity: usize) -> Vec<PrcFmt> {
+fn vec_from_queue(queue: &ArrayQueue<Vec<CamillaFloat>>, capacity: usize) -> Vec<CamillaFloat> {
     trace!(
         "Try to get a vector from the stash, nbr available: {}",
         queue.len()
@@ -53,7 +53,10 @@ fn vec_from_queue(queue: &ArrayQueue<Vec<PrcFmt>>, capacity: usize) -> Vec<PrcFm
     }
 }
 
-fn container_from_queue(queue: &ArrayQueue<Vec<Vec<PrcFmt>>>, capacity: usize) -> Vec<Vec<PrcFmt>> {
+fn container_from_queue(
+    queue: &ArrayQueue<Vec<Vec<CamillaFloat>>>,
+    capacity: usize,
+) -> Vec<Vec<CamillaFloat>> {
     trace!(
         "Try to get a vector container from the stash, nbr available: {}",
         queue.len()
@@ -74,7 +77,7 @@ fn container_from_queue(queue: &ArrayQueue<Vec<Vec<PrcFmt>>>, capacity: usize) -
     }
 }
 
-fn recycle_vec_to_queue(queue: &ArrayQueue<Vec<PrcFmt>>, mut vector: Vec<PrcFmt>) {
+fn recycle_vec_to_queue(queue: &ArrayQueue<Vec<CamillaFloat>>, mut vector: Vec<CamillaFloat>) {
     trace!("Recycling a vector");
 
     for elem in vector.iter_mut() {
@@ -87,9 +90,9 @@ fn recycle_vec_to_queue(queue: &ArrayQueue<Vec<PrcFmt>>, mut vector: Vec<PrcFmt>
 }
 
 fn recycle_container_to_queue(
-    container_queue: &ArrayQueue<Vec<Vec<PrcFmt>>>,
-    vector_queue: &ArrayQueue<Vec<PrcFmt>>,
-    mut container: Vec<Vec<PrcFmt>>,
+    container_queue: &ArrayQueue<Vec<Vec<CamillaFloat>>>,
+    vector_queue: &ArrayQueue<Vec<CamillaFloat>>,
+    mut container: Vec<Vec<CamillaFloat>>,
 ) {
     trace!("Recycling a container of vectors");
     for vector in container.drain(..) {
@@ -100,23 +103,23 @@ fn recycle_container_to_queue(
     }
 }
 
-/// Borrow a zeroed `Vec<PrcFmt>` of the given length from the stash, allocating if empty.
-pub fn vec_from_stash(capacity: usize) -> Vec<PrcFmt> {
+/// Borrow a zeroed `Vec<CamillaFloat>` of the given length from the stash, allocating if empty.
+pub fn vec_from_stash(capacity: usize) -> Vec<CamillaFloat> {
     vec_from_queue(&BUFFERSTASH, capacity)
 }
 
-/// Borrow a `Vec<Vec<PrcFmt>>` container of the given capacity from the stash, allocating if empty.
-pub fn container_from_stash(capacity: usize) -> Vec<Vec<PrcFmt>> {
+/// Borrow a `Vec<Vec<CamillaFloat>>` container of the given capacity from the stash, allocating if empty.
+pub fn container_from_stash(capacity: usize) -> Vec<Vec<CamillaFloat>> {
     container_from_queue(&CONTAINERSTASH, capacity)
 }
 
-/// Return a `Vec<PrcFmt>` to the stash for reuse. The vector is zeroed before stashing.
-pub fn recycle_vec(vector: Vec<PrcFmt>) {
+/// Return a `Vec<CamillaFloat>` to the stash for reuse. The vector is zeroed before stashing.
+pub fn recycle_vec(vector: Vec<CamillaFloat>) {
     recycle_vec_to_queue(&BUFFERSTASH, vector);
 }
 
 /// Return a channel container and all its inner waveform vectors to the stash.
-pub fn recycle_container(container: Vec<Vec<PrcFmt>>) {
+pub fn recycle_container(container: Vec<Vec<CamillaFloat>>) {
     recycle_container_to_queue(&CONTAINERSTASH, &BUFFERSTASH, container);
 }
 
