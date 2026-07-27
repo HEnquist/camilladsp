@@ -15,7 +15,7 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::config::{AlsaSampleFormat, BinarySampleFormat};
-use crate::{CamillaFloat, CaptureStatus, PlaybackStatus, Res, StatusMessage};
+use crate::{CaptureStatus, PlaybackStatus, Res, StatusMessage};
 use alsa::card::Iter;
 use alsa::ctl::{Ctl, DeviceIter, ElemId, ElemIface, ElemType, ElemValue};
 use alsa::device_name::HintIter;
