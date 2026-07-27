@@ -348,7 +348,11 @@ pub fn compute_spectrum_from_signal(
 
     // Apply Hann window in-place, reusing the signal allocation.
     let window = get_hann_window(fft_len);
-    let window_sum: f32 = window.iter().sum();
+    // Summed in f64 for the same reason as in `SpectrumComputer::new`: at the
+    // largest FFT sizes an f32 accumulation of this many terms loses meaningful
+    // precision in the normalisation. Both paths must agree, since this one
+    // serves the one-shot spectrum request and the other the subscriptions.
+    let window_sum: f64 = window.iter().map(|w| *w as f64).sum();
     let mut windowed = signal;
     windowed
         .iter_mut()
@@ -372,7 +376,7 @@ pub fn compute_spectrum_from_signal(
 
     // norm_sqr avoids a sqrt that would only be undone by the squaring step.
     // DC and Nyquist use scale 1^2 = 1; all other bins use scale 2^2 = 4 (single-sided).
-    let inv_w2 = 1.0 / (window_sum * window_sum);
+    let inv_w2 = (1.0 / (window_sum * window_sum)) as f32;
     let power: Vec<f32> = spectrum
         .iter()
         .enumerate()

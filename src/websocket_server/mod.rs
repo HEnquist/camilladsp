@@ -1916,9 +1916,6 @@ fn make_spectrum_subscription(
     sub: SpectrumSubscription,
     shared_data: &SharedData,
 ) -> Result<SpectrumSubscriptionState, WsResult> {
-    // Start filling the audio ring buffer, if nothing has asked for it yet.
-    crate::spectrum::request_spectrum_data();
-
     if sub.n_bins < 2 {
         return Err(WsResult::InvalidRequestError {
             message: "n_bins must be at least 2".to_string(),
@@ -1945,6 +1942,12 @@ fn make_spectrum_subscription(
     if samplerate == 0 {
         return Err(WsResult::ProcessingNotRunningError);
     }
+
+    // Only a request that is going to be served starts filling the audio ring
+    // buffer, since the flag is sticky and the filling costs a pass over every
+    // chunk from here on.
+    crate::spectrum::request_spectrum_data();
+
     let fft_len = crate::spectrum::fft_length_for(sub.min_freq, samplerate);
     let hop_interval = Duration::from_secs_f64(fft_len as f64 / 2.0 / samplerate as f64);
     let min_interval = match sub.max_rate {
@@ -1968,11 +1971,6 @@ fn make_spectrum_subscription(
 }
 
 fn handle_get_spectrum(req: SpectrumRequest, shared_data: &SharedData) -> WsReply {
-    // Start filling the audio ring buffer, if nothing has asked for it yet. The
-    // history needed for this request is not there until it has filled, so the
-    // first request after startup can still report insufficient data.
-    crate::spectrum::request_spectrum_data();
-
     // Validate parameters that don't require the lock.
     if req.n_bins < 2 {
         return WsReply::GetSpectrum {
@@ -2002,6 +2000,12 @@ fn handle_get_spectrum(req: SpectrumRequest, shared_data: &SharedData) -> WsRepl
             value: None,
         };
     }
+
+    // Only a request that is going to be served starts filling the audio ring
+    // buffer, since the flag is sticky. The history this request needs is not
+    // there until the buffer has filled, so the first request after startup can
+    // still report insufficient data.
+    crate::spectrum::request_spectrum_data();
 
     let fft_len = crate::spectrum::fft_length_for(req.min_freq, samplerate);
 
