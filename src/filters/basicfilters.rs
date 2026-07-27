@@ -14,8 +14,6 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(camillafloat_f32, allow(clippy::unnecessary_cast))]
-
 use std::sync::Arc;
 
 use ringbuf::LocalRb;
@@ -31,7 +29,8 @@ use crate::CamillaFloat;
 use crate::ProcessingParameters;
 use crate::Res;
 use crate::ToCamillaFloat;
-use crate::utils::decibels::gain_from_value;
+use crate::ToF32;
+use crate::utils::decibels::{db_to_linear, gain_from_value};
 use crate::utils::time::delay_to_samples;
 
 #[derive(Clone, Debug)]
@@ -50,11 +49,13 @@ pub struct Delay {
 pub struct Volume {
     pub name: String,
     ramptime_in_chunks: usize,
-    current_volume: CamillaFloat,
+    /// Level in dB. Control value, not audio, and f32 at both ends of the API.
+    current_volume: f32,
     target_volume: f32,
     target_linear_gain: CamillaFloat,
     mute: bool,
-    ramp_start: CamillaFloat,
+    /// Level in dB at the start of the current ramp.
+    ramp_start: f32,
     ramp_step: usize,
     samplerate: usize,
     chunksize: usize,
@@ -89,14 +90,13 @@ impl Volume {
         let target_linear_gain = if mute {
             0.0
         } else {
-            let tempgain: CamillaFloat = 10.0;
-            tempgain.powf(current_volume as CamillaFloat / 20.0)
+            db_to_linear(current_volume as f64).to_camilla_float()
         };
         Self {
             name,
             ramptime_in_chunks,
-            current_volume: current_volume_with_mute as CamillaFloat,
-            ramp_start: current_volume as CamillaFloat,
+            current_volume: current_volume_with_mute,
+            ramp_start: current_volume,
             target_volume: current_volume,
             target_linear_gain,
             mute,
@@ -140,18 +140,17 @@ impl Volume {
             self.target_volume
         };
 
-        let ramprange = (target_volume as CamillaFloat - self.ramp_start)
-            / self.ramptime_in_chunks as CamillaFloat;
-        let stepsize = ramprange / self.chunksize as CamillaFloat;
+        // The ramp is laid out in dB, at the f32 precision the levels are kept
+        // in, and only the resulting gain factors cross into the processing
+        // precision, since those get multiplied into the samples.
+        let ramprange = (target_volume - self.ramp_start) / self.ramptime_in_chunks as f32;
+        let stepsize = ramprange / self.chunksize as f32;
         (0..self.chunksize)
             .map(|val| {
-                let tempgain: CamillaFloat = 10.0;
-                tempgain.powf(
-                    (self.ramp_start
-                        + ramprange * (self.ramp_step as CamillaFloat - 1.0)
-                        + val as CamillaFloat * stepsize)
-                        / 20.0,
-                )
+                let level_db = self.ramp_start
+                    + ramprange * (self.ramp_step as f32 - 1.0)
+                    + val as f32 * stepsize;
+                db_to_linear(level_db as f64).to_camilla_float()
             })
             .collect()
     }
@@ -185,19 +184,14 @@ impl Volume {
                     "switch volume without ramp: {} -> {}, mute: {}",
                     self.current_volume, target_volume, shared_mute
                 );
-                self.current_volume = if shared_mute {
-                    0.0
-                } else {
-                    target_volume as CamillaFloat
-                };
+                self.current_volume = if shared_mute { 0.0 } else { target_volume };
                 self.ramp_step = 0;
             }
             self.target_volume = target_volume;
             self.target_linear_gain = if shared_mute {
                 0.0
             } else {
-                let tempgain: CamillaFloat = 10.0;
-                tempgain.powf(target_volume as CamillaFloat / 20.0)
+                db_to_linear(target_volume as f64).to_camilla_float()
             };
             self.mute = shared_mute;
         }
@@ -229,12 +223,12 @@ impl Volume {
                     *item *= *stepgain;
                 }
             }
-            self.current_volume = 20.0 * ramp.last().unwrap().log10();
+            self.current_volume = 20.0 * ramp.last().unwrap().to_f32().log10();
         }
 
         // Update shared current volume
         self.processing_params
-            .set_current_volume(self.fader, self.current_volume as f32);
+            .set_current_volume(self.fader, self.current_volume.to_f32());
     }
 }
 
@@ -264,12 +258,12 @@ impl Filter for Volume {
             for (item, stepgain) in waveform.iter_mut().zip(ramp.iter()) {
                 *item *= *stepgain;
             }
-            self.current_volume = 20.0 * ramp.last().unwrap().log10();
+            self.current_volume = 20.0 * ramp.last().unwrap().to_f32().log10();
         }
 
         // Update shared current volume
         self.processing_params
-            .set_current_volume(self.fader, self.current_volume as f32);
+            .set_current_volume(self.fader, self.current_volume.to_f32());
         Ok(())
     }
 
@@ -283,8 +277,8 @@ impl Filter for Volume {
                 .round() as usize;
             self.fader = conf.fader as usize;
             self.volume_limit = conf.limit();
-            if (self.volume_limit as CamillaFloat) < self.current_volume {
-                self.current_volume = self.volume_limit as CamillaFloat;
+            if self.volume_limit < self.current_volume {
+                self.current_volume = self.volume_limit;
             }
         } else {
             // This should never happen unless there is a bug somewhere else

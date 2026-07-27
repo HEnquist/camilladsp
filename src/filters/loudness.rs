@@ -14,8 +14,6 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(camillafloat_f32, allow(clippy::unnecessary_cast))]
-
 use crate::config;
 use crate::filters::Filter;
 use crate::filters::basicfilters::Gain;
@@ -25,6 +23,7 @@ use std::sync::Arc;
 use crate::CamillaFloat;
 use crate::ProcessingParameters;
 use crate::Res;
+use crate::ToF32;
 
 pub struct Loudness {
     pub name: String,
@@ -112,9 +111,9 @@ impl Filter for Loudness {
         let shared_vol = self.processing_params.current_volume(self.fader);
 
         // Volume setting changed
-        if (shared_vol - self.current_volume as f32).abs() > 0.01 {
+        if (shared_vol - self.current_volume.to_f32()).abs() > 0.01 {
             self.current_volume = shared_vol as CamillaFloat;
-            let relboost = rel_boost(self.current_volume as f32, self.reference_level);
+            let relboost = rel_boost(self.current_volume.to_f32(), self.reference_level);
             let high_boost = (relboost * self.high_boost) as f64;
             let low_boost = (relboost * self.low_boost) as f64;
             self.active = relboost > 0.001;

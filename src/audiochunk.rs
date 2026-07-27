@@ -14,11 +14,10 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(camillafloat_f32, allow(clippy::unnecessary_cast))]
-
 use std::time::Instant;
 
 use crate::CamillaFloat;
+use crate::ToF32;
 use crate::utils::decibels::linear_to_db;
 
 /// Main container of audio data
@@ -32,16 +31,21 @@ pub struct AudioChunk {
     pub waveforms: Vec<Vec<CamillaFloat>>,
 }
 
-/// Container for RMS and peak values of a chunk
+/// Container for RMS and peak values of a chunk.
+///
+/// These are telemetry rather than audio: they exist to be reported over the
+/// websocket, which uses `f32` throughout, so they are stored as `f32`. The
+/// values are still accumulated at processing precision in [`rms_and_peak`] and
+/// converted once here.
 pub struct ChunkStats {
-    pub rms: Vec<CamillaFloat>,
-    pub peak: Vec<CamillaFloat>,
+    pub rms: Vec<f32>,
+    pub peak: Vec<f32>,
 }
 
 impl ChunkStats {
-    fn write_values<F>(&self, source: &[CamillaFloat], values: &mut Vec<f32>, map: F)
+    fn write_values<F>(&self, source: &[f32], values: &mut Vec<f32>, map: F)
     where
-        F: Fn(CamillaFloat) -> f32,
+        F: Fn(f32) -> f32,
     {
         values.resize(source.len(), 0.0);
         for (slot, value) in values.iter_mut().zip(source.iter()) {
@@ -50,19 +54,19 @@ impl ChunkStats {
     }
 
     pub fn rms_db(&self, values: &mut Vec<f32>) {
-        self.write_values(&self.rms, values, |value| linear_to_db(value as f32))
+        self.write_values(&self.rms, values, linear_to_db)
     }
 
     pub fn rms_linear(&self, values: &mut Vec<f32>) {
-        self.write_values(&self.rms, values, |value| value as f32)
+        self.write_values(&self.rms, values, |value| value)
     }
 
     pub fn peak_db(&self, values: &mut Vec<f32>) {
-        self.write_values(&self.peak, values, |value| linear_to_db(value as f32))
+        self.write_values(&self.peak, values, linear_to_db)
     }
 
     pub fn peak_linear(&self, values: &mut Vec<f32>) {
-        self.write_values(&self.peak, values, |value| value as f32)
+        self.write_values(&self.peak, values, |value| value)
     }
 }
 
@@ -109,8 +113,8 @@ impl AudioChunk {
     pub fn stats(&self) -> ChunkStats {
         let rms_peak: Vec<(CamillaFloat, CamillaFloat)> =
             self.waveforms.iter().map(|wf| rms_and_peak(wf)).collect();
-        let rms: Vec<CamillaFloat> = rms_peak.iter().map(|rp| rp.0).collect();
-        let peak: Vec<CamillaFloat> = rms_peak.iter().map(|rp| rp.1).collect();
+        let rms: Vec<f32> = rms_peak.iter().map(|rp| rp.0.to_f32()).collect();
+        let peak: Vec<f32> = rms_peak.iter().map(|rp| rp.1.to_f32()).collect();
         ChunkStats { rms, peak }
     }
 
@@ -123,8 +127,8 @@ impl AudioChunk {
             .zip(stats.peak.iter_mut().zip(stats.rms.iter_mut()))
         {
             let (rms, peak) = rms_and_peak(wf);
-            *peakval = peak;
-            *rmsval = rms;
+            *peakval = peak.to_f32();
+            *rmsval = rms.to_f32();
         }
         xtrace!("Stats: rms {:?}, peak {:?}", stats.rms, stats.peak);
     }

@@ -24,13 +24,11 @@
 //! Key types in this crate root: [`StatusMessage`], [`CommandMessage`],
 //! [`CaptureStatus`], [`PlaybackStatus`], [`CamillaFloat`].
 
-// In an f32 build `CamillaFloat` is `f32`, which makes `x as f32` casts and
-// full-precision `f64` literals (both correct for the default `f64` build) look
-// redundant. Silence those lints only in the f32 build; the f64 build is unaffected.
-#![cfg_attr(
-    camillafloat_f32,
-    allow(clippy::unnecessary_cast, clippy::excessive_precision)
-)]
+// Full-precision `f64` literals, correct for the default build, hold more digits
+// than an `f32` build can represent. Silence that only in the f32 build.
+// Conversions go through `ToCamillaFloat` and `ToF32` rather than `as` casts, so
+// no cast lint needs suppressing.
+#![cfg_attr(camillafloat_f32, allow(clippy::excessive_precision))]
 
 #[macro_use]
 extern crate log;
@@ -112,11 +110,45 @@ pub trait ToCamillaFloat {
     fn to_camilla_float(self) -> CamillaFloat;
 }
 
+#[cfg(camillafloat_f32)]
 impl ToCamillaFloat for f64 {
     #[inline]
-    #[allow(clippy::unnecessary_cast)]
     fn to_camilla_float(self) -> CamillaFloat {
-        self as CamillaFloat
+        self as f32
+    }
+}
+
+#[cfg(not(camillafloat_f32))]
+impl ToCamillaFloat for f64 {
+    #[inline]
+    fn to_camilla_float(self) -> CamillaFloat {
+        self
+    }
+}
+
+/// Conversion from the processing precision down to `f32`.
+///
+/// Signal levels, volumes and spectrum data are reported as `f32` whatever
+/// [`CamillaFloat`] is. Implemented for both float types and written as a method
+/// rather than an `as` cast, so that the direction which is a no-op in a given
+/// build does not need a blanket `clippy::unnecessary_cast` allow over a whole
+/// file, which would also hide genuinely redundant casts.
+pub trait ToF32 {
+    /// Convert to `f32` for reporting.
+    fn to_f32(self) -> f32;
+}
+
+impl ToF32 for f64 {
+    #[inline]
+    fn to_f32(self) -> f32 {
+        self as f32
+    }
+}
+
+impl ToF32 for f32 {
+    #[inline]
+    fn to_f32(self) -> f32 {
+        self
     }
 }
 
@@ -305,6 +337,9 @@ pub(crate) fn push_capture_audio_buffer(
     capture_status: &Arc<RwLock<CaptureStatus>>,
     chunk: &audiochunk::AudioChunk,
 ) {
+    if !spectrum::spectrum_data_requested() {
+        return;
+    }
     if let Some(mut status) = capture_status.try_write() {
         status.audio_buffer.push_chunk(chunk);
     }
@@ -314,6 +349,9 @@ pub(crate) fn push_playback_audio_buffer(
     playback_status: &Arc<RwLock<PlaybackStatus>>,
     chunk: &audiochunk::AudioChunk,
 ) {
+    if !spectrum::spectrum_data_requested() {
+        return;
+    }
     if let Some(mut status) = playback_status.try_write() {
         status.audio_buffer.push_chunk(chunk);
     }

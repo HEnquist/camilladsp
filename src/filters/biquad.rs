@@ -14,8 +14,6 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(camillafloat_f32, allow(clippy::collapsible_if))]
-
 // Based on https://github.com/korken89/biquad-rs
 // coeffs: https://arachnoid.com/BiQuadDesigner/index.html
 

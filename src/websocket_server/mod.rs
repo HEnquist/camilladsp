@@ -1916,6 +1916,9 @@ fn make_spectrum_subscription(
     sub: SpectrumSubscription,
     shared_data: &SharedData,
 ) -> Result<SpectrumSubscriptionState, WsResult> {
+    // Start filling the audio ring buffer, if nothing has asked for it yet.
+    crate::spectrum::request_spectrum_data();
+
     if sub.n_bins < 2 {
         return Err(WsResult::InvalidRequestError {
             message: "n_bins must be at least 2".to_string(),
@@ -1965,6 +1968,11 @@ fn make_spectrum_subscription(
 }
 
 fn handle_get_spectrum(req: SpectrumRequest, shared_data: &SharedData) -> WsReply {
+    // Start filling the audio ring buffer, if nothing has asked for it yet. The
+    // history needed for this request is not there until it has filled, so the
+    // first request after startup can still report insufficient data.
+    crate::spectrum::request_spectrum_data();
+
     // Validate parameters that don't require the lock.
     if req.n_bins < 2 {
         return WsReply::GetSpectrum {

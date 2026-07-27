@@ -14,8 +14,6 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(camillafloat_f32, allow(clippy::unnecessary_cast))]
-
 use crate::config;
 use crate::filters::Filter;
 use crate::filters::biquad;
