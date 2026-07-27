@@ -94,6 +94,13 @@ impl AudioRingBuffer {
         if available < n_frames {
             return false;
         }
+        // The channel index reaches here straight from a websocket request, so an
+        // out of range one must not index into `channels`.
+        if let Some(ch_idx) = channel
+            && ch_idx >= self.channels.len()
+        {
+            return false;
+        }
         let start = (self.write_pos + RING_BUFFER_CAPACITY - n_frames) % RING_BUFFER_CAPACITY;
         buf.resize(n_frames, f32::default());
         match channel {
@@ -540,6 +547,22 @@ mod tests {
         let mut buf = AudioRingBuffer::new();
         buf.push_chunk(&chunk);
         assert!(compute_spectrum(&buf, 20.0, 20000.0, 100, Some(5), samplerate).is_err());
+    }
+
+    // `compute_spectrum` validates the channel index, but the subscription path
+    // goes through `fill_from_buffer` instead, passing the client's index
+    // straight down. That must not index out of bounds.
+    #[test]
+    fn fill_from_buffer_rejects_out_of_range_channel() {
+        let samplerate = 48000;
+        let chunk = make_chunk_sine(1000.0, 0.5, samplerate, 8192);
+        let mut buf = AudioRingBuffer::new();
+        buf.push_chunk(&chunk);
+        let fft_len = fft_length_for(20.0, samplerate);
+        let mut computer = SpectrumComputer::new(fft_len, 100, 20.0, 20000.0, samplerate);
+        assert!(!computer.fill_from_buffer(&buf, Some(5)));
+        assert!(computer.fill_from_buffer(&buf, Some(0)));
+        assert!(computer.fill_from_buffer(&buf, None));
     }
 
     #[test]
