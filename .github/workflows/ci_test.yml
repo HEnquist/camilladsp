@@ -112,7 +112,8 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates curl git pkg-config \
-            crossbuild-essential-armhf libasound2-dev:armhf qemu-user-static
+            build-essential crossbuild-essential-armhf \
+            libasound2-dev:armhf qemu-user-static
 
       - name: Checkout sources
         uses: actions/checkout@v5
