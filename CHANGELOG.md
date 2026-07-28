@@ -13,6 +13,10 @@ Bugfixes:
 Changes:
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
+- The pre-built Linux binaries now need glibc 2.34 or newer, meaning Raspberry Pi OS Bookworm
+  or another distribution of similar age. Older systems must build from source.
+- No more pre-built armv6 binary for the Raspberry Pi 1 and the original Pi Zero.
+  Those must build from source.
 
 Config changes (breaking):
 - Time values no longer accept unitless numbers. Every time-valued parameter now states its unit.
