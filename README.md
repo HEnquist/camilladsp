@@ -223,10 +223,22 @@ Both 64 and 32 bit architectures are supported.
 All platforms supported by the Rustc compiler should work.
 
 Pre-built binaries are provided for:
-- x86_64 (almost all PCs)
-- armv6 (32-bit arm, for example a Raspberry Pi 1 and Zero)
-- armv7 (32-bit arm, for example a Raspberry Pi 2,3,4 with a 32-bit OS)
-- aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS)
+- x86_64 (almost all PCs), built on Ubuntu 24.04
+- armv7 (32-bit arm, for example a Raspberry Pi 2,3,4 with a 32-bit OS),
+  cross compiled on Debian Bookworm
+- aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS),
+  built on Ubuntu 24.04
+
+All three need glibc 2.34 or newer.
+That is lower than the glibc of the systems they are built on,
+because the binaries never reference anything newer than 2.34.
+Any newer system works too, glibc is backwards compatible.
+Raspberry Pi OS Bookworm has glibc 2.36, and Trixie has 2.41.
+
+Older systems must be built from source.
+The same goes for other architectures,
+for example armv6 (Raspberry Pi 1 and the original Pi Zero),
+32-bit x86, and riscv64.
 
 ### Windows requirements
 An x86_64 CPU and the 64-bit version of Windows is recommended.
@@ -342,7 +354,6 @@ The following configurations are provided:
 |----------|-------------|----------|
 | `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA |
 | `camilladsp-linux-pipewire-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA, PipeWire |
-| `camilladsp-linux-armv6.tar.gz` | Linux on Armv6 (32-bit), intended for Raspberry Pi 1 and Pi Zero but should also work on others | ALSA |
 | `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon (32-bit), intended for Raspberry Pi 2 and up but should also work on others | ALSA |
 | `camilladsp-linux-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA |
 | `camilladsp-linux-pipewire-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA, PipeWire |
@@ -434,7 +445,6 @@ All the available options, or "features" are:
 - `threaded-alsa`: Experimental ALSA backend implementation (Linux only). When enabled, it replaces the legacy ALSA backend.
 - `websocket`: Websocket server for control.
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
-- `32bit`: Perform all calculations with 32-bit floats (instead of 64).
 - `debug`: Enable extra logging, useful for debugging.
 
 
@@ -451,12 +461,33 @@ cargo build --release --features pipewire-backend
 cargo install --path . --features pipewire-backend
 ```
 
-Example 2: You want only `32bit`. Since you don't want `websocket` you have to disable the defaults:
+Example 2: You want only `debug`. Since you don't want `websocket` you have to disable the defaults:
 ```
-cargo build --release --no-default-features --features 32bit
+cargo build --release --no-default-features --features debug
 (or)
-cargo install --path . --no-default-features --features 32bit
+cargo install --path . --no-default-features --features debug
 ```
+
+### Sample precision
+
+All processing is done with 64-bit floats by default. It is also possible to build with
+32-bit floats instead. This lowers memory use and can be noticeably faster for resampling
+and FIR convolution on weak in-order CPUs, at the cost of a higher numerical noise floor.
+On more capable CPUs there is little or nothing to gain.
+
+This is not a Cargo feature. Cargo features are unified across the whole dependency graph,
+which means another crate depending on CamillaDSP as a library could silently change the
+precision for everyone else in the build. It is a raw compiler flag instead, so the choice
+belongs to whoever runs the build:
+```
+RUSTFLAGS="--cfg camillafloat_f32" cargo build --release
+```
+
+Note that this rebuilds all dependencies, since changing `RUSTFLAGS` invalidates the build
+cache. To make it the local default without setting the variable every time, put it under
+`[build] rustflags` in `.cargo/config.toml`.
+
+The active precision is listed as `Sample precision` in the output of `camilladsp --help`.
 
 ### Additional dependencies
 

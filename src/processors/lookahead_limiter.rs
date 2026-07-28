@@ -14,7 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
@@ -40,7 +40,7 @@ pub struct LookaheadLimiter {
     /// Lookahead delay for each channel.
     delays: Vec<Delay>,
     /// Peak detection signal of the current chunk.
-    scratch: Vec<PrcFmt>,
+    scratch: Vec<CamillaFloat>,
 }
 
 /// Expand an empty channel list to all channels.
@@ -60,7 +60,7 @@ fn make_delays(nbr_channels: usize, attack_samples: usize, samplerate: usize) ->
             Delay::new(
                 &format!("Lookahead delay {ch}"),
                 samplerate,
-                attack_samples as PrcFmt,
+                attack_samples as f64,
                 false,
             )
         })
@@ -127,7 +127,7 @@ impl LookaheadLimiter {
         }
     }
 
-    fn apply_gain(gain: &[PrcFmt], input: &mut [PrcFmt]) {
+    fn apply_gain(gain: &[CamillaFloat], input: &mut [CamillaFloat]) {
         for (val, gain) in input.iter_mut().zip(gain.iter()) {
             *val *= gain;
         }
@@ -243,8 +243,8 @@ mod tests {
     fn params(
         monitor_channels: Option<Vec<usize>>,
         process_channels: Option<Vec<usize>>,
-        attack: PrcFmt,
-        release: PrcFmt,
+        attack: f64,
+        release: f64,
     ) -> config::LookaheadLimiterProcessorParameters {
         config::LookaheadLimiterProcessorParameters {
             channels: 2,
@@ -259,12 +259,12 @@ mod tests {
         }
     }
 
-    fn chunk(waveforms: Vec<Vec<PrcFmt>>) -> AudioChunk {
+    fn chunk(waveforms: Vec<Vec<CamillaFloat>>) -> AudioChunk {
         let frames = waveforms[0].len();
         AudioChunk::new(waveforms, 1.0, -1.0, frames, frames)
     }
 
-    fn assert_close(left: &[PrcFmt], right: &[PrcFmt], epsilon: PrcFmt) {
+    fn assert_close(left: &[CamillaFloat], right: &[CamillaFloat], epsilon: CamillaFloat) {
         assert_eq!(left.len(), right.len());
         for (i, (&l, &r)) in left.iter().zip(right.iter()).enumerate() {
             assert!(
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn test_matches_filter() {
         let samplerate = 48000;
-        let waveform: Vec<PrcFmt> = vec![
+        let waveform: Vec<CamillaFloat> = vec![
             1.0, 1.0, 1.0, 1.0, 1.0, 2.0, -2.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
             1.0, 1.0,
         ];
@@ -293,7 +293,7 @@ mod tests {
                 limit: 0.0,
                 attack: 4.0,
                 attack_unit: TimeUnit::Samples,
-                release: 1.0 / std::f64::consts::LN_2 as PrcFmt,
+                release: 1.0 / std::f64::consts::LN_2,
                 release_unit: TimeUnit::Samples,
                 delay_processed_only: None,
             },
@@ -306,7 +306,7 @@ mod tests {
                 limit: 0.0,
                 attack: 4.0,
                 attack_unit: TimeUnit::Samples,
-                release: 1.0 / std::f64::consts::LN_2 as PrcFmt,
+                release: 1.0 / std::f64::consts::LN_2,
                 release_unit: TimeUnit::Samples,
             },
             samplerate,

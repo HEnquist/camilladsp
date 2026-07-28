@@ -23,8 +23,9 @@ use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 use std::sync::Arc;
 
 // Sample format
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
+use crate::ToCamillaFloat;
 
 #[cfg(target_arch = "aarch64")]
 #[path = "fftconv_neon.rs"]
@@ -36,10 +37,10 @@ mod avx;
 
 // element-wise product, result = slice_a * slice_b
 #[cfg(any(not(target_arch = "aarch64"), test, feature = "bench"))]
-fn multiply_elements_scalar(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+fn multiply_elements_scalar<T: num_traits::Float>(
+    result: &mut [Complex<T>],
+    slice_a: &[Complex<T>],
+    slice_b: &[Complex<T>],
 ) {
     let len = result.len();
     let mut res = &mut result[..len];
@@ -71,10 +72,10 @@ fn multiply_elements_scalar(
 
 // element-wise add product, result = result + slice_a * slice_b
 #[cfg(any(not(target_arch = "aarch64"), test, feature = "bench"))]
-fn multiply_add_elements_scalar(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+fn multiply_add_elements_scalar<T: num_traits::Float + num_traits::NumAssign>(
+    result: &mut [Complex<T>],
+    slice_a: &[Complex<T>],
+    slice_b: &[Complex<T>],
 ) {
     let len = result.len();
     let mut res = &mut result[..len];
@@ -104,93 +105,136 @@ fn multiply_add_elements_scalar(
     }
 }
 
-// Element-wise product: result = slice_a * slice_b.
-// Dispatches to NEON (aarch64), AVX+FMA (x86_64 with runtime support), or scalar.
-#[inline]
-fn multiply_elements(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
-) {
-    #[cfg(target_arch = "aarch64")]
-    {
-        // SAFETY: NEON is mandatory on all AArch64 implementations.
-        unsafe { neon::multiply_elements_neon(result, slice_a, slice_b) };
-    }
+/// Complex multiply and multiply-accumulate kernels for the convolution inner loop.
+///
+/// Implemented for both float precisions rather than selected by `cfg`, so that
+/// whichever one `CamillaFloat` is not currently set to still gets compiled and tested
+/// on every build. The unused implementation is dead code that the linker drops,
+/// so the binary is unaffected.
+///
+/// Each implementation dispatches to NEON (aarch64), AVX+FMA (x86_64 with runtime
+/// support), or the scalar fallback.
+pub(super) trait ConvKernel: Sized {
+    /// result = slice_a * slice_b
+    fn multiply_elements(
+        result: &mut [Complex<Self>],
+        slice_a: &[Complex<Self>],
+        slice_b: &[Complex<Self>],
+    );
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        if avx::has_avx_fma() {
-            // SAFETY: AVX and FMA support has been verified by has_avx_fma().
-            unsafe { avx::multiply_elements_avx_fma(result, slice_a, slice_b) };
-        } else {
-            multiply_elements_scalar(result, slice_a, slice_b);
-        }
-    }
-
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    multiply_elements_scalar(result, slice_a, slice_b);
+    /// result += slice_a * slice_b
+    fn multiply_add_elements(
+        result: &mut [Complex<Self>],
+        slice_a: &[Complex<Self>],
+        slice_b: &[Complex<Self>],
+    );
 }
 
-// Element-wise accumulate product: result += slice_a * slice_b.
-// Dispatches to NEON (aarch64), AVX+FMA (x86_64 with runtime support), or scalar.
-#[inline]
-fn multiply_add_elements(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
-) {
-    #[cfg(target_arch = "aarch64")]
-    {
-        // SAFETY: NEON is mandatory on all AArch64 implementations.
-        unsafe { neon::multiply_add_elements_neon(result, slice_a, slice_b) };
-    }
+macro_rules! impl_conv_kernel {
+    ($t:ty, $neon_mul:ident, $neon_mul_add:ident, $avx_mul:ident, $avx_mul_add:ident) => {
+        impl ConvKernel for $t {
+            #[inline]
+            fn multiply_elements(
+                result: &mut [Complex<$t>],
+                slice_a: &[Complex<$t>],
+                slice_b: &[Complex<$t>],
+            ) {
+                #[cfg(target_arch = "aarch64")]
+                {
+                    // SAFETY: NEON is mandatory on all AArch64 implementations.
+                    unsafe { neon::$neon_mul(result, slice_a, slice_b) };
+                }
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        if avx::has_avx_fma() {
-            // SAFETY: AVX and FMA support has been verified by has_avx_fma().
-            unsafe { avx::multiply_add_elements_avx_fma(result, slice_a, slice_b) };
-        } else {
-            multiply_add_elements_scalar(result, slice_a, slice_b);
+                #[cfg(target_arch = "x86_64")]
+                {
+                    if avx::has_avx_fma() {
+                        // SAFETY: AVX and FMA support has been verified by has_avx_fma().
+                        unsafe { avx::$avx_mul(result, slice_a, slice_b) };
+                    } else {
+                        multiply_elements_scalar(result, slice_a, slice_b);
+                    }
+                }
+
+                #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+                multiply_elements_scalar(result, slice_a, slice_b);
+            }
+
+            #[inline]
+            fn multiply_add_elements(
+                result: &mut [Complex<$t>],
+                slice_a: &[Complex<$t>],
+                slice_b: &[Complex<$t>],
+            ) {
+                #[cfg(target_arch = "aarch64")]
+                {
+                    // SAFETY: NEON is mandatory on all AArch64 implementations.
+                    unsafe { neon::$neon_mul_add(result, slice_a, slice_b) };
+                }
+
+                #[cfg(target_arch = "x86_64")]
+                {
+                    if avx::has_avx_fma() {
+                        // SAFETY: AVX and FMA support has been verified by has_avx_fma().
+                        unsafe { avx::$avx_mul_add(result, slice_a, slice_b) };
+                    } else {
+                        multiply_add_elements_scalar(result, slice_a, slice_b);
+                    }
+                }
+
+                #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+                multiply_add_elements_scalar(result, slice_a, slice_b);
+            }
         }
-    }
-
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    multiply_add_elements_scalar(result, slice_a, slice_b);
+    };
 }
+
+impl_conv_kernel!(
+    f64,
+    multiply_elements_neon_f64,
+    multiply_add_elements_neon_f64,
+    multiply_elements_avx_fma_f64,
+    multiply_add_elements_avx_fma_f64
+);
+impl_conv_kernel!(
+    f32,
+    multiply_elements_neon_f32,
+    multiply_add_elements_neon_f32,
+    multiply_elements_avx_fma_f32,
+    multiply_add_elements_avx_fma_f32
+);
 
 pub struct FftConv {
     name: String,
     npoints: usize,
     nsegments: usize,
-    overlap: Vec<PrcFmt>,
-    coeffs_f: Vec<Vec<Complex<PrcFmt>>>,
-    fft: Arc<dyn RealToComplex<PrcFmt>>,
-    ifft: Arc<dyn ComplexToReal<PrcFmt>>,
-    scratch_fw: Vec<Complex<PrcFmt>>,
-    scratch_inv: Vec<Complex<PrcFmt>>,
-    input_buf: Vec<PrcFmt>,
-    input_f: Vec<Vec<Complex<PrcFmt>>>,
-    temp_buf: Vec<Complex<PrcFmt>>,
-    output_buf: Vec<PrcFmt>,
+    overlap: Vec<CamillaFloat>,
+    coeffs_f: Vec<Vec<Complex<CamillaFloat>>>,
+    fft: Arc<dyn RealToComplex<CamillaFloat>>,
+    ifft: Arc<dyn ComplexToReal<CamillaFloat>>,
+    scratch_fw: Vec<Complex<CamillaFloat>>,
+    scratch_inv: Vec<Complex<CamillaFloat>>,
+    input_buf: Vec<CamillaFloat>,
+    input_f: Vec<Vec<Complex<CamillaFloat>>>,
+    temp_buf: Vec<Complex<CamillaFloat>>,
+    output_buf: Vec<CamillaFloat>,
     index: usize,
 }
 
 impl FftConv {
     /// Create a new FFT convolution filter.
-    pub fn new(name: &str, data_length: usize, coeffs: &[PrcFmt]) -> Self {
+    pub fn new(name: &str, data_length: usize, coeffs: &[CamillaFloat]) -> Self {
         let name = name.to_string();
-        let input_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
-        let temp_buf: Vec<Complex<PrcFmt>> = vec![Complex::zero(); data_length + 1];
-        let output_buf: Vec<PrcFmt> = vec![0.0; 2 * data_length];
-        let mut planner = RealFftPlanner::<PrcFmt>::new();
+        let input_buf: Vec<CamillaFloat> = vec![0.0; 2 * data_length];
+        let temp_buf: Vec<Complex<CamillaFloat>> = vec![Complex::zero(); data_length + 1];
+        let output_buf: Vec<CamillaFloat> = vec![0.0; 2 * data_length];
+        let mut planner = RealFftPlanner::<CamillaFloat>::new();
         let fft = planner.plan_fft_forward(2 * data_length);
         let ifft = planner.plan_fft_inverse(2 * data_length);
         let mut scratch_fw = fft.make_scratch_vec();
         let scratch_inv = ifft.make_scratch_vec();
 
-        let nsegments = ((coeffs.len() as PrcFmt) / (data_length as PrcFmt)).ceil() as usize;
+        let nsegments =
+            ((coeffs.len() as CamillaFloat) / (data_length as CamillaFloat)).ceil() as usize;
 
         let input_f = vec![vec![Complex::zero(); data_length + 1]; nsegments];
         let mut coeffs_padded = vec![vec![0.0; 2 * data_length]; nsegments];
@@ -199,7 +243,8 @@ impl FftConv {
         debug!("Conv {name} is using {nsegments} segments");
 
         for (n, coeff) in coeffs.iter().enumerate() {
-            coeffs_padded[n / data_length][n % data_length] = coeff / (2 * data_length) as PrcFmt;
+            coeffs_padded[n / data_length][n % data_length] =
+                coeff / (2 * data_length) as CamillaFloat;
         }
 
         for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
@@ -227,7 +272,11 @@ impl FftConv {
 
     pub fn from_config(name: &str, data_length: usize, conf: config::ConvParameters) -> Self {
         let values = match conf {
-            config::ConvParameters::Values { values } => values,
+            config::ConvParameters::Values { values } => {
+                // Coefficients from the config are f64; file and wav readers
+                // already deliver the processing precision.
+                values.into_iter().map(|v| v.to_camilla_float()).collect()
+            }
             config::ConvParameters::Raw(params) => filters::read_coeff_file(
                 &params.filename,
                 &params.format(),
@@ -254,7 +303,7 @@ impl Filter for FftConv {
     }
 
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
         // Copy to input buffer and clear overlap area
         self.input_buf[0..self.npoints].copy_from_slice(waveform);
         for item in self
@@ -279,14 +328,14 @@ impl Filter for FftConv {
         // Loop through history of input FTs, multiply with filter FTs, accumulate result
         let segm = 0;
         let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-        multiply_elements(
+        CamillaFloat::multiply_elements(
             &mut self.temp_buf,
             &self.input_f[hist_idx],
             &self.coeffs_f[segm],
         );
         for segm in 1..self.nsegments {
             let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-            multiply_add_elements(
+            CamillaFloat::multiply_add_elements(
                 &mut self.temp_buf,
                 &self.input_f[hist_idx],
                 &self.coeffs_f[segm],
@@ -315,7 +364,11 @@ impl Filter for FftConv {
         } = conf
         {
             let coeffs = match conf {
-                config::ConvParameters::Values { values } => values,
+                config::ConvParameters::Values { values } => {
+                    // Coefficients from the config are f64; file and wav readers
+                    // already deliver the processing precision.
+                    values.into_iter().map(|v| v.to_camilla_float()).collect()
+                }
                 config::ConvParameters::Raw(params) => filters::read_coeff_file(
                     &params.filename,
                     &params.format(),
@@ -333,7 +386,8 @@ impl Filter for FftConv {
                 }
             };
 
-            let nsegments = ((coeffs.len() as PrcFmt) / (self.npoints as PrcFmt)).ceil() as usize;
+            let nsegments =
+                ((coeffs.len() as CamillaFloat) / (self.npoints as CamillaFloat)).ceil() as usize;
 
             if nsegments == self.nsegments {
                 // Same length, lets keep history
@@ -351,7 +405,7 @@ impl Filter for FftConv {
 
             for (n, coeff) in coeffs.iter().enumerate() {
                 coeffs_padded[n / self.npoints][n % self.npoints] =
-                    coeff / (2 * self.npoints) as PrcFmt;
+                    coeff / (2 * self.npoints) as CamillaFloat;
             }
 
             for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
@@ -371,18 +425,18 @@ impl Filter for FftConv {
 
 #[cfg(feature = "bench")]
 pub fn bench_multiply_elements_scalar(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+    result: &mut [Complex<CamillaFloat>],
+    slice_a: &[Complex<CamillaFloat>],
+    slice_b: &[Complex<CamillaFloat>],
 ) {
     multiply_elements_scalar(result, slice_a, slice_b);
 }
 
 #[cfg(feature = "bench")]
 pub fn bench_multiply_add_elements_scalar(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+    result: &mut [Complex<CamillaFloat>],
+    slice_a: &[Complex<CamillaFloat>],
+    slice_b: &[Complex<CamillaFloat>],
 ) {
     multiply_add_elements_scalar(result, slice_a, slice_b);
 }
@@ -392,48 +446,56 @@ pub fn bench_has_avx_fma() -> bool {
     avx::has_avx_fma()
 }
 
+/// Runs the AVX+FMA kernel for the precision `CamillaFloat` is built with.
+///
 /// # Safety
 /// Caller must verify AVX+FMA availability via `bench_has_avx_fma()`.
 #[cfg(all(target_arch = "x86_64", feature = "bench"))]
 pub unsafe fn bench_multiply_elements_avx_fma(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+    result: &mut [Complex<CamillaFloat>],
+    slice_a: &[Complex<CamillaFloat>],
+    slice_b: &[Complex<CamillaFloat>],
 ) {
-    unsafe { avx::multiply_elements_avx_fma(result, slice_a, slice_b) };
+    CamillaFloat::multiply_elements(result, slice_a, slice_b);
 }
 
+/// Runs the AVX+FMA kernel for the precision `CamillaFloat` is built with.
+///
 /// # Safety
 /// Caller must verify AVX+FMA availability via `bench_has_avx_fma()`.
 #[cfg(all(target_arch = "x86_64", feature = "bench"))]
 pub unsafe fn bench_multiply_add_elements_avx_fma(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+    result: &mut [Complex<CamillaFloat>],
+    slice_a: &[Complex<CamillaFloat>],
+    slice_b: &[Complex<CamillaFloat>],
 ) {
-    unsafe { avx::multiply_add_elements_avx_fma(result, slice_a, slice_b) };
+    CamillaFloat::multiply_add_elements(result, slice_a, slice_b);
 }
 
-#[cfg(all(target_arch = "aarch64", feature = "bench"))]
+/// Runs the NEON kernel for the precision `CamillaFloat` is built with.
+///
 /// # Safety
 /// Caller must ensure this is only used on aarch64 where NEON is available.
+#[cfg(all(target_arch = "aarch64", feature = "bench"))]
 pub unsafe fn bench_multiply_elements_neon(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+    result: &mut [Complex<CamillaFloat>],
+    slice_a: &[Complex<CamillaFloat>],
+    slice_b: &[Complex<CamillaFloat>],
 ) {
-    unsafe { neon::multiply_elements_neon(result, slice_a, slice_b) };
+    CamillaFloat::multiply_elements(result, slice_a, slice_b);
 }
 
-#[cfg(all(target_arch = "aarch64", feature = "bench"))]
+/// Runs the NEON kernel for the precision `CamillaFloat` is built with.
+///
 /// # Safety
 /// Caller must ensure this is only used on aarch64 where NEON is available.
+#[cfg(all(target_arch = "aarch64", feature = "bench"))]
 pub unsafe fn bench_multiply_add_elements_neon(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+    result: &mut [Complex<CamillaFloat>],
+    slice_a: &[Complex<CamillaFloat>],
+    slice_b: &[Complex<CamillaFloat>],
 ) {
-    unsafe { neon::multiply_add_elements_neon(result, slice_a, slice_b) };
+    CamillaFloat::multiply_add_elements(result, slice_a, slice_b);
 }
 
 /// Validate a FFT convolution config.
@@ -464,18 +526,22 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::PrcFmt;
+    use crate::CamillaFloat;
     use crate::config::ConvParameters;
     use crate::filters::Filter;
     use crate::filters::fftconv::FftConv;
     use num_complex::Complex;
 
-    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
+    fn is_close(left: CamillaFloat, right: CamillaFloat, maxdiff: CamillaFloat) -> bool {
         println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 
-    fn compare_waveforms(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
+    fn compare_waveforms(
+        left: Vec<CamillaFloat>,
+        right: Vec<CamillaFloat>,
+        maxdiff: CamillaFloat,
+    ) -> bool {
         for (val_l, val_r) in left.iter().zip(right.iter()) {
             if !is_close(*val_l, *val_r, maxdiff) {
                 return false;
@@ -497,16 +563,16 @@ mod tests {
 
     #[test]
     fn check_result_segmented() {
-        let mut coeffs = Vec::<PrcFmt>::new();
+        let mut coeffs = Vec::<CamillaFloat>::new();
         for m in 0..32 {
-            coeffs.push(m as PrcFmt);
+            coeffs.push(m as CamillaFloat);
         }
         let mut filter = FftConv::new("test", 8, &coeffs);
-        let mut wave1 = vec![0.0 as PrcFmt; 8];
-        let mut wave2 = vec![0.0 as PrcFmt; 8];
-        let mut wave3 = vec![0.0 as PrcFmt; 8];
-        let mut wave4 = vec![0.0 as PrcFmt; 8];
-        let mut wave5 = vec![0.0 as PrcFmt; 8];
+        let mut wave1 = vec![0.0 as CamillaFloat; 8];
+        let mut wave2 = vec![0.0 as CamillaFloat; 8];
+        let mut wave3 = vec![0.0 as CamillaFloat; 8];
+        let mut wave4 = vec![0.0 as CamillaFloat; 8];
+        let mut wave5 = vec![0.0 as CamillaFloat; 8];
 
         wave1[0] = 1.0;
         filter.process_waveform(&mut wave1).unwrap();
@@ -519,7 +585,7 @@ mod tests {
         let exp2 = Vec::from(&coeffs[8..16]);
         let exp3 = Vec::from(&coeffs[16..24]);
         let exp4 = Vec::from(&coeffs[24..32]);
-        let exp5 = vec![0.0 as PrcFmt; 8];
+        let exp5 = vec![0.0 as CamillaFloat; 8];
 
         assert!(compare_waveforms(wave1, exp1, 1e-5));
         assert!(compare_waveforms(wave2, exp2, 1e-5));
@@ -529,19 +595,19 @@ mod tests {
     }
 
     // FMA rounds differently from scalar; SIMD results may differ by a few ULPs.
-    #[cfg(not(feature = "32bit"))]
-    const SIMD_TOL: PrcFmt = 1e-9;
-    #[cfg(feature = "32bit")]
-    const SIMD_TOL: PrcFmt = 1e-5;
+    #[cfg(not(camillafloat_f32))]
+    const SIMD_TOL: CamillaFloat = 1e-9;
+    #[cfg(camillafloat_f32)]
+    const SIMD_TOL: CamillaFloat = 1e-5;
 
     #[test]
     fn multiply_elements_scalar_known_values() {
         use super::multiply_elements_scalar;
 
         // (1 + 2i) * (3 + 4i) = (3-8) + (4+6)i = -5 + 10i
-        let a = vec![Complex::new(1.0 as PrcFmt, 2.0)];
-        let b = vec![Complex::new(3.0 as PrcFmt, 4.0)];
-        let mut result = vec![Complex::new(0.0 as PrcFmt, 0.0)];
+        let a = vec![Complex::new(1.0 as CamillaFloat, 2.0)];
+        let b = vec![Complex::new(3.0 as CamillaFloat, 4.0)];
+        let mut result = vec![Complex::new(0.0 as CamillaFloat, 0.0)];
 
         multiply_elements_scalar(&mut result, &a, &b);
 
@@ -555,9 +621,9 @@ mod tests {
 
         // result starts at (1 + 1i), then += (1 + 2i) * (3 + 4i) = -5 + 10i
         // expected final: (-4 + 11i)
-        let a = vec![Complex::new(1.0 as PrcFmt, 2.0)];
-        let b = vec![Complex::new(3.0 as PrcFmt, 4.0)];
-        let mut result = vec![Complex::new(1.0 as PrcFmt, 1.0)];
+        let a = vec![Complex::new(1.0 as CamillaFloat, 2.0)];
+        let b = vec![Complex::new(3.0 as CamillaFloat, 4.0)];
+        let mut result = vec![Complex::new(1.0 as CamillaFloat, 1.0)];
 
         multiply_add_elements_scalar(&mut result, &a, &b);
 

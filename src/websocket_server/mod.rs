@@ -1942,6 +1942,12 @@ fn make_spectrum_subscription(
     if samplerate == 0 {
         return Err(WsResult::ProcessingNotRunningError);
     }
+
+    // Only a request that is going to be served starts filling the audio ring
+    // buffer, since the flag is sticky and the filling costs a pass over every
+    // chunk from here on.
+    crate::spectrum::request_spectrum_data();
+
     let fft_len = crate::spectrum::fft_length_for(sub.min_freq, samplerate);
     let hop_interval = Duration::from_secs_f64(fft_len as f64 / 2.0 / samplerate as f64);
     let min_interval = match sub.max_rate {
@@ -1994,6 +2000,12 @@ fn handle_get_spectrum(req: SpectrumRequest, shared_data: &SharedData) -> WsRepl
             value: None,
         };
     }
+
+    // Only a request that is going to be served starts filling the audio ring
+    // buffer, since the flag is sticky. The history this request needs is not
+    // there until the buffer has filled, so the first request after startup can
+    // still report insufficient data.
+    crate::spectrum::request_spectrum_data();
 
     let fft_len = crate::spectrum::fft_length_for(req.min_freq, samplerate);
 

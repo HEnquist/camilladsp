@@ -27,13 +27,14 @@ use parking_lot::RwLock;
 use rand::{SeedableRng, rngs::SmallRng};
 use rand_distr::{Distribution, Uniform};
 
+use crate::CamillaFloat;
 use crate::CaptureStatus;
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
+use crate::ToCamillaFloat;
 use crate::utils::decibels::db_to_linear;
 use crate::utils::stash::{container_from_stash, vec_from_stash};
 
@@ -41,11 +42,11 @@ struct SineGenerator {
     time: f64,
     freq: f64,
     delta_t: f64,
-    amplitude: PrcFmt,
+    amplitude: CamillaFloat,
 }
 
 impl SineGenerator {
-    fn new(freq: f64, fs: usize, amplitude: PrcFmt) -> Self {
+    fn new(freq: f64, fs: usize, amplitude: CamillaFloat) -> Self {
         SineGenerator {
             time: 0.0,
             freq,
@@ -56,9 +57,9 @@ impl SineGenerator {
 }
 
 impl Iterator for SineGenerator {
-    type Item = PrcFmt;
-    fn next(&mut self) -> Option<PrcFmt> {
-        let output = (self.freq * self.time * PI * 2.).sin() as PrcFmt * self.amplitude;
+    type Item = CamillaFloat;
+    fn next(&mut self) -> Option<CamillaFloat> {
+        let output = (self.freq * self.time * PI * 2.).sin() as CamillaFloat * self.amplitude;
         self.time += self.delta_t;
         Some(output)
     }
@@ -68,11 +69,11 @@ struct SquareGenerator {
     time: f64,
     freq: f64,
     delta_t: f64,
-    amplitude: PrcFmt,
+    amplitude: CamillaFloat,
 }
 
 impl SquareGenerator {
-    fn new(freq: f64, fs: usize, amplitude: PrcFmt) -> Self {
+    fn new(freq: f64, fs: usize, amplitude: CamillaFloat) -> Self {
         SquareGenerator {
             time: 0.0,
             freq,
@@ -83,9 +84,10 @@ impl SquareGenerator {
 }
 
 impl Iterator for SquareGenerator {
-    type Item = PrcFmt;
-    fn next(&mut self) -> Option<PrcFmt> {
-        let output = (self.freq * self.time * PI * 2.).sin().signum() as PrcFmt * self.amplitude;
+    type Item = CamillaFloat;
+    fn next(&mut self) -> Option<CamillaFloat> {
+        let output =
+            (self.freq * self.time * PI * 2.).sin().signum() as CamillaFloat * self.amplitude;
         self.time += self.delta_t;
         Some(output)
     }
@@ -93,11 +95,11 @@ impl Iterator for SquareGenerator {
 
 struct NoiseGenerator {
     rng: SmallRng,
-    distribution: Uniform<PrcFmt>,
+    distribution: Uniform<CamillaFloat>,
 }
 
 impl NoiseGenerator {
-    fn new(amplitude: PrcFmt) -> Self {
+    fn new(amplitude: CamillaFloat) -> Self {
         let rng = SmallRng::from_os_rng();
         let distribution = Uniform::new_inclusive(-amplitude, amplitude).unwrap();
         NoiseGenerator { rng, distribution }
@@ -105,8 +107,8 @@ impl NoiseGenerator {
 }
 
 impl Iterator for NoiseGenerator {
-    type Item = PrcFmt;
-    fn next(&mut self) -> Option<PrcFmt> {
+    type Item = CamillaFloat;
+    fn next(&mut self) -> Option<CamillaFloat> {
         Some(self.distribution.sample(&mut self.rng))
     }
 }
@@ -144,18 +146,26 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
     let mut square_gen;
     let mut noise_gen;
 
-    let mut generator: &mut dyn Iterator<Item = PrcFmt> = match params.signal {
+    let mut generator: &mut dyn Iterator<Item = CamillaFloat> = match params.signal {
         config::Signal::Sine { freq, level } => {
-            sine_gen = SineGenerator::new(freq, params.samplerate, db_to_linear(level));
-            &mut sine_gen as &mut dyn Iterator<Item = PrcFmt>
+            sine_gen = SineGenerator::new(
+                freq,
+                params.samplerate,
+                db_to_linear(level).to_camilla_float(),
+            );
+            &mut sine_gen as &mut dyn Iterator<Item = CamillaFloat>
         }
         config::Signal::Square { freq, level } => {
-            square_gen = SquareGenerator::new(freq, params.samplerate, db_to_linear(level));
-            &mut square_gen as &mut dyn Iterator<Item = PrcFmt>
+            square_gen = SquareGenerator::new(
+                freq,
+                params.samplerate,
+                db_to_linear(level).to_camilla_float(),
+            );
+            &mut square_gen as &mut dyn Iterator<Item = CamillaFloat>
         }
         config::Signal::WhiteNoise { level } => {
-            noise_gen = NoiseGenerator::new(db_to_linear(level));
-            &mut noise_gen as &mut dyn Iterator<Item = PrcFmt>
+            noise_gen = NoiseGenerator::new(db_to_linear(level).to_camilla_float());
+            &mut noise_gen as &mut dyn Iterator<Item = CamillaFloat>
         }
     };
 

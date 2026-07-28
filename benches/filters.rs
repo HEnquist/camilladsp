@@ -1,10 +1,10 @@
-// Full-precision f64 literals look excessive when the `32bit` feature makes
-// `PrcFmt` an `f32`; silence that only in the 32-bit build.
-#![cfg_attr(feature = "32bit", allow(clippy::excessive_precision))]
+// Full-precision f64 literals look excessive when an f32 build makes
+// `CamillaFloat` an `f32`; silence that only in the f32 build.
+#![cfg_attr(camillafloat_f32, allow(clippy::excessive_precision))]
 
 use criterion::{Bencher, BenchmarkId, Criterion, criterion_group, criterion_main};
 
-use camillalib::PrcFmt;
+use camillalib::CamillaFloat;
 use camillalib::filters::Filter;
 use camillalib::filters::biquad::{Biquad, BiquadCoefficients};
 use camillalib::filters::diffeq::DiffEq;
@@ -12,9 +12,9 @@ use camillalib::filters::fftconv::FftConv;
 
 /// Bench a single convolution
 fn run_conv(b: &mut Bencher, len: usize, chunksize: usize) {
-    let filter = vec![0.0 as PrcFmt; len];
+    let filter = vec![0.0 as CamillaFloat; len];
     let mut conv = FftConv::new("test", chunksize, &filter);
-    let mut waveform = vec![0.0 as PrcFmt; chunksize];
+    let mut waveform = vec![0.0 as CamillaFloat; chunksize];
 
     //let mut spectrum = signal.clone();
     b.iter(|| conv.process_waveform(&mut waveform));
@@ -45,7 +45,7 @@ fn bench_biquad(c: &mut Criterion) {
         0.21476322779271284,
     );
     let mut bq = Biquad::new("test", chunksize, coeffs);
-    let mut waveform = vec![0.0 as PrcFmt; chunksize];
+    let mut waveform = vec![0.0 as CamillaFloat; chunksize];
 
     c.bench_function("Biquad", |b| b.iter(|| bq.process_waveform(&mut waveform)));
 }
@@ -58,7 +58,7 @@ fn bench_diffeq(c: &mut Criterion) {
         vec![1.0, -0.1462978543780541, 0.005350765548905586],
         vec![0.21476322779271284, 0.4295264555854257, 0.21476322779271284],
     );
-    let mut waveform = vec![0.0 as PrcFmt; chunksize];
+    let mut waveform = vec![0.0 as CamillaFloat; chunksize];
 
     c.bench_function("DiffEq", |b| b.iter(|| de.process_waveform(&mut waveform)));
 }

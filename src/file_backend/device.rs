@@ -14,8 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(feature = "32bit", allow(clippy::unnecessary_cast))]
-
+use crate::ToF32;
 use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
 use crate::config;
@@ -37,7 +36,6 @@ use std::time::Duration;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
@@ -174,8 +172,8 @@ pub struct FileCaptureDevice {
     pub resampler_config: Option<config::Resampler>,
     pub channels: usize,
     pub sample_format: Option<BinarySampleFormat>,
-    pub silence_threshold: PrcFmt,
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: f64,
+    pub silence_timeout: f64,
     pub extra_samples: usize,
     pub skip_bytes: usize,
     pub read_bytes: usize,
@@ -196,8 +194,8 @@ struct CaptureParams {
     extra_bytes: usize,
     buffer_bytes: usize,
     capture_samplerate: usize,
-    silence_timeout: PrcFmt,
-    silence_threshold: PrcFmt,
+    silence_timeout: f64,
+    silence_threshold: f64,
     chunksize: usize,
     resampling_ratio: f32,
     read_bytes: usize,
@@ -560,7 +558,7 @@ fn capture_loop(
                             RwLockUpgradableReadGuard::try_upgrade(capture_status)
                         {
                             capture_status.measured_samplerate = measured_rate as usize;
-                            capture_status.signal_range = value_range as f32;
+                            capture_status.signal_range = value_range.to_f32();
                             capture_status.rate_adjust = rate_adjust as f32;
                             crate::update_capture_state(&mut capture_status, state);
                         } else {

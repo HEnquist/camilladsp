@@ -87,13 +87,15 @@ fn main_process() -> i32 {
     if cfg!(feature = "secure-websocket") {
         features.push("secure-websocket");
     }
-    if cfg!(feature = "32bit") {
-        features.push("32bit");
-    }
     if cfg!(feature = "debug") {
         features.push("debug");
     }
     let featurelist = format!("Built with features: {}", features.join(", "));
+
+    // The sample precision is a rustc cfg rather than a Cargo feature, so it is
+    // reported separately to avoid implying it can be selected with --features.
+    let precision = if cfg!(camillafloat_f32) { "f32" } else { "f64" };
+    let precision_notice = format!("Sample precision: {precision}");
 
     let (pb_types, cap_types) = list_supported_devices();
     let playback_types = format!("Playback: {}", pb_types.join(", "));
@@ -109,7 +111,7 @@ fn main_process() -> i32 {
         Box::leak(format!("{} ({})", crate_version!(), GIT_HASH).into_boxed_str());
 
     let longabout = format!(
-        "{} v{} ({})\n{}\n{}\n\n{}\n\n{}\n\nSupported device types:\n{}\n{}",
+        "{} v{} ({})\n{}\n{}\n\n{}\n\n{}\n{}\n\nSupported device types:\n{}\n{}",
         crate_name!(),
         crate_version!(),
         GIT_HASH,
@@ -117,6 +119,7 @@ fn main_process() -> i32 {
         crate_description!(),
         license_notice,
         featurelist,
+        precision_notice,
         capture_types,
         playback_types
     );

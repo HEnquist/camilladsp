@@ -14,8 +14,9 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/en-US/MPL/2.0/>.
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
+use crate::ToCamillaFloat;
 use crate::config;
 use crate::config::TimeUnit;
 use crate::filters::Filter;
@@ -28,25 +29,25 @@ use ringbuf::traits::*;
 /// Convert the configured values to the internal limiter parameters:
 /// linear limit, attack/lookahead in samples, and release coefficient.
 pub fn limiter_parameters(
-    limit: PrcFmt,
-    attack: PrcFmt,
+    limit: f64,
+    attack: f64,
     attack_unit: TimeUnit,
-    release: PrcFmt,
+    release: f64,
     release_unit: TimeUnit,
     samplerate: usize,
-) -> (PrcFmt, usize, PrcFmt) {
-    let limit = db_to_linear(limit);
+) -> (CamillaFloat, usize, CamillaFloat) {
+    let limit = db_to_linear(limit).to_camilla_float();
     let attack_samples = time_to_samples(attack, attack_unit, samplerate).round() as usize;
     let release_samples = time_to_samples(release, release_unit, samplerate);
-    let release_coeff = (-1.0 / release_samples).exp();
+    let release_coeff = (-1.0 / release_samples).exp().to_camilla_float();
     (limit, attack_samples, release_coeff)
 }
 
 /// Validate the attack and release times of a lookahead limiter.
 pub fn validate_times(
-    attack: PrcFmt,
+    attack: f64,
     attack_unit: TimeUnit,
-    release: PrcFmt,
+    release: f64,
     samplerate: usize,
 ) -> Res<()> {
     if attack < 0.0 {
@@ -69,18 +70,18 @@ pub fn validate_times(
 /// history buffer followed by the samples of the current chunk.
 /// Index 0 is the sample that is due to leave the limiter first.
 struct LookaheadWindow<'a> {
-    first: &'a [PrcFmt],
-    second: &'a [PrcFmt],
+    first: &'a [CamillaFloat],
+    second: &'a [CamillaFloat],
     start: usize,
     attack_samples: usize,
-    current: &'a [PrcFmt],
+    current: &'a [CamillaFloat],
 }
 
 impl<'a> LookaheadWindow<'a> {
     fn new(
-        history: &'a LocalRb<Heap<PrcFmt>>,
+        history: &'a LocalRb<Heap<CamillaFloat>>,
         attack_samples: usize,
-        current: &'a [PrcFmt],
+        current: &'a [CamillaFloat],
     ) -> Self {
         let start = history.occupied_len() - attack_samples;
         let (first, second) = history.as_slices();
@@ -94,7 +95,7 @@ impl<'a> LookaheadWindow<'a> {
     }
 
     #[inline]
-    fn get(&self, index: usize) -> PrcFmt {
+    fn get(&self, index: usize) -> CamillaFloat {
         if index < self.attack_samples {
             let idx = self.start + index;
             if idx < self.first.len() {
@@ -115,24 +116,24 @@ impl<'a> LookaheadWindow<'a> {
 /// envelope state, and turns the detection signal into a gain envelope that applies
 /// to the signal delayed by `attack_samples`.
 pub struct LookaheadGain {
-    pub limit: PrcFmt,
+    pub limit: CamillaFloat,
     pub attack_samples: usize,
-    pub release_coeff: PrcFmt,
+    pub release_coeff: CamillaFloat,
     /// Lookahead history of the detection signal, always kept full.
-    history: LocalRb<Heap<PrcFmt>>,
-    release_gain: PrcFmt,
+    history: LocalRb<Heap<CamillaFloat>>,
+    release_gain: CamillaFloat,
     /// Gain envelope of the chunk being processed.
     /// Doubles as output buffer in [LookaheadGain::process_waveform].
-    gain: Vec<PrcFmt>,
+    gain: Vec<CamillaFloat>,
     /// Number of valid values in `gain`.
     gain_len: usize,
 }
 
 impl LookaheadGain {
     pub fn new(
-        limit: PrcFmt,
+        limit: CamillaFloat,
         attack_samples: usize,
-        release_coeff: PrcFmt,
+        release_coeff: CamillaFloat,
         samplerate: usize,
         chunksize: usize,
     ) -> Self {
@@ -141,16 +142,21 @@ impl LookaheadGain {
             limit,
             attack_samples,
             release_coeff,
-            history: LocalRb::from(vec![0.0 as PrcFmt; history_len]),
+            history: LocalRb::from(vec![0.0 as CamillaFloat; history_len]),
             release_gain: 1.0,
-            gain: vec![0.0 as PrcFmt; chunksize],
+            gain: vec![0.0 as CamillaFloat; chunksize],
             gain_len: 0,
         }
     }
 
     /// Update the parameters. The lookahead history is padded with silence,
     /// so that an increased attack time does not pull in stale samples.
-    pub fn set_parameters(&mut self, limit: PrcFmt, attack_samples: usize, release_coeff: PrcFmt) {
+    pub fn set_parameters(
+        &mut self,
+        limit: CamillaFloat,
+        attack_samples: usize,
+        release_coeff: CamillaFloat,
+    ) {
         self.limit = limit;
         self.attack_samples = attack_samples;
         self.release_coeff = release_coeff;
@@ -160,13 +166,13 @@ impl LookaheadGain {
     }
 
     /// The gain envelope calculated for the most recent chunk.
-    pub fn envelope(&self) -> &[PrcFmt] {
+    pub fn envelope(&self) -> &[CamillaFloat] {
         &self.gain[..self.gain_len]
     }
 
     /// Calculate the gain envelope for the coming chunk of the detection signal,
     /// leaving the result in `self.gain`. The history buffer is left untouched.
-    fn calculate_envelope(&mut self, detection: &[PrcFmt]) {
+    fn calculate_envelope(&mut self, detection: &[CamillaFloat]) {
         let len = detection.len();
         let attack_samples = self.attack_samples;
         let limit = self.limit;
@@ -191,8 +197,8 @@ impl LookaheadGain {
                 // Compute ramp
                 let mut ramp_gain = 1.0;
                 if samples_since_peak <= attack_samples {
-                    let ramp = (attack_samples - samples_since_peak) as PrcFmt
-                        / attack_samples.max(1) as PrcFmt;
+                    let ramp = (attack_samples - samples_since_peak) as CamillaFloat
+                        / attack_samples.max(1) as CamillaFloat;
                     ramp_gain = 1.0 - (ramp * (1.0 - peak));
                     samples_since_peak += 1;
                 }
@@ -229,7 +235,7 @@ impl LookaheadGain {
     /// Calculate the gain envelope for `detection`, and store `detection` in the
     /// lookahead history. The envelope is fetched with [LookaheadGain::envelope],
     /// and applies to a signal that is delayed by `attack_samples` elsewhere.
-    pub fn process_detection(&mut self, detection: &[PrcFmt]) {
+    pub fn process_detection(&mut self, detection: &[CamillaFloat]) {
         if detection.is_empty() {
             self.gain_len = 0;
             return;
@@ -240,7 +246,7 @@ impl LookaheadGain {
 
     /// Limit `waveform` in place, using the waveform itself as detection signal.
     /// The output is delayed by `attack_samples`.
-    pub fn process_waveform(&mut self, waveform: &mut [PrcFmt]) {
+    pub fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         let len = waveform.len();
         if len == 0 {
             self.gain_len = 0;
@@ -296,7 +302,7 @@ impl LookaheadLimiter {
     fn configure(
         config: &config::LookaheadLimiterParameters,
         samplerate: usize,
-    ) -> (PrcFmt, usize, PrcFmt) {
+    ) -> (CamillaFloat, usize, CamillaFloat) {
         limiter_parameters(
             config.limit,
             config.attack,
@@ -313,7 +319,7 @@ impl Filter for LookaheadLimiter {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
         self.gain.process_waveform(waveform);
         Ok(())
     }
@@ -354,7 +360,7 @@ mod tests {
     use crate::config::TimeUnit;
     use crate::processors::Processor;
 
-    fn assert_close(left: &[PrcFmt], right: &[PrcFmt], epsilon: PrcFmt) {
+    fn assert_close(left: &[CamillaFloat], right: &[CamillaFloat], epsilon: CamillaFloat) {
         assert_eq!(left.len(), right.len());
         for (i, (&l, &r)) in left.iter().zip(right.iter()).enumerate() {
             if (l - r).abs() > epsilon {
@@ -373,14 +379,14 @@ mod tests {
             attack_unit: TimeUnit::Samples,
             release_unit: TimeUnit::Samples,
             attack: 4.0,
-            release: 1.0 / std::f64::consts::LN_2 as PrcFmt,
+            release: 1.0 / std::f64::consts::LN_2,
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
         let mut input = vec![
             1.0, 1.0, 1.0, 1.0, 1.0, 2.0, -2.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
             1.0, 1.0,
         ];
-        let expected: Vec<PrcFmt> = vec![
+        let expected: Vec<CamillaFloat> = vec![
             0.0,
             0.0,
             0.0,
@@ -392,14 +398,14 @@ mod tests {
             0.625,
             1.0,
             -1.0,
-            0.5_f64.powf(1.0 / 2.0) as PrcFmt,
+            0.5_f64.powf(1.0 / 2.0) as CamillaFloat,
             0.625,
             1.0,
-            0.5_f64.powf(1.0 / 2.0) as PrcFmt,
-            0.5_f64.powf(1.0 / 4.0) as PrcFmt,
-            0.5_f64.powf(1.0 / 8.0) as PrcFmt,
-            0.5_f64.powf(1.0 / 16.0) as PrcFmt,
-            0.5_f64.powf(1.0 / 32.0) as PrcFmt,
+            0.5_f64.powf(1.0 / 2.0) as CamillaFloat,
+            0.5_f64.powf(1.0 / 4.0) as CamillaFloat,
+            0.5_f64.powf(1.0 / 8.0) as CamillaFloat,
+            0.5_f64.powf(1.0 / 16.0) as CamillaFloat,
+            0.5_f64.powf(1.0 / 32.0) as CamillaFloat,
         ];
         limiter.process_waveform(&mut input).unwrap();
         assert_close(&input, &expected, 1e-6);
@@ -437,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_lookahead_limiter_zero_attack_matches_compressor() {
-        let release_samples: PrcFmt = 4.0;
+        let release_samples: f64 = 4.0;
         let samplerate = 48000;
         let mut limiter_input = vec![2.0, 1.0, 1.0, 1.0, 1.0];
         let chunksize = limiter_input.len();
@@ -457,7 +463,7 @@ mod tests {
                 process_channels: None,
                 attack: 0.0,
                 attack_unit: TimeUnit::Seconds,
-                release: release_samples / samplerate as PrcFmt,
+                release: release_samples / samplerate as f64,
                 release_unit: TimeUnit::Seconds,
                 threshold: 0.0,
                 factor: 1.0e20,
@@ -508,20 +514,21 @@ mod tests {
             attack_unit: TimeUnit::Samples,
             release_unit: TimeUnit::Samples,
             attack: 5.0,
-            release: 1.0 / std::f64::consts::LN_2 as PrcFmt,
+            release: 1.0 / std::f64::consts::LN_2,
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
         let mut buf1 = vec![1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0];
-        let expected1: Vec<PrcFmt> = vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.9, 0.8, 0.7, 0.6, 1.0];
+        let expected1: Vec<CamillaFloat> =
+            vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.9, 0.8, 0.7, 0.6, 1.0];
         limiter.process_waveform(&mut buf1).unwrap();
         assert_close(&buf1, &expected1, 1e-6);
 
         let mut buf2 = vec![1.0, 1.0, 1.0, 1.0];
-        let expected2: Vec<PrcFmt> = vec![
-            0.5_f64.powf(1.0 / 2.0) as PrcFmt,
-            0.5_f64.powf(1.0 / 4.0) as PrcFmt,
-            0.5_f64.powf(1.0 / 8.0) as PrcFmt,
-            0.5_f64.powf(1.0 / 16.0) as PrcFmt,
+        let expected2: Vec<CamillaFloat> = vec![
+            0.5_f64.powf(1.0 / 2.0) as CamillaFloat,
+            0.5_f64.powf(1.0 / 4.0) as CamillaFloat,
+            0.5_f64.powf(1.0 / 8.0) as CamillaFloat,
+            0.5_f64.powf(1.0 / 16.0) as CamillaFloat,
         ];
         limiter.process_waveform(&mut buf2).unwrap();
         assert_close(&buf2, &expected2, 1e-6);

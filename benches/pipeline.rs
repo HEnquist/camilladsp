@@ -1,6 +1,6 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 
-use camillalib::PrcFmt;
+use camillalib::CamillaFloat;
 use camillalib::ProcessingParameters;
 use camillalib::audiochunk::AudioChunk;
 use camillalib::config;
@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 const CHUNK_SIZE: usize = 1024;
 const CONV_LENGTHS: [usize; 2] = [32768, 65536];
-const PRE_BIQUAD_PARAMS: [(PrcFmt, PrcFmt); 16] = [
+const PRE_BIQUAD_PARAMS: [(f64, f64); 16] = [
     (120.0, 0.70),
     (220.0, 0.75),
     (350.0, 0.80),
@@ -28,7 +28,7 @@ const PRE_BIQUAD_PARAMS: [(PrcFmt, PrcFmt); 16] = [
     (6200.0, 0.75),
     (8000.0, 0.70),
 ];
-const POST_BIQUAD_PARAMS: [(PrcFmt, PrcFmt); 16] = [
+const POST_BIQUAD_PARAMS: [(f64, f64); 16] = [
     (140.0, 0.72),
     (260.0, 0.78),
     (400.0, 0.83),
@@ -47,7 +47,7 @@ const POST_BIQUAD_PARAMS: [(PrcFmt, PrcFmt); 16] = [
     (9200.0, 0.72),
 ];
 
-fn build_biquad_filter(freq: PrcFmt, q: PrcFmt) -> config::Filter {
+fn build_biquad_filter(freq: f64, q: f64) -> config::Filter {
     config::Filter::Biquad {
         description: None,
         parameters: config::BiquadParameters::Peaking(config::PeakingWidth::Q {
@@ -60,9 +60,9 @@ fn build_biquad_filter(freq: PrcFmt, q: PrcFmt) -> config::Filter {
 
 fn build_conv_filter(length: usize) -> config::Filter {
     let mut values = Vec::with_capacity(length);
-    let pi = std::f64::consts::PI as PrcFmt;
+    let pi = std::f64::consts::PI;
     for idx in 0..length {
-        let x = idx as PrcFmt - (length as PrcFmt - 1.0) * 0.5;
+        let x = idx as f64 - (length as f64 - 1.0) * 0.5;
         let sinc = if x == 0.0 {
             1.0
         } else {
@@ -233,12 +233,18 @@ fn make_chunk(channels: usize, frames: usize) -> AudioChunk {
     for channel in 0..channels {
         let mut waveform = Vec::with_capacity(frames);
         for frame in 0..frames {
-            let phase = (frame as PrcFmt + channel as PrcFmt * 13.0) * 0.013;
+            let phase = (frame as CamillaFloat + channel as CamillaFloat * 13.0) * 0.013;
             waveform.push(phase.sin());
         }
         waveforms.push(waveform);
     }
-    AudioChunk::new(waveforms, 0.0 as PrcFmt, 0.0 as PrcFmt, frames, frames)
+    AudioChunk::new(
+        waveforms,
+        0.0 as CamillaFloat,
+        0.0 as CamillaFloat,
+        frames,
+        frames,
+    )
 }
 
 fn bench_complete_pipeline(c: &mut Criterion) {

@@ -14,8 +14,9 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
+use crate::ToCamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::processors::Processor;
@@ -28,13 +29,13 @@ pub struct NoiseGate {
     pub channels: usize,
     pub monitor_channels: Vec<usize>,
     pub process_channels: Vec<usize>,
-    pub attack: PrcFmt,
-    pub release: PrcFmt,
-    pub threshold: PrcFmt,
-    pub factor: PrcFmt,
+    pub attack: CamillaFloat,
+    pub release: CamillaFloat,
+    pub threshold: CamillaFloat,
+    pub factor: CamillaFloat,
     pub samplerate: usize,
-    pub scratch: Vec<PrcFmt>,
-    pub prev_loudness: PrcFmt,
+    pub scratch: Vec<CamillaFloat>,
+    pub prev_loudness: CamillaFloat,
 }
 
 impl NoiseGate {
@@ -77,16 +78,16 @@ impl NoiseGate {
             config.attenuation
         );
 
-        let factor = db_to_linear(-config.attenuation);
+        let factor = db_to_linear(-config.attenuation).to_camilla_float();
 
         NoiseGate {
             name,
             channels,
             monitor_channels,
             process_channels,
-            attack,
-            release,
-            threshold: config.threshold,
+            attack: attack.to_camilla_float(),
+            release: release.to_camilla_float(),
+            threshold: config.threshold.to_camilla_float(),
             factor,
             samplerate,
             scratch,
@@ -130,7 +131,7 @@ impl NoiseGate {
         }
     }
 
-    fn apply_gain(&self, input: &mut [PrcFmt]) {
+    fn apply_gain(&self, input: &mut [CamillaFloat]) {
         for (val, gain) in input.iter_mut().zip(self.scratch.iter()) {
             *val *= gain;
         }
@@ -179,10 +180,10 @@ impl Processor for NoiseGate {
 
             self.monitor_channels = monitor_channels;
             self.process_channels = process_channels;
-            self.attack = attack;
-            self.release = release;
-            self.threshold = config.threshold;
-            self.factor = db_to_linear(-config.attenuation);
+            self.attack = attack.to_camilla_float();
+            self.release = release.to_camilla_float();
+            self.threshold = config.threshold.to_camilla_float();
+            self.factor = db_to_linear(-config.attenuation).to_camilla_float();
 
             debug!(
                 "Updated noise gate '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, attenuation: {}",

@@ -1,20 +1,49 @@
+// The spectrum analyser works in f32 throughout: its output is f32 already, and
+// an f32 FFT has a numerical noise floor far below anything a display shows.
+// Halving the ring buffer also halves the store traffic on the audio thread,
+// which pushes every chunk through 262144 frames per channel.
+
+use crate::ToF32;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use num_complex::Complex;
 use realfft::{RealFftPlanner, RealToComplex};
 
-use crate::PrcFmt;
 use crate::audiochunk::AudioChunk;
 
 /// Maximum number of frames stored per channel in [`AudioRingBuffer`].
 pub const RING_BUFFER_CAPACITY: usize = 262144;
 
+static SPECTRUM_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Record that a client has asked for spectrum data, so the audio threads start
+/// filling the ring buffer.
+///
+/// Filling costs a pass over every chunk on both the capture and playback
+/// threads, writing through a buffer of [`RING_BUFFER_CAPACITY`] frames per
+/// channel, so it is skipped until something actually wants the data. The flag
+/// is sticky: one-shot spectrum reads need history that is already there, so it
+/// cannot be turned off again when a subscription ends without breaking them.
+///
+/// The first request after startup therefore reports insufficient data until
+/// enough frames have accumulated, the same as a request made immediately after
+/// the process starts.
+pub fn request_spectrum_data() {
+    SPECTRUM_REQUESTED.store(true, Ordering::Relaxed);
+}
+
+/// Whether the audio threads should be filling the ring buffer.
+pub fn spectrum_data_requested() -> bool {
+    SPECTRUM_REQUESTED.load(Ordering::Relaxed)
+}
+
 /// Circular ring buffer storing the last [`RING_BUFFER_CAPACITY`] frames per channel.
 /// Self-sizes on first push; resets if channel count changes.
 #[derive(Clone, Debug)]
 pub struct AudioRingBuffer {
-    channels: Vec<Vec<PrcFmt>>,
+    channels: Vec<Vec<f32>>,
     write_pos: usize,
     total_written: usize,
 }
@@ -33,13 +62,13 @@ impl AudioRingBuffer {
         let n_frames = chunk.valid_frames;
         let n_ch = chunk.channels;
         if self.channels.len() != n_ch {
-            self.channels = vec![vec![PrcFmt::default(); RING_BUFFER_CAPACITY]; n_ch];
+            self.channels = vec![vec![f32::default(); RING_BUFFER_CAPACITY]; n_ch];
             self.write_pos = 0;
             self.total_written = 0;
         }
         for frame in 0..n_frames {
             for ch in 0..n_ch {
-                self.channels[ch][self.write_pos] = chunk.waveforms[ch][frame];
+                self.channels[ch][self.write_pos] = chunk.waveforms[ch][frame].to_f32();
             }
             self.write_pos = (self.write_pos + 1) % RING_BUFFER_CAPACITY;
         }
@@ -56,7 +85,7 @@ impl AudioRingBuffer {
         &self,
         n_frames: usize,
         channel: Option<usize>,
-        buf: &mut Vec<PrcFmt>,
+        buf: &mut Vec<f32>,
     ) -> bool {
         if self.channels.is_empty() {
             return false;
@@ -65,8 +94,15 @@ impl AudioRingBuffer {
         if available < n_frames {
             return false;
         }
+        // The channel index reaches here straight from a websocket request, so an
+        // out of range one must not index into `channels`.
+        if let Some(ch_idx) = channel
+            && ch_idx >= self.channels.len()
+        {
+            return false;
+        }
         let start = (self.write_pos + RING_BUFFER_CAPACITY - n_frames) % RING_BUFFER_CAPACITY;
-        buf.resize(n_frames, PrcFmt::default());
+        buf.resize(n_frames, f32::default());
         match channel {
             Some(ch_idx) => {
                 for (i, sample) in buf.iter_mut().enumerate() {
@@ -74,10 +110,10 @@ impl AudioRingBuffer {
                 }
             }
             None => {
-                let n = self.channels.len() as PrcFmt;
+                let n = self.channels.len() as f32;
                 for (i, sample) in buf.iter_mut().enumerate() {
                     let idx = (start + i) % RING_BUFFER_CAPACITY;
-                    *sample = self.channels.iter().map(|ch| ch[idx]).sum::<PrcFmt>() / n;
+                    *sample = self.channels.iter().map(|ch| ch[idx]).sum::<f32>() / n;
                 }
             }
         }
@@ -86,7 +122,7 @@ impl AudioRingBuffer {
 
     /// Copy the last `n_frames` samples in chronological order, mixing channels as requested.
     /// `None` averages all channels; `Some(idx)` returns channel `idx` only.
-    pub fn read_latest(&self, n_frames: usize, channel: Option<usize>) -> Option<Vec<PrcFmt>> {
+    pub fn read_latest(&self, n_frames: usize, channel: Option<usize>) -> Option<Vec<f32>> {
         let mut buf = Vec::new();
         self.read_latest_into(n_frames, channel, &mut buf)
             .then_some(buf)
@@ -101,21 +137,21 @@ impl Default for AudioRingBuffer {
 
 // --- Window cache ---
 
-static WINDOW_CACHE: LazyLock<Mutex<HashMap<usize, Arc<[PrcFmt]>>>> =
+static WINDOW_CACHE: LazyLock<Mutex<HashMap<usize, Arc<[f32]>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-static FFT_PLANNER: LazyLock<Mutex<RealFftPlanner<PrcFmt>>> =
+static FFT_PLANNER: LazyLock<Mutex<RealFftPlanner<f32>>> =
     LazyLock::new(|| Mutex::new(RealFftPlanner::new()));
 
-fn get_hann_window(n: usize) -> Arc<[PrcFmt]> {
+fn get_hann_window(n: usize) -> Arc<[f32]> {
     let mut cache = WINDOW_CACHE.lock().unwrap();
     if let Some(w) = cache.get(&n) {
         return Arc::clone(w);
     }
-    // Compute in f64 for trig precision, then store as PrcFmt.
-    let window: Arc<[PrcFmt]> = (0..n)
+    // Compute in f64 for trig precision, then store as f32.
+    let window: Arc<[f32]> = (0..n)
         .map(|i| {
-            (0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (n - 1) as f64).cos())) as PrcFmt
+            (0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (n - 1) as f64).cos())) as f32
         })
         .collect();
     cache.insert(n, Arc::clone(&window));
@@ -162,13 +198,13 @@ pub struct SpectrumComputer {
     freq_res: f64,
     log_ratio: f64,
     sqrt_log_ratio: f64,
-    inv_w2: PrcFmt,
-    fft: Arc<dyn RealToComplex<PrcFmt>>,
-    window: Arc<[PrcFmt]>,
+    inv_w2: f32,
+    fft: Arc<dyn RealToComplex<f32>>,
+    window: Arc<[f32]>,
     /// FFT input / windowed signal scratch — pre-allocated to `fft_len` elements.
-    windowed: Vec<PrcFmt>,
+    windowed: Vec<f32>,
     /// FFT output scratch — pre-allocated to `fft_len / 2 + 1` complex elements.
-    spectrum_buf: Vec<Complex<PrcFmt>>,
+    spectrum_buf: Vec<Complex<f32>>,
     frequencies: Arc<[f32]>,
 }
 
@@ -195,8 +231,10 @@ impl SpectrumComputer {
         let windowed = fft.make_input_vec();
         let spectrum_buf = fft.make_output_vec();
         let window = get_hann_window(fft_len);
-        let window_sum: PrcFmt = window.iter().sum();
-        let inv_w2 = 1.0 / (window_sum * window_sum);
+        // Summed in f64: at the largest FFT sizes an f32 accumulation of this
+        // many terms loses meaningful precision in the normalisation.
+        let window_sum: f64 = window.iter().map(|w| *w as f64).sum();
+        let inv_w2 = (1.0 / (window_sum * window_sum)) as f32;
         let freq_res = samplerate as f64 / fft_len as f64;
         let log_ratio = (max_freq / min_freq).powf(1.0 / (n_bins - 1) as f64);
         let sqrt_log_ratio = log_ratio.sqrt();
@@ -264,26 +302,26 @@ impl SpectrumComputer {
 
             // Power is computed inline from spectrum_buf, eliminating the intermediate
             // power Vec that compute_spectrum_from_signal allocates.
-            let peak_power: PrcFmt = if k_low <= k_high {
+            let peak_power: f32 = if k_low <= k_high {
                 self.spectrum_buf[k_low..=k_high]
                     .iter()
                     .enumerate()
                     .map(|(j, c)| {
                         let k = k_low + j;
-                        let scale: PrcFmt = if k == 0 || k == n_fft - 1 { 1.0 } else { 4.0 };
+                        let scale: f32 = if k == 0 || k == n_fft - 1 { 1.0 } else { 4.0 };
                         scale * c.norm_sqr() * inv_w2
                     })
-                    .fold(0.0, PrcFmt::max)
+                    .fold(0.0, f32::max)
             } else {
                 let k_nearest = ((f_center / freq_res).round() as usize).min(n_fft - 1);
-                let scale: PrcFmt = if k_nearest == 0 || k_nearest == n_fft - 1 {
+                let scale: f32 = if k_nearest == 0 || k_nearest == n_fft - 1 {
                     1.0
                 } else {
                     4.0
                 };
                 scale * self.spectrum_buf[k_nearest].norm_sqr() * inv_w2
             };
-            magnitudes.push((10.0 * peak_power.max(1e-30).log10()) as f32);
+            magnitudes.push(10.0 * peak_power.max(1e-30).log10());
             f_center *= self.log_ratio;
         }
         Some(SpectrumData {
@@ -307,7 +345,7 @@ pub fn fft_length_for(min_freq: f64, samplerate: usize) -> usize {
 /// Returns `n_bins` log-spaced bins from `min_freq` to `max_freq` (Hz).
 /// Magnitudes are in dBFS where 0 dBFS = a full-scale (amplitude 1.0) sine wave.
 pub fn compute_spectrum_from_signal(
-    signal: Vec<PrcFmt>,
+    signal: Vec<f32>,
     min_freq: f64,
     max_freq: f64,
     n_bins: usize,
@@ -317,7 +355,11 @@ pub fn compute_spectrum_from_signal(
 
     // Apply Hann window in-place, reusing the signal allocation.
     let window = get_hann_window(fft_len);
-    let window_sum: PrcFmt = window.iter().sum();
+    // Summed in f64 for the same reason as in `SpectrumComputer::new`: at the
+    // largest FFT sizes an f32 accumulation of this many terms loses meaningful
+    // precision in the normalisation. Both paths must agree, since this one
+    // serves the one-shot spectrum request and the other the subscriptions.
+    let window_sum: f64 = window.iter().map(|w| *w as f64).sum();
     let mut windowed = signal;
     windowed
         .iter_mut()
@@ -341,12 +383,12 @@ pub fn compute_spectrum_from_signal(
 
     // norm_sqr avoids a sqrt that would only be undone by the squaring step.
     // DC and Nyquist use scale 1^2 = 1; all other bins use scale 2^2 = 4 (single-sided).
-    let inv_w2 = 1.0 / (window_sum * window_sum);
-    let power: Vec<PrcFmt> = spectrum
+    let inv_w2 = (1.0 / (window_sum * window_sum)) as f32;
+    let power: Vec<f32> = spectrum
         .iter()
         .enumerate()
         .map(|(k, c)| {
-            let scale: PrcFmt = if k == 0 || k == n_fft - 1 { 1.0 } else { 4.0 };
+            let scale: f32 = if k == 0 || k == n_fft - 1 { 1.0 } else { 4.0 };
             scale * c.norm_sqr() * inv_w2
         })
         .collect();
@@ -375,15 +417,15 @@ pub fn compute_spectrum_from_signal(
         let k_low = (f_low / freq_res).floor() as usize;
         let k_high = ((f_high / freq_res).ceil() as usize).min(n_fft - 1);
 
-        let peak_power: PrcFmt = if k_low <= k_high {
-            power[k_low..=k_high].iter().copied().fold(0.0, PrcFmt::max)
+        let peak_power: f32 = if k_low <= k_high {
+            power[k_low..=k_high].iter().copied().fold(0.0, f32::max)
         } else {
             // Frequency range narrower than one FFT bin: use nearest bin.
             let k_nearest = ((f_center / freq_res).round() as usize).min(n_fft - 1);
             power[k_nearest]
         };
 
-        magnitudes.push((10.0 * peak_power.max(1e-30).log10()) as f32);
+        magnitudes.push(10.0 * peak_power.max(1e-30).log10());
     }
 
     Ok(SpectrumData {
@@ -437,21 +479,23 @@ pub fn compute_spectrum(
 mod tests {
     use super::*;
     use crate::audiochunk::AudioChunk;
+    use crate::{CamillaFloat, ToCamillaFloat};
     use std::time::Instant;
 
     fn make_chunk_sine(freq: f64, amplitude: f64, samplerate: usize, frames: usize) -> AudioChunk {
-        let waveform: Vec<PrcFmt> = (0..frames)
+        // An AudioChunk carries the processing precision, not the analyser's f32.
+        let waveform: Vec<CamillaFloat> = (0..frames)
             .map(|n| {
                 (amplitude
                     * (2.0 * std::f64::consts::PI * freq * n as f64 / samplerate as f64).sin())
-                    as PrcFmt
+                .to_camilla_float()
             })
             .collect();
         AudioChunk {
             frames,
             channels: 1,
-            maxval: amplitude as PrcFmt,
-            minval: -(amplitude as PrcFmt),
+            maxval: amplitude.to_camilla_float(),
+            minval: -amplitude.to_camilla_float(),
             timestamp: Instant::now(),
             valid_frames: frames,
             waveforms: vec![waveform],
@@ -503,6 +547,22 @@ mod tests {
         let mut buf = AudioRingBuffer::new();
         buf.push_chunk(&chunk);
         assert!(compute_spectrum(&buf, 20.0, 20000.0, 100, Some(5), samplerate).is_err());
+    }
+
+    // `compute_spectrum` validates the channel index, but the subscription path
+    // goes through `fill_from_buffer` instead, passing the client's index
+    // straight down. That must not index out of bounds.
+    #[test]
+    fn fill_from_buffer_rejects_out_of_range_channel() {
+        let samplerate = 48000;
+        let chunk = make_chunk_sine(1000.0, 0.5, samplerate, 8192);
+        let mut buf = AudioRingBuffer::new();
+        buf.push_chunk(&chunk);
+        let fft_len = fft_length_for(20.0, samplerate);
+        let mut computer = SpectrumComputer::new(fft_len, 100, 20.0, 20000.0, samplerate);
+        assert!(!computer.fill_from_buffer(&buf, Some(5)));
+        assert!(computer.fill_from_buffer(&buf, Some(0)));
+        assert!(computer.fill_from_buffer(&buf, None));
     }
 
     #[test]

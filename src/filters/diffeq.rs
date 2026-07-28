@@ -19,16 +19,17 @@ use crate::filters::Filter;
 
 // Sample format
 //type SmpFmt = i16;
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
+use crate::ToCamillaFloat;
 
 #[derive(Clone, Debug)]
 pub struct DiffEq {
-    pub x: Vec<PrcFmt>,
-    pub y: Vec<PrcFmt>,
-    pub a: Vec<PrcFmt>,
+    pub x: Vec<CamillaFloat>,
+    pub y: Vec<CamillaFloat>,
+    pub a: Vec<CamillaFloat>,
     pub a_len: usize,
-    pub b: Vec<PrcFmt>,
+    pub b: Vec<CamillaFloat>,
     pub b_len: usize,
     pub idx_x: usize,
     pub idx_y: usize,
@@ -36,12 +37,22 @@ pub struct DiffEq {
 }
 
 impl DiffEq {
-    pub fn new(name: &str, a_in: Vec<PrcFmt>, b_in: Vec<PrcFmt>) -> Self {
+    pub fn new(name: &str, a_in: Vec<f64>, b_in: Vec<f64>) -> Self {
         let name = name.to_string();
 
-        let a = if a_in.is_empty() { vec![1.0] } else { a_in };
+        // Coefficients arrive from the config in f64 and cross into the
+        // processing precision once, here.
+        let a: Vec<CamillaFloat> = if a_in.is_empty() {
+            vec![1.0]
+        } else {
+            a_in.into_iter().map(|v| v.to_camilla_float()).collect()
+        };
 
-        let b = if b_in.is_empty() { vec![1.0] } else { b_in };
+        let b: Vec<CamillaFloat> = if b_in.is_empty() {
+            vec![1.0]
+        } else {
+            b_in.into_iter().map(|v| v.to_camilla_float()).collect()
+        };
 
         let x = vec![0.0; b.len()];
         let y = vec![0.0; a.len()];
@@ -68,7 +79,7 @@ impl DiffEq {
     }
 
     /// Process a single sample
-    fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
+    fn process_single(&mut self, input: CamillaFloat) -> CamillaFloat {
         let mut out = 0.0;
         self.idx_x = (self.idx_x + 1) % self.b_len;
         self.idx_y = (self.idx_y + 1) % self.a_len;
@@ -113,7 +124,7 @@ impl Filter for DiffEq {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
         for item in waveform.iter_mut() {
             *item = self.process_single(*item);
         }
@@ -140,18 +151,22 @@ pub fn validate_config(_parameters: &config::DiffEqParameters) -> Res<()> {
 }
 
 #[cfg(test)]
-#[cfg_attr(feature = "32bit", allow(clippy::excessive_precision))]
+#[cfg_attr(camillafloat_f32, allow(clippy::excessive_precision))]
 mod tests {
-    use crate::PrcFmt;
+    use crate::CamillaFloat;
     use crate::filters::Filter;
     use crate::filters::diffeq::DiffEq;
 
-    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
+    fn is_close(left: CamillaFloat, right: CamillaFloat, maxdiff: CamillaFloat) -> bool {
         println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 
-    fn compare_waveforms(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
+    fn compare_waveforms(
+        left: Vec<CamillaFloat>,
+        right: Vec<CamillaFloat>,
+        maxdiff: CamillaFloat,
+    ) -> bool {
         for (val_l, val_r) in left.iter().zip(right.iter()) {
             if !is_close(*val_l, *val_r, maxdiff) {
                 return false;

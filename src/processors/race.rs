@@ -16,7 +16,7 @@
 
 // RACE, recursive ambiophonic crosstalk eliminator
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
@@ -33,8 +33,8 @@ pub struct RACE {
     pub channels: usize,
     pub channel_a: usize,
     pub channel_b: usize,
-    pub feedback_a: PrcFmt,
-    pub feedback_b: PrcFmt,
+    pub feedback_a: CamillaFloat,
+    pub feedback_b: CamillaFloat,
     pub delay_a: Delay,
     pub delay_b: Delay,
     pub gain: Gain,
@@ -44,10 +44,10 @@ pub struct RACE {
 fn delay_config(config: &config::RACEParameters, samplerate: usize) -> DelayParameters {
     // compensate the delay by subtracting one sample period from the delay, clamp at zero
     let sample_period_in_delay_unit = match config.delay_unit() {
-        config::DelayUnit::Microseconds => 1000000.0 / samplerate as PrcFmt,
-        config::DelayUnit::Milliseconds => 1000.0 / samplerate as PrcFmt,
-        config::DelayUnit::Seconds => 1.0 / samplerate as PrcFmt,
-        config::DelayUnit::Millimetres => 343.0 * 1000.0 / samplerate as PrcFmt,
+        config::DelayUnit::Microseconds => 1000000.0 / samplerate as f64,
+        config::DelayUnit::Milliseconds => 1000.0 / samplerate as f64,
+        config::DelayUnit::Seconds => 1.0 / samplerate as f64,
+        config::DelayUnit::Millimetres => 343.0 * 1000.0 / samplerate as f64,
         config::DelayUnit::Samples => 1.0,
     };
     let compensated_delay = (config.delay - sample_period_in_delay_unit).max(0.0);

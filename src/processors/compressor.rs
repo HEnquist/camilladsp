@@ -14,8 +14,9 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
+use crate::ToCamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters::clipper::Clipper;
@@ -29,15 +30,15 @@ pub struct Compressor {
     pub channels: usize,
     pub monitor_channels: Vec<usize>,
     pub process_channels: Vec<usize>,
-    pub attack: PrcFmt,
-    pub release: PrcFmt,
-    pub threshold: PrcFmt,
-    pub factor: PrcFmt,
-    pub makeup_gain: PrcFmt,
+    pub attack: CamillaFloat,
+    pub release: CamillaFloat,
+    pub threshold: CamillaFloat,
+    pub factor: CamillaFloat,
+    pub makeup_gain: CamillaFloat,
     pub clipper: Option<Clipper>,
     pub samplerate: usize,
-    pub scratch: Vec<PrcFmt>,
-    pub prev_loudness: PrcFmt,
+    pub scratch: Vec<CamillaFloat>,
+    pub prev_loudness: CamillaFloat,
 }
 
 impl Compressor {
@@ -64,8 +65,8 @@ impl Compressor {
         }
         let attack_samples = time_to_samples(config.attack, config.attack_unit, samplerate);
         let release_samples = time_to_samples(config.release, config.release_unit, samplerate);
-        let attack = (-1.0 / attack_samples).exp();
-        let release = (-1.0 / release_samples).exp();
+        let attack = (-1.0 / attack_samples).exp().to_camilla_float();
+        let release = (-1.0 / release_samples).exp().to_camilla_float();
         let clip_limit = config.clip_limit.map(db_to_linear);
 
         let scratch = vec![0.0; chunksize];
@@ -101,9 +102,9 @@ impl Compressor {
             process_channels,
             attack,
             release,
-            threshold: config.threshold,
-            factor: config.factor,
-            makeup_gain: config.makeup_gain(),
+            threshold: config.threshold.to_camilla_float(),
+            factor: config.factor.to_camilla_float(),
+            makeup_gain: config.makeup_gain().to_camilla_float(),
             clipper,
             samplerate,
             scratch,
@@ -149,13 +150,13 @@ impl Compressor {
         }
     }
 
-    fn apply_gain(&self, input: &mut [PrcFmt]) {
+    fn apply_gain(&self, input: &mut [CamillaFloat]) {
         for (val, gain) in input.iter_mut().zip(self.scratch.iter()) {
             *val *= gain;
         }
     }
 
-    fn apply_clipper(&self, input: &mut [PrcFmt]) {
+    fn apply_clipper(&self, input: &mut [CamillaFloat]) {
         if let Some(clipper) = &self.clipper {
             clipper.apply_clip(input);
         }
@@ -216,11 +217,11 @@ impl Processor for Compressor {
 
             self.monitor_channels = monitor_channels;
             self.process_channels = process_channels;
-            self.attack = attack;
-            self.release = release;
-            self.threshold = config.threshold;
-            self.factor = config.factor;
-            self.makeup_gain = config.makeup_gain();
+            self.attack = attack.to_camilla_float();
+            self.release = release.to_camilla_float();
+            self.threshold = config.threshold.to_camilla_float();
+            self.factor = config.factor.to_camilla_float();
+            self.makeup_gain = config.makeup_gain().to_camilla_float();
             self.clipper = clipper;
 
             debug!(

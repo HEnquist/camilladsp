@@ -14,21 +14,20 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(feature = "32bit", allow(clippy::unnecessary_cast))]
-
 use crate::config;
 use crate::filters::Filter;
 use crate::filters::basicfilters::Gain;
 use crate::filters::biquad;
 use std::sync::Arc;
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::ProcessingParameters;
 use crate::Res;
+use crate::ToF32;
 
 pub struct Loudness {
     pub name: String,
-    current_volume: PrcFmt,
+    current_volume: CamillaFloat,
     processing_params: Arc<ProcessingParameters>,
     reference_level: f32,
     high_boost: f32,
@@ -57,8 +56,8 @@ impl Loudness {
         let current_volume = processing_params.target_volume(fader);
         let relboost = rel_boost(current_volume, conf.reference_level);
         let active = relboost > 0.01;
-        let high_boost = (relboost * conf.high_boost()) as PrcFmt;
-        let low_boost = (relboost * conf.low_boost()) as PrcFmt;
+        let high_boost = (relboost * conf.high_boost()) as f64;
+        let low_boost = (relboost * conf.low_boost()) as f64;
         let highshelf_conf = config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {
             freq: 3500.0,
             slope: 12.0,
@@ -89,7 +88,7 @@ impl Loudness {
         let low_biquad = biquad::Biquad::new("lowshelf", samplerate, low_biquad_coeffs);
         Loudness {
             name: name.to_string(),
-            current_volume: current_volume as PrcFmt,
+            current_volume: current_volume as CamillaFloat,
             reference_level: conf.reference_level,
             high_boost: conf.high_boost(),
             low_boost: conf.low_boost(),
@@ -108,15 +107,15 @@ impl Filter for Loudness {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
         let shared_vol = self.processing_params.current_volume(self.fader);
 
         // Volume setting changed
-        if (shared_vol - self.current_volume as f32).abs() > 0.01 {
-            self.current_volume = shared_vol as PrcFmt;
-            let relboost = rel_boost(self.current_volume as f32, self.reference_level);
-            let high_boost = (relboost * self.high_boost) as PrcFmt;
-            let low_boost = (relboost * self.low_boost) as PrcFmt;
+        if (shared_vol - self.current_volume.to_f32()).abs() > 0.01 {
+            self.current_volume = shared_vol as CamillaFloat;
+            let relboost = rel_boost(self.current_volume.to_f32(), self.reference_level);
+            let high_boost = (relboost * self.high_boost) as f64;
+            let low_boost = (relboost * self.low_boost) as f64;
             self.active = relboost > 0.001;
             debug!(
                 "Updating loudness biquads, relative boost {}%",
@@ -174,8 +173,8 @@ impl Filter for Loudness {
             self.fader = conf.fader();
             let current_volume = self.processing_params.current_volume(self.fader);
             let relboost = rel_boost(current_volume, conf.reference_level);
-            let high_boost = (relboost * conf.high_boost()) as PrcFmt;
-            let low_boost = (relboost * conf.low_boost()) as PrcFmt;
+            let high_boost = (relboost * conf.high_boost()) as f64;
+            let low_boost = (relboost * conf.low_boost()) as f64;
             self.active = relboost > 0.001;
             let highshelf_conf =
                 config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope {

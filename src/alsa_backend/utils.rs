@@ -15,7 +15,7 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::config::{AlsaSampleFormat, BinarySampleFormat};
-use crate::{CaptureStatus, PlaybackStatus, PrcFmt, Res, StatusMessage};
+use crate::{CaptureStatus, PlaybackStatus, Res, StatusMessage};
 use alsa::card::Iter;
 use alsa::ctl::{Ctl, DeviceIter, ElemId, ElemIface, ElemType, ElemValue};
 use alsa::device_name::HintIter;
@@ -46,8 +46,8 @@ pub enum SupportedValues {
 pub struct CaptureParams {
     pub channels: usize,
     pub sample_format: BinarySampleFormat,
-    pub silence_timeout: PrcFmt,
-    pub silence_threshold: PrcFmt,
+    pub silence_timeout: f64,
+    pub silence_threshold: f64,
     pub chunksize: usize,
     pub store_bytes_per_sample: usize,
     pub bytes_per_frame: usize,
