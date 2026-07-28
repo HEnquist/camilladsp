@@ -221,10 +221,22 @@ Both 64 and 32 bit architectures are supported.
 All platforms supported by the Rustc compiler should work.
 
 Pre-built binaries are provided for:
-- x86_64 (almost all PCs)
-- armv6 (32-bit arm, for example a Raspberry Pi 1 and Zero)
-- armv7 (32-bit arm, for example a Raspberry Pi 2,3,4 with a 32-bit OS)
-- aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS)
+- x86_64 (almost all PCs), built on Ubuntu 24.04
+- armv7 (32-bit arm, for example a Raspberry Pi 2,3,4 with a 32-bit OS),
+  cross compiled on Debian Bookworm
+- aarch64 (64-bit arm, for example Raspberry Pis running a 64 bit OS),
+  built on Ubuntu 24.04
+
+All three need glibc 2.34 or newer.
+That is lower than the glibc of the systems they are built on,
+because the binaries never reference anything newer than 2.34.
+Any newer system works too, glibc is backwards compatible.
+Raspberry Pi OS Bookworm has glibc 2.36, and Trixie has 2.41.
+
+Older systems must be built from source.
+The same goes for other architectures,
+for example armv6 (Raspberry Pi 1 and the original Pi Zero),
+32-bit x86, and riscv64.
 
 ### Windows requirements
 An x86_64 CPU and the 64-bit version of Windows is recommended.
@@ -340,7 +352,6 @@ The following configurations are provided:
 |----------|-------------|----------|
 | `camilladsp-linux-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA |
 | `camilladsp-linux-pipewire-amd64.tar.gz` | Linux on 64-bit Intel or AMD CPU | ALSA, PipeWire |
-| `camilladsp-linux-armv6.tar.gz` | Linux on Armv6 (32-bit), intended for Raspberry Pi 1 and Pi Zero but should also work on others | ALSA |
 | `camilladsp-linux-armv7.tar.gz` | Linux on Armv7 with Neon (32-bit), intended for Raspberry Pi 2 and up but should also work on others | ALSA |
 | `camilladsp-linux-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA |
 | `camilladsp-linux-pipewire-aarch64.tar.gz` | Linux on Armv8 (64-bit), for example Raspberry Pi 3 and up | ALSA, PipeWire |

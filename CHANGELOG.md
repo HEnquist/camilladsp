@@ -32,6 +32,10 @@ Changes:
   audio has accumulated, typically well under a tenth of a second.
 - Spectrum analysis is done in 32-bit float, which halves the memory used by its audio buffer.
   The numerical noise floor stays far below the displayed range.
+- The pre-built Linux binaries now need glibc 2.34 or newer, meaning Raspberry Pi OS Bookworm
+  or another distribution of similar age. Older systems must build from source.
+- No more pre-built armv6 binary for the Raspberry Pi 1 and the original Pi Zero.
+  Those must build from source.
 
 Config changes (breaking):
 - Time values no longer accept unitless numbers. Every time-valued parameter now states its unit.

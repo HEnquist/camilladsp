@@ -114,10 +114,31 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy -- -D warnings
 
+  # Cross compiled in a Debian container rather than with the `cross` tool.
+  # Debian serves armhf from the normal archive, so enabling the armhf
+  # multiarch is all that is needed to get the ALSA headers and libraries.
+  # The container release also sets the glibc floor of the released binary,
+  # so keep it no newer than the oldest Raspberry Pi OS release to support.
   check_test_armv7:
     name: Check and test Linux armv7
     runs-on: ubuntu-latest
+    container: debian:bookworm
+    env:
+      PKG_CONFIG_ALLOW_CROSS: 1
+      PKG_CONFIG_PATH: /usr/lib/arm-linux-gnueabihf/pkgconfig
+      CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+      # The tests are armv7 binaries, so they have to run under emulation.
+      CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER: qemu-arm-static
     steps:
+      - name: Install armhf cross toolchain
+        run: |
+          dpkg --add-architecture armhf
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git pkg-config \
+            build-essential crossbuild-essential-armhf \
+            libasound2-dev:armhf qemu-user-static
+
       - name: Checkout sources
         uses: actions/checkout@v5
 
@@ -128,45 +149,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build image
-        run: docker build -t cross/armv7:v1 --file Dockerfile_armv7 ./
-
       - name: Run cargo check
-        run: cross check --target armv7-unknown-linux-gnueabihf
+        run: cargo check --target armv7-unknown-linux-gnueabihf
 
       - name: Run cargo test for arm
-        run: cross test --target armv7-unknown-linux-gnueabihf
-
-  check_test_armv6:
-    name: Check and test Linux arm v6
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v5
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: arm-unknown-linux-gnueabihf
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build image
-        run: docker build -t cross/armv6:v1 --file Dockerfile_armv6 ./
-
-      - name: Run cargo check
-        run: cross check --target arm-unknown-linux-gnueabihf
-
-      - name: Run cargo test for arm
-        run: cross test --target arm-unknown-linux-gnueabihf
-        env: 
-          LD_LIBRARY_PATH: /usr/lib/arm-linux-gnueabihf
+        run: cargo test --target armv7-unknown-linux-gnueabihf
 
   check_test_and_lint_windows:
     name: Check and test Windows

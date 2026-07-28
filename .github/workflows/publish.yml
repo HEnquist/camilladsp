@@ -150,7 +150,23 @@ jobs:
   linux_armv7:
     name: Linux armv7
     runs-on: ubuntu-latest
+    # Cross compiled in a Debian container, see the matching job in ci_test.yml.
+    # The container release sets the glibc floor of the released binary, so keep
+    # it no newer than the oldest Raspberry Pi OS release to support.
+    container: debian:bookworm
+    env:
+      PKG_CONFIG_ALLOW_CROSS: 1
+      PKG_CONFIG_PATH: /usr/lib/arm-linux-gnueabihf/pkgconfig
+      CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
     steps:
+      - name: Install armhf cross toolchain
+        run: |
+          dpkg --add-architecture armhf
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git pkg-config \
+            build-essential crossbuild-essential-armhf libasound2-dev:armhf
+
       - name: Checkout sources
         uses: actions/checkout@v5
 
@@ -159,14 +175,8 @@ jobs:
         with:
           targets: armv7-unknown-linux-gnueabihf
 
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build image
-        run: docker build -t cross/armv7:v1 --file Dockerfile_armv7 ./
-
       - name: Build
-        run: cross build --release --target armv7-unknown-linux-gnueabihf
+        run: cargo build --release --target armv7-unknown-linux-gnueabihf
         env:
           RUSTFLAGS: "-C target-feature=+neon"
 
@@ -187,46 +197,6 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.tar.gz
           asset_name: camilladsp-linux-armv7.tar.gz
-          tag: ${{ github.event.release.tag_name }}
-
-  linux_armv6:
-    name: Linux armv6
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v5
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: arm-unknown-linux-gnueabihf
-
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build image
-        run: docker build -t cross/armv6:v1 --file Dockerfile_armv6 ./
-
-      - name: Build
-        run: cross build --release --target arm-unknown-linux-gnueabihf
-
-      - name: Compress
-        run: tar -zcvf camilladsp.tar.gz -C target/arm-unknown-linux-gnueabihf/release camilladsp --owner=0 --group=0 --numeric-owner
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: camilladsp-linux-armv6
-          path: camilladsp.tar.gz
-          retention-days: 14
-
-      - name: Upload binaries to release
-        if: github.event_name == 'release' && github.event.action == 'created'
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: camilladsp.tar.gz
-          asset_name: camilladsp-linux-armv6.tar.gz
           tag: ${{ github.event.release.tag_name }}
 
   windows:
@@ -351,7 +321,7 @@ jobs:
   publish_crate:
     name: Publish to crates.io
     if: github.event_name == 'release' && github.event.action == 'created'
-    needs: [linux_amd64, linux_aarch64, linux_armv7, linux_armv6, windows, macos, macos_arm]
+    needs: [linux_amd64, linux_aarch64, linux_armv7, windows, macos, macos_arm]
     runs-on: ubuntu-latest
     steps:
       - name: Check tag is a plain release version
