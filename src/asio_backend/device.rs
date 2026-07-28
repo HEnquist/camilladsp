@@ -12,6 +12,7 @@
 // ASIO backend for playback and capture.
 // This implementation uses the asio-sys crate to interface with the ASIO driver system.
 
+use crate::ToF32;
 use std::collections::VecDeque;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
@@ -43,7 +44,6 @@ unsafe extern "system" {
 const COINIT_APARTMENTTHREADED: u32 = 0x2;
 
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
@@ -88,8 +88,8 @@ pub struct AsioCaptureDevice {
     pub chunksize: usize,
     pub channels: usize,
     pub sample_format: Option<AsioSampleFormat>,
-    pub silence_threshold: PrcFmt,
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: f64,
+    pub silence_timeout: f64,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub full_duplex: bool,
@@ -2139,7 +2139,7 @@ impl CaptureDevice for AsioCaptureDevice {
                             {
                                 capture_status.measured_samplerate =
                                     measured_rate as usize;
-                                capture_status.signal_range = value_range as f32;
+                                capture_status.signal_range = value_range.to_f32();
                                 capture_status.rate_adjust = rate_adjust as f32;
                                 crate::update_capture_state(&mut capture_status, state);
                             } else {

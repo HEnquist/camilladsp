@@ -14,25 +14,26 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
+use crate::ToCamillaFloat;
 use crate::config;
 use crate::filters::Filter;
 use crate::utils::decibels::db_to_linear;
 
-const CUBEFACTOR: PrcFmt = 1.0 / 6.75; // = 1 / (2 * 1.5^3)
+const CUBEFACTOR: CamillaFloat = 1.0 / 6.75; // = 1 / (2 * 1.5^3)
 
 #[derive(Clone, Debug)]
 pub struct Clipper {
     pub name: String,
     pub soft_clip: bool,
-    pub clip_limit: PrcFmt,
+    pub clip_limit: CamillaFloat,
 }
 
 impl Clipper {
     /// Creates a Clipper from a config struct
     pub fn from_config(name: &str, config: config::ClipperParameters) -> Self {
-        let clip_limit = db_to_linear(config.clip_limit);
+        let clip_limit = db_to_linear(config.clip_limit).to_camilla_float();
 
         debug!(
             "Creating clipper '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
@@ -49,7 +50,7 @@ impl Clipper {
         }
     }
 
-    fn apply_soft_clip(&self, input: &mut [PrcFmt]) {
+    fn apply_soft_clip(&self, input: &mut [CamillaFloat]) {
         for val in input.iter_mut() {
             let mut scaled = *val / self.clip_limit;
             scaled = scaled.clamp(-1.5, 1.5);
@@ -58,13 +59,13 @@ impl Clipper {
         }
     }
 
-    fn apply_hard_clip(&self, input: &mut [PrcFmt]) {
+    fn apply_hard_clip(&self, input: &mut [CamillaFloat]) {
         for val in input.iter_mut() {
             *val = val.clamp(-self.clip_limit, self.clip_limit);
         }
     }
 
-    pub fn apply_clip(&self, input: &mut [PrcFmt]) {
+    pub fn apply_clip(&self, input: &mut [CamillaFloat]) {
         if self.soft_clip {
             self.apply_soft_clip(input);
         } else {
@@ -78,7 +79,7 @@ impl Filter for Clipper {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
         self.apply_clip(waveform);
         Ok(())
     }
@@ -88,7 +89,7 @@ impl Filter for Clipper {
             parameters: config, ..
         } = config
         {
-            let clip_limit = db_to_linear(config.clip_limit);
+            let clip_limit = db_to_linear(config.clip_limit).to_camilla_float();
 
             self.soft_clip = config.soft_clip();
             self.clip_limit = clip_limit;

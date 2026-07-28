@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "32bit", allow(clippy::excessive_precision))]
+#![cfg_attr(camillafloat_f32, allow(clippy::excessive_precision))]
 
 // CamillaDSP - A flexible tool for processing audio
 // Copyright (C) 2026 Henrik Enquist
@@ -22,13 +22,13 @@ use ringbuf::LocalRb;
 use ringbuf::storage::Heap;
 use ringbuf::traits::*;
 
-use crate::{NewValue, PrcFmt, Res, config, filters::Filter};
+use crate::{CamillaFloat, Res, ToCamillaFloat, config, filters::Filter};
 
 // lifetime `'a` to guarantee that `ditherer` and `shaper`
 // will live as long as this `Dither`.
 pub struct Dither<'a> {
     pub name: String,
-    pub scalefact: PrcFmt,
+    pub scalefact: CamillaFloat,
     // have to `Box` because `dyn Ditherer` is not `Sized`.
     ditherer: Box<dyn Ditherer + Send + 'a>,
     shaper: Option<NoiseShaper<'a>>,
@@ -37,12 +37,12 @@ pub struct Dither<'a> {
 pub struct NoiseShaper<'a> {
     // optimization: lifetime allows taking coefficients
     // from an array instead of allocating a `Vec`.
-    filter: &'a [PrcFmt],
-    buffer: LocalRb<Heap<PrcFmt>>,
+    filter: &'a [CamillaFloat],
+    buffer: LocalRb<Heap<CamillaFloat>>,
 }
 
 impl<'a> NoiseShaper<'a> {
-    pub fn new(filter: &'a [PrcFmt]) -> Self {
+    pub fn new(filter: &'a [CamillaFloat]) -> Self {
         let buffer = LocalRb::new(filter.len());
         Self { filter, buffer }
     }
@@ -455,7 +455,7 @@ impl<'a> NoiseShaper<'a> {
         ])
     }
 
-    pub fn process(&mut self, scaled: PrcFmt, dither: PrcFmt) -> PrcFmt {
+    pub fn process(&mut self, scaled: CamillaFloat, dither: CamillaFloat) -> CamillaFloat {
         let mut filt_buf = 0.0;
         for (item, coeff) in self.buffer.iter().zip(self.filter.iter().rev()) {
             filt_buf += coeff * item;
@@ -479,7 +479,7 @@ impl<'a> Dither<'a> {
         shaper: Option<NoiseShaper<'a>>,
     ) -> Self {
         let name = name.to_string();
-        let scalefact = PrcFmt::coerce(2.0).powi((bits - 1) as i32);
+        let scalefact = 2.0f64.powi((bits - 1) as i32).to_camilla_float();
         let ditherer = Box::new(ditherer);
         Self {
             name,
@@ -555,7 +555,7 @@ impl<'a> Dither<'a> {
                 Self::new(name, bits, noop, shaper)
             }
             config::DitherParameters::Flat { amplitude, .. } => {
-                let tpdf = <TriangularDitherer as Ditherer>::new(amplitude);
+                let tpdf = <TriangularDitherer as Ditherer>::new(amplitude.to_camilla_float());
                 Self::new(name, bits, tpdf, shaper)
             }
             config::DitherParameters::Highpass { .. } => {
@@ -575,7 +575,7 @@ impl Filter for Dither<'_> {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
         for item in waveform.iter_mut() {
             let scaled = *item * self.scalefact;
             let dither = self.ditherer.sample();
@@ -649,11 +649,11 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
 // which is licensed under MIT. Used with permission.
 pub trait Ditherer {
     // `amplitude` in bits
-    fn new(amplitude: PrcFmt) -> Self
+    fn new(amplitude: CamillaFloat) -> Self
     where
         Self: Sized;
 
-    fn sample(&mut self) -> PrcFmt;
+    fn sample(&mut self) -> CamillaFloat;
 }
 
 // Deterministic and not cryptographically secure, but fast and with excellent
@@ -671,11 +671,11 @@ fn create_rng() -> SmallRng {
 #[derive(Clone, Debug)]
 pub struct TriangularDitherer {
     cached_rng: SmallRng,
-    distribution: Triangular<PrcFmt>,
+    distribution: Triangular<CamillaFloat>,
 }
 
 impl Ditherer for TriangularDitherer {
-    fn new(amplitude: PrcFmt) -> Self {
+    fn new(amplitude: CamillaFloat) -> Self {
         let amplitude = amplitude / 2.0; // negative to positive peak
         Self {
             cached_rng: create_rng(),
@@ -683,7 +683,7 @@ impl Ditherer for TriangularDitherer {
         }
     }
 
-    fn sample(&mut self) -> PrcFmt {
+    fn sample(&mut self) -> CamillaFloat {
         self.distribution.sample(&mut self.cached_rng)
     }
 }
@@ -707,15 +707,15 @@ impl Default for TriangularDitherer {
 #[derive(Clone, Debug)]
 pub struct HighpassDitherer {
     cached_rng: SmallRng,
-    previous_sample: PrcFmt,
+    previous_sample: CamillaFloat,
 
     // optimization: makes sampling of multiple values faster
     // and with less bias than frequently calling `Rnd::gen()`.
-    distribution: Uniform<PrcFmt>,
+    distribution: Uniform<CamillaFloat>,
 }
 
 impl Ditherer for HighpassDitherer {
-    fn new(amplitude: PrcFmt) -> Self {
+    fn new(amplitude: CamillaFloat) -> Self {
         // 2x RDPF (current - previous) makes 1x TDPF
         let amplitude = amplitude / 2.0;
         Self {
@@ -725,7 +725,7 @@ impl Ditherer for HighpassDitherer {
         }
     }
 
-    fn sample(&mut self) -> PrcFmt {
+    fn sample(&mut self) -> CamillaFloat {
         let new_sample = self.distribution.sample(&mut self.cached_rng);
         let high_passed_sample = new_sample - self.previous_sample;
         self.previous_sample = new_sample;
@@ -747,11 +747,11 @@ impl Default for HighpassDitherer {
 pub struct NoopDitherer;
 
 impl Ditherer for NoopDitherer {
-    fn new(_amplitude: PrcFmt) -> Self {
+    fn new(_amplitude: CamillaFloat) -> Self {
         Self {}
     }
 
-    fn sample(&mut self) -> PrcFmt {
+    fn sample(&mut self) -> CamillaFloat {
         0.0
     }
 }
@@ -764,14 +764,18 @@ impl Default for NoopDitherer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{PrcFmt, config::DitherParameters, filters::Filter, filters::dither::Dither};
+    use crate::{CamillaFloat, config::DitherParameters, filters::Filter, filters::dither::Dither};
 
-    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
+    fn is_close(left: CamillaFloat, right: CamillaFloat, maxdiff: CamillaFloat) -> bool {
         println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 
-    fn compare_waveforms(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
+    fn compare_waveforms(
+        left: Vec<CamillaFloat>,
+        right: Vec<CamillaFloat>,
+        maxdiff: CamillaFloat,
+    ) -> bool {
         for (val_l, val_r) in left.iter().zip(right.iter()) {
             if !is_close(*val_l, *val_r, maxdiff) {
                 return false;

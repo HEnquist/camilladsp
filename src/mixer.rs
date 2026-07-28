@@ -14,8 +14,9 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
+use crate::ToCamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::utils::decibels::gain_from_value;
@@ -40,7 +41,7 @@ pub struct MixerSource {
     /// Index of the input channel.
     pub channel: usize,
     /// Linear gain applied to this source.
-    pub gain: PrcFmt,
+    pub gain: CamillaFloat,
 }
 
 impl Mixer {
@@ -57,7 +58,8 @@ impl Mixer {
                         let gain_value = cfg_src.gain();
                         let inverted = cfg_src.is_inverted();
                         let linear = cfg_src.scale() == config::GainScale::Linear;
-                        let gain = gain_from_value(gain_value, linear, inverted, false);
+                        let gain =
+                            gain_from_value(gain_value, linear, inverted, false).to_camilla_float();
                         let src = MixerSource {
                             channel: cfg_src.channel,
                             gain,
@@ -85,7 +87,7 @@ impl Mixer {
                 let gain_value = cfg_src.gain();
                 let inverted = cfg_src.is_inverted();
                 let linear = cfg_src.scale() == config::GainScale::Linear;
-                let gain = gain_from_value(gain_value, linear, inverted, false);
+                let gain = gain_from_value(gain_value, linear, inverted, false).to_camilla_float();
                 let src = MixerSource {
                     channel: cfg_src.channel,
                     gain,

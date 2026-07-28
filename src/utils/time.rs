@@ -14,28 +14,27 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
 use crate::config::{DelayUnit, TimeUnit};
 
 /// Convert a time value with a given unit to a number of samples (floating point).
 /// The result is exact, not rounded.
-pub fn time_to_samples(value: PrcFmt, unit: TimeUnit, samplerate: usize) -> PrcFmt {
+pub fn time_to_samples(value: f64, unit: TimeUnit, samplerate: usize) -> f64 {
     match unit {
-        TimeUnit::Microseconds => value / 1_000_000.0 * samplerate as PrcFmt,
-        TimeUnit::Milliseconds => value / 1000.0 * samplerate as PrcFmt,
-        TimeUnit::Seconds => value * samplerate as PrcFmt,
+        TimeUnit::Microseconds => value / 1_000_000.0 * samplerate as f64,
+        TimeUnit::Milliseconds => value / 1000.0 * samplerate as f64,
+        TimeUnit::Seconds => value * samplerate as f64,
         TimeUnit::Samples => value,
     }
 }
 
 /// Convert a time or distance value with a given delay unit to a number of samples
 /// (floating point). The result is exact, not rounded.
-pub fn delay_to_samples(value: PrcFmt, unit: DelayUnit, samplerate: usize) -> PrcFmt {
+pub fn delay_to_samples(value: f64, unit: DelayUnit, samplerate: usize) -> f64 {
     match unit {
-        DelayUnit::Microseconds => value / 1_000_000.0 * samplerate as PrcFmt,
-        DelayUnit::Milliseconds => value / 1000.0 * samplerate as PrcFmt,
-        DelayUnit::Seconds => value * samplerate as PrcFmt,
-        DelayUnit::Millimetres => value / 1000.0 * samplerate as PrcFmt / 343.0,
+        DelayUnit::Microseconds => value / 1_000_000.0 * samplerate as f64,
+        DelayUnit::Milliseconds => value / 1000.0 * samplerate as f64,
+        DelayUnit::Seconds => value * samplerate as f64,
+        DelayUnit::Millimetres => value / 1000.0 * samplerate as f64 / 343.0,
         DelayUnit::Samples => value,
     }
 }

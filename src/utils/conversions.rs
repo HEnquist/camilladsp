@@ -14,7 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config::BinarySampleFormat;
 use crate::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
@@ -28,10 +28,10 @@ fn chunk_to_buffer_with_adapter<A>(
     bytes_per_sample: usize,
 ) -> (usize, usize)
 where
-    A: AdapterMut<PrcFmt>,
+    A: AdapterMut<CamillaFloat>,
 {
     let mut clipped = 0;
-    let mut peak: PrcFmt = 0.0;
+    let mut peak: CamillaFloat = 0.0;
     let num_valid_bytes = chunk.valid_frames * chunk.channels * bytes_per_sample;
     for chan in 0..chunk.channels {
         if chunk.waveforms[chan].is_empty() {
@@ -43,7 +43,7 @@ where
                 let pk = chunk.waveforms[chan]
                     .iter()
                     .map(|x| x.abs())
-                    .fold(0.0, PrcFmt::max);
+                    .fold(0.0, CamillaFloat::max);
                 if pk > peak {
                     peak = pk;
                 }
@@ -72,10 +72,10 @@ fn buffer_to_chunk_with_adapter<A>(
     check_for_nan: bool,
 ) -> AudioChunk
 where
-    A: Adapter<PrcFmt>,
+    A: Adapter<CamillaFloat>,
 {
-    let mut maxvalue: PrcFmt = 0.0;
-    let mut minvalue: PrcFmt = 0.0;
+    let mut maxvalue: CamillaFloat = 0.0;
+    let mut minvalue: CamillaFloat = 0.0;
     let mut wfs = container_from_stash(channels);
     for (ch, used) in used_channels.iter().enumerate() {
         if *used {
@@ -103,7 +103,7 @@ where
                     (maxv, minv)
                 } else {
                     wf.iter().fold((0.0, 0.0), |(max, min), x| {
-                        (PrcFmt::max(max, *x), PrcFmt::min(min, *x))
+                        (CamillaFloat::max(max, *x), CamillaFloat::min(min, *x))
                     })
                 };
                 if mavx > maxvalue {
@@ -133,7 +133,7 @@ pub fn chunk_to_buffer_rawbytes(
     match *sample_format {
         BinarySampleFormat::S16_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [I16_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [I16_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -141,7 +141,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::S24_3_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [I24_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [I24_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -149,7 +149,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::S24_4_RJ_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [I24_4RJ_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [I24_4RJ_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -157,7 +157,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::S24_4_LJ_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [I24_4LJ_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [I24_4LJ_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -165,7 +165,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::S32_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [I32_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [I32_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -173,7 +173,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::F32_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [F32_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [F32_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -181,7 +181,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::F64_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [F64_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [F64_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -203,8 +203,10 @@ pub fn buffer_to_chunk_rawbytes(
     let num_valid_frames = valid_bytes / sample_format.bytes_per_sample() / channels;
     match *sample_format {
         BinarySampleFormat::S16_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[I16_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
+            &InterleavedNumbers::<&[I16_LE], CamillaFloat>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
             channels,
             num_frames,
             num_valid_frames,
@@ -212,8 +214,10 @@ pub fn buffer_to_chunk_rawbytes(
             false,
         ),
         BinarySampleFormat::S24_3_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[I24_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
+            &InterleavedNumbers::<&[I24_LE], CamillaFloat>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
             channels,
             num_frames,
             num_valid_frames,
@@ -221,7 +225,7 @@ pub fn buffer_to_chunk_rawbytes(
             false,
         ),
         BinarySampleFormat::S24_4_RJ_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[I24_4RJ_LE], PrcFmt>::new_from_bytes(
+            &InterleavedNumbers::<&[I24_4RJ_LE], CamillaFloat>::new_from_bytes(
                 buffer, channels, num_frames,
             )
             .unwrap(),
@@ -232,7 +236,7 @@ pub fn buffer_to_chunk_rawbytes(
             false,
         ),
         BinarySampleFormat::S24_4_LJ_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[I24_4LJ_LE], PrcFmt>::new_from_bytes(
+            &InterleavedNumbers::<&[I24_4LJ_LE], CamillaFloat>::new_from_bytes(
                 buffer, channels, num_frames,
             )
             .unwrap(),
@@ -243,8 +247,10 @@ pub fn buffer_to_chunk_rawbytes(
             false,
         ),
         BinarySampleFormat::S32_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[I32_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
+            &InterleavedNumbers::<&[I32_LE], CamillaFloat>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
             channels,
             num_frames,
             num_valid_frames,
@@ -252,8 +258,10 @@ pub fn buffer_to_chunk_rawbytes(
             false,
         ),
         BinarySampleFormat::F32_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[F32_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
+            &InterleavedNumbers::<&[F32_LE], CamillaFloat>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
             channels,
             num_frames,
             num_valid_frames,
@@ -261,8 +269,10 @@ pub fn buffer_to_chunk_rawbytes(
             check_for_nan,
         ),
         BinarySampleFormat::F64_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[F64_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
+            &InterleavedNumbers::<&[F64_LE], CamillaFloat>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
             channels,
             num_frames,
             num_valid_frames,
@@ -392,9 +402,9 @@ mod tests {
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 4];
         chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S32_LE);
-        #[cfg(feature = "32bit")]
+        #[cfg(camillafloat_f32)]
         let expected = vec![0xD0, 0xCC, 0xCC, 0x0C];
-        #[cfg(not(feature = "32bit"))]
+        #[cfg(not(camillafloat_f32))]
         let expected = vec![0xCC, 0xCC, 0xCC, 0x0C];
         assert_eq!(buffer, expected);
     }
@@ -415,9 +425,9 @@ mod tests {
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 8];
         chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::F64_LE);
-        #[cfg(feature = "32bit")]
+        #[cfg(camillafloat_f32)]
         let expected = vec![0x00, 0x00, 0x00, 0xA0, 0x99, 0x99, 0xB9, 0x3F];
-        #[cfg(not(feature = "32bit"))]
+        #[cfg(not(camillafloat_f32))]
         let expected = vec![0x9A, 0x99, 0x99, 0x99, 0x99, 0x99, 0xB9, 0x3F];
         assert_eq!(buffer, expected);
     }

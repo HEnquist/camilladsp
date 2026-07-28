@@ -14,8 +14,6 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#![cfg_attr(feature = "32bit", allow(clippy::unnecessary_cast))]
-
 use std::sync::Arc;
 
 use ringbuf::LocalRb;
@@ -27,34 +25,37 @@ use crate::config;
 use crate::filters::Filter;
 use crate::filters::biquad::{Biquad, BiquadCoefficients};
 
-use crate::NewValue;
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::ProcessingParameters;
 use crate::Res;
-use crate::utils::decibels::gain_from_value;
+use crate::ToCamillaFloat;
+use crate::ToF32;
+use crate::utils::decibels::{db_to_linear, gain_from_value};
 use crate::utils::time::delay_to_samples;
 
 #[derive(Clone, Debug)]
 pub struct Gain {
     pub name: String,
-    pub gain: PrcFmt,
+    pub gain: CamillaFloat,
 }
 
 pub struct Delay {
     pub name: String,
     samplerate: usize,
-    queue: Option<LocalRb<Heap<PrcFmt>>>,
+    queue: Option<LocalRb<Heap<CamillaFloat>>>,
     biquad: Option<Biquad>,
 }
 
 pub struct Volume {
     pub name: String,
     ramptime_in_chunks: usize,
-    current_volume: PrcFmt,
+    /// Level in dB. Control value, not audio, and f32 at both ends of the API.
+    current_volume: f32,
     target_volume: f32,
-    target_linear_gain: PrcFmt,
+    target_linear_gain: CamillaFloat,
     mute: bool,
-    ramp_start: PrcFmt,
+    /// Level in dB at the start of the current ramp.
+    ramp_start: f32,
     ramp_step: usize,
     samplerate: usize,
     chunksize: usize,
@@ -89,14 +90,13 @@ impl Volume {
         let target_linear_gain = if mute {
             0.0
         } else {
-            let tempgain: PrcFmt = 10.0;
-            tempgain.powf(current_volume as PrcFmt / 20.0)
+            db_to_linear(current_volume as f64).to_camilla_float()
         };
         Self {
             name,
             ramptime_in_chunks,
-            current_volume: current_volume_with_mute as PrcFmt,
-            ramp_start: current_volume as PrcFmt,
+            current_volume: current_volume_with_mute,
+            ramp_start: current_volume,
             target_volume: current_volume,
             target_linear_gain,
             mute,
@@ -133,24 +133,24 @@ impl Volume {
         )
     }
 
-    fn make_ramp(&self) -> Vec<PrcFmt> {
+    fn make_ramp(&self) -> Vec<CamillaFloat> {
         let target_volume = if self.mute {
             -100.0
         } else {
             self.target_volume
         };
 
-        let ramprange =
-            (target_volume as PrcFmt - self.ramp_start) / self.ramptime_in_chunks as PrcFmt;
-        let stepsize = ramprange / self.chunksize as PrcFmt;
+        // The ramp is laid out in dB, at the f32 precision the levels are kept
+        // in, and only the resulting gain factors cross into the processing
+        // precision, since those get multiplied into the samples.
+        let ramprange = (target_volume - self.ramp_start) / self.ramptime_in_chunks as f32;
+        let stepsize = ramprange / self.chunksize as f32;
         (0..self.chunksize)
             .map(|val| {
-                (PrcFmt::coerce(10.0)).powf(
-                    (self.ramp_start
-                        + ramprange * (self.ramp_step as PrcFmt - 1.0)
-                        + val as PrcFmt * stepsize)
-                        / 20.0,
-                )
+                let level_db = self.ramp_start
+                    + ramprange * (self.ramp_step as f32 - 1.0)
+                    + val as f32 * stepsize;
+                db_to_linear(level_db as f64).to_camilla_float()
             })
             .collect()
     }
@@ -184,19 +184,14 @@ impl Volume {
                     "switch volume without ramp: {} -> {}, mute: {}",
                     self.current_volume, target_volume, shared_mute
                 );
-                self.current_volume = if shared_mute {
-                    0.0
-                } else {
-                    target_volume as PrcFmt
-                };
+                self.current_volume = if shared_mute { 0.0 } else { target_volume };
                 self.ramp_step = 0;
             }
             self.target_volume = target_volume;
             self.target_linear_gain = if shared_mute {
                 0.0
             } else {
-                let tempgain: PrcFmt = 10.0;
-                tempgain.powf(target_volume as PrcFmt / 20.0)
+                db_to_linear(target_volume as f64).to_camilla_float()
             };
             self.mute = shared_mute;
         }
@@ -228,12 +223,12 @@ impl Volume {
                     *item *= *stepgain;
                 }
             }
-            self.current_volume = 20.0 * ramp.last().unwrap().log10();
+            self.current_volume = 20.0 * ramp.last().unwrap().to_f32().log10();
         }
 
         // Update shared current volume
         self.processing_params
-            .set_current_volume(self.fader, self.current_volume as f32);
+            .set_current_volume(self.fader, self.current_volume.to_f32());
     }
 }
 
@@ -242,7 +237,7 @@ impl Filter for Volume {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
         self.prepare_processing();
 
         // Not in a ramp
@@ -263,12 +258,12 @@ impl Filter for Volume {
             for (item, stepgain) in waveform.iter_mut().zip(ramp.iter()) {
                 *item *= *stepgain;
             }
-            self.current_volume = 20.0 * ramp.last().unwrap().log10();
+            self.current_volume = 20.0 * ramp.last().unwrap().to_f32().log10();
         }
 
         // Update shared current volume
         self.processing_params
-            .set_current_volume(self.fader, self.current_volume as f32);
+            .set_current_volume(self.fader, self.current_volume.to_f32());
         Ok(())
     }
 
@@ -282,8 +277,8 @@ impl Filter for Volume {
                 .round() as usize;
             self.fader = conf.fader as usize;
             self.volume_limit = conf.limit();
-            if (self.volume_limit as PrcFmt) < self.current_volume {
-                self.current_volume = self.volume_limit as PrcFmt;
+            if self.volume_limit < self.current_volume {
+                self.current_volume = self.volume_limit;
             }
         } else {
             // This should never happen unless there is a bug somewhere else
@@ -294,9 +289,9 @@ impl Filter for Volume {
 
 impl Gain {
     /// A simple filter providing gain in dB, and can also invert the signal.
-    pub fn new(name: &str, gain_value: PrcFmt, inverted: bool, mute: bool, linear: bool) -> Self {
+    pub fn new(name: &str, gain_value: f64, inverted: bool, mute: bool, linear: bool) -> Self {
         let name = name.to_string();
-        let gain = gain_from_value(gain_value, linear, inverted, mute);
+        let gain = gain_from_value(gain_value, linear, inverted, mute).to_camilla_float();
         Gain { name, gain }
     }
 
@@ -308,7 +303,7 @@ impl Gain {
         Gain::new(name, gain, inverted, mute, linear)
     }
 
-    pub fn process_single(&self, value: PrcFmt) -> PrcFmt {
+    pub fn process_single(&self, value: CamillaFloat) -> CamillaFloat {
         value * self.gain
     }
 }
@@ -318,7 +313,7 @@ impl Filter for Gain {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
         for item in waveform.iter_mut() {
             *item *= self.gain;
         }
@@ -334,7 +329,7 @@ impl Filter for Gain {
             let inverted = conf.is_inverted();
             let mute = conf.is_mute();
             let linear = conf.scale() == config::GainScale::Linear;
-            let gain = gain_from_value(gain_value, linear, inverted, mute);
+            let gain = gain_from_value(gain_value, linear, inverted, mute).to_camilla_float();
             self.gain = gain;
         } else {
             // This should never happen unless there is a bug somewhere else
@@ -343,7 +338,7 @@ impl Filter for Gain {
     }
 }
 
-fn build_subsample_biquad(delay: PrcFmt, samplerate: usize) -> (usize, Option<Biquad>) {
+fn build_subsample_biquad(delay: f64, samplerate: usize) -> (usize, Option<Biquad>) {
     // delay is less than 0.1 samples, ignore
     if delay < 0.1 {
         debug!("Delay too small, ignoring");
@@ -383,7 +378,7 @@ fn build_subsample_biquad(delay: PrcFmt, samplerate: usize) -> (usize, Option<Bi
 
 impl Delay {
     /// Creates a delay filter with delay in samples
-    pub fn new(name: &str, samplerate: usize, delay: PrcFmt, subsample: bool) -> Self {
+    pub fn new(name: &str, samplerate: usize, delay: f64, subsample: bool) -> Self {
         let name = name.to_string();
 
         let (integerdelay, biquad) = if subsample {
@@ -392,7 +387,7 @@ impl Delay {
                 "Building delay filter '{}' with delay {} + {:.2} samples",
                 name,
                 samples,
-                delay - samples as PrcFmt
+                delay - samples as f64
             );
             (samples, bq)
         } else {
@@ -425,7 +420,7 @@ impl Delay {
         Self::new(name, samplerate, delay_samples, conf.subsample())
     }
 
-    pub fn process_single(&mut self, input: PrcFmt) -> PrcFmt {
+    pub fn process_single(&mut self, input: CamillaFloat) -> CamillaFloat {
         let mut value = if let Some(q) = &mut self.queue {
             q.push_overwrite(input).unwrap()
         } else {
@@ -443,7 +438,7 @@ impl Filter for Delay {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
         if let Some(q) = &mut self.queue {
             for item in waveform.iter_mut() {
                 // this returns the item that was popped while pushing
@@ -500,18 +495,22 @@ pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::PrcFmt;
+    use crate::CamillaFloat;
     use crate::ProcessingParameters;
     use crate::filters::Filter;
     use crate::filters::basicfilters::{Delay, Gain, Volume};
     use std::sync::Arc;
 
-    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
+    fn is_close(left: CamillaFloat, right: CamillaFloat, maxdiff: CamillaFloat) -> bool {
         println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 
-    fn compare_waveforms(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
+    fn compare_waveforms(
+        left: Vec<CamillaFloat>,
+        right: Vec<CamillaFloat>,
+        maxdiff: CamillaFloat,
+    ) -> bool {
         for (val_l, val_r) in left.iter().zip(right.iter()) {
             if !is_close(*val_l, *val_r, maxdiff) {
                 return false;
@@ -619,8 +618,8 @@ mod tests {
         )
     }
 
-    fn gain_at(db: PrcFmt) -> PrcFmt {
-        (10.0 as PrcFmt).powf(db / 20.0)
+    fn gain_at(db: CamillaFloat) -> CamillaFloat {
+        (10.0 as CamillaFloat).powf(db / 20.0)
     }
 
     /// A volume change made while audio is flowing is ramped, and the ramp
@@ -742,11 +741,11 @@ mod tests {
         params.set_target_volume(0, -20.0);
         let mut filter = make_volume_full(&params, 0.0, 50.0, -20.0, false, 4);
 
-        let mut waveform: Vec<PrcFmt> = vec![1.0, -1.0, 0.5, -0.5];
+        let mut waveform: Vec<CamillaFloat> = vec![1.0, -1.0, 0.5, -0.5];
         filter.process_waveform(&mut waveform).unwrap();
 
         let gain = gain_at(-20.0);
-        let expected: Vec<PrcFmt> = vec![gain, -gain, 0.5 * gain, -0.5 * gain];
+        let expected: Vec<CamillaFloat> = vec![gain, -gain, 0.5 * gain, -0.5 * gain];
         assert!(compare_waveforms(waveform, expected, 1e-10));
     }
 
@@ -758,7 +757,7 @@ mod tests {
         params.set_mute(0, true);
         let mut filter = make_volume_full(&params, 0.0, 50.0, 0.0, true, 4);
 
-        let mut waveform: Vec<PrcFmt> = vec![1.0, 0.5, -0.5, -1.0];
+        let mut waveform: Vec<CamillaFloat> = vec![1.0, 0.5, -0.5, -1.0];
         filter.process_waveform(&mut waveform).unwrap();
         assert!(waveform.iter().all(|s| s.abs() < 1e-10));
     }
@@ -770,18 +769,18 @@ mod tests {
         params.set_target_volume(0, 0.0);
         let mut filter = make_volume_full(&params, 0.0, 50.0, 0.0, false, 4);
 
-        let mut wave1: Vec<PrcFmt> = vec![1.0; 4];
+        let mut wave1: Vec<CamillaFloat> = vec![1.0; 4];
         filter.process_waveform(&mut wave1).unwrap();
 
         // Below the threshold, so the gain stays at unity.
         params.set_target_volume(0, 0.005);
-        let mut wave2: Vec<PrcFmt> = vec![1.0; 4];
+        let mut wave2: Vec<CamillaFloat> = vec![1.0; 4];
         filter.process_waveform(&mut wave2).unwrap();
         assert!(wave2.iter().all(|s| (s - 1.0).abs() < 1e-10));
 
         // Above the threshold, so it is applied.
         params.set_target_volume(0, 0.02);
-        let mut wave3: Vec<PrcFmt> = vec![1.0; 4];
+        let mut wave3: Vec<CamillaFloat> = vec![1.0; 4];
         filter.process_waveform(&mut wave3).unwrap();
         assert!(wave3.iter().all(|s| (s - gain_at(0.02)).abs() < 1e-6));
     }
@@ -794,7 +793,7 @@ mod tests {
         let mut filter = make_volume_full(&params, 0.0, 10.0, 0.0, false, 4);
 
         params.set_target_volume(0, 20.0);
-        let mut waveform: Vec<PrcFmt> = vec![1.0; 4];
+        let mut waveform: Vec<CamillaFloat> = vec![1.0; 4];
         filter.process_waveform(&mut waveform).unwrap();
         assert!(waveform.iter().all(|s| (s - gain_at(10.0)).abs() < 1e-6));
     }
@@ -809,23 +808,23 @@ mod tests {
         params.set_target_volume(0, 0.0);
         let mut filter = make_volume_full(&params, 2.0, 50.0, 0.0, false, 4);
 
-        let mut chunk0: Vec<PrcFmt> = vec![1.0; 4];
+        let mut chunk0: Vec<CamillaFloat> = vec![1.0; 4];
         filter.process_waveform(&mut chunk0).unwrap();
         assert!(chunk0.iter().all(|s| (s - 1.0).abs() < 1e-10));
 
         params.set_target_volume(0, -20.0);
 
-        let mut chunk1: Vec<PrcFmt> = vec![1.0; 4];
+        let mut chunk1: Vec<CamillaFloat> = vec![1.0; 4];
         filter.process_waveform(&mut chunk1).unwrap();
         assert!(chunk1[0] > chunk1[3]);
         assert!(chunk1.iter().all(|s| *s <= gain_at(0.0) + 1e-6));
         assert!(chunk1.iter().all(|s| *s >= gain_at(-20.0) - 1e-6));
 
-        let mut chunk2: Vec<PrcFmt> = vec![1.0; 4];
+        let mut chunk2: Vec<CamillaFloat> = vec![1.0; 4];
         filter.process_waveform(&mut chunk2).unwrap();
         assert!(chunk2[3] < chunk1[3]);
 
-        let mut chunk3: Vec<PrcFmt> = vec![1.0; 4];
+        let mut chunk3: Vec<CamillaFloat> = vec![1.0; 4];
         filter.process_waveform(&mut chunk3).unwrap();
         assert!(chunk3.iter().all(|s| (s - gain_at(-20.0)).abs() < 1e-6));
     }

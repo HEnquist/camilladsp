@@ -26,7 +26,6 @@ use std::fs::File;
 use std::io::BufReader;
 
 //type SmpFmt = i16;
-use crate::PrcFmt;
 /// Configuration validation error type returned by the config utilities.
 pub type ConfigError = self::utils::ConfigErrorType;
 /// Runtime configuration overrides that can be applied on top of a loaded config file.
@@ -308,11 +307,11 @@ impl AlsaSampleFormat {
 #[serde(tag = "type")]
 pub enum Signal {
     /// Sine wave at `freq` Hz and `level` dBFS.
-    Sine { freq: f64, level: PrcFmt },
+    Sine { freq: f64, level: f64 },
     /// Square wave at `freq` Hz and `level` dBFS.
-    Square { freq: f64, level: PrcFmt },
+    Square { freq: f64, level: f64 },
     /// White noise at `level` dBFS.
-    WhiteNoise { level: PrcFmt },
+    WhiteNoise { level: f64 },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -694,9 +693,9 @@ pub struct Devices {
     #[serde(default)]
     pub queuelimit: Option<usize>,
     #[serde(default)]
-    pub silence_threshold: Option<PrcFmt>,
+    pub silence_threshold: Option<f64>,
     #[serde(default)]
-    pub silence_timeout_s: Option<PrcFmt>,
+    pub silence_timeout_s: Option<f64>,
     pub capture: CaptureDevice,
     pub playback: PlaybackDevice,
     #[serde(default)]
@@ -737,11 +736,11 @@ impl Devices {
         self.rate_measure_interval_s.unwrap_or(1.0)
     }
 
-    pub fn silence_threshold(&self) -> PrcFmt {
+    pub fn silence_threshold(&self) -> f64 {
         self.silence_threshold.unwrap_or(0.0)
     }
 
-    pub fn silence_timeout_s(&self) -> PrcFmt {
+    pub fn silence_timeout_s(&self) -> f64 {
         self.silence_timeout_s.unwrap_or(0.0)
     }
 
@@ -925,7 +924,7 @@ pub enum ConvParameters {
     Raw(ConvParametersRaw),
     Wav(ConvParametersWav),
     Values {
-        values: Vec<PrcFmt>,
+        values: Vec<f64>,
     },
     Dummy {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -979,16 +978,8 @@ impl ConvParametersWav {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum ShelfSteepness {
-    Q {
-        freq: PrcFmt,
-        q: PrcFmt,
-        gain: PrcFmt,
-    },
-    Slope {
-        freq: PrcFmt,
-        slope: PrcFmt,
-        gain: PrcFmt,
-    },
+    Q { freq: f64, q: f64, gain: f64 },
+    Slope { freq: f64, slope: f64, gain: f64 },
 }
 
 /// Peaking filter width specified either as a Q factor or a bandwidth in octaves.
@@ -996,14 +987,14 @@ pub enum ShelfSteepness {
 #[serde(untagged)]
 pub enum PeakingWidth {
     Q {
-        freq: PrcFmt,
-        q: PrcFmt,
-        gain: PrcFmt,
+        freq: f64,
+        q: f64,
+        gain: f64,
     },
     Bandwidth {
-        freq: PrcFmt,
-        bandwidth: PrcFmt,
-        gain: PrcFmt,
+        freq: f64,
+        bandwidth: f64,
+        gain: f64,
     },
 }
 
@@ -1011,17 +1002,17 @@ pub enum PeakingWidth {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum NotchWidth {
-    Q { freq: PrcFmt, q: PrcFmt },
-    Bandwidth { freq: PrcFmt, bandwidth: PrcFmt },
+    Q { freq: f64, q: f64 },
+    Bandwidth { freq: f64, bandwidth: f64 },
 }
 
 /// Parameters for the general (asymmetric pole/zero) notch biquad.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GeneralNotchParams {
-    pub freq_p: PrcFmt,
-    pub freq_z: PrcFmt,
-    pub q_p: PrcFmt,
+    pub freq_p: f64,
+    pub freq_z: f64,
+    pub q_p: f64,
     #[serde(default)]
     pub normalize_at_dc: Option<bool>,
 }
@@ -1039,49 +1030,49 @@ impl GeneralNotchParams {
 #[serde(deny_unknown_fields)]
 pub enum BiquadParameters {
     Free {
-        a1: PrcFmt,
-        a2: PrcFmt,
-        b0: PrcFmt,
-        b1: PrcFmt,
-        b2: PrcFmt,
+        a1: f64,
+        a2: f64,
+        b0: f64,
+        b1: f64,
+        b2: f64,
     },
     Highpass {
-        freq: PrcFmt,
-        q: PrcFmt,
+        freq: f64,
+        q: f64,
     },
     Lowpass {
-        freq: PrcFmt,
-        q: PrcFmt,
+        freq: f64,
+        q: f64,
     },
     Peaking(PeakingWidth),
     Highshelf(ShelfSteepness),
     HighshelfFO {
-        freq: PrcFmt,
-        gain: PrcFmt,
+        freq: f64,
+        gain: f64,
     },
     Lowshelf(ShelfSteepness),
     LowshelfFO {
-        freq: PrcFmt,
-        gain: PrcFmt,
+        freq: f64,
+        gain: f64,
     },
     HighpassFO {
-        freq: PrcFmt,
+        freq: f64,
     },
     LowpassFO {
-        freq: PrcFmt,
+        freq: f64,
     },
     Allpass(NotchWidth),
     AllpassFO {
-        freq: PrcFmt,
+        freq: f64,
     },
     Bandpass(NotchWidth),
     Notch(NotchWidth),
     GeneralNotch(GeneralNotchParams),
     LinkwitzTransform {
-        freq_act: PrcFmt,
-        q_act: PrcFmt,
-        freq_target: PrcFmt,
-        q_target: PrcFmt,
+        freq_act: f64,
+        q_act: f64,
+        freq_target: f64,
+        q_target: f64,
     },
 }
 
@@ -1091,40 +1082,40 @@ pub enum BiquadParameters {
 #[serde(deny_unknown_fields)]
 pub enum BiquadComboParameters {
     LinkwitzRileyHighpass {
-        freq: PrcFmt,
+        freq: f64,
         order: usize,
     },
     LinkwitzRileyLowpass {
-        freq: PrcFmt,
+        freq: f64,
         order: usize,
     },
     ButterworthHighpass {
-        freq: PrcFmt,
+        freq: f64,
         order: usize,
     },
     ButterworthLowpass {
-        freq: PrcFmt,
+        freq: f64,
         order: usize,
     },
     Tilt {
-        gain: PrcFmt,
+        gain: f64,
     },
     FivePointPeq {
-        fls: PrcFmt,
-        qls: PrcFmt,
-        gls: PrcFmt,
-        fp1: PrcFmt,
-        qp1: PrcFmt,
-        gp1: PrcFmt,
-        fp2: PrcFmt,
-        qp2: PrcFmt,
-        gp2: PrcFmt,
-        fp3: PrcFmt,
-        qp3: PrcFmt,
-        gp3: PrcFmt,
-        fhs: PrcFmt,
-        qhs: PrcFmt,
-        ghs: PrcFmt,
+        fls: f64,
+        qls: f64,
+        gls: f64,
+        fp1: f64,
+        qp1: f64,
+        gp1: f64,
+        fp2: f64,
+        qp2: f64,
+        gp2: f64,
+        fp3: f64,
+        qp3: f64,
+        gp3: f64,
+        fhs: f64,
+        qhs: f64,
+        ghs: f64,
     },
     GraphicEqualizer(GraphicEqualizerParameters),
 }
@@ -1226,7 +1217,7 @@ impl LoudnessParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GainParameters {
-    pub gain: PrcFmt,
+    pub gain: f64,
     #[serde(default)]
     pub inverted: Option<bool>,
     #[serde(default)]
@@ -1262,7 +1253,7 @@ impl GainParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct DelayParameters {
-    pub delay: PrcFmt,
+    pub delay: f64,
     pub delay_unit: DelayUnit,
     #[serde(default)]
     pub subsample: Option<bool>,
@@ -1314,7 +1305,7 @@ pub enum DelayUnit {
 #[serde(deny_unknown_fields)]
 pub enum DitherParameters {
     None { bits: usize },
-    Flat { bits: usize, amplitude: PrcFmt },
+    Flat { bits: usize, amplitude: f64 },
     Highpass { bits: usize },
     Fweighted441 { bits: usize },
     FweightedLong441 { bits: usize },
@@ -1342,17 +1333,17 @@ pub enum DitherParameters {
 #[serde(deny_unknown_fields)]
 pub struct DiffEqParameters {
     #[serde(default)]
-    pub a: Option<Vec<PrcFmt>>,
+    pub a: Option<Vec<f64>>,
     #[serde(default)]
-    pub b: Option<Vec<PrcFmt>>,
+    pub b: Option<Vec<f64>>,
 }
 
 impl DiffEqParameters {
-    pub fn a(&self) -> Vec<PrcFmt> {
+    pub fn a(&self) -> Vec<f64> {
         self.a.clone().unwrap_or_default()
     }
 
-    pub fn b(&self) -> Vec<PrcFmt> {
+    pub fn b(&self) -> Vec<f64> {
         self.b.clone().unwrap_or_default()
     }
 }
@@ -1373,7 +1364,7 @@ pub struct MixerChannels {
 pub struct MixerSource {
     pub channel: usize,
     #[serde(default)]
-    pub gain: Option<PrcFmt>,
+    pub gain: Option<f64>,
     #[serde(default)]
     pub inverted: Option<bool>,
     #[serde(default)]
@@ -1383,7 +1374,7 @@ pub struct MixerSource {
 }
 
 impl MixerSource {
-    pub fn gain(&self) -> PrcFmt {
+    pub fn gain(&self) -> f64 {
         self.gain.unwrap_or_default()
     }
 
@@ -1459,18 +1450,18 @@ pub struct CompressorParameters {
     pub monitor_channels: Option<Vec<usize>>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
-    pub attack: PrcFmt,
+    pub attack: f64,
     pub attack_unit: TimeUnit,
-    pub release: PrcFmt,
+    pub release: f64,
     pub release_unit: TimeUnit,
-    pub threshold: PrcFmt,
-    pub factor: PrcFmt,
+    pub threshold: f64,
+    pub factor: f64,
     #[serde(default)]
-    pub makeup_gain: Option<PrcFmt>,
+    pub makeup_gain: Option<f64>,
     #[serde(default)]
     pub soft_clip: Option<bool>,
     #[serde(default)]
-    pub clip_limit: Option<PrcFmt>,
+    pub clip_limit: Option<f64>,
 }
 
 impl CompressorParameters {
@@ -1482,7 +1473,7 @@ impl CompressorParameters {
         self.process_channels.clone().unwrap_or_default()
     }
 
-    pub fn makeup_gain(&self) -> PrcFmt {
+    pub fn makeup_gain(&self) -> f64 {
         self.makeup_gain.unwrap_or_default()
     }
 
@@ -1500,12 +1491,12 @@ pub struct NoiseGateParameters {
     pub monitor_channels: Option<Vec<usize>>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
-    pub attack: PrcFmt,
+    pub attack: f64,
     pub attack_unit: TimeUnit,
-    pub release: PrcFmt,
+    pub release: f64,
     pub release_unit: TimeUnit,
-    pub threshold: PrcFmt,
-    pub attenuation: PrcFmt,
+    pub threshold: f64,
+    pub attenuation: f64,
 }
 
 impl NoiseGateParameters {
@@ -1525,11 +1516,11 @@ pub struct RACEParameters {
     pub channels: usize,
     pub channel_a: usize,
     pub channel_b: usize,
-    pub delay: PrcFmt,
+    pub delay: f64,
     #[serde(default)]
     pub subsample_delay: Option<bool>,
     pub delay_unit: DelayUnit,
-    pub attenuation: PrcFmt,
+    pub attenuation: f64,
 }
 
 impl RACEParameters {
@@ -1549,7 +1540,7 @@ pub struct ClipperParameters {
     #[serde(default)]
     pub soft_clip: Option<bool>,
     #[serde(default)]
-    pub clip_limit: PrcFmt,
+    pub clip_limit: f64,
 }
 
 impl ClipperParameters {
@@ -1562,10 +1553,10 @@ impl ClipperParameters {
 #[serde(deny_unknown_fields)]
 pub struct LookaheadLimiterParameters {
     #[serde(default)]
-    pub limit: PrcFmt,
-    pub attack: PrcFmt,
+    pub limit: f64,
+    pub attack: f64,
     pub attack_unit: TimeUnit,
-    pub release: PrcFmt,
+    pub release: f64,
     pub release_unit: TimeUnit,
 }
 

@@ -47,7 +47,19 @@ jobs:
         run: cargo test --features pipewire-backend
 
       - name: Run cargo test with all optional features
-        run: cargo test --features 32bit,debug,secure-websocket
+        run: cargo test --features debug,secure-websocket
+
+      # The sample precision is a rustc cfg, not a Cargo feature, so it is not
+      # covered by --features or --all-features and needs its own run.
+      - name: Run cargo test with f32 sample precision
+        run: cargo test
+        env:
+          RUSTFLAGS: --cfg camillafloat_f32
+
+      - name: Run cargo clippy with f32 sample precision
+        run: cargo clippy --all-targets -- -D warnings
+        env:
+          RUSTFLAGS: --cfg camillafloat_f32
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
@@ -83,6 +95,18 @@ jobs:
 
       - name: Run cargo test
         run: cargo test
+
+      # The NEON kernels exist in both precisions, so this is the runner that
+      # covers the f32 SIMD convolution path end to end.
+      - name: Run cargo test with f32 sample precision
+        run: cargo test
+        env:
+          RUSTFLAGS: --cfg camillafloat_f32
+
+      - name: Run cargo clippy with f32 sample precision
+        run: cargo clippy --all-targets -- -D warnings
+        env:
+          RUSTFLAGS: --cfg camillafloat_f32
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check

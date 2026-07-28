@@ -443,7 +443,6 @@ All the available options, or "features" are:
 - `threaded-alsa`: Experimental ALSA backend implementation (Linux only). When enabled, it replaces the legacy ALSA backend.
 - `websocket`: Websocket server for control.
 - `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
-- `32bit`: Perform all calculations with 32-bit floats (instead of 64).
 - `debug`: Enable extra logging, useful for debugging.
 
 
@@ -460,12 +459,33 @@ cargo build --release --features pipewire-backend
 cargo install --path . --features pipewire-backend
 ```
 
-Example 2: You want only `32bit`. Since you don't want `websocket` you have to disable the defaults:
+Example 2: You want only `debug`. Since you don't want `websocket` you have to disable the defaults:
 ```
-cargo build --release --no-default-features --features 32bit
+cargo build --release --no-default-features --features debug
 (or)
-cargo install --path . --no-default-features --features 32bit
+cargo install --path . --no-default-features --features debug
 ```
+
+### Sample precision
+
+All processing is done with 64-bit floats by default. It is also possible to build with
+32-bit floats instead. This lowers memory use and can be noticeably faster for resampling
+and FIR convolution on weak in-order CPUs, at the cost of a higher numerical noise floor.
+On more capable CPUs there is little or nothing to gain.
+
+This is not a Cargo feature. Cargo features are unified across the whole dependency graph,
+which means another crate depending on CamillaDSP as a library could silently change the
+precision for everyone else in the build. It is a raw compiler flag instead, so the choice
+belongs to whoever runs the build:
+```
+RUSTFLAGS="--cfg camillafloat_f32" cargo build --release
+```
+
+Note that this rebuilds all dependencies, since changing `RUSTFLAGS` invalidates the build
+cache. To make it the local default without setting the variable every time, put it under
+`[build] rustflags` in `.cargo/config.toml`.
+
+The active precision is listed as `Sample precision` in the output of `camilladsp --help`.
 
 ### Additional dependencies
 
