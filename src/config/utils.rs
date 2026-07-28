@@ -18,6 +18,7 @@ use crate::config::*;
 use crate::filters;
 use crate::mixer;
 use crate::processors::compressor;
+use crate::processors::lookahead_limiter;
 use crate::processors::noisegate;
 use crate::processors::race;
 use crate::utils::wavtools::find_data_in_wav_stream;
@@ -460,6 +461,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
                 match (params, current_proc) {
                     (Processor::Compressor { .. }, Processor::Compressor { .. })
                     | (Processor::NoiseGate { .. }, Processor::NoiseGate { .. })
+                    | (Processor::LookaheadLimiter { .. }, Processor::LookaheadLimiter { .. })
                     | (Processor::RACE { .. }, Processor::RACE { .. }) => {}
                     _ => {
                         // A processor changed type, need to rebuild the pipeline
@@ -734,6 +736,28 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                             Err(err) => {
                                                 let msg = format!(
                                                     "Invalid noise gate '{}'. Reason: {}",
+                                                    step.name, err
+                                                );
+                                                return Err(ConfigError::new(&msg).into());
+                                            }
+                                        }
+                                    }
+                                    Processor::LookaheadLimiter { parameters, .. } => {
+                                        let channels = parameters.channels;
+                                        if channels != num_channels {
+                                            let msg = format!(
+                                                "LookaheadLimiter '{}' has wrong number of channels. Expected {}, found {}.",
+                                                step.name, num_channels, channels
+                                            );
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
+                                        match lookahead_limiter::validate_lookahead_limiter(
+                                            parameters, fs,
+                                        ) {
+                                            Ok(_) => {}
+                                            Err(err) => {
+                                                let msg = format!(
+                                                    "Invalid lookahead limiter '{}'. Reason: {}",
                                                     step.name, err
                                                 );
                                                 return Err(ConfigError::new(&msg).into());

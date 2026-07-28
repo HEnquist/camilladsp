@@ -20,6 +20,8 @@ use crate::config;
 
 /// Dynamic range compressor processor.
 pub mod compressor;
+/// Multichannel lookahead limiter processor.
+pub mod lookahead_limiter;
 /// Noise gate processor.
 pub mod noisegate;
 /// RACE (Recursive Ambiophonic Crosstalk Elimination) processor.

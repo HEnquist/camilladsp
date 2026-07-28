@@ -134,6 +134,8 @@ and the Mozilla Public License Version 2.0:
 - **[Processors](#processors)**
    - **[Compressor](#compressor)**
    - **[NoiseGate](#noise-gate)**
+   - **[Lookahead limiter](#lookahead-limiter-processor)**
+   - **[RACE](#race)**
 - **[Pipeline](#pipeline)**
    - **[Filter step](#filter-step)**
    - **[Mixer and Processor step](#mixer-and-processor-step)**
@@ -2285,6 +2287,10 @@ Parameters:
 ### Lookahead Limiter
 The "LookaheadLimiter" delays the input signal by the attack time, detects peaks in advance and ramps up gain reduction to reach the required level when the peak arrives. After the peak passes, the gain is restored using an exponential release curve.
 
+This filter works on a single channel at a time.
+Use the [LookaheadLimiter processor](#lookahead-limiter-processor)
+to apply the same gain reduction to several channels.
+
 Example:
 ```
   example_lookahead_limiter:
@@ -2415,6 +2421,58 @@ pipeline:
   * `attenuation`: the amount of attenuation in dB to apply when the gate is "closed".
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
+
+### Lookahead Limiter (processor)
+The "LookaheadLimiter" processor is the multichannel version of the
+[LookaheadLimiter filter](#lookahead-limiter).
+It uses the same algorithm, but detects peaks on a set of monitored channels
+and applies the resulting gain reduction to a set of processed channels.
+This keeps the gain reduction identical on all processed channels,
+which preserves the stereo image.
+
+Looking ahead means that the output is delayed by the attack time.
+By default all channels are delayed, also the ones that are not in `process_channels`,
+so that all channels stay time aligned.
+
+Example:
+```
+processors:
+  demolimiter:
+    type: LookaheadLimiter
+    parameters:
+      channels: 2
+      limit: -1.0 (*)
+      attack: 2.0
+      attack_unit: ms
+      release: 100.0
+      release_unit: ms
+      monitor_channels: [0, 1] (*)
+      process_channels: [0, 1] (*)
+      delay_processed_only: false (*)
+
+pipeline:
+  - type: Processor
+    name: demolimiter
+```
+
+  Parameters:
+  * `channels`: number of channels, must match the number of channels of the pipeline where the limiter is inserted.
+  * `limit`: Maximum output level in dB. Optional, defaults to 0.0 dB.
+  * `attack`: Attack/lookahead/delay time, see the `LookaheadLimiter` filter.
+  * `attack_unit`: Unit for the attack time. Can be `s`, `ms`, `us` or `samples`.
+  * `release`: Release time, see the `LookaheadLimiter` filter.
+  * `release_unit`: Unit for the release time. Can be `s`, `ms`, `us` or `samples`.
+  * `monitor_channels`: a list of channels to detect peaks on. The largest amplitude of these channels
+    at each instant determines the gain reduction. Optional, defaults to all channels.
+  * `process_channels`: a list of channels to apply the gain reduction to. Optional, defaults to all channels.
+  * `delay_processed_only`: only delay the channels in `process_channels`, and pass the others through
+    without any delay. Optional, defaults to `false`, meaning that all channels are delayed.
+    Set this to `true` when the other channels do not need to stay aligned with the processed ones,
+    for example when they drive a separate output such as a headphone pair,
+    or when they are delayed to match elsewhere in the pipeline.
+
+Note that a channel that is monitored but not processed can still exceed the limit,
+and that a channel that is processed but not monitored is not guaranteed to stay below it.
 
 ### RACE
 The "RACE" processor implements the recursive part of the
