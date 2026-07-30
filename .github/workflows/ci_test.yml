@@ -31,8 +31,8 @@ jobs:
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
-      - name: Install PipeWire development files
-        run: sudo apt-get install libpipewire-0.3-dev -y
+      - name: Install PipeWire and D-Bus development files
+        run: sudo apt-get install libpipewire-0.3-dev libdbus-1-dev -y
 
       - name: Install OpenSSL
         run: sudo apt-get install openssl libssl-dev -y
