@@ -17,10 +17,10 @@
 use crate::audiodevice::*;
 use crate::config;
 use crate::pipeline;
-use crate::{ProcessingParameters, SHUTDOWN_REQUESTED};
-use audio_thread_priority::{
+use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
+use crate::{ProcessingParameters, SHUTDOWN_REQUESTED};
 use std::sync::{Arc, Barrier};
 use std::thread;
 

@@ -16,7 +16,7 @@
 
 use crate::ToF32;
 use crate::utils::ringbuffer::fill_playback_output_from_ringbuffer;
-use audio_thread_priority::{
+use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 use pipewire as pw;
