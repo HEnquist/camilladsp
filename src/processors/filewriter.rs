@@ -14,7 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
@@ -37,7 +37,7 @@ pub struct FileWriter {
     config: config::FileWriterParameters,
     process_channels: Vec<usize>,
     chunksize: usize,
-    producer: HeapProd<PrcFmt>,
+    producer: HeapProd<CamillaFloat>,
     tx_notify: Sender<()>,
     warned: bool,
 }
@@ -48,7 +48,7 @@ struct WriterThread {
     samples_per_chunk: usize,
     sample_format: BinarySampleFormat,
     filename: String,
-    consumer: HeapCons<PrcFmt>,
+    consumer: HeapCons<CamillaFloat>,
     rx_notify: crossbeam_channel::Receiver<()>,
     wav_header: bool,
     chunk: AudioChunk,
@@ -86,7 +86,7 @@ impl FileWriter {
         let samples_per_chunk = (chunksize * write_channels).max(1);
         let bytes_per_chunk = samples_per_chunk * sample_format.bytes_per_sample();
         let ring_size = write_channels * samplerate.max(MIN_CHUNKS * chunksize * write_channels);
-        let ringbuffer = HeapRb::<PrcFmt>::new(ring_size);
+        let ringbuffer = HeapRb::<CamillaFloat>::new(ring_size);
         let (producer, consumer) = ringbuffer.split();
         let (tx_notify, rx_notify) = bounded::<()>(2);
         let proc_name = name.to_string();
@@ -186,7 +186,8 @@ impl WriterThread {
                 self.channels,
                 self.sample_format,
                 self.samplerate,
-            )?;
+            )
+            .map_err(|err| std::io::Error::other(err.to_string()))?;
         }
         while let Ok(()) = self.rx_notify.recv() {
             self.drain_and_write(&mut file)?;
@@ -248,7 +249,7 @@ pub fn validate_file_writer(config: &config::FileWriterParameters) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PrcFmt;
+    use crate::CamillaFloat;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
@@ -290,11 +291,11 @@ mod tests {
         let all = [left[0], left[1], right[0], right[1]];
         AudioChunk::new(
             vec![
-                vec![left[0] as PrcFmt, left[1] as PrcFmt],
-                vec![right[0] as PrcFmt, right[1] as PrcFmt],
+                vec![left[0] as CamillaFloat, left[1] as CamillaFloat],
+                vec![right[0] as CamillaFloat, right[1] as CamillaFloat],
             ],
-            all.iter().copied().fold(f64::NEG_INFINITY, f64::max) as PrcFmt,
-            all.iter().copied().fold(f64::INFINITY, f64::min) as PrcFmt,
+            all.iter().copied().fold(f64::NEG_INFINITY, f64::max) as CamillaFloat,
+            all.iter().copied().fold(f64::INFINITY, f64::min) as CamillaFloat,
             2,
             valid_frames,
         )
@@ -302,9 +303,9 @@ mod tests {
 
     fn mono_chunk(samples: [f64; 2], valid_frames: usize) -> AudioChunk {
         AudioChunk::new(
-            vec![vec![samples[0] as PrcFmt, samples[1] as PrcFmt]],
-            samples[0].max(samples[1]) as PrcFmt,
-            samples[0].min(samples[1]) as PrcFmt,
+            vec![vec![samples[0] as CamillaFloat, samples[1] as CamillaFloat]],
+            samples[0].max(samples[1]) as CamillaFloat,
+            samples[0].min(samples[1]) as CamillaFloat,
             2,
             valid_frames,
         )
@@ -348,12 +349,30 @@ mod tests {
         fw.process_chunk(&mut c3).unwrap();
         shutdown(fw);
 
-        assert_eq!(c1.waveforms[0], vec![0.25 as PrcFmt, -0.5 as PrcFmt]);
-        assert_eq!(c1.waveforms[1], vec![0.75 as PrcFmt, -1.0 as PrcFmt]);
-        assert_eq!(c2.waveforms[0], vec![0.125 as PrcFmt, -0.25 as PrcFmt]);
-        assert_eq!(c2.waveforms[1], vec![0.5 as PrcFmt, -0.75 as PrcFmt]);
-        assert_eq!(c3.waveforms[0], vec![1.0 as PrcFmt, -0.875 as PrcFmt]);
-        assert_eq!(c3.waveforms[1], vec![0.0 as PrcFmt, 0.375 as PrcFmt]);
+        assert_eq!(
+            c1.waveforms[0],
+            vec![0.25 as CamillaFloat, -0.5 as CamillaFloat]
+        );
+        assert_eq!(
+            c1.waveforms[1],
+            vec![0.75 as CamillaFloat, -1.0 as CamillaFloat]
+        );
+        assert_eq!(
+            c2.waveforms[0],
+            vec![0.125 as CamillaFloat, -0.25 as CamillaFloat]
+        );
+        assert_eq!(
+            c2.waveforms[1],
+            vec![0.5 as CamillaFloat, -0.75 as CamillaFloat]
+        );
+        assert_eq!(
+            c3.waveforms[0],
+            vec![1.0 as CamillaFloat, -0.875 as CamillaFloat]
+        );
+        assert_eq!(
+            c3.waveforms[1],
+            vec![0.0 as CamillaFloat, 0.375 as CamillaFloat]
+        );
 
         let data = fs::read(&filename).unwrap();
         let mut expected = Vec::new();
@@ -405,7 +424,7 @@ mod tests {
     fn drops_chunk_when_ring_buffer_is_full() {
         let filename = unique_test_filename();
         let mut fw = FileWriter::from_config("test", f32_config(filename.clone()), 48_000, 2);
-        let ringbuffer = HeapRb::<PrcFmt>::new(1);
+        let ringbuffer = HeapRb::<CamillaFloat>::new(1);
         let (mut producer, _consumer) = ringbuffer.split();
         assert!(producer.try_push(0.0).is_ok());
         fw.producer = producer;

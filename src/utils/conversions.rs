@@ -22,9 +22,9 @@ use audioadapter::{Adapter, AdapterMut};
 use audioadapter_buffers::number_to_float::InterleavedNumbers;
 use audioadapter_sample::sample::{F32_LE, F64_LE, I16_LE, I24_4LJ_LE, I24_4RJ_LE, I24_LE, I32_LE};
 
-fn chunk_to_buffer_with_adapter_borrowed<'a, A>(
+fn chunk_to_buffer_with_adapter_borrowed<A>(
     chunk: &AudioChunk,
-    adapter: &'a mut A,
+    adapter: &mut A,
     bytes_per_sample: usize,
 ) -> (usize, usize)
 where

@@ -368,7 +368,7 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
                 }
             }
             if let Some(processors) = &mut config.processors {
-                for (_name, processor) in processors.iter_mut() {
+                for processor in processors.values_mut() {
                     if let Processor::FileWriter { parameters, .. } = processor {
                         check_and_replace_relative_path(&mut parameters.filename, config_dir);
                     }
