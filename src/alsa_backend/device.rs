@@ -280,10 +280,12 @@ fn capture_buffer(
         );
         pcmdevice.start()?;
     }
-    let millis_per_chunk = 1000 * frames_to_read / params.samplerate;
+    // `frames_to_read` is counted on the capture side, so the wait timeout must be
+    // derived from the capture rate and not the pipeline rate.
+    let millis_per_chunk = 1000.0 * frames_to_read as f32 / params.capture_samplerate as f32;
 
     loop {
-        let mut timeout_millis = 8 * millis_per_chunk as u32;
+        let mut timeout_millis = (8.0 * millis_per_chunk) as u32;
         if timeout_millis < 20 {
             timeout_millis = 20;
         }
