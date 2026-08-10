@@ -52,8 +52,8 @@ jobs:
           asset_name: camilladsp-linux-amd64.tar.gz
           tag: ${{ github.event.release.tag_name }}
 
-      - name: Install PipeWire development files
-        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpipewire-0.3-dev -y
+      - name: Install PipeWire and D-Bus development files
+        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpipewire-0.3-dev libdbus-1-dev -y
 
       - name: Build with PipeWire
         run: cargo build --release --features pipewire-backend
@@ -122,8 +122,8 @@ jobs:
           asset_name: camilladsp-linux-aarch64.tar.gz
           tag: ${{ github.event.release.tag_name }}
 
-      - name: Install PipeWire development files
-        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpipewire-0.3-dev -y
+      - name: Install PipeWire and D-Bus development files
+        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpipewire-0.3-dev libdbus-1-dev -y
 
       - name: Build with PipeWire
         run: cargo build --release --features pipewire-backend

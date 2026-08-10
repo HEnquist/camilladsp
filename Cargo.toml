@@ -12,7 +12,12 @@ repository = "https://github.com/HEnquist/camilladsp"
 [features]
 default = ["websocket"]
 threaded-alsa = []
-pipewire-backend = ["pipewire"]
+# Promote real-time threads via rtkit over D-Bus instead of natively, see
+# src/utils/rt_priority.rs. PipeWire implies a desktop system where rtkit ships as a dependency of
+# the sound server, so that backend enables it. Can also be enabled on its own, for an ALSA build
+# that runs unprivileged on a desktop.
+rtkit = ["audio_thread_priority/with_dbus"]
+pipewire-backend = ["pipewire", "rtkit"]
 asio-backend = ["asio-sys"]
 bench = []
 websocket = ["tungstenite"]
@@ -81,7 +86,9 @@ parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
 crossbeam-channel = "0.5"
 crossbeam-queue = "0.3"
 rayon = "1.10.0"
-audio_thread_priority = { version = "0.33.0", default-features = false }
+# Real-time thread promotion. On Linux it promotes via rtkit over D-Bus with the "rtkit" feature, and
+# natively with SCHED_FIFO without it, see src/utils/rt_priority.rs.
+audio_thread_priority = { version = "0.36.0", default-features = false }
 ringbuf = "0.4.7"
 #audioadapter = { version = "2.0.0", default-features = false, path = "../audioadapter-rs/audioadapter" }
 #audioadapter-sample = { version = "2.0.0", default-features = false,path = "../audioadapter-rs/audioadapter-sample" }

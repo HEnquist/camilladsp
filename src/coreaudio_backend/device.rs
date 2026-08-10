@@ -64,7 +64,7 @@ use objc2_core_audio_types::{
 };
 use objc2_core_foundation::CFString;
 
-use audio_thread_priority::{
+use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 
