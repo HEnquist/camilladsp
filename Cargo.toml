@@ -80,7 +80,7 @@ flexi_logger = { version = "0.30.2", features = ["async", "colors"] }
 chrono = "0.4"
 tungstenite = { version = "0.26.1", optional = true }
 native-tls = { version = "0.2.7", optional = true }
-rubato = "4.0"
+rubato = "5.0"
 #rubato = { git = "https://github.com/HEnquist/rubato", branch = "preview_1.0" }
 parking_lot = { version = "0.12.1", features = ["hardware-lock-elision"] }
 crossbeam-channel = "0.5"
@@ -90,13 +90,13 @@ rayon = "1.10.0"
 # natively with SCHED_FIFO without it, see src/utils/rt_priority.rs.
 audio_thread_priority = { version = "0.36.0", default-features = false }
 ringbuf = "0.4.7"
-#audioadapter = { version = "2.0.0", default-features = false, path = "../audioadapter-rs/audioadapter" }
-#audioadapter-sample = { version = "2.0.0", default-features = false,path = "../audioadapter-rs/audioadapter-sample" }
-#audioadapter-buffers = { version = "2.0.0", path = "../audioadapter-rs/audioadapter-buffers" }
-audioadapter = { version = "4.0.0", default-features = false }
-audioadapter-sample = { version = "4.0.0", default-features = false }
-audioadapter-buffers = { version = "4.0.0" }
-waveadapter = "0.1.0"
+#audioadapter = { version = "5.0.0", path = "../audioadapter-rs/audioadapter" }
+#audioadapter-sample = { version = "5.1.0", path = "../audioadapter-rs/audioadapter-sample" }
+#audioadapter-buffers = { version = "5.1.0", path = "../audioadapter-rs/audioadapter-buffers" }
+audioadapter = "5.0.0"
+audioadapter-sample = "5.1.0"
+audioadapter-buffers = "5.1.0"
+waveadapter = "0.2.0"
 
 [dev-dependencies]
 criterion = "0.6"
