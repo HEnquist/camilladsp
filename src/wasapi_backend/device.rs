@@ -541,9 +541,9 @@ fn playback_loop(
         }
     };
 
-    audio_client.start_stream()?;
     let mut running = false;
     let mut starting = true;
+    let mut started = false;
     let (device_period_hns, _) = audio_client.get_device_period()?;
     // set poll delay to one device period, may be shorter than needed
     let poll_delay = std::time::Duration::from_micros(device_period_hns as u64 / 10);
@@ -553,6 +553,15 @@ fn playback_loop(
             poll_delay.as_micros()
         );
     }
+    // Fill the endpoint buffer with the first block before starting the stream,
+    // so playback begins with real audio (preceded by the target_level silence)
+    // instead of an empty buffer. This follows the ordering recommended by Microsoft:
+    // https://learn.microsoft.com/en-us/windows/win32/coreaudio/rendering-a-stream
+    // The first pass does this prefill and then starts the stream. Every later pass
+    // is preceded by the event wait (or poll sleep) at the end of the previous pass,
+    // which matters because in exclusive event mode get_available_space_in_frames
+    // always returns the full buffer size: without the preceding wait we would
+    // rewrite the buffer while the hardware reads it.
     loop {
         buffer_free_frame_count = audio_client.get_available_space_in_frames()?;
         trace!("Playback, new buffer frame count {buffer_free_frame_count}.");
@@ -591,7 +600,10 @@ fn playback_loop(
                     {
                         sample_queue.push_back(0);
                     }
-                    if running {
+                    // While prefilling (before the stream is started) a short
+                    // fill just gets padded with silence and is not an
+                    // interruption, so skip the underrun handling until started.
+                    if started && running {
                         running = false;
                         warn!("Playback interrupted, no data available.");
                     }
@@ -611,7 +623,11 @@ fn playback_loop(
         if let Ok(mut estimator) = sync.bufferfill.try_lock() {
             estimator.add(curr_buffer_fill)
         }
-        //println!("{} bef",prev_inst.elapsed().as_micros());
+        if !started {
+            // The buffer now holds the first block, start playback.
+            audio_client.start_stream()?;
+            started = true;
+        }
         if let Some(ref h) = handle {
             if h.wait_for_event(1000).is_err() {
                 error!("Error on playback, stopping stream");
