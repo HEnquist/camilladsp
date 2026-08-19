@@ -27,9 +27,6 @@ jobs:
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
-      - name: Install OpenSSL
-        run: sudo apt-get install openssl libssl-dev -y
-
       - name: Build with Alsa only
         run: cargo build --release
 
@@ -96,9 +93,6 @@ jobs:
 
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
-
-      - name: Install OpenSSL
-        run: sudo apt-get install openssl libssl-dev -y
 
       - name: Build with Alsa only
         run: cargo build --release

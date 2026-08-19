@@ -17,15 +17,12 @@
 use crossbeam_channel::select;
 use parking_lot::{Mutex, RwLockUpgradableReadGuard};
 use std::sync::Arc;
-#[cfg(any(windows, feature = "websocket"))]
 use std::sync::atomic::AtomicBool;
 use std::thread;
-#[cfg(any(windows, feature = "websocket"))]
 use std::time::Duration;
 
 use crate::engine_pipeline::{EnginePipeline, start_pipeline};
 use crate::engine_process_signals::launch_process_signals_thread;
-#[cfg(feature = "websocket")]
 use crate::websocket_server;
 use crate::{
     CommandMessage, ControllerMessage, ExitState, ProcessingState, SHUTDOWN_REQUESTED,
@@ -54,11 +51,9 @@ pub struct EngineConfig {
     pub initial_mutes: [bool; 5],
     /// If `true`, wait for a configuration via WebSocket rather than exiting when none is provided.
     pub wait: bool,
-    /// WebSocket server port (requires `websocket` feature).
-    #[cfg(feature = "websocket")]
+    /// WebSocket server port.
     pub ws_port: Option<usize>,
-    /// WebSocket server bind address (requires `websocket` feature).
-    #[cfg(feature = "websocket")]
+    /// WebSocket server bind address.
     pub ws_address: String,
     /// Path to TLS certificate for the secure WebSocket server (requires `secure-websocket` feature).
     #[cfg(feature = "secure-websocket")]
@@ -288,9 +283,7 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
     let initial_volumes = engine_params.initial_volumes;
     let initial_mutes = engine_params.initial_mutes;
     let wait = engine_params.wait;
-    #[cfg(feature = "websocket")]
     let ws_port = engine_params.ws_port;
-    #[cfg(feature = "websocket")]
     let ws_address = engine_params.ws_address;
     #[cfg(feature = "secure-websocket")]
     let ws_cert = engine_params.ws_cert;
@@ -340,66 +333,63 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
     let active_config = Arc::new(Mutex::new(None));
     let previous_config = Arc::new(Mutex::new(None));
 
-    #[cfg(feature = "websocket")]
-    {
-        let (tx_state, rx_state) = crossbeam_channel::bounded(1);
+    let (tx_state, rx_state) = crossbeam_channel::bounded(1);
 
-        let processing_params_clone = processing_params.clone();
-        let active_config_path_clone = active_config_path.clone();
-        let unsaved_state_changes = Arc::new(AtomicBool::new(false));
+    let processing_params_clone = processing_params.clone();
+    let active_config_path_clone = active_config_path.clone();
+    let unsaved_state_changes = Arc::new(AtomicBool::new(false));
 
-        if let Some(port) = ws_port {
-            let serverport = port;
-            let serveraddress = ws_address.clone();
+    if let Some(port) = ws_port {
+        let serverport = port;
+        let serveraddress = ws_address.clone();
 
-            let shared_data = websocket_server::SharedData {
-                active_config: active_config.clone(),
-                active_config_path,
-                previous_config: previous_config.clone(),
-                command_sender: tx_command,
-                capture_status,
-                playback_status,
-                processing_params,
-                processing_status,
-                state_change_notify: tx_state,
-                state_file_path: statefilename.clone(),
-                unsaved_state_change: unsaved_state_changes.clone(),
-            };
-            let server_params = websocket_server::ServerParameters {
-                port: serverport,
-                address: &serveraddress,
-                #[cfg(feature = "secure-websocket")]
-                cert_file: ws_cert.as_deref(),
-                #[cfg(feature = "secure-websocket")]
-                cert_pass: ws_pass.as_deref(),
-            };
-            websocket_server::start_server(server_params, shared_data);
-        }
+        let shared_data = websocket_server::SharedData {
+            active_config: active_config.clone(),
+            active_config_path,
+            previous_config: previous_config.clone(),
+            command_sender: tx_command,
+            capture_status,
+            playback_status,
+            processing_params,
+            processing_status,
+            state_change_notify: tx_state,
+            state_file_path: statefilename.clone(),
+            unsaved_state_change: unsaved_state_changes.clone(),
+        };
+        let server_params = websocket_server::ServerParameters {
+            port: serverport,
+            address: &serveraddress,
+            #[cfg(feature = "secure-websocket")]
+            cert_file: ws_cert.as_deref(),
+            #[cfg(feature = "secure-websocket")]
+            cert_pass: ws_pass.as_deref(),
+        };
+        websocket_server::start_server(server_params, shared_data);
+    }
 
-        if let Some(fname) = &statefilename {
-            let fname = fname.clone();
+    if let Some(fname) = &statefilename {
+        let fname = fname.clone();
 
-            thread::Builder::new()
-                .name("statefile".to_string())
-                .spawn(move || {
-                    loop {
-                        thread::sleep(Duration::from_millis(1000));
-                        match rx_state.recv() {
-                            Ok(()) => {
-                                debug!("saving state to {}", fname);
-                                statefile::save_state(
-                                    &fname,
-                                    &active_config_path_clone,
-                                    &processing_params_clone,
-                                    &unsaved_state_changes,
-                                );
-                            }
-                            Err(_) => break,
+        thread::Builder::new()
+            .name("statefile".to_string())
+            .spawn(move || {
+                loop {
+                    thread::sleep(Duration::from_millis(1000));
+                    match rx_state.recv() {
+                        Ok(()) => {
+                            debug!("saving state to {}", fname);
+                            statefile::save_state(
+                                &fname,
+                                &active_config_path_clone,
+                                &processing_params_clone,
+                                &unsaved_state_changes,
+                            );
                         }
+                        Err(_) => break,
                     }
-                })
-                .expect("can spawn statefile thread");
-        }
+                }
+            })
+            .expect("can spawn statefile thread");
     }
 
     loop {

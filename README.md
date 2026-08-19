@@ -406,8 +406,7 @@ but the actual speed advantage has not been evaluated.
 Note that the reduction in precision increases the numerical noise.
 
 CamillaDSP includes a Websocket server that can be used to pass commands to the running process.
-This feature is enabled by default, but can be left out. The feature name is "websocket".
-For usage see the section "Controlling via websocket".
+It is always built in. For usage see the section "Controlling via websocket".
 
 ## Building in Linux with standard features
 These instructions assume that the Linux distribution used is one of Fedora, Debian, Ubuntu or Arch.
@@ -427,10 +426,6 @@ If possible, it's recommended to use a pre-built binary on these systems.
 - - Fedora: ```sudo dnf install alsa-lib-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libasound2-dev```
 - - Arch: ```sudo pacman -S alsa-lib```
-- Install OpenSSL dependency:
-- - Fedora: ```sudo dnf install openssl openssl-devel```
-- - Debian/Ubuntu etc: ```sudo apt-get install openssl libssl-dev```
-- - Arch:  ```sudo pacman -S openssl```
 - Clone the repository
 - Build with standard options: ```cargo build --release```
 - - see below for other options
@@ -443,29 +438,21 @@ All the available options, or "features" are:
 - `pipewire-backend`: Native PipeWire support (Linux only).
 - `asio-backend`: ASIO support (Windows only, requires the ASIO SDK).
 - `threaded-alsa`: Experimental ALSA backend implementation (Linux only). When enabled, it replaces the legacy ALSA backend.
-- `websocket`: Websocket server for control.
-- `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
+- `secure-websocket`: Enable TLS for the websocket server. Needs the OpenSSL development files:
+- - Fedora: ```sudo dnf install openssl openssl-devel```
+- - Debian/Ubuntu etc: ```sudo apt-get install openssl libssl-dev```
+- - Arch:  ```sudo pacman -S openssl```
 - `debug`: Enable extra logging, useful for debugging.
 
 
-The `websocket` feature is included in the default features, meaning it will be enabled if you don't specify anything.
+None of these are enabled by default, so a plain build gets none of them.
+Add the ones you want with `--features`, separated by commas.
 
-Cargo doesn't allow disabling a single default feature,
-but you can disable the whole group with the `--no-default-features` flag.
-Then you have to manually add all the ones you want.
-
-Example 1: You want `websocket` and `pipewire-backend`. The first one is included by default so you only need to add `pipewire-backend`:
+Example: You want `pipewire-backend` and `debug`:
 ```
-cargo build --release --features pipewire-backend
+cargo build --release --features pipewire-backend,debug
 (or)
-cargo install --path . --features pipewire-backend
-```
-
-Example 2: You want only `debug`. Since you don't want `websocket` you have to disable the defaults:
-```
-cargo build --release --no-default-features --features debug
-(or)
-cargo install --path . --no-default-features --features debug
+cargo install --path . --features pipewire-backend,debug
 ```
 
 ### Sample precision
@@ -575,7 +562,7 @@ CamillaDSP v3.0.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
-Built with features: websocket
+Built with features: none
 
 Supported device types:
 Capture: RawFile, WavFile, Stdin, SignalGenerator, CoreAudio

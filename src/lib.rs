@@ -204,8 +204,7 @@ pub mod utils;
 /// WASAPI audio backend (Windows only).
 #[cfg(target_os = "windows")]
 pub mod wasapi_backend;
-/// WebSocket control server (requires `websocket` feature).
-#[cfg(feature = "websocket")]
+/// WebSocket control server.
 pub mod websocket_server;
 
 /// Messages sent from audio device threads to the processing supervisor.
