@@ -21,7 +21,6 @@
 use crate::ToF32;
 use std::collections::VecDeque;
 use std::ffi::{c_long, c_void};
-use std::mem;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Barrier, Condvar, Mutex, OnceLock};
@@ -32,7 +31,10 @@ use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{HeapRb, traits::*};
 
 use azo::dto::ChannelId;
-use azo::sys::{Bool, BufferSwitchTimeInfo, Callbacks, MessageSelector, SampleRate, Time};
+use azo::sys::{
+    Bool, BufferSwitch, BufferSwitchTimeInfo, Callbacks, MessageSelector, SampleRate,
+    SampleRateDidChange, Time,
+};
 
 use crate::CommandMessage;
 use crate::ProcessingParameters;
@@ -220,35 +222,17 @@ fn wait_for_playback_callback(timeout: std::time::Duration) -> bool {
 // ASIO callbacks  (unsafe extern "system" — called from ASIO driver thread)
 // ---------------------------------------------------------------------------
 
-/// Correct signature for the `bufferSwitchTimeInfo` callback.
-///
-/// The ASIO SDK declares it as
-/// `ASIOTime* (*bufferSwitchTimeInfo)(ASIOTime* params, long doubleBufferIndex, ASIOBool directProcess)`,
-/// i.e. returning a *pointer*. azo-sys 0.0.8 declares the return as `Time` by value, which
-/// is a different ABI: a by-value struct return of that size is passed through a hidden
-/// out-pointer in the first argument register, so the driver's call would be corrupted.
-/// Declare the correct signature here and transmute the function pointer when building the
-/// `Callbacks` struct.
-type BufferSwitchTimeInfoFn = unsafe extern "system" fn(*mut Time, c_long, Bool) -> *mut Time;
-
 /// Assemble the `Callbacks` struct the driver is given.
-///
-/// Works around the `bufferSwitchTimeInfo` signature mismatch described on
-/// [`BufferSwitchTimeInfoFn`].
 fn make_callbacks(
-    buffer_switch: unsafe extern "system" fn(c_long, Bool),
-    buffer_switch_time_info: BufferSwitchTimeInfoFn,
-    sample_rate_did_change: unsafe extern "system" fn(SampleRate),
+    buffer_switch: BufferSwitch,
+    buffer_switch_time_info: BufferSwitchTimeInfo,
+    sample_rate_did_change: SampleRateDidChange,
 ) -> Callbacks {
     Callbacks {
         buffer_switch,
         sample_rate_did_change,
         asio_message: asio_message_callback,
-        // SAFETY: both are plain function pointers of the same size. The transmute
-        // installs the ABI the driver actually expects, see `BufferSwitchTimeInfoFn`.
-        buffer_switch_time_info: unsafe {
-            mem::transmute::<BufferSwitchTimeInfoFn, BufferSwitchTimeInfo>(buffer_switch_time_info)
-        },
+        buffer_switch_time_info,
     }
 }
 

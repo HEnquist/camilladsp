@@ -32,18 +32,26 @@ use std::ptr;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use azo::Driver;
+use azo::utils::com::InitGuard;
 
 use crate::config::ConfigError;
 
 /// Wrapper that lets a driver handle be shared between the capture and playback threads.
 ///
-/// SAFETY: `azo::Driver` holds a COM interface pointer and an apartment guard, neither of
-/// which is `Send` in general. ASIO interfaces cannot be marshalled at all (no method
-/// returns an `HRESULT`), so every call is a direct vtable call on the calling thread, and
-/// hosts are expected to drive them from their own threads. Each device thread initialises
-/// COM for itself via [`com_init_this_thread`] before touching a driver, so whichever
-/// thread ends up dropping a handle has a matching `CoInitializeEx` of its own.
-struct SharedDriver(Driver);
+/// SAFETY: `InitGuard<Driver>` is deliberately `!Send`, because its `Drop` calls
+/// `CoUninitialize`, which belongs on the thread that called `CoInitializeEx`. We override
+/// that because capture and playback share one driver instance across two threads, and the
+/// full-duplex teardown means either of them may be the one to drop it.
+///
+/// This is sound here for two reasons. ASIO interfaces cannot be marshalled at all (no
+/// method returns an `HRESULT`), so every call is a direct vtable call on the calling
+/// thread and hosts are expected to drive them from their own threads. And each device
+/// thread calls [`com_init_this_thread`] before touching a driver, so whichever thread
+/// drops the guard has a matching `CoInitializeEx` of its own to balance.
+///
+/// The drop must stay a real drop. Recreating the instance is what makes a sample rate
+/// change take effect, and that depends on the `CoUninitialize` this guard performs.
+struct SharedDriver(InitGuard<Driver>);
 
 // SAFETY: see the note on `SharedDriver`.
 unsafe impl Send for SharedDriver {}
