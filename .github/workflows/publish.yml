@@ -231,28 +231,6 @@ jobs:
           asset_name: camilladsp-windows-amd64.zip
           tag: ${{ github.event.release.tag_name }}
 
-      - name: Build with ASIO backend
-        run: cargo build --release --features asio-backend
-
-      - name: Compress with ASIO backend
-        run: powershell Compress-Archive target/release/camilladsp.exe camilladsp-asio.zip
-
-      - name: Upload binary artifact with ASIO backend
-        uses: actions/upload-artifact@v6
-        with:
-          name: camilladsp-windows-asio-amd64
-          path: camilladsp-asio.zip
-          retention-days: 14
-
-      - name: Upload binary with ASIO backend to release
-        if: github.event_name == 'release' && github.event.action == 'created'
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: camilladsp-asio.zip
-          asset_name: camilladsp-windows-asio-amd64.zip
-          tag: ${{ github.event.release.tag_name }}
-
   macos:
     name: macOS Intel
     runs-on: macos-15-intel

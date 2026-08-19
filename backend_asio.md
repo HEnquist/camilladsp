@@ -2,15 +2,19 @@
 
 ## Introduction
 
-The ASIO backend is an optional alternative audio backend for Windows.
+The ASIO backend is an alternative audio backend for Windows.
 It provides low-latency access to audio devices via ASIO drivers.
-To use it, CamillaDSP must be compiled with the `asio-backend` feature enabled.
-See [Building with ASIO backend (Windows)](./README.md#building-with-asio-backend-windows).
+It is always included in Windows builds, so no special build options are needed.
 
-Note that the ASIO backend is licensed under GPLv3 only,
-due to the ASIO SDK license requirements.
-See the [ASIO backend and license implications](./README.md#asio-backend-and-license-implications)
-section for details.
+This backend does not use the ASIO SDK from Steinberg.
+It is an independent implementation that talks to the ASIO drivers directly
+through the COM interfaces they expose.
+There are therefore no extra license restrictions on builds with ASIO enabled,
+and no SDK to download.
+See the [ASIO backend](./README.md#asio-backend) section for details.
+
+ASIO is a trademark of Steinberg Media Technologies GmbH.
+CamillaDSP is not affiliated with or endorsed by Steinberg.
 
 ## ASIO4ALL and other generic wrapper drivers
 
@@ -63,18 +67,18 @@ ASIO drivers do not perform sample format conversion,
 so if a format is specified it must match the device's native format.
 A mismatch will result in an error at startup.
 
-## Full-duplex limitations
-When both capture and playback use the ASIO backend,
-CamillaDSP operates them in full-duplex mode
-through a single shared driver instance. This implies:
-- **Same device:** Capture and playback must specify the same ASIO driver name.
-  ASIO only supports one driver loaded at a time.
-- **Same sample rate:** Resampling is not supported in full-duplex ASIO mode.
-  Both directions share the same hardware clock,
-  so `capture_samplerate` must equal `samplerate`
-  and no `resampler` should be configured.
+## Using one or two devices
+Capture and playback may use the same ASIO device, or two different ones.
+The behaviour differs in an important way, because each ASIO device has its own clock.
 
-Example configuration:
+### Same device, full duplex
+When capture and playback name the same driver,
+CamillaDSP operates them in full-duplex mode through a single shared driver instance.
+Both directions then run on one hardware clock, which means:
+- Resampling is not supported. `capture_samplerate` must equal `samplerate`,
+  and no `resampler` may be configured.
+- The two directions are inherently in sync, so no rate adjustment is needed.
+
 ```yaml
 capture:
   type: Asio
@@ -86,4 +90,25 @@ playback:
   channels: 2
   device: "My ASIO Driver"
   format: S32_LE
+```
+
+### Two different devices
+Capture and playback may also name different drivers.
+Each side then gets its own driver instance, and each device runs on its own clock.
+Since two independent clocks always drift apart,
+this requires asynchronous resampling to avoid a slow build-up of
+buffer underruns or overruns:
+- Set `enable_rate_adjust: true` and configure an asynchronous `resampler`.
+- The sample formats do not have to match.
+  Each device is queried separately and its native format is used.
+
+```yaml
+capture:
+  type: Asio
+  channels: 2
+  device: "My Recording Interface"
+playback:
+  type: Asio
+  channels: 2
+  device: "My Playback Interface"
 ```

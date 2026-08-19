@@ -18,7 +18,6 @@ threaded-alsa = []
 # that runs unprivileged on a desktop.
 rtkit = ["audio_thread_priority/with_dbus"]
 pipewire-backend = ["pipewire", "rtkit"]
-asio-backend = ["asio-sys"]
 bench = []
 websocket = ["tungstenite"]
 secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
@@ -58,7 +57,7 @@ libc = "0.2.172"
 wasapi = "0.24.0"
 # wasapi = { version = "0.24.0", path = "../wasapi-rs" }
 windows = {version = "0.62.0", features = ["Win32_System_Threading", "Win32_Foundation"] }
-asio-sys = { version = "0.2.5", optional = true }
+azo = "0.0.8"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive", "rc"] }
@@ -120,3 +119,10 @@ required-features = ["bench"]
 
 [profile.release]
 codegen-units = 1
+
+# Optimised build that compiles quickly, for testing changes against real hardware.
+# Splitting into more codegen units costs some runtime performance but builds much faster
+# than the release profile. Use the release profile for anything shipped or benchmarked.
+[profile.release-fast]
+inherits = "release"
+codegen-units = 16

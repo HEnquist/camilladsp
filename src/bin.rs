@@ -101,11 +101,7 @@ fn main_process() -> i32 {
     let playback_types = format!("Playback: {}", pb_types.join(", "));
     let capture_types = format!("Capture: {}", cap_types.join(", "));
 
-    let license_notice = if cfg!(feature = "asio-backend") {
-        "License: GPLv3 only (built with ASIO backend)".to_string()
-    } else {
-        "License: GPLv3 or MPL-2.0".to_string()
-    };
+    let license_notice = "License: GPLv3 or MPL-2.0".to_string();
 
     let version_with_hash: &'static str =
         Box::leak(format!("{} ({})", crate_version!(), GIT_HASH).into_boxed_str());

@@ -230,7 +230,7 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             CaptureDevice::Wasapi(dev) => {
                 dev.channels = chans;
             }
-            #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+            #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => {
                 dev.channels = chans;
             }
@@ -280,7 +280,7 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                     return Err(ConfigError::new(&msg).into());
                 }
             }
-            #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+            #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => {
                 let mapped_format = AsioSampleFormat::from_binary_format(&fmt);
                 if let Some(mapped) = mapped_format {
@@ -564,18 +564,14 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
             ConfigError::new("Wasapi shared mode playback must use F32 sample format").into(),
         );
     }
-    #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+    #[cfg(target_os = "windows")]
     if let (CaptureDevice::Asio(cap_dev), PlaybackDevice::Asio(pb_dev)) =
         (&conf.devices.capture, &conf.devices.playback)
     {
-        if cap_dev.device != pb_dev.device {
-            return Err(ConfigError::new(
-                "ASIO only supports one driver at a time. \
-                 Capture and playback must use the same ASIO device",
-            )
-            .into());
-        }
-        if conf.devices.resampler.is_some() {
+        // Capture and playback on the same device share a single driver instance, and
+        // therefore a single clock and sample rate, so there is nothing to resample
+        // between. Different devices are independent and resample like any other pair.
+        if cap_dev.device == pb_dev.device && conf.devices.resampler.is_some() {
             return Err(ConfigError::new(
                 "Resampling is not supported in full-duplex ASIO mode. \
                  Both capture and playback share the same driver and sample rate",
