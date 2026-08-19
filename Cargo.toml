@@ -10,7 +10,6 @@ readme = "README.crates.md"
 repository = "https://github.com/HEnquist/camilladsp"
 
 [features]
-default = ["websocket"]
 threaded-alsa = []
 # Promote real-time threads via rtkit over D-Bus instead of natively, see
 # src/utils/rt_priority.rs. PipeWire implies a desktop system where rtkit ships as a dependency of
@@ -19,8 +18,7 @@ threaded-alsa = []
 rtkit = ["audio_thread_priority/with_dbus"]
 pipewire-backend = ["pipewire", "rtkit"]
 bench = []
-websocket = ["tungstenite"]
-secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
+secure-websocket = ["native-tls", "tungstenite/native-tls"]
 debug = []
 
 # The sample precision is deliberately not a Cargo feature. Features are unified
@@ -77,7 +75,7 @@ git-version = "0.3"
 log = "0.4.14"
 flexi_logger = { version = "0.30.2", features = ["async", "colors"] }
 chrono = "0.4"
-tungstenite = { version = "0.26.1", optional = true }
+tungstenite = "0.26.1"
 native-tls = { version = "0.2.7", optional = true }
 rubato = "5.0"
 #rubato = { git = "https://github.com/HEnquist/rubato", branch = "preview_1.0" }

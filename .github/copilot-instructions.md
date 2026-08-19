@@ -19,7 +19,8 @@ This repository is the **CamillaDSP engine** (Rust).
 ## Cargo feature map
 The authoritative feature list is in `Cargo.toml`. When a task depends on optional functionality, check both the feature gate and any platform gate before editing.
 
-- `default = ["websocket"]`: enables the websocket control server by default. Main implementation: `src/websocket_server/mod.rs`, with helper code in `src/websocket_server/utils.rs`, runtime setup in `src/bin.rs`, and module gating in `src/lib.rs`.
+There are no default features. The websocket control server is always built in, see `src/websocket_server/mod.rs`, with helper code in `src/websocket_server/utils.rs` and runtime setup in `src/bin.rs` and `src/engine.rs`.
+
 - `threaded-alsa`: switches Linux ALSA playback and capture over to the threaded ALSA backend instead of the legacy backend. Main implementation switch: `src/alsa_backend/mod.rs`. Threaded code lives in `src/alsa_backend/threaded_device.rs` and `src/alsa_backend/threaded_buffermanager.rs`; legacy code lives in `src/alsa_backend/device.rs` and `src/alsa_backend/buffermanager.rs`.
 - `pipewire-backend`: enables the Linux PipeWire backend. Main implementation: `src/pipewire_backend/device.rs`, with module gating in `src/lib.rs`.
 The Windows ASIO backend is always built on Windows, gated only on `cfg(target_os = "windows")`. Main implementation: `src/asio_backend/device.rs`, `src/asio_backend/driver.rs` and `src/asio_backend/utils.rs`, with module gating in `src/lib.rs`.
@@ -31,8 +32,7 @@ Values that only get reported (signal levels, volumes in dB, spectrum data) are 
 
 The SIMD convolution kernels in `src/filters/fftconv_avx.rs` and `src/filters/fftconv_neon.rs` exist in both precisions and are always compiled, dispatched through the `ConvKernel` trait in `src/filters/fftconv.rs`. Do not put precision cfgs back in those files.
 - `bench`: enables benchmark-only code paths needed by Criterion benches. Main gated code: `src/filters/fftconv.rs`, and the benches themselves live in `benches/`.
-- `websocket`: enables the websocket control and monitoring server. Main implementation: `src/websocket_server/mod.rs`, with runtime setup in `src/bin.rs` and module gating in `src/lib.rs`.
-- `secure-websocket`: adds TLS support on top of `websocket`. Main implementation: TLS-specific branches in `src/websocket_server/mod.rs` and certificate-related CLI/runtime handling in `src/bin.rs`.
+- `secure-websocket`: adds TLS support to the websocket server. Main implementation: TLS-specific branches in `src/websocket_server/mod.rs` and certificate-related CLI/runtime handling in `src/bin.rs`.
 - `debug`: enables extra trace and debug-only instrumentation, not a separate subsystem. Representative gated locations: `src/lib.rs`, `src/wasapi_backend/device.rs`, and `src/coreaudio_backend/device.rs`.
 
 When changing backend selection, config parsing, CLI flags, or websocket behavior, verify the relevant feature-gated code paths and do not assume the default build includes every backend.

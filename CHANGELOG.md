@@ -26,6 +26,11 @@ Changes:
   the flag.
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
+- The `websocket` build feature is gone. The websocket server is now always built in, since every
+  known packager and build script enabled it anyway, and the control interface is what the GUI and
+  the python bindings talk to. `secure-websocket` remains optional and no longer implies anything.
+  There are now no default features, so `--no-default-features` has no effect and can be dropped
+  from build commands.
 - The `32bit` build feature is gone. 32-bit float processing is now selected with the compiler
   flag `RUSTFLAGS="--cfg camillafloat_f32"` instead. Cargo features are unified across the whole
   dependency graph, so as a feature it could be switched on by any other crate in a build that
