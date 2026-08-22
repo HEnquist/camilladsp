@@ -27,58 +27,37 @@
 // playback threads share a single instance.
 
 use std::collections::HashMap;
-use std::ffi::c_void;
-use std::ptr;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use azo::Driver;
-use azo::utils::com::InitGuard;
+use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 
 use crate::config::ConfigError;
 
-/// Wrapper that lets a driver handle be shared between the capture and playback threads.
-///
-/// SAFETY: `InitGuard<Driver>` is deliberately `!Send`, because its `Drop` calls
-/// `CoUninitialize`, which belongs on the thread that called `CoInitializeEx`. We override
-/// that because capture and playback share one driver instance across two threads, and the
-/// full-duplex teardown means either of them may be the one to drop it.
-///
-/// This is sound here for two reasons. ASIO interfaces cannot be marshalled at all (no
-/// method returns an `HRESULT`), so every call is a direct vtable call on the calling
-/// thread and hosts are expected to drive them from their own threads. And each device
-/// thread calls [`com_init_this_thread`] before touching a driver, so whichever thread
-/// drops the guard has a matching `CoInitializeEx` of its own to balance.
-///
-/// The drop must stay a real drop. Recreating the instance is what makes a sample rate
-/// change take effect, and that depends on the `CoUninitialize` this guard performs.
-struct SharedDriver(InitGuard<Driver>);
-
-// SAFETY: see the note on `SharedDriver`.
-unsafe impl Send for SharedDriver {}
-
 /// One loaded driver. The inner mutex serialises calls into a single instance, which
 /// matters when capture and playback share one device in full-duplex mode.
-type DriverHandle = Arc<Mutex<SharedDriver>>;
+type DriverHandle = Arc<Mutex<Driver>>;
 
 static DRIVERS: LazyLock<Mutex<HashMap<String, DriverHandle>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-// ASIO drivers are COM objects that expect a Single-Threaded Apartment. azo calls
-// CoInitializeEx when a driver instance is created, but only on the creating thread. The
-// capture and playback threads call into instances they did not necessarily create, and
-// either of them may be the one that drops an instance (which calls CoUninitialize), so
-// each initialises COM for itself.
-unsafe extern "system" {
-    fn CoInitializeEx(pvReserved: *mut c_void, dwCoInit: u32) -> i32;
-}
-const COINIT_APARTMENTTHREADED: u32 = 0x2;
-
 /// Initialise COM on the calling thread as a Single-Threaded Apartment.
+///
+/// ASIO drivers are COM objects that expect an STA. Instances are created with
+/// [`Driver::new_unguarded`], so this module owns the COM lifecycle instead of azo. Every
+/// thread that calls into a driver calls this first, and nothing here ever calls
+/// `CoUninitialize`, so COM stays initialised for as long as the process runs. That is what
+/// `new_unguarded` requires, and it means an instance can be created on one thread and used
+/// or dropped on another, which is what full-duplex mode does.
+///
+/// Sharing an instance between threads is fine for ASIO specifically: the interfaces cannot
+/// be marshalled at all (no method returns an `HRESULT`), so every call is a direct vtable
+/// call on the calling thread, and hosts are expected to drive them from their own threads.
 ///
 /// Safe to call more than once per thread; COM keeps a per-thread reference count.
 pub(crate) fn com_init_this_thread() {
-    let hr = unsafe { CoInitializeEx(ptr::null_mut(), COINIT_APARTMENTTHREADED) };
-    trace!("CoInitializeEx returned 0x{hr:08x}");
+    let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    trace!("CoInitializeEx returned 0x{:08x}", hr.0);
 }
 
 /// Look up a loaded driver by device name.
@@ -101,7 +80,7 @@ pub(crate) fn with_driver<T>(
         )));
     };
     let guard = handle.lock().unwrap();
-    f(&guard.0)
+    f(&guard)
 }
 
 /// Whether a driver is currently loaded for `devname`.
@@ -142,7 +121,11 @@ pub fn load_driver_by_name(name: &str) -> Result<(), ConfigError> {
         .find(|driver| driver.description == name)
         .ok_or_else(|| ConfigError::new(&format!("No ASIO driver named '{name}' is registered")))?;
 
-    let driver = metadata.create_instance().map_err(|err| {
+    // SAFETY: `com_init_this_thread` above initialised COM on this thread, and nothing in
+    // this process ever calls `CoUninitialize`, so COM stays initialised for as long as the
+    // instance lives. `DriverMetadata::create_instance` is not used because the COM guard it
+    // returns is `!Send`, which would tie the instance to this thread.
+    let driver = unsafe { Driver::new_unguarded(&metadata.clsid) }.map_err(|err| {
         ConfigError::new(&format!(
             "Failed to create an instance of ASIO driver '{name}': {err}"
         ))
@@ -164,7 +147,7 @@ pub fn load_driver_by_name(name: &str) -> Result<(), ConfigError> {
     DRIVERS
         .lock()
         .unwrap()
-        .insert(name.to_string(), Arc::new(Mutex::new(SharedDriver(driver))));
+        .insert(name.to_string(), Arc::new(Mutex::new(driver)));
     trace!("load_driver_by_name: '{name}' loaded and initialised");
     Ok(())
 }

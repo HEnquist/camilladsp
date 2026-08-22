@@ -870,12 +870,8 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
         // of ~48 kHz, and 48 kHz requests became unstable). Only the measured rate exposes
         // this, the driver's own report does not.
         //
-        // This works because dropping the instance also drops azo's COM guard, which calls
-        // CoUninitialize and tears the apartment down. The old SDK-based backend could not
-        // do this: it called CoInitializeEx before every load and never CoUninitialize, so
-        // its "reload" only released the object while apartment and DLL state survived, and
-        // the rate change did not stick. Keep the teardown a real drop. Leaking the handle
-        // instead, to dodge dropping it on another thread, would silently break this.
+        // Keep the teardown a real drop: releasing the COM object is what resets the
+        // driver's own state, so leaking the handle instead would silently break this.
         teardown_asio_driver(devname);
         load_driver_by_name(devname)?;
         let after_reload = with_driver(devname, |driver| {
