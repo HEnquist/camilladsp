@@ -60,6 +60,30 @@ pub(crate) fn com_init_this_thread() {
     trace!("CoInitializeEx returned 0x{:08x}", hr.0);
 }
 
+/// Drivers that tolerate only one instance per process.
+///
+/// ASIO4ALL keeps the audio device open until `ASIOStop` is called or its DLL is unloaded,
+/// which its author has confirmed on the ASIO4ALL forum. Releasing an instance that was
+/// only initialised, never started, therefore leaves the device held, and creating the next
+/// instance either deadlocks in `ASIOInit` or takes the process down. `ASIOStop` before the
+/// release does not reliably help, it worked once in three attempts.
+///
+/// Matched case-insensitively as a substring: the same driver appears as `ASIO4ALL v2` in
+/// the registry key and from `getDriverName`, but as `Asio4all v2` in the description that
+/// device names are taken from.
+const SINGLE_INSTANCE_DRIVERS: &[&str] = &["asio4all"];
+
+/// Whether only one instance of this driver may be created per process.
+///
+/// Such drivers cannot be reloaded to apply a sample rate change, and cannot be probed for
+/// capabilities, since probing loads an instance and releases it again.
+pub(crate) fn is_single_instance_driver(devname: &str) -> bool {
+    let lowercase = devname.to_lowercase();
+    SINGLE_INSTANCE_DRIVERS
+        .iter()
+        .any(|quirky| lowercase.contains(quirky))
+}
+
 /// Look up a loaded driver by device name.
 fn lookup(devname: &str) -> Option<DriverHandle> {
     DRIVERS.lock().unwrap().get(devname).cloned()

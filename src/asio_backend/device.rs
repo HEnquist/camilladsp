@@ -42,7 +42,8 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 use crate::asio_backend::driver::{
-    com_init_this_thread, driver_is_loaded, teardown_asio_driver, with_driver,
+    com_init_this_thread, driver_is_loaded, is_single_instance_driver, teardown_asio_driver,
+    with_driver,
 };
 use crate::asio_backend::utils::{
     ChannelBuffers, asio_format_to_str, asio_sample_type_name, copy_from_queue_at_offset,
@@ -863,33 +864,54 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
             })
         })?;
 
-        // Recreating the driver instance is what actually makes the new rate take effect.
-        // Do NOT remove this: without it the Steinberg built-in driver reports the
-        // requested rate from getSampleRate while the hardware keeps running at the old
-        // one, which was measured directly (asking for 96 kHz gave a measured capture rate
-        // of ~48 kHz, and 48 kHz requests became unstable). Only the measured rate exposes
-        // this, the driver's own report does not.
+        // Workaround for drivers that accept a new rate but do not act on it. The only
+        // one we have seen do this is the Steinberg built-in (generic) driver, version
+        // 1.0.9, the latest as of August 2026. It returns success from setSampleRate and
+        // then reports the new rate from getSampleRate, while the hardware keeps clocking
+        // at the old one. Only measuring the callback rate exposes it, the driver's own
+        // report does not. Asking it to go from 48 to 96 kHz gave a measured rate of
+        // 48 kHz, and 44.1 to 48 kHz stayed at 44.1 kHz, while moving down from 96 kHz
+        // worked without any of this. It behaved the same with two different WASAPI
+        // devices under it, so this looks like the driver itself rather than the endpoint
+        // it wraps. A MOTU M series switches in both directions on its own, so this is
+        // not the norm.
+        //
+        // Recreating the instance is the only thing found that makes the rate stick, the
+        // requested value does survive into the next instance. Setting the rate twice,
+        // waiting a second, re-running ASIOInit and a start/stop cycle were all tried on
+        // the same instance and changed nothing. Disposing and recreating the buffers is
+        // not an option here, the rate is set right after ASIOInit and no buffers exist
+        // yet.
         //
         // Keep the teardown a real drop: releasing the COM object is what resets the
-        // driver's own state, so leaking the handle instead would silently break this.
-        teardown_asio_driver(devname);
-        load_driver_by_name(devname)?;
-        let after_reload = with_driver(devname, |driver| {
+        // driver, so leaking the handle instead would silently break this.
+        //
+        // Drivers that tolerate only one instance per process are left out of this.
+        // Recreating one of those deadlocks, and they apply the rate on their own anyway.
+        if is_single_instance_driver(devname) {
+            debug!(
+                "Not reinitialising '{devname}' to apply the sample rate, this \
+                 driver allows only one instance per process."
+            );
+        } else {
+            teardown_asio_driver(devname);
+            load_driver_by_name(devname)?;
+        }
+
+        let after_set = with_driver(devname, |driver| {
             driver.get_sample_rate().map_err(|err| {
                 ConfigError::new(&format!(
-                    "Failed to read ASIO sample rate after reinitialising: {err:?}"
+                    "Failed to read ASIO sample rate after setting it: {err:?}"
                 ))
             })
         })?;
 
-        if (after_reload - rate).abs() > 0.5 {
+        if (after_set - rate).abs() > 0.5 {
             return Err(ConfigError::new(&format!(
-                "ASIO device still reports {after_reload} Hz after being asked for \
-                 {samplerate} Hz and reinitialised. The driver may require the rate to be \
-                 set from its own control panel."
+                "ASIO device still reports {after_set} Hz after being asked for                  {samplerate} Hz. The driver may require the rate to be set from its own                  control panel."
             )));
         }
-        debug!("ASIO sample rate {samplerate} Hz applied after reinitialising the driver.");
+        debug!("ASIO sample rate {samplerate} Hz applied.");
     }
 
     // Query channels AFTER the sample rate has been set.
@@ -983,6 +1005,17 @@ pub fn get_device_capabilities(
     device_name: &str,
     input: bool,
 ) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
+    // Refuse to probe drivers that tolerate only one instance per process. Probing loads
+    // an instance and releases it again, which leaves such a driver holding the device.
+    // Every later instance in this process then deadlocks or takes the process down, so a
+    // probe would break the device for the rest of the session. Probing ASIO4ALL twice was
+    // enough to kill the process outright.
+    if is_single_instance_driver(device_name) {
+        return Err(crate::DeviceError::Other(format!(
+            "ASIO driver '{device_name}' cannot be probed, it tolerates only one instance per process."
+        )));
+    }
+
     // Refuse to probe if an in-process ASIO driver is already loaded (live stream).
     // load_driver_by_name() unconditionally tears down any loaded driver, which
     // would silently interrupt active playback or capture.

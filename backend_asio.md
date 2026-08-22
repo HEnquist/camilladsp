@@ -36,6 +36,26 @@ Devices like this typically ship with their own ASIO driver though,
 and that native driver is almost always a better choice than a generic
 wrapper such as ASIO4ALL.
 
+### ASIO4ALL
+
+ASIO4ALL tolerates only one driver instance per process.
+Once an instance has been created and released,
+creating another one either hangs in `ASIOInit` or takes the process down.
+Its author has explained that the audio device stays open
+until `ASIOStop` is called or the driver dll is unloaded,
+which is what causes this.
+
+CamillaDSP handles it in two ways.
+It never reloads the driver to apply a sample rate change,
+something only the Steinberg generic driver needs.
+And it refuses to probe ASIO4ALL for capabilities,
+since a probe creates an instance and releases it again.
+A capability request for ASIO4ALL therefore returns an error,
+and the GUI cannot list its supported rates and formats.
+Capture, playback and sample rate changes all work as usual.
+
+This was seen with ASIO4ALL 2.22.
+
 ## Configuration of devices
 
 Set the device `type` to `Asio` for both capture and playback.
