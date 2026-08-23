@@ -54,13 +54,16 @@ under the terms of either of the following licenses:
    available at [www.mozilla.org](https://www.mozilla.org/en-US/MPL/),
    or [LICENSE_MPL2.0.txt](LICENSE_MPL2.0.txt).
 
-## ASIO backend and license implications
+## ASIO backend
 
-The optional ASIO backend (`asio-backend` feature) depends on the ASIO SDK,
-which is licensed under the GNU General Public License version 3.
-When CamillaDSP is built with the `asio-backend` feature enabled,
-the resulting binary is subject to the GPLv3 license only.
-The MPL 2.0 option does not apply to binaries that include ASIO SDK code.
+The ASIO backend, always included in Windows builds, does not use the ASIO SDK from Steinberg.
+It talks to the ASIO drivers directly through the COM interfaces they expose,
+via the permissively licensed [azo](https://crates.io/crates/azo) crate.
+Builds with the ASIO backend enabled are therefore covered by the same dual license
+as every other build, with no extra restrictions and no SDK to download.
+
+ASIO is a trademark of Steinberg Media Technologies GmbH.
+CamillaDSP is not affiliated with or endorsed by Steinberg.
 
 # Disclaimer
 
@@ -95,7 +98,7 @@ and the Mozilla Public License Version 2.0:
 - **[Customized build](#customized-build)**
 - **[Optimize for your system](#optimize-for-your-system)**
 - **[Building on Windows and macOS](#building-on-windows-and-macos)**
-- **[Building with ASIO backend (Windows)](#building-with-asio-backend-windows)**
+- **[ASIO support (Windows)](#asio-support-windows)**
 
 **[How to run](#how-to-run)**
 - **[Command line options](#command-line-options)**
@@ -269,7 +272,7 @@ These are the key dependencies for CamillaDSP.
 * https://crates.io/crates/alsa - ALSA bindings
 * https://crates.io/crates/coreaudio-rs - CoreAudio bindings
 * https://crates.io/crates/pipewire - PipeWire bindings
-* https://crates.io/crates/asio-sys
+* https://crates.io/crates/azo - ASIO driver access
 * https://crates.io/crates/wasapi
 * https://crates.io/crates/clap - Command line argument parsing
 * https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
@@ -395,8 +398,7 @@ This tool works on all supported platforms (Linux, macOS and Windows). Get it he
 For Windows you also need the "Build Tools for Visual Studio". Get them from here: https://aka.ms/buildtools
 
 When building on Linux the ALSA backend is always enabled.
-Similarly, building on Windows always enables the Wasapi backend.
-The optional ASIO backend can be enabled with the `asio-backend` feature (see [Customized build](#customized-build)).
+Similarly, building on Windows always enables the Wasapi and ASIO backends.
 And building on macOS always enables the CoreAudio backend.
 
 By default the internal processing is done using 64-bit floats.
@@ -436,7 +438,6 @@ If possible, it's recommended to use a pre-built binary on these systems.
 ## Customized build
 All the available options, or "features" are:
 - `pipewire-backend`: Native PipeWire support (Linux only).
-- `asio-backend`: ASIO support (Windows only, requires the ASIO SDK).
 - `threaded-alsa`: Experimental ALSA backend implementation (Linux only). When enabled, it replaces the legacy ALSA backend.
 - `secure-websocket`: Enable TLS for the websocket server. Needs the OpenSSL development files:
 - - Fedora: ```sudo dnf install openssl openssl-devel```
@@ -520,26 +521,12 @@ $env:RUSTFLAGS="-C target-cpu=native"
 cargo build --release
 ```
 
-## Building with ASIO backend (Windows)
-To build CamillaDSP with ASIO support, enable the `asio-backend` feature.
-This uses the `asio-sys` crate, which generates bindings via `bindgen`.
-The ASIO SDK is downloaded/extracted automatically during the build,
-so you normally do not need to download it manually.
-
-Before building, ensure `bindgen` requirements are met:
-- Install LLVM/Clang (Clang 9.0+). On Windows with winget:
-  - `winget install LLVM.LLVM`
-- In most setups you do **not** need to set `LIBCLANG_PATH` manually.
-  Keep this as a reference in case `bindgen` cannot find `libclang`:
-  - PowerShell: `$env:LIBCLANG_PATH="C:\\Program Files\\LLVM\\bin"`
-  - cmd.exe: `set LIBCLANG_PATH=C:\Program Files\LLVM\bin`
-
-Reference: [rust-bindgen requirements](https://rust-lang.github.io/rust-bindgen/requirements.html)
-
-Build command:
-- `cargo build --release --features asio-backend`
-
-After a successful build, the binary is available at `target/release/camilladsp.exe`.
+## ASIO support (Windows)
+The ASIO backend is always included in Windows builds, and needs no extra build steps.
+It uses the [azo](https://crates.io/crates/azo) crate, which is pure Rust,
+so there is no ASIO SDK to download and no C++ toolchain or `bindgen` setup required.
+The resulting binary also runs on systems without any ASIO drivers installed;
+it simply reports no available ASIO devices.
 
 
 # How to run

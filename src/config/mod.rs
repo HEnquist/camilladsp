@@ -195,7 +195,7 @@ impl WasapiSampleFormat {
     }
 }
 
-#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+#[cfg(target_os = "windows")]
 #[allow(clippy::upper_case_acronyms, non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -208,7 +208,7 @@ pub enum AsioSampleFormat {
     F64_LE,
 }
 
-#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+#[cfg(target_os = "windows")]
 impl AsioSampleFormat {
     // Map binary format to the corresponding ASIO format, if possible.
     // Used for overriding config values.
@@ -356,7 +356,7 @@ pub enum CaptureDevice {
     CoreAudio(CaptureDeviceCA),
     #[cfg(target_os = "windows")]
     Wasapi(CaptureDeviceWasapi),
-    #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+    #[cfg(target_os = "windows")]
     Asio(CaptureDeviceAsio),
     SignalGenerator {
         #[serde(deserialize_with = "validate_nonzero_usize")]
@@ -383,7 +383,7 @@ impl CaptureDevice {
             CaptureDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => dev.channels,
-            #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+            #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => dev.channels,
             CaptureDevice::SignalGenerator { channels, .. } => *channels,
         }
@@ -402,7 +402,7 @@ impl CaptureDevice {
             CaptureDevice::CoreAudio(dev) => dev.labels.clone(),
             #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => dev.labels.clone(),
-            #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+            #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => dev.labels.clone(),
             CaptureDevice::SignalGenerator { labels, .. } => labels.clone(),
         }
@@ -528,7 +528,7 @@ impl CaptureDeviceWasapi {
     }
 }
 
-#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+#[cfg(target_os = "windows")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CaptureDeviceAsio {
@@ -602,7 +602,7 @@ pub enum PlaybackDevice {
     CoreAudio(PlaybackDeviceCA),
     #[cfg(target_os = "windows")]
     Wasapi(PlaybackDeviceWasapi),
-    #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+    #[cfg(target_os = "windows")]
     Asio(PlaybackDeviceAsio),
 }
 
@@ -619,7 +619,7 @@ impl PlaybackDevice {
             PlaybackDevice::CoreAudio(dev) => dev.channels,
             #[cfg(target_os = "windows")]
             PlaybackDevice::Wasapi(dev) => dev.channels,
-            #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+            #[cfg(target_os = "windows")]
             PlaybackDevice::Asio(dev) => dev.channels,
         }
     }
@@ -651,7 +651,7 @@ impl PlaybackDeviceWasapi {
     }
 }
 
-#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+#[cfg(target_os = "windows")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PlaybackDeviceAsio {

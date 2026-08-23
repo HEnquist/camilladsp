@@ -3,32 +3,46 @@
 //
 // This file is part of CamillaDSP.
 //
-// This file is licensed under the GNU General Public License version 3 only.
-// It links against the ASIO SDK, which is licensed under GPLv3.
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
 //
-// You should have received a copy of the GNU General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-// ASIO backend for playback and capture.
-// This implementation uses the asio-sys crate to interface with the ASIO driver system.
+// Helpers for the ASIO backend.
+// The driver is accessed through the azo crate, which talks to the driver COM objects
+// directly instead of going through the Steinberg ASIO SDK.
 
 use std::collections::VecDeque;
-use std::ptr;
+use std::ffi::c_void;
 
-use asio_sys::bindings::asio_import::{
-    ASIOBufferInfo, ASIOCallbacks, ASIOChannelInfo, ASIOCreateBuffers, ASIOGetBufferSize,
-    ASIOGetChannelInfo, get_sample_rate,
-};
+use azo::dto::ChannelId;
+use azo::sys::{Callbacks, SampleType};
 
+use crate::asio_backend::driver::with_driver;
 use crate::config::{AsioSampleFormat, BinarySampleFormat, ConfigError};
+
+/// The pair of double-buffer pointers a driver hands out for one channel.
+///
+/// Index with the buffer index passed to the buffer-switch callback.
+pub(crate) type ChannelBuffers = [*mut c_void; 2];
 
 /// Read the currently active ASIO sample rate in Hz.
 ///
 /// Returns `None` if the driver call fails or returns a non-finite/non-positive value.
-pub(crate) fn read_current_asio_sample_rate_hz() -> Option<usize> {
-    let mut rate = 0.0f64;
-    let res = unsafe { get_sample_rate(&mut rate) };
-    if res == 0 && rate.is_finite() && rate > 0.0 {
+pub(crate) fn read_current_asio_sample_rate_hz(devname: &str) -> Option<usize> {
+    let rate = with_driver(devname, |driver| {
+        driver
+            .get_sample_rate()
+            .map_err(|err| ConfigError::new(&format!("Failed to read ASIO sample rate: {err:?}")))
+    })
+    .ok()?;
+    if rate.is_finite() && rate > 0.0 {
         Some(rate.round() as usize)
     } else {
         None
@@ -53,13 +67,12 @@ pub(crate) fn copy_from_queue_at_offset(queue: &VecDeque<u8>, offset: usize, dst
     }
 }
 
-/// Create an `ASIOBufferInfo` array for the given number of channels.
-pub(crate) fn make_buffer_infos(num_channels: usize, is_input: bool) -> Vec<ASIOBufferInfo> {
+/// Build the channel identifiers for the first `num_channels` channels of one direction.
+pub(crate) fn make_channel_ids(num_channels: usize, is_input: bool) -> Vec<ChannelId> {
     (0..num_channels)
-        .map(|ch| ASIOBufferInfo {
-            isInput: if is_input { 1 } else { 0 },
-            channelNum: ch as i32,
-            buffers: [ptr::null_mut(), ptr::null_mut()],
+        .map(|ch| ChannelId {
+            input: is_input,
+            index: ch as i32,
         })
         .collect()
 }
@@ -79,119 +92,85 @@ pub(crate) fn resolve_binary_format(format: &AsioSampleFormat) -> BinarySampleFo
 /// Convert an `AsioSampleFormat` to the canonical string used in YAML configs.
 pub(crate) fn asio_format_to_str(fmt: AsioSampleFormat) -> &'static str {
     match fmt {
-        AsioSampleFormat::S16_LE => "S16_LE",
-        AsioSampleFormat::S24_4_LE => "S24_4_LE",
-        AsioSampleFormat::S24_3_LE => "S24_3_LE",
-        AsioSampleFormat::S32_LE => "S32_LE",
-        AsioSampleFormat::F32_LE => "F32_LE",
-        AsioSampleFormat::F64_LE => "F64_LE",
+        AsioSampleFormat::S16_LE => "S16LE",
+        AsioSampleFormat::S24_3_LE => "S24LE3",
+        AsioSampleFormat::S24_4_LE => "S24LE",
+        AsioSampleFormat::S32_LE => "S32LE",
+        AsioSampleFormat::F32_LE => "FLOAT32LE",
+        AsioSampleFormat::F64_LE => "FLOAT64LE",
     }
 }
 
-const ASIO_ST_INT16_MSB: i32 = 0;
-const ASIO_ST_INT24_MSB: i32 = 1;
-const ASIO_ST_INT32_MSB: i32 = 2;
-const ASIO_ST_FLOAT32_MSB: i32 = 3;
-const ASIO_ST_FLOAT64_MSB: i32 = 4;
-const ASIO_ST_INT32_MSB_16: i32 = 8;
-const ASIO_ST_INT32_MSB_18: i32 = 9;
-const ASIO_ST_INT32_MSB_20: i32 = 10;
-const ASIO_ST_INT32_MSB_24: i32 = 11;
-const ASIO_ST_INT16_LSB: i32 = 16;
-const ASIO_ST_INT24_LSB: i32 = 17;
-const ASIO_ST_INT32_LSB: i32 = 18;
-const ASIO_ST_FLOAT32_LSB: i32 = 19;
-const ASIO_ST_FLOAT64_LSB: i32 = 20;
-const ASIO_ST_INT32_LSB_16: i32 = 24;
-const ASIO_ST_INT32_LSB_18: i32 = 25;
-const ASIO_ST_INT32_LSB_20: i32 = 26;
-const ASIO_ST_INT32_LSB_24: i32 = 27;
-const ASIO_ST_DSD_INT8_LSB_1: i32 = 32;
-const ASIO_ST_DSD_INT8_MSB_1: i32 = 33;
-const ASIO_ST_DSD_INT8_NER8: i32 = 40;
-
-/// Return a human-readable name for an ASIO sample type
-/// (from `ASIOChannelInfo::type_`).
-pub(crate) fn asio_sample_type_name(type_id: i32) -> &'static str {
-    match type_id {
-        ASIO_ST_INT16_MSB => "Int16 MSB (big-endian)",
-        ASIO_ST_INT24_MSB => "Int24 MSB (3-byte packed, big-endian)",
-        ASIO_ST_INT32_MSB => "Int32 MSB (big-endian)",
-        ASIO_ST_FLOAT32_MSB => "Float32 MSB (big-endian)",
-        ASIO_ST_FLOAT64_MSB => "Float64 MSB (big-endian)",
-        ASIO_ST_INT32_MSB_16 => "Int32 MSB 16-bit (big-endian)",
-        ASIO_ST_INT32_MSB_18 => "Int32 MSB 18-bit (big-endian)",
-        ASIO_ST_INT32_MSB_20 => "Int32 MSB 20-bit (big-endian)",
-        ASIO_ST_INT32_MSB_24 => "Int32 MSB 24-bit (big-endian)",
-        ASIO_ST_INT16_LSB => "Int16 LSB",
-        ASIO_ST_INT24_LSB => "Int24 LSB (3-byte packed)",
-        ASIO_ST_INT32_LSB => "Int32 LSB",
-        ASIO_ST_FLOAT32_LSB => "Float32 LSB",
-        ASIO_ST_FLOAT64_LSB => "Float64 LSB",
-        ASIO_ST_INT32_LSB_16 => "Int32 LSB 16-bit",
-        ASIO_ST_INT32_LSB_18 => "Int32 LSB 18-bit",
-        ASIO_ST_INT32_LSB_20 => "Int32 LSB 20-bit",
-        ASIO_ST_INT32_LSB_24 => "Int32 LSB 24-bit",
-        ASIO_ST_DSD_INT8_LSB_1 => "DSD Int8 LSB 1",
-        ASIO_ST_DSD_INT8_MSB_1 => "DSD Int8 MSB 1",
-        ASIO_ST_DSD_INT8_NER8 => "DSD Int8 NER8",
+/// Human-readable name of an ASIO sample type, for logging.
+pub(crate) fn asio_sample_type_name(sample_type: SampleType) -> &'static str {
+    match sample_type {
+        SampleType::PCM_I16_MSB => "Int16 MSB (big-endian)",
+        SampleType::PCM_I24_MSB => "Int24 MSB (3-byte packed, big-endian)",
+        SampleType::PCM_I32_MSB => "Int32 MSB (big-endian)",
+        SampleType::PCM_F32_MSB => "Float32 MSB (big-endian)",
+        SampleType::PCM_F64_MSB => "Float64 MSB (big-endian)",
+        SampleType::PCM_I32_MSB_16 => "Int32 MSB 16-bit (big-endian)",
+        SampleType::PCM_I32_MSB_18 => "Int32 MSB 18-bit (big-endian)",
+        SampleType::PCM_I32_MSB_20 => "Int32 MSB 20-bit (big-endian)",
+        SampleType::PCM_I32_MSB_24 => "Int32 MSB 24-bit (big-endian)",
+        SampleType::PCM_I16_LSB => "Int16 LSB",
+        SampleType::PCM_I24_LSB => "Int24 LSB (3-byte packed)",
+        SampleType::PCM_I32_LSB => "Int32 LSB",
+        SampleType::PCM_F32_LSB => "Float32 LSB",
+        SampleType::PCM_F64_LSB => "Float64 LSB",
+        SampleType::PCM_I32_LSB_16 => "Int32 LSB 16-bit",
+        SampleType::PCM_I32_LSB_18 => "Int32 LSB 18-bit",
+        SampleType::PCM_I32_LSB_20 => "Int32 LSB 20-bit",
+        SampleType::PCM_I32_LSB_24 => "Int32 LSB 24-bit",
+        SampleType::DSD_I8_LSB_1 => "DSD Int8 LSB 1",
+        SampleType::DSD_I8_MSB_1 => "DSD Int8 MSB 1",
+        SampleType::DSD_I8_NER_8 => "DSD Int8 NER8",
         _ => "Unknown",
     }
 }
 
-/// Map an ASIO sample type to an `AsioSampleFormat`.
-///
-/// Returns `None` for types that CamillaDSP cannot handle (e.g. big-endian, DSD).
-pub(crate) fn asio_sample_type_to_format(type_id: i32) -> Option<AsioSampleFormat> {
-    match type_id {
-        ASIO_ST_INT16_LSB => Some(AsioSampleFormat::S16_LE),
-        ASIO_ST_INT24_LSB => Some(AsioSampleFormat::S24_3_LE),
-        ASIO_ST_INT32_LSB => Some(AsioSampleFormat::S32_LE),
-        ASIO_ST_INT32_LSB_16 => Some(AsioSampleFormat::S32_LE),
-        ASIO_ST_INT32_LSB_18 => Some(AsioSampleFormat::S32_LE),
-        ASIO_ST_INT32_LSB_20 => Some(AsioSampleFormat::S32_LE),
-        ASIO_ST_INT32_LSB_24 => Some(AsioSampleFormat::S24_4_LE),
-        ASIO_ST_FLOAT32_LSB => Some(AsioSampleFormat::F32_LE),
-        ASIO_ST_FLOAT64_LSB => Some(AsioSampleFormat::F64_LE),
+/// Map an ASIO sample type to the matching `AsioSampleFormat`, if supported.
+pub(crate) fn asio_sample_type_to_format(sample_type: SampleType) -> Option<AsioSampleFormat> {
+    match sample_type {
+        SampleType::PCM_I16_LSB => Some(AsioSampleFormat::S16_LE),
+        SampleType::PCM_I24_LSB => Some(AsioSampleFormat::S24_3_LE),
+        SampleType::PCM_I32_LSB => Some(AsioSampleFormat::S32_LE),
+        SampleType::PCM_I32_LSB_16 => Some(AsioSampleFormat::S32_LE),
+        SampleType::PCM_I32_LSB_18 => Some(AsioSampleFormat::S32_LE),
+        SampleType::PCM_I32_LSB_20 => Some(AsioSampleFormat::S32_LE),
+        SampleType::PCM_I32_LSB_24 => Some(AsioSampleFormat::S24_4_LE),
+        SampleType::PCM_F32_LSB => Some(AsioSampleFormat::F32_LE),
+        SampleType::PCM_F64_LSB => Some(AsioSampleFormat::F64_LE),
         _ => None,
     }
 }
 
-/// Convert a fixed-size C char buffer to `String` without reading past the buffer.
-///
-/// Some ASIO drivers may return char arrays without NUL termination; this helper
-/// safely truncates at the first NUL if present, otherwise uses the full buffer.
-pub(crate) fn fixed_cstr_buf_to_string(buf: &[i8]) -> String {
-    let end = buf.iter().position(|&ch| ch == 0).unwrap_or(buf.len());
-    let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, end) };
-    String::from_utf8_lossy(bytes).into_owned()
-}
-
 /// Query the native sample format of channel 0 for the given direction.
 /// Must be called after the driver is loaded and initialized.
-pub(crate) fn query_device_format(is_input: bool) -> Result<i32, ConfigError> {
-    let mut info = ASIOChannelInfo {
-        channel: 0,
-        isInput: if is_input { 1 } else { 0 },
-        isActive: 0,
-        channelGroup: 0,
-        type_: 0,
-        name: [0; 32],
-    };
-    let res = unsafe { ASIOGetChannelInfo(&mut info) };
-    if res != 0 {
-        let direction = if is_input { "input" } else { "output" };
-        return Err(ConfigError::new(&format!(
-            "ASIOGetChannelInfo failed for {direction} channel 0 (error code {res})"
-        )));
-    }
+pub(crate) fn query_device_format(
+    devname: &str,
+    is_input: bool,
+) -> Result<SampleType, ConfigError> {
+    let direction = if is_input { "input" } else { "output" };
+    let info = with_driver(devname, |driver| {
+        driver
+            .channel_info(ChannelId {
+                input: is_input,
+                index: 0,
+            })
+            .map_err(|err| {
+                ConfigError::new(&format!(
+                    "getChannelInfo failed for {direction} channel 0: {err:?}"
+                ))
+            })
+    })?;
     debug!(
         "ASIO channel 0 ({}): type={} ({})",
-        if is_input { "input" } else { "output" },
-        info.type_,
-        asio_sample_type_name(info.type_),
+        direction,
+        info.sample_type.0,
+        asio_sample_type_name(info.sample_type),
     );
-    Ok(info.type_)
+    Ok(info.sample_type)
 }
 
 /// Resolve the sample format to use for a given direction.
@@ -204,10 +183,11 @@ pub(crate) fn query_device_format(is_input: bool) -> Result<i32, ConfigError> {
 /// format, an error is returned. If the format is `None`, auto-detect from the device.
 /// Must be called after the driver is loaded and initialized.
 pub(crate) fn resolve_format(
+    devname: &str,
     configured: &Option<AsioSampleFormat>,
     is_input: bool,
 ) -> Result<AsioSampleFormat, ConfigError> {
-    let device_type = query_device_format(is_input)?;
+    let device_type = query_device_format(devname, is_input)?;
     let device_format = asio_sample_type_to_format(device_type);
     let direction = if is_input { "capture" } else { "playback" };
 
@@ -216,7 +196,7 @@ pub(crate) fn resolve_format(
         None => {
             return Err(ConfigError::new(&format!(
                 "ASIO {direction}: device uses unsupported sample type {} ({})",
-                device_type,
+                device_type.0,
                 asio_sample_type_name(device_type),
             )));
         }
@@ -239,59 +219,107 @@ pub(crate) fn resolve_format(
     Ok(native_format)
 }
 
-/// Create ASIO buffers and register callbacks.
-pub(crate) fn create_asio_buffers(
-    buffer_infos: &mut [ASIOBufferInfo],
-    num_channels: i32,
+/// Create ASIO buffers for `channels` and register `callbacks`.
+///
+/// Returns one [`ChannelBuffers`] entry per requested channel, in the same order.
+///
+/// # Safety
+/// `callbacks` must remain valid until the buffers are disposed.
+pub(crate) unsafe fn create_asio_buffers(
+    devname: &str,
+    channels: &[ChannelId],
     buffer_size: i32,
-    callbacks: &mut ASIOCallbacks,
-) -> Result<(), ConfigError> {
+    callbacks: *const Callbacks,
+) -> Result<Vec<ChannelBuffers>, ConfigError> {
     trace!(
-        "Calling ASIOCreateBuffers: infos_ptr={:p}, channels={}, buffer_size={}, callbacks_ptr={:p}",
-        buffer_infos.as_mut_ptr(),
-        num_channels,
+        "Calling createBuffers: channels={}, buffer_size={}, callbacks_ptr={:p}",
+        channels.len(),
         buffer_size,
-        callbacks as *mut ASIOCallbacks
+        callbacks
     );
-    let res = unsafe {
-        ASIOCreateBuffers(
-            buffer_infos.as_mut_ptr(),
-            num_channels,
-            buffer_size,
-            callbacks,
-        )
-    };
-    trace!("ASIOCreateBuffers returned {}.", res);
-    if res != 0 {
-        return Err(ConfigError::new(&format!(
-            "ASIOCreateBuffers failed with error code {res}"
-        )));
+    let buffers = with_driver(devname, |driver| {
+        // SAFETY: the caller guarantees `callbacks` outlives the buffers.
+        unsafe { driver.create_buffers(channels.iter().copied(), buffer_size, callbacks) }
+            .map(|iter| iter.collect::<Vec<_>>())
+            .map_err(|err| ConfigError::new(&format!("createBuffers failed: {err:?}")))
+    })?;
+    trace!("createBuffers returned {} channel buffers.", buffers.len());
+    Ok(buffers)
+}
+
+/// Dispose all buffers previously created on the driver.
+pub(crate) fn dispose_asio_buffers(devname: &str) -> Result<(), ConfigError> {
+    with_driver(devname, |driver| {
+        driver
+            .dispose_all_buffers()
+            .map_err(|err| ConfigError::new(&format!("disposeBuffers failed: {err:?}")))
+    })
+}
+
+/// Start the ASIO stream.
+pub(crate) fn start_asio_stream(devname: &str) -> Result<(), ConfigError> {
+    with_driver(devname, |driver| {
+        driver
+            .start()
+            .map_err(|err| ConfigError::new(&format!("start failed: {err:?}")))
+    })
+}
+
+/// Stop the ASIO stream.
+pub(crate) fn stop_asio_stream(devname: &str) -> Result<(), ConfigError> {
+    with_driver(devname, |driver| {
+        driver
+            .stop()
+            .map_err(|err| ConfigError::new(&format!("stop failed: {err:?}")))
+    })
+}
+
+/// Log the latencies the driver reports, for diagnostics.
+///
+/// Must be called after the buffers have been created, since the reported values depend on
+/// the buffer size. This is the driver's own latency and does not include the buffering
+/// CamillaDSP adds through `chunksize` and `target_level`.
+pub(crate) fn log_asio_latencies(devname: &str) {
+    // Querying the driver costs two calls, so skip it entirely unless it will be logged.
+    if !log_enabled!(log::Level::Debug) {
+        return;
     }
-    Ok(())
+    let latencies = with_driver(devname, |driver| {
+        driver
+            .latencies()
+            .map_err(|err| ConfigError::new(&format!("getLatencies failed: {err:?}")))
+    });
+    let samplerate = read_current_asio_sample_rate_hz(devname).unwrap_or(0);
+    match latencies {
+        Ok(latencies) if samplerate > 0 => {
+            let as_ms = |frames: i32| 1000.0 * frames as f64 / samplerate as f64;
+            debug!(
+                "ASIO driver reported latencies: capture {} frames ({:.1} ms), \
+                 playback {} frames ({:.1} ms).",
+                latencies.in_,
+                as_ms(latencies.in_),
+                latencies.out,
+                as_ms(latencies.out),
+            );
+        }
+        Ok(latencies) => debug!(
+            "ASIO driver reported latencies: capture {} frames, playback {} frames.",
+            latencies.in_, latencies.out
+        ),
+        Err(err) => debug!("Could not read ASIO latencies: {err}"),
+    }
 }
 
 /// Query preferred ASIO buffer size.
-pub(crate) fn get_preferred_buffer_size() -> Result<i32, ConfigError> {
-    let mut min_buf: i32 = 0;
-    let mut max_buf: i32 = 0;
-    let mut preferred_buf: i32 = 0;
-    let mut granularity: i32 = 0;
-    let res = unsafe {
-        ASIOGetBufferSize(
-            &mut min_buf,
-            &mut max_buf,
-            &mut preferred_buf,
-            &mut granularity,
-        )
-    };
-    if res != 0 {
-        return Err(ConfigError::new(&format!(
-            "ASIOGetBufferSize failed with error code {res}"
-        )));
-    }
+pub(crate) fn get_preferred_buffer_size(devname: &str) -> Result<i32, ConfigError> {
+    let sizes = with_driver(devname, |driver| {
+        driver
+            .buffer_size()
+            .map_err(|err| ConfigError::new(&format!("getBufferSize failed: {err:?}")))
+    })?;
     trace!(
-        "ASIOGetBufferSize: min={}, max={}, preferred={}, granularity={}",
-        min_buf, max_buf, preferred_buf, granularity
+        "getBufferSize: min={}, max={}, preferred={}, granularity={:?}",
+        sizes.min, sizes.max, sizes.preferred, sizes.granularity
     );
-    Ok(preferred_buf)
+    Ok(sizes.preferred)
 }

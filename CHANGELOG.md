@@ -7,12 +7,23 @@ New features:
 - RF64 support for reading and writing wav files larger than 4 GB (`use_rf64` for File playback).
 - New `LookaheadLimiter`, as a single-channel filter and as a multichannel processor with
   configurable monitor and process channels.
+- ASIO: capture and playback can now use two different ASIO devices. Previously both sides had to
+  use the same one.
 
 Bugfixes:
 - ASIO: size the ring buffer and prefill from the driver's actual buffer size instead of just
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
 
 Changes:
+- The ASIO backend no longer uses the ASIO SDK from Steinberg. It talks to the ASIO drivers
+  directly through the COM interfaces they expose, using the `azo` crate. Windows builds with ASIO
+  are therefore no longer restricted to GPLv3, and the usual dual license applies to every build.
+  Building no longer requires the SDK, LLVM/Clang or `bindgen`.
+- ASIO support is now always included in Windows builds. The `asio-backend` build feature is gone,
+  and so is the separate `camilladsp-windows-asio-amd64.zip` download. The regular Windows binary
+  now includes ASIO, and still runs on systems without any ASIO drivers installed, where it simply
+  reports no available ASIO devices. Anyone building with `--features asio-backend` should drop
+  the flag.
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
 - The `websocket` build feature is gone. The websocket server is now always built in, since every

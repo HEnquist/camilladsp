@@ -19,7 +19,7 @@
 use crate::alsa_backend::device as alsadevice;
 #[cfg(all(target_os = "linux", feature = "threaded-alsa"))]
 use crate::alsa_backend::threaded_device as alsadevice;
-#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+#[cfg(target_os = "windows")]
 use crate::asio_backend::device as asiodevice;
 use crate::config;
 #[cfg(target_os = "macos")]
@@ -196,7 +196,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             enable_rate_adjust: conf.rate_adjust(),
             polling: dev.is_polling(),
         }),
-        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        #[cfg(target_os = "windows")]
         config::PlaybackDevice::Asio(ref dev) => {
             let full_duplex = if let config::CaptureDevice::Asio(ref cap_dev) = conf.capture {
                 cap_dev.device == dev.device
@@ -397,7 +397,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             rate_measure_interval: conf.rate_measure_interval_s(),
             polling: dev.is_polling(),
         }),
-        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        #[cfg(target_os = "windows")]
         config::CaptureDevice::Asio(ref dev) => {
             let full_duplex = if let config::PlaybackDevice::Asio(ref pb_dev) = conf.playback {
                 pb_dev.device == dev.device
