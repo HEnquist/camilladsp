@@ -60,6 +60,20 @@ pub(crate) fn com_init_this_thread() {
     trace!("CoInitializeEx returned 0x{:08x}", hr.0);
 }
 
+/// Drivers that ignore `setSampleRate` unless the instance is recreated.
+///
+/// The Steinberg built-in (generic) driver returns success and then reports the new rate
+/// from `getSampleRate`, while the hardware keeps clocking at the old one. Recreating the
+/// instance is the only thing that makes it switch, see the workaround in
+/// `open_asio_device`.
+///
+/// This is deliberately an allow list rather than something applied to every driver. The
+/// quirk appears to be rare: PortAudio's ASIO backend has no handling for it at all, and it
+/// has been exercised against far more drivers than we have. Recreating an instance is also
+/// not free of risk, ASIO4ALL deadlocks when asked to do it, so the reload is only done for
+/// drivers known to need it.
+const NEEDS_RATE_RELOAD: &[&str] = &["steinberg built-in"];
+
 /// Drivers that tolerate only one instance per process.
 ///
 /// ASIO4ALL keeps the audio device open until `ASIOStop` is called or its DLL is unloaded,
@@ -67,22 +81,31 @@ pub(crate) fn com_init_this_thread() {
 /// only initialised, never started, therefore leaves the device held, and creating the next
 /// instance either deadlocks in `ASIOInit` or takes the process down. `ASIOStop` before the
 /// release does not reliably help, it worked once in three attempts.
-///
-/// Matched case-insensitively as a substring: the same driver appears as `ASIO4ALL v2` in
-/// the registry key and from `getDriverName`, but as `Asio4all v2` in the description that
-/// device names are taken from.
 const SINGLE_INSTANCE_DRIVERS: &[&str] = &["asio4all"];
+
+/// Case-insensitive substring match of a device name against a list of driver names.
+///
+/// Substring rather than equality because the same driver is named inconsistently: ASIO4ALL
+/// appears as `ASIO4ALL v2` in the registry key and from `getDriverName`, but as
+/// `Asio4all v2` in the description that device names are taken from.
+fn matches_driver(devname: &str, names: &[&str]) -> bool {
+    let lowercase = devname.to_lowercase();
+    names.iter().any(|name| lowercase.contains(name))
+}
+
+/// Whether this driver needs to be recreated for a sample rate change to take effect.
+pub(crate) fn needs_rate_reload(devname: &str) -> bool {
+    matches_driver(devname, NEEDS_RATE_RELOAD)
+}
 
 /// Whether only one instance of this driver may be created per process.
 ///
-/// Such drivers cannot be reloaded to apply a sample rate change, and cannot be probed for
-/// capabilities, since probing loads an instance and releases it again.
+/// Such drivers cannot be probed for capabilities, since probing loads an instance and
+/// releases it again, which leaves the driver unusable for the rest of the session.
 pub(crate) fn is_single_instance_driver(devname: &str) -> bool {
-    let lowercase = devname.to_lowercase();
-    SINGLE_INSTANCE_DRIVERS
-        .iter()
-        .any(|quirky| lowercase.contains(quirky))
+    matches_driver(devname, SINGLE_INSTANCE_DRIVERS)
 }
+
 
 /// Look up a loaded driver by device name.
 fn lookup(devname: &str) -> Option<DriverHandle> {

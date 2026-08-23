@@ -42,8 +42,8 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 use crate::asio_backend::driver::{
-    com_init_this_thread, driver_is_loaded, is_single_instance_driver, teardown_asio_driver,
-    with_driver,
+    com_init_this_thread, driver_is_loaded, is_single_instance_driver, needs_rate_reload,
+    teardown_asio_driver, with_driver,
 };
 use crate::asio_backend::utils::{
     ChannelBuffers, asio_format_to_str, asio_sample_type_name, copy_from_queue_at_offset,
@@ -886,16 +886,16 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
         // Keep the teardown a real drop: releasing the COM object is what resets the
         // driver, so leaking the handle instead would silently break this.
         //
-        // Drivers that tolerate only one instance per process are left out of this.
-        // Recreating one of those deadlocks, and they apply the rate on their own anyway.
-        if is_single_instance_driver(devname) {
-            debug!(
-                "Not reinitialising '{devname}' to apply the sample rate, this \
-                 driver allows only one instance per process."
-            );
-        } else {
+        // Only done for drivers known to need it. The quirk looks rare, PortAudio has no
+        // handling for it at all, and recreating an instance carries its own risk.
+        if needs_rate_reload(devname) {
             teardown_asio_driver(devname);
             load_driver_by_name(devname)?;
+        } else {
+            debug!(
+                "Not reinitialising '{devname}' to apply the sample rate, this driver \
+                 is not known to need it."
+            );
         }
 
         let after_set = with_driver(devname, |driver| {

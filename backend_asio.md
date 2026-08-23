@@ -45,11 +45,11 @@ Its author has explained that the audio device stays open
 until `ASIOStop` is called or the driver dll is unloaded,
 which is what causes this.
 
-CamillaDSP handles it in two ways.
-It never reloads the driver to apply a sample rate change,
-something only the Steinberg generic driver needs.
-And it refuses to probe ASIO4ALL for capabilities,
-since a probe creates an instance and releases it again.
+CamillaDSP avoids creating a second instance of it.
+The driver reload that some drivers need for sample rate changes
+is only done for the drivers known to need it, so ASIO4ALL never gets one.
+Capability probing is refused, since a probe creates an instance
+and releases it again.
 A capability request for ASIO4ALL therefore returns an error,
 and the GUI cannot list its supported rates and formats.
 Capture, playback and sample rate changes all work as usual.
