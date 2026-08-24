@@ -185,14 +185,14 @@ impl WriterThread {
         Ok(())
     }
 
-    /// Claim a unique numbered output file, starting after the highest
-    /// existing one; `create_new(true)` keeps the claim atomic.
+    /// Open unique numbered output file, starting after the highest existing one.
     fn open_file(&mut self) -> Result<File, std::io::Error> {
         let mut counter = highest_existing_counter(&self.filename).map_or(0, |n| n + 1);
         loop {
             let candidate = numbered_filename(&self.filename, counter);
             match OpenOptions::new()
                 .write(true)
+                // atomic
                 .create_new(true)
                 .open(&candidate)
             {
