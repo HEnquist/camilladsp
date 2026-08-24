@@ -367,13 +367,6 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
                     }
                 }
             }
-            if let Some(processors) = &mut config.processors {
-                for processor in processors.values_mut() {
-                    if let Processor::FileWriter { parameters, .. } = processor {
-                        check_and_replace_relative_path(&mut parameters.filename, config_dir);
-                    }
-                }
-            }
         } else {
             warn!("Can't find parent directory of config file");
         }
