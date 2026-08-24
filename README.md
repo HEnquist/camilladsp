@@ -2625,8 +2625,8 @@ pipeline:
 ```
 
 ### FileWriter
-The "FileWriter" processor writes the audio to a file.
-This is useful for recording the (un)processed audio, or for capturing intermediate stages of the pipeline for analysis.
+The "FileWriter" processor writes raw audio to a file.
+This is useful for recording (un)processed audio, or for capturing intermediate stages of the pipeline for analysis.
 When exiting the process, the last few chunks may not be written to the file.
 
 Example:
@@ -2637,17 +2637,15 @@ processors:
     parameters:
       channels: 2
       process_channels: [0, 1] (*)
-      filename: /tmp/recording.wav
+      filename: /tmp/capture
       format: S16_LE
-      wav_header: true (*)
 ```
 
   Parameters:
   * `channels`: number of channels, must match the number of channels of the pipeline where the FileWriter is inserted.
   * `process_channels`: a list of channels to write to the file. Optional, defaults to all channels. The channels are written in the specified order.
-  * `filename`: path to the output file. The file is overwritten if it already exists.
+  * `filename`: path to the output file. The file is never overwritten: a zero-padded counter is appended to the filename to claim a unique name, e.g. with `filename: /tmp/capture` the files written are `/tmp/capture.000`, `/tmp/capture.001`, and so on. The counter starts one higher than the highest numbered file already present.
   * `format`: sample format of the output file. One of `S16_LE`, `S24_3_LE`, `S24_4_RJ_LE`, `S24_4_LJ_LE`, `S32_LE`, `F32_LE`, `F64_LE`.
-  * `wav_header`: prepend a WAV header to the file. Optional, defaults to `false`. When `true`, the format must not be `S24_4_RJ_LE`.
 
 ## Pipeline
 The pipeline section defines the processing steps between input and output.

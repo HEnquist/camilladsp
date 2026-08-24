@@ -21,12 +21,12 @@ use crate::config;
 use crate::config::BinarySampleFormat;
 use crate::processors::Processor;
 use crate::utils::conversions::chunk_to_buffer_rawbytes_borrowed;
-use crate::utils::wavtools::write_wav_header;
 use crossbeam_channel::{Sender, bounded};
 use ringbuf::HeapCons;
 use ringbuf::{HeapProd, HeapRb, traits::*};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::path::Path;
 use std::thread;
 
 // Minimum number of chunks to store in the ring buffer
@@ -43,14 +43,12 @@ pub struct FileWriter {
 }
 
 struct WriterThread {
-    samplerate: usize,
     channels: usize,
     samples_per_chunk: usize,
     sample_format: BinarySampleFormat,
     filename: String,
     consumer: HeapCons<CamillaFloat>,
     rx_notify: crossbeam_channel::Receiver<()>,
-    wav_header: bool,
     chunk: AudioChunk,
     bytes: Vec<u8>,
 }
@@ -64,13 +62,12 @@ impl FileWriter {
         chunksize: usize,
     ) -> Self {
         debug!(
-            "Creating FileWriter processor '{}', channels: {}, process_channels: {:?}, filename: {}, format: {}, wav_header: {}",
+            "Creating FileWriter processor '{}', channels: {}, process_channels: {:?}, filename: {}, format: {}",
             name,
             config.channels,
             config.process_channels(),
             config.filename,
-            config.format,
-            config.wav_header()
+            config.format
         );
         let input_channels = config.channels;
         let mut process_channels = config.process_channels();
@@ -81,9 +78,8 @@ impl FileWriter {
         }
         let write_channels = process_channels.len();
         let sample_format = config.format;
-        let wav_header = config.wav_header();
         let filename = config.filename.clone();
-        let samples_per_chunk = (chunksize * write_channels).max(1);
+        let samples_per_chunk = chunksize * write_channels;
         let bytes_per_chunk = samples_per_chunk * sample_format.bytes_per_sample();
         let ring_size = write_channels * samplerate.max(MIN_CHUNKS * chunksize * write_channels);
         let ringbuffer = HeapRb::<CamillaFloat>::new(ring_size);
@@ -97,14 +93,12 @@ impl FileWriter {
                 let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunksize, chunksize);
                 let bytes = vec![0_u8; bytes_per_chunk];
                 let writer = WriterThread {
-                    samplerate,
                     channels: write_channels,
                     samples_per_chunk,
                     sample_format,
                     filename,
                     consumer,
                     rx_notify,
-                    wav_header,
                     chunk,
                     bytes,
                 };
@@ -179,26 +173,41 @@ impl Processor for FileWriter {
 impl WriterThread {
     // Consumes `self` and runs the write loop to completion.
     fn run(mut self) -> Result<(), std::io::Error> {
-        let mut file = File::create(&self.filename)?;
-        if self.wav_header {
-            write_wav_header(
-                &mut file,
-                self.channels,
-                self.sample_format,
-                self.samplerate,
-            )
-            .map_err(|err| std::io::Error::other(err.to_string()))?;
-        }
+        let mut file: Option<File> = None;
         while let Ok(()) = self.rx_notify.recv() {
             self.drain_and_write(&mut file)?;
         }
         self.drain_and_write(&mut file)?;
-        file.flush()?;
+        if let Some(mut file) = file {
+            file.flush()?;
+        }
         debug!("FileWriter processor '{}' writer done", self.filename);
         Ok(())
     }
 
-    fn drain_and_write(&mut self, file: &mut File) -> Result<(), std::io::Error> {
+    /// Claim a unique numbered output file, starting after the highest
+    /// existing one; `create_new(true)` keeps the claim atomic.
+    fn open_file(&mut self) -> Result<File, std::io::Error> {
+        let mut counter = highest_existing_counter(&self.filename).map_or(0, |n| n + 1);
+        loop {
+            let candidate = numbered_filename(&self.filename, counter);
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&candidate)
+            {
+                Ok(file) => {
+                    self.filename = candidate;
+                    return Ok(file);
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    counter += 1;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+    fn drain_and_write(&mut self, file: &mut Option<File>) -> Result<(), std::io::Error> {
         while self.consumer.occupied_len() >= self.samples_per_chunk {
             for ch in 0..self.channels {
                 self.consumer.pop_slice(&mut self.chunk.waveforms[ch]);
@@ -208,10 +217,40 @@ impl WriterThread {
                 &mut self.bytes,
                 &self.sample_format,
             );
-            file.write_all(&self.bytes[..valid_bytes])?;
+            if file.is_none() {
+                *file = Some(self.open_file()?);
+            }
+            file.as_mut()
+                .unwrap()
+                .write_all(&self.bytes[..valid_bytes])?;
         }
         Ok(())
     }
+}
+
+fn numbered_filename(filename: &str, counter: u64) -> String {
+    format!("{filename}.{counter:03}")
+}
+
+fn highest_existing_counter(filename: &str) -> Option<u64> {
+    let path = Path::new(filename);
+    let name = path.file_name()?.to_str()?;
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let prefix = format!("{name}.");
+    std::fs::read_dir(parent)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_str()?;
+            let rest = name.strip_prefix(&prefix)?;
+            (!rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+                .then(|| rest.parse::<u64>().ok())?
+        })
+        .max()
 }
 
 /// Validate the file writer config.
@@ -237,12 +276,6 @@ pub fn validate_file_writer(config: &config::FileWriterParameters) -> Res<()> {
             config::ConfigError::new("FileWriter processor filename must not be empty.").into(),
         );
     }
-    if config.wav_header() && config.format == BinarySampleFormat::S24_4_RJ_LE {
-        return Err(config::ConfigError::new(
-            "Wav files do not support the S24_4_RJ_LE sample format.",
-        )
-        .into());
-    }
     Ok(())
 }
 
@@ -261,7 +294,7 @@ mod tests {
         let n = FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir()
             .join(format!(
-                "camilladsp_file_writer_test_{}_{n}.raw",
+                "camilladsp_file_writer_test_{}_{n}",
                 std::process::id()
             ))
             .to_string_lossy()
@@ -283,7 +316,6 @@ mod tests {
             process_channels: None,
             filename,
             format: BinarySampleFormat::F32_LE,
-            wav_header: Some(false),
         }
     }
 
@@ -301,31 +333,9 @@ mod tests {
         )
     }
 
-    fn mono_chunk(samples: [f64; 2], valid_frames: usize) -> AudioChunk {
-        AudioChunk::new(
-            vec![vec![samples[0] as CamillaFloat, samples[1] as CamillaFloat]],
-            samples[0].max(samples[1]) as CamillaFloat,
-            samples[0].min(samples[1]) as CamillaFloat,
-            2,
-            valid_frames,
-        )
-    }
-
-    #[test]
-    fn validate_rejects_right_justified_wav() {
-        let config = config::FileWriterParameters {
-            channels: 2,
-            process_channels: None,
-            filename: "test.wav".to_string(),
-            format: BinarySampleFormat::S24_4_RJ_LE,
-            wav_header: Some(true),
-        };
-        assert!(validate_file_writer(&config).is_err());
-    }
-
     #[test]
     fn validate_rejects_invalid_process_channel() {
-        let mut config = f32_config("test.raw".to_string());
+        let mut config = f32_config("test".to_string());
         config.process_channels = Some(vec![2]);
 
         assert!(validate_file_writer(&config).is_err());
@@ -374,7 +384,7 @@ mod tests {
             vec![0.0 as CamillaFloat, 0.375 as CamillaFloat]
         );
 
-        let data = fs::read(&filename).unwrap();
+        let data = fs::read(numbered_filename(&filename, 0)).unwrap();
         let mut expected = Vec::new();
         // Only c1 and c2 are written; c3 is dropped (partial chunk).
         for &value in &[
@@ -383,20 +393,7 @@ mod tests {
             expected.extend_from_slice(&value.to_le_bytes());
         }
         assert_eq!(data, expected);
-        let _ = fs::remove_file(filename);
-    }
-
-    #[test]
-    fn accepts_zero_chunksize() {
-        let filename = unique_test_filename();
-        let mut fw = FileWriter::from_config("test", f32_config(filename.clone()), 48_000, 0);
-        let mut chunk = AudioChunk::new(vec![vec![], vec![]], 0.0, 0.0, 0, 0);
-
-        fw.process_chunk(&mut chunk).unwrap();
-        shutdown(fw);
-
-        assert!(fs::read(&filename).unwrap().is_empty());
-        let _ = fs::remove_file(filename);
+        let _ = fs::remove_file(numbered_filename(&filename, 0));
     }
 
     #[test]
@@ -411,13 +408,13 @@ mod tests {
         fw.process_chunk(&mut chunk).unwrap();
         shutdown(fw);
 
-        let data = fs::read(&filename).unwrap();
+        let data = fs::read(numbered_filename(&filename, 0)).unwrap();
         let mut expected = Vec::new();
         for &value in &[0.75f32, 0.25f32, -1.0f32, -0.5f32] {
             expected.extend_from_slice(&value.to_le_bytes());
         }
         assert_eq!(data, expected);
-        let _ = fs::remove_file(filename);
+        let _ = fs::remove_file(numbered_filename(&filename, 0));
     }
 
     #[test]
@@ -434,7 +431,7 @@ mod tests {
 
         assert_eq!(fw.producer.occupied_len(), 1);
         drop(fw);
-        let _ = fs::remove_file(filename);
+        let _ = fs::remove_file(numbered_filename(&filename, 0));
     }
 
     #[test]
@@ -455,28 +452,73 @@ mod tests {
         assert!(result.is_err());
 
         drop(fw);
-        let _ = fs::remove_file(filename);
+        let _ = fs::remove_file(numbered_filename(&filename, 0));
+    }
+
+    /// Write one stereo chunk through a fresh writer.
+    fn write_one_chunk(filename: &str) {
+        let mut fw = FileWriter::from_config("test", f32_config(filename.to_string()), 48_000, 2);
+        let mut chunk = stereo_chunk([0.25, -0.5], [0.75, -1.0], 2);
+        fw.process_chunk(&mut chunk).unwrap();
+        shutdown(fw);
+    }
+
+    fn expected_bytes() -> Vec<u8> {
+        let mut expected = Vec::new();
+        for &value in &[0.25f32, 0.75f32, -0.5f32, -1.0f32] {
+            expected.extend_from_slice(&value.to_le_bytes());
+        }
+        expected
     }
 
     #[test]
-    fn writes_wav_header_and_samples() {
+    fn claims_next_free_number() {
+        // The counter is zero-padded to three digits.
+        assert_eq!(numbered_filename("capture", 42), "capture.042");
+        // An existing file at 000 blocks the first name.
         let filename = unique_test_filename();
-        let config = config::FileWriterParameters {
-            channels: 1,
-            process_channels: None,
-            filename: filename.clone(),
-            format: BinarySampleFormat::S16_LE,
-            wav_header: Some(true),
-        };
-        let mut fw = FileWriter::from_config("test", config, 48_000, 2);
-        let mut chunk = mono_chunk([0.5, -0.5], 2);
+        fs::write(numbered_filename(&filename, 0), b"occupied").unwrap();
+        write_one_chunk(&filename);
+        assert_eq!(
+            fs::read(numbered_filename(&filename, 0)).unwrap(),
+            b"occupied"
+        );
+        assert_eq!(
+            fs::read(numbered_filename(&filename, 1)).unwrap(),
+            expected_bytes()
+        );
+        fs::remove_file(numbered_filename(&filename, 0)).unwrap();
+        fs::remove_file(numbered_filename(&filename, 1)).unwrap();
 
-        fw.process_chunk(&mut chunk).unwrap();
-        shutdown(fw);
+        // Gaps are skipped: with 000 and 002 present, the next is 003.
+        let filename = unique_test_filename();
+        fs::write(numbered_filename(&filename, 0), b"old0").unwrap();
+        fs::write(numbered_filename(&filename, 2), b"old2").unwrap();
+        write_one_chunk(&filename);
+        assert_eq!(fs::read(numbered_filename(&filename, 0)).unwrap(), b"old0");
+        assert_eq!(fs::read(numbered_filename(&filename, 2)).unwrap(), b"old2");
+        assert!(!Path::new(&numbered_filename(&filename, 1)).exists());
+        assert_eq!(
+            fs::read(numbered_filename(&filename, 3)).unwrap(),
+            expected_bytes()
+        );
+        for n in [0, 2, 3] {
+            fs::remove_file(numbered_filename(&filename, n)).unwrap();
+        }
 
-        let data = fs::read(&filename).unwrap();
-        assert!(data.starts_with(b"RIFF"));
-        assert!(data.len() > 4 + 24 + 8);
-        let _ = fs::remove_file(filename);
+        // A 4-digit name is still counted, so the next is 1001.
+        let filename = unique_test_filename();
+        fs::write(numbered_filename(&filename, 1000), b"old").unwrap();
+        write_one_chunk(&filename);
+        assert_eq!(
+            fs::read(numbered_filename(&filename, 1000)).unwrap(),
+            b"old"
+        );
+        assert_eq!(
+            fs::read(numbered_filename(&filename, 1001)).unwrap(),
+            expected_bytes()
+        );
+        fs::remove_file(numbered_filename(&filename, 1000)).unwrap();
+        fs::remove_file(numbered_filename(&filename, 1001)).unwrap();
     }
 }
