@@ -55,6 +55,20 @@ pub trait Filter {
     /// Hot-reload filter coefficients from a new configuration without rebuilding.
     fn update_parameters(&mut self, config: config::Filter);
 
+    /// Hot-reload as [`Filter::update_parameters`], reusing anything `cache`
+    /// already holds for this filter name.
+    ///
+    /// Only convolution filters have coefficients worth sharing between the
+    /// channels of a step, so every other filter keeps the default and ignores
+    /// the cache.
+    fn update_parameters_cached(
+        &mut self,
+        config: config::Filter,
+        _cache: &mut fftconv::ConvCoeffCache,
+    ) {
+        self.update_parameters(config);
+    }
+
     /// Return the filter's name as given in the configuration.
     fn name(&self) -> &str;
 

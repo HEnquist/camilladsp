@@ -19,6 +19,13 @@ Changes:
   `multithreaded` keeps the previous per-channel thread pool, which does not interleave, so
   biquad-heavy configurations are usually fastest with it left off. See the `multithreaded`
   setting in the README.
+- Faster convolution setup and processing. All convolution filters now share one FFT planner,
+  and the channels of a filter step share one copy of their transformed coefficients instead of
+  each holding its own. Building eight 16384 tap filters at a chunksize of 16384 went from about
+  3.0 ms to about 0.9 ms, and four channels of a one million tap filter running in parallel went
+  from about 3.1 ms to about 2.0 ms per chunk. The saving grows with `chunksize` for setup and
+  with filter length for processing, and configurations that use a different impulse response on
+  every channel still get the planner half.
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
 - The `32bit` build feature is gone. 32-bit float processing is now selected with the compiler
