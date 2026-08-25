@@ -13,8 +13,13 @@
 //! `serial` walks them in order the way the default path does. In parallel the
 //! copies compete for bandwidth at the same instant; in serial they evict each
 //! other from cache in turn.
+//!
+//! The pool comes from `build_processing_threadpool`, so its workers get the
+//! same real-time priority they get in production. Note that the calling thread
+//! is deliberately left alone: promoting it makes a back-to-back benchmark far
+//! slower, because the scheduler throttles a real-time thread that overruns the
+//! duty cycle it declared.
 
-use audio_thread_priority::promote_current_thread_to_real_time;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rayon::prelude::*;
 use std::hint::black_box;
@@ -23,6 +28,7 @@ use camillalib::CamillaFloat;
 use camillalib::config;
 use camillalib::filters::Filter;
 use camillalib::filters::fftconv::{ConvCoeffCache, FftConv};
+use camillalib::processing::build_processing_threadpool;
 
 const CHUNK: usize = 1024;
 const CHANNEL_COUNTS: [usize; 3] = [1, 2, 4];
@@ -78,30 +84,19 @@ fn bench_conv_parallel(c: &mut Criterion) {
 
     for length in FILTER_LENGTHS {
         for channels in CHANNEL_COUNTS {
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(channels)
-                .build()
-                .unwrap();
-            // EXPERIMENT: the same pool with its workers promoted to real-time,
-            // the way build_processing_threadpool does it. On a part with
-            // efficiency cores that is what keeps the workers off them.
-            let rt_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(channels)
-                .start_handler(|_| {
-                    if promote_current_thread_to_real_time(CHUNK as u32, 48000).is_err() {
-                        eprintln!("warning: real-time promotion failed");
-                    }
-                })
-                .build()
-                .unwrap();
+            // The production builder, so the workers are promoted to real-time
+            // exactly as they are when CamillaDSP runs. Without the promotion
+            // the workers can land on efficiency cores, which measured 9 to 17%
+            // slower here and is a configuration that never ships.
+            let pool =
+                build_processing_threadpool(true, channels, CHUNK, 48000).expect("thread pool");
             let label = format!("{length}taps_{channels}ch");
             for (arm, build) in [
                 ("shared", shared_filters as fn(usize, usize) -> Vec<FftConv>),
                 ("separate", separate_filters),
             ] {
-                for mode in ["par", "serial", "par_rt"] {
-                    let parallel = mode != "serial";
-                    let use_rt = mode == "par_rt";
+                for mode in ["par", "serial"] {
+                    let parallel = mode == "par";
                     let name = format!("{mode}_{arm}");
                     group.bench_with_input(
                         BenchmarkId::new(name, &label),
@@ -113,8 +108,7 @@ fn bench_conv_parallel(c: &mut Criterion) {
                             b.iter(|| {
                                 refill(&mut waves, &source);
                                 if parallel {
-                                    let p = if use_rt { &rt_pool } else { &pool };
-                                    p.install(|| {
+                                    pool.install(|| {
                                         filters.par_iter_mut().zip(waves.par_iter_mut()).for_each(
                                             |(filter, wave)| {
                                                 filter.process_waveform(wave).unwrap();
