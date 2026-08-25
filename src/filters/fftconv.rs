@@ -20,6 +20,7 @@ use crate::filters::Filter;
 use num_complex::Complex;
 use num_traits::Zero;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
+use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
 // Sample format
@@ -235,12 +236,94 @@ fn plan_transforms(
     )
 }
 
+/// Convolution coefficients, padded into segments and transformed, ready for
+/// the processing loop to multiply against.
+pub type ConvCoeffs = Vec<Vec<Complex<CamillaFloat>>>;
+
+/// Transformed coefficients keyed by filter name, so that channels running the
+/// same convolution filter share one copy.
+///
+/// Loading and transforming an impulse response is the bulk of the work of
+/// building a convolution filter, and for a file-backed filter it includes
+/// reading the file. Doing that once per channel duplicated both the work and
+/// the result, and the duplicated coefficients then competed for cache and
+/// memory bandwidth while the channels were processed in parallel.
+///
+/// A cache is only valid for one build or update pass, where every name maps
+/// to exactly one configuration. Create one, use it for the pass, drop it;
+/// keeping it any longer risks handing out coefficients from a stale config.
+#[derive(Default)]
+pub struct ConvCoeffCache {
+    entries: HashMap<String, Arc<ConvCoeffs>>,
+}
+
+impl ConvCoeffCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn get(&self, name: &str) -> Option<Arc<ConvCoeffs>> {
+        self.entries.get(name).cloned()
+    }
+
+    fn insert(&mut self, name: &str, coeffs: &Arc<ConvCoeffs>) {
+        self.entries.insert(name.to_string(), coeffs.clone());
+    }
+}
+
+/// Read the impulse response a configuration points at.
+fn coeffs_from_config(conf: config::ConvParameters) -> Vec<CamillaFloat> {
+    match conf {
+        config::ConvParameters::Values { values } => {
+            // Coefficients from the config are f64; file and wav readers
+            // already deliver the processing precision.
+            values.into_iter().map(|v| v.to_camilla_float()).collect()
+        }
+        config::ConvParameters::Raw(params) => filters::read_coeff_file(
+            &params.filename,
+            &params.format(),
+            params.read_bytes_lines(),
+            params.skip_bytes_lines(),
+        )
+        .unwrap(),
+        config::ConvParameters::Wav(params) => {
+            filters::read_wav(&params.filename, params.channel()).unwrap()
+        }
+        config::ConvParameters::Dummy { length } => {
+            let mut values = vec![0.0; length];
+            values[0] = 1.0;
+            values
+        }
+    }
+}
+
+/// Split an impulse response into `data_length` sized segments and transform
+/// each one.
+fn transform_coeffs(
+    coeffs: &[CamillaFloat],
+    data_length: usize,
+    fft: &dyn RealToComplex<CamillaFloat>,
+    scratch: &mut [Complex<CamillaFloat>],
+) -> Arc<ConvCoeffs> {
+    let nsegments = coeffs.len().div_ceil(data_length);
+    let mut coeffs_padded = vec![vec![0.0; 2 * data_length]; nsegments];
+    let mut coeffs_f = vec![vec![Complex::zero(); data_length + 1]; nsegments];
+    for (n, coeff) in coeffs.iter().enumerate() {
+        coeffs_padded[n / data_length][n % data_length] = coeff / (2 * data_length) as CamillaFloat;
+    }
+    for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
+        fft.process_with_scratch(segment, segment_f, scratch)
+            .unwrap();
+    }
+    Arc::new(coeffs_f)
+}
+
 pub struct FftConv {
     name: String,
     npoints: usize,
     nsegments: usize,
     overlap: Vec<CamillaFloat>,
-    coeffs_f: Vec<Vec<Complex<CamillaFloat>>>,
+    coeffs_f: Arc<ConvCoeffs>,
     fft: Arc<dyn RealToComplex<CamillaFloat>>,
     ifft: Arc<dyn ComplexToReal<CamillaFloat>>,
     scratch_fw: Vec<Complex<CamillaFloat>>,
@@ -255,35 +338,25 @@ pub struct FftConv {
 impl FftConv {
     /// Create a new FFT convolution filter.
     pub fn new(name: &str, data_length: usize, coeffs: &[CamillaFloat]) -> Self {
-        let name = name.to_string();
-        let input_buf: Vec<CamillaFloat> = vec![0.0; 2 * data_length];
-        let temp_buf: Vec<Complex<CamillaFloat>> = vec![Complex::zero(); data_length + 1];
-        let output_buf: Vec<CamillaFloat> = vec![0.0; 2 * data_length];
-        let (fft, ifft) = plan_transforms(data_length);
+        let (fft, _) = plan_transforms(data_length);
         let mut scratch_fw = fft.make_scratch_vec();
+        let coeffs_f = transform_coeffs(coeffs, data_length, &*fft, &mut scratch_fw);
+        FftConv::with_coeffs(name, data_length, coeffs_f)
+    }
+
+    /// Create a filter from coefficients that are already transformed, sharing
+    /// them with whichever other channels were given the same `Arc`.
+    ///
+    /// Only the coefficients are shared. Everything the processing loop writes
+    /// to stays private to this filter.
+    pub fn with_coeffs(name: &str, data_length: usize, coeffs_f: Arc<ConvCoeffs>) -> Self {
+        let (fft, ifft) = plan_transforms(data_length);
+        let scratch_fw = fft.make_scratch_vec();
         let scratch_inv = ifft.make_scratch_vec();
-
-        let nsegments =
-            ((coeffs.len() as CamillaFloat) / (data_length as CamillaFloat)).ceil() as usize;
-
-        let input_f = vec![vec![Complex::zero(); data_length + 1]; nsegments];
-        let mut coeffs_padded = vec![vec![0.0; 2 * data_length]; nsegments];
-        let mut coeffs_f = vec![vec![Complex::zero(); data_length + 1]; nsegments];
-
+        let nsegments = coeffs_f.len();
         debug!("Conv {name} is using {nsegments} segments");
-
-        for (n, coeff) in coeffs.iter().enumerate() {
-            coeffs_padded[n / data_length][n % data_length] =
-                coeff / (2 * data_length) as CamillaFloat;
-        }
-
-        for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
-            fft.process_with_scratch(segment, segment_f, &mut scratch_fw)
-                .unwrap();
-        }
-
         FftConv {
-            name,
+            name: name.to_string(),
             npoints: data_length,
             nsegments,
             overlap: vec![0.0; data_length],
@@ -292,38 +365,33 @@ impl FftConv {
             ifft,
             scratch_fw,
             scratch_inv,
-            input_f,
-            input_buf,
-            output_buf,
-            temp_buf,
+            input_f: vec![vec![Complex::zero(); data_length + 1]; nsegments],
+            input_buf: vec![0.0; 2 * data_length],
+            temp_buf: vec![Complex::zero(); data_length + 1],
+            output_buf: vec![0.0; 2 * data_length],
             index: 0,
         }
     }
 
     pub fn from_config(name: &str, data_length: usize, conf: config::ConvParameters) -> Self {
-        let values = match conf {
-            config::ConvParameters::Values { values } => {
-                // Coefficients from the config are f64; file and wav readers
-                // already deliver the processing precision.
-                values.into_iter().map(|v| v.to_camilla_float()).collect()
-            }
-            config::ConvParameters::Raw(params) => filters::read_coeff_file(
-                &params.filename,
-                &params.format(),
-                params.read_bytes_lines(),
-                params.skip_bytes_lines(),
-            )
-            .unwrap(),
-            config::ConvParameters::Wav(params) => {
-                filters::read_wav(&params.filename, params.channel()).unwrap()
-            }
-            config::ConvParameters::Dummy { length } => {
-                let mut values = vec![0.0; length];
-                values[0] = 1.0;
-                values
-            }
-        };
-        FftConv::new(name, data_length, &values)
+        FftConv::new(name, data_length, &coeffs_from_config(conf))
+    }
+
+    /// Build from a configuration, reusing the transformed coefficients if
+    /// another channel already built this filter in the same pass.
+    pub fn from_config_cached(
+        name: &str,
+        data_length: usize,
+        conf: config::ConvParameters,
+        cache: &mut ConvCoeffCache,
+    ) -> Self {
+        if let Some(coeffs_f) = cache.get(name) {
+            debug!("Conv {name} reuses coefficients already built for another channel");
+            return FftConv::with_coeffs(name, data_length, coeffs_f);
+        }
+        let filter = FftConv::from_config(name, data_length, conf);
+        cache.insert(name, &filter.coeffs_f);
+        filter
     }
 }
 
@@ -389,65 +457,38 @@ impl Filter for FftConv {
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
-        if let config::Filter::Conv {
+        self.update_parameters_cached(conf, &mut ConvCoeffCache::new());
+    }
+
+    fn update_parameters_cached(&mut self, conf: config::Filter, cache: &mut ConvCoeffCache) {
+        let config::Filter::Conv {
             parameters: conf, ..
         } = conf
-        {
-            let coeffs = match conf {
-                config::ConvParameters::Values { values } => {
-                    // Coefficients from the config are f64; file and wav readers
-                    // already deliver the processing precision.
-                    values.into_iter().map(|v| v.to_camilla_float()).collect()
-                }
-                config::ConvParameters::Raw(params) => filters::read_coeff_file(
-                    &params.filename,
-                    &params.format(),
-                    params.read_bytes_lines(),
-                    params.skip_bytes_lines(),
-                )
-                .unwrap(),
-                config::ConvParameters::Wav(params) => {
-                    filters::read_wav(&params.filename, params.channel()).unwrap()
-                }
-                config::ConvParameters::Dummy { length } => {
-                    let mut values = vec![0.0; length];
-                    values[0] = 1.0;
-                    values
-                }
-            };
-
-            let nsegments =
-                ((coeffs.len() as CamillaFloat) / (self.npoints as CamillaFloat)).ceil() as usize;
-
-            if nsegments == self.nsegments {
-                // Same length, lets keep history
-            } else {
-                // length changed, clearing history
-                self.nsegments = nsegments;
-                let input_f = vec![vec![Complex::zero(); self.npoints + 1]; nsegments];
-                self.input_f = input_f;
-            }
-
-            let mut coeffs_f = vec![vec![Complex::zero(); self.npoints + 1]; nsegments];
-            let mut coeffs_padded = vec![vec![0.0; 2 * self.npoints]; nsegments];
-
-            debug!("conv using {nsegments} segments");
-
-            for (n, coeff) in coeffs.iter().enumerate() {
-                coeffs_padded[n / self.npoints][n % self.npoints] =
-                    coeff / (2 * self.npoints) as CamillaFloat;
-            }
-
-            for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
-                self.fft
-                    .process_with_scratch(segment, segment_f, &mut self.scratch_fw)
-                    .unwrap();
-            }
-            self.coeffs_f = coeffs_f;
-        } else {
+        else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
+        };
+        let coeffs_f = match cache.get(&self.name) {
+            Some(coeffs_f) => coeffs_f,
+            None => {
+                // First channel to reach this filter does the reading and the
+                // transform; the rest take the result.
+                let coeffs = coeffs_from_config(conf);
+                let coeffs_f =
+                    transform_coeffs(&coeffs, self.npoints, &*self.fft, &mut self.scratch_fw);
+                cache.insert(&self.name, &coeffs_f);
+                coeffs_f
+            }
+        };
+
+        let nsegments = coeffs_f.len();
+        debug!("conv using {nsegments} segments");
+        if nsegments != self.nsegments {
+            // Length changed, so the history no longer lines up. Clear it.
+            self.nsegments = nsegments;
+            self.input_f = vec![vec![Complex::zero(); self.npoints + 1]; nsegments];
         }
+        self.coeffs_f = coeffs_f;
     }
 }
 
@@ -557,10 +598,13 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use crate::CamillaFloat;
+    use crate::ToCamillaFloat;
+    use crate::config;
     use crate::config::ConvParameters;
     use crate::filters::Filter;
-    use crate::filters::fftconv::FftConv;
+    use crate::filters::fftconv::{ConvCoeffCache, FftConv};
     use num_complex::Complex;
+    use std::sync::Arc;
 
     fn is_close(left: CamillaFloat, right: CamillaFloat, maxdiff: CamillaFloat) -> bool {
         println!("{left} - {right}");
@@ -614,6 +658,77 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Two channels built from the same filter must share one allocation of
+    /// coefficients, and must still behave exactly like independent filters.
+    /// The shared part is read-only; the overlap history is not.
+    #[test]
+    fn cached_build_shares_coeffs_but_not_state() {
+        // A config always carries f64, whatever the processing precision is.
+        let values: Vec<f64> = (0..48).map(|m| m as f64).collect();
+        let coeffs: Vec<CamillaFloat> = values.iter().map(|v| v.to_camilla_float()).collect();
+        let conf = ConvParameters::Values { values };
+        let mut cache = ConvCoeffCache::new();
+        let mut left = FftConv::from_config_cached("conv", 8, conf.clone(), &mut cache);
+        let mut right = FftConv::from_config_cached("conv", 8, conf, &mut cache);
+        assert!(
+            Arc::ptr_eq(&left.coeffs_f, &right.coeffs_f),
+            "second channel should reuse the cached coefficients"
+        );
+
+        // An impulse into the left channel only. The right channel must stay
+        // silent, which it cannot do if the two share overlap history.
+        let mut reference = FftConv::new("reference", 8, &coeffs);
+        for block in 0..6 {
+            let mut wave_left = vec![0.0 as CamillaFloat; 8];
+            let mut wave_ref = vec![0.0 as CamillaFloat; 8];
+            if block == 0 {
+                wave_left[0] = 1.0;
+                wave_ref[0] = 1.0;
+            }
+            let mut wave_right = vec![0.0 as CamillaFloat; 8];
+            left.process_waveform(&mut wave_left).unwrap();
+            right.process_waveform(&mut wave_right).unwrap();
+            reference.process_waveform(&mut wave_ref).unwrap();
+            assert!(
+                compare_waveforms(wave_left, wave_ref, 1e-5),
+                "shared build changed the result, block {block}"
+            );
+            assert!(
+                wave_right.iter().all(|v| v.abs() < 1e-9),
+                "silent channel picked up the other channel's history, block {block}"
+            );
+        }
+    }
+
+    /// The same for the hot-reload path: one read and transform, shared out,
+    /// with per-filter history left alone.
+    #[test]
+    fn cached_update_shares_coeffs() {
+        let initial: Vec<CamillaFloat> = vec![1.0, 0.0, 0.0, 0.0];
+        let mut left = FftConv::new("conv", 4, &initial);
+        let mut right = FftConv::new("conv", 4, &initial);
+        assert!(!Arc::ptr_eq(&left.coeffs_f, &right.coeffs_f));
+
+        let conf = config::Filter::Conv {
+            description: None,
+            parameters: ConvParameters::Values {
+                values: vec![0.0, 1.0, 0.0, 0.0],
+            },
+        };
+        let mut cache = ConvCoeffCache::new();
+        left.update_parameters_cached(conf.clone(), &mut cache);
+        right.update_parameters_cached(conf, &mut cache);
+        assert!(
+            Arc::ptr_eq(&left.coeffs_f, &right.coeffs_f),
+            "second channel should reuse the coefficients transformed for the first"
+        );
+
+        // A one sample delay now, so an impulse comes back shifted by one.
+        let mut wave = vec![1.0 as CamillaFloat, 0.0, 0.0, 0.0];
+        left.process_waveform(&mut wave).unwrap();
+        assert!(compare_waveforms(wave, vec![0.0, 1.0, 0.0, 0.0], 1e-5));
     }
 
     #[test]

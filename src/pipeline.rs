@@ -20,6 +20,7 @@ use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters;
 use crate::filters::Filter;
+use crate::filters::fftconv::ConvCoeffCache;
 use crate::mixer;
 use crate::processors;
 use crate::processors::Processor;
@@ -45,6 +46,7 @@ impl FilterGroup {
         waveform_length: usize,
         sample_freq: usize,
         processing_params: Arc<ProcessingParameters>,
+        cache: &mut ConvCoeffCache,
     ) -> Self {
         debug!("Build filter group from config");
         let mut filters = Vec::<Box<dyn Filter + Send>>::new();
@@ -52,9 +54,14 @@ impl FilterGroup {
             let filter_cfg = filter_configs[name].clone();
             trace!("Create filter {name} with config {filter_cfg:?}");
             let filter: Box<dyn Filter + Send> = match filter_cfg {
-                config::Filter::Conv { parameters, .. } => Box::new(
-                    filters::fftconv::FftConv::from_config(name, waveform_length, parameters),
-                ),
+                config::Filter::Conv { parameters, .. } => {
+                    Box::new(filters::fftconv::FftConv::from_config_cached(
+                        name,
+                        waveform_length,
+                        parameters,
+                        cache,
+                    ))
+                }
                 config::Filter::Biquad { parameters, .. } => {
                     Box::new(filters::biquad::Biquad::new(
                         name,
@@ -116,10 +123,11 @@ impl FilterGroup {
         &mut self,
         filterconfigs: HashMap<String, config::Filter>,
         changed: &[String],
+        cache: &mut ConvCoeffCache,
     ) {
         for filter in &mut self.filters {
             if changed.iter().any(|n| n == filter.name()) {
-                filter.update_parameters(filterconfigs[filter.name()].clone());
+                filter.update_parameters_cached(filterconfigs[filter.name()].clone(), cache);
             }
         }
     }
@@ -147,11 +155,12 @@ impl ParallelFilters {
         &mut self,
         filterconfigs: HashMap<String, config::Filter>,
         changed: &[String],
+        cache: &mut ConvCoeffCache,
     ) {
         for channel_filters in &mut self.filters {
             for filter in channel_filters {
                 if changed.iter().any(|n| n == filter.name()) {
-                    filter.update_parameters(filterconfigs[filter.name()].clone());
+                    filter.update_parameters_cached(filterconfigs[filter.name()].clone(), cache);
                 }
             }
         }
@@ -206,6 +215,9 @@ impl Pipeline {
         debug!("Build new pipeline");
         trace!("Pipeline config {:?}", conf.pipeline);
         let mut steps = Vec::<PipelineStep>::new();
+        // One cache for the whole build, so channels sharing a convolution
+        // filter share its transformed coefficients.
+        let mut coeff_cache = ConvCoeffCache::new();
         let mut num_channels = conf.devices.capture.channels();
         for step in conf.pipeline.unwrap_or_default() {
             match step {
@@ -246,6 +258,7 @@ impl Pipeline {
                                 conf.devices.chunksize,
                                 conf.devices.samplerate,
                                 processing_params.clone(),
+                                &mut coeff_cache,
                             );
                             steps.push(PipelineStep::FilterStep(fltgrp));
                         }
@@ -336,6 +349,10 @@ impl Pipeline {
         processors: &[String],
     ) {
         debug!("Updating parameters");
+        // One cache for the whole pass, so a convolution filter used on
+        // several channels is read and transformed once. It is dropped at the
+        // end of the pass, before any later config can reuse a name.
+        let mut coeff_cache = ConvCoeffCache::new();
         for mut step in &mut self.steps {
             match &mut step {
                 PipelineStep::MixerStep(mix) => {
@@ -344,10 +361,18 @@ impl Pipeline {
                     }
                 }
                 PipelineStep::FilterStep(flt) => {
-                    flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters);
+                    flt.update_parameters(
+                        conf.filters.as_ref().unwrap().clone(),
+                        filters,
+                        &mut coeff_cache,
+                    );
                 }
                 PipelineStep::ParallelFiltersStep(flt) => {
-                    flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters);
+                    flt.update_parameters(
+                        conf.filters.as_ref().unwrap().clone(),
+                        filters,
+                        &mut coeff_cache,
+                    );
                 }
                 PipelineStep::ProcessorStep(proc) => {
                     if processors.iter().any(|n| n == proc.name()) {
