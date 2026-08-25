@@ -106,6 +106,10 @@ name = "filters"
 harness = false
 
 [[bench]]
+name = "biquad_interleave"
+harness = false
+
+[[bench]]
 name = "conversions"
 harness = false
 
