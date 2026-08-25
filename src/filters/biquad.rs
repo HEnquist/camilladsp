@@ -426,6 +426,30 @@ impl From<BiquadCoefficients> for RuntimeCoefficients {
     }
 }
 
+/// Computes `a * b + c`, fused into a single instruction where the hardware
+/// has fused multiply-add.
+///
+/// Fusing shortens the biquad feedback path and is measurably faster. It is
+/// gated because on targets without hardware FMA `mul_add` lowers to a libm
+/// `fma()` call, which is far slower than a separate multiply and add. The
+/// gate covers aarch64, where FMA is always present, and x86 built with
+/// `+fma`. Plain x86-64 falls back to `mulsd`/`addsd`, and 32-bit arm to a
+/// single unfused `vmla.f64`, so the fallback costs nothing there.
+///
+/// Note that the fused form rounds once instead of twice, so a build that
+/// takes this path differs from one that does not in the last few ulp.
+#[inline(always)]
+fn mul_add(a: CamillaFloat, b: CamillaFloat, c: CamillaFloat) -> CamillaFloat {
+    if cfg!(any(
+        all(target_arch = "aarch64", target_feature = "neon"),
+        target_feature = "fma",
+    )) {
+        a.mul_add(b, c)
+    } else {
+        a * b + c
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Biquad {
     samplerate: usize,
@@ -449,9 +473,13 @@ impl Biquad {
 
     /// Process a single sample.
     pub fn process_single(&mut self, input: CamillaFloat) -> CamillaFloat {
-        let out = self.s1 + self.coeffs.b0 * input;
-        self.s1 = self.s2 + self.coeffs.b1 * input - self.coeffs.a1 * out;
-        self.s2 = self.coeffs.b2 * input - self.coeffs.a2 * out;
+        let out = mul_add(self.coeffs.b0, input, self.s1);
+        self.s1 = mul_add(
+            -self.coeffs.a1,
+            out,
+            mul_add(self.coeffs.b1, input, self.s2),
+        );
+        self.s2 = mul_add(-self.coeffs.a2, out, self.coeffs.b2 * input);
         out
     }
 
