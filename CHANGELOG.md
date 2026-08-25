@@ -19,14 +19,15 @@ Changes:
   `multithreaded` keeps the previous per-channel thread pool, which does not interleave, so
   biquad-heavy configurations are usually fastest with it left off. See the `multithreaded`
   setting in the README.
-- Faster convolution setup and processing. All convolution filters now share one FFT planner,
-  and the channels of a filter step share one copy of their transformed coefficients instead of
-  each holding its own. Building eight 16384 tap filters at a chunksize of 16384 went from about
-  3.0 ms to about 0.9 ms, and four channels of a one million tap filter running in parallel went
-  from about 3.1 ms to about 2.0 ms per chunk. The setup saving grows with `chunksize`, and
-  applies even when every channel uses a different impulse response. The processing saving needs
-  channels that share a filter, and is largest with `multithreaded` enabled, where the copies
-  would otherwise compete for memory bandwidth at the same moment. Without it the gain is smaller
+- Faster convolution setup and processing, and lower memory use. All convolution filters now
+  share one FFT planner, and channels that use the same filter share one copy of its transformed
+  coefficients instead of each holding its own. Building eight 16384 tap filters at a chunksize
+  of 16384 went from about 3.0 ms to about 0.9 ms, and four channels of a one million tap filter
+  running in parallel went from about 3.1 ms to about 2.0 ms per chunk while using a quarter of
+  the coefficient memory. The setup saving grows with `chunksize`, and applies even when every
+  channel uses a different impulse response. The coefficient sharing requires the channels to
+  refer to the same named filter, and helps most with `multithreaded` enabled, where the copies
+  would otherwise compete for memory bandwidth at the same moment. Without it the gain is smaller,
   and limited to filters large enough to crowd the cache but small enough that a single copy still
   fits.
 - Improved DSP library separation for easier external integration.
