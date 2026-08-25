@@ -188,7 +188,6 @@ impl ParallelFilters {
 /// chain; anything else stays on [`ParallelFilters`].
 pub struct InterleavedFilters {
     filters: Vec<Vec<Box<dyn Filter + Send>>>,
-    filter_pool: Arc<rayon::ThreadPool>,
 }
 
 impl InterleavedFilters {
@@ -202,7 +201,6 @@ impl InterleavedFilters {
     /// parallel. Mixed chains therefore stay on [`ParallelFilters`].
     fn try_new(
         mut filters: Vec<Vec<Box<dyn Filter + Send>>>,
-        filter_pool: Arc<rayon::ThreadPool>,
     ) -> Result<Self, Vec<Vec<Box<dyn Filter + Send>>>> {
         let uniform_depth = filters
             .iter()
@@ -216,10 +214,7 @@ impl InterleavedFilters {
             .all(|f| f.biquad_cascade().is_some());
         let worth_it = filters.len() > 1 && filters.first().is_some_and(|c| !c.is_empty());
         if uniform_depth && all_biquads && worth_it {
-            Ok(InterleavedFilters {
-                filters,
-                filter_pool,
-            })
+            Ok(InterleavedFilters { filters })
         } else {
             Err(filters)
         }
@@ -242,14 +237,13 @@ impl InterleavedFilters {
 
     /// Apply all the filters to an AudioChunk.
     fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
-        self.filter_pool.install(|| {
-            self.filters
-                .par_chunks_mut(MAX_INTERLEAVE)
-                .zip(input.waveforms.par_chunks_mut(MAX_INTERLEAVE))
-                .for_each(|(chains, waves)| {
-                    process_interleaved_group(chains, waves);
-                });
-        });
+        for (chains, waves) in self
+            .filters
+            .chunks_mut(MAX_INTERLEAVE)
+            .zip(input.waveforms.chunks_mut(MAX_INTERLEAVE))
+        {
+            process_interleaved_group(chains, waves);
+        }
         Ok(())
     }
 }
@@ -434,9 +428,12 @@ impl Pipeline {
         // When a rayon pool is available, merge the per-channel filter
         // steps into parallel steps that run on it. With no pool the
         // filters run sequentially.
-        if let Some(pool) = &filter_pool {
-            steps = parallelize_filters(&mut steps, conf.devices.capture.channels(), pool);
-        }
+        // Runs with or without a pool: interleaving needs no threads.
+        steps = parallelize_filters(
+            &mut steps,
+            conf.devices.capture.channels(),
+            filter_pool.as_ref(),
+        );
         Pipeline {
             steps,
             volume,
@@ -528,40 +525,51 @@ impl Pipeline {
 // in order use rayon to apply them in parallel.
 /// Emit an accumulated filter step in the fastest form it qualifies for.
 ///
-/// Channels whose chains are all biquads can run interleaved; everything else
-/// keeps the plain per-channel parallel path.
-fn finish_filter_step(parfilt: ParallelFilters) -> PipelineStep {
-    let ParallelFilters {
-        filters,
-        filter_pool,
-    } = parfilt;
-    match InterleavedFilters::try_new(filters, filter_pool.clone()) {
+/// Channels whose chains are all biquads run interleaved, with or without a
+/// thread pool. Anything else keeps the previous behaviour: the parallel
+/// per-channel path when there is a pool, separate per-channel steps when
+/// there is not.
+fn finish_filter_step(
+    filters: Vec<Vec<Box<dyn Filter + Send>>>,
+    pool: Option<&Arc<rayon::ThreadPool>>,
+) -> Vec<PipelineStep> {
+    match InterleavedFilters::try_new(filters) {
         Ok(interleaved) => {
             debug!("Filter step is all biquads, processing channels interleaved");
-            PipelineStep::InterleavedFiltersStep(interleaved)
+            vec![PipelineStep::InterleavedFiltersStep(interleaved)]
         }
-        Err(filters) => PipelineStep::ParallelFiltersStep(ParallelFilters {
-            filters,
-            filter_pool,
-        }),
+        Err(filters) => match pool {
+            Some(pool) => vec![PipelineStep::ParallelFiltersStep(ParallelFilters {
+                filters,
+                filter_pool: pool.clone(),
+            })],
+            None => filters
+                .into_iter()
+                .enumerate()
+                .filter(|(_, chain)| !chain.is_empty())
+                .map(|(channel, filters)| {
+                    PipelineStep::FilterStep(FilterGroup { channel, filters })
+                })
+                .collect(),
+        },
     }
 }
 
 fn parallelize_filters(
     steps: &mut Vec<PipelineStep>,
     nbr_channels: usize,
-    pool: &Arc<rayon::ThreadPool>,
+    pool: Option<&Arc<rayon::ThreadPool>>,
 ) -> Vec<PipelineStep> {
-    debug!("Merging filter steps to enable parallel processing");
+    debug!("Merging filter steps to enable parallel and interleaved processing");
     let mut new_steps: Vec<PipelineStep> = Vec::new();
-    let mut parfilt = None;
+    let mut parfilt: Option<Vec<Vec<Box<dyn Filter + Send>>>> = None;
     let mut active_channels = nbr_channels;
     for step in steps.drain(..) {
         match step {
             PipelineStep::MixerStep(ref mix) => {
                 if parfilt.is_some() {
                     debug!("Append parallel filter step to pipeline");
-                    new_steps.push(finish_filter_step(parfilt.take().unwrap()));
+                    new_steps.extend(finish_filter_step(parfilt.take().unwrap(), pool));
                 }
                 active_channels = mix.channels_out;
                 debug!("Append mixer step to pipeline");
@@ -570,7 +578,7 @@ fn parallelize_filters(
             PipelineStep::ProcessorStep(_) => {
                 if parfilt.is_some() {
                     debug!("Append parallel filter step to pipeline");
-                    new_steps.push(finish_filter_step(parfilt.take().unwrap()));
+                    new_steps.extend(finish_filter_step(parfilt.take().unwrap(), pool));
                 }
                 debug!("Append processor step to pipeline");
                 new_steps.push(step);
@@ -578,37 +586,34 @@ fn parallelize_filters(
             PipelineStep::ParallelFiltersStep(_) | PipelineStep::InterleavedFiltersStep(_) => {
                 if parfilt.is_some() {
                     debug!("Append parallel filter step to pipeline");
-                    new_steps.push(finish_filter_step(parfilt.take().unwrap()));
+                    new_steps.extend(finish_filter_step(parfilt.take().unwrap(), pool));
                 }
                 debug!("Append existing parallel filter step to pipeline");
                 new_steps.push(step);
             }
             PipelineStep::FilterStep(mut flt) => {
                 if parfilt.is_none() {
-                    debug!("Start new parallel filter step");
+                    debug!("Start new merged filter step");
                     let mut filters = Vec::with_capacity(active_channels);
                     for _ in 0..active_channels {
                         filters.push(Vec::new());
                     }
-                    parfilt = Some(ParallelFilters {
-                        filters,
-                        filter_pool: pool.clone(),
-                    });
+                    parfilt = Some(filters);
                 }
                 if let Some(ref mut f) = parfilt {
                     debug!(
-                        "Adding {} filters to channel {} of parallel filter step",
+                        "Adding {} filters to channel {} of merged filter step",
                         flt.filters.len(),
                         flt.channel
                     );
-                    f.filters[flt.channel].append(&mut flt.filters);
+                    f[flt.channel].append(&mut flt.filters);
                 }
             }
         }
     }
     if parfilt.is_some() {
         debug!("Append parallel filter step to pipeline");
-        new_steps.push(finish_filter_step(parfilt.take().unwrap()));
+        new_steps.extend(finish_filter_step(parfilt.take().unwrap(), pool));
     }
     new_steps
 }
