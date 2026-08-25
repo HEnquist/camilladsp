@@ -8,8 +8,11 @@
 //!
 //! The difference is memory traffic. Coefficients are read in full for every
 //! chunk, so with a copy per channel the working set grows with the channel
-//! count and the channels end up competing for cache and memory bandwidth
-//! rather than running independently.
+//! count. Both processing paths pay for that, so both are measured: `par`
+//! spreads the channels over a thread pool the way `multithreaded` does,
+//! `serial` walks them in order the way the default path does. In parallel the
+//! copies compete for bandwidth at the same instant; in serial they evict each
+//! other from cache in turn.
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rayon::prelude::*;
@@ -79,26 +82,43 @@ fn bench_conv_parallel(c: &mut Criterion) {
                 .build()
                 .unwrap();
             let label = format!("{length}taps_{channels}ch");
-            for (name, build) in [
+            for (arm, build) in [
                 ("shared", shared_filters as fn(usize, usize) -> Vec<FftConv>),
                 ("separate", separate_filters),
             ] {
-                group.bench_with_input(BenchmarkId::new(name, &label), &length, |b, &length| {
-                    let mut filters = build(channels, length);
-                    let source = waveforms(channels);
-                    let mut waves = source.clone();
-                    b.iter(|| {
-                        refill(&mut waves, &source);
-                        pool.install(|| {
-                            filters.par_iter_mut().zip(waves.par_iter_mut()).for_each(
-                                |(filter, wave)| {
-                                    filter.process_waveform(wave).unwrap();
-                                },
-                            );
-                        });
-                        black_box(&waves[0][0]);
-                    })
-                });
+                for parallel in [true, false] {
+                    let name = if parallel {
+                        format!("par_{arm}")
+                    } else {
+                        format!("serial_{arm}")
+                    };
+                    group.bench_with_input(
+                        BenchmarkId::new(name, &label),
+                        &length,
+                        |b, &length| {
+                            let mut filters = build(channels, length);
+                            let source = waveforms(channels);
+                            let mut waves = source.clone();
+                            b.iter(|| {
+                                refill(&mut waves, &source);
+                                if parallel {
+                                    pool.install(|| {
+                                        filters.par_iter_mut().zip(waves.par_iter_mut()).for_each(
+                                            |(filter, wave)| {
+                                                filter.process_waveform(wave).unwrap();
+                                            },
+                                        );
+                                    });
+                                } else {
+                                    for (filter, wave) in filters.iter_mut().zip(waves.iter_mut()) {
+                                        filter.process_waveform(wave).unwrap();
+                                    }
+                                }
+                                black_box(&waves[0][0]);
+                            })
+                        },
+                    );
+                }
             }
         }
     }
