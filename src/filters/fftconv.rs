@@ -238,7 +238,45 @@ fn plan_transforms(
 
 /// Convolution coefficients, padded into segments and transformed, ready for
 /// the processing loop to multiply against.
-pub type ConvCoeffs = Vec<Vec<Complex<CamillaFloat>>>;
+pub type ConvCoeffs = SegmentedSpectrum;
+
+/// A run of equal-length spectra held in one contiguous allocation.
+///
+/// This was a `Vec<Vec<Complex>>`, one heap block per segment. The hot loop
+/// walks every segment of both the coefficients and the input history once per
+/// chunk, and with a block per segment the hardware prefetcher has to restart
+/// at every boundary. A single allocation lets it run the whole way.
+pub struct SegmentedSpectrum {
+    data: Vec<Complex<CamillaFloat>>,
+    seg_len: usize,
+}
+
+impl SegmentedSpectrum {
+    /// `segments` spectra of `seg_len` bins each, all zero.
+    pub fn zeroed(segments: usize, seg_len: usize) -> Self {
+        SegmentedSpectrum {
+            data: vec![Complex::zero(); segments * seg_len],
+            seg_len,
+        }
+    }
+
+    /// Number of segments.
+    pub fn len(&self) -> usize {
+        self.data.len().checked_div(self.seg_len).unwrap_or(0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn segment(&self, index: usize) -> &[Complex<CamillaFloat>] {
+        &self.data[index * self.seg_len..(index + 1) * self.seg_len]
+    }
+
+    pub fn segment_mut(&mut self, index: usize) -> &mut [Complex<CamillaFloat>] {
+        &mut self.data[index * self.seg_len..(index + 1) * self.seg_len]
+    }
+}
 
 /// Transformed coefficients keyed by filter name, so that channels running the
 /// same convolution filter share one copy.
@@ -307,12 +345,12 @@ fn transform_coeffs(
 ) -> Arc<ConvCoeffs> {
     let nsegments = coeffs.len().div_ceil(data_length);
     let mut coeffs_padded = vec![vec![0.0; 2 * data_length]; nsegments];
-    let mut coeffs_f = vec![vec![Complex::zero(); data_length + 1]; nsegments];
+    let mut coeffs_f = SegmentedSpectrum::zeroed(nsegments, data_length + 1);
     for (n, coeff) in coeffs.iter().enumerate() {
         coeffs_padded[n / data_length][n % data_length] = coeff / (2 * data_length) as CamillaFloat;
     }
-    for (segment, segment_f) in coeffs_padded.iter_mut().zip(coeffs_f.iter_mut()) {
-        fft.process_with_scratch(segment, segment_f, scratch)
+    for (n, segment) in coeffs_padded.iter_mut().enumerate() {
+        fft.process_with_scratch(segment, coeffs_f.segment_mut(n), scratch)
             .unwrap();
     }
     Arc::new(coeffs_f)
@@ -329,7 +367,7 @@ pub struct FftConv {
     scratch_fw: Vec<Complex<CamillaFloat>>,
     scratch_inv: Vec<Complex<CamillaFloat>>,
     input_buf: Vec<CamillaFloat>,
-    input_f: Vec<Vec<Complex<CamillaFloat>>>,
+    input_f: SegmentedSpectrum,
     temp_buf: Vec<Complex<CamillaFloat>>,
     output_buf: Vec<CamillaFloat>,
     index: usize,
@@ -365,7 +403,7 @@ impl FftConv {
             ifft,
             scratch_fw,
             scratch_inv,
-            input_f: vec![vec![Complex::zero(); data_length + 1]; nsegments],
+            input_f: SegmentedSpectrum::zeroed(nsegments, data_length + 1),
             input_buf: vec![0.0; 2 * data_length],
             temp_buf: vec![Complex::zero(); data_length + 1],
             output_buf: vec![0.0; 2 * data_length],
@@ -418,7 +456,7 @@ impl Filter for FftConv {
         self.fft
             .process_with_scratch(
                 &mut self.input_buf,
-                &mut self.input_f[self.index],
+                self.input_f.segment_mut(self.index),
                 &mut self.scratch_fw,
             )
             .unwrap();
@@ -428,15 +466,15 @@ impl Filter for FftConv {
         let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
         CamillaFloat::multiply_elements(
             &mut self.temp_buf,
-            &self.input_f[hist_idx],
-            &self.coeffs_f[segm],
+            self.input_f.segment(hist_idx),
+            self.coeffs_f.segment(segm),
         );
         for segm in 1..self.nsegments {
             let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
             CamillaFloat::multiply_add_elements(
                 &mut self.temp_buf,
-                &self.input_f[hist_idx],
-                &self.coeffs_f[segm],
+                self.input_f.segment(hist_idx),
+                self.coeffs_f.segment(segm),
             );
         }
 
@@ -486,7 +524,7 @@ impl Filter for FftConv {
         if nsegments != self.nsegments {
             // Length changed, so the history no longer lines up. Clear it.
             self.nsegments = nsegments;
-            self.input_f = vec![vec![Complex::zero(); self.npoints + 1]; nsegments];
+            self.input_f = SegmentedSpectrum::zeroed(nsegments, self.npoints + 1);
         }
         self.coeffs_f = coeffs_f;
     }

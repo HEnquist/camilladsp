@@ -14,6 +14,7 @@
 //! copies compete for bandwidth at the same instant; in serial they evict each
 //! other from cache in turn.
 
+use audio_thread_priority::promote_current_thread_to_real_time;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rayon::prelude::*;
 use std::hint::black_box;
@@ -81,17 +82,27 @@ fn bench_conv_parallel(c: &mut Criterion) {
                 .num_threads(channels)
                 .build()
                 .unwrap();
+            // EXPERIMENT: the same pool with its workers promoted to real-time,
+            // the way build_processing_threadpool does it. On a part with
+            // efficiency cores that is what keeps the workers off them.
+            let rt_pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(channels)
+                .start_handler(|_| {
+                    if promote_current_thread_to_real_time(CHUNK as u32, 48000).is_err() {
+                        eprintln!("warning: real-time promotion failed");
+                    }
+                })
+                .build()
+                .unwrap();
             let label = format!("{length}taps_{channels}ch");
             for (arm, build) in [
                 ("shared", shared_filters as fn(usize, usize) -> Vec<FftConv>),
                 ("separate", separate_filters),
             ] {
-                for parallel in [true, false] {
-                    let name = if parallel {
-                        format!("par_{arm}")
-                    } else {
-                        format!("serial_{arm}")
-                    };
+                for mode in ["par", "serial", "par_rt"] {
+                    let parallel = mode != "serial";
+                    let use_rt = mode == "par_rt";
+                    let name = format!("{mode}_{arm}");
                     group.bench_with_input(
                         BenchmarkId::new(name, &label),
                         &length,
@@ -102,7 +113,8 @@ fn bench_conv_parallel(c: &mut Criterion) {
                             b.iter(|| {
                                 refill(&mut waves, &source);
                                 if parallel {
-                                    pool.install(|| {
+                                    let p = if use_rt { &rt_pool } else { &pool };
+                                    p.install(|| {
                                         filters.par_iter_mut().zip(waves.par_iter_mut()).for_each(
                                             |(filter, wave)| {
                                                 filter.process_waveform(wave).unwrap();
