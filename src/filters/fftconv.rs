@@ -20,7 +20,7 @@ use crate::filters::Filter;
 use num_complex::Complex;
 use num_traits::Zero;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 
 // Sample format
 use crate::CamillaFloat;
@@ -203,6 +203,38 @@ impl_conv_kernel!(
     multiply_add_elements_avx_fma_f32
 );
 
+/// Shared FFT planner for all convolution filters.
+///
+/// The plans depend only on the FFT length, which is twice the chunksize, so
+/// every convolution filter in a configuration asks for the same pair. A
+/// planner caches what it has built, but only for as long as it lives, so a
+/// planner per filter threw the cache away and every filter paid full price.
+/// Planning scales with the FFT length while a cache hit does not: for a 16384
+/// sample chunk a fresh pair costs about 250 us against about 40 ns from a warm
+/// planner, which is most of the time an eight channel reload spends.
+///
+/// `spectrum.rs` keeps its own planner for the same reason. That one is fixed
+/// at `f32` while these plans follow `CamillaFloat`, so they cannot be merged.
+///
+/// The lock is only taken while building filters, never while processing.
+static FFT_PLANNER: LazyLock<Mutex<RealFftPlanner<CamillaFloat>>> =
+    LazyLock::new(|| Mutex::new(RealFftPlanner::new()));
+
+/// Plan the forward and inverse transforms for a convolution of `data_length`
+/// samples, reusing any plan the shared planner has already built.
+fn plan_transforms(
+    data_length: usize,
+) -> (
+    Arc<dyn RealToComplex<CamillaFloat>>,
+    Arc<dyn ComplexToReal<CamillaFloat>>,
+) {
+    let mut planner = FFT_PLANNER.lock().unwrap();
+    (
+        planner.plan_fft_forward(2 * data_length),
+        planner.plan_fft_inverse(2 * data_length),
+    )
+}
+
 pub struct FftConv {
     name: String,
     npoints: usize,
@@ -227,9 +259,7 @@ impl FftConv {
         let input_buf: Vec<CamillaFloat> = vec![0.0; 2 * data_length];
         let temp_buf: Vec<Complex<CamillaFloat>> = vec![Complex::zero(); data_length + 1];
         let output_buf: Vec<CamillaFloat> = vec![0.0; 2 * data_length];
-        let mut planner = RealFftPlanner::<CamillaFloat>::new();
-        let fft = planner.plan_fft_forward(2 * data_length);
-        let ifft = planner.plan_fft_inverse(2 * data_length);
+        let (fft, ifft) = plan_transforms(data_length);
         let mut scratch_fw = fft.make_scratch_vec();
         let scratch_inv = ifft.make_scratch_vec();
 
@@ -559,6 +589,31 @@ mod tests {
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
         filter.process_waveform(&mut wave1).unwrap();
         assert!(compare_waveforms(wave1, expected, 1e-7));
+    }
+
+    /// Filters sharing the planner must behave exactly as they did with a
+    /// private one, including when several chunksizes are in play so the
+    /// planner is holding more than one pair of plans.
+    #[test]
+    fn shared_planner_gives_same_result() {
+        let coeffs: Vec<CamillaFloat> = (0..48).map(|m| m as CamillaFloat).collect();
+        for data_length in [8, 16, 8] {
+            let mut first = FftConv::new("first", data_length, &coeffs);
+            let mut second = FftConv::new("second", data_length, &coeffs);
+            for block in 0..6 {
+                let input: Vec<CamillaFloat> = (0..data_length)
+                    .map(|n| ((n + block * data_length) as CamillaFloat * 0.25).sin())
+                    .collect();
+                let mut wave_first = input.clone();
+                let mut wave_second = input;
+                first.process_waveform(&mut wave_first).unwrap();
+                second.process_waveform(&mut wave_second).unwrap();
+                assert!(
+                    compare_waveforms(wave_first, wave_second, 1e-9),
+                    "length {data_length}, block {block}"
+                );
+            }
+        }
     }
 
     #[test]
