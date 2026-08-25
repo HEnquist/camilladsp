@@ -13,6 +13,12 @@ Bugfixes:
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
 
 Changes:
+- Faster biquad processing. Biquads now use fused multiply-add on hardware that has it, and with
+  `multithreaded` disabled the biquads for several channels are processed together in one
+  interleaved pass. A four channel biquad pipeline is about 3.4 times faster. Enabling
+  `multithreaded` keeps the previous per-channel thread pool, which does not interleave, so
+  biquad-heavy configurations are usually fastest with it left off. See the `multithreaded`
+  setting in the README.
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
 - The `32bit` build feature is gone. 32-bit float processing is now selected with the compiler

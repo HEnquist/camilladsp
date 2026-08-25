@@ -1145,12 +1145,22 @@ A parameter marked (*) in any example is optional. If they are left out from the
   cannot be parallelized and are processed in the main thread.
   Therefore, only the filters between mixers and/or processors can be parallelized.
 
-  Multithreaded processing is beneficial for configurations that require significant processing power,
-  such as using very long FIR filters, high sample rates, or a large number of channels.
+  Multithreaded processing is intended for configurations dominated by heavy FIR filtering,
+  meaning very long convolutions, high sample rates, or a large number of channels.
   It should only be enabled if necessary, as it typically should remain disabled.
   Synchronizing with worker threads adds some overhead, increasing overall CPU usage.
   It also makes CamillaDSP more susceptible to other processes using the CPU,
   which may cause buffer underruns.
+
+  Note that enabling it can make a biquad-heavy configuration slower.
+  With multithreading disabled, biquad filters for several channels are processed together in one
+  interleaved pass, which is several times faster than handling one channel at a time.
+  A biquad spends most of its time waiting on its own feedback path, and running several channels
+  at once fills that idle time without needing any threads.
+  Enabling multithreading selects the per-channel thread pool instead, which does not interleave,
+  so a configuration built from biquads, peaking filters and shelving filters is usually fastest
+  with `multithreaded` left at `false`.
+  Convolution filters do not have this property and are the case worth enabling threads for.
 
   An exception to this recommendation is when both the input and output are files on disk,
   allowing processing to run faster than real time.
