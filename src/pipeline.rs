@@ -815,4 +815,112 @@ devices:
     fn mismatched_types_at_a_position_are_not_batched() {
         assert_eq!(run_shape(&["bb", "bc"]), vec![(true, 1), (false, 1)]);
     }
+    /// Four channels, biquads with a non-biquad filter in the middle so the
+    /// chains have to be split into runs, plus a trailing biquad cascade.
+    const SPLIT_CONFIG: &str = "
+devices:
+  samplerate: 44100
+  chunksize: 256
+  capture:
+    type: SignalGenerator
+    channels: 4
+    signal:
+      type: Sine
+      freq: 1000
+      level: 0.0
+  playback:
+    type: Stdout
+    channels: 4
+    format: S16_LE
+filters:
+  hp:
+    type: Biquad
+    parameters:
+      type: Highpass
+      freq: 120
+      q: 0.7
+  peak:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 1000
+      q: 1.5
+      gain: 4.0
+  att:
+    type: Gain
+    parameters:
+      gain: -3.0
+  lr4:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 2000
+      order: 4
+pipeline:
+  - type: Filter
+    channels: [0, 1, 2, 3]
+    names: [hp, peak, att, lr4, hp]
+";
+
+    fn process_once(
+        conf: config::Configuration,
+        pool: Option<Arc<rayon::ThreadPool>>,
+    ) -> Vec<Vec<CamillaFloat>> {
+        let chunksize = conf.devices.chunksize;
+        let channels = conf.devices.capture.channels();
+        let params = Arc::new(ProcessingParameters::default());
+        params.set_target_volume(0, 0.0);
+        params.sync_volumes_to_target();
+        let mut pipeline = Pipeline::from_config(conf, params, pool);
+
+        // Distinct signal per channel, so a mix-up between channels shows up.
+        let waveforms = (0..channels)
+            .map(|ch| {
+                (0..chunksize)
+                    .map(|n| {
+                        let t = n as CamillaFloat / 44100.0;
+                        let f = 200.0 * (1.0 + ch as CamillaFloat);
+                        0.5 * (2.0 * std::f64::consts::PI as CamillaFloat * f * t).sin()
+                    })
+                    .collect()
+            })
+            .collect();
+        let chunk = AudioChunk::new(waveforms, 1.0, -1.0, chunksize, chunksize);
+        pipeline.process_chunk(chunk).waveforms
+    }
+
+    /// End to end check that interleaving changes nothing.
+    ///
+    /// Without a pool the biquads run interleaved and the chains get split
+    /// around the Gain; with a pool they run one channel at a time. Each
+    /// channel sees the same operations in the same order either way, so the
+    /// results must match exactly.
+    #[test]
+    fn interleaved_pipeline_matches_parallel_pipeline() {
+        let conf: config::Configuration = yaml_serde::from_str(SPLIT_CONFIG).unwrap();
+        let interleaved = process_once(conf, None);
+
+        let conf: config::Configuration = yaml_serde::from_str(SPLIT_CONFIG).unwrap();
+        let pool = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(2)
+                .build()
+                .unwrap(),
+        );
+        let parallel = process_once(conf, Some(pool));
+
+        assert_eq!(interleaved.len(), parallel.len());
+        for (ch, (a, b)) in interleaved.iter().zip(parallel.iter()).enumerate() {
+            assert_eq!(a, b, "channel {ch} differs between the two pipeline paths");
+        }
+        // Guard against both paths silently doing nothing.
+        let peak = interleaved
+            .iter()
+            .flat_map(|w| w.iter())
+            .fold(0.0 as CamillaFloat, |m, v| m.max(v.abs()));
+        assert!(
+            peak > 1e-6,
+            "pipeline produced silence, test proves nothing"
+        );
+    }
 }
