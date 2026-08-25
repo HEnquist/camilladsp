@@ -14,12 +14,14 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::CamillaFloat;
 use crate::ProcessingParameters;
 use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters;
-use crate::filters::Filter;
+use crate::filters::biquad::MAX_INTERLEAVE;
+use crate::filters::{Filter, InterleavedFilters as _};
 use crate::mixer;
 use crate::processors;
 use crate::processors::Processor;
@@ -174,12 +176,129 @@ impl ParallelFilters {
     }
 }
 
+/// Filter groups for channels whose chains are entirely biquad-based, run with
+/// several channels interleaved.
+///
+/// A biquad stalls on its own feedback path, so processing channels one at a
+/// time leaves the core idle. Channels are batched into groups of at most
+/// [`MAX_INTERLEAVE`] and the groups are spread over the same rayon pool as
+/// [`ParallelFilters`].
+///
+/// Built only when every channel has an equal-length, fully biquad-based
+/// chain; anything else stays on [`ParallelFilters`].
+pub struct InterleavedFilters {
+    filters: Vec<Vec<Box<dyn Filter + Send>>>,
+    filter_pool: Arc<rayon::ThreadPool>,
+}
+
+impl InterleavedFilters {
+    /// Returns `Some` if every channel chain is the same length and made up
+    /// entirely of filters that expose a biquad cascade.
+    ///
+    /// The all-biquad requirement is deliberate. Grouping channels trades
+    /// per-channel rayon parallelism for interleaving, which is a win for
+    /// biquads but a loss for an expensive filter like a convolution, since
+    /// four of those would then run serially in one task instead of in
+    /// parallel. Mixed chains therefore stay on [`ParallelFilters`].
+    fn try_new(
+        mut filters: Vec<Vec<Box<dyn Filter + Send>>>,
+        filter_pool: Arc<rayon::ThreadPool>,
+    ) -> Result<Self, Vec<Vec<Box<dyn Filter + Send>>>> {
+        let uniform_depth = filters
+            .iter()
+            .map(|chain| chain.len())
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            <= 1;
+        let all_biquads = filters
+            .iter_mut()
+            .flat_map(|chain| chain.iter_mut())
+            .all(|f| f.biquad_cascade().is_some());
+        let worth_it = filters.len() > 1 && filters.first().is_some_and(|c| !c.is_empty());
+        if uniform_depth && all_biquads && worth_it {
+            Ok(InterleavedFilters {
+                filters,
+                filter_pool,
+            })
+        } else {
+            Err(filters)
+        }
+    }
+
+    /// Hot-reload parameters for any filters whose names appear in `changed`.
+    pub fn update_parameters(
+        &mut self,
+        filterconfigs: HashMap<String, config::Filter>,
+        changed: &[String],
+    ) {
+        for channel_filters in &mut self.filters {
+            for filter in channel_filters {
+                if changed.iter().any(|n| n == filter.name()) {
+                    filter.update_parameters(filterconfigs[filter.name()].clone());
+                }
+            }
+        }
+    }
+
+    /// Apply all the filters to an AudioChunk.
+    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+        self.filter_pool.install(|| {
+            self.filters
+                .par_chunks_mut(MAX_INTERLEAVE)
+                .zip(input.waveforms.par_chunks_mut(MAX_INTERLEAVE))
+                .for_each(|(chains, waves)| {
+                    process_interleaved_group(chains, waves);
+                });
+        });
+        Ok(())
+    }
+}
+
+/// Runs one group of channels, advancing every chain a position at a time so
+/// the filters at each position can be batched.
+///
+/// All chains here are the same length, checked when the step was built.
+fn process_interleaved_group(
+    chains: &mut [Vec<Box<dyn Filter + Send>>],
+    waves: &mut [Vec<CamillaFloat>],
+) {
+    let depth = chains.first().map(|c| c.len()).unwrap_or(0);
+    for pos in 0..depth {
+        // Fixed-size destructuring keeps the audio path allocation-free.
+        match (&mut *chains, &mut *waves) {
+            ([c0, c1, c2, c3], [w0, w1, w2, w3]) => {
+                let mut fs: [&mut (dyn Filter + Send); 4] =
+                    [&mut *c0[pos], &mut *c1[pos], &mut *c2[pos], &mut *c3[pos]];
+                let mut ws: [&mut [CamillaFloat]; 4] =
+                    [w0.as_mut(), w1.as_mut(), w2.as_mut(), w3.as_mut()];
+                let _ = fs.as_mut_slice().process_group(ws.as_mut_slice());
+            }
+            ([c0, c1, c2], [w0, w1, w2]) => {
+                let mut fs: [&mut (dyn Filter + Send); 3] =
+                    [&mut *c0[pos], &mut *c1[pos], &mut *c2[pos]];
+                let mut ws: [&mut [CamillaFloat]; 3] = [w0.as_mut(), w1.as_mut(), w2.as_mut()];
+                let _ = fs.as_mut_slice().process_group(ws.as_mut_slice());
+            }
+            ([c0, c1], [w0, w1]) => {
+                let mut fs: [&mut (dyn Filter + Send); 2] = [&mut *c0[pos], &mut *c1[pos]];
+                let mut ws: [&mut [CamillaFloat]; 2] = [w0.as_mut(), w1.as_mut()];
+                let _ = fs.as_mut_slice().process_group(ws.as_mut_slice());
+            }
+            ([c0], [w0]) => {
+                let _ = c0[pos].process_waveform(w0);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// A Pipeline is made up of a series of PipelineSteps,
 /// each one can be a single Mixer or a group of Filters
 pub enum PipelineStep {
     MixerStep(mixer::Mixer),
     FilterStep(FilterGroup),
     ParallelFiltersStep(ParallelFilters),
+    InterleavedFiltersStep(InterleavedFilters),
     ProcessorStep(Box<dyn Processor>),
 }
 
@@ -349,6 +468,9 @@ impl Pipeline {
                 PipelineStep::ParallelFiltersStep(flt) => {
                     flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters);
                 }
+                PipelineStep::InterleavedFiltersStep(flt) => {
+                    flt.update_parameters(conf.filters.as_ref().unwrap().clone(), filters);
+                }
                 PipelineStep::ProcessorStep(proc) => {
                     if processors.iter().any(|n| n == proc.name()) {
                         proc.update_parameters(
@@ -373,6 +495,9 @@ impl Pipeline {
                     flt.process_chunk(&mut chunk).unwrap();
                 }
                 PipelineStep::ParallelFiltersStep(flt) => {
+                    flt.process_chunk(&mut chunk).unwrap();
+                }
+                PipelineStep::InterleavedFiltersStep(flt) => {
                     flt.process_chunk(&mut chunk).unwrap();
                 }
                 PipelineStep::ProcessorStep(comp) => {
@@ -401,6 +526,27 @@ impl Pipeline {
 
 // Loop through the pipeline to merge individual filter steps,
 // in order use rayon to apply them in parallel.
+/// Emit an accumulated filter step in the fastest form it qualifies for.
+///
+/// Channels whose chains are all biquads can run interleaved; everything else
+/// keeps the plain per-channel parallel path.
+fn finish_filter_step(parfilt: ParallelFilters) -> PipelineStep {
+    let ParallelFilters {
+        filters,
+        filter_pool,
+    } = parfilt;
+    match InterleavedFilters::try_new(filters, filter_pool.clone()) {
+        Ok(interleaved) => {
+            debug!("Filter step is all biquads, processing channels interleaved");
+            PipelineStep::InterleavedFiltersStep(interleaved)
+        }
+        Err(filters) => PipelineStep::ParallelFiltersStep(ParallelFilters {
+            filters,
+            filter_pool,
+        }),
+    }
+}
+
 fn parallelize_filters(
     steps: &mut Vec<PipelineStep>,
     nbr_channels: usize,
@@ -415,7 +561,7 @@ fn parallelize_filters(
             PipelineStep::MixerStep(ref mix) => {
                 if parfilt.is_some() {
                     debug!("Append parallel filter step to pipeline");
-                    new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+                    new_steps.push(finish_filter_step(parfilt.take().unwrap()));
                 }
                 active_channels = mix.channels_out;
                 debug!("Append mixer step to pipeline");
@@ -424,15 +570,15 @@ fn parallelize_filters(
             PipelineStep::ProcessorStep(_) => {
                 if parfilt.is_some() {
                     debug!("Append parallel filter step to pipeline");
-                    new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+                    new_steps.push(finish_filter_step(parfilt.take().unwrap()));
                 }
                 debug!("Append processor step to pipeline");
                 new_steps.push(step);
             }
-            PipelineStep::ParallelFiltersStep(_) => {
+            PipelineStep::ParallelFiltersStep(_) | PipelineStep::InterleavedFiltersStep(_) => {
                 if parfilt.is_some() {
                     debug!("Append parallel filter step to pipeline");
-                    new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+                    new_steps.push(finish_filter_step(parfilt.take().unwrap()));
                 }
                 debug!("Append existing parallel filter step to pipeline");
                 new_steps.push(step);
@@ -462,7 +608,7 @@ fn parallelize_filters(
     }
     if parfilt.is_some() {
         debug!("Append parallel filter step to pipeline");
-        new_steps.push(PipelineStep::ParallelFiltersStep(parfilt.take().unwrap()));
+        new_steps.push(finish_filter_step(parfilt.take().unwrap()));
     }
     new_steps
 }
