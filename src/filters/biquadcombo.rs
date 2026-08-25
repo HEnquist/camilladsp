@@ -275,6 +275,10 @@ impl BiquadCombo {
 }
 
 impl Filter for BiquadCombo {
+    fn biquad_cascade(&mut self) -> Option<&mut [biquad::Biquad]> {
+        Some(&mut self.filters)
+    }
+
     fn name(&self) -> &str {
         &self.name
     }

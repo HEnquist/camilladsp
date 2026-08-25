@@ -496,6 +496,110 @@ impl Biquad {
     }
 }
 
+/// Largest channel group the interleaved biquad kernel accepts.
+///
+/// Each channel needs seven live floats (two state, five coefficients). With
+/// 32 FP registers, four channels is the most that stays clear of spilling;
+/// measured throughput peaks there and regresses beyond it.
+pub const MAX_INTERLEAVE: usize = 4;
+
+/// Runs one biquad cascade per channel, interleaving the recurrences.
+///
+/// A single biquad is latency-bound: each output feeds the next sample's
+/// state, so the core stalls on the dependency chain. Channels are
+/// independent, so running several at once fills those slots.
+///
+/// Cascades may differ in length. The stages every channel has are run
+/// interleaved; any channel with further stages finishes them on its own.
+/// Order within a channel is preserved either way.
+///
+/// `cascades` and `waveforms` must be the same length, one waveform per
+/// channel.
+pub fn process_cascades_interleaved(
+    cascades: &mut [&mut [Biquad]],
+    waveforms: &mut [&mut [CamillaFloat]],
+) {
+    debug_assert_eq!(cascades.len(), waveforms.len());
+    for (group, wfs) in cascades
+        .chunks_mut(MAX_INTERLEAVE)
+        .zip(waveforms.chunks_mut(MAX_INTERLEAVE))
+    {
+        process_one_group(group, wfs);
+    }
+}
+
+/// Interleaves a single group of at most [`MAX_INTERLEAVE`] channels.
+fn process_one_group(cascades: &mut [&mut [Biquad]], waveforms: &mut [&mut [CamillaFloat]]) {
+    let common = cascades.iter().map(|c| c.len()).min().unwrap_or(0);
+    for stage in 0..common {
+        match cascades.len() {
+            4 => interleaved::<4>(cascades, stage, waveforms),
+            3 => interleaved::<3>(cascades, stage, waveforms),
+            2 => interleaved::<2>(cascades, stage, waveforms),
+            1 => interleaved::<1>(cascades, stage, waveforms),
+            _ => unreachable!("chunks_mut yields at most MAX_INTERLEAVE"),
+        }
+    }
+    // Any channel with a longer cascade finishes its remaining stages alone.
+    for (cascade, waveform) in cascades.iter_mut().zip(waveforms.iter_mut()) {
+        for biquad in cascade[common..].iter_mut() {
+            for item in waveform.iter_mut() {
+                *item = biquad.process_single(*item);
+            }
+            biquad.flush_subnormals();
+        }
+    }
+}
+
+/// Interleaved kernel for one cascade stage across a fixed channel count.
+///
+/// State and coefficients are copied into locals so they stay in registers for
+/// the whole loop; `N` is a constant so the inner loop unrolls completely.
+fn interleaved<const N: usize>(
+    cascades: &mut [&mut [Biquad]],
+    stage: usize,
+    waveforms: &mut [&mut [CamillaFloat]],
+) {
+    let mut s1 = [0.0 as CamillaFloat; N];
+    let mut s2 = [0.0 as CamillaFloat; N];
+    let mut b0 = [0.0 as CamillaFloat; N];
+    let mut b1 = [0.0 as CamillaFloat; N];
+    let mut b2 = [0.0 as CamillaFloat; N];
+    let mut a1 = [0.0 as CamillaFloat; N];
+    let mut a2 = [0.0 as CamillaFloat; N];
+    for c in 0..N {
+        let bq = &cascades[c][stage];
+        s1[c] = bq.s1;
+        s2[c] = bq.s2;
+        b0[c] = bq.coeffs.b0;
+        b1[c] = bq.coeffs.b1;
+        b2[c] = bq.coeffs.b2;
+        a1[c] = bq.coeffs.a1;
+        a2[c] = bq.coeffs.a2;
+    }
+
+    let len = waveforms.iter().map(|w| w.len()).min().unwrap_or(0);
+    // Indexing is deliberate: each step advances N independent channels at the
+    // same sample position, which is what interleaves the recurrences.
+    #[allow(clippy::needless_range_loop)]
+    for i in 0..len {
+        for c in 0..N {
+            let input = waveforms[c][i];
+            let out = mul_add(b0[c], input, s1[c]);
+            s1[c] = mul_add(-a1[c], out, mul_add(b1[c], input, s2[c]));
+            s2[c] = mul_add(-a2[c], out, b2[c] * input);
+            waveforms[c][i] = out;
+        }
+    }
+
+    for c in 0..N {
+        let bq = &mut cascades[c][stage];
+        bq.s1 = s1[c];
+        bq.s2 = s2[c];
+        bq.flush_subnormals();
+    }
+}
+
 impl Filter for Biquad {
     fn name(&self) -> &str {
         &self.name
@@ -507,6 +611,10 @@ impl Filter for Biquad {
         }
         self.flush_subnormals();
         Ok(())
+    }
+
+    fn biquad_cascade(&mut self) -> Option<&mut [Biquad]> {
+        Some(std::slice::from_mut(self))
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
@@ -634,6 +742,7 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 
 #[cfg(test)]
 mod tests {
+    use super::{MAX_INTERLEAVE, process_cascades_interleaved};
     use crate::CamillaFloat;
     use crate::config::{
         BiquadParameters, GeneralNotchParams, NotchWidth, PeakingWidth, ShelfSteepness,
@@ -1115,5 +1224,97 @@ mod tests {
             gain: 1.23,
         });
         assert!(validate_config(fs, &badconf2).is_err());
+    }
+
+    /// Distinct coefficients per channel, so a mix-up between channels shows up.
+    fn test_cascade(channel: usize, stages: usize) -> Vec<Biquad> {
+        (0..stages)
+            .map(|st| {
+                let k = 1.0 + 0.01 * (channel * 8 + st) as f64;
+                Biquad::new(
+                    "t",
+                    44100,
+                    BiquadCoefficients::new(
+                        -0.14 * k,
+                        0.0053 * k,
+                        0.2147 / k,
+                        0.4295 / k,
+                        0.2147 / k,
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    fn test_signal(channel: usize, len: usize) -> Vec<CamillaFloat> {
+        (0..len)
+            .map(|n| {
+                let t = n as CamillaFloat / 44100.0;
+                let f = 100.0 * (1.0 + channel as CamillaFloat);
+                0.5 * (2.0 * std::f64::consts::PI as CamillaFloat * f * t).sin()
+            })
+            .collect()
+    }
+
+    /// Interleaving must not change the result at all: each channel runs the
+    /// same operations in the same order, only the scheduling differs.
+    fn check_interleaved_matches(stages_per_channel: &[usize]) {
+        let len = 500;
+        let nbr = stages_per_channel.len();
+
+        let mut seq_casc: Vec<Vec<Biquad>> = (0..nbr)
+            .map(|c| test_cascade(c, stages_per_channel[c]))
+            .collect();
+        let mut seq_wave: Vec<Vec<CamillaFloat>> = (0..nbr).map(|c| test_signal(c, len)).collect();
+        for (cascade, wave) in seq_casc.iter_mut().zip(seq_wave.iter_mut()) {
+            for bq in cascade.iter_mut() {
+                bq.process_waveform(wave).unwrap();
+            }
+        }
+
+        let mut int_casc: Vec<Vec<Biquad>> = (0..nbr)
+            .map(|c| test_cascade(c, stages_per_channel[c]))
+            .collect();
+        let mut int_wave: Vec<Vec<CamillaFloat>> = (0..nbr).map(|c| test_signal(c, len)).collect();
+        {
+            let mut casc_refs: Vec<&mut [Biquad]> =
+                int_casc.iter_mut().map(|c| c.as_mut_slice()).collect();
+            let mut wave_refs: Vec<&mut [CamillaFloat]> =
+                int_wave.iter_mut().map(|w| w.as_mut_slice()).collect();
+            process_cascades_interleaved(&mut casc_refs, &mut wave_refs);
+        }
+
+        for c in 0..nbr {
+            assert_eq!(
+                seq_wave[c], int_wave[c],
+                "channel {c} differs between sequential and interleaved"
+            );
+        }
+    }
+
+    /// Covers group sizes on both sides of `MAX_INTERLEAVE`, so that channels
+    /// past the first group cannot be silently skipped.
+    #[test]
+    fn interleaved_matches_sequential() {
+        for nbr in 1..=(3 * MAX_INTERLEAVE) {
+            check_interleaved_matches(&vec![1; nbr]);
+        }
+    }
+
+    #[test]
+    fn interleaved_matches_sequential_cascades() {
+        check_interleaved_matches(&[4, 4]);
+        check_interleaved_matches(&[3, 3, 3, 3]);
+    }
+
+    /// Channels with different cascade lengths: the shared stages interleave,
+    /// the rest finish alone, and per-channel order is still preserved.
+    #[test]
+    fn interleaved_handles_ragged_cascades() {
+        check_interleaved_matches(&[1, 4]);
+        check_interleaved_matches(&[4, 1]);
+        check_interleaved_matches(&[2, 5, 3, 1]);
+        // Ragged and wider than one group.
+        check_interleaved_matches(&[2, 5, 3, 1, 4, 1, 2]);
     }
 }
