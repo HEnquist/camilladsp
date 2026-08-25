@@ -579,17 +579,11 @@ fn interleaved<const N: usize>(
     }
 
     let len = waveforms.iter().map(|w| w.len()).min().unwrap_or(0);
-    // `i` is the subscript of the inner slices in `waveforms[c][i]`, advancing
-    // N independent channels together at one sample position. The lint only
-    // sees it indexing `waveforms` and suggests iterating that, which would
-    // walk channels instead of positions and undo the interleaving.
-    //
-    // The order can be kept with iterators, by advancing a per-channel cursor
-    // in lockstep, and that does silence the lint. It measured 2.7% slower at
-    // N=4 though: storing the advanced iterator state back costs more than the
-    // bounds check it removes, and it needs an allocation for the cursors.
-    // Dropping the bounds checks entirely with get_unchecked is worth about 2%
-    // at N=4, which is not enough for an unsafe block in here.
+    // `i` subscripts the inner slices in `waveforms[c][i]`, advancing N
+    // independent channels together at one sample position. The lint only sees
+    // it indexing `waveforms` and suggests iterating that, which would walk
+    // channels instead and undo the interleaving. Lockstep cursors keep the
+    // order and silence the lint, but measured 2.7% slower.
     #[allow(clippy::needless_range_loop)]
     for i in 0..len {
         for c in 0..N {
