@@ -10,6 +10,27 @@ use std::sync::Arc;
 
 const CHUNK_SIZE: usize = 1024;
 const CONV_LENGTHS: [usize; 2] = [32768, 65536];
+/// A million taps, so the convolutions dominate the pipeline completely. This
+/// is the case the thread pool exists for.
+const LONG_CONV_LENGTHS: [usize; 1] = [1048576];
+
+/// How much FIR filtering a pipeline variant carries.
+#[derive(Clone, Copy, PartialEq)]
+enum Conv {
+    None,
+    Normal,
+    Long,
+}
+
+impl Conv {
+    fn lengths(self) -> &'static [usize] {
+        match self {
+            Conv::None => &[],
+            Conv::Normal => &CONV_LENGTHS,
+            Conv::Long => &LONG_CONV_LENGTHS,
+        }
+    }
+}
 const PRE_BIQUAD_PARAMS: [(f64, f64); 16] = [
     (120.0, 0.70),
     (220.0, 0.75),
@@ -76,9 +97,10 @@ fn build_conv_filter(length: usize) -> config::Filter {
     }
 }
 
-fn build_pipeline(chunksize: usize, multithreaded: bool, with_conv: bool) -> Pipeline {
+fn build_pipeline(chunksize: usize, multithreaded: bool, conv: Conv) -> Pipeline {
     let mut filters = HashMap::new();
-    let extra_filters = if with_conv { CONV_LENGTHS.len() } else { 0 };
+    let conv_lengths = conv.lengths();
+    let extra_filters = conv_lengths.len();
     let mut pre_filter_names = Vec::with_capacity(PRE_BIQUAD_PARAMS.len() + extra_filters);
     let mut post_filter_names = Vec::with_capacity(POST_BIQUAD_PARAMS.len() + extra_filters);
     for (index, (freq, q)) in PRE_BIQUAD_PARAMS.iter().enumerate() {
@@ -92,21 +114,13 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, with_conv: bool) -> Pip
         post_filter_names.push(name);
     }
 
-    if with_conv {
-        filters.insert("pre_conv_1".to_string(), build_conv_filter(CONV_LENGTHS[0]));
-        filters.insert("pre_conv_2".to_string(), build_conv_filter(CONV_LENGTHS[1]));
-        filters.insert(
-            "post_conv_1".to_string(),
-            build_conv_filter(CONV_LENGTHS[0]),
-        );
-        filters.insert(
-            "post_conv_2".to_string(),
-            build_conv_filter(CONV_LENGTHS[1]),
-        );
-        pre_filter_names.push("pre_conv_1".to_string());
-        pre_filter_names.push("pre_conv_2".to_string());
-        post_filter_names.push("post_conv_1".to_string());
-        post_filter_names.push("post_conv_2".to_string());
+    for (index, length) in conv_lengths.iter().enumerate() {
+        let pre = format!("pre_conv_{}", index + 1);
+        let post = format!("post_conv_{}", index + 1);
+        filters.insert(pre.clone(), build_conv_filter(*length));
+        filters.insert(post.clone(), build_conv_filter(*length));
+        pre_filter_names.push(pre);
+        post_filter_names.push(post);
     }
 
     let mixer = config::Mixer {
@@ -249,15 +263,21 @@ fn make_chunk(channels: usize, frames: usize) -> AudioChunk {
 
 fn bench_complete_pipeline(c: &mut Criterion) {
     let variants = [
-        ("biquad_single", false, false),
-        ("biquad_multi", true, false),
-        ("biquad_conv_single", false, true),
-        ("biquad_conv_multi", true, true),
+        ("biquad_single", false, Conv::None),
+        ("biquad_multi", true, Conv::None),
+        ("biquad_conv_single", false, Conv::Normal),
+        ("biquad_conv_multi", true, Conv::Normal),
+        // Convolution-dominated: this is where the thread pool should pay off.
+        ("long_fir_single", false, Conv::Long),
+        ("long_fir_multi", true, Conv::Long),
     ];
 
     let mut group = c.benchmark_group("complete_pipeline_chunk");
-    for (name, multithreaded, with_conv) in variants {
-        let mut pipeline = build_pipeline(CHUNK_SIZE, multithreaded, with_conv);
+    for (name, multithreaded, conv) in variants {
+        // The million-tap variants take milliseconds per chunk, so fewer
+        // samples keeps the bench to a sensible runtime.
+        group.sample_size(if conv == Conv::Long { 20 } else { 100 });
+        let mut pipeline = build_pipeline(CHUNK_SIZE, multithreaded, conv);
         group.bench_with_input(BenchmarkId::new("variant", name), &name, |b, _| {
             b.iter_batched(
                 || make_chunk(4, CHUNK_SIZE),
