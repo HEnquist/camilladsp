@@ -176,6 +176,9 @@ impl ParallelFilters {
     }
 }
 
+/// Filter chains for every channel of a step, indexed by channel.
+type ChannelChains = Vec<Vec<Box<dyn Filter + Send>>>;
+
 /// Filter groups for channels whose chains are entirely biquad-based, run with
 /// several channels interleaved.
 ///
@@ -193,7 +196,7 @@ impl ParallelFilters {
 /// Built only when every channel has an equal-length, fully biquad-based
 /// chain; anything else falls back to one [`FilterGroup`] per channel.
 pub struct InterleavedFilters {
-    filters: Vec<Vec<Box<dyn Filter + Send>>>,
+    filters: ChannelChains,
 }
 
 impl InterleavedFilters {
@@ -205,9 +208,7 @@ impl InterleavedFilters {
     /// biquads but a loss for an expensive filter like a convolution, since
     /// four of those would then run serially in one task instead of in
     /// parallel. Mixed chains therefore stay on [`ParallelFilters`].
-    fn try_new(
-        mut filters: Vec<Vec<Box<dyn Filter + Send>>>,
-    ) -> Result<Self, Vec<Vec<Box<dyn Filter + Send>>>> {
+    fn try_new(mut filters: ChannelChains) -> Result<Self, ChannelChains> {
         let uniform_depth = filters
             .iter()
             .map(|chain| chain.len())
@@ -533,14 +534,14 @@ impl Pipeline {
 ///
 /// Multithreading is an explicit choice, not a hint, so when a pool is
 /// configured every filter step goes to [`ParallelFilters`] exactly as before.
-/// Without a pool, all-biquad steps run interleaved and anything else falls
-/// back to one step per channel.
 ///
-/// The two are deliberately not mixed. Interleaving and per-channel threading
-/// are alternative ways to use the same parallelism, so combining them just
-/// adds dispatch overhead; see [`InterleavedFilters`].
+/// Without a pool the chains are split by position into runs that every
+/// channel can process interleaved and runs that they cannot, so a
+/// configuration mixing biquads with convolution still gets interleaved
+/// biquads. The runs stay in position order, so each channel still sees its
+/// filters in the order the configuration listed them.
 fn finish_filter_step(
-    filters: Vec<Vec<Box<dyn Filter + Send>>>,
+    filters: ChannelChains,
     pool: Option<&Arc<rayon::ThreadPool>>,
 ) -> Vec<PipelineStep> {
     if let Some(pool) = pool {
@@ -549,18 +550,76 @@ fn finish_filter_step(
             filter_pool: pool.clone(),
         })];
     }
-    match InterleavedFilters::try_new(filters) {
-        Ok(interleaved) => {
-            debug!("Filter step is all biquads, processing channels interleaved");
-            vec![PipelineStep::InterleavedFiltersStep(interleaved)]
+    let mut steps = Vec::new();
+    for (batchable, chains) in split_into_runs(filters) {
+        if batchable {
+            match InterleavedFilters::try_new(chains) {
+                Ok(interleaved) => {
+                    debug!("Adding interleaved biquad step");
+                    steps.push(PipelineStep::InterleavedFiltersStep(interleaved));
+                    continue;
+                }
+                Err(chains) => steps.extend(per_channel_steps(chains)),
+            }
+        } else {
+            steps.extend(per_channel_steps(chains));
         }
-        Err(filters) => filters
-            .into_iter()
-            .enumerate()
-            .filter(|(_, chain)| !chain.is_empty())
-            .map(|(channel, filters)| PipelineStep::FilterStep(FilterGroup { channel, filters }))
-            .collect(),
     }
+    steps
+}
+
+/// One [`FilterGroup`] per channel that has anything to do.
+fn per_channel_steps(chains: ChannelChains) -> Vec<PipelineStep> {
+    chains
+        .into_iter()
+        .enumerate()
+        .filter(|(_, chain)| !chain.is_empty())
+        .map(|(channel, filters)| PipelineStep::FilterStep(FilterGroup { channel, filters }))
+        .collect()
+}
+
+/// Split per-channel chains into consecutive runs of positions, each flagged
+/// with whether every channel can be processed interleaved there.
+///
+/// A position is batchable when every channel has a filter there and all of
+/// them are biquad-based. Anything else, including a position some channel
+/// does not reach, becomes a non-batchable run handled per channel.
+fn split_into_runs(mut filters: ChannelChains) -> Vec<(bool, ChannelChains)> {
+    let depth = filters.iter().map(|chain| chain.len()).max().unwrap_or(0);
+    if depth == 0 {
+        return Vec::new();
+    }
+    let nbr_channels = filters.len();
+    let batchable: Vec<bool> = (0..depth)
+        .map(|pos| {
+            nbr_channels > 1
+                && filters.iter_mut().all(|chain| {
+                    chain
+                        .get_mut(pos)
+                        .is_some_and(|f| f.biquad_cascade().is_some())
+                })
+        })
+        .collect();
+
+    // Consecutive positions with the same verdict share a step.
+    let mut runs: Vec<(bool, usize)> = Vec::new();
+    for flag in batchable {
+        match runs.last_mut() {
+            Some((last, count)) if *last == flag => *count += 1,
+            _ => runs.push((flag, 1)),
+        }
+    }
+
+    let mut remaining: Vec<_> = filters.into_iter().map(|chain| chain.into_iter()).collect();
+    runs.into_iter()
+        .map(|(flag, count)| {
+            let chains = remaining
+                .iter_mut()
+                .map(|it| it.by_ref().take(count).collect())
+                .collect();
+            (flag, chains)
+        })
+        .collect()
 }
 
 fn parallelize_filters(
@@ -570,7 +629,7 @@ fn parallelize_filters(
 ) -> Vec<PipelineStep> {
     debug!("Merging filter steps to enable parallel and interleaved processing");
     let mut new_steps: Vec<PipelineStep> = Vec::new();
-    let mut parfilt: Option<Vec<Vec<Box<dyn Filter + Send>>>> = None;
+    let mut parfilt: Option<ChannelChains> = None;
     let mut active_channels = nbr_channels;
     for step in steps.drain(..) {
         match step {
@@ -628,10 +687,14 @@ fn parallelize_filters(
 
 #[cfg(test)]
 mod tests {
-    use super::Pipeline;
+    use super::{Pipeline, split_into_runs};
     use crate::CamillaFloat;
     use crate::ProcessingParameters;
+    use crate::Res;
     use crate::audiochunk::AudioChunk;
+    use crate::config;
+    use crate::filters::Filter;
+    use crate::filters::biquad::{Biquad, BiquadCoefficients};
     use std::sync::Arc;
 
     // Regression test: volume set before config load must be applied to the very first chunk.
@@ -679,5 +742,77 @@ devices:
             max_val < 1e-3,
             "First chunk after preset volume should be near-silent, got max={max_val}"
         );
+    }
+    /// Stand-in for a filter that cannot be batched, such as a convolution.
+    struct NotABiquad;
+
+    impl Filter for NotABiquad {
+        fn process_waveform(&mut self, _waveform: &mut [CamillaFloat]) -> Res<()> {
+            Ok(())
+        }
+        fn update_parameters(&mut self, _config: config::Filter) {}
+        fn name(&self) -> &str {
+            "not_a_biquad"
+        }
+    }
+
+    /// `b` for a biquad, `c` for something that cannot be interleaved.
+    fn chains_from(shapes: &[&str]) -> super::ChannelChains {
+        shapes
+            .iter()
+            .map(|shape| {
+                shape
+                    .chars()
+                    .map(|ch| match ch {
+                        'b' => Box::new(Biquad::new(
+                            "b",
+                            44100,
+                            BiquadCoefficients::new(-0.1, 0.005, 0.2, 0.4, 0.2),
+                        )) as Box<dyn Filter + Send>,
+                        _ => Box::new(NotABiquad) as Box<dyn Filter + Send>,
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn run_shape(shapes: &[&str]) -> Vec<(bool, usize)> {
+        split_into_runs(chains_from(shapes))
+            .into_iter()
+            .map(|(flag, chains)| (flag, chains[0].len()))
+            .collect()
+    }
+
+    #[test]
+    fn splits_mixed_chains_into_runs() {
+        // A convolution in the middle must not disqualify the biquads around it.
+        assert_eq!(
+            run_shape(&["bcbb", "bcbb"]),
+            vec![(true, 1), (false, 1), (true, 2)]
+        );
+        assert_eq!(run_shape(&["bbbb", "bbbb"]), vec![(true, 4)]);
+        assert_eq!(run_shape(&["cccc", "cccc"]), vec![(false, 4)]);
+        assert_eq!(
+            run_shape(&["cbbc", "cbbc"]),
+            vec![(false, 1), (true, 2), (false, 1)]
+        );
+    }
+
+    /// A position only some channels reach cannot be batched.
+    #[test]
+    fn ragged_chains_are_not_batched_past_the_shortest() {
+        assert_eq!(run_shape(&["bbb", "b"]), vec![(true, 1), (false, 2)]);
+    }
+
+    /// One channel has nothing to interleave with.
+    #[test]
+    fn single_channel_is_never_batched() {
+        assert_eq!(run_shape(&["bbb"]), vec![(false, 3)]);
+    }
+
+    /// Channels differing in filter type at the same position cannot be batched.
+    #[test]
+    fn mismatched_types_at_a_position_are_not_batched() {
+        assert_eq!(run_shape(&["bb", "bc"]), vec![(true, 1), (false, 1)]);
     }
 }
