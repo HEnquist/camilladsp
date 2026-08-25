@@ -579,8 +579,12 @@ fn interleaved<const N: usize>(
     }
 
     let len = waveforms.iter().map(|w| w.len()).min().unwrap_or(0);
-    // Indexing is deliberate: each step advances N independent channels at the
-    // same sample position, which is what interleaves the recurrences.
+    // The lint sees `i` indexing only `waveforms` and suggests iterating it
+    // instead, but that would walk channels rather than sample positions and
+    // undo the interleaving. `i` is the subscript of the inner slices in
+    // `waveforms[c][i]`, advancing N independent channels together at one
+    // sample position. The bounds checks this leaves in the loop measured
+    // about 2% at N=4, which is not worth an unsafe block.
     #[allow(clippy::needless_range_loop)]
     for i in 0..len {
         for c in 0..N {
