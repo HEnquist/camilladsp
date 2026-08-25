@@ -20,8 +20,8 @@ use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters;
+use crate::filters::Filter;
 use crate::filters::biquad::MAX_INTERLEAVE;
-use crate::filters::{Filter, InterleavedFilters as _};
 use crate::mixer;
 use crate::processors;
 use crate::processors::Processor;
@@ -272,18 +272,18 @@ fn process_interleaved_group(
                     [&mut *c0[pos], &mut *c1[pos], &mut *c2[pos], &mut *c3[pos]];
                 let mut ws: [&mut [CamillaFloat]; 4] =
                     [w0.as_mut(), w1.as_mut(), w2.as_mut(), w3.as_mut()];
-                let _ = fs.as_mut_slice().process_group(ws.as_mut_slice());
+                let _ = filters::process_channels_interleaved(fs.as_mut_slice(), ws.as_mut_slice());
             }
             ([c0, c1, c2], [w0, w1, w2]) => {
                 let mut fs: [&mut (dyn Filter + Send); 3] =
                     [&mut *c0[pos], &mut *c1[pos], &mut *c2[pos]];
                 let mut ws: [&mut [CamillaFloat]; 3] = [w0.as_mut(), w1.as_mut(), w2.as_mut()];
-                let _ = fs.as_mut_slice().process_group(ws.as_mut_slice());
+                let _ = filters::process_channels_interleaved(fs.as_mut_slice(), ws.as_mut_slice());
             }
             ([c0, c1], [w0, w1]) => {
                 let mut fs: [&mut (dyn Filter + Send); 2] = [&mut *c0[pos], &mut *c1[pos]];
                 let mut ws: [&mut [CamillaFloat]; 2] = [w0.as_mut(), w1.as_mut()];
-                let _ = fs.as_mut_slice().process_group(ws.as_mut_slice());
+                let _ = filters::process_channels_interleaved(fs.as_mut_slice(), ws.as_mut_slice());
             }
             ([c0], [w0]) => {
                 let _ = c0[pos].process_waveform(w0);

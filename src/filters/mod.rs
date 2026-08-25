@@ -61,7 +61,7 @@ pub trait Filter {
     /// Expose this filter's biquad cascade, if it is built from biquads.
     ///
     /// Returning `Some` opts the filter into interleaved multi-channel
-    /// processing via [`InterleavedFilters`]. The slice is the cascade in
+    /// processing via [`process_channels_interleaved`]. The slice is the cascade in
     /// processing order. Filters that are not biquad-based keep the default
     /// and are processed one channel at a time.
     fn biquad_cascade(&mut self) -> Option<&mut [biquad::Biquad]> {
@@ -69,76 +69,70 @@ pub trait Filter {
     }
 }
 
-/// Extension trait adding interleaved multi-channel processing to a group of
-/// filters, one per channel.
+/// Applies one filter per channel to `waveforms`, interleaving where possible.
 ///
-/// A biquad is latency-bound on its own feedback path, so processing several
-/// channels at once fills the stalls. This is implemented for slices rather
-/// than on [`Filter`] itself, so filters opt in only by overriding
-/// [`Filter::biquad_cascade`].
-pub trait InterleavedFilters {
-    /// Apply one filter per channel to `waveforms`.
-    ///
-    /// Interleaves when every filter in the group exposes a biquad cascade,
-    /// and otherwise falls back to processing each channel separately. The
-    /// result is identical either way.
-    fn process_group(&mut self, waveforms: &mut [&mut [CamillaFloat]]) -> Res<()>;
-}
-
-impl InterleavedFilters for [&mut (dyn Filter + Send)] {
-    fn process_group(&mut self, waveforms: &mut [&mut [CamillaFloat]]) -> Res<()> {
-        debug_assert_eq!(self.len(), waveforms.len());
-        // Interleaving only pays off with at least two independent channels,
-        // and only if every one of them is biquad-based.
-        let interleavable = self.len() > 1 && self.iter_mut().all(|f| f.biquad_cascade().is_some());
-        if !interleavable {
-            for (filter, waveform) in self.iter_mut().zip(waveforms.iter_mut()) {
-                filter.process_waveform(waveform)?;
-            }
-            return Ok(());
+/// A biquad is latency-bound on its own feedback path, so running several
+/// independent channels at once fills the stalls. Filters opt in by overriding
+/// [`Filter::biquad_cascade`]; when every filter in the group does, they are
+/// batched, and otherwise each channel is processed on its own. The result is
+/// identical either way.
+///
+/// `filters` and `waveforms` must be the same length, one waveform per channel.
+pub fn process_channels_interleaved(
+    filters: &mut [&mut (dyn Filter + Send)],
+    waveforms: &mut [&mut [CamillaFloat]],
+) -> Res<()> {
+    debug_assert_eq!(filters.len(), waveforms.len());
+    // Interleaving only pays off with at least two independent channels, and
+    // only if every one of them is biquad-based.
+    let interleavable =
+        filters.len() > 1 && filters.iter_mut().all(|f| f.biquad_cascade().is_some());
+    if !interleavable {
+        for (filter, waveform) in filters.iter_mut().zip(waveforms.iter_mut()) {
+            filter.process_waveform(waveform)?;
         }
-        for (group, wfs) in self
-            .chunks_mut(biquad::MAX_INTERLEAVE)
-            .zip(waveforms.chunks_mut(biquad::MAX_INTERLEAVE))
-        {
-            // Destructured rather than collected, to keep the audio path
-            // free of allocations. Groups are at most MAX_INTERLEAVE wide.
-            let expect = "biquad_cascade checked above";
-            match group {
-                [a, b, c, d] => biquad::process_cascades_interleaved(
-                    &mut [
-                        a.biquad_cascade().expect(expect),
-                        b.biquad_cascade().expect(expect),
-                        c.biquad_cascade().expect(expect),
-                        d.biquad_cascade().expect(expect),
-                    ],
-                    wfs,
-                ),
-                [a, b, c] => biquad::process_cascades_interleaved(
-                    &mut [
-                        a.biquad_cascade().expect(expect),
-                        b.biquad_cascade().expect(expect),
-                        c.biquad_cascade().expect(expect),
-                    ],
-                    wfs,
-                ),
-                [a, b] => biquad::process_cascades_interleaved(
-                    &mut [
-                        a.biquad_cascade().expect(expect),
-                        b.biquad_cascade().expect(expect),
-                    ],
-                    wfs,
-                ),
-                [a] => biquad::process_cascades_interleaved(
-                    &mut [a.biquad_cascade().expect(expect)],
-                    wfs,
-                ),
-                [] => {}
-                _ => unreachable!("chunks_mut yields at most MAX_INTERLEAVE"),
-            }
-        }
-        Ok(())
+        return Ok(());
     }
+    for (group, wfs) in filters
+        .chunks_mut(biquad::MAX_INTERLEAVE)
+        .zip(waveforms.chunks_mut(biquad::MAX_INTERLEAVE))
+    {
+        // Destructured rather than collected, to keep the audio path free of
+        // allocations. Groups are at most MAX_INTERLEAVE wide.
+        let expect = "biquad_cascade checked above";
+        match group {
+            [a, b, c, d] => biquad::process_cascades_interleaved(
+                &mut [
+                    a.biquad_cascade().expect(expect),
+                    b.biquad_cascade().expect(expect),
+                    c.biquad_cascade().expect(expect),
+                    d.biquad_cascade().expect(expect),
+                ],
+                wfs,
+            ),
+            [a, b, c] => biquad::process_cascades_interleaved(
+                &mut [
+                    a.biquad_cascade().expect(expect),
+                    b.biquad_cascade().expect(expect),
+                    c.biquad_cascade().expect(expect),
+                ],
+                wfs,
+            ),
+            [a, b] => biquad::process_cascades_interleaved(
+                &mut [
+                    a.biquad_cascade().expect(expect),
+                    b.biquad_cascade().expect(expect),
+                ],
+                wfs,
+            ),
+            [a] => {
+                biquad::process_cascades_interleaved(&mut [a.biquad_cascade().expect(expect)], wfs)
+            }
+            [] => {}
+            _ => unreachable!("chunks_mut yields at most MAX_INTERLEAVE"),
+        }
+    }
+    Ok(())
 }
 
 /// Zero-pad `values` to at least `length` elements (never truncates).
