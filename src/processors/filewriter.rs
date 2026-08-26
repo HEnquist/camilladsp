@@ -171,7 +171,7 @@ impl Processor for FileWriter {
 }
 
 impl WriterThread {
-    // Consumes `self` and runs the write loop to completion.
+    // Consume `self` and run the write loop to completion.
     fn run(mut self) -> Result<(), std::io::Error> {
         let mut file: Option<File> = None;
         while let Ok(()) = self.rx_notify.recv() {
@@ -207,6 +207,7 @@ impl WriterThread {
             }
         }
     }
+
     fn drain_and_write(&mut self, file: &mut Option<File>) -> Result<(), std::io::Error> {
         while self.consumer.occupied_len() >= self.samples_per_chunk {
             for ch in 0..self.channels {
