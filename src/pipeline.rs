@@ -292,6 +292,15 @@ impl Pipeline {
                                 );
                                 Box::new(race) as Box<dyn Processor>
                             }
+                            config::Processor::FileWriter { parameters, .. } => {
+                                let filewriter = processors::filewriter::FileWriter::from_config(
+                                    &step.name,
+                                    parameters,
+                                    conf.devices.samplerate,
+                                    conf.devices.chunksize,
+                                );
+                                Box::new(filewriter) as Box<dyn Processor>
+                            }
                         };
                         steps.push(PipelineStep::ProcessorStep(proc));
                     }
