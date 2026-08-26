@@ -23,6 +23,7 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rayon::prelude::*;
 use std::hint::black_box;
+use std::time::Duration;
 
 use camillalib::CamillaFloat;
 use camillalib::config;
@@ -78,9 +79,33 @@ fn refill(waves: &mut [Vec<CamillaFloat>], source: &[Vec<CamillaFloat>]) {
     }
 }
 
+/// Criterion's defaults are tuned for nanosecond benchmarks, where thousands of
+/// iterations are needed to get a stable reading. One iteration here is between
+/// 20 us and 4 ms, so the default 3 s warm-up and 5 s measurement spend most of
+/// their time repeating a result that settled almost immediately. Criterion
+/// budgets by wall time rather than by iteration count, so every benchmark cost
+/// the same 8 s no matter how fast the work was, and 36 of them took six
+/// minutes.
+///
+/// The shorter budgets below give the same numbers to within a percent or so.
+/// `sample_size` stays high because it is nearly free: criterion budgets by
+/// wall time, so with fast iterations it just packs more of them into each
+/// sample, and it only starts costing time once one iteration per sample would
+/// overrun the budget.
+///
+/// The real threat to these measurements was never sampling noise, it was
+/// comparing runs taken under different power states, and a bench that finishes
+/// quickly is easier to repeat, which is the actual defence against that.
+fn config() -> Criterion {
+    Criterion::default()
+        .warm_up_time(Duration::from_millis(500))
+        .measurement_time(Duration::from_secs(2))
+        .sample_size(50)
+        .without_plots()
+}
+
 fn bench_conv_parallel(c: &mut Criterion) {
     let mut group = c.benchmark_group("conv_parallel");
-    group.sample_size(20);
 
     for length in FILTER_LENGTHS {
         for channels in CHANNEL_COUNTS {
@@ -131,5 +156,9 @@ fn bench_conv_parallel(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_conv_parallel);
+criterion_group! {
+    name = benches;
+    config = config();
+    targets = bench_conv_parallel
+}
 criterion_main!(benches);
