@@ -1,4 +1,5 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+use std::time::Duration;
 
 use camillalib::CamillaFloat;
 use camillalib::ProcessingParameters;
@@ -276,7 +277,6 @@ fn bench_complete_pipeline(c: &mut Criterion) {
     for (name, multithreaded, conv) in variants {
         // The million-tap variants take milliseconds per chunk, so fewer
         // samples keeps the bench to a sensible runtime.
-        group.sample_size(if conv == Conv::Long { 20 } else { 100 });
         let mut pipeline = build_pipeline(CHUNK_SIZE, multithreaded, conv);
         group.bench_with_input(BenchmarkId::new("variant", name), &name, |b, _| {
             b.iter_batched(
@@ -291,5 +291,30 @@ fn bench_complete_pipeline(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_complete_pipeline);
+/// One chunk through this pipeline takes between 90 us and 6 ms, so criterion's
+/// default 3 s warm-up and 5 s measurement spend nearly all of their time
+/// repeating a reading that stabilised immediately. Criterion budgets by wall
+/// time, not by iteration count, so the defaults cost the same 8 s per variant
+/// whatever the variant costs.
+///
+/// `sample_size` stays high because it is nearly free: criterion budgets by
+/// wall time, so with fast iterations it just packs more of them into each
+/// sample. It only costs time once one sample per iteration would overrun the
+/// budget, which at 6 ms and 50 samples it does not.
+///
+/// Micro-benchmarks measuring individual kernels should keep the defaults;
+/// at nanosecond scale the long budgets are doing real work.
+fn config() -> Criterion {
+    Criterion::default()
+        .warm_up_time(Duration::from_millis(500))
+        .measurement_time(Duration::from_secs(2))
+        .sample_size(50)
+        .without_plots()
+}
+
+criterion_group! {
+    name = benches;
+    config = config();
+    targets = bench_complete_pipeline
+}
 criterion_main!(benches);
