@@ -13,12 +13,22 @@ Bugfixes:
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
 
 Changes:
-- Faster biquad processing. Biquads now use fused multiply-add on hardware that has it, and with
-  `multithreaded` disabled the biquads for several channels are processed together in one
-  interleaved pass. A four channel biquad pipeline is about 3.4 times faster. Enabling
-  `multithreaded` keeps the previous per-channel thread pool, which does not interleave, so
-  biquad-heavy configurations are usually fastest with it left off. See the `multithreaded`
-  setting in the README.
+- Faster biquad processing. Biquads now use fused multiply-add on hardware that has it, and a
+  cascade of biquads is run as a canon, where the first stage works on one sample while the second
+  works on the previous one and so on, so the stages fill each other's stalls. A biquad spends most
+  of its time waiting on its own feedback path, and this keeps that time busy without any threads.
+  Cascades too short to fill the pipeline on their own fall back to processing the same stage for
+  several channels together, as before. Neither changes the result: every stage still sees its
+  samples in order with the same arithmetic. A four channel biquad pipeline went from about 92 to
+  about 41 microseconds per chunk. Configurations that could not be batched at all before, such as
+  mono, now benefit too.
+- Biquad steps are no longer sent to the thread pool when `multithreaded` is enabled. A batched
+  biquad step already has every FP unit busy, so a thread pool on top of it could only add
+  dispatch. The rest of the chain still goes to the pool. Enabling `multithreaded` no longer makes
+  a biquad-heavy configuration slower: the same four channel pipeline went from about 220 to about
+  41 microseconds per chunk with it enabled, and a pipeline mixing biquads with a one million tap
+  filter went from about 3.6 to about 2.8 milliseconds. See the `multithreaded` setting in the
+  README.
 - Faster convolution setup and processing, and lower memory use. Three changes: convolution
   filters share one FFT planner instead of each building and discarding its own, channels that use
   the same filter share one copy of its transformed coefficients instead of each keeping a copy,

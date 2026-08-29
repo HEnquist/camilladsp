@@ -1135,7 +1135,8 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
 * `multithreaded` and `worker_threads` (optional, defaults to `false` and automatic)
   Setting `multithreaded` to `true` enables multithreaded processing.
-  When this is enabled, CamillaDSP creates several filtering tasks by grouping the filters for each channel.
+  When this is enabled, CamillaDSP creates several filtering tasks by grouping the filters for each channel,
+  apart from the biquad steps described below.
   These tasks are then sent to a thread pool, where multiple threads are ready to pick up the work.
   On a machine with multiple CPU cores, this allows filters to be processed in parallel,
   potentially boosting performance.
@@ -1152,14 +1153,14 @@ A parameter marked (*) in any example is optional. If they are left out from the
   It also makes CamillaDSP more susceptible to other processes using the CPU,
   which may cause buffer underruns.
 
-  Note that enabling it can make a biquad-heavy configuration slower.
-  With multithreading disabled, biquad filters for several channels are processed together in one
-  interleaved pass, which is several times faster than handling one channel at a time.
-  A biquad spends most of its time waiting on its own feedback path, and running several channels
-  at once fills that idle time without needing any threads.
-  Enabling multithreading selects the per-channel thread pool instead, which does not interleave,
-  so a configuration built from biquads, peaking filters and shelving filters is usually fastest
-  with `multithreaded` left at `false`.
+  Biquad filters are not affected by this setting.
+  A step whose filters are all biquads is always processed on the main thread, whether or not
+  multithreading is enabled.
+  A biquad spends most of its time waiting on its own feedback path, and such a step fills that
+  idle time by working on several independent recurrences at once, either several stages of one
+  channel's cascade or the same stage of several channels.
+  That leaves no idle time for a worker thread to pick up, so sending it to the pool would only
+  add overhead.
   Convolution filters do not have this property and are the case worth enabling threads for.
 
   An exception to this recommendation is when both the input and output are files on disk,
