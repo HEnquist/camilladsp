@@ -198,14 +198,13 @@ type ChannelChains = Vec<Vec<Box<dyn Filter + Send>>>;
 /// skewed against each other. Which axis is used is decided once, when the
 /// step is built.
 ///
-/// This is the single-threaded path. Either axis already extracts the
+/// This always runs on the calling thread. Either axis already extracts the
 /// parallelism the biquads had to offer, so putting a thread pool on top of
-/// it only costs dispatch. Configurations that enable multithreading keep the
-/// per-channel [`ParallelFilters`] path instead, which is what heavy FIR
-/// convolution wants.
+/// it only costs dispatch.
 ///
 /// Built only when every channel has an equal-length, fully biquad-based
-/// chain; anything else falls back to one [`FilterGroup`] per channel.
+/// chain; anything else falls back to [`ParallelFilters`] or to one
+/// [`FilterGroup`] per channel.
 pub struct InterleavedFilters {
     filters: ChannelChains,
     /// Which axis this step fills the FP pipeline from, decided when the step
@@ -599,24 +598,21 @@ impl Pipeline {
 // in order use rayon to apply them in parallel.
 /// Emit an accumulated filter step in the form the configuration asked for.
 ///
-/// Multithreading is an explicit choice, not a hint, so when a pool is
-/// configured every filter step goes to [`ParallelFilters`] exactly as before.
+/// The chains are split by position into runs that can be batched as biquads
+/// and runs that cannot, so a configuration mixing biquads with convolution
+/// still gets batched biquads. The runs stay in position order, so each
+/// channel still sees its filters in the order the configuration listed them.
 ///
-/// Without a pool the chains are split by position into runs that can be
-/// batched as biquads and runs that cannot, so a configuration mixing biquads
-/// with convolution still gets batched biquads. The runs stay in position
-/// order, so each channel still sees its filters in the order the
-/// configuration listed them.
+/// Batched runs stay on the calling thread even when multithreading is
+/// enabled. A batched step already saturates the FP pipeline from cascade
+/// depth or from channel count, so a thread pool on top of it only adds
+/// dispatch: it has no idle parallelism left to spend. Everything else goes
+/// to [`ParallelFilters`] when a pool is configured, which is what heavy FIR
+/// convolution wants, and to one step per channel when it is not.
 fn finish_filter_step(
     filters: ChannelChains,
     pool: Option<&Arc<rayon::ThreadPool>>,
 ) -> Vec<PipelineStep> {
-    if let Some(pool) = pool {
-        return vec![PipelineStep::ParallelFiltersStep(ParallelFilters {
-            filters,
-            filter_pool: pool.clone(),
-        })];
-    }
     let mut steps = Vec::new();
     for (batchable, chains) in split_into_runs(filters) {
         if batchable {
@@ -626,13 +622,28 @@ fn finish_filter_step(
                     steps.push(PipelineStep::InterleavedFiltersStep(interleaved));
                     continue;
                 }
-                Err(chains) => steps.extend(per_channel_steps(chains)),
+                Err(chains) => steps.extend(unbatched_steps(chains, pool)),
             }
         } else {
-            steps.extend(per_channel_steps(chains));
+            steps.extend(unbatched_steps(chains, pool));
         }
     }
     steps
+}
+
+/// Everything that is not a batched biquad run: on the pool when the
+/// configuration asked for multithreading, one step per channel otherwise.
+fn unbatched_steps(
+    chains: ChannelChains,
+    pool: Option<&Arc<rayon::ThreadPool>>,
+) -> Vec<PipelineStep> {
+    match pool {
+        Some(pool) => vec![PipelineStep::ParallelFiltersStep(ParallelFilters {
+            filters: chains,
+            filter_pool: pool.clone(),
+        })],
+        None => per_channel_steps(chains),
+    }
 }
 
 /// One [`FilterGroup`] per channel that has anything to do.
