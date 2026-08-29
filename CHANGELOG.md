@@ -8,6 +8,22 @@ New features:
 - New `LookaheadLimiter`, as a single-channel filter and as a multichannel processor with
   configurable monitor and process channels.
 
+Performance improvements:
+All figures are one chunk of 1024 frames at 44.1 kHz, measured on an Apple M1 against 4.1.3.
+Other processors will differ.
+- Biquad filtering is several times faster. A pipeline of 16 biquads on four channels followed by
+  16 more on two went from about 310 to about 41 microseconds per chunk, about 7.5 times faster.
+  Filters built from biquads, such as peaking and shelving filters and the biquad combinations,
+  all benefit.
+- Biquads no longer need `multithreaded`. The same pipeline took about 195 microseconds with
+  multithreading in 4.1.3, so one thread is now about 4.7 times faster than four threads were.
+  Enabling it no longer slows biquads down either; it simply makes no difference to them.
+- Convolution is faster to set up and to run, and uses less memory. A four channel pipeline with
+  two long filters per channel went from about 970 to about 510 microseconds per chunk, and
+  reloading eight 16384 tap filters went from about 3.0 to about 0.9 milliseconds. Channels using
+  the same filter now share one copy of its coefficients, a quarter of the memory in a four
+  channel setup.
+
 Bugfixes:
 - ASIO: size the ring buffer and prefill from the driver's actual buffer size instead of just
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
@@ -16,34 +32,19 @@ Bugfixes:
   would scale a small `chunksize` down to zero now keeps one frame instead.
 
 Changes:
-- Faster biquad processing. Biquads now use fused multiply-add on hardware that has it, and a
-  cascade of biquads is run as a canon, where the first stage works on one sample while the second
-  works on the previous one and so on, so the stages fill each other's stalls. A biquad spends most
-  of its time waiting on its own feedback path, and this keeps that time busy without any threads.
-  Cascades too short to fill the pipeline on their own fall back to processing the same stage for
-  several channels together, as before. Neither changes the result: every stage still sees its
-  samples in order with the same arithmetic. A four channel biquad pipeline went from about 92 to
-  about 41 microseconds per chunk. Configurations that could not be batched at all before, such as
-  mono, now benefit too.
-- Biquad steps are no longer sent to the thread pool when `multithreaded` is enabled. A batched
-  biquad step already has every FP unit busy, so a thread pool on top of it could only add
-  dispatch. The rest of the chain still goes to the pool. Enabling `multithreaded` no longer makes
-  a biquad-heavy configuration slower: the same four channel pipeline went from about 220 to about
-  41 microseconds per chunk with it enabled, and a pipeline mixing biquads with a one million tap
-  filter went from about 3.6 to about 2.8 milliseconds. See the `multithreaded` setting in the
-  README.
-- Faster convolution setup and processing, and lower memory use. Three changes: convolution
-  filters share one FFT planner instead of each building and discarding its own, channels that use
-  the same filter share one copy of its transformed coefficients instead of each keeping a copy,
-  and the segmented spectra are held in one contiguous allocation rather than one block per
-  segment. Reloading eight 16384 tap filters at a chunksize of 16384 went from about 3.0 ms to
-  about 0.9 ms, and a four channel pipeline with a one million tap filter went from 5.1 ms to
-  3.8 ms per chunk with `multithreaded` enabled, using a quarter of the coefficient memory. The
-  setup saving grows with `chunksize` and applies even when every channel uses a different impulse
-  response. The coefficient sharing requires the channels to refer to the same named filter, and
-  helps most with `multithreaded` enabled, where the copies would otherwise compete for memory
-  bandwidth at the same moment. Without it the gain is smaller, and limited to filters large
-  enough to crowd the cache but small enough that a single copy still fits.
+- Biquads now use fused multiply-add on hardware that has it, so results can differ from 4.1.3 in
+  the last few bits.
+- Biquad steps are no longer sent to the thread pool when `multithreaded` is enabled. They already
+  keep the processor busy on their own, so the pool could only add overhead. The rest of the chain
+  still goes to the pool. See the `multithreaded` setting in the README.
+- Convolution filters share one FFT planner instead of each building and discarding its own,
+  channels that use the same filter share one copy of its transformed coefficients instead of each
+  keeping a copy, and the segmented spectra are held in one contiguous allocation rather than one
+  block per segment. The setup saving grows with `chunksize` and applies even when every channel
+  uses a different impulse response. The coefficient sharing requires the channels to refer to the
+  same named filter, and helps most with `multithreaded` enabled, where the copies would otherwise
+  compete for memory bandwidth at the same moment. Without it the gain is smaller, and limited to
+  filters large enough to crowd the cache but small enough that a single copy still fits.
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
 - The `32bit` build feature is gone. 32-bit float processing is now selected with the compiler
