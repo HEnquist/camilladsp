@@ -808,6 +808,17 @@ fn canon_kernel<const S: usize>(
     let mut pipe = [0.0 as CamillaFloat; S];
     let n = waveform.len();
 
+    // The bounds below read like special cases for a waveform shorter than
+    // the cascade, and they are, but they are also what keeps this fast. They
+    // are how the loops tell the compiler their indices are inside the slice:
+    // `(S - 1).min(n)` says `i < n`, and the guarded store says the same for
+    // the drain. Rewriting them into the form a guaranteed minimum length
+    // would allow, an unguarded `waveform[n - S + first]`, measured 6.40 us
+    // against 13.35 for a 16 stage cascade over 1024 samples. The indices
+    // stop being provably in range, and the panic paths that appear block the
+    // optimisation of everything around them. Stating `assert!(n >= S)`
+    // instead recovers only part of it, 10.15 us. Leave them alone.
+    //
     // Ramp-up: stage `k` has seen no sample yet while `k > i`.
     let ramp = (S - 1).min(n);
     // `i` is the wavefront position, not just a subscript: it also bounds how
