@@ -1,10 +1,16 @@
 // Sizing bench for interleaved multi-channel biquads.
 use camillalib::CamillaFloat;
 use camillalib::filters::Filter;
-use camillalib::filters::biquad::{Biquad, BiquadCoefficients, process_cascades_interleaved};
+use camillalib::filters::biquad::{
+    Biquad, BiquadCoefficients, process_cascade_canon_depth, process_cascades_interleaved,
+};
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 const CHUNK: usize = 1024;
+
+/// Short chunks are where the canon's ramp-up and drain cost the most: the
+/// wavefront takes `n + depth - 1` iterations for `n` samples.
+const SHORT_CHUNK: usize = 64;
 
 fn coeffs() -> BiquadCoefficients {
     BiquadCoefficients::new(
@@ -19,7 +25,11 @@ fn coeffs() -> BiquadCoefficients {
 /// A real signal. All-zero input is not representative: it never exercises the
 /// magnitudes the state variables actually take.
 fn signal() -> Vec<CamillaFloat> {
-    (0..CHUNK)
+    signal_of_len(CHUNK)
+}
+
+fn signal_of_len(len: usize) -> Vec<CamillaFloat> {
+    (0..len)
         .map(|n| (n as CamillaFloat * 0.013).sin() * 0.5)
         .collect()
 }
@@ -56,5 +66,47 @@ fn bench(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench);
+/// Sizing bench for the cascade canon: one channel, so the channel axis
+/// supplies no parallelism at all and every independent chain has to come
+/// from cascade depth.
+///
+/// `depth = 1` is the control. It runs the same kernel one stage at a time,
+/// so it isolates the canon's effect from any difference between the kernel
+/// and `process_waveform`.
+fn bench_canon(c: &mut Criterion) {
+    for chunk in [CHUNK, SHORT_CHUNK] {
+        let mut g = c.benchmark_group(format!("canon_{chunk}"));
+        for stages in [4usize, 16] {
+            g.throughput(criterion::Throughput::Elements((stages * chunk) as u64));
+
+            // Reference: the current production path for a single channel.
+            let mut seq: Vec<Biquad> = (0..stages)
+                .map(|_| Biquad::new("t", chunk, coeffs()))
+                .collect();
+            let mut seq_w = signal_of_len(chunk);
+            g.bench_with_input(BenchmarkId::new("sequential", stages), &stages, |b, _| {
+                b.iter(|| {
+                    for bq in seq.iter_mut() {
+                        bq.process_waveform(&mut seq_w).unwrap();
+                    }
+                })
+            });
+
+            for depth in [1usize, 2, 4, 6, 8] {
+                let mut casc: Vec<Biquad> = (0..stages)
+                    .map(|_| Biquad::new("t", chunk, coeffs()))
+                    .collect();
+                let mut w = signal_of_len(chunk);
+                g.bench_with_input(
+                    BenchmarkId::new(format!("canon{depth}"), stages),
+                    &stages,
+                    |b, _| b.iter(|| process_cascade_canon_depth(&mut casc, &mut w, depth)),
+                );
+            }
+        }
+        g.finish();
+    }
+}
+
+criterion_group!(benches, bench, bench_canon);
 criterion_main!(benches);

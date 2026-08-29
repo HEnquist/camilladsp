@@ -603,6 +603,208 @@ fn interleaved<const N: usize>(
     }
 }
 
+/// A cascade of biquads the canon can run over, whatever holds the stages.
+///
+/// A filter chain keeps its biquads in a separate slice per filter, and the
+/// canon has to run across those boundaries to reach a useful depth, so the
+/// kernel reaches stages through this trait instead of through a slice. It is
+/// only used to load and store stage parameters, twice per pass, so the
+/// dynamic dispatch never lands on the per-sample path.
+pub trait BiquadCascade {
+    /// Number of stages, in processing order.
+    fn nbr_stages(&mut self) -> usize;
+
+    /// Stage `index`, counted from the start of the cascade.
+    fn stage(&mut self, index: usize) -> &mut Biquad;
+}
+
+struct SliceCascade<'a>(&'a mut [Biquad]);
+
+impl BiquadCascade for SliceCascade<'_> {
+    fn nbr_stages(&mut self) -> usize {
+        self.0.len()
+    }
+
+    fn stage(&mut self, index: usize) -> &mut Biquad {
+        &mut self.0[index]
+    }
+}
+
+/// Stages the canon runs in one pass.
+///
+/// The kernel is latency-bound until enough independent chains are in flight
+/// to saturate the FP units. Measured on a 1024 sample chunk, one stage takes
+/// 2.70 us and eight stages take 3.19 us, so the eighth stage is still nearly
+/// free; depth is what buys the throughput.
+pub const CANON_DEPTH: usize = 8;
+
+/// Deepest kernel that is instantiated. Deeper cascades are split into
+/// several passes.
+///
+/// Keep this equal to [`CANON_DEPTH`]. Instantiating deeper kernels as well
+/// is not free: a build carrying depths up to 16 measured depth 8 at 0.69 us
+/// per stage against 0.40 us for the same code in a build that stopped at 8,
+/// a 72% regression with the kernel itself unchanged. The extra
+/// instantiations push the unrolled loops past a compiler heuristic and the
+/// codegen for every depth suffers.
+pub const MAX_CANON_DEPTH: usize = CANON_DEPTH;
+
+/// Runs a cascade of biquads as a canon, filling the pipeline from cascade
+/// depth instead of from channel count.
+///
+/// A single biquad is latency-bound: each output feeds the next sample's
+/// state. Stages of a cascade depend on each other sample by sample, but
+/// stage `k` working on sample `n - k` is independent of stage `k + 1`
+/// working on sample `n - k - 1`. Skewing the stages that way gives one
+/// independent chain per stage, the same trick as the multi-channel
+/// interleave but along the cascade axis, which is the only axis available
+/// when there is a single channel.
+///
+/// Intermediates never reach memory: one sample is loaded into the first
+/// stage and one stored from the last, with everything in between staying in
+/// registers.
+///
+/// Output is bit-identical to running the stages one at a time. Every stage
+/// still sees its samples in order with identical arithmetic; only the
+/// scheduling of independent stages changes.
+pub fn process_cascade_canon(cascade: &mut [Biquad], waveform: &mut [CamillaFloat]) {
+    process_canon(&mut SliceCascade(cascade), waveform, CANON_DEPTH);
+}
+
+/// [`process_cascade_canon`] with an explicit depth, for sizing benchmarks.
+pub fn process_cascade_canon_depth(
+    cascade: &mut [Biquad],
+    waveform: &mut [CamillaFloat],
+    depth: usize,
+) {
+    process_canon(&mut SliceCascade(cascade), waveform, depth);
+}
+
+/// Runs any [`BiquadCascade`] as a canon, splitting it into passes of at most
+/// `depth` stages.
+///
+/// `depth` is clamped to the range the kernel is instantiated for.
+pub fn process_canon(cascade: &mut dyn BiquadCascade, waveform: &mut [CamillaFloat], depth: usize) {
+    let depth = depth.clamp(1, MAX_CANON_DEPTH);
+    let total = cascade.nbr_stages();
+    let mut start = 0;
+    while start < total {
+        let take = (total - start).min(depth);
+        dispatch_canon(cascade, start, waveform, take);
+        start += take;
+    }
+}
+
+/// Turns a runtime depth into a call to the kernel instantiated for it.
+fn dispatch_canon(
+    cascade: &mut dyn BiquadCascade,
+    start: usize,
+    waveform: &mut [CamillaFloat],
+    depth: usize,
+) {
+    macro_rules! arms {
+        ($($d:literal),*) => {
+            match depth {
+                $($d => canon::<$d>(cascade, start, waveform),)*
+                _ => unreachable!("depth is clamped to 1..=MAX_CANON_DEPTH"),
+            }
+        };
+    }
+    arms!(1, 2, 3, 4, 5, 6, 7, 8)
+}
+
+/// The canon kernel for a cascade of exactly `S` stages.
+///
+/// `pipe[k]` holds stage `k`'s output from the previous iteration, which is
+/// what stage `k + 1` consumes in this one. Walking the stages downwards
+/// keeps that value unread until it has been used, so a single array serves
+/// as the whole skew buffer.
+///
+/// The wavefront takes `n + S - 1` iterations for `n` samples: a ramp-up
+/// while the deeper stages have not yet been reached, the steady state where
+/// every stage is busy, and a drain once the input is exhausted. Stages that
+/// are not yet or no longer active must be skipped rather than fed zeros,
+/// since running them would advance their state past the end of the chunk.
+fn canon<const S: usize>(
+    cascade: &mut dyn BiquadCascade,
+    start: usize,
+    waveform: &mut [CamillaFloat],
+) {
+    let mut s1 = [0.0 as CamillaFloat; S];
+    let mut s2 = [0.0 as CamillaFloat; S];
+    let mut b0 = [0.0 as CamillaFloat; S];
+    let mut b1 = [0.0 as CamillaFloat; S];
+    let mut b2 = [0.0 as CamillaFloat; S];
+    let mut a1 = [0.0 as CamillaFloat; S];
+    let mut a2 = [0.0 as CamillaFloat; S];
+    for k in 0..S {
+        let bq = cascade.stage(start + k);
+        s1[k] = bq.s1;
+        s2[k] = bq.s2;
+        b0[k] = bq.coeffs.b0;
+        b1[k] = bq.coeffs.b1;
+        b2[k] = bq.coeffs.b2;
+        a1[k] = bq.coeffs.a1;
+        a2[k] = bq.coeffs.a2;
+    }
+
+    // One stage advanced by one sample. Identical arithmetic to
+    // `Biquad::process_single`, on locals that stay in registers.
+    macro_rules! stage {
+        ($k:expr, $x:expr) => {{
+            let k = $k;
+            let input = $x;
+            let out = mul_add(b0[k], input, s1[k]);
+            s1[k] = mul_add(-a1[k], out, mul_add(b1[k], input, s2[k]));
+            s2[k] = mul_add(-a2[k], out, b2[k] * input);
+            out
+        }};
+    }
+
+    let mut pipe = [0.0 as CamillaFloat; S];
+    let n = waveform.len();
+
+    // Ramp-up: stage `k` has seen no sample yet while `k > i`.
+    let ramp = (S - 1).min(n);
+    // `i` is the wavefront position, not just a subscript: it also bounds how
+    // many stages have been reached. Iterating the waveform would hide that.
+    #[allow(clippy::needless_range_loop)]
+    for i in 0..ramp {
+        for k in (1..=i).rev() {
+            pipe[k] = stage!(k, pipe[k - 1]);
+        }
+        pipe[0] = stage!(0, waveform[i]);
+    }
+
+    // Steady state: every stage busy on a different sample.
+    for i in (S - 1)..n {
+        for k in (1..S).rev() {
+            pipe[k] = stage!(k, pipe[k - 1]);
+        }
+        pipe[0] = stage!(0, waveform[i]);
+        waveform[i - (S - 1)] = pipe[S - 1];
+    }
+
+    // Drain: stage `k` is finished once `i - k` reaches `n`.
+    for i in n..(n + S - 1) {
+        let first = i - n + 1;
+        let last = (S - 1).min(i);
+        for k in (first..=last).rev() {
+            pipe[k] = stage!(k, pipe[k - 1]);
+        }
+        if i >= S - 1 {
+            waveform[i - (S - 1)] = pipe[S - 1];
+        }
+    }
+
+    for k in 0..S {
+        let bq = cascade.stage(start + k);
+        bq.s1 = s1[k];
+        bq.s2 = s2[k];
+        bq.flush_subnormals();
+    }
+}
+
 impl Filter for Biquad {
     fn name(&self) -> &str {
         &self.name
@@ -745,7 +947,10 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_INTERLEAVE, process_cascades_interleaved};
+    use super::{
+        MAX_CANON_DEPTH, MAX_INTERLEAVE, process_cascade_canon, process_cascade_canon_depth,
+        process_cascades_interleaved,
+    };
     use crate::CamillaFloat;
     use crate::config::{
         BiquadParameters, GeneralNotchParams, NotchWidth, PeakingWidth, ShelfSteepness,
@@ -1319,5 +1524,77 @@ mod tests {
         check_interleaved_matches(&[2, 5, 3, 1]);
         // Ragged and wider than one group.
         check_interleaved_matches(&[2, 5, 3, 1, 4, 1, 2]);
+    }
+
+    /// The canon must not change the result at all: every stage still sees its
+    /// samples in order with identical arithmetic. Filter state is compared
+    /// too, since a skew bug that only misplaces the ramp or the drain would
+    /// leave the state wrong for the next chunk while the output still looks
+    /// plausible.
+    fn check_canon_matches(stages: usize, len: usize, depth: usize) {
+        let mut seq_casc = test_cascade(0, stages);
+        let mut seq_wave = test_signal(0, len);
+        for bq in seq_casc.iter_mut() {
+            bq.process_waveform(&mut seq_wave).unwrap();
+        }
+
+        let mut can_casc = test_cascade(0, stages);
+        let mut can_wave = test_signal(0, len);
+        process_cascade_canon_depth(&mut can_casc, &mut can_wave, depth);
+
+        assert_eq!(
+            seq_wave, can_wave,
+            "output differs for {stages} stages, {len} samples, depth {depth}"
+        );
+        for (st, (seq, can)) in seq_casc.iter().zip(can_casc.iter()).enumerate() {
+            assert_eq!(
+                (seq.s1, seq.s2),
+                (can.s1, can.s2),
+                "state of stage {st} differs for {stages} stages, {len} samples, depth {depth}"
+            );
+        }
+    }
+
+    #[test]
+    fn canon_matches_sequential() {
+        for stages in 1..=20 {
+            for depth in 1..=MAX_CANON_DEPTH {
+                check_canon_matches(stages, 500, depth);
+            }
+        }
+    }
+
+    /// Waveforms shorter than the wavefront never reach the steady state, so
+    /// the ramp-up runs straight into the drain.
+    #[test]
+    fn canon_matches_sequential_short_waveforms() {
+        for len in 0..=8 {
+            for stages in 1..=6 {
+                for depth in 1..=MAX_CANON_DEPTH {
+                    check_canon_matches(stages, len, depth);
+                }
+            }
+        }
+    }
+
+    /// Chunk boundaries are where a wrong carry-over would show up: the canon
+    /// must leave the same state behind as the sequential path did.
+    #[test]
+    fn canon_matches_sequential_across_chunks() {
+        let stages = 7;
+        let chunk = 64;
+        let mut seq_casc = test_cascade(0, stages);
+        let mut can_casc = test_cascade(0, stages);
+        let full = test_signal(0, 8 * chunk);
+
+        for part in full.chunks(chunk) {
+            let mut seq_wave = part.to_vec();
+            for bq in seq_casc.iter_mut() {
+                bq.process_waveform(&mut seq_wave).unwrap();
+            }
+            let mut can_wave = part.to_vec();
+            process_cascade_canon(&mut can_casc, &mut can_wave);
+            assert_eq!(seq_wave, can_wave, "chunked output differs");
+        }
     }
 }
