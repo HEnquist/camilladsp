@@ -11,6 +11,9 @@ New features:
 Bugfixes:
 - ASIO: size the ring buffer and prefill from the driver's actual buffer size instead of just
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
+- `chunksize` must now be larger than zero. A `chunksize` of zero was accepted as a valid
+  configuration and then hung on startup without producing any audio. A samplerate override that
+  would scale a small `chunksize` down to zero now keeps one frame instead.
 
 Changes:
 - Faster biquad processing. Biquads now use fused multiply-add on hardware that has it, and a
