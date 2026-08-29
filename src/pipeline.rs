@@ -20,8 +20,9 @@ use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters;
+use crate::filters::ChainCascade;
 use crate::filters::Filter;
-use crate::filters::biquad::MAX_INTERLEAVE;
+use crate::filters::biquad::{self, BiquadCascade, MAX_INTERLEAVE};
 use crate::filters::fftconv::ConvCoeffCache;
 use crate::mixer;
 use crate::processors;
@@ -189,23 +190,36 @@ impl ParallelFilters {
 type ChannelChains = Vec<Vec<Box<dyn Filter + Send>>>;
 
 /// Filter groups for channels whose chains are entirely biquad-based, run with
-/// several channels interleaved.
+/// several independent recurrences in flight.
 ///
-/// A biquad stalls on its own feedback path, so processing channels one at a
-/// time leaves the core idle. Channels are batched into groups of at most
-/// [`MAX_INTERLEAVE`] and the groups run in sequence on the calling thread.
+/// A biquad stalls on its own feedback path, so running one at a time leaves
+/// the core idle. Independent chains come from two axes: several channels at
+/// the same cascade position, or several cascade positions of one channel
+/// skewed against each other. Which axis is used is decided once, when the
+/// step is built.
 ///
-/// This is the single-threaded path. Interleaving already extracts the
-/// parallelism the biquads had to offer, so putting a thread pool on top of it
-/// only costs dispatch: a four channel biquad pipeline measured 92 us here
-/// against 138 us on the pool. Configurations that enable multithreading keep
-/// the per-channel [`ParallelFilters`] path instead, which is what heavy FIR
+/// This is the single-threaded path. Either axis already extracts the
+/// parallelism the biquads had to offer, so putting a thread pool on top of
+/// it only costs dispatch. Configurations that enable multithreading keep the
+/// per-channel [`ParallelFilters`] path instead, which is what heavy FIR
 /// convolution wants.
 ///
 /// Built only when every channel has an equal-length, fully biquad-based
 /// chain; anything else falls back to one [`FilterGroup`] per channel.
 pub struct InterleavedFilters {
     filters: ChannelChains,
+    /// Which axis this step fills the FP pipeline from, decided when the step
+    /// was built. See [`InterleavedFilters::try_new`].
+    axis: Axis,
+}
+
+/// The axis a biquad step draws its independent chains from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Axis {
+    /// One canon per channel, chains coming from cascade depth.
+    Cascade,
+    /// Channels batched, chains coming from the channel count.
+    Channels,
 }
 
 impl InterleavedFilters {
@@ -228,12 +242,29 @@ impl InterleavedFilters {
             .iter_mut()
             .flat_map(|chain| chain.iter_mut())
             .all(|f| f.biquad_cascade().is_some());
-        let worth_it = filters.len() > 1 && filters.first().is_some_and(|c| !c.is_empty());
-        if uniform_depth && all_biquads && worth_it {
-            Ok(InterleavedFilters { filters })
-        } else {
-            Err(filters)
+        if !uniform_depth || !all_biquads || filters.is_empty() {
+            return Err(filters);
         }
+
+        // Both axes fill the same FP pipeline, so take whichever supplies more
+        // independent chains. Cascade depth is counted in biquads rather than
+        // in filters, since one combo filter can hold a cascade of its own.
+        let stages = filters
+            .iter_mut()
+            .map(|chain| ChainCascade::new(chain).nbr_stages())
+            .min()
+            .unwrap_or(0);
+        let cascade_width = stages.min(biquad::CANON_DEPTH);
+        let channel_width = filters.len().min(MAX_INTERLEAVE);
+        if cascade_width <= 1 && channel_width <= 1 {
+            return Err(filters);
+        }
+        let axis = if cascade_width >= channel_width {
+            Axis::Cascade
+        } else {
+            Axis::Channels
+        };
+        Ok(InterleavedFilters { filters, axis })
     }
 
     /// Hot-reload parameters for any filters whose names appear in `changed`.
@@ -254,6 +285,12 @@ impl InterleavedFilters {
 
     /// Apply all the filters to an AudioChunk.
     fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+        if self.axis == Axis::Cascade {
+            for (chain, wave) in self.filters.iter_mut().zip(input.waveforms.iter_mut()) {
+                biquad::process_canon(&mut ChainCascade::new(chain), wave, biquad::CANON_DEPTH);
+            }
+            return Ok(());
+        }
         for (chains, waves) in self
             .filters
             .chunks_mut(MAX_INTERLEAVE)
@@ -565,11 +602,11 @@ impl Pipeline {
 /// Multithreading is an explicit choice, not a hint, so when a pool is
 /// configured every filter step goes to [`ParallelFilters`] exactly as before.
 ///
-/// Without a pool the chains are split by position into runs that every
-/// channel can process interleaved and runs that they cannot, so a
-/// configuration mixing biquads with convolution still gets interleaved
-/// biquads. The runs stay in position order, so each channel still sees its
-/// filters in the order the configuration listed them.
+/// Without a pool the chains are split by position into runs that can be
+/// batched as biquads and runs that cannot, so a configuration mixing biquads
+/// with convolution still gets batched biquads. The runs stay in position
+/// order, so each channel still sees its filters in the order the
+/// configuration listed them.
 fn finish_filter_step(
     filters: ChannelChains,
     pool: Option<&Arc<rayon::ThreadPool>>,
@@ -585,7 +622,7 @@ fn finish_filter_step(
         if batchable {
             match InterleavedFilters::try_new(chains) {
                 Ok(interleaved) => {
-                    debug!("Adding interleaved biquad step");
+                    debug!("Adding batched biquad step");
                     steps.push(PipelineStep::InterleavedFiltersStep(interleaved));
                     continue;
                 }
@@ -609,25 +646,27 @@ fn per_channel_steps(chains: ChannelChains) -> Vec<PipelineStep> {
 }
 
 /// Split per-channel chains into consecutive runs of positions, each flagged
-/// with whether every channel can be processed interleaved there.
+/// with whether every channel can be processed as a batched biquad step there.
 ///
 /// A position is batchable when every channel has a filter there and all of
 /// them are biquad-based. Anything else, including a position some channel
 /// does not reach, becomes a non-batchable run handled per channel.
+///
+/// A single channel qualifies too: the canon draws its independent chains
+/// from cascade depth, so it has something to work with even when there is no
+/// second channel.
 fn split_into_runs(mut filters: ChannelChains) -> Vec<(bool, ChannelChains)> {
     let depth = filters.iter().map(|chain| chain.len()).max().unwrap_or(0);
     if depth == 0 {
         return Vec::new();
     }
-    let nbr_channels = filters.len();
     let batchable: Vec<bool> = (0..depth)
         .map(|pos| {
-            nbr_channels > 1
-                && filters.iter_mut().all(|chain| {
-                    chain
-                        .get_mut(pos)
-                        .is_some_and(|f| f.biquad_cascade().is_some())
-                })
+            filters.iter_mut().all(|chain| {
+                chain
+                    .get_mut(pos)
+                    .is_some_and(|f| f.biquad_cascade().is_some())
+            })
         })
         .collect();
 
@@ -834,10 +873,10 @@ devices:
         assert_eq!(run_shape(&["bbb", "b"]), vec![(true, 1), (false, 2)]);
     }
 
-    /// One channel has nothing to interleave with.
+    /// One channel still batches: the canon interleaves along the cascade.
     #[test]
-    fn single_channel_is_never_batched() {
-        assert_eq!(run_shape(&["bbb"]), vec![(false, 3)]);
+    fn single_channel_is_batched() {
+        assert_eq!(run_shape(&["bbb"]), vec![(true, 3)]);
     }
 
     /// Channels differing in filter type at the same position cannot be batched.

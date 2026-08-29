@@ -83,6 +83,52 @@ pub trait Filter {
     }
 }
 
+/// A whole filter chain seen as a single biquad cascade.
+///
+/// Chains keep their biquads in one slice per filter. Concatenating them lets
+/// the canon run across filter boundaries, so eight one-biquad filters reach
+/// the same depth as one eight stage combo.
+///
+/// Filters that expose no cascade contribute no stages, so a chain is only
+/// worth wrapping when every filter in it is biquad-based.
+pub struct ChainCascade<'a> {
+    chain: &'a mut [Box<dyn Filter + Send>],
+}
+
+impl<'a> ChainCascade<'a> {
+    pub fn new(chain: &'a mut [Box<dyn Filter + Send>]) -> Self {
+        ChainCascade { chain }
+    }
+}
+
+impl biquad::BiquadCascade for ChainCascade<'_> {
+    fn nbr_stages(&mut self) -> usize {
+        self.chain
+            .iter_mut()
+            .map(|filter| filter.biquad_cascade().map_or(0, |c| c.len()))
+            .sum()
+    }
+
+    fn stage(&mut self, index: usize) -> &mut biquad::Biquad {
+        // Locate the filter first, then borrow it, so the search does not hold
+        // a borrow of the chain across iterations.
+        let mut rest = index;
+        let mut found = None;
+        for (pos, filter) in self.chain.iter_mut().enumerate() {
+            let len = filter.biquad_cascade().map_or(0, |c| c.len());
+            if rest < len {
+                found = Some(pos);
+                break;
+            }
+            rest -= len;
+        }
+        let pos = found.expect("stage index is within nbr_stages");
+        &mut self.chain[pos]
+            .biquad_cascade()
+            .expect("the filter was located by counting its own stages")[rest]
+    }
+}
+
 /// Applies one filter per channel to `waveforms`, interleaving where possible.
 ///
 /// A biquad is latency-bound on its own feedback path, so running several
