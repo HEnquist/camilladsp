@@ -13,6 +13,9 @@ Bugfixes:
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
 - A convolution filter with an empty inline `values` list is now rejected by the config
   validation, instead of being accepted and then panicking on the first chunk.
+- `chunksize` must now be larger than zero. A `chunksize` of zero was accepted as a valid
+  configuration and then hung on startup without producing any audio. A samplerate override that
+  would scale a small `chunksize` down to zero now keeps one frame instead.
 
 Changes:
 - Biquads now use fused multiply-add on hardware that has it, about 18% faster on aarch64. The

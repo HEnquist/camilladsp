@@ -689,6 +689,7 @@ pub struct Devices {
     /// Output sample rate in Hz.
     pub samplerate: usize,
     /// Number of frames per processing chunk.
+    #[serde(deserialize_with = "validate_nonzero_usize")]
     pub chunksize: usize,
     #[serde(default)]
     pub queuelimit: Option<usize>,
