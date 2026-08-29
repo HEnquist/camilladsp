@@ -109,23 +109,34 @@ impl biquad::BiquadCascade for ChainCascade<'_> {
             .sum()
     }
 
-    fn stage(&mut self, index: usize) -> &mut biquad::Biquad {
-        // Locate the filter first, then borrow it, so the search does not hold
-        // a borrow of the chain across iterations.
-        let mut rest = index;
-        let mut found = None;
-        for (pos, filter) in self.chain.iter_mut().enumerate() {
-            let len = filter.biquad_cascade().map_or(0, |c| c.len());
-            if rest < len {
-                found = Some(pos);
+    fn visit_stages(
+        &mut self,
+        start: usize,
+        count: usize,
+        visit: &mut dyn FnMut(usize, &mut biquad::Biquad),
+    ) {
+        let mut skip = start;
+        let mut seen = 0;
+        for filter in self.chain.iter_mut() {
+            if seen == count {
                 break;
             }
-            rest -= len;
+            let Some(cascade) = filter.biquad_cascade() else {
+                continue;
+            };
+            if skip >= cascade.len() {
+                skip -= cascade.len();
+                continue;
+            }
+            for bq in cascade[skip..].iter_mut() {
+                if seen == count {
+                    break;
+                }
+                visit(seen, bq);
+                seen += 1;
+            }
+            skip = 0;
         }
-        let pos = found.expect("stage index is within nbr_stages");
-        &mut self.chain[pos]
-            .biquad_cascade()
-            .expect("the filter was located by counting its own stages")[rest]
     }
 }
 

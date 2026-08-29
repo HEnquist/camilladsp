@@ -614,8 +614,17 @@ pub trait BiquadCascade {
     /// Number of stages, in processing order.
     fn nbr_stages(&mut self) -> usize;
 
-    /// Stage `index`, counted from the start of the cascade.
-    fn stage(&mut self, index: usize) -> &mut Biquad;
+    /// Visit `count` stages starting at `start`, in processing order, calling
+    /// `visit` with the position within the pass.
+    ///
+    /// Visiting a whole pass at once rather than indexing stage by stage keeps
+    /// a segmented cascade from rescanning its segments for every stage.
+    fn visit_stages(
+        &mut self,
+        start: usize,
+        count: usize,
+        visit: &mut dyn FnMut(usize, &mut Biquad),
+    );
 }
 
 struct SliceCascade<'a>(&'a mut [Biquad]);
@@ -625,8 +634,15 @@ impl BiquadCascade for SliceCascade<'_> {
         self.0.len()
     }
 
-    fn stage(&mut self, index: usize) -> &mut Biquad {
-        &mut self.0[index]
+    fn visit_stages(
+        &mut self,
+        start: usize,
+        count: usize,
+        visit: &mut dyn FnMut(usize, &mut Biquad),
+    ) {
+        for (pos, bq) in self.0[start..].iter_mut().take(count).enumerate() {
+            visit(pos, bq);
+        }
     }
 }
 
@@ -635,18 +651,20 @@ impl BiquadCascade for SliceCascade<'_> {
 /// The kernel is latency-bound until enough independent chains are in flight
 /// to saturate the FP units. Measured on a 1024 sample chunk, one stage takes
 /// 2.70 us and eight stages take 3.19 us, so the eighth stage is still nearly
-/// free; depth is what buys the throughput.
+/// free and depth is what buys the throughput.
+///
+/// Past eight the curve flattens and turns bumpy: a 16 stage cascade gains
+/// 5% at depth 16, while a 32 stage cascade prefers depth 12 to depth 16.
+/// Those few percent are not worth chasing, and a deeper wavefront costs more
+/// at small chunk sizes, where its ramp-up and drain are a larger share of
+/// the work.
 pub const CANON_DEPTH: usize = 8;
 
 /// Deepest kernel that is instantiated. Deeper cascades are split into
 /// several passes.
 ///
-/// Keep this equal to [`CANON_DEPTH`]. Instantiating deeper kernels as well
-/// is not free: a build carrying depths up to 16 measured depth 8 at 0.69 us
-/// per stage against 0.40 us for the same code in a build that stopped at 8,
-/// a 72% regression with the kernel itself unchanged. The extra
-/// instantiations push the unrolled loops past a compiler heuristic and the
-/// codegen for every depth suffers.
+/// Kept equal to [`CANON_DEPTH`] so the build carries no kernel that nothing
+/// calls.
 pub const MAX_CANON_DEPTH: usize = CANON_DEPTH;
 
 /// Runs a cascade of biquads as a canon, filling the pipeline from cascade
@@ -737,8 +755,7 @@ fn canon<const S: usize>(
     let mut b2 = [0.0 as CamillaFloat; S];
     let mut a1 = [0.0 as CamillaFloat; S];
     let mut a2 = [0.0 as CamillaFloat; S];
-    for k in 0..S {
-        let bq = cascade.stage(start + k);
+    cascade.visit_stages(start, S, &mut |k, bq| {
         s1[k] = bq.s1;
         s2[k] = bq.s2;
         b0[k] = bq.coeffs.b0;
@@ -746,8 +763,35 @@ fn canon<const S: usize>(
         b2[k] = bq.coeffs.b2;
         a1[k] = bq.coeffs.a1;
         a2[k] = bq.coeffs.a2;
-    }
+    });
 
+    let (s1, s2) = canon_kernel::<S>(s1, s2, b0, b1, b2, a1, a2, waveform);
+
+    cascade.visit_stages(start, S, &mut |k, bq| {
+        bq.s1 = s1[k];
+        bq.s2 = s2[k];
+        bq.flush_subnormals();
+    });
+}
+
+/// The sample loop, on values rather than on anything the caller can reach.
+///
+/// The state and coefficients arrive and leave by value so that nothing in
+/// the loop is behind a pointer the compiler has to reason about. Taking the
+/// cascade as `&mut dyn BiquadCascade` here instead measured 10.28 us against
+/// 6.39 us for a 16 stage cascade over 1024 samples, a 60% penalty for two
+/// opaque calls that only run once per pass.
+#[allow(clippy::too_many_arguments)]
+fn canon_kernel<const S: usize>(
+    mut s1: [CamillaFloat; S],
+    mut s2: [CamillaFloat; S],
+    b0: [CamillaFloat; S],
+    b1: [CamillaFloat; S],
+    b2: [CamillaFloat; S],
+    a1: [CamillaFloat; S],
+    a2: [CamillaFloat; S],
+    waveform: &mut [CamillaFloat],
+) -> ([CamillaFloat; S], [CamillaFloat; S]) {
     // One stage advanced by one sample. Identical arithmetic to
     // `Biquad::process_single`, on locals that stay in registers.
     macro_rules! stage {
@@ -797,12 +841,7 @@ fn canon<const S: usize>(
         }
     }
 
-    for k in 0..S {
-        let bq = cascade.stage(start + k);
-        bq.s1 = s1[k];
-        bq.s2 = s2[k];
-        bq.flush_subnormals();
-    }
+    (s1, s2)
 }
 
 impl Filter for Biquad {
