@@ -207,9 +207,12 @@ type ChannelChains = Vec<Vec<Box<dyn Filter + Send>>>;
 /// [`FilterGroup`] per channel.
 pub struct InterleavedFilters {
     filters: ChannelChains,
-    /// Which axis this step fills the FP pipeline from, decided when the step
-    /// was built. See [`InterleavedFilters::try_new`].
-    axis: Axis,
+    /// Independent chains the cascade axis can supply, capped at the canon
+    /// depth. Decided when the step was built.
+    cascade_width: usize,
+    /// Independent chains the channel axis can supply, capped at
+    /// [`MAX_INTERLEAVE`].
+    channel_width: usize,
 }
 
 /// The axis a biquad step draws its independent chains from.
@@ -220,6 +223,17 @@ enum Axis {
     /// Channels batched, chains coming from the channel count.
     Channels,
 }
+
+/// Frames per channel of interleaving width below which the canon's per-pass
+/// cost is not yet paid off.
+///
+/// The canon loads and stores its stages once per pass whatever the chunk
+/// length, while the channel interleave carries no such fixed cost. On a
+/// short chunk that cost is spread over too few samples. Measured on 16 stage
+/// cascades, the channel axis wins at 16 frames and loses at 32 with two
+/// channels, and wins at 32 and loses at 64 with four, so the crossover
+/// tracks the channel width.
+const CANON_FRAMES_PER_CHANNEL: usize = 16;
 
 impl InterleavedFilters {
     /// Returns `Some` if every channel chain is the same length and made up
@@ -258,12 +272,29 @@ impl InterleavedFilters {
         if cascade_width <= 1 && channel_width <= 1 {
             return Err(filters);
         }
-        let axis = if cascade_width >= channel_width {
+        Ok(InterleavedFilters {
+            filters,
+            cascade_width,
+            channel_width,
+        })
+    }
+
+    /// Which axis to use for a chunk of `frames` frames.
+    ///
+    /// Both axes fill the same FP pipeline, so the wider one wins, except on
+    /// chunks too short to pay off the canon's per-pass cost. The channel
+    /// axis is only a candidate when there is more than one channel; a single
+    /// channel has nothing to batch and falls back to plain sequential
+    /// processing, which is worse than the canon at any chunk length.
+    fn axis(&self, frames: usize) -> Axis {
+        if self.channel_width > 1 && frames < CANON_FRAMES_PER_CHANNEL * self.channel_width {
+            return Axis::Channels;
+        }
+        if self.cascade_width >= self.channel_width {
             Axis::Cascade
         } else {
             Axis::Channels
-        };
-        Ok(InterleavedFilters { filters, axis })
+        }
     }
 
     /// Hot-reload parameters for any filters whose names appear in `changed`.
@@ -284,7 +315,7 @@ impl InterleavedFilters {
 
     /// Apply all the filters to an AudioChunk.
     fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
-        if self.axis == Axis::Cascade {
+        if self.axis(input.frames) == Axis::Cascade {
             for (chain, wave) in self.filters.iter_mut().zip(input.waveforms.iter_mut()) {
                 biquad::process_canon(&mut ChainCascade::new(chain), wave, biquad::CANON_DEPTH);
             }
@@ -888,6 +919,37 @@ devices:
     #[test]
     fn single_channel_is_batched() {
         assert_eq!(run_shape(&["bbb"]), vec![(true, 3)]);
+    }
+
+    fn axis_of(shapes: &[&str], frames: usize) -> super::Axis {
+        super::InterleavedFilters::try_new(chains_from(shapes))
+            .ok()
+            .expect("all-biquad chains of equal length are batchable")
+            .axis(frames)
+    }
+
+    /// The canon's per-pass cost needs enough frames to pay for itself, and
+    /// how many depends on how wide the channel axis is.
+    #[test]
+    fn short_chunks_use_the_channel_axis() {
+        let deep = "bbbbbbbbbbbbbbbb";
+        assert_eq!(axis_of(&[deep, deep], 16), super::Axis::Channels);
+        assert_eq!(axis_of(&[deep, deep], 32), super::Axis::Cascade);
+        assert_eq!(axis_of(&[deep; 4], 32), super::Axis::Channels);
+        assert_eq!(axis_of(&[deep; 4], 64), super::Axis::Cascade);
+    }
+
+    /// A single channel has no channel axis to fall back on, so it takes the
+    /// canon however short the chunk is.
+    #[test]
+    fn single_channel_always_uses_the_cascade_axis() {
+        assert_eq!(axis_of(&["bbbbbbbbbbbbbbbb"], 4), super::Axis::Cascade);
+    }
+
+    /// Cascades too shallow to fill the pipeline leave it to the channels.
+    #[test]
+    fn shallow_cascades_use_the_channel_axis() {
+        assert_eq!(axis_of(&["bb"; 4], 1024), super::Axis::Channels);
     }
 
     /// Channels differing in filter type at the same position cannot be batched.

@@ -2,7 +2,8 @@
 use camillalib::CamillaFloat;
 use camillalib::filters::Filter;
 use camillalib::filters::biquad::{
-    Biquad, BiquadCoefficients, process_cascade_canon_depth, process_cascades_interleaved,
+    Biquad, BiquadCoefficients, process_cascade_canon, process_cascade_canon_depth,
+    process_cascades_interleaved,
 };
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
@@ -108,5 +109,57 @@ fn bench_canon(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench, bench_canon);
+/// How the two axes compare as the chunk shrinks.
+///
+/// The canon pays a fixed cost per pass, loading and storing eight stages,
+/// which the channel interleave does not. On a short chunk that cost is
+/// spread over few samples, so short chunks are where the axis choice flips.
+/// 16 stages per channel, the shape a PEQ configuration has.
+fn bench_small_chunks(c: &mut Criterion) {
+    let mut g = c.benchmark_group("axis_vs_chunk");
+    for nch in [2usize, 4] {
+        for chunk in [16usize, 32, 64, 128] {
+            g.throughput(criterion::Throughput::Elements((nch * 16 * chunk) as u64));
+
+            let mut int: Vec<Vec<Biquad>> = (0..nch)
+                .map(|_| (0..16).map(|_| Biquad::new("t", chunk, coeffs())).collect())
+                .collect();
+            let mut int_w: Vec<Vec<CamillaFloat>> =
+                (0..nch).map(|_| signal_of_len(chunk)).collect();
+            g.bench_with_input(
+                BenchmarkId::new(format!("ch{nch}_channels"), chunk),
+                &chunk,
+                |b, _| {
+                    b.iter(|| {
+                        let mut cr: Vec<&mut [Biquad]> =
+                            int.iter_mut().map(|c| c.as_mut_slice()).collect();
+                        let mut wr: Vec<&mut [CamillaFloat]> =
+                            int_w.iter_mut().map(|w| w.as_mut_slice()).collect();
+                        process_cascades_interleaved(&mut cr, &mut wr);
+                    })
+                },
+            );
+
+            let mut can: Vec<Vec<Biquad>> = (0..nch)
+                .map(|_| (0..16).map(|_| Biquad::new("t", chunk, coeffs())).collect())
+                .collect();
+            let mut can_w: Vec<Vec<CamillaFloat>> =
+                (0..nch).map(|_| signal_of_len(chunk)).collect();
+            g.bench_with_input(
+                BenchmarkId::new(format!("ch{nch}_cascade"), chunk),
+                &chunk,
+                |b, _| {
+                    b.iter(|| {
+                        for (casc, w) in can.iter_mut().zip(can_w.iter_mut()) {
+                            process_cascade_canon(casc, w);
+                        }
+                    })
+                },
+            );
+        }
+    }
+    g.finish();
+}
+
+criterion_group!(benches, bench, bench_canon, bench_small_chunks);
 criterion_main!(benches);
