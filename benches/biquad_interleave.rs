@@ -16,6 +16,14 @@ fn coeffs() -> BiquadCoefficients {
     )
 }
 
+/// A real signal. All-zero input is not representative: it never exercises the
+/// magnitudes the state variables actually take.
+fn signal() -> Vec<CamillaFloat> {
+    (0..CHUNK)
+        .map(|n| (n as CamillaFloat * 0.013).sin() * 0.5)
+        .collect()
+}
+
 fn bench(c: &mut Criterion) {
     let mut g = c.benchmark_group("interleave");
     for n in [1usize, 2, 3, 4, 5, 6, 8] {
@@ -23,7 +31,7 @@ fn bench(c: &mut Criterion) {
 
         // Reference: one channel at a time, the current production path.
         let mut seq: Vec<Biquad> = (0..n).map(|_| Biquad::new("t", CHUNK, coeffs())).collect();
-        let mut seq_w: Vec<Vec<CamillaFloat>> = (0..n).map(|_| vec![0.0; CHUNK]).collect();
+        let mut seq_w: Vec<Vec<CamillaFloat>> = (0..n).map(|_| signal()).collect();
         g.bench_with_input(BenchmarkId::new("sequential", n), &n, |b, _| {
             b.iter(|| {
                 for (bq, w) in seq.iter_mut().zip(seq_w.iter_mut()) {
@@ -35,7 +43,7 @@ fn bench(c: &mut Criterion) {
         let mut int: Vec<Vec<Biquad>> = (0..n)
             .map(|_| vec![Biquad::new("t", CHUNK, coeffs())])
             .collect();
-        let mut int_w: Vec<Vec<CamillaFloat>> = (0..n).map(|_| vec![0.0; CHUNK]).collect();
+        let mut int_w: Vec<Vec<CamillaFloat>> = (0..n).map(|_| signal()).collect();
         g.bench_with_input(BenchmarkId::new("interleaved", n), &n, |b, _| {
             b.iter(|| {
                 let mut cr: Vec<&mut [Biquad]> = int.iter_mut().map(|c| c.as_mut_slice()).collect();
