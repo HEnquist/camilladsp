@@ -38,7 +38,7 @@ extern crate flexi_logger;
 #[macro_use]
 extern crate log;
 
-use clap::{Arg, ArgAction, Command, crate_authors, crate_description, crate_name, crate_version};
+use clap::{Arg, ArgAction, Command, crate_authors, crate_description, crate_version};
 use crossbeam_channel::select;
 use git_version::git_version;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
@@ -84,6 +84,8 @@ const EXIT_PROCESSING_ERROR: i32 = 102; // Error from processing
 const EXIT_FORCED: i32 = 103; // Exit was forced by a second SIGINT
 const EXIT_OK: i32 = 0; // All ok
 const GIT_HASH: &str = git_version!(fallback = "unknown");
+// Display name. The crates.io package name is the lowercase "camilladsp".
+const APP_NAME: &str = "CamillaDSP";
 
 // Customized version of `colored_opt_format` from flexi_logger.
 fn custom_colored_logger_format(
@@ -493,7 +495,7 @@ fn main_process() -> i32 {
 
     let longabout = format!(
         "{} v{} ({})\n{}\n{}\n\n{}\n\n{}\n\nSupported device types:\n{}\n{}",
-        crate_name!(),
+        APP_NAME,
         crate_version!(),
         GIT_HASH,
         crate_authors!(),
@@ -504,7 +506,7 @@ fn main_process() -> i32 {
         playback_types
     );
 
-    let clapapp = Command::new("CamillaDSP")
+    let clapapp = Command::new(APP_NAME)
         .version(version_with_hash)
         .about(longabout)
         .author(crate_authors!())

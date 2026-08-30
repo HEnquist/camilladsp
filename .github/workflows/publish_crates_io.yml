@@ -1,0 +1,27 @@
+name: Publish to crates.io
+
+on:
+  release:
+    types:
+      - created
+  workflow_dispatch:
+
+jobs:
+  crates_io:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Update package list
+        run: sudo apt-get update
+
+      - name: Install Alsa devel
+        run: sudo apt-get install libasound2-dev -y
+
+      - name: Publish
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

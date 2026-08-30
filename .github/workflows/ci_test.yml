@@ -212,3 +212,22 @@ jobs:
 
 
 
+
+  package:
+    name: Check crates.io package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Update package list
+        run: sudo apt-get update
+
+      - name: Install Alsa devel
+        run: sudo apt-get install libasound2-dev -y
+
+      - name: Build the crate package
+        run: cargo package

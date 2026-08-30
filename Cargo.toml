@@ -1,11 +1,57 @@
 [package]
-name = "CamillaDSP"
+name = "camilladsp"
 version = "4.1.3"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2024"
 description = "A flexible tool for processing audio"
 rust-version = "1.90"
 license = "GPL-3.0-only OR MPL-2.0"
+repository = "https://github.com/HEnquist/camilladsp"
+homepage = "https://github.com/HEnquist/camilladsp"
+readme = "README.md"
+keywords = ["audio", "dsp", "crossover", "equalizer", "convolution"]
+categories = ["multimedia::audio", "command-line-utilities"]
+# Keep the published crate to the files needed to build, test and read about it.
+exclude = [
+    "/.github",
+    "/.vscode",
+    "/testscripts",
+    "/web",
+    "/Dockerfile_*",
+    "/*.png",
+    "/*.svg",
+    "/*.graphml",
+    "/translate_rew_xml.py",
+]
+
+# Let `cargo binstall camilladsp` fetch the pre-built binaries from the GitHub
+# releases instead of compiling. The asset names are set in publish.yml, and the
+# archives contain the executable at the top level.
+[package.metadata.binstall]
+pkg-fmt = "tgz"
+bin-dir = "{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/camilladsp-linux-amd64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/camilladsp-linux-aarch64.tar.gz"
+
+[package.metadata.binstall.overrides.armv7-unknown-linux-gnueabihf]
+pkg-url = "{ repo }/releases/download/v{ version }/camilladsp-linux-armv7.tar.gz"
+
+[package.metadata.binstall.overrides.arm-unknown-linux-gnueabihf]
+pkg-url = "{ repo }/releases/download/v{ version }/camilladsp-linux-armv6.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/camilladsp-macos-amd64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/camilladsp-macos-aarch64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/camilladsp-windows-amd64.zip"
+pkg-fmt = "zip"
 
 [features]
 default = ["websocket"]

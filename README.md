@@ -87,6 +87,7 @@ and the Mozilla Public License Version 2.0:
 - **[GUI](#gui)**
 
 **[Installing](#installing)**
+- **[Installing with cargo](#installing-with-cargo)**
 
 **[Building](#building)**
 - **[Build with standard features](#building-in-linux-with-standard-features)**
@@ -321,6 +322,36 @@ Open a terminal and run:
 ```sh
 xattr -d com.apple.quarantine /path/to/camilladsp
 ```
+
+## Installing with cargo
+
+CamillaDSP is also published on [crates.io](https://crates.io/crates/camilladsp),
+which makes it possible to install and update it with cargo.
+This requires that rustc and cargo are installed, see [Building](#building).
+
+The quickest way is [`cargo binstall`](https://github.com/cargo-bins/cargo-binstall),
+which downloads the same pre-built binary as the "Releases" page instead of compiling:
+
+```sh
+cargo binstall camilladsp
+```
+
+To compile from source instead:
+
+```sh
+cargo install camilladsp
+```
+
+This needs the same build dependencies as a manual build, see [Building](#building).
+It builds with the default features only.
+Use the `--features` option to pick others, in the same way as for `cargo build`:
+
+```sh
+cargo install camilladsp --features pulse-backend
+```
+
+Both commands install the `camilladsp` executable in `~/.cargo/bin`.
+Updating to a newer version is done by running the same command again.
 
 # Building
 
