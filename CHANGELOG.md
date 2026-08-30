@@ -9,8 +9,9 @@ New features:
   configurable monitor and process channels.
 
 Performance improvements:
-All figures are one chunk of 1024 frames at 44.1 kHz, measured on an Apple M1 against 4.1.3.
-Other processors will differ.
+All figures are one chunk of 1024 frames at 44.1 kHz, measured on an Apple M1 against 4.1.3. The
+biquad figures were reproduced within about 10% on a Zen 4 laptop and a Snapdragon X Elite. Other
+processors will differ.
 - Biquad filtering is several times faster. A pipeline of 16 biquads on four channels followed by
   16 more on two went from about 310 to about 41 microseconds per chunk, about 7.5 times faster.
   Filters built from biquads, such as peaking and shelving filters and the biquad combinations,
