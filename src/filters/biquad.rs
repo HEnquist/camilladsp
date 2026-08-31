@@ -530,6 +530,20 @@ pub fn process_cascades_interleaved(
 
 /// Interleaves a single group of at most [`MAX_INTERLEAVE`] channels.
 fn process_one_group(cascades: &mut [&mut [Biquad]], waveforms: &mut [&mut [CamillaFloat]]) {
+    // The kernel walks every channel of a group together, over the shortest
+    // waveform in it. A channel the capture step does not use arrives as an
+    // empty waveform, so one of those in a group would silently leave every
+    // other channel in it unfiltered. Bounds per channel would cost the inner
+    // loop, and mixed lengths only arise from unused channels, so those groups
+    // run a channel at a time down the cascade axis instead.
+    let len = waveforms.first().map_or(0, |w| w.len());
+    if waveforms.iter().any(|w| w.len() != len) {
+        for (cascade, waveform) in cascades.iter_mut().zip(waveforms.iter_mut()) {
+            process_cascade_canon(cascade, waveform);
+        }
+        return;
+    }
+
     let common = cascades.iter().map(|c| c.len()).min().unwrap_or(0);
     for stage in 0..common {
         match cascades.len() {
@@ -1546,6 +1560,52 @@ mod tests {
                 seq_wave[c], int_wave[c],
                 "channel {c} differs between sequential and interleaved"
             );
+        }
+    }
+
+    /// An unused capture channel arrives as an empty waveform. Grouped with
+    /// active channels it must not stop them being filtered.
+    #[test]
+    fn interleaved_skips_empty_channels_without_stopping_the_rest() {
+        let len = 500;
+        let nbr = 4;
+        // Reference: each channel on its own, channel 2 empty.
+        let mut seq_casc: Vec<Vec<Biquad>> = (0..nbr).map(|c| test_cascade(c, 2)).collect();
+        let mut seq_wave: Vec<Vec<CamillaFloat>> = (0..nbr)
+            .map(|c| {
+                if c == 2 {
+                    Vec::new()
+                } else {
+                    test_signal(c, len)
+                }
+            })
+            .collect();
+        for (cascade, wave) in seq_casc.iter_mut().zip(seq_wave.iter_mut()) {
+            for bq in cascade.iter_mut() {
+                bq.process_waveform(wave);
+            }
+        }
+
+        let mut int_casc: Vec<Vec<Biquad>> = (0..nbr).map(|c| test_cascade(c, 2)).collect();
+        let mut int_wave: Vec<Vec<CamillaFloat>> = (0..nbr)
+            .map(|c| {
+                if c == 2 {
+                    Vec::new()
+                } else {
+                    test_signal(c, len)
+                }
+            })
+            .collect();
+        {
+            let mut casc_refs: Vec<&mut [Biquad]> =
+                int_casc.iter_mut().map(|c| c.as_mut_slice()).collect();
+            let mut wave_refs: Vec<&mut [CamillaFloat]> =
+                int_wave.iter_mut().map(|w| w.as_mut_slice()).collect();
+            process_cascades_interleaved(&mut casc_refs, &mut wave_refs);
+        }
+
+        for c in 0..nbr {
+            assert_eq!(seq_wave[c], int_wave[c], "channel {c} differs");
         }
     }
 
