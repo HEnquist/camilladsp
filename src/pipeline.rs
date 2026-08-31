@@ -695,7 +695,11 @@ fn finish_filter_step(
                     steps.push(PipelineStep::InterleavedFiltersStep(interleaved));
                     continue;
                 }
-                Err(chains) => steps.extend(unbatched_steps(chains, pool)),
+                // A batchable run is all biquads with every channel present
+                // at every position, so the only way to land here is one
+                // channel holding one stage: nothing to batch along either
+                // axis. It is still biquad work, so it stays off the pool.
+                Err(chains) => steps.extend(per_channel_steps(chains)),
             }
         } else {
             steps.extend(unbatched_steps(chains, pool));
@@ -1076,6 +1080,56 @@ pipeline:
     /// around the Gain; with a pool they run one channel at a time. Each
     /// channel sees the same operations in the same order either way, so the
     /// results must match exactly.
+    /// A lone biquad has nothing to batch along either axis, but it is still
+    /// biquad work and a thread pool could only add dispatch to it.
+    #[test]
+    fn a_lone_biquad_stays_off_the_pool() {
+        const ONE_BIQUAD: &str = "
+devices:
+  samplerate: 44100
+  chunksize: 256
+  multithreaded: true
+  capture:
+    type: SignalGenerator
+    channels: 1
+    signal:
+      type: Sine
+      freq: 1000
+      level: 0.0
+  playback:
+    type: Stdout
+    channels: 1
+    format: S16_LE
+filters:
+  hp:
+    type: Biquad
+    parameters:
+      type: Highpass
+      freq: 120
+      q: 0.7
+pipeline:
+  - type: Filter
+    channels: [0]
+    names: [hp]
+";
+        let conf: config::Configuration = yaml_serde::from_str(ONE_BIQUAD).unwrap();
+        let pool = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(2)
+                .build()
+                .unwrap(),
+        );
+        let params = Arc::new(ProcessingParameters::default());
+        let pipeline = Pipeline::from_config(conf, params, Some(pool));
+        assert!(
+            !pipeline
+                .steps
+                .iter()
+                .any(|s| matches!(s, super::PipelineStep::ParallelFiltersStep(_))),
+            "a lone biquad was sent to the thread pool"
+        );
+    }
+
     /// Channels with chains of different lengths. Everything past the shortest
     /// channel falls out of the batched step and lands in a per-channel one,
     /// which is where the canon has to pick it up.
