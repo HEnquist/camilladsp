@@ -860,12 +860,11 @@ impl Filter for Biquad {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         for item in waveform.iter_mut() {
             *item = self.process_single(*item);
         }
         self.flush_subnormals();
-        Ok(())
     }
 
     fn biquad_cascade(&mut self) -> Option<&mut [Biquad]> {
@@ -1055,7 +1054,7 @@ mod tests {
         let mut wave = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let expected = vec![0.215, 0.461, 0.281, 0.039, 0.004, 0.0, 0.0, 0.0];
         let mut filter = Biquad::new("test", 44100, coeffs);
-        filter.process_waveform(&mut wave).unwrap();
+        filter.process_waveform(&mut wave);
         assert!(compare_waveforms(wave, expected, 1e-3));
     }
 
@@ -1526,7 +1525,7 @@ mod tests {
         let mut seq_wave: Vec<Vec<CamillaFloat>> = (0..nbr).map(|c| test_signal(c, len)).collect();
         for (cascade, wave) in seq_casc.iter_mut().zip(seq_wave.iter_mut()) {
             for bq in cascade.iter_mut() {
-                bq.process_waveform(wave).unwrap();
+                bq.process_waveform(wave);
             }
         }
 
@@ -1585,7 +1584,7 @@ mod tests {
         let mut seq_casc = test_cascade(0, stages);
         let mut seq_wave = test_signal(0, len);
         for bq in seq_casc.iter_mut() {
-            bq.process_waveform(&mut seq_wave).unwrap();
+            bq.process_waveform(&mut seq_wave);
         }
 
         let mut can_casc = test_cascade(0, stages);
@@ -1645,7 +1644,7 @@ mod tests {
                 for (nbr, part) in full.chunks(chunk).enumerate() {
                     let mut seq_wave = part.to_vec();
                     for bq in seq_casc.iter_mut() {
-                        bq.process_waveform(&mut seq_wave).unwrap();
+                        bq.process_waveform(&mut seq_wave);
                     }
                     let mut can_wave = part.to_vec();
                     process_cascade_canon(&mut can_casc, &mut can_wave);

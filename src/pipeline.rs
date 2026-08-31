@@ -16,7 +16,6 @@
 
 use crate::CamillaFloat;
 use crate::ProcessingParameters;
-use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters;
@@ -157,10 +156,10 @@ impl FilterGroup {
     }
 
     /// Apply all the filters to an AudioChunk.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
         let waveform = &mut input.waveforms[self.channel];
         if waveform.is_empty() {
-            return Ok(());
+            return;
         }
         // A single channel has no channel axis to batch along, but its cascade
         // is an axis of its own. This is where the chains that no batched step
@@ -171,13 +170,12 @@ impl FilterGroup {
             let mut cascade = ChainCascade::new(&mut self.filters);
             if cascade.nbr_stages() >= 2 {
                 biquad::process_canon(&mut cascade, waveform, biquad::CANON_DEPTH);
-                return Ok(());
+                return;
             }
         }
         for filter in &mut self.filters {
-            filter.process_waveform(waveform)?;
+            filter.process_waveform(waveform);
         }
-        Ok(())
     }
 }
 
@@ -205,7 +203,7 @@ impl ParallelFilters {
     }
 
     /// Apply all the filters to an AudioChunk.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
         self.filter_pool.install(|| {
             self.filters
                 .par_iter_mut()
@@ -213,11 +211,10 @@ impl ParallelFilters {
                 .filter(|(f, w)| !f.is_empty() && !w.is_empty())
                 .for_each(|(f, w)| {
                     for filt in f {
-                        let _ = filt.process_waveform(w);
+                        filt.process_waveform(w);
                     }
                 });
         });
-        Ok(())
     }
 }
 
@@ -361,12 +358,12 @@ impl InterleavedFilters {
     }
 
     /// Apply all the filters to an AudioChunk.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
         if self.axis(input.frames) == Axis::Cascade {
             for (chain, wave) in self.filters.iter_mut().zip(input.waveforms.iter_mut()) {
                 biquad::process_canon(&mut ChainCascade::new(chain), wave, biquad::CANON_DEPTH);
             }
-            return Ok(());
+            return;
         }
         for (chains, waves) in self
             .filters
@@ -375,7 +372,6 @@ impl InterleavedFilters {
         {
             process_interleaved_group(chains, waves);
         }
-        Ok(())
     }
 }
 
@@ -396,21 +392,21 @@ fn process_interleaved_group(
                     [&mut *c0[pos], &mut *c1[pos], &mut *c2[pos], &mut *c3[pos]];
                 let mut ws: [&mut [CamillaFloat]; 4] =
                     [w0.as_mut(), w1.as_mut(), w2.as_mut(), w3.as_mut()];
-                let _ = filters::process_channels_interleaved(fs.as_mut_slice(), ws.as_mut_slice());
+                filters::process_channels_interleaved(fs.as_mut_slice(), ws.as_mut_slice());
             }
             ([c0, c1, c2], [w0, w1, w2]) => {
                 let mut fs: [&mut (dyn Filter + Send); 3] =
                     [&mut *c0[pos], &mut *c1[pos], &mut *c2[pos]];
                 let mut ws: [&mut [CamillaFloat]; 3] = [w0.as_mut(), w1.as_mut(), w2.as_mut()];
-                let _ = filters::process_channels_interleaved(fs.as_mut_slice(), ws.as_mut_slice());
+                filters::process_channels_interleaved(fs.as_mut_slice(), ws.as_mut_slice());
             }
             ([c0, c1], [w0, w1]) => {
                 let mut fs: [&mut (dyn Filter + Send); 2] = [&mut *c0[pos], &mut *c1[pos]];
                 let mut ws: [&mut [CamillaFloat]; 2] = [w0.as_mut(), w1.as_mut()];
-                let _ = filters::process_channels_interleaved(fs.as_mut_slice(), ws.as_mut_slice());
+                filters::process_channels_interleaved(fs.as_mut_slice(), ws.as_mut_slice());
             }
             ([c0], [w0]) => {
-                let _ = c0[pos].process_waveform(w0);
+                c0[pos].process_waveform(w0);
             }
             _ => {}
         }
@@ -640,13 +636,13 @@ impl Pipeline {
                     chunk = mix.process_chunk(chunk);
                 }
                 PipelineStep::FilterStep(flt) => {
-                    flt.process_chunk(&mut chunk).unwrap();
+                    flt.process_chunk(&mut chunk);
                 }
                 PipelineStep::ParallelFiltersStep(flt) => {
-                    flt.process_chunk(&mut chunk).unwrap();
+                    flt.process_chunk(&mut chunk);
                 }
                 PipelineStep::InterleavedFiltersStep(flt) => {
-                    flt.process_chunk(&mut chunk).unwrap();
+                    flt.process_chunk(&mut chunk);
                 }
                 PipelineStep::ProcessorStep(comp) => {
                     comp.process_chunk(&mut chunk).unwrap();
@@ -847,7 +843,6 @@ mod tests {
     use super::{Pipeline, split_into_runs};
     use crate::CamillaFloat;
     use crate::ProcessingParameters;
-    use crate::Res;
     use crate::audiochunk::AudioChunk;
     use crate::config;
     use crate::filters::Filter;
@@ -904,9 +899,7 @@ devices:
     struct NotABiquad;
 
     impl Filter for NotABiquad {
-        fn process_waveform(&mut self, _waveform: &mut [CamillaFloat]) -> Res<()> {
-            Ok(())
-        }
+        fn process_waveform(&mut self, _waveform: &mut [CamillaFloat]) {}
         fn update_parameters(&mut self, _config: config::Filter) {}
         fn name(&self) -> &str {
             "not_a_biquad"

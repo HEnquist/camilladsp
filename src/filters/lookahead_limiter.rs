@@ -319,9 +319,8 @@ impl Filter for LookaheadLimiter {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         self.gain.process_waveform(waveform);
-        Ok(())
     }
 
     fn update_parameters(&mut self, config: config::Filter) {
@@ -407,7 +406,7 @@ mod tests {
             0.5_f64.powf(1.0 / 16.0) as CamillaFloat,
             0.5_f64.powf(1.0 / 32.0) as CamillaFloat,
         ];
-        limiter.process_waveform(&mut input).unwrap();
+        limiter.process_waveform(&mut input);
         assert_close(&input, &expected, 1e-6);
     }
 
@@ -433,9 +432,7 @@ mod tests {
         let mut lookahead_input = vec![0.5, 1.0, 2.0, -2.0, -1.0, -0.5, 1.5, -1.5, 0.0];
         let mut clipper_input = lookahead_input.clone();
 
-        lookahead_limiter
-            .process_waveform(&mut lookahead_input)
-            .unwrap();
+        lookahead_limiter.process_waveform(&mut lookahead_input);
         clipper.apply_clip(&mut clipper_input);
 
         assert_eq!(lookahead_input, clipper_input);
@@ -483,7 +480,7 @@ mod tests {
             limiter_input.len(),
         );
 
-        limiter.process_waveform(&mut limiter_input).unwrap();
+        limiter.process_waveform(&mut limiter_input);
         compressor.process_chunk(&mut compressor_chunk).unwrap();
 
         // The values are not exactly equal because compressor works in the dB domain and has 1e-6 bias.
@@ -501,7 +498,7 @@ mod tests {
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
         let mut input = vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0];
-        limiter.process_waveform(&mut input).unwrap();
+        limiter.process_waveform(&mut input);
         for &val in &input {
             assert!(val.abs() <= 1.0);
         }
@@ -520,7 +517,7 @@ mod tests {
         let mut buf1 = vec![1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0];
         let expected1: Vec<CamillaFloat> =
             vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.9, 0.8, 0.7, 0.6, 1.0];
-        limiter.process_waveform(&mut buf1).unwrap();
+        limiter.process_waveform(&mut buf1);
         assert_close(&buf1, &expected1, 1e-6);
 
         let mut buf2 = vec![1.0, 1.0, 1.0, 1.0];
@@ -530,7 +527,7 @@ mod tests {
             0.5_f64.powf(1.0 / 8.0) as CamillaFloat,
             0.5_f64.powf(1.0 / 16.0) as CamillaFloat,
         ];
-        limiter.process_waveform(&mut buf2).unwrap();
+        limiter.process_waveform(&mut buf2);
         assert_close(&buf2, &expected2, 1e-6);
     }
 
@@ -560,7 +557,7 @@ mod tests {
         let mut limiter = LookaheadLimiter::from_config("test", config, samplerate, chunksize);
         let mut input = vec![1.0, 1.0, 2.0, 1.0, 1.0, -2.0, 1.0, 1.0];
 
-        limiter.process_waveform(&mut input).unwrap();
+        limiter.process_waveform(&mut input);
 
         assert_eq!(input.len(), chunksize);
     }

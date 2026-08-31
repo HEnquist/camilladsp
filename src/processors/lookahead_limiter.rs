@@ -146,7 +146,7 @@ impl Processor for LookaheadLimiter {
         // Unless disabled, delay the unprocessed channels too, to keep all channels time aligned.
         for (ch, delay) in self.delays.iter_mut().enumerate() {
             if !self.delay_processed_only || self.process_channels.contains(&ch) {
-                delay.process_waveform(&mut input.waveforms[ch])?;
+                delay.process_waveform(&mut input.waveforms[ch]);
             }
         }
         for ch in self.process_channels.iter() {
@@ -317,7 +317,7 @@ mod tests {
         let mut filter_waveform = waveform;
 
         processor.process_chunk(&mut processor_chunk).unwrap();
-        filter.process_waveform(&mut filter_waveform).unwrap();
+        filter.process_waveform(&mut filter_waveform);
 
         assert_close(&processor_chunk.waveforms[0], &filter_waveform, 1e-12);
     }

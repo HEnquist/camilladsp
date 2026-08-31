@@ -237,7 +237,7 @@ impl Filter for Volume {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         self.prepare_processing();
 
         // Not in a ramp
@@ -264,7 +264,6 @@ impl Filter for Volume {
         // Update shared current volume
         self.processing_params
             .set_current_volume(self.fader, self.current_volume.to_f32());
-        Ok(())
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
@@ -313,11 +312,10 @@ impl Filter for Gain {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         for item in waveform.iter_mut() {
             *item *= self.gain;
         }
-        Ok(())
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
@@ -438,7 +436,7 @@ impl Filter for Delay {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         if let Some(q) = &mut self.queue {
             for item in waveform.iter_mut() {
                 // this returns the item that was popped while pushing
@@ -446,9 +444,8 @@ impl Filter for Delay {
             }
         }
         if let Some(bq) = &mut self.biquad {
-            bq.process_waveform(waveform)?;
+            bq.process_waveform(waveform);
         }
-        Ok(())
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
@@ -524,7 +521,7 @@ mod tests {
         let mut waveform = vec![-0.5, 0.0, 0.5];
         let waveform_inv = vec![0.5, 0.0, -0.5];
         let mut gain = Gain::new("test", 0.0, true, false, false);
-        gain.process_waveform(&mut waveform).unwrap();
+        gain.process_waveform(&mut waveform);
         assert_eq!(waveform, waveform_inv);
     }
 
@@ -533,7 +530,7 @@ mod tests {
         let mut waveform = vec![-0.5, 0.0, 0.5];
         let waveform_ampl = vec![-5.0, 0.0, 5.0];
         let mut gain = Gain::new("test", 20.0, false, false, false);
-        gain.process_waveform(&mut waveform).unwrap();
+        gain.process_waveform(&mut waveform);
         assert_eq!(waveform, waveform_ampl);
     }
 
@@ -542,7 +539,7 @@ mod tests {
         let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let waveform_delayed = vec![0.0, 0.0, 0.0, 0.0, -0.5, 1.0, 0.0, 0.0];
         let mut delay = Delay::new("test", 44100, 3.0, false);
-        delay.process_waveform(&mut waveform).unwrap();
+        delay.process_waveform(&mut waveform);
         assert_eq!(waveform, waveform_delayed);
     }
 
@@ -551,7 +548,7 @@ mod tests {
         let mut waveform = vec![0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let waveform_delayed = waveform.clone();
         let mut delay = Delay::new("test", 44100, 0.1, false);
-        delay.process_waveform(&mut waveform).unwrap();
+        delay.process_waveform(&mut waveform);
         assert_eq!(waveform, waveform_delayed);
     }
 
@@ -561,8 +558,8 @@ mod tests {
         let mut waveform2 = vec![0.0; 8];
         let waveform_delayed = vec![0.0, 0.0, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0];
         let mut delay = Delay::new("test", 44100, 9.0, false);
-        delay.process_waveform(&mut waveform1).unwrap();
-        delay.process_waveform(&mut waveform2).unwrap();
+        delay.process_waveform(&mut waveform1);
+        delay.process_waveform(&mut waveform2);
         assert_eq!(waveform1, vec![0.0; 8]);
         assert_eq!(waveform2, waveform_delayed);
     }
@@ -583,7 +580,7 @@ mod tests {
             -0.001882310318672015,
         ];
         let mut delay = Delay::new("test", 44100, 1.7, true);
-        delay.process_waveform(&mut waveform).unwrap();
+        delay.process_waveform(&mut waveform);
         assert!(compare_waveforms(waveform, expected_waveform, 1.0e-6));
     }
 
@@ -632,27 +629,27 @@ mod tests {
 
         // No change yet, unity gain.
         let mut chunk = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut chunk).unwrap();
+        filter.process_waveform(&mut chunk);
         assert!(chunk.iter().all(|s| (s - 1.0).abs() < 1e-10));
 
         params.set_target_volume(0, -20.0);
 
         // First ramp chunk: stays inside the range and falls across the chunk.
         let mut chunk1 = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut chunk1).unwrap();
+        filter.process_waveform(&mut chunk1);
         assert!(chunk1.iter().all(|s| *s <= gain_at(0.0) + 1e-6));
         assert!(chunk1.iter().all(|s| *s >= gain_at(-20.0) - 1e-6));
         assert!(chunk1[0] > chunk1[VOL_CHUNKSIZE - 1]);
 
         // Second ramp chunk continues downwards.
         let mut chunk2 = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut chunk2).unwrap();
+        filter.process_waveform(&mut chunk2);
         assert!(chunk2[VOL_CHUNKSIZE - 1] < chunk1[VOL_CHUNKSIZE - 1]);
         assert!(chunk2[VOL_CHUNKSIZE - 1] >= gain_at(-20.0) - 1e-6);
 
         // Ramp is done, the target is applied flat.
         let mut chunk3 = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut chunk3).unwrap();
+        filter.process_waveform(&mut chunk3);
         assert!(chunk3.iter().all(|s| (s - gain_at(-20.0)).abs() < 1e-6));
     }
 
@@ -664,7 +661,7 @@ mod tests {
         let mut filter = make_volume(&params, 2.0);
 
         let mut chunk = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut chunk).unwrap();
+        filter.process_waveform(&mut chunk);
 
         // Audio stops, volume is changed while paused, then playback resumes.
         params.bump_pause_count();
@@ -672,7 +669,7 @@ mod tests {
         params.set_target_volume(0, -20.0);
 
         let mut resumed = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut resumed).unwrap();
+        filter.process_waveform(&mut resumed);
         assert!(resumed.iter().all(|s| (s - gain_at(-20.0)).abs() < 1e-6));
     }
 
@@ -685,17 +682,17 @@ mod tests {
         let mut filter = make_volume(&params, 2.0);
 
         let mut chunk = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut chunk).unwrap();
+        filter.process_waveform(&mut chunk);
 
         // A pause happens, but no volume change is made during it.
         params.bump_pause_count();
         let mut resumed = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut resumed).unwrap();
+        filter.process_waveform(&mut resumed);
 
         // Now change the volume while running, this must ramp.
         params.set_target_volume(0, -20.0);
         let mut chunk1 = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut chunk1).unwrap();
+        filter.process_waveform(&mut chunk1);
         assert!(chunk1[0] > chunk1[VOL_CHUNKSIZE - 1]);
         assert!(chunk1[VOL_CHUNKSIZE - 1] > gain_at(-20.0) + 1e-6);
     }
@@ -708,11 +705,11 @@ mod tests {
         let mut filter = make_volume(&params, 0.0);
 
         let mut chunk = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut chunk).unwrap();
+        filter.process_waveform(&mut chunk);
 
         params.set_target_volume(0, -20.0);
         let mut chunk1 = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut chunk1).unwrap();
+        filter.process_waveform(&mut chunk1);
         assert!(chunk1.iter().all(|s| (s - gain_at(-20.0)).abs() < 1e-6));
     }
 
@@ -724,13 +721,13 @@ mod tests {
         let mut filter = make_volume(&params, 2.0);
 
         let mut chunk = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut chunk).unwrap();
+        filter.process_waveform(&mut chunk);
 
         params.bump_pause_count();
         params.set_mute(0, true);
 
         let mut resumed = vec![1.0; VOL_CHUNKSIZE];
-        filter.process_waveform(&mut resumed).unwrap();
+        filter.process_waveform(&mut resumed);
         assert!(resumed.iter().all(|s| s.abs() < 1e-10));
     }
 
@@ -742,7 +739,7 @@ mod tests {
         let mut filter = make_volume_full(&params, 0.0, 50.0, -20.0, false, 4);
 
         let mut waveform: Vec<CamillaFloat> = vec![1.0, -1.0, 0.5, -0.5];
-        filter.process_waveform(&mut waveform).unwrap();
+        filter.process_waveform(&mut waveform);
 
         let gain = gain_at(-20.0);
         let expected: Vec<CamillaFloat> = vec![gain, -gain, 0.5 * gain, -0.5 * gain];
@@ -758,7 +755,7 @@ mod tests {
         let mut filter = make_volume_full(&params, 0.0, 50.0, 0.0, true, 4);
 
         let mut waveform: Vec<CamillaFloat> = vec![1.0, 0.5, -0.5, -1.0];
-        filter.process_waveform(&mut waveform).unwrap();
+        filter.process_waveform(&mut waveform);
         assert!(waveform.iter().all(|s| s.abs() < 1e-10));
     }
 
@@ -770,18 +767,18 @@ mod tests {
         let mut filter = make_volume_full(&params, 0.0, 50.0, 0.0, false, 4);
 
         let mut wave1: Vec<CamillaFloat> = vec![1.0; 4];
-        filter.process_waveform(&mut wave1).unwrap();
+        filter.process_waveform(&mut wave1);
 
         // Below the threshold, so the gain stays at unity.
         params.set_target_volume(0, 0.005);
         let mut wave2: Vec<CamillaFloat> = vec![1.0; 4];
-        filter.process_waveform(&mut wave2).unwrap();
+        filter.process_waveform(&mut wave2);
         assert!(wave2.iter().all(|s| (s - 1.0).abs() < 1e-10));
 
         // Above the threshold, so it is applied.
         params.set_target_volume(0, 0.02);
         let mut wave3: Vec<CamillaFloat> = vec![1.0; 4];
-        filter.process_waveform(&mut wave3).unwrap();
+        filter.process_waveform(&mut wave3);
         assert!(wave3.iter().all(|s| (s - gain_at(0.02)).abs() < 1e-6));
     }
 
@@ -794,7 +791,7 @@ mod tests {
 
         params.set_target_volume(0, 20.0);
         let mut waveform: Vec<CamillaFloat> = vec![1.0; 4];
-        filter.process_waveform(&mut waveform).unwrap();
+        filter.process_waveform(&mut waveform);
         assert!(waveform.iter().all(|s| (s - gain_at(10.0)).abs() < 1e-6));
     }
 
@@ -809,23 +806,23 @@ mod tests {
         let mut filter = make_volume_full(&params, 2.0, 50.0, 0.0, false, 4);
 
         let mut chunk0: Vec<CamillaFloat> = vec![1.0; 4];
-        filter.process_waveform(&mut chunk0).unwrap();
+        filter.process_waveform(&mut chunk0);
         assert!(chunk0.iter().all(|s| (s - 1.0).abs() < 1e-10));
 
         params.set_target_volume(0, -20.0);
 
         let mut chunk1: Vec<CamillaFloat> = vec![1.0; 4];
-        filter.process_waveform(&mut chunk1).unwrap();
+        filter.process_waveform(&mut chunk1);
         assert!(chunk1[0] > chunk1[3]);
         assert!(chunk1.iter().all(|s| *s <= gain_at(0.0) + 1e-6));
         assert!(chunk1.iter().all(|s| *s >= gain_at(-20.0) - 1e-6));
 
         let mut chunk2: Vec<CamillaFloat> = vec![1.0; 4];
-        filter.process_waveform(&mut chunk2).unwrap();
+        filter.process_waveform(&mut chunk2);
         assert!(chunk2[3] < chunk1[3]);
 
         let mut chunk3: Vec<CamillaFloat> = vec![1.0; 4];
-        filter.process_waveform(&mut chunk3).unwrap();
+        filter.process_waveform(&mut chunk3);
         assert!(chunk3.iter().all(|s| (s - gain_at(-20.0)).abs() < 1e-6));
     }
 }

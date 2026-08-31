@@ -439,7 +439,7 @@ impl Filter for FftConv {
     }
 
     /// Process a waveform by FT, then multiply transform with transform of filter, and then transform back.
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         // Copy to input buffer and clear overlap area
         self.input_buf[0..self.npoints].copy_from_slice(waveform);
         for item in self
@@ -491,7 +491,6 @@ impl Filter for FftConv {
         }
         self.overlap
             .copy_from_slice(&self.output_buf[self.npoints..]);
-        Ok(())
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
@@ -669,7 +668,7 @@ mod tests {
         let mut filter = FftConv::from_config("test", 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
         let expected = vec![0.5, 1.0, 1.0, 0.5, 0.0, -0.5, -0.5, 0.0];
-        filter.process_waveform(&mut wave1).unwrap();
+        filter.process_waveform(&mut wave1);
         assert!(compare_waveforms(wave1, expected, 1e-7));
     }
 
@@ -688,8 +687,8 @@ mod tests {
                     .collect();
                 let mut wave_first = input.clone();
                 let mut wave_second = input;
-                first.process_waveform(&mut wave_first).unwrap();
-                second.process_waveform(&mut wave_second).unwrap();
+                first.process_waveform(&mut wave_first);
+                second.process_waveform(&mut wave_second);
                 assert!(
                     compare_waveforms(wave_first, wave_second, 1e-9),
                     "length {data_length}, block {block}"
@@ -726,9 +725,9 @@ mod tests {
                 wave_ref[0] = 1.0;
             }
             let mut wave_right = vec![0.0 as CamillaFloat; 8];
-            left.process_waveform(&mut wave_left).unwrap();
-            right.process_waveform(&mut wave_right).unwrap();
-            reference.process_waveform(&mut wave_ref).unwrap();
+            left.process_waveform(&mut wave_left);
+            right.process_waveform(&mut wave_right);
+            reference.process_waveform(&mut wave_ref);
             assert!(
                 compare_waveforms(wave_left, wave_ref, 1e-5),
                 "shared build changed the result, block {block}"
@@ -765,7 +764,7 @@ mod tests {
 
         // A one sample delay now, so an impulse comes back shifted by one.
         let mut wave = vec![1.0 as CamillaFloat, 0.0, 0.0, 0.0];
-        left.process_waveform(&mut wave).unwrap();
+        left.process_waveform(&mut wave);
         assert!(compare_waveforms(wave, vec![0.0, 1.0, 0.0, 0.0], 1e-5));
     }
 
@@ -783,11 +782,11 @@ mod tests {
         let mut wave5 = vec![0.0 as CamillaFloat; 8];
 
         wave1[0] = 1.0;
-        filter.process_waveform(&mut wave1).unwrap();
-        filter.process_waveform(&mut wave2).unwrap();
-        filter.process_waveform(&mut wave3).unwrap();
-        filter.process_waveform(&mut wave4).unwrap();
-        filter.process_waveform(&mut wave5).unwrap();
+        filter.process_waveform(&mut wave1);
+        filter.process_waveform(&mut wave2);
+        filter.process_waveform(&mut wave3);
+        filter.process_waveform(&mut wave4);
+        filter.process_waveform(&mut wave5);
 
         let exp1 = Vec::from(&coeffs[0..8]);
         let exp2 = Vec::from(&coeffs[8..16]);

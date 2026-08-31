@@ -50,7 +50,11 @@ use waveadapter::read_wav_file;
 /// Trait implemented by all single-channel audio filters.
 pub trait Filter {
     /// Apply the filter to `waveform` in place.
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()>;
+    ///
+    /// Infallible. A filter that was accepted at construction cannot start
+    /// failing on a later chunk, and nothing could be done about it part way
+    /// through a chunk in the processing thread if it did.
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]);
 
     /// Hot-reload filter coefficients from a new configuration without rebuilding.
     fn update_parameters(&mut self, config: config::Filter);
@@ -152,7 +156,7 @@ impl biquad::BiquadCascade for ChainCascade<'_> {
 pub fn process_channels_interleaved(
     filters: &mut [&mut (dyn Filter + Send)],
     waveforms: &mut [&mut [CamillaFloat]],
-) -> Res<()> {
+) {
     debug_assert_eq!(filters.len(), waveforms.len());
     // Interleaving only pays off with at least two independent channels, and
     // only if every one of them is biquad-based.
@@ -160,9 +164,9 @@ pub fn process_channels_interleaved(
         filters.len() > 1 && filters.iter_mut().all(|f| f.biquad_cascade().is_some());
     if !interleavable {
         for (filter, waveform) in filters.iter_mut().zip(waveforms.iter_mut()) {
-            filter.process_waveform(waveform)?;
+            filter.process_waveform(waveform);
         }
-        return Ok(());
+        return;
     }
     for (group, wfs) in filters
         .chunks_mut(biquad::MAX_INTERLEAVE)
@@ -203,7 +207,6 @@ pub fn process_channels_interleaved(
             _ => unreachable!("chunks_mut yields at most MAX_INTERLEAVE"),
         }
     }
-    Ok(())
 }
 
 /// Zero-pad `values` to at least `length` elements (never truncates).

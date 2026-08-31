@@ -283,11 +283,10 @@ impl Filter for BiquadCombo {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         for filter in self.filters.iter_mut() {
-            filter.process_waveform(waveform)?;
+            filter.process_waveform(waveform);
         }
-        Ok(())
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {

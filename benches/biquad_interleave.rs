@@ -9,6 +9,11 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 const CHUNK: usize = 1024;
 
+/// `Biquad::new` wants a samplerate, not a chunk length. Nothing in the
+/// kernel reads it, since the coefficients are given directly, but passing a
+/// frame count here would be misleading.
+const SAMPLERATE: usize = 44100;
+
 /// Short chunks are where the canon's ramp-up and drain cost the most: the
 /// wavefront takes `n + depth - 1` iterations for `n` samples.
 const SHORT_CHUNK: usize = 64;
@@ -41,18 +46,20 @@ fn bench(c: &mut Criterion) {
         g.throughput(criterion::Throughput::Elements((n * CHUNK) as u64));
 
         // Reference: one channel at a time, the current production path.
-        let mut seq: Vec<Biquad> = (0..n).map(|_| Biquad::new("t", CHUNK, coeffs())).collect();
+        let mut seq: Vec<Biquad> = (0..n)
+            .map(|_| Biquad::new("t", SAMPLERATE, coeffs()))
+            .collect();
         let mut seq_w: Vec<Vec<CamillaFloat>> = (0..n).map(|_| signal()).collect();
         g.bench_with_input(BenchmarkId::new("sequential", n), &n, |b, _| {
             b.iter(|| {
                 for (bq, w) in seq.iter_mut().zip(seq_w.iter_mut()) {
-                    bq.process_waveform(w).unwrap();
+                    bq.process_waveform(w);
                 }
             })
         });
 
         let mut int: Vec<Vec<Biquad>> = (0..n)
-            .map(|_| vec![Biquad::new("t", CHUNK, coeffs())])
+            .map(|_| vec![Biquad::new("t", SAMPLERATE, coeffs())])
             .collect();
         let mut int_w: Vec<Vec<CamillaFloat>> = (0..n).map(|_| signal()).collect();
         g.bench_with_input(BenchmarkId::new("interleaved", n), &n, |b, _| {
@@ -82,20 +89,20 @@ fn bench_canon(c: &mut Criterion) {
 
             // Reference: the current production path for a single channel.
             let mut seq: Vec<Biquad> = (0..stages)
-                .map(|_| Biquad::new("t", chunk, coeffs()))
+                .map(|_| Biquad::new("t", SAMPLERATE, coeffs()))
                 .collect();
             let mut seq_w = signal_of_len(chunk);
             g.bench_with_input(BenchmarkId::new("sequential", stages), &stages, |b, _| {
                 b.iter(|| {
                     for bq in seq.iter_mut() {
-                        bq.process_waveform(&mut seq_w).unwrap();
+                        bq.process_waveform(&mut seq_w);
                     }
                 })
             });
 
             for depth in [1usize, 2, 4, 6, 8] {
                 let mut casc: Vec<Biquad> = (0..stages)
-                    .map(|_| Biquad::new("t", chunk, coeffs()))
+                    .map(|_| Biquad::new("t", SAMPLERATE, coeffs()))
                     .collect();
                 let mut w = signal_of_len(chunk);
                 g.bench_with_input(
@@ -122,7 +129,11 @@ fn bench_small_chunks(c: &mut Criterion) {
             g.throughput(criterion::Throughput::Elements((nch * 16 * chunk) as u64));
 
             let mut int: Vec<Vec<Biquad>> = (0..nch)
-                .map(|_| (0..16).map(|_| Biquad::new("t", chunk, coeffs())).collect())
+                .map(|_| {
+                    (0..16)
+                        .map(|_| Biquad::new("t", SAMPLERATE, coeffs()))
+                        .collect()
+                })
                 .collect();
             let mut int_w: Vec<Vec<CamillaFloat>> =
                 (0..nch).map(|_| signal_of_len(chunk)).collect();
@@ -141,7 +152,11 @@ fn bench_small_chunks(c: &mut Criterion) {
             );
 
             let mut can: Vec<Vec<Biquad>> = (0..nch)
-                .map(|_| (0..16).map(|_| Biquad::new("t", chunk, coeffs())).collect())
+                .map(|_| {
+                    (0..16)
+                        .map(|_| Biquad::new("t", SAMPLERATE, coeffs()))
+                        .collect()
+                })
                 .collect();
             let mut can_w: Vec<Vec<CamillaFloat>> =
                 (0..nch).map(|_| signal_of_len(chunk)).collect();
