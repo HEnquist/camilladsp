@@ -284,9 +284,12 @@ impl Filter for BiquadCombo {
     }
 
     fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
-        for filter in self.filters.iter_mut() {
-            filter.process_waveform(waveform);
-        }
+        // Only reached when the surrounding chain could not be batched, since
+        // a batched step walks this cascade through `biquad_cascade` instead.
+        // A combo is a cascade in its own right either way, and the deeper
+        // ones are the point: a five point PEQ is five stages and a graphic
+        // equalizer is one per band.
+        biquad::process_cascade_canon(&mut self.filters, waveform);
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
@@ -400,6 +403,46 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
 mod tests {
     use crate::config;
     use crate::filters::biquadcombo;
+
+    /// A combo runs its own cascade as a canon when the surrounding chain
+    /// could not be batched. That must match running the stages one at a time.
+    /// 31 bands is a real graphic equalizer size and forces several passes.
+    #[test]
+    fn combo_canon_matches_the_stages_run_one_at_a_time() {
+        use crate::CamillaFloat;
+        use crate::filters::Filter;
+
+        // Every band non-zero: a band at unity gain builds no biquad at all.
+        let gains: Vec<f32> = (0..31)
+            .map(|b| if b % 2 == 0 { 4.0 } else { -4.0 })
+            .collect();
+        let params = config::BiquadComboParameters::GraphicEqualizer(
+            serde_json::from_str(&format!(
+                r#"{{"freq_min": 20.0, "freq_max": 20000.0, "gains": {gains:?}}}"#
+            ))
+            .unwrap(),
+        );
+        let signal: Vec<CamillaFloat> = (0..500)
+            .map(|n| 0.4 * (n as CamillaFloat * 0.013).sin())
+            .collect();
+
+        let mut canon = biquadcombo::BiquadCombo::from_config("g", 44100, params.clone());
+        let mut canon_wave = signal.clone();
+        canon.process_waveform(&mut canon_wave);
+
+        let mut split = biquadcombo::BiquadCombo::from_config("g", 44100, params.clone());
+        let mut split_wave = signal.clone();
+        for bq in split.filters.iter_mut() {
+            bq.process_waveform(&mut split_wave);
+        }
+
+        assert_eq!(canon.filters.len(), 31, "one biquad per band");
+        assert_eq!(canon_wave, split_wave);
+        assert_ne!(
+            canon_wave, signal,
+            "the equalizer did not change the signal"
+        );
+    }
 
     fn is_close(left: f64, right: f64, maxdiff: f64) -> bool {
         println!("{left} - {right}");
