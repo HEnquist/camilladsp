@@ -1631,20 +1631,38 @@ mod tests {
     /// must leave the same state behind as the sequential path did.
     #[test]
     fn canon_matches_sequential_across_chunks() {
-        let stages = 7;
-        let chunk = 64;
-        let mut seq_casc = test_cascade(0, stages);
-        let mut can_casc = test_cascade(0, stages);
-        let full = test_signal(0, 8 * chunk);
+        // The stage counts straddle `CANON_DEPTH`, so the larger ones are split
+        // into several passes. A pass boundary and a chunk boundary are
+        // different seams and a carry-over bug can live in either, so the two
+        // have to be crossed together. The short chunk is smaller than a full
+        // pass, which keeps the whole run on the canon's short-waveform path.
+        for stages in [1, 7, 8, 9, 16, 19] {
+            for chunk in [4, 64] {
+                let mut seq_casc = test_cascade(0, stages);
+                let mut can_casc = test_cascade(0, stages);
+                let full = test_signal(0, 8 * chunk);
 
-        for part in full.chunks(chunk) {
-            let mut seq_wave = part.to_vec();
-            for bq in seq_casc.iter_mut() {
-                bq.process_waveform(&mut seq_wave).unwrap();
+                for (nbr, part) in full.chunks(chunk).enumerate() {
+                    let mut seq_wave = part.to_vec();
+                    for bq in seq_casc.iter_mut() {
+                        bq.process_waveform(&mut seq_wave).unwrap();
+                    }
+                    let mut can_wave = part.to_vec();
+                    process_cascade_canon(&mut can_casc, &mut can_wave);
+                    assert_eq!(
+                        seq_wave, can_wave,
+                        "output differs in chunk {nbr}, {stages} stages of {chunk} frames"
+                    );
+                }
+
+                for (st, (seq, can)) in seq_casc.iter().zip(can_casc.iter()).enumerate() {
+                    assert_eq!(
+                        (seq.s1, seq.s2),
+                        (can.s1, can.s2),
+                        "state of stage {st} differs, {stages} stages of {chunk} frames"
+                    );
+                }
             }
-            let mut can_wave = part.to_vec();
-            process_cascade_canon(&mut can_casc, &mut can_wave);
-            assert_eq!(seq_wave, can_wave, "chunked output differs");
         }
     }
 }
