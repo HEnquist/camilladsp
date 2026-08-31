@@ -1617,8 +1617,8 @@ mod tests {
     /// the ramp-up runs straight into the drain.
     #[test]
     fn canon_matches_sequential_short_waveforms() {
-        for len in 0..=8 {
-            for stages in 1..=6 {
+        for len in 0..=10 {
+            for stages in 1..=10 {
                 for depth in 1..=MAX_CANON_DEPTH {
                     check_canon_matches(stages, len, depth);
                 }
@@ -1628,6 +1628,20 @@ mod tests {
 
     /// Chunk boundaries are where a wrong carry-over would show up: the canon
     /// must leave the same state behind as the sequential path did.
+    /// Copilot flagged the drain as writing on an empty waveform. Prove it does not,
+    /// at every instantiated depth, for both an empty and a one-sample chunk.
+    #[test]
+    fn canon_handles_empty_and_tiny_waveforms() {
+        for stages in 1..=MAX_CANON_DEPTH * 2 {
+            for len in [0usize, 1] {
+                let mut casc = test_cascade(0, stages);
+                let mut wave = vec![0.0 as CamillaFloat; len];
+                process_cascade_canon(&mut casc, &mut wave);
+                assert_eq!(wave.len(), len);
+            }
+        }
+    }
+
     #[test]
     fn canon_matches_sequential_across_chunks() {
         // The stage counts straddle `CANON_DEPTH`, so the larger ones are split
