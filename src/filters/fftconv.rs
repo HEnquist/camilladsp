@@ -292,7 +292,13 @@ impl SegmentedSpectrum {
 /// keeping it any longer risks handing out coefficients from a stale config.
 #[derive(Default)]
 pub struct ConvCoeffCache {
-    entries: HashMap<String, Arc<ConvCoeffs>>,
+    /// Keyed by name and segment length together. The transformed spectra are
+    /// cut into segments sized for one particular FFT, so handing a set built
+    /// for one length to a filter running another would leave the multiply
+    /// kernel short of bins. Nothing in the pipeline mixes lengths in one
+    /// pass, but this is a public constructor and the invariant is not
+    /// otherwise visible from it.
+    entries: HashMap<(String, usize), Arc<ConvCoeffs>>,
 }
 
 impl ConvCoeffCache {
@@ -300,12 +306,13 @@ impl ConvCoeffCache {
         Self::default()
     }
 
-    fn get(&self, name: &str) -> Option<Arc<ConvCoeffs>> {
-        self.entries.get(name).cloned()
+    fn get(&self, name: &str, npoints: usize) -> Option<Arc<ConvCoeffs>> {
+        self.entries.get(&(name.to_string(), npoints)).cloned()
     }
 
-    fn insert(&mut self, name: &str, coeffs: &Arc<ConvCoeffs>) {
-        self.entries.insert(name.to_string(), coeffs.clone());
+    fn insert(&mut self, name: &str, npoints: usize, coeffs: &Arc<ConvCoeffs>) {
+        self.entries
+            .insert((name.to_string(), npoints), coeffs.clone());
     }
 }
 
@@ -423,12 +430,12 @@ impl FftConv {
         conf: config::ConvParameters,
         cache: &mut ConvCoeffCache,
     ) -> Self {
-        if let Some(coeffs_f) = cache.get(name) {
+        if let Some(coeffs_f) = cache.get(name, data_length) {
             debug!("Conv {name} reuses coefficients already built for another channel");
             return FftConv::with_coeffs(name, data_length, coeffs_f);
         }
         let filter = FftConv::from_config(name, data_length, conf);
-        cache.insert(name, &filter.coeffs_f);
+        cache.insert(name, data_length, &filter.coeffs_f);
         filter
     }
 }
@@ -505,7 +512,7 @@ impl Filter for FftConv {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
         };
-        let coeffs_f = match cache.get(&self.name) {
+        let coeffs_f = match cache.get(&self.name, self.npoints) {
             Some(coeffs_f) => coeffs_f,
             None => {
                 // First channel to reach this filter does the reading and the
@@ -513,7 +520,7 @@ impl Filter for FftConv {
                 let coeffs = coeffs_from_config(conf);
                 let coeffs_f =
                     transform_coeffs(&coeffs, self.npoints, &*self.fft, &mut self.scratch_fw);
-                cache.insert(&self.name, &coeffs_f);
+                cache.insert(&self.name, self.npoints, &coeffs_f);
                 coeffs_f
             }
         };
@@ -700,6 +707,27 @@ mod tests {
     /// Two channels built from the same filter must share one allocation of
     /// coefficients, and must still behave exactly like independent filters.
     /// The shared part is read-only; the overlap history is not.
+    /// The spectra are cut into segments sized for one FFT, so the same name
+    /// at two lengths must not share them.
+    #[test]
+    fn cache_does_not_share_across_lengths() {
+        let conf = config::ConvParameters::Values {
+            values: vec![0.1, 0.2, 0.3, 0.4],
+        };
+        let mut cache = ConvCoeffCache::new();
+        let mut short = FftConv::from_config_cached("conv", 8, conf.clone(), &mut cache);
+        let mut long = FftConv::from_config_cached("conv", 16, conf, &mut cache);
+        let mut short_wave = vec![0.0 as CamillaFloat; 8];
+        short_wave[0] = 1.0;
+        let mut long_wave = vec![0.0 as CamillaFloat; 16];
+        long_wave[0] = 1.0;
+        short.process_waveform(&mut short_wave);
+        long.process_waveform(&mut long_wave);
+        for (a, b) in short_wave.iter().zip(long_wave.iter()) {
+            assert!((a - b).abs() < 1e-12, "{a} != {b}");
+        }
+    }
+
     #[test]
     fn cached_build_shares_coeffs_but_not_state() {
         // A config always carries f64, whatever the processing precision is.
