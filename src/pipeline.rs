@@ -796,6 +796,31 @@ fn split_into_runs(mut filters: ChannelChains) -> Vec<(bool, ChannelChains)> {
         .collect()
 }
 
+/// Merge runs of adjacent per-channel filter steps into one chain per channel,
+/// so the biquads in them can be batched. Mixers and processors work on all
+/// channels at once and break a run.
+///
+/// This changes the order the filters run in. The configuration gives them
+/// step by step and channel by channel within each step; a merged run comes
+/// out channel by channel instead, so one channel finishes the whole run
+/// before the next one starts it. Nothing in a batched run can tell, biquads
+/// having no state beyond their own.
+///
+/// One pairing can tell, and is accepted rather than fixed. `Volume` writes
+/// its fader's current level while processing and `Loudness` reads that level
+/// to size its compensation. Put them on the same fader but different
+/// channels, with the `Volume` on the higher channel number, and the
+/// `Loudness` now reads the level one chunk late while the volume is moving.
+/// Both on the same channels is not affected: every `Volume` on a fader
+/// computes the same level, so which of them ran first was never observable.
+///
+/// The cost is one chunk of lag on a compensation curve that moves over
+/// hundreds of milliseconds, which is not audible. Preserving the order
+/// exactly costs real batching: merging only within a configuration step
+/// leaves a chain written as sixteen separate steps four wide instead of
+/// eight deep, and merging only all-biquad steps gives up the batching in
+/// every chain that has a gain in the middle of it. Before trading either of
+/// those away, check that there is a listener who can hear the difference.
 fn parallelize_filters(
     steps: &mut Vec<PipelineStep>,
     nbr_channels: usize,
