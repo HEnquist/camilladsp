@@ -32,8 +32,10 @@ pub struct Loudness {
     reference_level: f32,
     high_boost: f32,
     low_boost: f32,
-    high_biquad: biquad::Biquad,
-    low_biquad: biquad::Biquad,
+    /// The highshelf and the lowshelf, in processing order, held together so
+    /// the pair can run as a two stage canon rather than two passes over the
+    /// waveform.
+    shelves: [biquad::Biquad; 2],
     fader: usize,
     active: bool,
     gain: Option<Gain>,
@@ -92,8 +94,7 @@ impl Loudness {
             reference_level: conf.reference_level,
             high_boost: conf.high_boost(),
             low_boost: conf.low_boost(),
-            high_biquad,
-            low_biquad,
+            shelves: [high_biquad, low_biquad],
             processing_params,
             fader,
             active,
@@ -132,11 +133,11 @@ impl Filter for Loudness {
                 slope: 12.0,
                 gain: low_boost,
             });
-            self.high_biquad.update_parameters(config::Filter::Biquad {
+            self.shelves[0].update_parameters(config::Filter::Biquad {
                 parameters: highshelf_conf,
                 description: None,
             });
-            self.low_biquad.update_parameters(config::Filter::Biquad {
+            self.shelves[1].update_parameters(config::Filter::Biquad {
                 parameters: lowshelf_conf,
                 description: None,
             });
@@ -156,8 +157,7 @@ impl Filter for Loudness {
         }
         if self.active {
             trace!("Applying loudness biquads");
-            self.high_biquad.process_waveform(waveform);
-            self.low_biquad.process_waveform(waveform);
+            biquad::process_cascade_canon(&mut self.shelves, waveform);
             if let Some(gain) = &mut self.gain {
                 gain.process_waveform(waveform);
             }
@@ -186,11 +186,11 @@ impl Filter for Loudness {
                 slope: 12.0,
                 gain: low_boost,
             });
-            self.high_biquad.update_parameters(config::Filter::Biquad {
+            self.shelves[0].update_parameters(config::Filter::Biquad {
                 parameters: highshelf_conf,
                 description: None,
             });
-            self.low_biquad.update_parameters(config::Filter::Biquad {
+            self.shelves[1].update_parameters(config::Filter::Biquad {
                 parameters: lowshelf_conf,
                 description: None,
             });
@@ -240,4 +240,66 @@ pub fn validate_config(conf: &config::LoudnessParameters) -> Res<()> {
         return Err(config::ConfigError::new("Low boost cannot be larger than 20").into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Loudness;
+    use crate::CamillaFloat;
+    use crate::ProcessingParameters;
+    use crate::config;
+    use crate::filters::Filter;
+    use std::sync::Arc;
+
+    fn params() -> config::LoudnessParameters {
+        config::LoudnessParameters {
+            reference_level: -10.0,
+            high_boost: Some(8.0),
+            low_boost: Some(8.0),
+            fader: None,
+            attenuate_mid: None,
+        }
+    }
+
+    fn signal(len: usize) -> Vec<CamillaFloat> {
+        (0..len)
+            .map(|n| 0.4 * (n as CamillaFloat * 0.017).sin())
+            .collect()
+    }
+
+    fn active_loudness() -> Loudness {
+        let shared = Arc::new(ProcessingParameters::default());
+        shared.set_target_volume(0, -30.0);
+        shared.sync_volumes_to_target();
+        shared.set_current_volume(0, -30.0);
+        Loudness::from_config("l", params(), 44100, shared)
+    }
+
+    /// The two shelves run as one two stage canon. That must give exactly what
+    /// running them one after the other did.
+    #[test]
+    fn canon_matches_the_shelves_run_one_at_a_time() {
+        let len = 400;
+
+        let mut canon = active_loudness();
+        let mut canon_wave = signal(len);
+        canon.process_waveform(&mut canon_wave);
+
+        // An empty waveform still runs the coefficient update at the top of
+        // process_waveform, so this leaves the shelves in the same state the
+        // run above started from.
+        let mut split = active_loudness();
+        split.process_waveform(&mut []);
+        let mut split_wave = signal(len);
+        split.shelves[0].process_waveform(&mut split_wave);
+        split.shelves[1].process_waveform(&mut split_wave);
+
+        assert!(canon.active, "loudness inactive, the test proves nothing");
+        assert_eq!(canon_wave, split_wave);
+        assert_ne!(
+            canon_wave,
+            signal(len),
+            "loudness did not change the signal"
+        );
+    }
 }
