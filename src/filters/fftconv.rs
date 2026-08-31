@@ -650,6 +650,15 @@ mod tests {
     use num_complex::Complex;
     use std::sync::Arc;
 
+    /// A round trip through the FFT loses more of the mantissa in an f32
+    /// build than in an f64 one, so the tolerance follows the processing
+    /// precision. Slackening both to what f32 needs would stop the f64 build
+    /// noticing a real loss of accuracy.
+    #[cfg(not(camillafloat_f32))]
+    const ROUNDTRIP_TOL: CamillaFloat = 1e-9;
+    #[cfg(camillafloat_f32)]
+    const ROUNDTRIP_TOL: CamillaFloat = 1e-5;
+
     fn is_close(left: CamillaFloat, right: CamillaFloat, maxdiff: CamillaFloat) -> bool {
         println!("{left} - {right}");
         (left - right).abs() < maxdiff
@@ -704,11 +713,10 @@ mod tests {
         }
     }
 
-    /// Two channels built from the same filter must share one allocation of
-    /// coefficients, and must still behave exactly like independent filters.
-    /// The shared part is read-only; the overlap history is not.
     /// The spectra are cut into segments sized for one FFT, so the same name
-    /// at two lengths must not share them.
+    /// at two lengths must not share them. Before the length joined the key
+    /// the second filter got the first one's segment width and panicked in
+    /// the multiply kernel.
     #[test]
     fn cache_does_not_share_across_lengths() {
         let conf = config::ConvParameters::Values {
@@ -723,11 +731,28 @@ mod tests {
         long_wave[0] = 1.0;
         short.process_waveform(&mut short_wave);
         long.process_waveform(&mut long_wave);
-        for (a, b) in short_wave.iter().zip(long_wave.iter()) {
-            assert!((a - b).abs() < 1e-12, "{a} != {b}");
-        }
+        // An impulse in, so what comes out is the impulse response itself.
+        // Both lengths must give it, which they cannot if either took the
+        // other's coefficients.
+        let expected: Vec<CamillaFloat> = vec![0.1, 0.2, 0.3, 0.4]
+            .into_iter()
+            .map(|v: f64| v.to_camilla_float())
+            .collect();
+        assert!(compare_waveforms(
+            short_wave[..4].to_vec(),
+            expected.clone(),
+            ROUNDTRIP_TOL
+        ));
+        assert!(compare_waveforms(
+            long_wave[..4].to_vec(),
+            expected,
+            ROUNDTRIP_TOL
+        ));
     }
 
+    /// Two channels built from the same filter must share one allocation of
+    /// coefficients, and must still behave exactly like independent filters.
+    /// The shared part is read-only; the overlap history is not.
     #[test]
     fn cached_build_shares_coeffs_but_not_state() {
         // A config always carries f64, whatever the processing precision is.

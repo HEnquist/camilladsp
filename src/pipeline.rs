@@ -296,13 +296,8 @@ impl InterleavedFilters {
         }
 
         // Both axes fill the same FP pipeline, so take whichever supplies more
-        // independent chains. Cascade depth is counted in biquads rather than
-        // in filters, since one combo filter can hold a cascade of its own.
-        let stages = filters
-            .iter_mut()
-            .map(|chain| ChainCascade::new(chain).nbr_stages())
-            .min()
-            .unwrap_or(0);
+        // independent chains.
+        let stages = Self::stages(&mut filters);
         let cascade_width = stages.min(biquad::CANON_DEPTH);
         let channel_width = filters.len().min(MAX_INTERLEAVE);
         if cascade_width <= 1 && channel_width <= 1 {
@@ -321,6 +316,16 @@ impl InterleavedFilters {
             cascade_width,
             channel_width,
         })
+    }
+
+    /// Shallowest cascade among the channels, counted in biquads rather than
+    /// in filters since one combo filter can hold a cascade of its own.
+    fn stages(filters: &mut ChannelChains) -> usize {
+        filters
+            .iter_mut()
+            .map(|chain| ChainCascade::new(chain).nbr_stages())
+            .min()
+            .unwrap_or(0)
     }
 
     /// Which axis to use for a chunk of `frames` frames.
@@ -355,6 +360,12 @@ impl InterleavedFilters {
                 }
             }
         }
+        // A combo can come back from a reload with a different number of
+        // stages, a Linkwitz-Riley changing order or an equalizer changing
+        // how many of its bands are flat. The canon reads the length afresh
+        // every chunk, but the axis choice would otherwise keep deciding on
+        // the depth this step was built with.
+        self.cascade_width = Self::stages(&mut self.filters).min(biquad::CANON_DEPTH);
     }
 
     /// Apply all the filters to an AudioChunk.
@@ -1122,6 +1133,52 @@ pipeline:
     /// around the Gain; with a pool they run one channel at a time. Each
     /// channel sees the same operations in the same order either way, so the
     /// results must match exactly.
+    /// A combo that comes back from a reload with more stages must move the
+    /// axis with it, or the step keeps choosing on the depth it was built at.
+    #[test]
+    fn reload_moves_the_axis_when_a_combo_changes_depth() {
+        fn combo(order: usize) -> config::Filter {
+            config::Filter::BiquadCombo {
+                description: None,
+                parameters: config::BiquadComboParameters::LinkwitzRileyLowpass {
+                    freq: 2000.0,
+                    order,
+                },
+            }
+        }
+        let chains: super::ChannelChains = (0..2)
+            .map(|_| {
+                vec![
+                    Box::new(crate::filters::biquadcombo::BiquadCombo::from_config(
+                        "combo",
+                        44100,
+                        match combo(2) {
+                            config::Filter::BiquadCombo { parameters, .. } => parameters,
+                            _ => unreachable!(),
+                        },
+                    )) as Box<dyn Filter + Send>,
+                ]
+            })
+            .collect();
+
+        let mut step = super::InterleavedFilters::try_new(chains)
+            .ok()
+            .expect("two channels of biquad combo are batchable");
+        // Order 2 is one stage, so the two channels are the wider axis.
+        assert_eq!(step.axis(1024), super::Axis::Channels);
+
+        let mut configs = std::collections::HashMap::new();
+        configs.insert("combo".to_string(), combo(8));
+        step.update_parameters(
+            configs,
+            &["combo".to_string()],
+            &mut crate::filters::fftconv::ConvCoeffCache::new(),
+        );
+
+        // Order 8 is four stages, which now beats the two channels.
+        assert_eq!(step.axis(1024), super::Axis::Cascade);
+    }
+
     /// A lone biquad has nothing to batch along either axis, but it is still
     /// biquad work and a thread pool could only add dispatch to it.
     #[test]
