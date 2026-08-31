@@ -708,18 +708,35 @@ fn finish_filter_step(
     steps
 }
 
-/// Everything that is not a batched biquad run: on the pool when the
-/// configuration asked for multithreading, one step per channel otherwise.
+/// Everything a batched biquad step did not take.
+///
+/// Biquad work stays on the calling thread whether or not a pool exists, even
+/// when it could not be batched. A run can be all biquads and still not
+/// batchable, when the channels hold chains of different lengths or the step
+/// reaches only some of them, and those chains still run as a canon per
+/// channel. The pool would have to earn its dispatch back, and it cannot: the
+/// same pipeline measured 92 us on the calling thread against 138 us on the
+/// pool, so about 46 us of dispatch, against per-stage costs of 0.39 us
+/// batched and 2.53 us not. Even sixteen channels of sixteen biquads come out
+/// ahead on the calling thread.
+///
+/// A run holding anything that is not a biquad goes to the pool when the
+/// configuration asked for multithreading, which is what heavy FIR
+/// convolution wants.
 fn unbatched_steps(
-    chains: ChannelChains,
+    mut chains: ChannelChains,
     pool: Option<&Arc<rayon::ThreadPool>>,
 ) -> Vec<PipelineStep> {
+    let all_biquads = chains
+        .iter_mut()
+        .flat_map(|chain| chain.iter_mut())
+        .all(|f| f.biquad_cascade().is_some());
     match pool {
-        Some(pool) => vec![PipelineStep::ParallelFiltersStep(ParallelFilters {
+        Some(pool) if !all_biquads => vec![PipelineStep::ParallelFiltersStep(ParallelFilters {
             filters: chains,
             filter_pool: pool.clone(),
         })],
-        None => per_channel_steps(chains),
+        _ => per_channel_steps(chains),
     }
 }
 
@@ -1176,6 +1193,50 @@ pipeline:
     channels: [0, 1]
     names: [lr4, hp, peak]
 ";
+
+    /// The pool must still get the runs it exists for: anything holding a
+    /// filter that is not a biquad.
+    #[test]
+    fn non_biquad_runs_still_go_to_the_pool() {
+        let conf: config::Configuration = yaml_serde::from_str(SPLIT_CONFIG).unwrap();
+        let pool = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(2)
+                .build()
+                .unwrap(),
+        );
+        let params = Arc::new(ProcessingParameters::default());
+        let pipeline = Pipeline::from_config(conf, params, Some(pool));
+        assert!(
+            pipeline
+                .steps
+                .iter()
+                .any(|s| matches!(s, super::PipelineStep::ParallelFiltersStep(_))),
+            "the gain step should still run on the pool"
+        );
+    }
+
+    /// A run can be all biquads and still not batchable, when the channels
+    /// hold chains of different lengths. That is still biquad work.
+    #[test]
+    fn ragged_biquads_stay_off_the_pool() {
+        let conf: config::Configuration = yaml_serde::from_str(RAGGED_CONFIG).unwrap();
+        let pool = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(2)
+                .build()
+                .unwrap(),
+        );
+        let params = Arc::new(ProcessingParameters::default());
+        let pipeline = Pipeline::from_config(conf, params, Some(pool));
+        assert!(
+            !pipeline
+                .steps
+                .iter()
+                .any(|s| matches!(s, super::PipelineStep::ParallelFiltersStep(_))),
+            "ragged biquad chains were sent to the thread pool"
+        );
+    }
 
     /// The per-channel canon must give the same answer as the thread pool,
     /// which runs every filter through `Filter::process_waveform` one at a
