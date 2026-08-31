@@ -38,9 +38,30 @@ const LOAD_WARN_CONSECUTIVE_CHUNKS: usize = 10;
 pub struct FilterGroup {
     channel: usize,
     filters: Vec<Box<dyn Filter + Send>>,
+    /// Whether every filter here exposes a biquad cascade, so the chain can be
+    /// run as one canon instead of a filter at a time. Fixed for the life of
+    /// the group: a hot reload can change a filter's parameters but not its
+    /// type. The stage count is not cached with it, since a combo filter can
+    /// change cascade length when its parameters are reloaded.
+    all_biquads: bool,
 }
 
 impl FilterGroup {
+    fn new(channel: usize, mut filters: Vec<Box<dyn Filter + Send>>) -> Self {
+        let all_biquads = filters.iter_mut().all(|f| f.biquad_cascade().is_some());
+        if all_biquads {
+            debug!(
+                "Channel {channel} filter step is {} biquads, running it as a canon",
+                ChainCascade::new(&mut filters).nbr_stages()
+            );
+        }
+        FilterGroup {
+            channel,
+            filters,
+            all_biquads,
+        }
+    }
+
     /// Creates a group of filters to process a chunk.
     pub fn from_config(
         channel: usize,
@@ -118,7 +139,7 @@ impl FilterGroup {
             };
             filters.push(filter);
         }
-        FilterGroup { channel, filters }
+        FilterGroup::new(channel, filters)
     }
 
     /// Hot-reload parameters for any filters whose names appear in `changed`.
@@ -137,10 +158,24 @@ impl FilterGroup {
 
     /// Apply all the filters to an AudioChunk.
     fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
-        if !input.waveforms[self.channel].is_empty() {
-            for filter in &mut self.filters {
-                filter.process_waveform(&mut input.waveforms[self.channel])?;
+        let waveform = &mut input.waveforms[self.channel];
+        if waveform.is_empty() {
+            return Ok(());
+        }
+        // A single channel has no channel axis to batch along, but its cascade
+        // is an axis of its own. This is where the chains that no batched step
+        // would take end up: ragged runs past the shortest channel, and steps
+        // that reach only one channel. One stage is not worth it, the canon
+        // then being the plain loop with a load and store around it.
+        if self.all_biquads {
+            let mut cascade = ChainCascade::new(&mut self.filters);
+            if cascade.nbr_stages() >= 2 {
+                biquad::process_canon(&mut cascade, waveform, biquad::CANON_DEPTH);
+                return Ok(());
             }
+        }
+        for filter in &mut self.filters {
+            filter.process_waveform(waveform)?;
         }
         Ok(())
     }
@@ -256,6 +291,10 @@ impl InterleavedFilters {
             .flat_map(|chain| chain.iter_mut())
             .all(|f| f.biquad_cascade().is_some());
         if !uniform_depth || !all_biquads || filters.is_empty() {
+            debug!(
+                "Not a batched biquad step: {} channels, uniform depth {uniform_depth}, all biquads {all_biquads}",
+                filters.len()
+            );
             return Err(filters);
         }
 
@@ -270,8 +309,16 @@ impl InterleavedFilters {
         let cascade_width = stages.min(biquad::CANON_DEPTH);
         let channel_width = filters.len().min(MAX_INTERLEAVE);
         if cascade_width <= 1 && channel_width <= 1 {
+            debug!("Not a batched biquad step: one channel, {stages} biquad stage");
             return Err(filters);
         }
+        // Logged in full because the shape decides everything downstream, and
+        // a run that is shallow because a non-biquad splits it is the case a
+        // future reordering pass would target.
+        debug!(
+            "Batched biquad step: {} channels, {stages} biquads each,              cascade width {cascade_width}, channel width {channel_width}",
+            filters.len()
+        );
         Ok(InterleavedFilters {
             filters,
             cascade_width,
@@ -649,7 +696,6 @@ fn finish_filter_step(
         if batchable {
             match InterleavedFilters::try_new(chains) {
                 Ok(interleaved) => {
-                    debug!("Adding batched biquad step");
                     steps.push(PipelineStep::InterleavedFiltersStep(interleaved));
                     continue;
                 }
@@ -683,7 +729,7 @@ fn per_channel_steps(chains: ChannelChains) -> Vec<PipelineStep> {
         .into_iter()
         .enumerate()
         .filter(|(_, chain)| !chain.is_empty())
-        .map(|(channel, filters)| PipelineStep::FilterStep(FilterGroup { channel, filters }))
+        .map(|(channel, filters)| PipelineStep::FilterStep(FilterGroup::new(channel, filters)))
         .collect()
 }
 
@@ -1037,6 +1083,89 @@ pipeline:
     /// around the Gain; with a pool they run one channel at a time. Each
     /// channel sees the same operations in the same order either way, so the
     /// results must match exactly.
+    /// Channels with chains of different lengths. Everything past the shortest
+    /// channel falls out of the batched step and lands in a per-channel one,
+    /// which is where the canon has to pick it up.
+    const RAGGED_CONFIG: &str = "
+devices:
+  samplerate: 44100
+  chunksize: 256
+  capture:
+    type: SignalGenerator
+    channels: 4
+    signal:
+      type: Sine
+      freq: 1000
+      level: 0.0
+  playback:
+    type: Stdout
+    channels: 4
+    format: S16_LE
+filters:
+  hp:
+    type: Biquad
+    parameters:
+      type: Highpass
+      freq: 120
+      q: 0.7
+  peak:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 1000
+      q: 1.5
+      gain: 4.0
+  lr4:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 2000
+      order: 4
+pipeline:
+  - type: Filter
+    channels: [0, 1, 2, 3]
+    names: [hp, peak]
+  - type: Filter
+    channels: [0, 1]
+    names: [lr4, hp, peak]
+";
+
+    /// The per-channel canon must give the same answer as the thread pool,
+    /// which runs every filter through `Filter::process_waveform` one at a
+    /// time and is therefore the sequential reference.
+    #[test]
+    fn ragged_pipeline_matches_parallel_pipeline() {
+        let conf: config::Configuration = yaml_serde::from_str(RAGGED_CONFIG).unwrap();
+        let canon = process_once(conf, None);
+
+        let conf: config::Configuration = yaml_serde::from_str(RAGGED_CONFIG).unwrap();
+        let pool = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(2)
+                .build()
+                .unwrap(),
+        );
+        let parallel = process_once(conf, Some(pool));
+
+        for (ch, (a, b)) in canon.iter().zip(parallel.iter()).enumerate() {
+            assert_eq!(a, b, "channel {ch} differs between the two pipeline paths");
+        }
+        // The long and short channels must not have come out the same, or the
+        // ragged part of the config is not being exercised.
+        assert_ne!(
+            canon[0], canon[2],
+            "ragged chains produced identical output"
+        );
+        let peak = canon
+            .iter()
+            .flat_map(|w| w.iter())
+            .fold(0.0 as CamillaFloat, |m, v| m.max(v.abs()));
+        assert!(
+            peak > 1e-6,
+            "pipeline produced silence, test proves nothing"
+        );
+    }
+
     #[test]
     fn interleaved_pipeline_matches_parallel_pipeline() {
         let conf: config::Configuration = yaml_serde::from_str(SPLIT_CONFIG).unwrap();
