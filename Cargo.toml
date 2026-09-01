@@ -104,6 +104,10 @@ name = "filters"
 harness = false
 
 [[bench]]
+name = "conv_parallel"
+harness = false
+
+[[bench]]
 name = "conversions"
 harness = false
 

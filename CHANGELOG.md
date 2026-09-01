@@ -11,10 +11,24 @@ New features:
 Bugfixes:
 - ASIO: size the ring buffer and prefill from the driver's actual buffer size instead of just
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
+- A convolution filter with an empty inline `values` list is now rejected by the config
+  validation, instead of being accepted and then panicking on the first chunk.
 
 Changes:
 - Biquads now use fused multiply-add on hardware that has it, about 18% faster on aarch64. The
   fused form rounds once instead of twice, so results can differ from 4.1.3 in the last few bits.
+- Faster convolution setup and processing, and lower memory use. Three changes: convolution
+  filters share one FFT planner instead of each building and discarding its own, channels that use
+  the same filter share one copy of its transformed coefficients instead of each keeping a copy,
+  and the segmented spectra are held in one contiguous allocation rather than one block per
+  segment. Reloading eight 16384 tap filters at a chunksize of 16384 went from about 3.0 ms to
+  about 0.9 ms, and a four channel pipeline with a one million tap filter went from 5.1 ms to
+  3.8 ms per chunk with `multithreaded` enabled, using a quarter of the coefficient memory. The
+  setup saving grows with `chunksize` and applies even when every channel uses a different impulse
+  response. The coefficient sharing requires the channels to refer to the same named filter, and
+  helps most with `multithreaded` enabled, where the copies would otherwise compete for memory
+  bandwidth at the same moment. Without it the gain is smaller, and limited to filters large
+  enough to crowd the cache but small enough that a single copy still fits.
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
 - The `websocket` build feature is gone. The websocket server is now always built in, since every
