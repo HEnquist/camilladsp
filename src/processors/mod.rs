@@ -14,7 +14,6 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 
@@ -30,7 +29,13 @@ pub mod race;
 /// Trait implemented by all multi-channel audio processors.
 pub trait Processor {
     /// Apply the processor to all channels of `chunk` in place.
-    fn process_chunk(&mut self, chunk: &mut AudioChunk) -> Res<()>;
+    ///
+    /// Infallible, as [`Filter::process_waveform`](crate::filters::Filter::process_waveform)
+    /// is and for the same reason. A processor that was accepted at
+    /// construction cannot start failing on a later chunk, and nothing could
+    /// be done about it part way through a chunk in the processing thread if
+    /// it did.
+    fn process_chunk(&mut self, chunk: &mut AudioChunk);
 
     /// Hot-reload processor parameters from a new configuration without rebuilding.
     fn update_parameters(&mut self, config: config::Processor);

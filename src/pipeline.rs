@@ -400,7 +400,7 @@ impl Pipeline {
                     flt.process_chunk(&mut chunk);
                 }
                 PipelineStep::ProcessorStep(comp) => {
-                    comp.process_chunk(&mut chunk).unwrap();
+                    comp.process_chunk(&mut chunk);
                 }
             }
         }

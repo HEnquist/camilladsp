@@ -481,7 +481,7 @@ mod tests {
         );
 
         limiter.process_waveform(&mut limiter_input);
-        compressor.process_chunk(&mut compressor_chunk).unwrap();
+        compressor.process_chunk(&mut compressor_chunk);
 
         // The values are not exactly equal because compressor works in the dB domain and has 1e-6 bias.
         assert_close(&limiter_input, &compressor_chunk.waveforms[0], 1e-6);

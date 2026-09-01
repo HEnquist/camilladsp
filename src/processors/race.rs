@@ -117,12 +117,12 @@ impl Processor for RACE {
     }
 
     /// Apply a RACE processor to an AudioChunk, modifying it in-place.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
         let (first, second) = input.waveforms.split_at_mut(self.channel_b);
         let channel_a = &mut first[self.channel_a];
         let channel_b = &mut second[0];
         if channel_a.is_empty() || channel_b.is_empty() {
-            return Ok(());
+            return;
         }
         for (value_a, value_b) in channel_a.iter_mut().zip(channel_b.iter_mut()) {
             // todo math
@@ -135,7 +135,6 @@ impl Processor for RACE {
             *value_a = added_a;
             *value_b = added_b;
         }
-        Ok(())
     }
 
     fn update_parameters(&mut self, config: config::Processor) {
