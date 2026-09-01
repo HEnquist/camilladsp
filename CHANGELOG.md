@@ -13,6 +13,8 @@ Bugfixes:
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
 
 Changes:
+- Biquads now use fused multiply-add on hardware that has it, about 18% faster on aarch64. The
+  fused form rounds once instead of twice, so results can differ from 4.1.3 in the last few bits.
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
 - The `websocket` build feature is gone. The websocket server is now always built in, since every
