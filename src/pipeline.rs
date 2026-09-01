@@ -1100,6 +1100,21 @@ pipeline:
     names: [hp, peak, att, lr4, hp]
 ";
 
+    /// Distinct signal per channel, so a mix-up between channels shows up.
+    fn test_waveforms(channels: usize, chunksize: usize) -> Vec<Vec<CamillaFloat>> {
+        (0..channels)
+            .map(|ch| {
+                (0..chunksize)
+                    .map(|n| {
+                        let t = n as CamillaFloat / 44100.0;
+                        let f = 200.0 * (1.0 + ch as CamillaFloat);
+                        0.5 * (2.0 * std::f64::consts::PI as CamillaFloat * f * t).sin()
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     fn process_once(
         conf: config::Configuration,
         pool: Option<Arc<rayon::ThreadPool>>,
@@ -1111,19 +1126,13 @@ pipeline:
         params.sync_volumes_to_target();
         let mut pipeline = Pipeline::from_config(conf, params, pool);
 
-        // Distinct signal per channel, so a mix-up between channels shows up.
-        let waveforms = (0..channels)
-            .map(|ch| {
-                (0..chunksize)
-                    .map(|n| {
-                        let t = n as CamillaFloat / 44100.0;
-                        let f = 200.0 * (1.0 + ch as CamillaFloat);
-                        0.5 * (2.0 * std::f64::consts::PI as CamillaFloat * f * t).sin()
-                    })
-                    .collect()
-            })
-            .collect();
-        let chunk = AudioChunk::new(waveforms, 1.0, -1.0, chunksize, chunksize);
+        let chunk = AudioChunk::new(
+            test_waveforms(channels, chunksize),
+            1.0,
+            -1.0,
+            chunksize,
+            chunksize,
+        );
         pipeline.process_chunk(chunk).waveforms
     }
 
@@ -1320,33 +1329,58 @@ pipeline:
         );
     }
 
-    /// The per-channel canon must give the same answer as the thread pool,
-    /// which runs every filter through `Filter::process_waveform` one at a
-    /// time and is therefore the sequential reference.
+    /// The canon has to match the filters run one at a time, and after the
+    /// change that keeps every biquad run off the pool there is no path
+    /// through `Pipeline` that does that any more. So the reference is built
+    /// here by hand: each channel's filters, in configuration order, each one
+    /// through `process_waveform`.
+    ///
+    /// That groups the stages differently from the pipeline, which
+    /// concatenates the whole chain and runs one canon across the filter
+    /// boundaries, so it is a real check of that traversal rather than of
+    /// itself.
     #[test]
-    fn ragged_pipeline_matches_parallel_pipeline() {
+    fn ragged_pipeline_matches_filters_run_one_at_a_time() {
         let conf: config::Configuration = yaml_serde::from_str(RAGGED_CONFIG).unwrap();
-        let canon = process_once(conf, None);
+        let chunksize = conf.devices.chunksize;
+        let filter_configs = conf.filters.clone().unwrap();
+        let batched = process_once(conf, None);
 
-        let conf: config::Configuration = yaml_serde::from_str(RAGGED_CONFIG).unwrap();
-        let pool = Arc::new(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(2)
-                .build()
-                .unwrap(),
-        );
-        let parallel = process_once(conf, Some(pool));
-
-        for (ch, (a, b)) in canon.iter().zip(parallel.iter()).enumerate() {
-            assert_eq!(a, b, "channel {ch} differs between the two pipeline paths");
+        // Channels 0 and 1 take both steps of the configuration, 2 and 3 only
+        // the first, which is what makes the run ragged.
+        let per_channel: [&[&str]; 4] = [
+            &["hp", "peak", "lr4", "hp", "peak"],
+            &["hp", "peak", "lr4", "hp", "peak"],
+            &["hp", "peak"],
+            &["hp", "peak"],
+        ];
+        let params = Arc::new(ProcessingParameters::default());
+        let mut cache = crate::filters::fftconv::ConvCoeffCache::new();
+        let mut reference = test_waveforms(4, chunksize);
+        for (channel, names) in per_channel.iter().enumerate() {
+            let names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+            let mut group = super::FilterGroup::from_config(
+                channel,
+                &names,
+                filter_configs.clone(),
+                chunksize,
+                44100,
+                params.clone(),
+                &mut cache,
+            );
+            for filter in group.filters.iter_mut() {
+                filter.process_waveform(&mut reference[channel]);
+            }
         }
-        // The long and short channels must not have come out the same, or the
-        // ragged part of the config is not being exercised.
-        assert_ne!(
-            canon[0], canon[2],
-            "ragged chains produced identical output"
-        );
-        let peak = canon
+
+        for channel in 0..4 {
+            assert_eq!(
+                batched[channel], reference[channel],
+                "channel {channel} differs from the filters run one at a time"
+            );
+        }
+        assert_ne!(batched[0], batched[2], "the run is no longer ragged");
+        let peak = batched
             .iter()
             .flat_map(|w| w.iter())
             .fold(0.0 as CamillaFloat, |m, v| m.max(v.abs()));
