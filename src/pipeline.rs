@@ -424,8 +424,26 @@ impl Pipeline {
     }
 }
 
-// Loop through the pipeline to merge individual filter steps,
-// in order use rayon to apply them in parallel.
+/// Merge adjacent per-channel filter steps into one chain per channel, so the
+/// channels can be run in parallel on the thread pool. Mixers and processors
+/// work on all channels at once and break a run.
+///
+/// This changes the order the filters run in. The configuration gives them
+/// step by step, and channel by channel within each step. A merged run instead
+/// has each channel running its whole chain, and the channels run at the same
+/// time as each other.
+///
+/// One pairing can tell, and is accepted rather than fixed. `Volume` writes its
+/// fader's current level while processing, and `Loudness` reads that level to
+/// size its compensation. Put them on the same fader but on different channels
+/// and the `Loudness` can read the level one chunk late while the volume is
+/// moving. Both on the same channel is not affected, the chain there keeping
+/// the order the configuration gave.
+///
+/// The cost is one chunk of lag on a compensation curve that moves over
+/// hundreds of milliseconds, which is not audible. Before giving up the
+/// parallelism to preserve the order exactly, check that there is a listener
+/// who can hear the difference.
 fn parallelize_filters(
     steps: &mut Vec<PipelineStep>,
     nbr_channels: usize,

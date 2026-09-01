@@ -226,7 +226,12 @@ impl Volume {
             self.current_volume = 20.0 * ramp.last().unwrap().to_f32().log10();
         }
 
-        // Update shared current volume
+        // Update shared current volume. `Loudness` reads this to size its
+        // compensation, which makes the two filters order-sensitive across
+        // channels. See `parallelize_filters` in pipeline.rs, which changes
+        // that order and says why the one chunk of lag is accepted. Anything
+        // else that comes to read or write shared state here inherits the
+        // same question.
         self.processing_params
             .set_current_volume(self.fader, self.current_volume.to_f32());
     }
@@ -261,7 +266,12 @@ impl Filter for Volume {
             self.current_volume = 20.0 * ramp.last().unwrap().to_f32().log10();
         }
 
-        // Update shared current volume
+        // Update shared current volume. `Loudness` reads this to size its
+        // compensation, which makes the two filters order-sensitive across
+        // channels. See `parallelize_filters` in pipeline.rs, which changes
+        // that order and says why the one chunk of lag is accepted. Anything
+        // else that comes to read or write shared state here inherits the
+        // same question.
         self.processing_params
             .set_current_volume(self.fader, self.current_volume.to_f32());
         Ok(())

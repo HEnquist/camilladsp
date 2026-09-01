@@ -108,6 +108,10 @@ impl Filter for Loudness {
     }
 
     fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+        // Written by `Volume` while it processes, so the two are
+        // order-sensitive across channels. See `parallelize_filters` in
+        // pipeline.rs, which changes that order and says why the one chunk of
+        // lag that can result is accepted.
         let shared_vol = self.processing_params.current_volume(self.fader);
 
         // Volume setting changed
