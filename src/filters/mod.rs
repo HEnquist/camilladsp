@@ -50,7 +50,11 @@ use waveadapter::read_wav_file;
 /// Trait implemented by all single-channel audio filters.
 pub trait Filter {
     /// Apply the filter to `waveform` in place.
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()>;
+    ///
+    /// Infallible. A filter that was accepted at construction cannot start
+    /// failing on a later chunk, and nothing could be done about it part way
+    /// through a chunk in the processing thread if it did.
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]);
 
     /// Hot-reload filter coefficients from a new configuration without rebuilding.
     fn update_parameters(&mut self, config: config::Filter);

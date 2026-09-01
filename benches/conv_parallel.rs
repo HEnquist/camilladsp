@@ -136,13 +136,13 @@ fn bench_conv_parallel(c: &mut Criterion) {
                                     pool.install(|| {
                                         filters.par_iter_mut().zip(waves.par_iter_mut()).for_each(
                                             |(filter, wave)| {
-                                                filter.process_waveform(wave).unwrap();
+                                                filter.process_waveform(wave);
                                             },
                                         );
                                     });
                                 } else {
                                     for (filter, wave) in filters.iter_mut().zip(waves.iter_mut()) {
-                                        filter.process_waveform(wave).unwrap();
+                                        filter.process_waveform(wave);
                                     }
                                 }
                                 black_box(&waves[0][0]);

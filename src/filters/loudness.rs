@@ -107,7 +107,7 @@ impl Filter for Loudness {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         // Written by `Volume` while it processes, so the two are
         // order-sensitive across channels. See `parallelize_filters` in
         // pipeline.rs, which changes that order and says why the one chunk of
@@ -160,13 +160,12 @@ impl Filter for Loudness {
         }
         if self.active {
             trace!("Applying loudness biquads");
-            self.high_biquad.process_waveform(waveform).unwrap();
-            self.low_biquad.process_waveform(waveform).unwrap();
+            self.high_biquad.process_waveform(waveform);
+            self.low_biquad.process_waveform(waveform);
             if let Some(gain) = &mut self.gain {
-                gain.process_waveform(waveform).unwrap();
+                gain.process_waveform(waveform);
             }
         }
-        Ok(())
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
