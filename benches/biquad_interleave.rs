@@ -62,11 +62,13 @@ fn bench(c: &mut Criterion) {
             .map(|_| vec![Biquad::new("t", SAMPLERATE, coeffs())])
             .collect();
         let mut int_w: Vec<Vec<CamillaFloat>> = (0..n).map(|_| signal()).collect();
+        // Built once, outside the timed loop. Production destructures instead
+        // of collecting, precisely so the audio path allocates nothing, so
+        // collecting per iteration would time something it never does.
+        let mut cr: Vec<&mut [Biquad]> = int.iter_mut().map(|c| c.as_mut_slice()).collect();
+        let mut wr: Vec<&mut [CamillaFloat]> = int_w.iter_mut().map(|w| w.as_mut_slice()).collect();
         g.bench_with_input(BenchmarkId::new("interleaved", n), &n, |b, _| {
             b.iter(|| {
-                let mut cr: Vec<&mut [Biquad]> = int.iter_mut().map(|c| c.as_mut_slice()).collect();
-                let mut wr: Vec<&mut [CamillaFloat]> =
-                    int_w.iter_mut().map(|w| w.as_mut_slice()).collect();
                 process_cascades_interleaved(&mut cr, &mut wr);
             })
         });
@@ -137,15 +139,16 @@ fn bench_small_chunks(c: &mut Criterion) {
                 .collect();
             let mut int_w: Vec<Vec<CamillaFloat>> =
                 (0..nch).map(|_| signal_of_len(chunk)).collect();
+            // Outside the timed loop: the crossover this table decides is a
+            // few percent wide, and two allocations per iteration are not.
+            let mut cr: Vec<&mut [Biquad]> = int.iter_mut().map(|c| c.as_mut_slice()).collect();
+            let mut wr: Vec<&mut [CamillaFloat]> =
+                int_w.iter_mut().map(|w| w.as_mut_slice()).collect();
             g.bench_with_input(
                 BenchmarkId::new(format!("ch{nch}_channels"), chunk),
                 &chunk,
                 |b, _| {
                     b.iter(|| {
-                        let mut cr: Vec<&mut [Biquad]> =
-                            int.iter_mut().map(|c| c.as_mut_slice()).collect();
-                        let mut wr: Vec<&mut [CamillaFloat]> =
-                            int_w.iter_mut().map(|w| w.as_mut_slice()).collect();
                         process_cascades_interleaved(&mut cr, &mut wr);
                     })
                 },
