@@ -116,6 +116,10 @@ name = "pipeline"
 harness = false
 
 [[bench]]
+name = "biquad_canon"
+harness = false
+
+[[bench]]
 name = "fftconv_kernels"
 harness = false
 required-features = ["bench"]
