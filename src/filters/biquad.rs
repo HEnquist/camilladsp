@@ -501,12 +501,11 @@ impl Filter for Biquad {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         for item in waveform.iter_mut() {
             *item = self.process_single(*item);
         }
         self.flush_subnormals();
-        Ok(())
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
@@ -688,7 +687,7 @@ mod tests {
         let mut wave = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let expected = vec![0.215, 0.461, 0.281, 0.039, 0.004, 0.0, 0.0, 0.0];
         let mut filter = Biquad::new("test", 44100, coeffs);
-        filter.process_waveform(&mut wave).unwrap();
+        filter.process_waveform(&mut wave);
         assert!(compare_waveforms(wave, expected, 1e-3));
     }
 

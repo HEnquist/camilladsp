@@ -15,7 +15,6 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::ProcessingParameters;
-use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters;
@@ -133,13 +132,14 @@ impl FilterGroup {
     }
 
     /// Apply all the filters to an AudioChunk.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
-        if !input.waveforms[self.channel].is_empty() {
-            for filter in &mut self.filters {
-                filter.process_waveform(&mut input.waveforms[self.channel])?;
-            }
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
+        let waveform = &mut input.waveforms[self.channel];
+        if waveform.is_empty() {
+            return;
         }
-        Ok(())
+        for filter in &mut self.filters {
+            filter.process_waveform(waveform);
+        }
     }
 }
 
@@ -167,7 +167,7 @@ impl ParallelFilters {
     }
 
     /// Apply all the filters to an AudioChunk.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
         self.filter_pool.install(|| {
             self.filters
                 .par_iter_mut()
@@ -175,11 +175,10 @@ impl ParallelFilters {
                 .filter(|(f, w)| !f.is_empty() && !w.is_empty())
                 .for_each(|(f, w)| {
                     for filt in f {
-                        let _ = filt.process_waveform(w);
+                        filt.process_waveform(w);
                     }
                 });
         });
-        Ok(())
     }
 }
 
@@ -395,10 +394,10 @@ impl Pipeline {
                     chunk = mix.process_chunk(chunk);
                 }
                 PipelineStep::FilterStep(flt) => {
-                    flt.process_chunk(&mut chunk).unwrap();
+                    flt.process_chunk(&mut chunk);
                 }
                 PipelineStep::ParallelFiltersStep(flt) => {
-                    flt.process_chunk(&mut chunk).unwrap();
+                    flt.process_chunk(&mut chunk);
                 }
                 PipelineStep::ProcessorStep(comp) => {
                     comp.process_chunk(&mut chunk).unwrap();
