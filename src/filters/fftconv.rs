@@ -350,7 +350,12 @@ fn transform_coeffs(
     fft: &dyn RealToComplex<CamillaFloat>,
     scratch: &mut [Complex<CamillaFloat>],
 ) -> Arc<ConvCoeffs> {
-    let nsegments = coeffs.len().div_ceil(data_length);
+    // Never zero. Processing indexes the segment ring with `% nsegments`, so a
+    // filter built with no coefficients has to come out as one silent segment
+    // rather than a division by zero. A configuration cannot reach this,
+    // `validate_config` rejecting empty coefficients, but the constructors are
+    // public.
+    let nsegments = coeffs.len().div_ceil(data_length).max(1);
     let mut coeffs_padded = vec![vec![0.0; 2 * data_length]; nsegments];
     let mut coeffs_f = SegmentedSpectrum::zeroed(nsegments, data_length + 1);
     for (n, coeff) in coeffs.iter().enumerate() {
@@ -617,7 +622,14 @@ pub unsafe fn bench_multiply_add_elements_neon(
 /// Validate a FFT convolution config.
 pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
     match conf {
-        config::ConvParameters::Values { .. } | config::ConvParameters::Dummy { .. } => Ok(()),
+        config::ConvParameters::Values { values } => {
+            if values.is_empty() {
+                return Err(config::ConfigError::new("Conv coefficients are empty").into());
+            }
+            Ok(())
+        }
+        // `length` carries the nonzero validator, so a dummy always has a tap.
+        config::ConvParameters::Dummy { .. } => Ok(()),
         config::ConvParameters::Raw(params) => {
             let coeffs = filters::read_coeff_file(
                 &params.filename,
@@ -712,6 +724,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Empty inline coefficients used to pass validation and then panic on the
+    /// first chunk, dividing by a segment count of zero. Validation rejects
+    /// them now, and a filter built through the public constructor comes out
+    /// silent rather than fatal.
+    #[test]
+    fn empty_inline_coefficients_are_rejected_and_harmless() {
+        let conf = ConvParameters::Values { values: vec![] };
+        assert!(
+            super::validate_config(&conf).is_err(),
+            "empty coefficients should not validate"
+        );
+
+        // Built directly, bypassing validation, it must be silent not fatal.
+        let mut filter = FftConv::from_config("empty", 8, conf);
+        let mut wave: Vec<CamillaFloat> = (0..8).map(|n| n as CamillaFloat).collect();
+        filter.process_waveform(&mut wave).unwrap();
+        assert!(
+            wave.iter().all(|v| *v == 0.0),
+            "expected silence, got {wave:?}"
+        );
     }
 
     /// The spectra are cut into segments sized for one FFT, so the same name
