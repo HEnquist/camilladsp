@@ -7,6 +7,8 @@ New features:
 - RF64 support for reading and writing wav files larger than 4 GB (`use_rf64` for File playback).
 - New `LookaheadLimiter`, as a single-channel filter and as a multichannel processor with
   configurable monitor and process channels.
+- The corner frequency and Q of the two `Loudness` shelves can be set with the new `high_freq`,
+  `low_freq`, `high_q` and `low_q` parameters. They were previously fixed.
 
 Bugfixes:
 - ASIO: size the ring buffer and prefill from the driver's actual buffer size instead of just

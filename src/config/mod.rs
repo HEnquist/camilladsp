@@ -1191,6 +1191,14 @@ pub struct LoudnessParameters {
     #[serde(default)]
     pub low_boost: Option<f32>,
     #[serde(default)]
+    pub high_freq: Option<f64>,
+    #[serde(default)]
+    pub low_freq: Option<f64>,
+    #[serde(default)]
+    pub high_q: Option<f64>,
+    #[serde(default)]
+    pub low_q: Option<f64>,
+    #[serde(default)]
     pub fader: Option<LoudnessFader>,
     #[serde(default)]
     pub attenuate_mid: Option<bool>,
@@ -1203,6 +1211,24 @@ impl LoudnessParameters {
 
     pub fn low_boost(&self) -> f32 {
         self.low_boost.unwrap_or(10.0)
+    }
+
+    pub fn high_freq(&self) -> f64 {
+        self.high_freq.unwrap_or(3500.0)
+    }
+
+    pub fn low_freq(&self) -> f64 {
+        self.low_freq.unwrap_or(70.0)
+    }
+
+    /// The default Q gives the same shelves as the fixed slope of 12 dB/octave
+    /// that earlier versions used, for any boost value.
+    pub fn high_q(&self) -> f64 {
+        self.high_q.unwrap_or(std::f64::consts::FRAC_1_SQRT_2)
+    }
+
+    pub fn low_q(&self) -> f64 {
+        self.low_q.unwrap_or(std::f64::consts::FRAC_1_SQRT_2)
     }
 
     pub fn fader(&self) -> usize {
