@@ -108,6 +108,9 @@ Websocket protocol changes (breaking):
     `AdjustVolume` takes `value` plus optional `min` and `max`.
 
 Removed:
+- The `FivePointPeq` biquad combo is gone. It was added for an external gui project that is no
+  longer maintained, and no other gui uses it. The same result is built from a `Lowshelf`, three
+  `Peaking` and a `Highshelf` biquad in the pipeline.
 - Dropped the Jack, Pulse and Bluez backends. On Linux, use the native PipeWire backend, or
   PipeWire's Pulse/JACK compatibility layers. PipeWire can also bridge Bluetooth A2DP directly.
 

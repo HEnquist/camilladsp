@@ -1082,42 +1082,11 @@ pub enum BiquadParameters {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum BiquadComboParameters {
-    LinkwitzRileyHighpass {
-        freq: f64,
-        order: usize,
-    },
-    LinkwitzRileyLowpass {
-        freq: f64,
-        order: usize,
-    },
-    ButterworthHighpass {
-        freq: f64,
-        order: usize,
-    },
-    ButterworthLowpass {
-        freq: f64,
-        order: usize,
-    },
-    Tilt {
-        gain: f64,
-    },
-    FivePointPeq {
-        fls: f64,
-        qls: f64,
-        gls: f64,
-        fp1: f64,
-        qp1: f64,
-        gp1: f64,
-        fp2: f64,
-        qp2: f64,
-        gp2: f64,
-        fp3: f64,
-        qp3: f64,
-        gp3: f64,
-        fhs: f64,
-        qhs: f64,
-        ghs: f64,
-    },
+    LinkwitzRileyHighpass { freq: f64, order: usize },
+    LinkwitzRileyLowpass { freq: f64, order: usize },
+    ButterworthHighpass { freq: f64, order: usize },
+    ButterworthLowpass { freq: f64, order: usize },
+    Tilt { gain: f64 },
     GraphicEqualizer(GraphicEqualizerParameters),
 }
 

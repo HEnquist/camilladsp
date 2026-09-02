@@ -2148,20 +2148,6 @@ The available types are:
 
   The `gain` value is limited to +- 100 dB.
 
-* FivePointPeq
-
-  This filter combo is mainly meant to be created by guis.
-  It defines a 5-point (or band) parametric equalizer by combining a Lowshelf, a Highshelf and three Peaking filters.
-
-  Each individual filter is defined by frequency, gain and q. The parameter names are:
-  * Lowshelf: `fls`, `gls`, `qls`
-  * Peaking 1: `fp1`, `gp1`, `qp1`
-  * Peaking 2: `fp2`, `gp2`, `qp2`
-  * Peaking 3: `fp3`, `gp3`, `qp3`
-  * Highshelf: `fhs`, `ghs`, `qhs`
-
-  All 15 parameters must be included in the config.
-
 
 Other types such as Bessel filters can be built by combining several Biquads.
 [See the separate readme for more filter functions.](./filterfunctions.md)
