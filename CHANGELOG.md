@@ -15,6 +15,12 @@ Bugfixes:
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
 - A convolution filter with an empty inline `values` list is now rejected by the config
   validation, instead of being accepted and then panicking on the first chunk.
+- The `DiffEq` filter now rejects unstable coefficients. The `a` coefficients are checked with the
+  Schur-Cohn stability test when the config is loaded, and a filter with poles on or outside the
+  unit circle is no longer accepted and then allowed to run away to full scale.
+- The `DiffEq` filter now scales its coefficients so that a0 becomes unity. The first `a`
+  coefficient was previously ignored, so any value other than 1.0 gave a filter with the wrong
+  gain compared to the documented transfer function.
 - `chunksize` must now be larger than zero. A `chunksize` of zero was accepted as a valid
   configuration and then hung on startup without producing any audio. A samplerate override that
   would scale a small `chunksize` down to zero now keeps one frame instead.
@@ -22,6 +28,10 @@ Bugfixes:
 Changes:
 - Biquads now use fused multiply-add on hardware that has it, about 18% faster on aarch64. The
   fused form rounds once instead of twice, so results can differ from 4.1.3 in the last few bits.
+- The `DiffEq` filter is now a direct form 2 transposed structure, the same form the biquads use,
+  instead of two ring buffers addressed with modulo. Orders up to eight keep their state in
+  registers for a whole chunk. About 1.4 times faster at second order and 3.4 times at eighth
+  order. The new form rounds differently, so results can differ from 4.1.3 in the last few bits.
 - Faster convolution setup and processing, and lower memory use. Three changes: convolution
   filters share one FFT planner instead of each building and discarding its own, channels that use
   the same filter share one copy of its transformed coefficients instead of each keeping a copy,

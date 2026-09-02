@@ -2334,6 +2334,11 @@ The coefficients are given as a list a0..an in that order. Example:
 This example implements a Biquad lowpass, but for a Biquad the Free Biquad type is faster and should be preferred.
 Both a and b are optional. If left out, they default to [1.0].
 
+The coefficients are scaled so that a0 becomes unity, which leaves the transfer function unchanged.
+The a coefficients are also checked for stability when the configuration is loaded.
+A filter with poles on or outside the unit circle is unstable, meaning its output grows without limit,
+and such a configuration is rejected.
+
 
 ## Processors
 The `processors` section contains the definitions for the Processors.
