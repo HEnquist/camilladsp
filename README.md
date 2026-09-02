@@ -1767,6 +1767,8 @@ That makes the loudness filter attenuate the midband instead of boosting the ext
 The method is the same as the one implemented by the [RME ADI-2 DAC FS](https://www.rme-audio.de/adi-2-dac.html).
 The loudness correction is done as shelving filters that boost the high (above 3500 Hz) and low (below 70 Hz) frequencies.
 The amount of boost is adjustable with the `high_boost` and `low_boost` parameters. If left out, they default to 10 dB.
+The corner frequencies and the Q of the two shelves can be changed with `high_freq`, `low_freq`,
+`high_q` and `low_q`. The defaults give the same shelves as earlier versions, which had them fixed.
 - When the volume is above the `reference_level`, only gain is applied.
 - When the volume is below `reference_level` - 20, the full correction is applied.
 - In the range between `reference_level` and `reference_level`-20, the boost value is scaled linearly.
@@ -1788,12 +1790,20 @@ filters:
       reference_level: -25.0
       high_boost: 7.0 (*)
       low_boost: 7.0 (*)
+      high_freq: 3500.0 (*)
+      low_freq: 70.0 (*)
+      high_q: 0.707 (*)
+      low_q: 0.707 (*)
       attenuate_mid: false (*)
 ```
 Allowed ranges:
 - reference_level: -100 to +20
 - high_boost: 0 to 20
 - low_boost: 0 to 20
+- high_freq: above `low_freq`, and below half the samplerate
+- low_freq: above 0
+- high_q: 0.1 to 2.0
+- low_q: 0.1 to 2.0
 
 ### Delay
 The delay filter provides a delay in seconds, milliseconds, microseconds, millimetres or samples.
