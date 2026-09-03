@@ -38,7 +38,7 @@ use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{HeapRb, traits::*};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -78,6 +78,134 @@ impl MainLoopQuitter {
     fn quit(&self) {
         unsafe {
             pw::sys::pw_main_loop_quit(self.raw as *mut pw::sys::pw_main_loop);
+        }
+    }
+}
+
+/// How long to wait for the PipeWire server to describe the graph.
+const GRAPH_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Look up the `media.class` of the node that `autoconnect_to` points at.
+///
+/// The value is matched the same way WirePlumber matches `target.object`:
+/// a value that parses as a number is an `object.serial`, anything else is a `node.name`.
+/// Returns `None` if no node in the graph matches.
+fn target_media_class(
+    core: &pw::core::Core,
+    mainloop: &pw::main_loop::MainLoop,
+    target: &str,
+) -> Option<String> {
+    let registry = match core.get_registry() {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("Failed to get the PipeWire registry: {:?}", e);
+            return None;
+        }
+    };
+
+    // The sync answer arrives after the server has sent every global it knows about,
+    // so a single roundtrip is enough to see the whole graph.
+    let pending = match core.sync(0) {
+        Ok(seq) => seq,
+        Err(e) => {
+            warn!("Failed to sync with the PipeWire core: {:?}", e);
+            return None;
+        }
+    };
+
+    let media_class = Rc::new(RefCell::new(None));
+    let media_class_cb = media_class.clone();
+    let wanted = target.to_string();
+    let _registry_listener = registry
+        .add_listener_local()
+        .global(move |global| {
+            if global.type_ != pw::types::ObjectType::Node {
+                return;
+            }
+            let Some(props) = global.props else {
+                return;
+            };
+            let matches = match wanted.parse::<u64>() {
+                Ok(serial) => {
+                    props
+                        .get(*pw::keys::OBJECT_SERIAL)
+                        .and_then(|s| s.parse::<u64>().ok())
+                        == Some(serial)
+                }
+                Err(_) => props.get(*pw::keys::NODE_NAME) == Some(wanted.as_str()),
+            };
+            if matches {
+                *media_class_cb.borrow_mut() = Some(
+                    props
+                        .get(*pw::keys::MEDIA_CLASS)
+                        .unwrap_or_default()
+                        .to_string(),
+                );
+            }
+        })
+        .register();
+
+    let done = Rc::new(Cell::new(false));
+    let done_cb = done.clone();
+    let _core_listener = core
+        .add_listener_local()
+        .done(move |id, seq| {
+            if id == pw::core::PW_ID_CORE && seq == pending {
+                done_cb.set(true);
+            }
+        })
+        .register();
+
+    // Iterate the loop directly instead of running it, to keep the roundtrip time bounded
+    // in case the server never answers.
+    let deadline = std::time::Instant::now() + GRAPH_QUERY_TIMEOUT;
+    while !done.get() {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            warn!("Timed out while querying the PipeWire graph");
+            return None;
+        }
+        mainloop.loop_().iterate(remaining);
+    }
+
+    media_class.take()
+}
+
+/// Add the properties that make PipeWire connect a stream to the node given as `autoconnect_to`.
+///
+/// `capture` selects the capture side, where the target may be the monitor of a sink.
+/// WirePlumber only considers sources when it resolves a `target.object` name for a capture
+/// stream, so a sink target additionally needs `stream.capture.sink` to be found at all.
+///
+/// The direction is decided here, from the graph as it looks at startup. A target that appears
+/// later is therefore only picked up by a capture device if it is a source.
+fn insert_autoconnect_props(
+    props: &mut pw::properties::PropertiesBox,
+    core: &pw::core::Core,
+    mainloop: &pw::main_loop::MainLoop,
+    target: &str,
+    capture: bool,
+) {
+    props.insert(*pw::keys::TARGET_OBJECT, target);
+    // Leave the node unconnected when the target cannot be found, instead of falling back to
+    // the default device, and connect it later if the target shows up.
+    // Neither key exists in pw::keys.
+    props.insert("node.dont-fallback", "true");
+    props.insert("node.linger", "true");
+
+    match target_media_class(core, mainloop, target) {
+        Some(class) => {
+            debug!("PipeWire autoconnect target '{}' is a {}", target, class);
+            if capture && class.ends_with("/Sink") {
+                debug!("Capturing from the monitor of sink '{}'", target);
+                props.insert(*pw::keys::STREAM_CAPTURE_SINK, "true");
+            }
+        }
+        None => {
+            warn!(
+                "No PipeWire node matches autoconnect_to '{}', the node will stay unconnected until it appears",
+                target
+            );
         }
     }
 }
@@ -330,8 +458,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     *pw::keys::NODE_GROUP => node_group_name,
                 };
                 if let Some(ref target) = autoconnect_to {
-                    // the key PW_KEY_TARGET_OBJECT doesn not (yet?) exist in pw::keys
-                    props.insert("target.object", target.as_str());
+                    insert_autoconnect_props(&mut props, &core, &mainloop, target, false);
                 }
 
                 let stream = match pw::stream::StreamBox::new(&core, "CamillaDSP-Playback", props) {
@@ -810,8 +937,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     *pw::keys::NODE_GROUP => node_group_name,
                 };
                 if let Some(ref target) = autoconnect_to {
-                    // the key PW_KEY_TARGET_OBJECT doesn not (yet?) exist in pw::keys
-                    props.insert("target.object", target.as_str());
+                    insert_autoconnect_props(&mut props, &core, &mainloop, target, true);
                 }
 
                 let stream = match pw::stream::StreamBox::new(&core, "CamillaDSP-Capture", props) {

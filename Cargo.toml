@@ -41,7 +41,10 @@ path = "src/bin.rs"
 alsa = "0.9.0"
 alsa-sys = "0.3.1"
 nix = { version = "0.30", features = ["poll", "signal"] }
-pipewire = { version = "0.9", optional = true }
+# The v0_3_44 feature unlocks the key constants added up to PipeWire 0.3.44, among them
+# PW_KEY_OBJECT_SERIAL and PW_KEY_TARGET_OBJECT. It sets the minimum PipeWire version to build
+# against, which is well below what any distro that ships PipeWire has.
+pipewire = { version = "0.9", optional = true, features = ["v0_3_44"] }
 
 [target.'cfg(target_os="macos")'.dependencies]
 coreaudio-rs = "0.13.0"

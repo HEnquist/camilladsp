@@ -73,6 +73,18 @@ If given, CamillaDSP will ask PipeWire to try connect the CamillaDSP capture or 
 This enables basic routing to be set up without any additional tools,
 and is useful when both the source and sink nodes already exist.
 
+A capture device can also be pointed at a sink, in which case it captures from the monitor of that sink.
+CamillaDSP looks the target up in the PipeWire graph at startup to determine whether it is a sink or a source,
+so no extra configuration is needed for this.
+
+If the target node does not exist, the CamillaDSP node is left unconnected
+instead of being connected to the default device,
+and gets connected automatically if the target appears later.
+
+Note that a capture device can only connect to a target that appears later if that target is a source.
+Whether the target is a sink or a source is determined when CamillaDSP starts,
+so a sink must already exist at that point to be captured from.
+
 For anything more advanced, it is recommended to leave this parameter at the default `null`,
 and instead set up routing with WirePlumber rules.
 
