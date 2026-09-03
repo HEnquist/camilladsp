@@ -76,6 +76,14 @@ Changes:
   Those must build from source.
 
 Config changes (breaking):
+- The `FivePointPeq` biquad combo is extended to a free number of bands, and is renamed
+  `NPointPeq`. The fifteen numbered parameters are replaced by a `bands` list of at least two
+  entries, each with `freq`, `gain` and `q`. The first band is a low shelf, the last a high shelf,
+  and the ones in between peaking filters, so an old five band equalizer becomes a list of five
+  bands in the order it already used, `fls`/`gls`/`qls` first and `fhs`/`ghs`/`qhs` last. Two new
+  rules come with it: the bands must be listed with rising frequency, and a band with a gain
+  smaller than 0.001 dB is left out when the filter is built, which is how a band is disabled
+  without removing it.
 - Time values no longer accept unitless numbers. Every time-valued parameter now states its unit.
 - Tunable times take a mandatory companion unit field:
   - `Delay` filter: `unit` renamed to `delay_unit` (now required).

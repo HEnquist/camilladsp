@@ -2148,19 +2148,45 @@ The available types are:
 
   The `gain` value is limited to +- 100 dB.
 
-* FivePointPeq
+* NPointPeq
 
+  A parametric equalizer with a free number of bands.
   This filter combo is mainly meant to be created by guis.
-  It defines a 5-point (or band) parametric equalizer by combining a Lowshelf, a Highshelf and three Peaking filters.
 
-  Each individual filter is defined by frequency, gain and q. The parameter names are:
-  * Lowshelf: `fls`, `gls`, `qls`
-  * Peaking 1: `fp1`, `gp1`, `qp1`
-  * Peaking 2: `fp2`, `gp2`, `qp2`
-  * Peaking 3: `fp3`, `gp3`, `qp3`
-  * Highshelf: `fhs`, `ghs`, `qhs`
+  It takes a single parameter `bands`, a list of at least two bands.
+  Every band has the same three parameters, `freq`, `gain` and `q`,
+  and its role follows its position in the list:
+  the first band is a Lowshelf, the last is a Highshelf,
+  and the ones in between are Peaking filters.
+  A list of two bands is therefore just the two shelves.
 
-  All 15 parameters must be included in the config.
+  The bands are applied in the order listed, and their frequencies must not decrease along the way.
+
+  A band with a `gain` of zero, or smaller than 0.001 dB, is left out when the filter is built,
+  since it does nothing.
+  This is how a band is disabled without removing it, and it does not change the role of any
+  other band, since the roles are decided before the zero gain bands are dropped.
+  An equalizer with every gain at zero passes the signal through unchanged.
+
+  ```yaml
+  MyEqualizer:
+    type: BiquadCombo
+    parameters:
+      type: NPointPeq
+      bands:
+        - freq: 125     # Lowshelf
+          gain: 1.0
+          q: 0.7
+        - freq: 400     # Peaking
+          gain: -0.5
+          q: 0.7
+        - freq: 1000    # Peaking
+          gain: 1.5
+          q: 0.7
+        - freq: 8000    # Highshelf
+          gain: 0.5
+          q: 0.7
+  ```
 
 
 Other types such as Bessel filters can be built by combining several Biquads.
