@@ -1,16 +1,12 @@
 //! Micro-benchmarks for fftconv complex-multiply kernels.
 //! Compares scalar with AVX+FMA on x86_64 and NEON on aarch64.
 
-extern crate camillalib;
-extern crate criterion;
-extern crate num_complex;
-
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use num_complex::Complex;
 use std::hint::black_box;
 use std::time::Duration;
 
-use camillalib::PrcFmt;
+use camillalib::CamillaFloat;
 #[cfg(target_arch = "x86_64")]
 use camillalib::filters::fftconv::{
     bench_has_avx_fma, bench_multiply_add_elements_avx_fma, bench_multiply_elements_avx_fma,
@@ -29,19 +25,24 @@ const SIZES: &[usize] = &[129, 513, 1025, 4097, 16385];
 fn make_buffers(
     len: usize,
 ) -> (
-    Vec<Complex<PrcFmt>>,
-    Vec<Complex<PrcFmt>>,
-    Vec<Complex<PrcFmt>>,
+    Vec<Complex<CamillaFloat>>,
+    Vec<Complex<CamillaFloat>>,
+    Vec<Complex<CamillaFloat>>,
 ) {
-    let scale = 1.0 / len as PrcFmt;
-    let a: Vec<Complex<PrcFmt>> = (0..len)
-        .map(|i| Complex::new((i as PrcFmt + 1.0) * scale, (len - i) as PrcFmt * scale))
-        .collect();
-    let b: Vec<Complex<PrcFmt>> = (0..len)
+    let scale = 1.0 / len as CamillaFloat;
+    let a: Vec<Complex<CamillaFloat>> = (0..len)
         .map(|i| {
             Complex::new(
-                (len - i) as PrcFmt * scale,
-                (i as PrcFmt + 1.0) * scale * 0.5,
+                (i as CamillaFloat + 1.0) * scale,
+                (len - i) as CamillaFloat * scale,
+            )
+        })
+        .collect();
+    let b: Vec<Complex<CamillaFloat>> = (0..len)
+        .map(|i| {
+            Complex::new(
+                (len - i) as CamillaFloat * scale,
+                (i as CamillaFloat + 1.0) * scale * 0.5,
             )
         })
         .collect();
@@ -50,7 +51,7 @@ fn make_buffers(
 }
 
 fn throughput_bytes(len: usize) -> u64 {
-    (3 * len * std::mem::size_of::<Complex<PrcFmt>>()) as u64
+    (3 * len * std::mem::size_of::<Complex<CamillaFloat>>()) as u64
 }
 
 fn bench_multiply_elements(c: &mut Criterion) {

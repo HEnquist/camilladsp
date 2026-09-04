@@ -18,6 +18,7 @@ use crate::config::*;
 use crate::filters;
 use crate::mixer;
 use crate::processors::compressor;
+use crate::processors::lookahead_limiter;
 use crate::processors::noisegate;
 use crate::processors::race;
 use crate::utils::wavtools::find_data_in_wav_stream;
@@ -34,11 +35,16 @@ use std::sync::LazyLock;
 // Keep same result type used by config module utility functions.
 type Res<T> = Result<T, Box<dyn error::Error>>;
 
+/// Runtime overrides that replace specific fields in a loaded configuration.
 #[derive(Clone)]
 pub struct OverridesState {
+    /// Override the capture/playback sample rate.
     pub samplerate: Option<usize>,
+    /// Override the sample format for binary backends.
     pub sample_format: Option<BinarySampleFormat>,
+    /// Override the number of extra (silent) samples the capture device prepends.
     pub extra_samples: Option<usize>,
+    /// Override the number of capture/playback channels.
     pub channels: Option<usize>,
 }
 
@@ -51,6 +57,7 @@ pub static OVERRIDES: LazyLock<RwLock<OverridesState>> = LazyLock::new(|| {
     })
 });
 
+/// Error type for configuration parsing and validation failures.
 #[derive(Debug)]
 pub struct ConfigErrorType {
     desc: String,
@@ -69,6 +76,7 @@ impl error::Error for ConfigErrorType {
 }
 
 impl ConfigErrorType {
+    /// Create a new config error with the given description message.
     pub fn new(desc: &str) -> Self {
         ConfigErrorType {
             desc: desc.to_owned(),
@@ -90,6 +98,7 @@ where
     Ok(value)
 }
 
+/// Parse a YAML configuration file and apply any active [`OVERRIDES`].
 pub fn load_config(filename: &str) -> Res<Configuration> {
     let file = match File::open(filename) {
         Ok(f) => f,
@@ -146,6 +155,17 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                 cfg_chunksize * (rate as f32 / cfg_rate as f32).round() as usize
             } else {
                 cfg_chunksize / (cfg_rate as f32 / rate as f32).round() as usize
+            };
+            // Scaling down is an integer division, so a small enough chunksize
+            // divides away entirely. Zero would hang the capture loop, and a
+            // configuration this odd should still run, so keep one frame.
+            let scaled_chunksize = if scaled_chunksize == 0 {
+                warn!(
+                    "Overriding the samplerate to {rate} scales chunksize {cfg_chunksize} below one frame, using 1"
+                );
+                1
+            } else {
+                scaled_chunksize
             };
             debug!(
                 "Samplerate changed, adjusting chunksize: {cfg_chunksize} -> {scaled_chunksize}"
@@ -209,14 +229,6 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             CaptureDevice::Alsa { channels, .. } => {
                 *channels = chans;
             }
-            #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez(dev) => {
-                dev.channels = chans;
-            }
-            #[cfg(feature = "pulse-backend")]
-            CaptureDevice::Pulse { channels, .. } => {
-                *channels = chans;
-            }
             #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { channels, .. } => {
                 *channels = chans;
@@ -232,19 +244,6 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             #[cfg(all(target_os = "windows", feature = "asio-backend"))]
             CaptureDevice::Asio(dev) => {
                 dev.channels = chans;
-            }
-            #[cfg(all(
-                feature = "cpal-backend",
-                feature = "jack-backend",
-                any(
-                    target_os = "linux",
-                    target_os = "dragonfly",
-                    target_os = "freebsd",
-                    target_os = "netbsd"
-                )
-            ))]
-            CaptureDevice::Jack { channels, .. } => {
-                *channels = chans;
             }
             CaptureDevice::SignalGenerator { channels, .. } => {
                 *channels = chans;
@@ -265,14 +264,6 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             CaptureDevice::Alsa { format, .. } => {
                 let mapped_format = AlsaSampleFormat::from_binary_format(&fmt);
                 *format = Some(mapped_format);
-            }
-            #[cfg(all(target_os = "linux", feature = "bluez-backend"))]
-            CaptureDevice::Bluez(dev) => {
-                dev.format = fmt;
-            }
-            #[cfg(feature = "pulse-backend")]
-            CaptureDevice::Pulse { .. } => {
-                error!("Not possible to override capture format for Pulse, ignoring");
             }
             #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { .. } => {
@@ -310,19 +301,6 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                     return Err(ConfigError::new(&msg).into());
                 }
             }
-            #[cfg(all(
-                feature = "cpal-backend",
-                feature = "jack-backend",
-                any(
-                    target_os = "linux",
-                    target_os = "dragonfly",
-                    target_os = "freebsd",
-                    target_os = "netbsd"
-                )
-            ))]
-            CaptureDevice::Jack { .. } => {
-                error!("Not possible to override capture format for Jack, ignoring");
-            }
             CaptureDevice::SignalGenerator { .. } => {}
         }
     }
@@ -341,7 +319,7 @@ fn replace_tokens_in_config(config: &mut Configuration) {
     let samplerate = config.devices.samplerate;
     let num_channels = config.devices.capture.channels();
     if let Some(filters) = &mut config.filters {
-        for (_name, filter) in filters.iter_mut() {
+        for filter in filters.values_mut() {
             match filter {
                 Filter::Conv {
                     parameters: ConvParameters::Raw(params),
@@ -383,7 +361,7 @@ fn replace_relative_paths_in_config(config: &mut Configuration, configname: &str
     if let Ok(config_file) = PathBuf::from(configname.to_owned()).canonicalize() {
         if let Some(config_dir) = config_file.parent() {
             if let Some(filters) = &mut config.filters {
-                for (_name, filter) in filters.iter_mut() {
+                for filter in filters.values_mut() {
                     if let Filter::Conv {
                         parameters: ConvParameters::Raw(params),
                         ..
@@ -424,12 +402,14 @@ fn check_and_replace_relative_path(path_str: &mut String, config_path: &Path) {
     }
 }
 
+/// Parse, apply overrides, and fully validate a configuration file.
 pub fn load_validate_config(configname: &str) -> Res<Configuration> {
     let mut configuration = load_config(configname)?;
     validate_config(&mut configuration, Some(configname))?;
     Ok(configuration)
 }
 
+/// Compare two configurations and return the most significant [`ConfigChange`] between them.
 pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> ConfigChange {
     if currentconf == newconf {
         return ConfigChange::None;
@@ -461,7 +441,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
                     | (Filter::DiffEq { .. }, Filter::DiffEq { .. })
                     | (Filter::Volume { .. }, Filter::Volume { .. })
                     | (Filter::Loudness { .. }, Filter::Loudness { .. })
-                    | (Filter::Limiter { .. }, Filter::Limiter { .. }) => {}
+                    | (Filter::Clipper { .. }, Filter::Clipper { .. }) => {}
                     _ => {
                         // A filter changed type, need to rebuild the pipeline
                         return ConfigChange::Pipeline;
@@ -487,10 +467,22 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     if let (Some(newprocs), Some(oldprocs)) = (&newconf.processors, &currentconf.processors) {
         for (proc, params) in newprocs {
             // The pipeline didn't change, any added processor isn't included and can be skipped
-            if let Some(current_proc) = oldprocs.get(proc)
-                && params != current_proc
-            {
-                processors.push(proc.to_string());
+            if let Some(current_proc) = oldprocs.get(proc) {
+                // Did the processor change type?
+                match (params, current_proc) {
+                    (Processor::Compressor { .. }, Processor::Compressor { .. })
+                    | (Processor::NoiseGate { .. }, Processor::NoiseGate { .. })
+                    | (Processor::LookaheadLimiter { .. }, Processor::LookaheadLimiter { .. })
+                    | (Processor::RACE { .. }, Processor::RACE { .. }) => {}
+                    _ => {
+                        // A processor changed type, need to rebuild the pipeline
+                        return ConfigChange::Pipeline;
+                    }
+                };
+                // Only parameters changed, ok to update
+                if params != current_proc {
+                    processors.push(proc.to_string());
+                }
             }
         }
     }
@@ -522,22 +514,22 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         let msg = format!("target_level cannot be larger than {target_level_limit}");
         return Err(ConfigError::new(&msg).into());
     }
-    if let Some(period) = conf.devices.adjust_period
-        && period <= 0.0
+    if let Some(interval) = conf.devices.adjust_interval_s
+        && interval <= 0.0
     {
-        return Err(ConfigError::new("adjust_period must be positive and > 0").into());
+        return Err(ConfigError::new("adjust_interval_s must be positive and > 0").into());
     }
     if let Some(threshold) = conf.devices.silence_threshold
         && threshold > 0.0
     {
         return Err(ConfigError::new("silence_threshold must be less than or equal to 0").into());
     }
-    if let Some(timeout) = conf.devices.silence_timeout
+    if let Some(timeout) = conf.devices.silence_timeout_s
         && timeout < 0.0
     {
-        return Err(ConfigError::new("silence_timeout cannot be negative").into());
+        return Err(ConfigError::new("silence_timeout_s cannot be negative").into());
     }
-    if conf.devices.ramp_time() < 0.0 {
+    if conf.devices.volume_ramp_time_ms() < 0.0 {
         return Err(ConfigError::new("Volume ramp time cannot be negative").into());
     }
     if conf.devices.volume_limit() > 50.0 {
@@ -545,6 +537,14 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     if conf.devices.volume_limit() < -150.0 {
         return Err(ConfigError::new("Volume limit cannot be less than -150 dB").into());
+    }
+    if matches!(conf.devices.resampler, Some(Resampler::Slip))
+        && conf.devices.capture_samplerate() != conf.devices.samplerate
+    {
+        return Err(ConfigError::new(
+            "The Slip resampler requires matching samplerate and capture_samplerate",
+        )
+        .into());
     }
     #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture
@@ -638,14 +638,14 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                     if !step.is_bypassed() {
                         if let Some(mixers) = &conf.mixers {
                             if !mixers.contains_key(&step.name) {
-                                let msg = format!("Use of missing mixer '{}'", &step.name);
+                                let msg = format!("Use of missing mixer '{}'", step.name);
                                 return Err(ConfigError::new(&msg).into());
                             } else {
                                 let chan_in = mixers.get(&step.name).unwrap().channels.r#in;
                                 if chan_in != num_channels {
                                     let msg = format!(
                                         "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
-                                        &step.name, num_channels, chan_in
+                                        step.name, num_channels, chan_in
                                     );
                                     return Err(ConfigError::new(&msg).into());
                                 }
@@ -655,14 +655,14 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                     Err(err) => {
                                         let msg = format!(
                                             "Invalid mixer '{}'. Reason: {}",
-                                            &step.name, err
+                                            step.name, err
                                         );
                                         return Err(ConfigError::new(&msg).into());
                                     }
                                 }
                             }
                         } else {
-                            let msg = format!("Use of missing mixer '{}'", &step.name);
+                            let msg = format!("Use of missing mixer '{}'", step.name);
                             return Err(ConfigError::new(&msg).into());
                         }
                     }
@@ -679,7 +679,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                             for idx in 1..channels.len() {
                                 if channels[idx..].contains(&channels[idx - 1]) {
                                     let msg =
-                                        format!("Use of duplicated channel {}", &channels[idx - 1]);
+                                        format!("Use of duplicated channel {}", channels[idx - 1]);
                                     return Err(ConfigError::new(&msg).into());
                                 }
                             }
@@ -753,6 +753,28 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                             }
                                         }
                                     }
+                                    Processor::LookaheadLimiter { parameters, .. } => {
+                                        let channels = parameters.channels;
+                                        if channels != num_channels {
+                                            let msg = format!(
+                                                "LookaheadLimiter '{}' has wrong number of channels. Expected {}, found {}.",
+                                                step.name, num_channels, channels
+                                            );
+                                            return Err(ConfigError::new(&msg).into());
+                                        }
+                                        match lookahead_limiter::validate_lookahead_limiter(
+                                            parameters, fs,
+                                        ) {
+                                            Ok(_) => {}
+                                            Err(err) => {
+                                                let msg = format!(
+                                                    "Invalid lookahead limiter '{}'. Reason: {}",
+                                                    step.name, err
+                                                );
+                                                return Err(ConfigError::new(&msg).into());
+                                            }
+                                        }
+                                    }
                                     Processor::RACE { parameters, .. } => {
                                         let channels = parameters.channels;
                                         if channels != num_channels {
@@ -811,6 +833,7 @@ pub fn used_capture_channels(conf: &Configuration) -> Vec<bool> {
     vec![true; capture_channels]
 }
 
+/// Return the capture channel labels from `config`, or `None` if no config is active.
 pub fn capture_channel_labels(config: &Option<Configuration>) -> Option<Vec<Option<String>>> {
     if let Some(conf) = config {
         conf.devices.capture.labels()
@@ -819,6 +842,7 @@ pub fn capture_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opti
     }
 }
 
+/// Return the playback channel labels from `config`, or `None` if no config is active.
 pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Option<String>>> {
     if let Some(conf) = config {
         if let Some(pipeline) = &conf.pipeline {

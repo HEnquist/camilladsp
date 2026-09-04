@@ -14,25 +14,34 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
+use crate::ToCamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::utils::decibels::gain_from_value;
 use crate::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
 
+/// A runtime mixer that combines and routes channels with per-source gain.
 #[derive(Clone)]
 pub struct Mixer {
+    /// Name of this mixer as defined in the configuration.
     pub name: String,
+    /// Number of input channels.
     pub channels_in: usize,
+    /// Number of output channels.
     pub channels_out: usize,
+    /// `mapping[out_channel]` is the list of sources summed into that output channel.
     pub mapping: Vec<Vec<MixerSource>>,
 }
 
+/// A single source contribution within a [`Mixer`] output channel.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MixerSource {
+    /// Index of the input channel.
     pub channel: usize,
-    pub gain: PrcFmt,
+    /// Linear gain applied to this source.
+    pub gain: CamillaFloat,
 }
 
 impl Mixer {
@@ -49,7 +58,8 @@ impl Mixer {
                         let gain_value = cfg_src.gain();
                         let inverted = cfg_src.is_inverted();
                         let linear = cfg_src.scale() == config::GainScale::Linear;
-                        let gain = gain_from_value(gain_value, linear, inverted, false);
+                        let gain =
+                            gain_from_value(gain_value, linear, inverted, false).to_camilla_float();
                         let src = MixerSource {
                             channel: cfg_src.channel,
                             gain,
@@ -77,7 +87,7 @@ impl Mixer {
                 let gain_value = cfg_src.gain();
                 let inverted = cfg_src.is_inverted();
                 let linear = cfg_src.scale() == config::GainScale::Linear;
-                let gain = gain_from_value(gain_value, linear, inverted, false);
+                let gain = gain_from_value(gain_value, linear, inverted, false).to_camilla_float();
                 let src = MixerSource {
                     channel: cfg_src.channel,
                     gain,

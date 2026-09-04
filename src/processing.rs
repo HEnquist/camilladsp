@@ -14,16 +14,35 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::ProcessingParameters;
 use crate::audiodevice::*;
 use crate::config;
 use crate::pipeline;
-use audio_thread_priority::{
+use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
+use crate::{ProcessingParameters, SHUTDOWN_REQUESTED};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
+fn forward_to_playback(tx_pb: &crossbeam_channel::Sender<AudioMessage>, msg: AudioMessage) -> bool {
+    let is_droppable = !matches!(msg, AudioMessage::EndOfStream);
+    let mut pending = msg;
+    loop {
+        match tx_pb.send_timeout(pending, std::time::Duration::from_millis(20)) {
+            Ok(()) => return true,
+            Err(crossbeam_channel::SendTimeoutError::Timeout(msg)) => {
+                if is_droppable && SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+                    trace!("Processing: playback queue full during shutdown, dropping message");
+                    return true;
+                }
+                pending = msg;
+            }
+            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => return false,
+        }
+    }
+}
+
+/// Spawn the processing thread: builds the pipeline, runs the chunk loop, and handles config updates.
 pub fn run_processing(
     conf_proc: config::Configuration,
     barrier_proc: Arc<Barrier>,
@@ -32,159 +51,194 @@ pub fn run_processing(
     rx_pipeconf: crossbeam_channel::Receiver<(config::ConfigChange, config::Configuration)>,
     processing_params: Arc<ProcessingParameters>,
 ) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
-        let chunksize = conf_proc.devices.chunksize;
-        let samplerate = conf_proc.devices.samplerate;
-        let multithreaded = conf_proc.devices.multithreaded();
-        let nbr_threads = conf_proc.devices.worker_threads();
-        let hw_threads = std::thread::available_parallelism()
-            .map(|p| p.get())
-            .unwrap_or_default();
-        if nbr_threads > hw_threads && multithreaded {
-            warn!(
-                "Requested {nbr_threads} worker threads. For optimal performance, this number should not \
-                exceed the available CPU cores, which is {hw_threads}."
+    thread::Builder::new()
+        .name("processing".to_string())
+        .spawn(move || {
+            processing(
+                conf_proc,
+                barrier_proc,
+                tx_pb,
+                rx_cap,
+                rx_pipeconf,
+                processing_params,
             );
-        }
-        if hw_threads == 1 && multithreaded {
-            warn!(
-                "This system only has one CPU core, multithreaded processing is not recommended."
-            );
-        }
-        if nbr_threads == 1 && multithreaded {
-            warn!(
-                "Requested multithreaded processing with one worker thread. \
-                   Performance can improve by adding more threads or disabling multithreading."
-            );
-        }
-        let mut pipeline = pipeline::Pipeline::from_config(conf_proc, processing_params.clone());
-        debug!("build filters, waiting to start processing loop");
+        })
+        .expect("can spawn processing thread")
+}
 
-        let thread_handle =
-            match promote_current_thread_to_real_time(chunksize as u32, samplerate as u32) {
-                Ok(h) => {
-                    debug!("Processing thread has real-time priority.");
-                    Some(h)
-                }
-                Err(err) => {
-                    warn!("Processing thread could not get real time priority, error: {err}");
-                    None
-                }
-            };
+fn processing(
+    conf_proc: config::Configuration,
+    barrier_proc: Arc<Barrier>,
+    tx_pb: crossbeam_channel::Sender<AudioMessage>,
+    rx_cap: crossbeam_channel::Receiver<AudioMessage>,
+    rx_pipeconf: crossbeam_channel::Receiver<(config::ConfigChange, config::Configuration)>,
+    processing_params: Arc<ProcessingParameters>,
+) {
+    let chunksize = conf_proc.devices.chunksize;
+    let samplerate = conf_proc.devices.samplerate;
+    let multithreaded = conf_proc.devices.multithreaded();
+    let nbr_threads = conf_proc.devices.worker_threads();
+    let hw_threads = std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or_default();
+    if nbr_threads > hw_threads && multithreaded {
+        warn!(
+            "Requested {nbr_threads} worker threads. For optimal performance, this number should not \
+            exceed the available CPU cores, which is {hw_threads}."
+        );
+    }
+    if hw_threads == 1 && multithreaded {
+        warn!("This system only has one CPU core, multithreaded processing is not recommended.");
+    }
+    if nbr_threads == 1 && multithreaded {
+        warn!(
+            "Requested multithreaded processing with one worker thread. \
+                Performance can improve by adding more threads or disabling multithreading."
+        );
+    }
+    processing_params.sync_volumes_to_target();
+    // The shared thread pool for this processing session's parallelizable tasks.
+    let processing_pool =
+        build_processing_threadpool(multithreaded, nbr_threads, chunksize, samplerate);
+    let mut pipeline = pipeline::Pipeline::from_config(
+        conf_proc,
+        processing_params.clone(),
+        processing_pool.clone(),
+    );
+    debug!("build filters, waiting to start processing loop");
 
-        // Initialize rayon thread pool
-        if multithreaded {
-            match rayon::ThreadPoolBuilder::new()
-                .num_threads(nbr_threads)
-                .build_global()
-            {
-                Ok(_) => {
-                    debug!(
-                        "Initialized global thread pool with {} workers",
-                        rayon::current_num_threads()
-                    );
-                    rayon::broadcast(|_| {
-                        match promote_current_thread_to_real_time(
-                            chunksize as u32,
-                            samplerate as u32,
-                        ) {
-                            Ok(_) => {
-                                debug!(
-                                    "Worker thread {} has real-time priority.",
-                                    rayon::current_thread_index().unwrap_or_default()
-                                );
-                            }
-                            Err(err) => {
-                                warn!(
-                                    "Worker thread {} could not get real time priority, error: {}",
-                                    rayon::current_thread_index().unwrap_or_default(),
-                                    err
-                                );
-                            }
-                        };
-                    });
-                }
-                Err(err) => {
-                    warn!("Failed to build thread pool, error: {err}");
-                }
-            };
-        }
+    let thread_handle =
+        match promote_current_thread_to_real_time(chunksize as u32, samplerate as u32) {
+            Ok(h) => {
+                debug!("Processing thread has real-time priority.");
+                Some(h)
+            }
+            Err(err) => {
+                warn!("Processing thread could not get real time priority, error: {err}");
+                None
+            }
+        };
 
-        barrier_proc.wait();
-        debug!("Processing loop starts now!");
-        loop {
-            match rx_cap.recv() {
-                Ok(AudioMessage::Audio(mut chunk)) => {
-                    //trace!("AudioMessage::Audio received");
-                    chunk = pipeline.process_chunk(chunk);
-                    let msg = AudioMessage::Audio(chunk);
-                    if tx_pb.send(msg).is_err() {
-                        info!("Playback thread has already stopped.");
-                        break;
-                    }
-                }
-                Ok(AudioMessage::EndOfStream) => {
-                    trace!("AudioMessage::EndOfStream received");
-                    let msg = AudioMessage::EndOfStream;
-                    if tx_pb.send(msg).is_err() {
-                        info!("Playback thread has already stopped.");
-                    }
-                    break;
-                }
-                Ok(AudioMessage::Pause) => {
-                    trace!("AudioMessage::Pause received");
-                    let msg = AudioMessage::Pause;
-                    if tx_pb.send(msg).is_err() {
-                        info!("Playback thread has already stopped.");
-                        break;
-                    }
-                }
-                Err(err) => {
-                    error!("Message channel error: {err}");
-                    let msg = AudioMessage::EndOfStream;
-                    if tx_pb.send(msg).is_err() {
-                        info!("Playback thread has already stopped.");
-                    }
+    barrier_proc.wait();
+    debug!("Processing loop starts now!");
+    loop {
+        match rx_cap.recv() {
+            Ok(AudioMessage::Audio(mut chunk)) => {
+                //trace!("AudioMessage::Audio received");
+                chunk = pipeline.process_chunk(chunk);
+                let msg = AudioMessage::Audio(chunk);
+                if !forward_to_playback(&tx_pb, msg) {
+                    info!("Playback thread has already stopped.");
                     break;
                 }
             }
-            if let Ok((diff, new_config)) = rx_pipeconf.try_recv() {
-                trace!("Message received on config channel");
-                match diff {
-                    config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
-                        debug!("Rebuilding pipeline.");
-                        let new_pipeline =
-                            pipeline::Pipeline::from_config(new_config, processing_params.clone());
-                        pipeline = new_pipeline;
-                    }
-                    config::ConfigChange::FilterParameters {
-                        filters,
-                        mixers,
-                        processors,
-                    } => {
-                        debug!("Updating parameters of filters: {filters:?}, mixers: {mixers:?}.");
-                        pipeline.update_parameters(new_config, &filters, &mixers, &processors);
-                    }
-                    config::ConfigChange::Devices => {
-                        let msg = AudioMessage::EndOfStream;
-                        tx_pb.send(msg).unwrap();
-                        break;
-                    }
-                    _ => {}
-                };
-            };
-        }
-        processing_params.set_processing_load(0.0);
-        processing_params.set_resampler_load(0.0);
-        if let Some(h) = thread_handle {
-            match demote_current_thread_from_real_time(h) {
-                Ok(_) => {
-                    debug!("Processing thread returned to normal priority.")
+            Ok(AudioMessage::EndOfStream) => {
+                trace!("AudioMessage::EndOfStream received");
+                let msg = AudioMessage::EndOfStream;
+                if !forward_to_playback(&tx_pb, msg) {
+                    info!("Playback thread has already stopped.");
                 }
-                Err(_) => {
-                    warn!("Could not bring the processing thread back to normal priority.")
+                break;
+            }
+            Ok(AudioMessage::Pause) => {
+                trace!("AudioMessage::Pause received");
+                // Audio is not flowing, so volume changes made from now until playback
+                // resumes must be applied without ramping.
+                processing_params.bump_pause_count();
+                let msg = AudioMessage::Pause;
+                if !forward_to_playback(&tx_pb, msg) {
+                    info!("Playback thread has already stopped.");
+                    break;
                 }
-            };
+            }
+            Err(err) => {
+                if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+                    debug!("Capture channel closed during shutdown.");
+                } else {
+                    error!("Message channel error: {err}");
+                    let msg = AudioMessage::EndOfStream;
+                    if !forward_to_playback(&tx_pb, msg) {
+                        info!("Playback thread has already stopped.");
+                    }
+                }
+                break;
+            }
         }
-    })
+        if let Ok((diff, new_config)) = rx_pipeconf.try_recv() {
+            trace!("Message received on config channel");
+            match diff {
+                config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
+                    debug!("Rebuilding pipeline.");
+                    processing_params.sync_volumes_to_target();
+                    let new_pipeline = pipeline::Pipeline::from_config(
+                        new_config,
+                        processing_params.clone(),
+                        processing_pool.clone(),
+                    );
+                    pipeline = new_pipeline;
+                }
+                config::ConfigChange::FilterParameters {
+                    filters,
+                    mixers,
+                    processors,
+                } => {
+                    debug!("Updating parameters of filters: {filters:?}, mixers: {mixers:?}.");
+                    pipeline.update_parameters(new_config, &filters, &mixers, &processors);
+                }
+                config::ConfigChange::Devices => {
+                    let msg = AudioMessage::EndOfStream;
+                    let _ = forward_to_playback(&tx_pb, msg);
+                    break;
+                }
+                _ => {}
+            };
+        };
+    }
+    processing_params.set_processing_load(0.0);
+    processing_params.set_resampler_load(0.0);
+    if let Some(h) = thread_handle {
+        match demote_current_thread_from_real_time(h) {
+            Ok(_) => {
+                debug!("Processing thread returned to normal priority.")
+            }
+            Err(_) => {
+                warn!("Could not bring the processing thread back to normal priority.")
+            }
+        };
+    }
+}
+
+/// Build the shared processing thread pool. It's used for parallel filter processing.
+///
+/// When `multithreaded` is false, or the pool fails to build, you get None.
+///
+/// Workers are promoted to real-time priority as they start.
+pub fn build_processing_threadpool(
+    multithreaded: bool,
+    worker_threads: usize,
+    chunksize: usize,
+    samplerate: usize,
+) -> Option<Arc<rayon::ThreadPool>> {
+    if !multithreaded {
+        return None;
+    }
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(worker_threads)
+        .thread_name(|i| format!("process-wrk-{i}"))
+        .start_handler(move |idx| {
+            match promote_current_thread_to_real_time(chunksize as u32, samplerate as u32) {
+                Ok(_) => debug!("Filter worker thread {idx} has real-time priority."),
+                Err(err) => warn!(
+                    "Filter worker thread {idx} could not get real time priority, error: {err}"
+                ),
+            }
+        })
+        .build();
+    match pool {
+        Ok(pool) => Some(Arc::new(pool)),
+        Err(err) => {
+            warn!("Failed to build filter thread pool, running single-threaded. Error: {err}");
+            None
+        }
+    }
 }

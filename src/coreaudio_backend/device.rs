@@ -14,6 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::ToF32;
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config;
@@ -58,15 +59,16 @@ use objc2_core_audio::{
     kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput,
     kAudioObjectPropertyScopeOutput,
 };
-use objc2_core_audio_types::{AudioBuffer, AudioValueTranslation};
+use objc2_core_audio_types::{
+    AudioBuffer, AudioStreamBasicDescription, AudioValueTranslation, kAudioFormatFlagIsFloat,
+};
 use objc2_core_foundation::CFString;
 
-use audio_thread_priority::{
+use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
@@ -161,8 +163,8 @@ pub struct CoreaudioCaptureDevice {
     pub chunksize: usize,
     pub channels: usize,
     pub sample_format: Option<CoreAudioSampleFormat>,
-    pub silence_threshold: PrcFmt,
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: f64,
+    pub silence_timeout: f64,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
 }
@@ -184,6 +186,96 @@ pub fn list_device_names(input: bool) -> Vec<String> {
 pub fn list_available_devices(input: bool) -> Vec<(String, String)> {
     let names = list_device_names(input);
     names.iter().map(|n| (n.clone(), n.clone())).collect()
+}
+
+fn get_physical_capabilities(device_id: AudioDeviceID, capabilities_map: &mut CapabilitiesMap) {
+    if let Ok(supported_formats) = get_supported_physical_stream_formats(device_id) {
+        for ranged_desc in supported_formats {
+            let asbd = ranged_desc.mFormat;
+            let channels = asbd.mChannelsPerFrame as usize;
+
+            let format_str = match get_format_from_asbd(&asbd) {
+                Some(fmt) => coreaudio_format_to_str(fmt).to_string(),
+                None => continue,
+            };
+
+            let rates =
+                if ranged_desc.mSampleRateRange.mMinimum == ranged_desc.mSampleRateRange.mMaximum {
+                    vec![ranged_desc.mSampleRateRange.mMinimum as usize]
+                } else {
+                    // Expand continuous ranges against the shared standard rate
+                    // table so clients see all usable discrete rates, not just
+                    // the endpoints.
+                    let min = ranged_desc.mSampleRateRange.mMinimum as usize;
+                    let max = ranged_desc.mSampleRateRange.mMaximum as usize;
+                    crate::STANDARD_RATES
+                        .iter()
+                        .filter(|&&r| (r as usize) >= min && (r as usize) <= max)
+                        .map(|&r| r as usize)
+                        .collect()
+                };
+
+            let rate_map = capabilities_map.entry(channels).or_default();
+            for rate in rates {
+                rate_map.entry(rate).or_default().push(format_str.clone());
+            }
+        }
+    }
+}
+
+pub fn get_device_capabilities(
+    device_name: &str,
+    input: bool,
+) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
+    let device_id = match get_device_id_from_name_and_scope(device_name, input) {
+        Some(id) => id,
+        None => return Err(crate::DeviceError::DeviceNotFound(device_name.to_string())),
+    };
+
+    if !device_supports_scope(device_id, input) {
+        return Err(crate::DeviceError::DeviceNotFound(device_name.to_string()));
+    }
+
+    let mut capabilities_map: CapabilitiesMap = std::collections::HashMap::new();
+
+    get_physical_capabilities(device_id, &mut capabilities_map);
+
+    Ok(crate::AudioDeviceDescriptor {
+        name: device_name.to_string(),
+        description: device_name.to_string(),
+        capability_sets: vec![crate::DeviceCapabilitySet {
+            mode: crate::CapabilityMode::Unified,
+            capabilities: capabilities_from_map(capabilities_map),
+        }],
+    })
+}
+
+fn coreaudio_format_to_str(fmt: CoreAudioSampleFormat) -> &'static str {
+    match fmt {
+        CoreAudioSampleFormat::S16 => "S16",
+        CoreAudioSampleFormat::S24 => "S24",
+        CoreAudioSampleFormat::S32 => "S32",
+        CoreAudioSampleFormat::F32 => "F32",
+    }
+}
+
+fn get_format_from_asbd(asbd: &AudioStreamBasicDescription) -> Option<CoreAudioSampleFormat> {
+    let is_float = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0;
+    let bit_depth = asbd.mBitsPerChannel;
+    if is_float {
+        if bit_depth == 32 {
+            Some(CoreAudioSampleFormat::F32)
+        } else {
+            None
+        }
+    } else {
+        match bit_depth {
+            16 => Some(CoreAudioSampleFormat::S16),
+            24 => Some(CoreAudioSampleFormat::S24),
+            32 => Some(CoreAudioSampleFormat::S32),
+            _ => None,
+        }
+    }
 }
 
 fn device_supports_scope(device_id: u32, input: bool) -> bool {
@@ -215,6 +307,36 @@ fn device_supports_scope(device_id: u32, input: bool) -> bool {
     let nbr_buffers =
         (data_size - mem::size_of::<u32>() as u32) / mem::size_of::<AudioBuffer>() as u32;
     nbr_buffers > 0
+}
+
+type CapabilitiesMap =
+    std::collections::HashMap<usize, std::collections::HashMap<usize, Vec<String>>>;
+
+/// Convert a capabilities map into a sorted Vec<ChannelCapability>.
+fn capabilities_from_map(map: CapabilitiesMap) -> Vec<crate::ChannelCapability> {
+    let mut capabilities: Vec<crate::ChannelCapability> = map
+        .into_iter()
+        .map(|(channels, rate_map)| {
+            let mut samplerates: Vec<crate::SamplerateCapability> = rate_map
+                .into_iter()
+                .map(|(samplerate, mut formats)| {
+                    formats.sort_unstable();
+                    formats.dedup();
+                    crate::SamplerateCapability {
+                        samplerate,
+                        formats,
+                    }
+                })
+                .collect();
+            samplerates.sort_unstable_by_key(|s| s.samplerate);
+            crate::ChannelCapability {
+                channels,
+                samplerates,
+            }
+        })
+        .collect();
+    capabilities.sort_unstable_by_key(|c| c.channels);
+    capabilities
 }
 
 fn open_coreaudio_playback(
@@ -530,6 +652,12 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     warn!("Unable to register playback device alive listener, error: {err}.");
                 }
 
+                let (rate_tx, rate_rx) = mpsc::channel();
+                let mut rate_listener = RateListener::new(device_id, Some(rate_tx));
+                if let Err(err) = rate_listener.register() {
+                    warn!("Unable to register playback rate listener, error: {err}.");
+                }
+
                 match status_channel.send(StatusMessage::PlaybackReady) {
                     Ok(()) => {}
                     Err(_err) => {}
@@ -578,6 +706,21 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             .unwrap_or(());
                         break 'deviceloop;
                     }
+                    match rate_rx.try_recv() {
+                        Ok(rate) => {
+                            debug!("Playback rate change event, new rate: {rate}.");
+                            if rate as usize != samplerate {
+                                status_channel.send(StatusMessage::PlaybackFormatChange(rate as usize)).unwrap_or(());
+                                break 'deviceloop;
+                            }
+                        },
+                        Err(mpsc::TryRecvError::Empty) => {}
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            error!("Rate event queue closed!");
+                            status_channel.send(StatusMessage::PlaybackError("Rate listener channel closed".to_string())).unwrap_or(());
+                            break 'deviceloop;
+                        }
+                    }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
                             let estimated_buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
@@ -616,7 +759,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 }
                             }
                             chunk.update_stats(&mut chunk_stats);
-
+                            crate::push_playback_audio_buffer(&playback_status, &chunk);
                             conversion_result = chunk_to_buffer_rawbytes(
                                 chunk,
                                 &mut buf,
@@ -695,7 +838,10 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
 fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize) -> usize {
     if let Some(resampl) = &resampler {
         #[cfg(feature = "debug")]
-        trace!("Resampler needs {} frames.", resampl.input_frames_next());
+        trace!(
+            "Resampler needs {} frames.",
+            resampl.resampler.input_frames_next()
+        );
         resampl.resampler.input_frames_next()
     } else {
         capture_frames
@@ -852,6 +998,9 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 let mut rms_values = Vec::new();
                 let mut peak_values = Vec::new();
                 let mut rate_adjust = 0.0;
+                // Sample rate measured over the last completed `rate_measure_interval` window,
+                // kept separate from the short update cadence.
+                let mut measured_rate = 0.0;
                 let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                 let mut state = ProcessingState::Running;
                 let blockalign = 4*channels;
@@ -904,7 +1053,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             else if let Some(resampl) = &mut resampler {
                                 debug!("Adjusting resampler rate to {speed}.");
                                 if async_src {
-                                    if resampl.resampler.set_resample_ratio_relative(speed, true).is_err() {
+                                    if resampl.set_resample_ratio_relative(speed, true).is_err() {
                                         debug!("Failed to set resampling speed to {speed}.");
                                     }
                                 }
@@ -972,11 +1121,15 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         tries += 1;
                     }
                     if device_consumer.occupied_len() < (blockalign * capture_frames) {
+                        measured_rate = 0.0;
                         if let Some(mut capture_status) = capture_status.try_write() {
                             capture_status.measured_samplerate = 0;
                             capture_status.signal_range = 0.0;
                             capture_status.rate_adjust = 0.0;
-                            capture_status.state = ProcessingState::Stalled;
+                            crate::update_capture_state(
+                                &mut capture_status,
+                                ProcessingState::Stalled,
+                            );
                         }
                         else {
                             xtrace!("Capture status blocked, skip update.");
@@ -1001,17 +1154,12 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     if let Some(capture_status) = capture_status.try_upgradable_read() {
                         if averager.larger_than_millis(capture_status.update_interval as u64)
                         {
-                            let samples_per_sec = averager.average();
                             averager.restart();
-                            let measured_rate_f = samples_per_sec;
-                            debug!(
-                                "Measured sample rate is {measured_rate_f:.1} Hz."
-                            );
                             if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
-                                capture_status.measured_samplerate = measured_rate_f as usize;
-                                capture_status.signal_range = value_range as f32;
+                                capture_status.measured_samplerate = measured_rate as usize;
+                                capture_status.signal_range = value_range.to_f32();
                                 capture_status.rate_adjust = rate_adjust as f32;
-                                capture_status.state = state;
+                                crate::update_capture_state(&mut capture_status, state);
                             }
                             else {
                                 xtrace!("Capture status upgrade blocked, skip update.");
@@ -1027,6 +1175,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         let samples_per_sec = watcher_averager.average();
                         watcher_averager.restart();
                         let measured_rate_f = samples_per_sec;
+                        measured_rate = measured_rate_f;
                         debug!(
                             "Rate watcher, measured sample rate is {measured_rate_f:.1} Hz."
                         );
@@ -1043,6 +1192,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     }
                     prev_len = device_consumer.occupied_len();
                     chunk.update_stats(&mut chunk_stats);
+                    crate::push_capture_audio_buffer(&capture_status, &chunk);
                     crate::update_capture_signal_status(
                         &capture_status,
                         &chunk_stats,
@@ -1079,7 +1229,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         }
                     };
                 }
-                capture_status.write().state = ProcessingState::Inactive;
+                crate::set_capture_state(&capture_status, ProcessingState::Inactive);
             })?;
         Ok(Box::new(handle))
     }

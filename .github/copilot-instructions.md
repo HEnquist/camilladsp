@@ -19,19 +19,21 @@ This repository is the **CamillaDSP engine** (Rust).
 ## Cargo feature map
 The authoritative feature list is in `Cargo.toml`. When a task depends on optional functionality, check both the feature gate and any platform gate before editing.
 
-- `default = ["websocket"]`: enables the websocket control server by default. Main implementation: `src/socketserver.rs`, with startup and CLI integration in `src/bin.rs` and module gating in `src/lib.rs`.
+There are no default features. The websocket control server is always built in, see `src/websocket_server/mod.rs`, with helper code in `src/websocket_server/utils.rs` and runtime setup in `src/bin.rs` and `src/engine.rs`.
+
 - `threaded-alsa`: switches Linux ALSA playback and capture over to the threaded ALSA backend instead of the legacy backend. Main implementation switch: `src/alsa_backend/mod.rs`. Threaded code lives in `src/alsa_backend/threaded_device.rs` and `src/alsa_backend/threaded_buffermanager.rs`; legacy code lives in `src/alsa_backend/device.rs` and `src/alsa_backend/buffermanager.rs`.
-- `pulse-backend`: enables the Linux PulseAudio backend and related config parsing. Main implementation: `src/pulse_backend/device.rs`, with gating in `src/lib.rs`, `src/audiodevice.rs`, `src/config/mod.rs`, `src/config/utils.rs`, and `src/bin.rs`.
 - `pipewire-backend`: enables the Linux PipeWire backend. Main implementation: `src/pipewire_backend/device.rs`, with module gating in `src/lib.rs`.
-- `cpal-backend`: enables the CPAL-based backend support. Main implementation: `src/cpal_backend/device.rs`, with supporting conversion helpers in `src/utils/conversions.rs` and module gating in `src/lib.rs`.
-- `jack-backend`: enables JACK support through CPAL rather than a separate backend module. Main implementation is still `src/cpal_backend/device.rs`; this feature extends `cpal-backend` and activates CPAL's JACK support in `Cargo.toml`.
-- `bluez-backend`: enables BlueZ and D-Bus integration used by the file backend Bluetooth support. Main implementation: `src/file_backend/bluez.rs`.
 - `asio-backend`: enables the Windows ASIO backend. Main implementation: `src/asio_backend/device.rs` and `src/asio_backend/utils.rs`, with module gating in `src/lib.rs`.
-- `32bit`: changes the internal processing sample type from `f64` to `f32`. Main type definition: `src/lib.rs` (`PrcFmt`), with numerics and conversion consequences across the DSP codebase, especially `src/utils/conversions.rs`, `src/utils/resampling.rs`, and filter implementations.
+The sample precision is not a Cargo feature. It is the rustc cfg `camillafloat_f32`, set with `RUSTFLAGS="--cfg camillafloat_f32"`, which changes the internal processing sample type from `f64` to `f32`. Main type definition: `src/lib.rs` (`CamillaFloat`), with numerics and conversion consequences across the DSP codebase, especially `src/utils/conversions.rs`, `src/utils/resampling.rs`, and filter implementations. Because it is a cfg rather than a feature, `--all-features` does not cover it and it needs its own build to verify.
+
+Rule when adding or changing filters: setup runs in `f64`, processing runs in `CamillaFloat`, telemetry is `f32`. Config values (`src/config/mod.rs`) and coefficient math are always `f64`. Convert to the processing precision exactly once, at the point where a finished value is stored for per-sample use, using `ToCamillaFloat::to_camilla_float()`. `src/filters/biquad.rs` is the reference example: `BiquadCoefficients` is `f64`, `RuntimeCoefficients` is `CamillaFloat`.
+
+Values that only get reported (signal levels, volumes in dB, spectrum data) are `f32`, matching the websocket API, and are converted with `ToF32::to_f32()`. Use these traits rather than `as` casts, so the direction that is a no-op in a given build does not need a `clippy::unnecessary_cast` allow.
+
+The SIMD convolution kernels in `src/filters/fftconv_avx.rs` and `src/filters/fftconv_neon.rs` exist in both precisions and are always compiled, dispatched through the `ConvKernel` trait in `src/filters/fftconv.rs`. Do not put precision cfgs back in those files.
 - `bench`: enables benchmark-only code paths needed by Criterion benches. Main gated code: `src/filters/fftconv.rs`, and the benches themselves live in `benches/`.
-- `websocket`: enables the websocket control and monitoring server. Main implementation: `src/socketserver.rs`, with runtime setup in `src/bin.rs` and module gating in `src/lib.rs`.
-- `secure-websocket`: adds TLS support on top of `websocket`. Main implementation: TLS-specific branches in `src/socketserver.rs` and certificate-related CLI/runtime handling in `src/bin.rs`.
-- `debug`: enables extra trace and debug-only instrumentation, not a separate subsystem. Representative gated locations: `src/lib.rs`, `src/wasapi_backend/device.rs`, `src/coreaudio_backend/device.rs`, and `src/cpal_backend/device.rs`.
+- `secure-websocket`: adds TLS support to the websocket server. Main implementation: TLS-specific branches in `src/websocket_server/mod.rs` and certificate-related CLI/runtime handling in `src/bin.rs`.
+- `debug`: enables extra trace and debug-only instrumentation, not a separate subsystem. Representative gated locations: `src/lib.rs`, `src/wasapi_backend/device.rs`, and `src/coreaudio_backend/device.rs`.
 
 When changing backend selection, config parsing, CLI flags, or websocket behavior, verify the relevant feature-gated code paths and do not assume the default build includes every backend.
 
@@ -50,7 +52,6 @@ When changing backend selection, config parsing, CLI flags, or websocket behavio
 - Backend-specific utility modules:
 	- `src/alsa_backend/utils.rs`
 	- `src/asio_backend/utils.rs`
-	- `src/file_backend/bluez.rs`
 
 When debugging or implementing cross-backend behavior, inspect these utility modules before editing backend-specific loops.
 

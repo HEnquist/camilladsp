@@ -14,41 +14,21 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#[cfg(target_os = "linux")]
-extern crate alsa;
-#[cfg(target_os = "linux")]
-extern crate alsa_sys;
-extern crate clap;
-#[cfg(target_os = "macos")]
-extern crate coreaudio;
-#[cfg(feature = "cpal-backend")]
-extern crate cpal;
-extern crate crossbeam_channel;
-#[cfg(target_os = "macos")]
-extern crate dispatch;
-#[cfg(feature = "pulse-backend")]
-extern crate libpulse_binding as pulse;
-#[cfg(feature = "pulse-backend")]
-extern crate libpulse_simple_binding as psimple;
-#[cfg(feature = "secure-websocket")]
-extern crate native_tls;
-#[cfg(target_os = "linux")]
-extern crate nix;
-extern crate num_complex;
-extern crate num_traits;
-#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-extern crate pipewire;
-extern crate rand;
-extern crate rand_distr;
-extern crate realfft;
-extern crate rubato;
-extern crate serde;
-extern crate serde_with;
-extern crate signal_hook;
-#[cfg(feature = "websocket")]
-extern crate tungstenite;
-//#[cfg(target_os = "windows")]
-//extern crate winapi;
+#![doc = include_str!("../README.crates.md")]
+//!
+//! # API cross-references
+//!
+//! Key modules: [`filters`], [`mixer`], [`processors`], [`pipeline`],
+//! [`config`], [`engine`], [`processing`].
+//!
+//! Key types in this crate root: [`StatusMessage`], [`CommandMessage`],
+//! [`CaptureStatus`], [`PlaybackStatus`], [`CamillaFloat`].
+
+// Full-precision `f64` literals, correct for the default build, hold more digits
+// than an `f32` build can represent. Silence that only in the f32 build.
+// Conversions go through `ToCamillaFloat` and `ToF32` rather than `as` casts, so
+// no cast lint needs suppressing.
+#![cfg_attr(camillafloat_f32, allow(clippy::excessive_precision))]
 
 #[macro_use]
 extern crate log;
@@ -59,8 +39,11 @@ use std::error;
 use std::fmt;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicU32, Ordering},
+    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
 };
+
+/// Global flag set to `true` when a graceful shutdown has been requested (e.g. by SIGTERM).
+pub static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 // Logging macros to give extra logs
 // when the "debug" feature is enabled.
@@ -95,118 +78,241 @@ macro_rules! xerror { ($($x:tt)*) => (
     }
 ) }
 
-// Sample format
-#[cfg(feature = "32bit")]
-pub type PrcFmt = f32;
-#[cfg(not(feature = "32bit"))]
-pub type PrcFmt = f64;
+/// Internal floating-point sample type: `f64` by default, `f32` in an f32 build.
+///
+/// `f64` is correct for nearly all use cases. `f32` is available for the few
+/// setups where it measurably helps, mainly resampling and FIR convolution on
+/// weak in-order CPUs, and is deliberately not a Cargo feature: features are
+/// unified across the whole dependency graph, so any crate depending on this one
+/// could silently flip the precision for everyone else in the build. It is a raw
+/// rustc cfg instead, set with:
+///
+/// ```text
+/// RUSTFLAGS="--cfg camillafloat_f32" cargo build --release
+/// ```
+#[cfg(camillafloat_f32)]
+pub type CamillaFloat = f32;
+/// Internal floating-point sample type: `f64` by default, `f32` in an f32 build.
+///
+/// See the f32 variant of this alias for how to select the other precision.
+#[cfg(not(camillafloat_f32))]
+pub type CamillaFloat = f64;
 
-pub trait NewValue<T> {
-    fn coerce(val: T) -> Self;
+/// Conversion from a setup-time `f64` value to the processing precision.
+///
+/// Configuration values and filter coefficient math always run in `f64`, no
+/// matter what [`CamillaFloat`] is, so that an f32 build gets the same
+/// coefficients as an f64 one and only rounds once, on the way in. This trait
+/// marks that single crossing point: a no-op in a default build, a narrowing
+/// conversion in an f32 build.
+pub trait ToCamillaFloat {
+    /// Convert a setup value into the processing precision.
+    fn to_camilla_float(self) -> CamillaFloat;
 }
 
-impl<PrcFmt> NewValue<PrcFmt> for PrcFmt {
-    fn coerce(val: PrcFmt) -> PrcFmt {
-        val
+#[cfg(camillafloat_f32)]
+impl ToCamillaFloat for f64 {
+    #[inline]
+    fn to_camilla_float(self) -> CamillaFloat {
+        self as f32
     }
 }
 
+#[cfg(not(camillafloat_f32))]
+impl ToCamillaFloat for f64 {
+    #[inline]
+    fn to_camilla_float(self) -> CamillaFloat {
+        self
+    }
+}
+
+/// Conversion from the processing precision down to `f32`.
+///
+/// Signal levels, volumes and spectrum data are reported as `f32` whatever
+/// [`CamillaFloat`] is. Implemented for both float types and written as a method
+/// rather than an `as` cast, so that the direction which is a no-op in a given
+/// build does not need a blanket `clippy::unnecessary_cast` allow over a whole
+/// file, which would also hide genuinely redundant casts.
+pub trait ToF32 {
+    /// Convert to `f32` for reporting.
+    fn to_f32(self) -> f32;
+}
+
+impl ToF32 for f64 {
+    #[inline]
+    fn to_f32(self) -> f32 {
+        self as f32
+    }
+}
+
+impl ToF32 for f32 {
+    #[inline]
+    fn to_f32(self) -> f32 {
+        self
+    }
+}
+
+/// Convenience `Result` type used throughout CamillaDSP.
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
+/// ALSA audio backend (Linux only).
 #[cfg(target_os = "linux")]
 pub mod alsa_backend;
+/// ASIO audio backend (Windows only, requires `asio-backend` feature).
 #[cfg(all(target_os = "windows", feature = "asio-backend"))]
 pub mod asio_backend;
+/// Audio chunk types and per-chunk statistics.
 pub mod audiochunk;
+/// Audio device abstraction and cross-backend message types.
 pub mod audiodevice;
+/// Configuration parsing, validation, and type definitions.
 pub mod config;
+/// CoreAudio backend (macOS only).
 #[cfg(target_os = "macos")]
 pub mod coreaudio_backend;
-#[cfg(feature = "cpal-backend")]
-pub mod cpal_backend;
+/// Top-level engine: device startup, supervisor loop, and restart logic.
+pub mod engine;
+/// Structural wrapper for pipeline signals and channels.
+pub mod engine_pipeline;
+/// The thread that watches for process signals.
+pub mod engine_process_signals;
+/// File, stdin/stdout, and WAV audio backends.
 pub mod file_backend;
+/// Audio filter implementations and the [`filters::Filter`] trait.
 pub mod filters;
+/// Signal-generator capture device.
 pub mod generatordevice;
+/// Mixer: channel routing and gain with the [`mixer::Mixer`] runtime type.
 pub mod mixer;
+/// Processing pipeline: ordered mixer, filter, and processor steps.
 pub mod pipeline;
+/// PipeWire audio backend (Linux only, requires `pipewire-backend` feature).
 #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
 pub mod pipewire_backend;
+/// Processing thread: pipeline loop and config-update handling.
 pub mod processing;
+/// Audio processor implementations and the [`processors::Processor`] trait.
 pub mod processors;
-#[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-pub mod pulse_backend;
-#[cfg(feature = "websocket")]
-pub mod socketserver;
+/// Signal-level event notifications for WebSocket subscribers.
+pub mod signal_monitor;
+/// FFT-based spectrum analysis and the audio ring buffer.
+pub mod spectrum;
+/// Persistent state file (volume, mute, config path).
 pub mod statefile;
+/// Shared utilities: resampling, conversions, timing, dB helpers, and buffer stash.
 pub mod utils;
+/// WASAPI audio backend (Windows only).
 #[cfg(target_os = "windows")]
 pub mod wasapi_backend;
+/// WebSocket control server.
+pub mod websocket_server;
 
+/// Messages sent from audio device threads to the processing supervisor.
 pub enum StatusMessage {
+    /// Playback device is open and ready.
     PlaybackReady,
+    /// Capture device is open and ready.
     CaptureReady,
+    /// Playback device encountered an unrecoverable error.
     PlaybackError(String),
+    /// Capture device encountered an unrecoverable error.
     CaptureError(String),
+    /// Playback device detected a sample-rate change to the given value.
     PlaybackFormatChange(usize),
+    /// Capture device detected a sample-rate change to the given value.
     CaptureFormatChange(usize),
+    /// Playback device thread has finished normally.
     PlaybackDone,
+    /// Capture device thread has finished normally.
     CaptureDone,
+    /// Request to change the resampling speed ratio (async resampling).
     SetSpeed(f64),
+    /// Request to set the master volume (dB).
     SetVolume(f32),
+    /// Request to set the master mute state.
     SetMute(bool),
 }
 
+/// Commands sent from the supervisor to an audio device thread.
 pub enum CommandMessage {
+    /// Change the resampling speed ratio (async resampling only).
     SetSpeed { speed: f64 },
+    /// Tell the device thread to stop gracefully.
     Exit,
 }
 
+/// Outcome returned by the engine after the processing loop ends.
 #[derive(Debug)]
 pub enum ExitState {
+    /// The engine should restart with a (potentially new) configuration.
     Restart,
+    /// The engine should shut down completely.
     Exit,
 }
 
+/// Messages sent to the engine controller (WebSocket server or external caller).
 pub enum ControllerMessage {
+    /// A new configuration has been loaded and should replace the active one.
     // Config must be boxed, to prevent "large size difference between variants" warning
     ConfigChanged(Box<config::Configuration>),
+    /// Stop processing but remain ready for a new configuration.
     Stop,
+    /// Shut down the engine entirely.
     Exit,
 }
 
 #[derive(Clone, Debug, Copy, Serialize, Eq, PartialEq)]
 pub enum ProcessingState {
-    // Processing is running normally.
+    /// Processing is running normally.
     Running,
-    // Processing is paused because input is silent.
+    /// Processing is paused because the input signal is silent.
     Paused,
-    // Processing is off and devices are closed, waiting for a new config.
+    /// Processing is off and devices are closed, waiting for a new configuration.
     Inactive,
-    // Opening devices and starting up processing.
+    /// Opening devices and starting up processing with a new configuration.
     Starting,
-    // Capture device isnt providing data, processing is stalled.
+    /// Capture device is not providing data; processing is stalled.
     Stalled,
 }
 
+/// Live status of the capture device, updated each processing chunk.
 #[derive(Clone, Debug)]
 pub struct CaptureStatus {
+    /// How often (in milliseconds) the WebSocket server pushes status updates.
     pub update_interval: usize,
+    /// Most recently measured capture sample rate in Hz.
     pub measured_samplerate: usize,
+    /// Peak amplitude of the most recent capture chunk (linear, 0..1).
     pub signal_range: f32,
+    /// Rolling history of per-channel RMS levels (squared values).
     pub signal_rms: utils::countertimer::ValueHistory,
+    /// Rolling history of per-channel peak levels.
     pub signal_peak: utils::countertimer::ValueHistory,
+    /// Current processing state (running, paused, stalled, …).
     pub state: ProcessingState,
+    /// Current sample-rate adjustment ratio applied by the async resampler.
     pub rate_adjust: f32,
+    /// Which input channels are active (non-empty waveform).
     pub used_channels: Vec<bool>,
+    /// Ring buffer holding recent capture audio for spectrum analysis.
+    pub audio_buffer: spectrum::AudioRingBuffer,
 }
 
+/// Live status of the playback device, updated each processing chunk.
 #[derive(Clone, Debug)]
 pub struct PlaybackStatus {
+    /// How often (in milliseconds) the WebSocket server pushes status updates.
     pub update_interval: usize,
+    /// Cumulative number of clipped samples since the last config load.
     pub clipped_samples: usize,
+    /// Current playback device buffer fill level in frames.
     pub buffer_level: usize,
+    /// Rolling history of per-channel RMS levels (squared values).
     pub signal_rms: utils::countertimer::ValueHistory,
+    /// Rolling history of per-channel peak levels.
     pub signal_peak: utils::countertimer::ValueHistory,
+    /// Ring buffer holding recent playback audio for spectrum analysis.
+    pub audio_buffer: spectrum::AudioRingBuffer,
 }
 
 pub(crate) fn update_capture_signal_status(
@@ -220,9 +326,61 @@ pub(crate) fn update_capture_signal_status(
     if let Some(mut capture_status) = capture_status.try_write() {
         capture_status.signal_rms.add_record_squared(rms_values);
         capture_status.signal_peak.add_record(peak_values);
+        signal_monitor::mark_capture_updated();
     } else {
         xtrace!("capture status blocked, skip update");
     }
+}
+
+pub(crate) fn push_capture_audio_buffer(
+    capture_status: &Arc<RwLock<CaptureStatus>>,
+    chunk: &audiochunk::AudioChunk,
+) {
+    if !spectrum::spectrum_data_requested() {
+        return;
+    }
+    if let Some(mut status) = capture_status.try_write() {
+        status.audio_buffer.push_chunk(chunk);
+    }
+}
+
+pub(crate) fn push_playback_audio_buffer(
+    playback_status: &Arc<RwLock<PlaybackStatus>>,
+    chunk: &audiochunk::AudioChunk,
+) {
+    if !spectrum::spectrum_data_requested() {
+        return;
+    }
+    if let Some(mut status) = playback_status.try_write() {
+        status.audio_buffer.push_chunk(chunk);
+    }
+}
+
+/// Update `capture_status.state` and notify signal monitors if the state changed.
+pub fn update_capture_state(capture_status: &mut CaptureStatus, state: ProcessingState) {
+    if capture_status.state != state {
+        capture_status.state = state;
+        signal_monitor::mark_state_updated();
+    }
+}
+
+/// Acquire the write lock on `capture_status` and call [`update_capture_state`].
+pub fn set_capture_state(capture_status: &Arc<RwLock<CaptureStatus>>, state: ProcessingState) {
+    let mut capture_status = capture_status.write();
+    update_capture_state(&mut capture_status, state);
+}
+
+/// Update `processing_status.stop_reason` if it has changed.
+pub fn update_stop_reason(processing_status: &mut ProcessingStatus, stop_reason: StopReason) {
+    if processing_status.stop_reason != stop_reason {
+        processing_status.stop_reason = stop_reason;
+    }
+}
+
+/// Acquire the write lock on `processing_status` and call [`update_stop_reason`].
+pub fn set_stop_reason(processing_status: &Arc<RwLock<ProcessingStatus>>, stop_reason: StopReason) {
+    let mut processing_status = processing_status.write();
+    update_stop_reason(&mut processing_status, stop_reason);
 }
 
 pub(crate) fn update_playback_signal_status(
@@ -240,11 +398,13 @@ pub(crate) fn update_playback_signal_status(
         }
         playback_status.signal_rms.add_record_squared(rms_values);
         playback_status.signal_peak.add_record(peak_values);
+        signal_monitor::mark_playback_updated();
     } else {
         xtrace!("playback status blocked, skip update");
     }
 }
 
+/// Lock-free shared state for volume, mute, and load metrics, accessible from any thread.
 #[derive(Debug)]
 pub struct ProcessingParameters {
     // Optimization: volumes are actually `f32`s, but by representing their
@@ -255,14 +415,19 @@ pub struct ProcessingParameters {
     mute: [AtomicBool; Self::NUM_FADERS],
     processing_load: AtomicU32,
     resampler_load: AtomicU32,
+    pause_count: AtomicU64,
 }
 
 impl ProcessingParameters {
+    /// Number of independent volume faders.
     pub const NUM_FADERS: usize = 5;
 
+    /// Default volume level in dB (0 dB = unity gain).
     pub const DEFAULT_VOLUME: f32 = 0.0;
+    /// Default mute state (`false` = unmuted).
     pub const DEFAULT_MUTE: bool = false;
 
+    /// Create a new instance with the given initial volumes (dB) and mute states.
     pub fn new(initial_volumes: &[f32; 5], initial_mutes: &[bool; 5]) -> Self {
         Self {
             target_volume: [
@@ -288,37 +453,68 @@ impl ProcessingParameters {
             ],
             processing_load: AtomicU32::new(0.0f32.to_bits()),
             resampler_load: AtomicU32::new(0.0f32.to_bits()),
+            pause_count: AtomicU64::new(0),
         }
     }
 
+    /// Return the requested target volume (dB) for `fader`.
     pub fn target_volume(&self, fader: usize) -> f32 {
         f32::from_bits(self.target_volume[fader].load(Ordering::Relaxed))
     }
 
+    /// Set the target volume (dB) for `fader`.
     pub fn set_target_volume(&self, fader: usize, target: f32) {
-        self.target_volume[fader].store(target.to_bits(), Ordering::Relaxed)
+        self.target_volume[fader].store(target.to_bits(), Ordering::Relaxed);
     }
 
+    /// Record that audio flow was interrupted, because capture is paused or stalled.
+    ///
+    /// Volume filters compare this counter against the value seen when they last ran, to tell
+    /// whether a volume change was made while audio was flowing (ramp it) or during a pause
+    /// (apply it directly, since ramping from a stale level would fade in at the wrong volume).
+    pub fn bump_pause_count(&self) {
+        self.pause_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Return the number of audio flow interruptions recorded so far.
+    pub fn pause_count(&self) -> u64 {
+        self.pause_count.load(Ordering::Relaxed)
+    }
+
+    /// Return the currently applied volume (dB) for `fader` (may lag behind the target during a ramp).
     pub fn current_volume(&self, fader: usize) -> f32 {
         f32::from_bits(self.current_volume[fader].load(Ordering::Relaxed))
     }
 
+    /// Immediately snap all current volumes to their targets, bypassing any ramp.
+    pub fn sync_volumes_to_target(&self) {
+        for fader in 0..Self::NUM_FADERS {
+            let target = self.target_volume(fader);
+            self.set_current_volume(fader, target);
+        }
+    }
+
+    /// Set the currently applied volume (dB) for `fader`.
     pub fn set_current_volume(&self, fader: usize, current: f32) {
         self.current_volume[fader].store(current.to_bits(), Ordering::Relaxed)
     }
 
+    /// Return the mute state for `fader`.
     pub fn is_mute(&self, fader: usize) -> bool {
         self.mute[fader].load(Ordering::Relaxed)
     }
 
+    /// Set the mute state for `fader`.
     pub fn set_mute(&self, fader: usize, mute: bool) {
         self.mute[fader].store(mute, Ordering::Relaxed)
     }
 
+    /// Toggle the mute state for `fader`; returns the previous state.
     pub fn toggle_mute(&self, fader: usize) -> bool {
         self.mute[fader].fetch_xor(true, Ordering::Relaxed)
     }
 
+    /// Return a snapshot of target volumes (dB) for all faders.
     pub fn volumes(&self) -> [f32; Self::NUM_FADERS] {
         [
             f32::from_bits(self.target_volume[0].load(Ordering::Relaxed)),
@@ -329,6 +525,7 @@ impl ProcessingParameters {
         ]
     }
 
+    /// Return a snapshot of mute states for all faders.
     pub fn mutes(&self) -> [bool; Self::NUM_FADERS] {
         [
             self.mute[0].load(Ordering::Relaxed),
@@ -339,19 +536,23 @@ impl ProcessingParameters {
         ]
     }
 
+    /// Store the pipeline processing load as a percentage (100 % = one chunk duration).
     pub fn set_processing_load(&self, load: f32) {
         self.processing_load
             .store(load.to_bits(), Ordering::Relaxed)
     }
 
+    /// Return the last recorded pipeline processing load percentage.
     pub fn processing_load(&self) -> f32 {
         f32::from_bits(self.processing_load.load(Ordering::Relaxed))
     }
 
+    /// Store the resampler processing load as a percentage.
     pub fn set_resampler_load(&self, load: f32) {
         self.resampler_load.store(load.to_bits(), Ordering::Relaxed)
     }
 
+    /// Return the last recorded resampler processing load percentage.
     pub fn resampler_load(&self) -> f32 {
         f32::from_bits(self.resampler_load.load(Ordering::Relaxed))
     }
@@ -378,32 +579,92 @@ impl Default for ProcessingParameters {
     }
 }
 
+/// Shared status of the current processing run, primarily recording why it stopped.
 #[derive(Clone, Debug)]
 pub struct ProcessingStatus {
+    /// The reason the last processing run ended (or `None` while still running).
     pub stop_reason: StopReason,
 }
 
+/// Reason a processing run ended, reported via [`ProcessingStatus`].
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum StopReason {
+    /// Processing is still running; not yet stopped.
     None,
+    /// Processing completed normally (e.g. end of file input).
     Done,
+    /// Capture device reported an error.
     CaptureError(String),
+    /// Playback device reported an error.
     PlaybackError(String),
+    /// An unexpected internal error occurred.
     UnknownError(String),
+    /// Capture device sample rate changed to the given value.
     CaptureFormatChange(usize),
+    /// Playback device sample rate changed to the given value.
     PlaybackFormatChange(usize),
 }
 
+/// Bundle of `Arc`-wrapped status objects passed between the engine, device threads, and WebSocket server.
 #[derive(Clone)]
 pub struct StatusStructs {
+    /// Shared capture status (sample rate, signal levels, processing state).
     pub capture: Arc<RwLock<CaptureStatus>>,
+    /// Shared playback status (buffer level, signal levels, clipped samples).
     pub playback: Arc<RwLock<PlaybackStatus>>,
+    /// Lock-free volume, mute, and load parameters.
     pub processing: Arc<ProcessingParameters>,
+    /// Stop reason and other run-level status.
     pub status: Arc<RwLock<ProcessingStatus>>,
 }
 
+impl Default for CaptureStatus {
+    fn default() -> Self {
+        Self {
+            measured_samplerate: 0,
+            update_interval: 1000,
+            signal_range: 0.0,
+            rate_adjust: 0.0,
+            state: ProcessingState::Inactive,
+            signal_rms: utils::countertimer::ValueHistory::new(1024, 2),
+            signal_peak: utils::countertimer::ValueHistory::new(1024, 2),
+            used_channels: Vec::new(),
+            audio_buffer: Default::default(),
+        }
+    }
+}
+
+impl Default for PlaybackStatus {
+    fn default() -> Self {
+        Self {
+            buffer_level: 0,
+            clipped_samples: 0,
+            update_interval: 1000,
+            signal_rms: utils::countertimer::ValueHistory::new(1024, 2),
+            signal_peak: utils::countertimer::ValueHistory::new(1024, 2),
+            audio_buffer: Default::default(),
+        }
+    }
+}
+
+impl Default for StatusStructs {
+    fn default() -> Self {
+        Self {
+            capture: Arc::new(RwLock::new(CaptureStatus::default())),
+            playback: Arc::new(RwLock::new(PlaybackStatus::default())),
+            processing: Arc::new(ProcessingParameters::default()),
+            status: Arc::new(RwLock::new(ProcessingStatus {
+                stop_reason: StopReason::None,
+            })),
+        }
+    }
+}
+
+/// Shared access to the active and previous configurations, used when hot-reloading.
 pub struct SharedConfigs {
+    /// The configuration currently driving the running pipeline, if any.
     pub active: Arc<Mutex<Option<config::Configuration>>>,
+    /// The configuration that was active before the last reload, for diffing.
     pub previous: Arc<Mutex<Option<config::Configuration>>>,
 }
 
@@ -420,6 +681,7 @@ impl fmt::Display for ProcessingState {
     }
 }
 
+/// Return `(playback_types, capture_types)`: the device type names supported by this build.
 pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     let mut playbacktypes = vec!["File".to_owned(), "Stdout".to_owned()];
     let mut capturetypes = vec![
@@ -433,20 +695,9 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         playbacktypes.push("Alsa".to_owned());
         capturetypes.push("Alsa".to_owned());
     }
-    if cfg!(all(target_os = "linux", feature = "pulse-backend")) {
-        playbacktypes.push("Pulse".to_owned());
-        capturetypes.push("Pulse".to_owned());
-    }
     if cfg!(all(target_os = "linux", feature = "pipewire-backend")) {
         playbacktypes.push("PipeWire".to_owned());
         capturetypes.push("PipeWire".to_owned());
-    }
-    if cfg!(all(target_os = "linux", feature = "bluez-backend")) {
-        capturetypes.push("Bluez".to_owned());
-    }
-    if cfg!(all(target_os = "linux", feature = "jack-backend")) {
-        playbacktypes.push("Jack".to_owned());
-        capturetypes.push("Jack".to_owned());
     }
     if cfg!(target_os = "macos") {
         playbacktypes.push("CoreAudio".to_owned());
@@ -463,9 +714,66 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     (playbacktypes, capturetypes)
 }
 
-// Return a list of supported devices.
-// Returns two strings per device, the device name and a readable name.
-// Some backends do not make a diference between these, and return the same name twice.
+/// Curated list of standard audio sample rates used across all backends
+/// for capability probing. Backends should use this instead of defining
+/// their own local rate tables.
+pub const STANDARD_RATES: &[u32] = &[
+    5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
+    352800, 384000, 705600, 768000,
+];
+
+/// The sample formats supported by a device at a specific sample rate.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct SamplerateCapability {
+    /// Sample rate in Hz.
+    pub samplerate: usize,
+    /// Names of the supported sample formats at this rate.
+    pub formats: Vec<String>,
+}
+
+/// The sample rates (and their formats) supported by a device at a specific channel count.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct ChannelCapability {
+    /// Number of channels.
+    pub channels: usize,
+    /// Supported sample rates for this channel count.
+    pub samplerates: Vec<SamplerateCapability>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub enum CapabilityMode {
+    /// Device uses a unified capability model (ALSA, CoreAudio, ASIO).
+    Unified,
+    /// WASAPI shared-mode capabilities (derived from the mix format).
+    Shared,
+    /// WASAPI exclusive-mode capabilities (probed independently).
+    Exclusive,
+}
+
+/// A set of device capabilities associated with a single access mode (e.g. exclusive vs. shared).
+#[derive(Debug, PartialEq, Serialize)]
+pub struct DeviceCapabilitySet {
+    /// The access mode these capabilities were probed under.
+    pub mode: CapabilityMode,
+    /// Per-channel-count capability entries.
+    pub capabilities: Vec<ChannelCapability>,
+}
+
+/// Full capability descriptor for a named audio device.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct AudioDeviceDescriptor {
+    /// Backend-specific device identifier (e.g. `"hw:0,0"` for ALSA).
+    pub name: String,
+    /// Human-readable device name.
+    pub description: String,
+    /// Capability sets, one per access mode supported by the backend.
+    pub capability_sets: Vec<DeviceCapabilitySet>,
+}
+
+/// Return available device names for `backend` (`"alsa"`, `"coreaudio"`, `"wasapi"`, `"asio"`).
+///
+/// Each entry is `(device_id, human_readable_name)`. Some backends return the same string twice.
+/// Pass `input = true` for capture devices, `false` for playback.
 pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String)> {
     match backend.to_lowercase().as_str() {
         #[cfg(target_os = "linux")]
@@ -473,9 +781,41 @@ pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String
         #[cfg(target_os = "macos")]
         "coreaudio" => coreaudio_backend::device::list_available_devices(input),
         #[cfg(target_os = "windows")]
-        "wasapi" => wasapi_backend::device::list_device_names(input),
+        "wasapi" => wasapi_backend::capabilities::list_device_names(input),
         #[cfg(all(target_os = "windows", feature = "asio-backend"))]
         "asio" => asio_backend::device::list_available_devices(),
         _ => Vec::new(),
+    }
+}
+
+/// Error returned by [`get_device_capabilities`] when probing a device fails.
+#[derive(Debug, PartialEq, serde::Serialize)]
+pub enum DeviceError {
+    /// No device with the given name was found.
+    DeviceNotFound(String),
+    /// The device exists but could not be opened (e.g. already in use).
+    DeviceBusy(String),
+    /// Any other backend-specific error.
+    Other(String),
+}
+
+/// Probe and return the full capability descriptor for `device_name` on `backend`.
+///
+/// Pass `input = true` for capture devices, `false` for playback.
+pub fn get_device_capabilities(
+    backend: &str,
+    device_name: &str,
+    input: bool,
+) -> Result<AudioDeviceDescriptor, DeviceError> {
+    match backend.to_lowercase().as_str() {
+        #[cfg(target_os = "linux")]
+        "alsa" => alsa_backend::utils::get_device_capabilities(device_name, input),
+        #[cfg(target_os = "macos")]
+        "coreaudio" => coreaudio_backend::device::get_device_capabilities(device_name, input),
+        #[cfg(target_os = "windows")]
+        "wasapi" => wasapi_backend::capabilities::get_device_capabilities(device_name, input),
+        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        "asio" => asio_backend::device::get_device_capabilities(device_name, input),
+        _ => Err(DeviceError::Other("Unsupported backend".to_string())),
     }
 }

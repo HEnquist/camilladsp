@@ -14,6 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::ToF32;
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config;
@@ -31,15 +32,14 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Duration;
 use wasapi;
-use wasapi::DeviceCollection;
 use wasapi::StreamMode;
 
-use audio_thread_priority::{
+use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 
+use super::capabilities::list_device_names_in_collection;
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
@@ -76,8 +76,8 @@ pub struct WasapiCaptureDevice {
     pub chunksize: usize,
     pub channels: usize,
     pub sample_format: Option<WasapiSampleFormat>,
-    pub silence_threshold: PrcFmt,
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: f64,
+    pub silence_timeout: f64,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub polling: bool,
@@ -89,107 +89,136 @@ enum DisconnectReason {
     Error,
 }
 
-pub fn list_device_names(input: bool) -> Vec<(String, String)> {
-    let direction = if input {
-        wasapi::Direction::Capture
-    } else {
-        wasapi::Direction::Render
-    };
-    let _ = wasapi::initialize_mta();
-    let enumerator = wasapi::DeviceEnumerator::new();
-
-    let names = enumerator
-        .map(|en| {
-            en.get_device_collection(&direction)
-                .map(|coll| list_device_names_in_collection(&coll).unwrap_or_default())
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
-    names.iter().map(|n| (n.clone(), n.clone())).collect()
-}
-
-fn list_device_names_in_collection(collection: &DeviceCollection) -> Res<Vec<String>> {
-    let mut names = Vec::new();
-    let count = collection.get_nbr_devices()?;
-    for n in 0..count {
-        let device = collection.get_device_at_index(n)?;
-        let name = device.get_friendlyname()?;
-        names.push(name);
-    }
-    Ok(names)
-}
-
 fn build_wave_format(
     sample_format: &BinarySampleFormat,
     samplerate: usize,
     channels: usize,
+    channel_mask: Option<u32>,
 ) -> wasapi::WaveFormat {
     match sample_format {
-        BinarySampleFormat::S16_LE => {
-            wasapi::WaveFormat::new(16, 16, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
-        BinarySampleFormat::S24_4_LJ_LE => {
-            wasapi::WaveFormat::new(32, 24, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
-        BinarySampleFormat::S24_3_LE => {
-            wasapi::WaveFormat::new(24, 24, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
-        BinarySampleFormat::S32_LE => {
-            wasapi::WaveFormat::new(32, 32, &wasapi::SampleType::Int, samplerate, channels, None)
-        }
+        BinarySampleFormat::S16_LE => wasapi::WaveFormat::new(
+            16,
+            16,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
+        BinarySampleFormat::S24_4_LJ_LE => wasapi::WaveFormat::new(
+            32,
+            24,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
+        BinarySampleFormat::S24_3_LE => wasapi::WaveFormat::new(
+            24,
+            24,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
+        BinarySampleFormat::S32_LE => wasapi::WaveFormat::new(
+            32,
+            32,
+            &wasapi::SampleType::Int,
+            samplerate,
+            channels,
+            channel_mask,
+        ),
         BinarySampleFormat::F32_LE => wasapi::WaveFormat::new(
             32,
             32,
             &wasapi::SampleType::Float,
             samplerate,
             channels,
-            None,
+            channel_mask,
         ),
         _ => unreachable!(),
     }
 }
 
-fn get_supported_wave_format(
+pub(super) fn get_supported_wave_format(
     audio_client: &wasapi::AudioClient,
     sample_format: &WasapiSampleFormat,
     samplerate: usize,
     channels: usize,
     sharemode: &wasapi::ShareMode,
 ) -> Res<(wasapi::WaveFormat, BinarySampleFormat)> {
+    get_supported_wave_format_with_channel_mask(
+        audio_client,
+        sample_format,
+        samplerate,
+        channels,
+        sharemode,
+        None,
+    )
+}
+
+pub(super) fn get_supported_wave_format_with_channel_mask(
+    audio_client: &wasapi::AudioClient,
+    sample_format: &WasapiSampleFormat,
+    samplerate: usize,
+    channels: usize,
+    sharemode: &wasapi::ShareMode,
+    channel_mask: Option<u32>,
+) -> Res<(wasapi::WaveFormat, BinarySampleFormat)> {
     match sharemode {
         wasapi::ShareMode::Exclusive => match sample_format {
             WasapiSampleFormat::S16 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S16_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S16_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::S16_LE,
                 ))
             }
             WasapiSampleFormat::S32 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S32_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S32_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::S32_LE,
                 ))
             }
             WasapiSampleFormat::F32 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::F32_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::F32_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::F32_LE,
                 ))
             }
             WasapiSampleFormat::S24 => {
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S24_3_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S24_3_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 if let Ok(wavefmt) = audio_client.is_supported_exclusive_with_quirks(&wave_format) {
                     return Ok((wavefmt, BinarySampleFormat::S24_3_LE));
                 }
-                let wave_format =
-                    build_wave_format(&BinarySampleFormat::S24_4_LJ_LE, samplerate, channels);
+                let wave_format = build_wave_format(
+                    &BinarySampleFormat::S24_4_LJ_LE,
+                    samplerate,
+                    channels,
+                    channel_mask,
+                );
                 Ok((
                     audio_client.is_supported_exclusive_with_quirks(&wave_format)?,
                     BinarySampleFormat::S24_4_LJ_LE,
@@ -197,7 +226,8 @@ fn get_supported_wave_format(
             }
         },
         wasapi::ShareMode::Shared => {
-            let wave_format = build_wave_format(&BinarySampleFormat::F32_LE, samplerate, channels);
+            let wave_format =
+                build_wave_format(&BinarySampleFormat::F32_LE, samplerate, channels, None);
             match audio_client.is_supported(&wave_format, sharemode) {
                 Ok(None) => {
                     debug!("Device supports format {wave_format:?}.");
@@ -511,9 +541,9 @@ fn playback_loop(
         }
     };
 
-    audio_client.start_stream()?;
     let mut running = false;
     let mut starting = true;
+    let mut started = false;
     let (device_period_hns, _) = audio_client.get_device_period()?;
     // set poll delay to one device period, may be shorter than needed
     let poll_delay = std::time::Duration::from_micros(device_period_hns as u64 / 10);
@@ -523,6 +553,15 @@ fn playback_loop(
             poll_delay.as_micros()
         );
     }
+    // Fill the endpoint buffer with the first block before starting the stream,
+    // so playback begins with real audio (preceded by the target_level silence)
+    // instead of an empty buffer. This follows the ordering recommended by Microsoft:
+    // https://learn.microsoft.com/en-us/windows/win32/coreaudio/rendering-a-stream
+    // The first pass does this prefill and then starts the stream. Every later pass
+    // is preceded by the event wait (or poll sleep) at the end of the previous pass,
+    // which matters because in exclusive event mode get_available_space_in_frames
+    // always returns the full buffer size: without the preceding wait we would
+    // rewrite the buffer while the hardware reads it.
     loop {
         buffer_free_frame_count = audio_client.get_available_space_in_frames()?;
         trace!("Playback, new buffer frame count {buffer_free_frame_count}.");
@@ -561,7 +600,10 @@ fn playback_loop(
                     {
                         sample_queue.push_back(0);
                     }
-                    if running {
+                    // While prefilling (before the stream is started) a short
+                    // fill just gets padded with silence and is not an
+                    // interruption, so skip the underrun handling until started.
+                    if started && running {
                         running = false;
                         warn!("Playback interrupted, no data available.");
                     }
@@ -581,7 +623,11 @@ fn playback_loop(
         if let Ok(mut estimator) = sync.bufferfill.try_lock() {
             estimator.add(curr_buffer_fill)
         }
-        //println!("{} bef",prev_inst.elapsed().as_micros());
+        if !started {
+            // The buffer now holds the first block, start playback.
+            audio_client.start_stream()?;
+            started = true;
+        }
         if let Some(ref h) = handle {
             if h.wait_for_event(1000).is_err() {
                 error!("Error on playback, stopping stream");
@@ -999,6 +1045,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                 }
                             }
                             chunk.update_stats(&mut chunk_stats);
+                            crate::push_playback_audio_buffer(&playback_status, &chunk);
                             conversion_result =
                                 chunk_to_buffer_rawbytes(chunk, &mut buf, &binary_format);
                             crate::update_playback_signal_status(
@@ -1269,6 +1316,9 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let mut rms_values = Vec::new();
                 let mut peak_values = Vec::new();
                 let mut rate_adjust = 0.0;
+                // Sample rate measured over the last completed `rate_measure_interval` window,
+                // kept separate from the short update cadence.
+                let mut measured_rate = 0.0;
                 let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
                 let mut state = ProcessingState::Running;
                 let mut saved_state = state;
@@ -1311,7 +1361,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             if let Some(resampl) = &mut resampler {
                                 debug!("Adjusting resampler rate to {speed}.");
                                 if async_src {
-                                    if resampl.resampler.set_resample_ratio_relative(speed, true).is_err() {
+                                    if resampl.set_resample_ratio_relative(speed, true).is_err() {
                                         debug!("Failed to set resampling speed to {speed}.");
                                     }
                                 }
@@ -1387,14 +1437,12 @@ impl CaptureDevice for WasapiCaptureDevice {
                         if let Some(capture_status) = capture_status.try_upgradable_read() {
                             if averager.larger_than_millis(capture_status.update_interval as u64)
                             {
-                                let samples_per_sec = averager.average();
                                 averager.restart();
-                                let measured_rate_f = samples_per_sec;
                                 if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
-                                    capture_status.measured_samplerate = measured_rate_f as usize;
-                                    capture_status.signal_range = value_range as f32;
+                                    capture_status.measured_samplerate = measured_rate as usize;
+                                    capture_status.signal_range = value_range.to_f32();
                                     capture_status.rate_adjust = rate_adjust as f32;
-                                    capture_status.state = state;
+                                    crate::update_capture_state(&mut capture_status, state);
                                 }
                                 else {
                                     xtrace!("Capture status upgrade blocked, skip update.");
@@ -1410,6 +1458,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             let samples_per_sec = watcher_averager.average();
                             watcher_averager.restart();
                             let measured_rate_f = samples_per_sec;
+                            measured_rate = measured_rate_f;
                             debug!(
                                 "Capture, measured sample rate is {measured_rate_f:.1} Hz."
                             );
@@ -1433,6 +1482,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                             false,
                         );
                         chunk.update_stats(&mut chunk_stats);
+                        crate::push_capture_audio_buffer(&capture_status, &chunk);
                         crate::update_capture_signal_status(
                             &capture_status,
                             &chunk_stats,
@@ -1473,7 +1523,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                 stop_signal.store(true, Ordering::Relaxed);
                 debug!("Wait for inner capture thread to exit.");
                 innerhandle.join().unwrap_or(());
-                capture_status.write().state = ProcessingState::Inactive;
+                crate::set_capture_state(&capture_status, ProcessingState::Inactive);
             })?;
         Ok(Box::new(handle))
     }

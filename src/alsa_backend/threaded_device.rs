@@ -14,22 +14,21 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-extern crate alsa;
-extern crate nix;
+use crate::ToF32;
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config::{AlsaSampleFormat, BinarySampleFormat, Resampler};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
+use crate::utils::rt_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
 use alsa::ctl::{Ctl, ElemId, ElemIface, ElemType, ElemValue};
 use alsa::hctl::HCtl;
 use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::poll::Descriptors;
 use alsa::{Direction, ValueOr};
 use alsa_sys;
-use audio_thread_priority::{
-    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
-};
 use crossbeam_channel;
 use nix::errno::Errno;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
@@ -42,7 +41,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
@@ -56,7 +54,7 @@ use crate::alsa_backend::utils::{
 };
 use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
-use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
+use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
 static ALSA_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -79,8 +77,8 @@ pub struct AlsaCaptureDevice {
     pub chunksize: usize,
     pub channels: usize,
     pub sample_format: Option<AlsaSampleFormat>,
-    pub silence_threshold: PrcFmt,
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: f64,
+    pub silence_timeout: f64,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
@@ -392,6 +390,11 @@ fn run_playback_inner_loop<C>(
                         end_of_stream = true;
                         break;
                     }
+                    Ok(PlaybackDeviceMessage::Stop) => {
+                        let drop_res = pcmdevice.drop();
+                        trace!("pcm_drop result {drop_res:?}");
+                        break;
+                    }
                     Err(crossbeam_channel::TryRecvError::Empty) => break,
                     Err(crossbeam_channel::TryRecvError::Disconnected) => {
                         channel_disconnected = true;
@@ -499,6 +502,11 @@ fn run_playback_inner_loop<C>(
                     if !pcm_paused {
                         pcmdevice.drain().unwrap_or_default();
                     }
+                    break;
+                }
+                Ok(PlaybackDeviceMessage::Stop) => {
+                    let drop_res = pcmdevice.drop();
+                    trace!("pcm_drop result {drop_res:?}");
                     break;
                 }
                 Err(crossbeam_channel::TryRecvError::Empty) => {
@@ -726,6 +734,9 @@ fn capture_buffer(
     params: &mut CaptureParams,
     processing_params: &Arc<ProcessingParameters>,
 ) -> Res<(CaptureResult, usize)> {
+    if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok((CaptureResult::Done, 0));
+    }
     let capture_state = pcmdevice.state_raw();
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("Prepare capture device");
@@ -750,9 +761,11 @@ fn capture_buffer(
         );
         pcmdevice.start()?;
     }
-    let millis_per_chunk = 1000 * frames_to_read / params.samplerate;
+    // `frames_to_read` is counted on the capture side, so the wait timeout must be
+    // derived from the capture rate and not the pipeline rate.
+    let millis_per_chunk = 1000.0 * frames_to_read as f32 / params.capture_samplerate as f32;
 
-    let mut timeout_millis = 8 * millis_per_chunk as u32;
+    let mut timeout_millis = (8.0 * millis_per_chunk) as u32;
     if timeout_millis < 20 {
         timeout_millis = 20;
     }
@@ -762,12 +775,21 @@ fn capture_buffer(
         None
     };
     trace!("Capture pcmdevice.wait with timeout {timeout_millis} ms");
+    let mut remaining_timeout_millis = timeout_millis;
     loop {
-        match fds.wait(timeout_millis as i32) {
+        if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok((CaptureResult::Done, 0));
+        }
+        let poll_slice_millis = remaining_timeout_millis.min(20);
+        match fds.wait(poll_slice_millis as i32) {
             Ok(pollresult) => {
                 if pollresult.poll_res == 0 {
-                    debug!("Capture wait timed out after {timeout_millis} ms, device stalled");
-                    return Ok((CaptureResult::Stalled, 0));
+                    if remaining_timeout_millis <= poll_slice_millis {
+                        debug!("Capture wait timed out after {timeout_millis} ms, device stalled");
+                        return Ok((CaptureResult::Stalled, 0));
+                    }
+                    remaining_timeout_millis -= poll_slice_millis;
+                    continue;
                 }
                 if pollresult.ctl {
                     trace!("Got a control event");
@@ -789,6 +811,8 @@ fn capture_buffer(
                     trace!("Capture waited for {:?}", start.map(|s| s.elapsed()));
                     break;
                 }
+                remaining_timeout_millis =
+                    remaining_timeout_millis.saturating_sub(poll_slice_millis);
             }
             Err(err) => match Errno::from_raw(err.errno()) {
                 Errno::EPIPE => {
@@ -813,6 +837,9 @@ fn capture_buffer(
                 }
             },
         }
+    }
+    if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok((CaptureResult::Done, 0));
     }
     match io.readi(buffer) {
         Ok(frames_read) => {
@@ -953,6 +980,30 @@ fn send_capture_audio(
     }
 }
 
+fn send_playback_device_message(
+    channel: &crossbeam_channel::Sender<PlaybackDeviceMessage>,
+    msg: PlaybackDeviceMessage,
+) -> bool {
+    let is_droppable = matches!(
+        msg,
+        PlaybackDeviceMessage::Data(_) | PlaybackDeviceMessage::SetPitch(_)
+    );
+    let mut pending = msg;
+    loop {
+        match channel.send_timeout(pending, std::time::Duration::from_millis(20)) {
+            Ok(()) => return true,
+            Err(crossbeam_channel::SendTimeoutError::Timeout(msg)) => {
+                if is_droppable && SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+                    trace!("Playback: inner queue full during shutdown, dropping message");
+                    return true;
+                }
+                pending = msg;
+            }
+            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => return false,
+        }
+    }
+}
+
 fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize) -> usize {
     if let Some(resampl) = &resampler {
         resampl.resampler.input_frames_next()
@@ -970,6 +1021,7 @@ enum PlaybackDeviceMessage {
     Data(usize),
     Pause,
     EndOfStream,
+    Stop,
     SetPitch(f64),
 }
 
@@ -1007,19 +1059,15 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (tx_dev, rx_dev) = crossbeam_channel::bounded(channel_capacity);
                 let (tx_state_dev, rx_state_dev) = crossbeam_channel::bounded(0);
-                let (tx_start, rx_start) = crossbeam_channel::bounded(0);
 
                 let ringbuffer_bytes_per_sample = conf_sample_format
                     .map(|format| format.to_binary_format().bytes_per_sample())
                     .unwrap_or(std::mem::size_of::<f64>());
-                let playback_prefill_frames = target_level.max(3 * chunksize);
-                let ringbuffer_frame_capacity = playback_prefill_frames + 4 * chunksize;
+                let ringbuffer_frame_capacity = target_level.max(3 * chunksize) + 4 * chunksize;
                 let ringbuffer = HeapRb::<u8>::new(
                     channels * ringbuffer_bytes_per_sample * ringbuffer_frame_capacity,
                 );
                 let (mut device_producer, mut device_consumer) = ringbuffer.split();
-                let playback_prefill_bytes =
-                    channels * ringbuffer_bytes_per_sample * playback_prefill_frames;
 
                 let status_channel_inner = status_channel.clone();
                 let buffer_fill = Arc::new(Mutex::new(
@@ -1045,9 +1093,6 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                 tx_state_dev
                                     .send(AlsaThreadState::Ready(binary_format))
                                     .unwrap_or(());
-                                if rx_start.recv().is_err() {
-                                    return;
-                                }
 
                                 let io = pcmdevice.io_bytes();
 
@@ -1145,7 +1190,6 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             adjust_period as f64,
                             target_level,
                         );
-                        let mut inner_started = false;
 
                         loop {
                             match channel.recv() {
@@ -1175,15 +1219,17 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         status_channel
                                             .send(StatusMessage::SetSpeed(speed))
                                             .unwrap_or(());
-                                        tx_dev
-                                            .send(PlaybackDeviceMessage::SetPitch(speed))
-                                            .unwrap_or(());
+                                        let _ = send_playback_device_message(
+                                            &tx_dev,
+                                            PlaybackDeviceMessage::SetPitch(speed),
+                                        );
                                         if let Some(mut ps) = playback_status.try_write() {
                                             ps.buffer_level = av_delay as usize;
                                         }
                                     }
 
                                     chunk.update_stats(&mut chunk_stats);
+                                    crate::push_playback_audio_buffer(&playback_status, &chunk);
                                     let conversion_result =
                                         chunk_to_buffer_rawbytes(chunk, &mut buf, &binary_format);
                                     crate::update_playback_signal_status(
@@ -1213,10 +1259,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         );
                                         continue;
                                     }
-                                    if tx_dev
-                                        .send(PlaybackDeviceMessage::Data(bytes_to_write))
-                                        .is_err()
-                                    {
+                                    if !send_playback_device_message(
+                                        &tx_dev,
+                                        PlaybackDeviceMessage::Data(bytes_to_write),
+                                    ) {
                                         status_channel
                                             .send(StatusMessage::PlaybackError(
                                                 "Playback inner queue closed".to_string(),
@@ -1224,42 +1270,36 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                             .unwrap_or(());
                                         break;
                                     }
-                                    if !inner_started
-                                        && device_producer.occupied_len() >= playback_prefill_bytes
-                                    {
-                                        debug!(
-                                            "Starting playback inner thread after prefilling {} bytes (target {} bytes).",
-                                            device_producer.occupied_len(),
-                                            playback_prefill_bytes
-                                        );
-                                        tx_start.send(()).unwrap_or(());
-                                        inner_started = true;
-                                    }
                                 }
                                 Ok(AudioMessage::Pause) => {
-                                    tx_dev.send(PlaybackDeviceMessage::Pause).unwrap_or(());
+                                    let _ = send_playback_device_message(
+                                        &tx_dev,
+                                        PlaybackDeviceMessage::Pause,
+                                    );
                                 }
                                 Ok(AudioMessage::EndOfStream) => {
-                                    if !inner_started {
-                                        debug!(
-                                            "Starting playback inner thread without full prefill because end of stream was received."
-                                        );
-                                        tx_start.send(()).unwrap_or(());
-                                    }
-                                    tx_dev.send(PlaybackDeviceMessage::EndOfStream).unwrap_or(());
+                                    let msg = if SHUTDOWN_REQUESTED
+                                        .load(std::sync::atomic::Ordering::Relaxed)
+                                    {
+                                        PlaybackDeviceMessage::Stop
+                                    } else {
+                                        PlaybackDeviceMessage::EndOfStream
+                                    };
+                                    let _ = send_playback_device_message(&tx_dev, msg);
                                     break;
                                 }
                                 Err(err) => {
                                     status_channel
                                         .send(StatusMessage::PlaybackError(err.to_string()))
                                         .unwrap_or(());
-                                    if !inner_started {
-                                        debug!(
-                                            "Starting playback inner thread without full prefill because the playback channel closed."
-                                        );
-                                        tx_start.send(()).unwrap_or(());
-                                    }
-                                    tx_dev.send(PlaybackDeviceMessage::EndOfStream).unwrap_or(());
+                                    let msg = if SHUTDOWN_REQUESTED
+                                        .load(std::sync::atomic::Ordering::Relaxed)
+                                    {
+                                        PlaybackDeviceMessage::Stop
+                                    } else {
+                                        PlaybackDeviceMessage::EndOfStream
+                                    };
+                                    let _ = send_playback_device_message(&tx_dev, msg);
                                     break;
                                 }
                             }
@@ -1618,7 +1658,10 @@ impl CaptureDevice for AlsaCaptureDevice {
                                         }
                                     };
                                 }
-                                cap_params.capture_status.write().state = ProcessingState::Inactive;
+                                crate::set_capture_state(
+                                    &cap_params.capture_status,
+                                    ProcessingState::Inactive,
+                                );
                             }
                             Err(err) => {
                                 tx_state_dev
@@ -1650,6 +1693,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                         let mut rms_values = Vec::new();
                         let mut peak_values = Vec::new();
                         let mut rate_adjust = 0.0;
+                        // Sample rate measured over the last completed `rate_measure_interval`
+                        // window, kept separate from the short update cadence.
+                        let mut measured_rate = 0.0;
                         let mut silence_counter = countertimer::SilenceCounter::new(
                             silence_threshold,
                             silence_timeout,
@@ -1692,7 +1738,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     if let Some(resampl) = &mut resampler {
                                         if async_src {
                                             if resampl
-                                                .resampler
                                                 .set_resample_ratio_relative(speed, true)
                                                 .is_err()
                                             {
@@ -1769,9 +1814,11 @@ impl CaptureDevice for AlsaCaptureDevice {
                             }
 
                             if device_stalled {
-                                state = ProcessingState::Stalled;
-                                if !send_capture_audio(&channel, AudioMessage::Pause) {
-                                    break;
+                                if state != ProcessingState::Stalled {
+                                    state = ProcessingState::Stalled;
+                                    if !send_capture_audio(&channel, AudioMessage::Pause) {
+                                        break;
+                                    }
                                 }
                                 continue;
                             }
@@ -1782,17 +1829,14 @@ impl CaptureDevice for AlsaCaptureDevice {
                             if let Some(capture_status_guard) = capture_status.try_upgradable_read()
                                 && averager.larger_than_millis(capture_status_guard.update_interval as u64)
                             {
-                                let bytes_per_sec = averager.average();
                                 averager.restart();
-                                let measured_rate_f =
-                                    bytes_per_sec / (channels * bytes_per_sample) as f64;
                                 if let Ok(mut capture_status) =
                                     RwLockUpgradableReadGuard::try_upgrade(capture_status_guard)
                                 {
-                                    capture_status.measured_samplerate = measured_rate_f as usize;
-                                    capture_status.signal_range = value_range as f32;
+                                    capture_status.measured_samplerate = measured_rate as usize;
+                                    capture_status.signal_range = value_range.to_f32();
                                     capture_status.rate_adjust = rate_adjust as f32;
-                                    capture_status.state = state;
+                                    crate::update_capture_state(&mut capture_status, state);
                                 }
                             }
 
@@ -1803,6 +1847,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 watcher_averager.restart();
                                 let measured_rate_f =
                                     bytes_per_sec / (channels * bytes_per_sample) as f64;
+                                measured_rate = measured_rate_f;
                                 let changed = valuewatcher.check_value(measured_rate_f as f32);
                                 if changed && stop_on_rate_change {
                                     let _ = send_capture_audio(&channel, AudioMessage::EndOfStream);
@@ -1825,6 +1870,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             );
 
                             chunk.update_stats(&mut chunk_stats);
+                            crate::push_capture_audio_buffer(&capture_status, &chunk);
                             crate::update_capture_signal_status(
                                 &capture_status,
                                 &chunk_stats,
@@ -1859,7 +1905,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 }
                             };
                         }
-                        capture_status.write().state = ProcessingState::Inactive;
+                        crate::set_capture_state(&capture_status, ProcessingState::Inactive);
                     }
                     Ok(AlsaThreadState::Error(err)) => {
                         status_channel
