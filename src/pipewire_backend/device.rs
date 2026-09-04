@@ -82,6 +82,16 @@ impl MainLoopQuitter {
     }
 }
 
+/// Add the properties that make PipeWire connect a stream to the node given as `autoconnect_to`.
+fn insert_autoconnect_props(props: &mut pw::properties::PropertiesBox, target: &str) {
+    props.insert(*pw::keys::TARGET_OBJECT, target);
+    // Leave the node unconnected when the target cannot be found, instead of falling back to
+    // the default device, and connect it later if the target shows up.
+    // Neither key exists in pw::keys.
+    props.insert("node.dont-fallback", "true");
+    props.insert("node.linger", "true");
+}
+
 #[derive(Debug)]
 pub struct PipeWireError {
     desc: String,
@@ -127,6 +137,7 @@ pub struct PipeWireCaptureDevice {
     pub node_description: Option<String>,
     pub node_group_name: Option<String>,
     pub autoconnect_to: Option<String>,
+    pub loopback: bool,
     pub samplerate: usize,
     pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
@@ -330,8 +341,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     *pw::keys::NODE_GROUP => node_group_name,
                 };
                 if let Some(ref target) = autoconnect_to {
-                    // the key PW_KEY_TARGET_OBJECT doesn not (yet?) exist in pw::keys
-                    props.insert("target.object", target.as_str());
+                    insert_autoconnect_props(&mut props, target);
                 }
 
                 let stream = match pw::stream::StreamBox::new(&core, "CamillaDSP-Playback", props) {
@@ -739,6 +749,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
             .clone()
             .unwrap_or("camilladsp".to_string());
         let autoconnect_to = self.autoconnect_to.clone();
+        let loopback = self.loopback;
         let samplerate = self.samplerate;
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
@@ -809,9 +820,14 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     *pw::keys::NODE_LATENCY => latency_str,
                     *pw::keys::NODE_GROUP => node_group_name,
                 };
+                if loopback {
+                    // Capture from the monitor of a sink instead of from a source.
+                    // WirePlumber only considers sources when it resolves a target by name,
+                    // so this is also what makes a sink name match at all.
+                    props.insert(*pw::keys::STREAM_CAPTURE_SINK, "true");
+                }
                 if let Some(ref target) = autoconnect_to {
-                    // the key PW_KEY_TARGET_OBJECT doesn not (yet?) exist in pw::keys
-                    props.insert("target.object", target.as_str());
+                    insert_autoconnect_props(&mut props, target);
                 }
 
                 let stream = match pw::stream::StreamBox::new(&core, "CamillaDSP-Capture", props) {
