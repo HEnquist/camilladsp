@@ -738,7 +738,7 @@ fn lengths_are_uniform(
 /// Turns a runtime `(channels, depth)` into a call to the kernel instantiated
 /// for it.
 ///
-/// The whole `MAX_CHANNELS` by `MAX_DEPTH` grid is instantiated, sixteen
+/// The whole `MAX_CHANNELS` by `MAX_DEPTH` grid is instantiated, thirty-two
 /// kernels. Every one of them is reachable: [`choose_split`] can ask for any depth up
 /// to `MAX_DEPTH`, and a cascade whose length is not a multiple of it ends on a
 /// shorter pass.

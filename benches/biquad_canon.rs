@@ -127,9 +127,10 @@ fn bench_split(
 /// stage-channels however it is divided, so these numbers are directly
 /// comparable and the shape of the curve is the answer.
 ///
-/// The shape is deliberately not tied to `MAX_DEPTH`. Eight stages is deeper
-/// than any single pass, so every split here also exercises the division into
-/// passes, and the shape stays comparable across runs if the constant moves.
+/// The shape is deliberately not tied to `MAX_DEPTH`. Every split of fewer than
+/// eight stages exercises the division into passes, while `S8` is the one column
+/// that fits in a single pass as long as `MAX_DEPTH` stays at eight. The numbers
+/// stay comparable across runs either way.
 const GRID_CHANNELS: usize = 4;
 const GRID_DEPTH: usize = 8;
 
