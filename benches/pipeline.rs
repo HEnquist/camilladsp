@@ -243,6 +243,82 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, conv: Conv) -> Pipeline
     Pipeline::from_config(conf, processing_params, filter_pool)
 }
 
+/// A large multi-way active system: many channels, a handful of biquads on
+/// each. The opposite shape to the parametric equaliser the bench above
+/// measures, and the one the cascade axis alone can do almost nothing with,
+/// since a three stage canon is only three recurrences wide.
+///
+/// It is here because measuring only the deep and narrow shape sizes the
+/// kernel around the wrong axis.
+const WIDE_CHANNELS: usize = 16;
+const WIDE_BIQUAD_PARAMS: [(f64, f64); 3] = [(90.0, 0.71), (1800.0, 1.05), (7500.0, 0.75)];
+
+fn build_wide_pipeline(chunksize: usize, multithreaded: bool) -> Pipeline {
+    let mut filters = HashMap::new();
+    let mut names = Vec::with_capacity(WIDE_BIQUAD_PARAMS.len());
+    for (index, (freq, q)) in WIDE_BIQUAD_PARAMS.iter().enumerate() {
+        let name = format!("wide_bq_{}", index + 1);
+        filters.insert(name.clone(), build_biquad_filter(*freq, *q));
+        names.push(name);
+    }
+
+    let conf = config::Configuration {
+        title: None,
+        description: None,
+        devices: config::Devices {
+            samplerate: 48000,
+            chunksize,
+            queuelimit: None,
+            silence_threshold: None,
+            silence_timeout_s: None,
+            capture: config::CaptureDevice::Stdin(config::CaptureDeviceStdin {
+                channels: WIDE_CHANNELS,
+                format: config::BinarySampleFormat::F32_LE,
+                extra_samples: None,
+                skip_bytes: None,
+                read_bytes: None,
+                labels: None,
+            }),
+            playback: config::PlaybackDevice::Stdout {
+                channels: WIDE_CHANNELS,
+                format: config::BinarySampleFormat::F32_LE,
+                wav_header: None,
+            },
+            enable_rate_adjust: None,
+            target_level: None,
+            adjust_interval_s: None,
+            resampler: None,
+            capture_samplerate: None,
+            stop_on_rate_change: None,
+            rate_measure_interval_s: None,
+            volume_ramp_time_ms: None,
+            volume_limit: None,
+            multithreaded: Some(multithreaded),
+            worker_threads: None,
+        },
+        mixers: None,
+        filters: Some(filters),
+        processors: None,
+        pipeline: Some(vec![config::PipelineStep::Filter(
+            config::PipelineStepFilter {
+                channels: None,
+                names,
+                description: None,
+                bypassed: Some(false),
+            },
+        )]),
+    };
+
+    let processing_params = Arc::new(ProcessingParameters::new(&[0.0_f32; 5], &[false; 5]));
+    let filter_pool = camillalib::processing::build_processing_threadpool(
+        multithreaded,
+        conf.devices.worker_threads(),
+        conf.devices.chunksize,
+        conf.devices.samplerate,
+    );
+    Pipeline::from_config(conf, processing_params, filter_pool)
+}
+
 fn make_chunk(channels: usize, frames: usize) -> AudioChunk {
     let mut waveforms = Vec::with_capacity(channels);
     for channel in 0..channels {
@@ -281,6 +357,18 @@ fn bench_complete_pipeline(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("variant", name), &name, |b, _| {
             b.iter_batched(
                 || make_chunk(4, CHUNK_SIZE),
+                |chunk| {
+                    let _out = pipeline.process_chunk(chunk);
+                },
+                BatchSize::SmallInput,
+            )
+        });
+    }
+    for (name, multithreaded) in [("wide_single", false), ("wide_multi", true)] {
+        let mut pipeline = build_wide_pipeline(CHUNK_SIZE, multithreaded);
+        group.bench_with_input(BenchmarkId::new("variant", name), &name, |b, _| {
+            b.iter_batched(
+                || make_chunk(WIDE_CHANNELS, CHUNK_SIZE),
                 |chunk| {
                     let _out = pipeline.process_chunk(chunk);
                 },

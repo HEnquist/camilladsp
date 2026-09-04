@@ -26,6 +26,17 @@ Bugfixes:
   would scale a small `chunksize` down to zero now keeps one frame instead.
 
 Changes:
+- Much faster biquad filtering. A biquad waits on its own feedback path, leaving the processor
+  idle, so several independent ones are now run at once: several channels side by side, and
+  several positions of a channel's cascade skewed against each other. A run of biquads in a
+  filter step is compiled into one cascade per channel, so the same trick reaches across the
+  filters inside the step. Measured per chunk at a chunksize of 1024: a pipeline of 16 biquads
+  on four channels followed by 16 more on two went from 249 to 39 us, sixteen channels of three
+  biquads went from 128 to 28 us, and a mixed pipeline of biquads and FIR filters went from 707
+  to 481 us. Results are bit-identical to running the filters one at a time.
+- Biquad filters are no longer sent to the thread pool when `multithreaded` is enabled, since
+  running them several at a time already keeps the processor busy. The same biquad pipeline
+  measured 39 us on the main thread against 222 us on the thread pool.
 - Biquads now use fused multiply-add on hardware that has it, about 18% faster on aarch64. The
   fused form rounds once instead of twice, so results can differ from 4.1.3 in the last few bits.
 - The `DiffEq` filter is now a direct form 2 transposed structure, the same form the biquads use,

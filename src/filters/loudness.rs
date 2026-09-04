@@ -36,8 +36,9 @@ pub struct Loudness {
     low_freq: f64,
     high_q: f64,
     low_q: f64,
-    high_biquad: biquad::Biquad,
-    low_biquad: biquad::Biquad,
+    /// The high and low shelf, in that order, so they can be run as a two
+    /// stage cascade rather than one after the other.
+    shelves: [biquad::Biquad; 2],
     fader: usize,
     active: bool,
     gain: Option<Gain>,
@@ -93,11 +94,18 @@ impl Loudness {
             None
         };
 
-        let high_biquad_coeffs =
-            biquad::BiquadCoefficients::from_config(samplerate, highshelf_conf);
-        let low_biquad_coeffs = biquad::BiquadCoefficients::from_config(samplerate, lowshelf_conf);
-        let high_biquad = biquad::Biquad::new("highshelf", samplerate, high_biquad_coeffs);
-        let low_biquad = biquad::Biquad::new("lowshelf", samplerate, low_biquad_coeffs);
+        let shelves = [
+            biquad::Biquad::new(
+                "highshelf",
+                samplerate,
+                biquad::BiquadCoefficients::from_config(samplerate, highshelf_conf),
+            ),
+            biquad::Biquad::new(
+                "lowshelf",
+                samplerate,
+                biquad::BiquadCoefficients::from_config(samplerate, lowshelf_conf),
+            ),
+        ];
         Loudness {
             name: name.to_string(),
             current_volume: current_volume as CamillaFloat,
@@ -108,8 +116,7 @@ impl Loudness {
             low_freq: conf.low_freq(),
             high_q: conf.high_q(),
             low_q: conf.low_q(),
-            high_biquad,
-            low_biquad,
+            shelves,
             processing_params,
             fader,
             active,
@@ -143,11 +150,11 @@ impl Filter for Loudness {
             );
             let highshelf_conf = highshelf_conf(self.high_freq, self.high_q, high_boost);
             let lowshelf_conf = lowshelf_conf(self.low_freq, self.low_q, low_boost);
-            self.high_biquad.update_parameters(config::Filter::Biquad {
+            self.shelves[0].update_parameters(config::Filter::Biquad {
                 parameters: highshelf_conf,
                 description: None,
             });
-            self.low_biquad.update_parameters(config::Filter::Biquad {
+            self.shelves[1].update_parameters(config::Filter::Biquad {
                 parameters: lowshelf_conf,
                 description: None,
             });
@@ -167,8 +174,9 @@ impl Filter for Loudness {
         }
         if self.active {
             trace!("Applying loudness biquads");
-            self.high_biquad.process_waveform(waveform);
-            self.low_biquad.process_waveform(waveform);
+            // Two stages, run as one canon rather than one after the
+            // other, so the second is not waiting on the first.
+            biquad::process_mono_cascade(&mut self.shelves, waveform);
             if let Some(gain) = &mut self.gain {
                 gain.process_waveform(waveform);
             }
@@ -188,11 +196,11 @@ impl Filter for Loudness {
             self.active = relboost > 0.001;
             let highshelf_conf = highshelf_conf(conf.high_freq(), conf.high_q(), high_boost);
             let lowshelf_conf = lowshelf_conf(conf.low_freq(), conf.low_q(), low_boost);
-            self.high_biquad.update_parameters(config::Filter::Biquad {
+            self.shelves[0].update_parameters(config::Filter::Biquad {
                 parameters: highshelf_conf,
                 description: None,
             });
-            self.low_biquad.update_parameters(config::Filter::Biquad {
+            self.shelves[1].update_parameters(config::Filter::Biquad {
                 parameters: lowshelf_conf,
                 description: None,
             });
@@ -266,9 +274,14 @@ pub fn validate_config(samplerate: usize, conf: &config::LoudnessParameters) -> 
 
 #[cfg(test)]
 mod tests {
+    use super::{Loudness, rel_boost};
+    use crate::CamillaFloat;
+    use crate::ProcessingParameters;
     use crate::config::{BiquadParameters, LoudnessParameters, ShelfSteepness};
-    use crate::filters::biquad::BiquadCoefficients;
+    use crate::filters::Filter;
+    use crate::filters::biquad::{self, BiquadCoefficients};
     use crate::filters::loudness::validate_config;
+    use std::sync::Arc;
 
     fn params() -> LoudnessParameters {
         LoudnessParameters {
@@ -359,5 +372,77 @@ mod tests {
         assert!(validate_config(44100, &conf).is_err());
         conf.high_q = Some(1.5);
         assert!(validate_config(44100, &conf).is_ok());
+    }
+
+    /// The two shelves run as one two stage canon rather than one after the
+    /// other. That is a scheduling change only, so the output has to stay
+    /// bit-identical to applying the highshelf and then the lowshelf, and the
+    /// highshelf has to stay first.
+    #[test]
+    fn the_shelves_match_running_them_one_at_a_time() {
+        const FS: usize = 44100;
+        const VOLUME: f32 = -30.0;
+        let conf = LoudnessParameters {
+            reference_level: -10.0,
+            high_boost: Some(8.0),
+            low_boost: Some(6.0),
+            ..params()
+        };
+        // Below the reference level, or the filter does nothing at all and the
+        // comparison would pass on two untouched waveforms.
+        let relboost = rel_boost(VOLUME, conf.reference_level);
+        assert!(relboost > 0.01, "the filter has to be active to be tested");
+
+        let processing = Arc::new(ProcessingParameters::default());
+        processing.set_target_volume(0, VOLUME);
+        processing.sync_volumes_to_target();
+        let mut loudness = Loudness::from_config("l", conf.clone(), FS, processing);
+
+        let signal: Vec<CamillaFloat> = (0..512)
+            .map(|i| (0.017 * (i as CamillaFloat)).sin() * 0.5)
+            .collect();
+        let mut got = signal.clone();
+        loudness.process_waveform(&mut got);
+
+        let high_boost = (relboost * conf.high_boost()) as f64;
+        let low_boost = (relboost * conf.low_boost()) as f64;
+        let mut shelves = [
+            biquad::Biquad::new(
+                "highshelf",
+                FS,
+                BiquadCoefficients::from_config(
+                    FS,
+                    BiquadParameters::Highshelf(ShelfSteepness::Q {
+                        freq: conf.high_freq(),
+                        q: conf.high_q(),
+                        gain: high_boost,
+                    }),
+                ),
+            ),
+            biquad::Biquad::new(
+                "lowshelf",
+                FS,
+                BiquadCoefficients::from_config(
+                    FS,
+                    BiquadParameters::Lowshelf(ShelfSteepness::Q {
+                        freq: conf.low_freq(),
+                        q: conf.low_q(),
+                        gain: low_boost,
+                    }),
+                ),
+            ),
+        ];
+        let mut want = signal.clone();
+        for shelf in shelves.iter_mut() {
+            shelf.process_waveform(&mut want);
+        }
+
+        assert!(
+            want.iter().zip(signal.iter()).any(|(a, b)| a != b),
+            "the reference did not filter anything"
+        );
+        for (i, (a, b)) in got.iter().zip(want.iter()).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "sample {i}, {a} against {b}");
+        }
     }
 }
