@@ -9,16 +9,15 @@ New features:
   configurable monitor and process channels.
 - The corner frequency and Q of the two `Loudness` shelves can be set with the new `high_freq`,
   `low_freq`, `high_q` and `low_q` parameters. They were previously fixed.
+- PipeWire capture has a new `loopback` parameter for capturing from the output of a sink instead
+  of from a source, matching the `loopback` parameter of the WASAPI backend. This is also what
+  makes `autoconnect_to` accept the name of a sink, since WirePlumber only considers sources when
+  it resolves a capture target by name.
 
 Bugfixes:
-- PipeWire: `autoconnect_to` now works when the target is given as the name of a sink to capture
-  the monitor of. WirePlumber only considers sources when it resolves a `target.object` name for
-  a capture stream, so CamillaDSP now looks the target up in the graph and sets
-  `stream.capture.sink` when it is a sink.
 - PipeWire: an `autoconnect_to` target that cannot be found now leaves the node unconnected,
   instead of falling back to the default device and capturing from or playing to the wrong node.
-  The node is connected automatically if the target appears later, except for a capture device
-  pointed at a sink, which needs the sink to exist when CamillaDSP starts.
+  The node is connected automatically if the target appears later.
 - ASIO: size the ring buffer and prefill from the driver's actual buffer size instead of just
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
 - A convolution filter with an empty inline `values` list is now rejected by the config

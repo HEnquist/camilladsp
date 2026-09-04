@@ -348,6 +348,8 @@ pub enum CaptureDevice {
         labels: Option<Vec<Option<String>>>,
         #[serde(default)]
         autoconnect_to: Option<String>,
+        #[serde(default)]
+        loopback: Option<bool>,
     },
     RawFile(CaptureDeviceRawFile),
     WavFile(CaptureDeviceWavFile),
