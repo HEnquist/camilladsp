@@ -106,7 +106,6 @@ pub(crate) fn is_single_instance_driver(devname: &str) -> bool {
     matches_driver(devname, SINGLE_INSTANCE_DRIVERS)
 }
 
-
 /// Look up a loaded driver by device name.
 fn lookup(devname: &str) -> Option<DriverHandle> {
     DRIVERS.lock().unwrap().get(devname).cloned()
