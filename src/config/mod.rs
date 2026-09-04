@@ -501,7 +501,9 @@ impl CaptureDeviceStdin {
 pub struct CaptureDeviceWasapi {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
+    #[serde(default)]
     pub device: Option<String>,
+    #[serde(default)]
     pub format: Option<WasapiSampleFormat>,
     #[serde(default)]
     exclusive: Option<bool>,
@@ -547,6 +549,7 @@ pub struct CaptureDeviceAsio {
 pub struct CaptureDeviceCA {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
+    #[serde(default)]
     pub device: Option<String>,
     #[serde(default)]
     pub format: Option<CoreAudioSampleFormat>,
@@ -631,6 +634,7 @@ impl PlaybackDevice {
 pub struct PlaybackDeviceWasapi {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
+    #[serde(default)]
     pub device: Option<String>,
     #[serde(default)]
     pub format: Option<WasapiSampleFormat>,
@@ -668,6 +672,7 @@ pub struct PlaybackDeviceAsio {
 pub struct PlaybackDeviceCA {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
+    #[serde(default)]
     pub device: Option<String>,
     #[serde(default)]
     pub format: Option<CoreAudioSampleFormat>,
@@ -808,6 +813,7 @@ pub enum AsyncSincParameters {
         sinc_len: usize,
         interpolation: AsyncSincInterpolation,
         window: AsyncSincWindow,
+        #[serde(default)]
         f_cutoff: Option<f32>,
         oversampling_factor: usize,
     },
@@ -1140,6 +1146,7 @@ pub struct VolumeParameters {
     #[serde(default)]
     pub ramp_time_ms: Option<f32>,
     pub fader: VolumeFader,
+    #[serde(default)]
     pub limit: Option<f32>,
 }
 
