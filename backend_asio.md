@@ -123,6 +123,10 @@ buffer underruns or overruns:
   Each device is queried separately and its native format is used.
 
 ```yaml
+enable_rate_adjust: true
+resampler:
+  type: AsyncSinc
+  profile: Balanced
 capture:
   type: Asio
   channels: 2
