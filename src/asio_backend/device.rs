@@ -908,7 +908,9 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
 
         if (after_set - rate).abs() > 0.5 {
             return Err(ConfigError::new(&format!(
-                "ASIO device still reports {after_set} Hz after being asked for                  {samplerate} Hz. The driver may require the rate to be set from its own                  control panel."
+                "ASIO device still reports {after_set} Hz after being asked for \
+                 {samplerate} Hz. The driver may require the rate to be set from its own \
+                 control panel."
             )));
         }
         debug!("ASIO sample rate {samplerate} Hz applied.");
