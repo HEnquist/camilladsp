@@ -33,7 +33,7 @@ use ringbuf::{HeapRb, traits::*};
 
 use azo::dto::ChannelId;
 use azo::sys::{
-    Bool, BufferSwitch, BufferSwitchTimeInfo, Callbacks, MessageSelector, SampleRate,
+    AsioMessage, Bool, BufferSwitch, BufferSwitchTimeInfo, Callbacks, MessageSelector, SampleRate,
     SampleRateDidChange, Time,
 };
 
@@ -146,12 +146,23 @@ static CAPTURE_STREAM_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ASIO_PLAYBACK_RATE_CHANGED: AtomicBool = AtomicBool::new(false);
 static ASIO_CAPTURE_RATE_CHANGED: AtomicBool = AtomicBool::new(false);
 
-fn clear_playback_rate_change_event() {
+/// Set when a driver asks for a reset with `kAsioResetRequest`.
+///
+/// The callback answers yes to that request, which commits the host to tearing the stream
+/// down and starting over. It cannot do that from the driver's own callback thread, so it
+/// raises this instead and the device loop stops the stream, which makes the engine restart
+/// the pipeline and reopen the device.
+static ASIO_PLAYBACK_RESET_REQUESTED: AtomicBool = AtomicBool::new(false);
+static ASIO_CAPTURE_RESET_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+fn clear_playback_driver_events() {
     ASIO_PLAYBACK_RATE_CHANGED.store(false, Ordering::Release);
+    ASIO_PLAYBACK_RESET_REQUESTED.store(false, Ordering::Release);
 }
 
-fn clear_capture_rate_change_event() {
+fn clear_capture_driver_events() {
     ASIO_CAPTURE_RATE_CHANGED.store(false, Ordering::Release);
+    ASIO_CAPTURE_RESET_REQUESTED.store(false, Ordering::Release);
 }
 
 fn take_playback_rate_change_event() -> bool {
@@ -160,6 +171,14 @@ fn take_playback_rate_change_event() -> bool {
 
 fn take_capture_rate_change_event() -> bool {
     ASIO_CAPTURE_RATE_CHANGED.swap(false, Ordering::AcqRel)
+}
+
+fn take_playback_reset_request() -> bool {
+    ASIO_PLAYBACK_RESET_REQUESTED.swap(false, Ordering::AcqRel)
+}
+
+fn take_capture_reset_request() -> bool {
+    ASIO_CAPTURE_RESET_REQUESTED.swap(false, Ordering::AcqRel)
 }
 
 // ---------------------------------------------------------------------------
@@ -240,11 +259,12 @@ fn make_callbacks(
     buffer_switch: BufferSwitch,
     buffer_switch_time_info: BufferSwitchTimeInfo,
     sample_rate_did_change: SampleRateDidChange,
+    asio_message: AsioMessage,
 ) -> Callbacks {
     Callbacks {
         buffer_switch,
         sample_rate_did_change,
-        asio_message: asio_message_callback,
+        asio_message,
         buffer_switch_time_info,
     }
 }
@@ -523,17 +543,55 @@ pub unsafe extern "system" fn sample_rate_changed_capture(_s_rate: SampleRate) {
     warn!("ASIO sampleRateDidChange callback received for the capture device.");
 }
 
-/// ASIO asioMessage callback.
-/// Handles driver queries about supported features.
-/// Returning 0 means "not supported" or "no" for most selectors.
+/// ASIO asioMessage callback for a full-duplex stream.
 ///
 /// # Safety
 /// Called from the ASIO driver thread. All parameters are provided by the driver.
-pub unsafe extern "system" fn asio_message_callback(
+pub unsafe extern "system" fn asio_message_combined(
     selector: MessageSelector,
     value: c_long,
     _message: *const c_void,
     _opt: *const f64,
+) -> c_long {
+    handle_asio_message(selector, value, true, true)
+}
+
+/// ASIO asioMessage callback for a standalone playback stream.
+///
+/// # Safety
+/// Called from the ASIO driver thread. All parameters are provided by the driver.
+pub unsafe extern "system" fn asio_message_playback(
+    selector: MessageSelector,
+    value: c_long,
+    _message: *const c_void,
+    _opt: *const f64,
+) -> c_long {
+    handle_asio_message(selector, value, true, false)
+}
+
+/// ASIO asioMessage callback for a standalone capture stream.
+///
+/// # Safety
+/// Called from the ASIO driver thread. All parameters are provided by the driver.
+pub unsafe extern "system" fn asio_message_capture(
+    selector: MessageSelector,
+    value: c_long,
+    _message: *const c_void,
+    _opt: *const f64,
+) -> c_long {
+    handle_asio_message(selector, value, false, true)
+}
+
+/// Handle a driver message, mostly queries about supported features.
+/// Returning 0 means "not supported" or "no" for most selectors.
+///
+/// `playback` and `capture` say which sides this driver instance drives, so that a reset
+/// request only stops the directions that are actually running on it.
+fn handle_asio_message(
+    selector: MessageSelector,
+    value: c_long,
+    playback: bool,
+    capture: bool,
 ) -> c_long {
     match selector {
         MessageSelector::SELECTOR_SUPPORTED => {
@@ -555,7 +613,16 @@ pub unsafe extern "system" fn asio_message_callback(
         MessageSelector::SUPPORTS_TIME_INFO => 1,
         MessageSelector::SUPPORTS_TIME_CODE => 0,
         MessageSelector::RESET_REQUEST => {
-            warn!("ASIO reset request received. A stream restart may be required by the driver.");
+            // Answering 1 commits us to tearing the stream down and starting over, so
+            // raise the flag the device loop watches. Doing the work here is not allowed,
+            // this runs on the driver's own callback thread.
+            warn!("ASIO reset request received, restarting the stream.");
+            if playback {
+                ASIO_PLAYBACK_RESET_REQUESTED.store(true, Ordering::Release);
+            }
+            if capture {
+                ASIO_CAPTURE_RESET_REQUESTED.store(true, Ordering::Release);
+            }
             1
         }
         MessageSelector::BUFFER_SIZE_CHANGE => {
@@ -719,6 +786,7 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
             buffer_switch_combined,
             buffer_switch_timeinfo_combined,
             sample_rate_changed_combined,
+            asio_message_combined,
         )));
         trace!("register_and_wait: callbacks registered for combined stream, creating buffers");
 
@@ -1428,7 +1496,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 let mut _single_playback_callbacks: Option<Box<Callbacks>> = None;
 
                 // --- Create context and start ASIO ---
-                clear_playback_rate_change_event();
+                clear_playback_driver_events();
                 reset_playback_callback_seen();
                 let ctx_raw = if full_duplex {
                     let ctx = Box::new(AsioPlaybackContext {
@@ -1471,6 +1539,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         buffer_switch_playback,
                         buffer_switch_timeinfo_playback,
                         sample_rate_changed_playback,
+                        asio_message_playback,
                     ));
 
                     // SAFETY: the callbacks are kept alive in `_single_playback_callbacks`
@@ -1570,6 +1639,18 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         );
                         status_channel
                             .send(StatusMessage::PlaybackFormatChange(new_rate))
+                            .unwrap_or(());
+                        break 'deviceloop;
+                    }
+
+                    // The driver asked for a reset and the callback promised one, so stop
+                    // here and let the engine reopen the device.
+                    if take_playback_reset_request() {
+                        let msg = "The ASIO driver requested a reset of the playback stream"
+                            .to_string();
+                        warn!("{msg}.");
+                        status_channel
+                            .send(StatusMessage::PlaybackError(msg))
                             .unwrap_or(());
                         break 'deviceloop;
                     }
@@ -1875,7 +1956,7 @@ impl CaptureDevice for AsioCaptureDevice {
                 let mut _single_capture_callbacks: Option<Box<Callbacks>> = None;
 
                 // --- Create context and start ASIO ---
-                clear_capture_rate_change_event();
+                clear_capture_driver_events();
                 // Keep the callback from pushing until the loop below is ready to consume.
                 CAPTURE_STREAM_ACTIVE.store(false, Ordering::Release);
                 let ctx_raw = if full_duplex {
@@ -1916,6 +1997,7 @@ impl CaptureDevice for AsioCaptureDevice {
                         buffer_switch_capture,
                         buffer_switch_timeinfo_capture,
                         sample_rate_changed_capture,
+                        asio_message_capture,
                     ));
 
                     // SAFETY: the callbacks are kept alive in `_single_capture_callbacks`
@@ -2044,6 +2126,19 @@ impl CaptureDevice for AsioCaptureDevice {
                             .unwrap_or(());
                         status_channel
                             .send(StatusMessage::CaptureFormatChange(new_rate))
+                            .unwrap_or(());
+                        break 'deviceloop;
+                    }
+
+                    // The driver asked for a reset and the callback promised one, so stop
+                    // here and let the engine reopen the device.
+                    if take_capture_reset_request() {
+                        let msg = "The ASIO driver requested a reset of the capture stream"
+                            .to_string();
+                        warn!("{msg}.");
+                        channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                        status_channel
+                            .send(StatusMessage::CaptureError(msg))
                             .unwrap_or(());
                         break 'deviceloop;
                     }
