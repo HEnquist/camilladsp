@@ -1077,7 +1077,32 @@ pub fn list_available_devices() -> Vec<(String, String)> {
     names.iter().map(|n| (n.clone(), n.clone())).collect()
 }
 
+/// Probe an ASIO device for its capabilities.
+///
+/// The work runs on a thread of its own so that it always starts from a clean COM
+/// apartment. Capability requests arrive on the websocket connection thread, which is
+/// shared with the other backends, and Wasapi probing puts that thread in an MTA. An ASIO
+/// instance cannot be created from there: COM would have to marshal the interface back to
+/// the caller's apartment, ASIO interfaces cannot be marshalled at all, and the creation
+/// fails with `E_NOINTERFACE`. A fresh thread gets the STA the driver expects.
+///
+/// The driver is loaded and released within the probe, so no instance outlives the thread.
 pub fn get_device_capabilities(
+    device_name: &str,
+    input: bool,
+) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
+    let device_name = device_name.to_string();
+    thread::Builder::new()
+        .name("AsioProbe".to_string())
+        .spawn(move || probe_device_capabilities(&device_name, input))
+        .map_err(|err| {
+            crate::DeviceError::Other(format!("Failed to start the ASIO probe thread: {err}"))
+        })?
+        .join()
+        .map_err(|_| crate::DeviceError::Other("The ASIO probe thread panicked".to_string()))?
+}
+
+fn probe_device_capabilities(
     device_name: &str,
     input: bool,
 ) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
