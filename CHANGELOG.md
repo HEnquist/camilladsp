@@ -19,6 +19,10 @@ Changes:
   directly through the COM interfaces they expose, using the `azo` crate. Windows builds with ASIO
   are therefore no longer restricted to GPLv3, and the usual dual license applies to every build.
   Building no longer requires the SDK, LLVM/Clang or `bindgen`.
+- ASIO: the ASIO4ALL driver is refused with an error pointing to the Wasapi backend. It tolerates
+  only one instance per process, which crashed CamillaDSP when a configuration was reloaded after a
+  failed one. It only makes an ordinary Windows device reachable over ASIO, which the Wasapi backend
+  already does, in exclusive mode with one emulation layer less.
 - ASIO support is now always included in Windows builds. The `asio-backend` build feature is gone,
   and so is the separate `camilladsp-windows-asio-amd64.zip` download. The regular Windows binary
   now includes ASIO, and still runs on systems without any ASIO drivers installed, where it simply

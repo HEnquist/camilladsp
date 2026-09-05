@@ -43,7 +43,7 @@ use crate::ProcessingState;
 use crate::Res;
 use crate::StatusMessage;
 use crate::asio_backend::driver::{
-    com_init_this_thread, driver_is_loaded, is_single_instance_driver, needs_rate_reload,
+    com_init_this_thread, driver_is_loaded, is_unsupported_driver, needs_rate_reload,
     teardown_asio_driver, with_driver,
 };
 use crate::asio_backend::utils::{
@@ -965,6 +965,10 @@ pub fn open_asio_device(devname: &str, samplerate: usize) -> Result<(i32, i32), 
     let available = list_device_names();
     debug!("Available ASIO devices: {:?}", available);
     if let Err(load_err) = load_driver_by_name(devname) {
+        // A refused driver is not a missing one, and its message already says what to do.
+        if is_unsupported_driver(devname) {
+            return Err(load_err);
+        }
         // Driver load failed — provide a helpful error with available devices.
         let err_desc = load_err.to_string();
         let exact_match = available.iter().any(|n| n == devname);
@@ -1200,17 +1204,6 @@ fn probe_device_capabilities(
     device_name: &str,
     input: bool,
 ) -> Result<crate::AudioDeviceDescriptor, crate::DeviceError> {
-    // Refuse to probe drivers that tolerate only one instance per process. Probing loads
-    // an instance and releases it again, which leaves such a driver holding the device.
-    // Every later instance in this process then deadlocks or takes the process down, so a
-    // probe would break the device for the rest of the session. Probing ASIO4ALL twice was
-    // enough to kill the process outright.
-    if is_single_instance_driver(device_name) {
-        return Err(crate::DeviceError::Other(format!(
-            "ASIO driver '{device_name}' cannot be probed, it tolerates only one instance per process."
-        )));
-    }
-
     // Refuse to probe if an in-process ASIO driver is already loaded (live stream).
     // load_driver_by_name() unconditionally tears down any loaded driver, which
     // would silently interrupt active playback or capture.

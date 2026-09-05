@@ -36,7 +36,10 @@ Devices like this typically ship with their own ASIO driver though,
 and that native driver is almost always a better choice than a generic
 wrapper such as ASIO4ALL.
 
-### ASIO4ALL
+### ASIO4ALL is not supported
+
+CamillaDSP refuses to open ASIO4ALL.
+Naming it as an ASIO device gives an error that points to the Wasapi backend instead.
 
 ASIO4ALL tolerates only one driver instance per process.
 Once an instance has been created and released,
@@ -44,15 +47,21 @@ creating another one either hangs in `ASIOInit` or takes the process down.
 Its author has explained that the audio device stays open
 until `ASIOStop` is called or the driver dll is unloaded,
 which is what causes this.
+A configuration that fails to start, for example with a sample format
+the device does not use, leaves such an instance behind,
+and applying a corrected configuration then crashes the process.
+Keeping the instance to reuse it is not possible either,
+since it belongs to the COM apartment of the device thread that created it,
+and that thread exits when the stream stops.
 
-CamillaDSP avoids creating a second instance of it.
-The driver reload that some drivers need for sample rate changes
-is only done for the drivers known to need it, so ASIO4ALL never gets one.
-Capability probing is refused, since a probe creates an instance
-and releases it again.
-A capability request for ASIO4ALL therefore returns an error,
-and the GUI cannot list its supported rates and formats.
-Capture, playback and sample rate changes all work as usual.
+Supporting it safely would mean owning every ASIO driver instance
+on a dedicated thread that lives for as long as the process,
+which is a lot of machinery for a driver that adds nothing here.
+ASIO4ALL only makes an ordinary Windows device reachable
+from applications that require ASIO, and CamillaDSP does not require it.
+Use the [Wasapi backend](./backend_wasapi.md#shared-or-exclusive-mode) for such a device,
+in exclusive mode for direct control of it, which is just as bit-perfect
+with one emulation layer less.
 
 This was seen with ASIO4ALL 2.22.
 

@@ -87,14 +87,27 @@ pub(crate) fn com_init_this_thread() -> Result<(), ConfigError> {
 /// drivers known to need it.
 const NEEDS_RATE_RELOAD: &[&str] = &["steinberg built-in"];
 
-/// Drivers that tolerate only one instance per process.
+/// Drivers that are refused outright.
 ///
-/// ASIO4ALL keeps the audio device open until `ASIOStop` is called or its DLL is unloaded,
-/// which its author has confirmed on the ASIO4ALL forum. Releasing an instance that was
-/// only initialised, never started, therefore leaves the device held, and creating the next
-/// instance either deadlocks in `ASIOInit` or takes the process down. `ASIOStop` before the
-/// release does not reliably help, it worked once in three attempts.
-const SINGLE_INSTANCE_DRIVERS: &[&str] = &["asio4all"];
+/// ASIO4ALL tolerates only one instance per process. It keeps the audio device open until
+/// `ASIOStop` is called or its DLL is unloaded, which its author has confirmed on the
+/// ASIO4ALL forum, so releasing an instance that was initialised but never started leaves
+/// the device held, and creating the next one either deadlocks in `ASIOInit` or takes the
+/// process down. A failed configuration followed by a corrected one reproduces that
+/// crash every time, and `ASIOStop` before the release does not reliably help, it worked
+/// once in three attempts.
+///
+/// Keeping the instance around to reuse it does not work either: it belongs to the COM
+/// apartment of the device thread that created it, and that thread exits at the end of
+/// every session. Making this driver safe would mean owning every ASIO instance on a
+/// dedicated thread that lives as long as the process.
+///
+/// That is a lot of machinery for a driver that gives CamillaDSP nothing. All ASIO4ALL does
+/// is make an ordinary WDM device reachable from applications that only speak ASIO, and
+/// CamillaDSP already speaks Wasapi, where exclusive mode is just as bit-perfect with one
+/// emulation layer less. Anyone pointing this backend at ASIO4ALL is better served by the
+/// Wasapi backend, so the driver is refused with a message that says so.
+const UNSUPPORTED_DRIVERS: &[&str] = &["asio4all"];
 
 /// Case-insensitive substring match of a device name against a list of driver names.
 ///
@@ -111,12 +124,9 @@ pub(crate) fn needs_rate_reload(devname: &str) -> bool {
     matches_driver(devname, NEEDS_RATE_RELOAD)
 }
 
-/// Whether only one instance of this driver may be created per process.
-///
-/// Such drivers cannot be probed for capabilities, since probing loads an instance and
-/// releases it again, which leaves the driver unusable for the rest of the session.
-pub(crate) fn is_single_instance_driver(devname: &str) -> bool {
-    matches_driver(devname, SINGLE_INSTANCE_DRIVERS)
+/// Whether this driver is refused, see [`UNSUPPORTED_DRIVERS`].
+pub(crate) fn is_unsupported_driver(devname: &str) -> bool {
+    matches_driver(devname, UNSUPPORTED_DRIVERS)
 }
 
 /// Look up a loaded driver by device name.
@@ -170,6 +180,12 @@ pub fn list_device_names() -> Vec<String> {
 /// other device names are left alone.
 pub fn load_driver_by_name(name: &str) -> Result<(), ConfigError> {
     trace!("load_driver_by_name: loading '{name}'");
+    if is_unsupported_driver(name) {
+        return Err(ConfigError::new(&format!(
+            "The ASIO driver '{name}' is not supported, use the Wasapi backend for this \
+             device instead"
+        )));
+    }
     teardown_asio_driver(name);
     com_init_this_thread()?;
 
