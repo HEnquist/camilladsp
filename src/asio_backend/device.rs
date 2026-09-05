@@ -779,6 +779,19 @@ fn release_shared_asio() {
     }
 }
 
+/// Dispose the buffers and release the driver after a failed stream setup.
+///
+/// Buffers must go before the driver, because the driver keeps a pointer to the callbacks
+/// struct until they are disposed, and that struct is owned by the caller. Both steps are
+/// best-effort, the setup has already failed and there is nothing useful to do about a
+/// driver that also refuses to clean up.
+fn cleanup_failed_setup(devname: &str) {
+    if let Err(err) = dispose_asio_buffers(devname) {
+        trace!("Cleanup after failed setup: dispose failed: {err}");
+    }
+    teardown_asio_driver(devname);
+}
+
 // ---------------------------------------------------------------------------
 // ASIO low-level helpers
 // ---------------------------------------------------------------------------
@@ -1354,6 +1367,10 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             status_channel
                                 .send(StatusMessage::PlaybackError(msg))
                                 .unwrap_or(());
+                            // A failed createBuffers may still have left buffers behind,
+                            // and they point at `callbacks_for_driver`, which is dropped
+                            // when this scope ends.
+                            cleanup_failed_setup(&devname);
                             barrier.wait();
                             return;
                         }
@@ -1389,6 +1406,10 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             .send(StatusMessage::PlaybackError(msg))
                             .unwrap_or(());
                         PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                        // The buffers are already created, so the driver holds a pointer
+                        // to `callbacks_for_driver`. Dispose them and release the driver
+                        // before that box is dropped at the end of this scope.
+                        cleanup_failed_setup(&devname);
                         let _ = unsafe { Box::from_raw(ctx_raw) };
                         barrier.wait();
                         return;
@@ -1773,6 +1794,10 @@ impl CaptureDevice for AsioCaptureDevice {
                             status_channel
                                 .send(StatusMessage::CaptureError(msg))
                                 .unwrap_or(());
+                            // A failed createBuffers may still have left buffers behind,
+                            // and they point at `callbacks_for_driver`, which is dropped
+                            // when this scope ends.
+                            cleanup_failed_setup(&devname);
                             barrier.wait();
                             return;
                         }
@@ -1803,6 +1828,10 @@ impl CaptureDevice for AsioCaptureDevice {
                             .send(StatusMessage::CaptureError(msg))
                             .unwrap_or(());
                         CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                        // The buffers are already created, so the driver holds a pointer
+                        // to `callbacks_for_driver`. Dispose them and release the driver
+                        // before that box is dropped at the end of this scope.
+                        cleanup_failed_setup(&devname);
                         let _ = unsafe { Box::from_raw(ctx_raw) };
                         barrier.wait();
                         return;
