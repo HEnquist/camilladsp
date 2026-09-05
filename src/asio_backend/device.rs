@@ -487,14 +487,40 @@ pub unsafe extern "system" fn buffer_switch_timeinfo_combined(
     params
 }
 
-/// ASIO sampleRateDidChange callback.
+/// ASIO sampleRateDidChange callback for a full-duplex stream.
+///
+/// Both directions run on the one driver instance and therefore on one clock, so a rate
+/// change concerns both of them.
 ///
 /// # Safety
 /// Called from the ASIO driver thread. `_s_rate` is provided by the driver.
-pub unsafe extern "system" fn sample_rate_changed_callback(_s_rate: SampleRate) {
+pub unsafe extern "system" fn sample_rate_changed_combined(_s_rate: SampleRate) {
     ASIO_PLAYBACK_RATE_CHANGED.store(true, Ordering::Release);
     ASIO_CAPTURE_RATE_CHANGED.store(true, Ordering::Release);
     warn!("ASIO sampleRateDidChange callback received.");
+}
+
+/// ASIO sampleRateDidChange callback for a standalone playback stream.
+///
+/// Only the playback side is flagged. Capture may be running on a different device with a
+/// clock of its own, and stopping it over someone else's rate change would be wrong.
+///
+/// # Safety
+/// Called from the ASIO driver thread. `_s_rate` is provided by the driver.
+pub unsafe extern "system" fn sample_rate_changed_playback(_s_rate: SampleRate) {
+    ASIO_PLAYBACK_RATE_CHANGED.store(true, Ordering::Release);
+    warn!("ASIO sampleRateDidChange callback received for the playback device.");
+}
+
+/// ASIO sampleRateDidChange callback for a standalone capture stream.
+///
+/// The playback side is left alone, see [`sample_rate_changed_playback`].
+///
+/// # Safety
+/// Called from the ASIO driver thread. `_s_rate` is provided by the driver.
+pub unsafe extern "system" fn sample_rate_changed_capture(_s_rate: SampleRate) {
+    ASIO_CAPTURE_RATE_CHANGED.store(true, Ordering::Release);
+    warn!("ASIO sampleRateDidChange callback received for the capture device.");
 }
 
 /// ASIO asioMessage callback.
@@ -692,7 +718,7 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
         shared.callbacks_for_driver = Some(Box::new(make_callbacks(
             buffer_switch_combined,
             buffer_switch_timeinfo_combined,
-            sample_rate_changed_callback,
+            sample_rate_changed_combined,
         )));
         trace!("register_and_wait: callbacks registered for combined stream, creating buffers");
 
@@ -1444,7 +1470,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     let callbacks_for_driver = Box::new(make_callbacks(
                         buffer_switch_playback,
                         buffer_switch_timeinfo_playback,
-                        sample_rate_changed_callback,
+                        sample_rate_changed_playback,
                     ));
 
                     // SAFETY: the callbacks are kept alive in `_single_playback_callbacks`
@@ -1889,7 +1915,7 @@ impl CaptureDevice for AsioCaptureDevice {
                     let callbacks_for_driver = Box::new(make_callbacks(
                         buffer_switch_capture,
                         buffer_switch_timeinfo_capture,
-                        sample_rate_changed_callback,
+                        sample_rate_changed_capture,
                     ));
 
                     // SAFETY: the callbacks are kept alive in `_single_capture_callbacks`
