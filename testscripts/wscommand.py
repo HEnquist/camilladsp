@@ -92,9 +92,11 @@ def main():
             print(f"-> {json.dumps(command)}")
             print(format_reply(raw, args.max_length))
             print()
-            # A non-Ok result is worth a non-zero exit so this can be scripted.
+            # Anything but an Ok result is worth a non-zero exit so this can be
+            # scripted. A rejected command replies {"reply": "Invalid", "error": ...}
+            # with no result field at all, which counts as a failure too.
             try:
-                if json.loads(raw).get("result") not in ("Ok", None):
+                if json.loads(raw).get("result") != "Ok":
                     failed = True
             except json.JSONDecodeError:
                 failed = True
