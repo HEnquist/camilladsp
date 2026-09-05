@@ -90,14 +90,17 @@ pub(crate) fn resolve_binary_format(format: &AsioSampleFormat) -> BinarySampleFo
 }
 
 /// Convert an `AsioSampleFormat` to the canonical string used in YAML configs.
+///
+/// These must match how the enum serialises, since the strings are handed out through the
+/// capabilities API for clients to put straight into a config.
 pub(crate) fn asio_format_to_str(fmt: AsioSampleFormat) -> &'static str {
     match fmt {
-        AsioSampleFormat::S16_LE => "S16LE",
-        AsioSampleFormat::S24_3_LE => "S24LE3",
-        AsioSampleFormat::S24_4_LE => "S24LE",
-        AsioSampleFormat::S32_LE => "S32LE",
-        AsioSampleFormat::F32_LE => "FLOAT32LE",
-        AsioSampleFormat::F64_LE => "FLOAT64LE",
+        AsioSampleFormat::S16_LE => "S16_LE",
+        AsioSampleFormat::S24_3_LE => "S24_3_LE",
+        AsioSampleFormat::S24_4_LE => "S24_4_LE",
+        AsioSampleFormat::S32_LE => "S32_LE",
+        AsioSampleFormat::F32_LE => "F32_LE",
+        AsioSampleFormat::F64_LE => "F64_LE",
     }
 }
 
