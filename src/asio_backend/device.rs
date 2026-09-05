@@ -25,6 +25,7 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Barrier, Condvar, Mutex, OnceLock};
 use std::thread;
+use std::time::Duration;
 
 use crossbeam_channel::{TrySendError, bounded};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
@@ -180,12 +181,23 @@ struct AsioSharedState {
     /// Setup error produced by the side that attempted combined startup.
     /// If set, the other side returns immediately instead of waiting indefinitely.
     setup_error: Option<String>,
-    /// Number of sides (playback/capture) still active. Last one to exit stops the stream.
+    /// Number of sides (playback/capture) holding a claim on this state. A side claims it in
+    /// `init_shared_asio` and gives it up in `release_shared_asio`, whether the setup
+    /// succeeded or not. The last one to leave disposes the buffers and the driver.
     active_count: u8,
     /// The `Callbacks` struct passed to `createBuffers`.
     /// The driver requires this struct to remain valid for the lifetime of the stream.
     callbacks_for_driver: Option<Box<Callbacks>>,
 }
+
+/// How long one side waits for the other to finish setting up a full-duplex stream.
+///
+/// The driver is already loaded and initialised by the time anyone waits here, so the wait
+/// only covers the other side reading back its format and allocating its buffers, which
+/// takes milliseconds. The generous value is because this is a safety net rather than a
+/// normal timeout: it catches the case where the other side never arrives at all, for
+/// example after failing and cleaning up before this side even claimed the shared state.
+const FULL_DUPLEX_SETUP_TIMEOUT: Duration = Duration::from_secs(10);
 
 static ASIO_SHARED: OnceLock<(Mutex<Option<AsioSharedState>>, Condvar)> = OnceLock::new();
 static PLAYBACK_CALLBACK_SEEN: OnceLock<(Mutex<bool>, Condvar)> = OnceLock::new();
@@ -561,6 +573,10 @@ pub unsafe extern "system" fn buffer_switch_combined(buffer_index: c_long, direc
 /// Initialize the shared ASIO driver state.
 /// The first caller loads and initialises the driver. Subsequent callers for the same driver
 /// reuse the existing state. Returns (num_inputs, num_outputs, preferred_buf_size).
+///
+/// A successful call claims a side of the shared state. Every caller that gets a claim must
+/// give it up again, with `release_shared_asio` when the stream is done or
+/// `abort_shared_asio` when the setup fails on the way there.
 fn init_shared_asio(devname: &str, samplerate: usize) -> Result<(i32, i32, i32), ConfigError> {
     trace!(
         "init_shared_asio: dev='{}', samplerate={}",
@@ -569,7 +585,7 @@ fn init_shared_asio(devname: &str, samplerate: usize) -> Result<(i32, i32, i32),
     let (mutex, _condvar) = ASIO_SHARED.get_or_init(|| (Mutex::new(None), Condvar::new()));
     let mut guard = mutex.lock().unwrap();
 
-    if let Some(ref shared) = *guard {
+    if let Some(ref mut shared) = *guard {
         // Driver already loaded by the other side. This path is only taken in full-duplex
         // mode, which by definition means both sides named the same device, so a mismatch
         // here means the shared state was left behind by an earlier session.
@@ -579,6 +595,7 @@ fn init_shared_asio(devname: &str, samplerate: usize) -> Result<(i32, i32, i32),
                 shared.driver_name
             )));
         }
+        shared.active_count += 1;
         trace!(
             "init_shared_asio: reusing existing shared state for '{}'",
             shared.driver_name
@@ -604,7 +621,7 @@ fn init_shared_asio(devname: &str, samplerate: usize) -> Result<(i32, i32, i32),
             pending_input: None,
             stream_started: false,
             setup_error: None,
-            active_count: 0,
+            active_count: 1,
             callbacks_for_driver: None,
         });
 
@@ -723,19 +740,32 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
 
         shared.stream_started = true;
         shared.setup_error = None;
-        shared.active_count = 2;
         condvar.notify_all();
     } else {
         // I am the first side — wait for the other side to complete setup.
         debug!("Waiting for other ASIO side to register for full-duplex...");
-        while !guard.as_ref().unwrap().stream_started
-            && guard.as_ref().unwrap().setup_error.is_none()
-        {
-            guard = condvar.wait(guard).unwrap();
-        }
-        if let Some(setup_error) = guard.as_ref().unwrap().setup_error.clone() {
+        let (new_guard, wait_result) = condvar
+            .wait_timeout_while(guard, FULL_DUPLEX_SETUP_TIMEOUT, |state| {
+                state
+                    .as_ref()
+                    .is_some_and(|shared| !shared.stream_started && shared.setup_error.is_none())
+            })
+            .unwrap();
+        guard = new_guard;
+        if wait_result.timed_out() {
             return Err(ConfigError::new(&format!(
-                "ASIO full-duplex setup aborted: {setup_error}"
+                "Timed out after {} seconds waiting for the other side of the full-duplex \
+                 ASIO stream to finish setting up",
+                FULL_DUPLEX_SETUP_TIMEOUT.as_secs()
+            )));
+        }
+        if !guard.as_ref().is_some_and(|shared| shared.stream_started) {
+            let detail = guard
+                .as_ref()
+                .and_then(|shared| shared.setup_error.clone())
+                .unwrap_or_else(|| "the other side gave up without reporting why".to_string());
+            return Err(ConfigError::new(&format!(
+                "ASIO full-duplex setup aborted: {detail}"
             )));
         }
         debug!("Full-duplex ASIO setup complete, proceeding.");
@@ -744,8 +774,13 @@ fn register_and_wait(is_input: bool, num_channels: usize) -> Result<(), ConfigEr
     Ok(())
 }
 
-/// Decrement the active-sides counter. When it reaches zero, stop the ASIO stream
-/// and clear the shared state so a fresh session can be started later.
+/// Give up this side's claim on the shared state. When the last one goes, stop the ASIO
+/// stream and clear the shared state so a fresh session can be started later.
+///
+/// This runs on the way out of a working stream and on the way out of a failed setup alike,
+/// which is why the stop is conditional: there is nothing to stop if the stream never
+/// started. The buffers are disposed unconditionally, because a `createBuffers` that failed
+/// part way through may still have left some behind.
 ///
 /// Both context pointers are nulled before `ASIOStop()` is called so that even a
 /// late-arriving callback (possible on some drivers) sees null and returns harmlessly.
@@ -763,7 +798,9 @@ fn release_shared_asio() {
             debug!("First ASIO side exiting, stopping stream.");
             PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
             CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
-            if let Err(err) = stop_asio_stream(&shared.driver_name) {
+            if shared.stream_started
+                && let Err(err) = stop_asio_stream(&shared.driver_name)
+            {
                 trace!("Stopping the ASIO stream on first side exit failed: {err}");
             }
         } else if shared.active_count == 0 {
@@ -777,6 +814,30 @@ fn release_shared_asio() {
             *guard = None; // Reset for next session
         }
     }
+}
+
+/// Give up this side's claim on the shared state after a failed full-duplex setup.
+///
+/// Records the error first, so that a peer waiting in `register_and_wait` stops waiting and
+/// one that has not got there yet turns around at the check on the way in. Then the claim is
+/// released like it would be after a normal stream, and the last side out disposes the
+/// buffers and the driver. Without this the shared state would survive with the error still
+/// in it, and every later attempt to configure the device would fail on that stale error
+/// until the process was restarted.
+fn abort_shared_asio(msg: &str) {
+    if let Some((mutex, condvar)) = ASIO_SHARED.get() {
+        {
+            let mut guard = mutex.lock().unwrap();
+            if let Some(ref mut shared) = *guard {
+                // Keep the first error, it is the one that explains the rest.
+                if shared.setup_error.is_none() {
+                    shared.setup_error = Some(msg.to_string());
+                }
+            }
+        }
+        condvar.notify_all();
+    }
+    release_shared_asio();
 }
 
 /// Dispose the buffers and release the driver after a failed stream setup.
@@ -1233,8 +1294,9 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         );
                         error!("{msg}");
                         status_channel
-                            .send(StatusMessage::PlaybackError(msg))
+                            .send(StatusMessage::PlaybackError(msg.clone()))
                             .unwrap_or(());
+                        abort_shared_asio(&msg);
                         barrier.wait();
                         return;
                     }
@@ -1246,8 +1308,9 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             let msg = format!("ASIO playback format error: {err}");
                             error!("{msg}");
                             status_channel
-                                .send(StatusMessage::PlaybackError(msg))
+                                .send(StatusMessage::PlaybackError(msg.clone()))
                                 .unwrap_or(());
+                            abort_shared_asio(&msg);
                             barrier.wait();
                             return;
                         }
@@ -1340,9 +1403,10 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         let msg = format!("ASIO full-duplex playback setup error: {err}");
                         error!("{msg}");
                         status_channel
-                            .send(StatusMessage::PlaybackError(msg))
+                            .send(StatusMessage::PlaybackError(msg.clone()))
                             .unwrap_or(());
                         PLAYBACK_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                        abort_shared_asio(&msg);
                         let _ = unsafe { Box::from_raw(ctx_raw) };
                         barrier.wait();
                         return;
@@ -1664,8 +1728,9 @@ impl CaptureDevice for AsioCaptureDevice {
                         error!("{msg}");
                         channel.send(AudioMessage::EndOfStream).unwrap_or(());
                         status_channel
-                            .send(StatusMessage::CaptureError(msg))
+                            .send(StatusMessage::CaptureError(msg.clone()))
                             .unwrap_or(());
+                        abort_shared_asio(&msg);
                         barrier.wait();
                         return;
                     }
@@ -1678,8 +1743,9 @@ impl CaptureDevice for AsioCaptureDevice {
                             error!("{msg}");
                             channel.send(AudioMessage::EndOfStream).unwrap_or(());
                             status_channel
-                                .send(StatusMessage::CaptureError(msg))
+                                .send(StatusMessage::CaptureError(msg.clone()))
                                 .unwrap_or(());
+                            abort_shared_asio(&msg);
                             barrier.wait();
                             return;
                         }
@@ -1775,9 +1841,10 @@ impl CaptureDevice for AsioCaptureDevice {
                         error!("{msg}");
                         channel.send(AudioMessage::EndOfStream).unwrap_or(());
                         status_channel
-                            .send(StatusMessage::CaptureError(msg))
+                            .send(StatusMessage::CaptureError(msg.clone()))
                             .unwrap_or(());
                         CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
+                        abort_shared_asio(&msg);
                         let _ = unsafe { Box::from_raw(ctx_raw) };
                         barrier.wait();
                         return;
