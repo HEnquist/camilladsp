@@ -1754,9 +1754,16 @@ impl CaptureDevice for AsioCaptureDevice {
                     let bytes_per_sample = binary_format.bytes_per_sample();
                     Ok((preferred_buf as usize, binary_format, bytes_per_sample))
                 } else {
-                    // Single-direction: open device (also resolves format)
+                    // Single-direction: open device (also resolves format).
+                    // The driver runs at the capture rate, which differs from the pipeline
+                    // rate when an async resampler is used.
                     let resolved_format =
-                        match open_asio_capture(&devname, channels, samplerate, &configured_format) {
+                        match open_asio_capture(
+                            &devname,
+                            channels,
+                            capture_samplerate,
+                            &configured_format,
+                        ) {
                             Ok(result) => result,
                             Err(err) => {
                                 let msg = format!("ASIO capture open error: {err}");
