@@ -1178,7 +1178,15 @@ impl PlaybackDevice for AsioPlaybackDevice {
             .spawn(move || {
                 // This thread calls into the driver COM object and may be the one that
                 // drops it, so give it an apartment of its own.
-                com_init_this_thread();
+                if let Err(err) = com_init_this_thread() {
+                    let msg = format!("ASIO playback thread setup error: {err}");
+                    error!("{msg}");
+                    status_channel
+                        .send(StatusMessage::PlaybackError(msg))
+                        .unwrap_or(());
+                    barrier.wait();
+                    return;
+                }
 
                 let channel_capacity = 8 * 1024 / chunksize + 3;
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
@@ -1603,7 +1611,16 @@ impl CaptureDevice for AsioCaptureDevice {
             .spawn(move || {
                 // This thread calls into the driver COM object and may be the one that
                 // drops it, so give it an apartment of its own.
-                com_init_this_thread();
+                if let Err(err) = com_init_this_thread() {
+                    let msg = format!("ASIO capture thread setup error: {err}");
+                    error!("{msg}");
+                    channel.send(AudioMessage::EndOfStream).unwrap_or(());
+                    status_channel
+                        .send(StatusMessage::CaptureError(msg))
+                        .unwrap_or(());
+                    barrier.wait();
+                    return;
+                }
 
                 let mut resampler = new_resampler(
                     &resampler_conf,

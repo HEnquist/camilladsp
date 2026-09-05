@@ -55,9 +55,22 @@ static DRIVERS: LazyLock<Mutex<HashMap<String, DriverHandle>>> =
 /// call on the calling thread, and hosts are expected to drive them from their own threads.
 ///
 /// Safe to call more than once per thread; COM keeps a per-thread reference count.
-pub(crate) fn com_init_this_thread() {
+///
+/// Fails with `RPC_E_CHANGED_MODE` if the thread is already in a multi-threaded apartment.
+/// That should not happen, every thread that gets here either starts out with no apartment
+/// or has been through this function, but if it does then the assumption the rest of this
+/// module rests on no longer holds, so the caller is told rather than left guessing.
+pub(crate) fn com_init_this_thread() -> Result<(), ConfigError> {
     let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
     trace!("CoInitializeEx returned 0x{:08x}", hr.0);
+    if hr.is_err() {
+        return Err(ConfigError::new(&format!(
+            "Failed to initialise COM as a single-threaded apartment, \
+             CoInitializeEx returned 0x{:08x}",
+            hr.0
+        )));
+    }
+    Ok(())
 }
 
 /// Drivers that ignore `setSampleRate` unless the instance is recreated.
@@ -158,7 +171,7 @@ pub fn list_device_names() -> Vec<String> {
 pub fn load_driver_by_name(name: &str) -> Result<(), ConfigError> {
     trace!("load_driver_by_name: loading '{name}'");
     teardown_asio_driver(name);
-    com_init_this_thread();
+    com_init_this_thread()?;
 
     let drivers = azo::get_drivers()
         .map_err(|err| ConfigError::new(&format!("Failed to enumerate ASIO drivers: {err}")))?;
