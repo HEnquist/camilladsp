@@ -16,7 +16,7 @@ See the [ASIO backend](./README.md#asio-backend) section for details.
 ASIO is a trademark of Steinberg Media Technologies GmbH.
 CamillaDSP is not affiliated with or endorsed by Steinberg.
 
-## ASIO4ALL and other generic wrapper drivers
+## Generic wrapper drivers
 
 Generic wrapper drivers such as ASIO4ALL, FlexASIO and Steinberg's
 Generic Low Latency ASIO Driver are best avoided when possible.
@@ -34,7 +34,7 @@ One case where Wasapi alone isn't enough is when it exposes a multichannel
 device as several separate stereo pairs instead of one multichannel device.
 Devices like this typically ship with their own ASIO driver though,
 and that native driver is almost always a better choice than a generic
-wrapper such as ASIO4ALL.
+wrapper such as FlexASIO.
 
 ### ASIO4ALL is not supported
 
