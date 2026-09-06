@@ -85,7 +85,7 @@ impl FileWriter {
         let wav_header = config.wav_header();
         let samples_per_chunk = chunksize * write_channels;
         let bytes_per_chunk = samples_per_chunk * sample_format.bytes_per_sample();
-        let ring_size = write_channels * samplerate.max(MIN_CHUNKS * chunksize * write_channels);
+        let ring_size = write_channels * samplerate.max(MIN_CHUNKS * chunksize);
         let ringbuffer = HeapRb::<CamillaFloat>::new(ring_size);
         let (producer, consumer) = ringbuffer.split();
         let (tx_notify, rx_notify) = bounded::<()>(2);
