@@ -2645,6 +2645,7 @@ processors:
   * `channels`: number of channels, must match the number of channels of the pipeline where the FileWriter is inserted.
   * `process_channels`: a list of channels to write to the file. Optional, defaults to all channels. The channels are written in the specified order.
   * `filename`: path to the output file. The file is never overwritten: a zero-padded counter is appended to the filename to claim a unique name, e.g. with `filename: /tmp/capture` the files written are `/tmp/capture.000`, `/tmp/capture.001`, and so on. The counter starts one higher than the highest numbered file already present.
+  * `wav_header`: wether to write a wav header to the output file or just raw audio. Optional, defaults to false.
   * `format`: sample format of the output file. One of `S16_LE`, `S24_3_LE`, `S24_4_RJ_LE`, `S24_4_LJ_LE`, `S32_LE`, `F32_LE`, `F64_LE`.
 
 ## Pipeline

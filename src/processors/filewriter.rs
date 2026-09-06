@@ -21,6 +21,7 @@ use crate::config;
 use crate::config::BinarySampleFormat;
 use crate::processors::Processor;
 use crate::utils::conversions::chunk_to_buffer_rawbytes_borrowed;
+use crate::utils::wavtools::write_wav_header;
 use crossbeam_channel::{Sender, bounded};
 use ringbuf::HeapCons;
 use ringbuf::{HeapProd, HeapRb, traits::*};
@@ -44,6 +45,8 @@ pub struct FileWriter {
 
 struct WriterThread {
     channels: usize,
+    samplerate: usize,
+    wav_header: bool,
     samples_per_chunk: usize,
     sample_format: BinarySampleFormat,
     filename: String,
@@ -79,6 +82,7 @@ impl FileWriter {
         let write_channels = process_channels.len();
         let sample_format = config.format;
         let filename = config.filename.clone();
+        let wav_header = config.wav_header();
         let samples_per_chunk = chunksize * write_channels;
         let bytes_per_chunk = samples_per_chunk * sample_format.bytes_per_sample();
         let ring_size = write_channels * samplerate.max(MIN_CHUNKS * chunksize * write_channels);
@@ -94,6 +98,8 @@ impl FileWriter {
                 let bytes = vec![0_u8; bytes_per_chunk];
                 let writer = WriterThread {
                     channels: write_channels,
+                    samplerate,
+                    wav_header,
                     samples_per_chunk,
                     sample_format,
                     filename,
@@ -196,8 +202,17 @@ impl WriterThread {
                 .create_new(true)
                 .open(&candidate)
             {
-                Ok(file) => {
+                Ok(mut file) => {
                     self.filename = candidate;
+                    if self.wav_header {
+                        write_wav_header(
+                            &mut file,
+                            self.channels,
+                            self.sample_format,
+                            self.samplerate,
+                        )
+                        .map_err(|err| std::io::Error::other(err.to_string()))?;
+                    }
                     return Ok(file);
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -277,6 +292,12 @@ pub fn validate_file_writer(config: &config::FileWriterParameters) -> Res<()> {
             config::ConfigError::new("FileWriter processor filename must not be empty.").into(),
         );
     }
+    if config.wav_header() && config.format == BinarySampleFormat::S24_4_RJ_LE {
+        return Err(config::ConfigError::new(
+            "Wav files do not support the S24_4_RJ_LE sample format",
+        )
+        .into());
+    }
     Ok(())
 }
 
@@ -317,6 +338,7 @@ mod tests {
             process_channels: None,
             filename,
             format: BinarySampleFormat::F32_LE,
+            wav_header: Some(false),
         }
     }
 
@@ -521,5 +543,28 @@ mod tests {
         );
         fs::remove_file(numbered_filename(&filename, 1000)).unwrap();
         fs::remove_file(numbered_filename(&filename, 1001)).unwrap();
+    }
+
+    #[test]
+    fn writes_wav_header_when_enabled() {
+        let filename = unique_test_filename();
+        let mut config = f32_config(filename.clone());
+        config.wav_header = Some(true);
+        let mut fw = FileWriter::from_config("test", config, 48_000, 2);
+        let mut chunk = stereo_chunk([0.25, -0.5], [0.75, -1.0], 2);
+        fw.process_chunk(&mut chunk).unwrap();
+        shutdown(fw);
+        let data = fs::read(numbered_filename(&filename, 0)).unwrap();
+        assert!(data.starts_with(b"RIFF"));
+        assert!(data.len() > 4 + 24 + 8);
+        let _ = fs::remove_file(numbered_filename(&filename, 0));
+    }
+
+    #[test]
+    fn validate_rejects_right_justified_wav() {
+        let mut config = f32_config("test.wav".to_string());
+        config.format = BinarySampleFormat::S24_4_RJ_LE;
+        config.wav_header = Some(true);
+        assert!(validate_file_writer(&config).is_err());
     }
 }
