@@ -632,7 +632,15 @@ fn handle_asio_message(
             0
         }
         MessageSelector::RESYNC_REQUEST => {
-            debug!("ASIO resync request received.");
+            // Deliberately nothing to do. This selector says the driver's timestamps have
+            // gone invalid and asks the host to resynchronise its transport to them, which
+            // matters to a sequencer. This backend never reads the `Time` struct, it hands
+            // it straight back, so there is nothing here that can be out of sync. The
+            // selector that asks for the driver to be torn down is RESET_REQUEST, and that
+            // one is acted on above. Answering 1 without acting matches what other hosts
+            // do, and stopping the stream over a notification the driver considers
+            // recoverable would only turn it into a dropout.
+            debug!("ASIO resync request received, nothing to resynchronise.");
             1
         }
         MessageSelector::LATENCIES_CHANGED => {
