@@ -465,10 +465,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
                     | (Processor::LookaheadLimiter { .. }, Processor::LookaheadLimiter { .. })
                     | (Processor::RACE { .. }, Processor::RACE { .. }) => {}
                     (Processor::FileWriter { .. }, Processor::FileWriter { .. })
-                        if params != current_proc =>
-                    {
-                        return ConfigChange::Pipeline;
-                    }
+                        if params == current_proc => {}
                     _ => {
                         // A processor changed type, need to rebuild the pipeline
                         return ConfigChange::Pipeline;
