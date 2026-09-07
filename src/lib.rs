@@ -158,8 +158,8 @@ pub type Res<T> = Result<T, Box<dyn error::Error>>;
 /// ALSA audio backend (Linux only).
 #[cfg(target_os = "linux")]
 pub mod alsa_backend;
-/// ASIO audio backend (Windows only, requires `asio-backend` feature).
-#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+/// ASIO audio backend (Windows only).
+#[cfg(target_os = "windows")]
 pub mod asio_backend;
 /// Audio chunk types and per-chunk statistics.
 pub mod audiochunk;
@@ -707,7 +707,7 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         playbacktypes.push("Wasapi".to_owned());
         capturetypes.push("Wasapi".to_owned());
     }
-    if cfg!(all(target_os = "windows", feature = "asio-backend")) {
+    if cfg!(target_os = "windows") {
         playbacktypes.push("Asio".to_owned());
         capturetypes.push("Asio".to_owned());
     }
@@ -782,7 +782,7 @@ pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String
         "coreaudio" => coreaudio_backend::device::list_available_devices(input),
         #[cfg(target_os = "windows")]
         "wasapi" => wasapi_backend::capabilities::list_device_names(input),
-        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        #[cfg(target_os = "windows")]
         "asio" => asio_backend::device::list_available_devices(),
         _ => Vec::new(),
     }
@@ -814,7 +814,7 @@ pub fn get_device_capabilities(
         "coreaudio" => coreaudio_backend::device::get_device_capabilities(device_name, input),
         #[cfg(target_os = "windows")]
         "wasapi" => wasapi_backend::capabilities::get_device_capabilities(device_name, input),
-        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        #[cfg(target_os = "windows")]
         "asio" => asio_backend::device::get_device_capabilities(device_name, input),
         _ => Err(DeviceError::Other("Unsupported backend".to_string())),
     }

@@ -7,6 +7,8 @@ New features:
 - RF64 support for reading and writing wav files larger than 4 GB (`use_rf64` for File playback).
 - New `LookaheadLimiter`, as a single-channel filter and as a multichannel processor with
   configurable monitor and process channels.
+- ASIO: capture and playback can now use two different ASIO devices. Previously both sides had to
+  use the same one.
 - The corner frequency and Q of the two `Loudness` shelves can be set with the new `high_freq`,
   `low_freq`, `high_q` and `low_q` parameters. They were previously fixed.
 - PipeWire capture has a new `loopback` parameter for capturing from the output of a sink instead
@@ -33,6 +35,19 @@ Bugfixes:
   would scale a small `chunksize` down to zero now keeps one frame instead.
 
 Changes:
+- The ASIO backend no longer uses the ASIO SDK from Steinberg. It talks to the ASIO drivers
+  directly through the COM interfaces they expose, using the `azo` crate. Windows builds with ASIO
+  are therefore no longer restricted to GPLv3, and the usual dual license applies to every build.
+  Building no longer requires the SDK, LLVM/Clang or `bindgen`.
+- ASIO: the ASIO4ALL driver is refused with an error pointing to the Wasapi backend. It tolerates
+  only one instance per process, which crashed CamillaDSP when a configuration was reloaded after a
+  failed one. It only makes an ordinary Windows device reachable over ASIO, which the Wasapi backend
+  already does, in exclusive mode with one emulation layer less.
+- ASIO support is now always included in Windows builds. The `asio-backend` build feature is gone,
+  and so is the separate `camilladsp-windows-asio-amd64.zip` download. The regular Windows binary
+  now includes ASIO, and still runs on systems without any ASIO drivers installed, where it simply
+  reports no available ASIO devices. Anyone building with `--features asio-backend` should drop
+  the flag.
 - Much faster biquad filtering. A biquad waits on its own feedback path, leaving the processor
   idle, so several independent ones are now run at once: several channels side by side, and
   several positions of a channel's cascade skewed against each other. A run of biquads in a
