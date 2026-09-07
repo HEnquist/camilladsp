@@ -144,14 +144,13 @@ impl Processor for NoiseGate {
     }
 
     /// Apply a NoiseGate to an AudioChunk, modifying it in-place.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
         self.sum_monitor_channels(input);
         self.estimate_loudness();
         self.calculate_linear_gain();
         for ch in self.process_channels.iter() {
             self.apply_gain(&mut input.waveforms[*ch]);
         }
-        Ok(())
     }
 
     fn update_parameters(&mut self, config: config::Processor) {

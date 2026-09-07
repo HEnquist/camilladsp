@@ -79,9 +79,8 @@ impl Filter for Clipper {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         self.apply_clip(waveform);
-        Ok(())
     }
 
     fn update_parameters(&mut self, config: config::Filter) {

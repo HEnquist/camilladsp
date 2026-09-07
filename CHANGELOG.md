@@ -9,10 +9,30 @@ New features:
   configurable monitor and process channels.
 - ASIO: capture and playback can now use two different ASIO devices. Previously both sides had to
   use the same one.
+- The corner frequency and Q of the two `Loudness` shelves can be set with the new `high_freq`,
+  `low_freq`, `high_q` and `low_q` parameters. They were previously fixed.
+- PipeWire capture has a new `loopback` parameter for capturing from the output of a sink instead
+  of from a source, matching the `loopback` parameter of the WASAPI backend. This is also what
+  makes `autoconnect_to` accept the name of a sink, since WirePlumber only considers sources when
+  it resolves a capture target by name.
 
 Bugfixes:
+- PipeWire: an `autoconnect_to` target that cannot be found now leaves the node unconnected,
+  instead of falling back to the default device and capturing from or playing to the wrong node.
+  The node is connected automatically if the target appears later.
 - ASIO: size the ring buffer and prefill from the driver's actual buffer size instead of just
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
+- A convolution filter with an empty inline `values` list is now rejected by the config
+  validation, instead of being accepted and then panicking on the first chunk.
+- The `DiffEq` filter now rejects unstable coefficients. The `a` coefficients are checked with the
+  Schur-Cohn stability test when the config is loaded, and a filter with poles on or outside the
+  unit circle is no longer accepted and then allowed to run away to full scale.
+- The `DiffEq` filter now scales its coefficients so that a0 becomes unity. The first `a`
+  coefficient was previously ignored, so any value other than 1.0 gave a filter with the wrong
+  gain compared to the documented transfer function.
+- `chunksize` must now be larger than zero. A `chunksize` of zero was accepted as a valid
+  configuration and then hung on startup without producing any audio. A samplerate override that
+  would scale a small `chunksize` down to zero now keeps one frame instead.
 
 Changes:
 - The ASIO backend no longer uses the ASIO SDK from Steinberg. It talks to the ASIO drivers
@@ -28,6 +48,35 @@ Changes:
   now includes ASIO, and still runs on systems without any ASIO drivers installed, where it simply
   reports no available ASIO devices. Anyone building with `--features asio-backend` should drop
   the flag.
+- Much faster biquad filtering. A biquad waits on its own feedback path, leaving the processor
+  idle, so several independent ones are now run at once: several channels side by side, and
+  several positions of a channel's cascade skewed against each other. A run of biquads in a
+  filter step is compiled into one cascade per channel, so the same trick reaches across the
+  filters inside the step. Measured per chunk at a chunksize of 1024: a pipeline of 16 biquads
+  on four channels followed by 16 more on two went from 249 to 39 us, sixteen channels of three
+  biquads went from 128 to 28 us, and a mixed pipeline of biquads and FIR filters went from 707
+  to 481 us. Results are bit-identical to running the filters one at a time.
+- Biquad filters are no longer sent to the thread pool when `multithreaded` is enabled, since
+  running them several at a time already keeps the processor busy. The same biquad pipeline
+  measured 39 us on the main thread against 222 us on the thread pool.
+- Biquads now use fused multiply-add on hardware that has it, about 18% faster on aarch64. The
+  fused form rounds once instead of twice, so results can differ from 4.1.3 in the last few bits.
+- The `DiffEq` filter is now a direct form 2 transposed structure, the same form the biquads use,
+  instead of two ring buffers addressed with modulo. Orders up to eight keep their state in
+  registers for a whole chunk. About 1.4 times faster at second order and 3.4 times at eighth
+  order. The new form rounds differently, so results can differ from 4.1.3 in the last few bits.
+- Faster convolution setup and processing, and lower memory use. Three changes: convolution
+  filters share one FFT planner instead of each building and discarding its own, channels that use
+  the same filter share one copy of its transformed coefficients instead of each keeping a copy,
+  and the segmented spectra are held in one contiguous allocation rather than one block per
+  segment. Reloading eight 16384 tap filters at a chunksize of 16384 went from about 3.0 ms to
+  about 0.9 ms, and a four channel pipeline with a one million tap filter went from 5.1 ms to
+  3.8 ms per chunk with `multithreaded` enabled, using a quarter of the coefficient memory. The
+  setup saving grows with `chunksize` and applies even when every channel uses a different impulse
+  response. The coefficient sharing requires the channels to refer to the same named filter, and
+  helps most with `multithreaded` enabled, where the copies would otherwise compete for memory
+  bandwidth at the same moment. Without it the gain is smaller, and limited to filters large
+  enough to crowd the cache but small enough that a single copy still fits.
 - Improved DSP library separation for easier external integration.
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.
 - The `websocket` build feature is gone. The websocket server is now always built in, since every
@@ -60,6 +109,14 @@ Changes:
   Those must build from source.
 
 Config changes (breaking):
+- The `FivePointPeq` biquad combo is extended to a free number of bands, and is renamed
+  `NPointPeq`. The fifteen numbered parameters are replaced by a `bands` list of at least two
+  entries, each with `freq`, `gain` and `q`. The first band is a low shelf, the last a high shelf,
+  and the ones in between peaking filters, so an old five band equalizer becomes a list of five
+  bands in the order it already used, `fls`/`gls`/`qls` first and `fhs`/`ghs`/`qhs` last. Two new
+  rules come with it: the bands must be listed with rising frequency, and a band with a gain
+  smaller than 0.001 dB is left out when the filter is built, which is how a band is disabled
+  without removing it.
 - Time values no longer accept unitless numbers. Every time-valued parameter now states its unit.
 - Tunable times take a mandatory companion unit field:
   - `Delay` filter: `unit` renamed to `delay_unit` (now required).

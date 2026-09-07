@@ -575,7 +575,7 @@ impl Filter for Dither<'_> {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         for item in waveform.iter_mut() {
             let scaled = *item * self.scalefact;
             let dither = self.ditherer.sample();
@@ -589,8 +589,6 @@ impl Filter for Dither<'_> {
 
             *item = result_r / self.scalefact;
         }
-
-        Ok(())
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
@@ -790,7 +788,7 @@ mod tests {
         let waveform2 = waveform.clone();
         let conf = DitherParameters::None { bits: 8 };
         let mut dith = Dither::from_config("test", conf);
-        dith.process_waveform(&mut waveform).unwrap();
+        dith.process_waveform(&mut waveform);
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 128.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
@@ -808,7 +806,7 @@ mod tests {
             amplitude: 2.0,
         };
         let mut dith = Dither::from_config("test", conf);
-        dith.process_waveform(&mut waveform).unwrap();
+        dith.process_waveform(&mut waveform);
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 64.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
@@ -823,7 +821,7 @@ mod tests {
         let waveform2 = waveform.clone();
         let conf = DitherParameters::Highpass { bits: 8 };
         let mut dith = Dither::from_config("test", conf);
-        dith.process_waveform(&mut waveform).unwrap();
+        dith.process_waveform(&mut waveform);
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 32.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
@@ -838,7 +836,7 @@ mod tests {
         let waveform2 = waveform.clone();
         let conf = DitherParameters::Lipshitz441 { bits: 8 };
         let mut dith = Dither::from_config("test", conf);
-        dith.process_waveform(&mut waveform).unwrap();
+        dith.process_waveform(&mut waveform);
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 16.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),

@@ -293,12 +293,14 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             ref node_description,
             ref node_group_name,
             ref autoconnect_to,
+            loopback,
             ..
         } => Box::new(pipewiredevice::PipeWireCaptureDevice {
             node_name: node_name.clone(),
             node_description: node_description.clone(),
             node_group_name: node_group_name.clone(),
             autoconnect_to: autoconnect_to.clone(),
+            loopback: loopback.unwrap_or_default(),
             samplerate: conf.samplerate,
             resampler_config: conf.resampler,
             capture_samplerate,

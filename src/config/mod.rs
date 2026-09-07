@@ -348,6 +348,8 @@ pub enum CaptureDevice {
         labels: Option<Vec<Option<String>>>,
         #[serde(default)]
         autoconnect_to: Option<String>,
+        #[serde(default)]
+        loopback: Option<bool>,
     },
     RawFile(CaptureDeviceRawFile),
     WavFile(CaptureDeviceWavFile),
@@ -501,7 +503,9 @@ impl CaptureDeviceStdin {
 pub struct CaptureDeviceWasapi {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
+    #[serde(default)]
     pub device: Option<String>,
+    #[serde(default)]
     pub format: Option<WasapiSampleFormat>,
     #[serde(default)]
     exclusive: Option<bool>,
@@ -547,6 +551,7 @@ pub struct CaptureDeviceAsio {
 pub struct CaptureDeviceCA {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
+    #[serde(default)]
     pub device: Option<String>,
     #[serde(default)]
     pub format: Option<CoreAudioSampleFormat>,
@@ -631,6 +636,7 @@ impl PlaybackDevice {
 pub struct PlaybackDeviceWasapi {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
+    #[serde(default)]
     pub device: Option<String>,
     #[serde(default)]
     pub format: Option<WasapiSampleFormat>,
@@ -668,6 +674,7 @@ pub struct PlaybackDeviceAsio {
 pub struct PlaybackDeviceCA {
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub channels: usize,
+    #[serde(default)]
     pub device: Option<String>,
     #[serde(default)]
     pub format: Option<CoreAudioSampleFormat>,
@@ -689,6 +696,7 @@ pub struct Devices {
     /// Output sample rate in Hz.
     pub samplerate: usize,
     /// Number of frames per processing chunk.
+    #[serde(deserialize_with = "validate_nonzero_usize")]
     pub chunksize: usize,
     #[serde(default)]
     pub queuelimit: Option<usize>,
@@ -807,6 +815,7 @@ pub enum AsyncSincParameters {
         sinc_len: usize,
         interpolation: AsyncSincInterpolation,
         window: AsyncSincWindow,
+        #[serde(default)]
         f_cutoff: Option<f32>,
         oversampling_factor: usize,
     },
@@ -1081,43 +1090,25 @@ pub enum BiquadParameters {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum BiquadComboParameters {
-    LinkwitzRileyHighpass {
-        freq: f64,
-        order: usize,
-    },
-    LinkwitzRileyLowpass {
-        freq: f64,
-        order: usize,
-    },
-    ButterworthHighpass {
-        freq: f64,
-        order: usize,
-    },
-    ButterworthLowpass {
-        freq: f64,
-        order: usize,
-    },
-    Tilt {
-        gain: f64,
-    },
-    FivePointPeq {
-        fls: f64,
-        qls: f64,
-        gls: f64,
-        fp1: f64,
-        qp1: f64,
-        gp1: f64,
-        fp2: f64,
-        qp2: f64,
-        gp2: f64,
-        fp3: f64,
-        qp3: f64,
-        gp3: f64,
-        fhs: f64,
-        qhs: f64,
-        ghs: f64,
-    },
+    LinkwitzRileyHighpass { freq: f64, order: usize },
+    LinkwitzRileyLowpass { freq: f64, order: usize },
+    ButterworthHighpass { freq: f64, order: usize },
+    ButterworthLowpass { freq: f64, order: usize },
+    Tilt { gain: f64 },
+    NPointPeq { bands: Vec<PeqBand> },
     GraphicEqualizer(GraphicEqualizerParameters),
+}
+
+/// One band of an NPointPeq parametric equalizer.
+///
+/// The role of a band follows its position in the list: the first one is a low shelf,
+/// the last one a high shelf, and the ones in between are peaking filters.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PeqBand {
+    pub freq: f64,
+    pub q: f64,
+    pub gain: f64,
 }
 
 /// Parameters for the graphic equalizer biquad combo filter.
@@ -1157,6 +1148,7 @@ pub struct VolumeParameters {
     #[serde(default)]
     pub ramp_time_ms: Option<f32>,
     pub fader: VolumeFader,
+    #[serde(default)]
     pub limit: Option<f32>,
 }
 
@@ -1190,6 +1182,14 @@ pub struct LoudnessParameters {
     #[serde(default)]
     pub low_boost: Option<f32>,
     #[serde(default)]
+    pub high_freq: Option<f64>,
+    #[serde(default)]
+    pub low_freq: Option<f64>,
+    #[serde(default)]
+    pub high_q: Option<f64>,
+    #[serde(default)]
+    pub low_q: Option<f64>,
+    #[serde(default)]
     pub fader: Option<LoudnessFader>,
     #[serde(default)]
     pub attenuate_mid: Option<bool>,
@@ -1202,6 +1202,24 @@ impl LoudnessParameters {
 
     pub fn low_boost(&self) -> f32 {
         self.low_boost.unwrap_or(10.0)
+    }
+
+    pub fn high_freq(&self) -> f64 {
+        self.high_freq.unwrap_or(3500.0)
+    }
+
+    pub fn low_freq(&self) -> f64 {
+        self.low_freq.unwrap_or(70.0)
+    }
+
+    /// The default Q gives the same shelves as the fixed slope of 12 dB/octave
+    /// that earlier versions used, for any boost value.
+    pub fn high_q(&self) -> f64 {
+        self.high_q.unwrap_or(std::f64::consts::FRAC_1_SQRT_2)
+    }
+
+    pub fn low_q(&self) -> f64 {
+        self.low_q.unwrap_or(std::f64::consts::FRAC_1_SQRT_2)
     }
 
     pub fn fader(&self) -> usize {

@@ -156,6 +156,17 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             } else {
                 cfg_chunksize / (cfg_rate as f32 / rate as f32).round() as usize
             };
+            // Scaling down is an integer division, so a small enough chunksize
+            // divides away entirely. Zero would hang the capture loop, and a
+            // configuration this odd should still run, so keep one frame.
+            let scaled_chunksize = if scaled_chunksize == 0 {
+                warn!(
+                    "Overriding the samplerate to {rate} scales chunksize {cfg_chunksize} below one frame, using 1"
+                );
+                1
+            } else {
+                scaled_chunksize
+            };
             debug!(
                 "Samplerate changed, adjusting chunksize: {cfg_chunksize} -> {scaled_chunksize}"
             );

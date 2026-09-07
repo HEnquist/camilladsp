@@ -1119,6 +1119,13 @@ A parameter marked (*) in any example is optional. If they are left out from the
   cannot be parallelized and are processed in the main thread.
   Therefore, only the filters between mixers and/or processors can be parallelized.
 
+  Biquad filters are also not sent to the thread pool.
+  They are run several channels and several cascade positions at a time on the main thread,
+  which already keeps the processor busy, so a thread pool on top only adds the cost of
+  handing the work over.
+  A pipeline of biquads measured about 5.7 times faster this way than the same pipeline
+  on the thread pool.
+
   Multithreaded processing is beneficial for configurations that require significant processing power,
   such as using very long FIR filters, high sample rates, or a large number of channels.
   It should only be enabled if necessary, as it typically should remain disabled.
@@ -1754,6 +1761,8 @@ That makes the loudness filter attenuate the midband instead of boosting the ext
 The method is the same as the one implemented by the [RME ADI-2 DAC FS](https://www.rme-audio.de/adi-2-dac.html).
 The loudness correction is done as shelving filters that boost the high (above 3500 Hz) and low (below 70 Hz) frequencies.
 The amount of boost is adjustable with the `high_boost` and `low_boost` parameters. If left out, they default to 10 dB.
+The corner frequencies and the Q of the two shelves can be changed with `high_freq`, `low_freq`,
+`high_q` and `low_q`. The defaults give the same shelves as earlier versions, which had them fixed.
 - When the volume is above the `reference_level`, only gain is applied.
 - When the volume is below `reference_level` - 20, the full correction is applied.
 - In the range between `reference_level` and `reference_level`-20, the boost value is scaled linearly.
@@ -1775,12 +1784,20 @@ filters:
       reference_level: -25.0
       high_boost: 7.0 (*)
       low_boost: 7.0 (*)
+      high_freq: 3500.0 (*)
+      low_freq: 70.0 (*)
+      high_q: 0.707 (*)
+      low_q: 0.707 (*)
       attenuate_mid: false (*)
 ```
 Allowed ranges:
 - reference_level: -100 to +20
 - high_boost: 0 to 20
 - low_boost: 0 to 20
+- high_freq: above `low_freq`, and below half the samplerate
+- low_freq: above 0
+- high_q: 0.1 to 2.0
+- low_q: 0.1 to 2.0
 
 ### Delay
 The delay filter provides a delay in seconds, milliseconds, microseconds, millimetres or samples.
@@ -1852,6 +1869,14 @@ If the filename includes the tokens `$samplerate$` or `$channels$`,
 these will be replaced by the corresponding values from the config.
 For example, if samplerate is 44100,
 the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`.
+
+When several channels need the same impulse response, refer to the same filter by name for each
+of them rather than defining one filter per channel.
+CamillaDSP then reads and prepares the impulse response once, and the channels share a single copy
+of it.
+Separate filters are never shared, even if their coefficients are identical,
+so defining one per channel uses more memory and makes processing slower.
+The difference grows with the filter length and the number of channels.
 
 #### Generating FIR coefficients
 There are many ways to generate impulse responses for FIR filters.
@@ -2117,19 +2142,45 @@ The available types are:
 
   The `gain` value is limited to +- 100 dB.
 
-* FivePointPeq
+* NPointPeq
 
+  A parametric equalizer with a free number of bands.
   This filter combo is mainly meant to be created by guis.
-  It defines a 5-point (or band) parametric equalizer by combining a Lowshelf, a Highshelf and three Peaking filters.
 
-  Each individual filter is defined by frequency, gain and q. The parameter names are:
-  * Lowshelf: `fls`, `gls`, `qls`
-  * Peaking 1: `fp1`, `gp1`, `qp1`
-  * Peaking 2: `fp2`, `gp2`, `qp2`
-  * Peaking 3: `fp3`, `gp3`, `qp3`
-  * Highshelf: `fhs`, `ghs`, `qhs`
+  It takes a single parameter `bands`, a list of at least two bands.
+  Every band has the same three parameters, `freq`, `gain` and `q`,
+  and its role follows its position in the list:
+  the first band is a Lowshelf, the last is a Highshelf,
+  and the ones in between are Peaking filters.
+  A list of two bands is therefore just the two shelves.
 
-  All 15 parameters must be included in the config.
+  The bands are applied in the order listed, and their frequencies must not decrease along the way.
+
+  A band with a `gain` of zero, or smaller than 0.001 dB, is left out when the filter is built,
+  since it does nothing.
+  This is how a band is disabled without removing it, and it does not change the role of any
+  other band, since the roles are decided before the zero gain bands are dropped.
+  An equalizer with every gain at zero passes the signal through unchanged.
+
+  ```yaml
+  MyEqualizer:
+    type: BiquadCombo
+    parameters:
+      type: NPointPeq
+      bands:
+        - freq: 125     # Lowshelf
+          gain: 1.0
+          q: 0.7
+        - freq: 400     # Peaking
+          gain: -0.5
+          q: 0.7
+        - freq: 1000    # Peaking
+          gain: 1.5
+          q: 0.7
+        - freq: 8000    # Highshelf
+          gain: 0.5
+          q: 0.7
+  ```
 
 
 Other types such as Bessel filters can be built by combining several Biquads.
@@ -2302,6 +2353,11 @@ The coefficients are given as a list a0..an in that order. Example:
 ```
 This example implements a Biquad lowpass, but for a Biquad the Free Biquad type is faster and should be preferred.
 Both a and b are optional. If left out, they default to [1.0].
+
+The coefficients are scaled so that a0 becomes unity, which leaves the transfer function unchanged.
+The a coefficients are also checked for stability when the configuration is loaded.
+A filter with poles on or outside the unit circle is unstable, meaning its output grows without limit,
+and such a configuration is rejected.
 
 
 ## Processors
@@ -2690,16 +2746,10 @@ It contains only filter definitions and pipeline steps, that can be pasted into 
 If using [CamillaGUI](#gui), it is also possible to import the filters into an existing configuration.
 
 # Related projects
-## Tools, utilities and libraries
-* https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels.
-* https://github.com/raptorlightning/I2S-Hat - An SPDIF Hat for the Raspberry Pi 2-X for SPDIF Communication, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/375834-i2s-hat-raspberry-pi-hat-spdif-i2s-communication-dsp.html).
-* https://github.com/worstenbrood/CamillaDsp.Client - CamillaDSP websocket client library for .NET, [also available on NuGet](https://www.nuget.org/packages/CamillaDsp.Client/).
-* https://github.com/AlfredJKwack/camillaEQ - A browser-based interactive graphical equalizer and spectrum analyzer for CamillaDSP, and a pipeline editor.
-
 ## Music players
 * https://moodeaudio.org/ - moOde audio player, audiophile-quality music playback for Raspberry Pi.
 * https://github.com/JWahle/piCoreCDSP - Installs CamillaDSP and GUI on piCorePlayer
-* [FusionDsp](https://docs.google.com/document/d/e/2PACX-1vRhU4i830YaaUlB6-FiDAdvl69T3Iej_9oSbNTeSpiW0DlsyuTLSv5IsVSYMmkwbFvNbdAT0Tj6Yjjh/pub) a plugin based on CamillaDsp for [Volumio](https://volumio.com), the music player, with graphic equalizer, parametric equalizer, FIR filters, Loudness, AutoEq profile for headphone and more!
+* https://github.com/volumio/volumio-plugins-sources-bookworm/tree/master/fusion - FusionDsp, a plugin based on CamillaDSP for [Volumio](https://volumio.com), the music player, with graphic equalizer, parametric equalizer, FIR filters, Loudness, AutoEq profile for headphone and more!
 
 ## Measurement and filter generation tools
 ### rePhase 
