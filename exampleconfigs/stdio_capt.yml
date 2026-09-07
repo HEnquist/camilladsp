@@ -3,11 +3,11 @@ devices:
   samplerate: 44100
   chunksize: 1024
   silence_threshold: -60
-  silence_timeout: 3.0
+  silence_timeout_s: 3.0
   capture:
-    type: Pulse
+    type: Alsa
     channels: 2
-    device: "MySink.monitor"
+    device: "hw:Loopback,1"
     format: S16_LE
   playback:
     type: Stdout

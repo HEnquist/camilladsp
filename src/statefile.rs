@@ -24,14 +24,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::ProcessingParameters;
 
+/// Persistent state that is saved to and loaded from the state file across restarts.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct State {
+    /// Path to the last active configuration file, if any.
     pub config_path: Option<String>,
+    /// Mute status for each of the [`ProcessingParameters::NUM_FADERS`] faders.
     pub mute: [bool; 5],
+    /// Volume (dB) for each of the [`ProcessingParameters::NUM_FADERS`] faders.
     pub volume: [f32; 5],
 }
 
+/// Load a [`State`] from `filename`, returning `None` and logging a warning on any error.
 pub fn load_state(filename: &str) -> Option<State> {
     let file = match File::open(filename) {
         Ok(f) => f,
@@ -59,6 +64,8 @@ pub fn load_state(filename: &str) -> Option<State> {
     Some(state)
 }
 
+/// Build a [`State`] from the current parameters and save it to `filename`,
+/// clearing the `unsaved_changes` flag on success.
 pub fn save_state(
     filename: &str,
     config_path: &Arc<Mutex<Option<String>>>,
@@ -75,6 +82,7 @@ pub fn save_state(
     }
 }
 
+/// Serialize `state` to `filename`, returning `true` on success.
 pub fn save_state_to_file(filename: &str, state: &State) -> bool {
     debug!("Saving state to {filename}");
     match std::fs::OpenOptions::new()

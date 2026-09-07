@@ -1,4 +1,4 @@
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::ProcessingParameters;
 use crate::audiochunk::AudioChunk;
 use crate::config;
@@ -7,29 +7,37 @@ use audioadapter_buffers::direct::{
     InterleavedSlice, SequentialSliceOfVecs, SparseSequentialSliceOfVecs,
 };
 use rubato::{
-    Async, Fft, FixedAsync, FixedSync, Indexing, PolynomialDegree, Resampler,
-    SincInterpolationParameters, SincInterpolationType, WindowFunction, calculate_cutoff,
+    Async, Fft, FixedAsync, FixedSync, Indexing, PolynomialDegree, ResampleResult, Resampler,
+    SincInterpolationParameters, SincInterpolationType, Slip, WindowFunction,
 };
 use std::sync::Arc;
 use std::time::Instant;
 
 const LOAD_WARN_CONSECUTIVE_CHUNKS: usize = 10;
 
+/// Wraps a `rubato` resampler for processing [`AudioChunk`]s and tracking resampler load.
 pub struct ChunkResampler {
-    pub resampler: Box<dyn Resampler<PrcFmt>>,
+    pub resampler: Box<dyn Resampler<CamillaFloat>>,
     pub indexing: Indexing,
     pub secs_per_chunk: f32,
     pub overloaded_chunks: usize,
     pub processing_params: Arc<ProcessingParameters>,
 }
 
+/// Returns `true` if the resampler configuration supports runtime rate adjustment.
+///
+/// This covers the asynchronous algorithms and the `Slip` resampler, all of which can have
+/// their ratio adjusted at runtime for clock drift compensation.
 pub fn resampler_is_async(conf: &Option<config::Resampler>) -> bool {
     matches!(
         &conf,
-        Some(config::Resampler::AsyncSinc { .. }) | Some(config::Resampler::AsyncPoly { .. })
+        Some(config::Resampler::AsyncSinc { .. })
+            | Some(config::Resampler::AsyncPoly { .. })
+            | Some(config::Resampler::Slip)
     )
 }
 
+/// Build `rubato` [`SincInterpolationParameters`] from a config profile or free parameters.
 pub fn new_async_sinc_parameters(
     resampler_conf: &config::AsyncSincParameters,
 ) -> SincInterpolationParameters {
@@ -41,10 +49,9 @@ pub fn new_async_sinc_parameters(
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
             let window = WindowFunction::Hann2;
-            let f_cutoff = calculate_cutoff(sinc_len, window);
             SincInterpolationParameters {
                 sinc_len,
-                f_cutoff,
+                f_cutoff: None,
                 oversampling_factor,
                 interpolation,
                 window,
@@ -57,10 +64,9 @@ pub fn new_async_sinc_parameters(
             let oversampling_factor = 1024;
             let interpolation = SincInterpolationType::Linear;
             let window = WindowFunction::Blackman2;
-            let f_cutoff = calculate_cutoff(sinc_len, window);
             SincInterpolationParameters {
                 sinc_len,
-                f_cutoff,
+                f_cutoff: None,
                 oversampling_factor,
                 interpolation,
                 window,
@@ -73,10 +79,9 @@ pub fn new_async_sinc_parameters(
             let oversampling_factor = 512;
             let interpolation = SincInterpolationType::Quadratic;
             let window = WindowFunction::BlackmanHarris2;
-            let f_cutoff = calculate_cutoff(sinc_len, window);
             SincInterpolationParameters {
                 sinc_len,
-                f_cutoff,
+                f_cutoff: None,
                 oversampling_factor,
                 interpolation,
                 window,
@@ -89,10 +94,9 @@ pub fn new_async_sinc_parameters(
             let oversampling_factor = 256;
             let interpolation = SincInterpolationType::Cubic;
             let window = WindowFunction::BlackmanHarris2;
-            let f_cutoff = calculate_cutoff(sinc_len, window);
             SincInterpolationParameters {
                 sinc_len,
-                f_cutoff,
+                f_cutoff: None,
                 oversampling_factor,
                 interpolation,
                 window,
@@ -120,14 +124,9 @@ pub fn new_async_sinc_parameters(
                 config::AsyncSincWindow::BlackmanHarris => WindowFunction::BlackmanHarris,
                 config::AsyncSincWindow::BlackmanHarris2 => WindowFunction::BlackmanHarris2,
             };
-            let cutoff = if let Some(co) = f_cutoff {
-                *co
-            } else {
-                calculate_cutoff(*sinc_len, wind)
-            };
             SincInterpolationParameters {
                 sinc_len: *sinc_len,
-                f_cutoff: cutoff,
+                f_cutoff: *f_cutoff,
                 oversampling_factor: *oversampling_factor,
                 interpolation,
                 window: wind,
@@ -136,6 +135,7 @@ pub fn new_async_sinc_parameters(
     }
 }
 
+/// Construct a [`ChunkResampler`] from the configuration, or `None` if no resampling is needed.
 pub fn new_resampler(
     resampler_conf: &Option<config::Resampler>,
     num_channels: usize,
@@ -160,7 +160,7 @@ pub fn new_resampler(
             );
             Some(ChunkResampler {
                 resampler: Box::new(
-                    Async::<PrcFmt>::new_sinc(
+                    Async::<CamillaFloat>::new_sinc(
                         samplerate as f64 / capture_samplerate as f64,
                         1.1,
                         &sinc_params,
@@ -185,7 +185,7 @@ pub fn new_resampler(
             };
             Some(ChunkResampler {
                 resampler: Box::new(
-                    Async::<PrcFmt>::new_poly(
+                    Async::<CamillaFloat>::new_poly(
                         samplerate as f64 / capture_samplerate as f64,
                         1.1,
                         degree,
@@ -203,15 +203,23 @@ pub fn new_resampler(
         }
         Some(config::Resampler::Synchronous) => Some(ChunkResampler {
             resampler: Box::new(
-                Fft::<PrcFmt>::new(
+                Fft::<CamillaFloat>::new(
                     capture_samplerate,
                     samplerate,
                     chunksize,
-                    2,
                     num_channels,
                     FixedSync::Output,
                 )
                 .unwrap(),
+            ),
+            indexing,
+            secs_per_chunk,
+            overloaded_chunks: 0,
+            processing_params: processing_params.clone(),
+        }),
+        Some(config::Resampler::Slip) => Some(ChunkResampler {
+            resampler: Box::new(
+                Slip::<CamillaFloat>::new(chunksize, num_channels, FixedAsync::Output).unwrap(),
             ),
             indexing,
             secs_per_chunk,
@@ -223,6 +231,22 @@ pub fn new_resampler(
 }
 
 impl ChunkResampler {
+    /// Adjust the resample ratio relative to the original ratio.
+    ///
+    /// Only asynchronous resamplers support this. For a synchronous resampler this is a no-op
+    /// that returns `Ok`, matching the previous behavior where callers guard on `async_src`.
+    pub fn set_resample_ratio_relative(
+        &mut self,
+        rel_ratio: f64,
+        ramp: bool,
+    ) -> ResampleResult<()> {
+        match self.resampler.as_adjustable() {
+            Some(adjustable) => adjustable.set_resample_ratio_relative(rel_ratio, ramp),
+            None => Ok(()),
+        }
+    }
+
+    /// Resample `chunk` in place to `chunksize` output frames across `channels` channels.
     pub fn resample_chunk(&mut self, chunk: &mut AudioChunk, chunksize: usize, channels: usize) {
         let start = Instant::now();
         chunk.update_channel_mask(self.indexing.active_channels_mask.as_mut().unwrap());
@@ -277,7 +301,7 @@ impl ChunkResampler {
         }
     }
 
-    pub fn pump_silence(&mut self, channels: usize, chunksize: usize) -> Vec<Vec<PrcFmt>> {
+    pub fn pump_silence(&mut self, channels: usize, chunksize: usize) -> Vec<Vec<CamillaFloat>> {
         let mut new_waves = Vec::with_capacity(channels);
         for _ in 0..channels {
             new_waves.push(vec![0.0; chunksize]);

@@ -20,270 +20,209 @@ use crate::filters::biquad;
 
 // Sample format
 //type SmpFmt = i16;
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
 
-#[derive(Clone, Debug)]
-pub struct BiquadCombo {
-    samplerate: usize,
-    pub name: String,
-    filters: Vec<biquad::Biquad>,
+/// A biquad combo is a cascade, so it has no runtime form of its own. It is
+/// expanded into stages at build time and compiled into the cascade of the
+/// filter step around it, which is what lets a combo and the loose biquads
+/// beside it share one canon.
+fn butterworth_q(order: usize) -> Vec<f64> {
+    let odd = !order.is_multiple_of(2);
+    let pi = std::f64::consts::PI;
+    let n_so = order / 2;
+    let mut qvalues = Vec::with_capacity(n_so + usize::from(odd));
+    for n in 0..n_so {
+        let q = 1.0 / (2.0 * (pi / (order as f64) * (n as f64 + 0.5)).sin());
+        qvalues.push(q);
+    }
+    if odd {
+        qvalues.push(-1.0);
+    }
+    qvalues
 }
 
-impl BiquadCombo {
-    fn butterworth_q(order: usize) -> Vec<PrcFmt> {
-        let odd = !order.is_multiple_of(2);
-        let pi = std::f64::consts::PI as PrcFmt;
-        let n_so = order / 2;
-        let mut qvalues = Vec::with_capacity(n_so + usize::from(odd));
-        for n in 0..n_so {
-            let q = 1.0 / (2.0 * (pi / (order as PrcFmt) * (n as PrcFmt + 0.5)).sin());
-            qvalues.push(q);
-        }
-        if odd {
-            qvalues.push(-1.0);
-        }
-        qvalues
-    }
-
-    fn make_highpass(fs: usize, freq: PrcFmt, qvalues: Vec<PrcFmt>) -> Vec<biquad::Biquad> {
-        let mut filters = Vec::with_capacity(qvalues.len());
-        for q in qvalues.iter() {
-            let filtconf = if q >= &0.0 {
-                config::BiquadParameters::Highpass { freq, q: *q }
-            } else {
-                config::BiquadParameters::HighpassFO { freq }
-            };
-            let coeffs = biquad::BiquadCoefficients::from_config(fs, filtconf);
-            let filt = biquad::Biquad::new("", fs, coeffs);
-            filters.push(filt);
-        }
-        filters
-    }
-
-    fn make_lowpass(fs: usize, freq: PrcFmt, qvalues: Vec<PrcFmt>) -> Vec<biquad::Biquad> {
-        let mut filters = Vec::with_capacity(qvalues.len());
-        for q in qvalues.iter() {
-            let filtconf = if q >= &0.0 {
-                config::BiquadParameters::Lowpass { freq, q: *q }
-            } else {
-                config::BiquadParameters::LowpassFO { freq }
-            };
-            let coeffs = biquad::BiquadCoefficients::from_config(fs, filtconf);
-            let filt = biquad::Biquad::new("", fs, coeffs);
-            filters.push(filt);
-        }
-        filters
-    }
-
-    fn linkwitzriley_q(order: usize) -> Vec<PrcFmt> {
-        let mut q_temp = BiquadCombo::butterworth_q(order / 2);
-        let mut qvalues;
-        if !order.is_multiple_of(4) {
-            q_temp.pop();
-            qvalues = q_temp.clone();
-            qvalues.append(&mut q_temp);
-            qvalues.push(0.5);
+fn make_highpass(fs: usize, freq: f64, qvalues: Vec<f64>) -> Vec<biquad::Biquad> {
+    let mut filters = Vec::with_capacity(qvalues.len());
+    for q in qvalues.iter() {
+        let filtconf = if q >= &0.0 {
+            config::BiquadParameters::Highpass { freq, q: *q }
         } else {
-            qvalues = q_temp.clone();
-            qvalues.append(&mut q_temp);
+            config::BiquadParameters::HighpassFO { freq }
+        };
+        let coeffs = biquad::BiquadCoefficients::from_config(fs, filtconf);
+        let filt = biquad::Biquad::new("", fs, coeffs);
+        filters.push(filt);
+    }
+    filters
+}
+
+fn make_lowpass(fs: usize, freq: f64, qvalues: Vec<f64>) -> Vec<biquad::Biquad> {
+    let mut filters = Vec::with_capacity(qvalues.len());
+    for q in qvalues.iter() {
+        let filtconf = if q >= &0.0 {
+            config::BiquadParameters::Lowpass { freq, q: *q }
+        } else {
+            config::BiquadParameters::LowpassFO { freq }
+        };
+        let coeffs = biquad::BiquadCoefficients::from_config(fs, filtconf);
+        let filt = biquad::Biquad::new("", fs, coeffs);
+        filters.push(filt);
+    }
+    filters
+}
+
+fn linkwitzriley_q(order: usize) -> Vec<f64> {
+    let mut q_temp = butterworth_q(order / 2);
+    let mut qvalues;
+    if !order.is_multiple_of(4) {
+        q_temp.pop();
+        qvalues = q_temp.clone();
+        qvalues.append(&mut q_temp);
+        qvalues.push(0.5);
+    } else {
+        qvalues = q_temp.clone();
+        qvalues.append(&mut q_temp);
+    }
+    qvalues
+}
+
+fn make_tilt(fs: usize, gain: f64) -> Vec<biquad::Biquad> {
+    let gain_low = -gain / 2.0;
+    let gain_high = gain / 2.0;
+    let lsconf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q {
+        freq: 110.0,
+        q: 0.35,
+        gain: gain_low,
+    });
+    let hsconf = config::BiquadParameters::Highshelf(config::ShelfSteepness::Q {
+        freq: 3500.0,
+        q: 0.35,
+        gain: gain_high,
+    });
+    let mut filters = Vec::with_capacity(2);
+    let lscoeffs = biquad::BiquadCoefficients::from_config(fs, lsconf);
+    let lsfilt = biquad::Biquad::new("", fs, lscoeffs);
+    filters.push(lsfilt);
+    let hscoeffs = biquad::BiquadCoefficients::from_config(fs, hsconf);
+    let hsfilt = biquad::Biquad::new("", fs, hscoeffs);
+    filters.push(hsfilt);
+    filters
+}
+
+fn make_npeq(samplerate: usize, bands: &[config::PeqBand]) -> Vec<biquad::Biquad> {
+    let sections = npeq_sections(bands);
+    let mut filters = Vec::with_capacity(sections.len());
+    for (params, band) in sections.into_iter().zip(bands.iter()) {
+        // A band with no significant gain does nothing, so leave it out.
+        if band.gain.abs() <= 0.001 {
+            continue;
         }
-        qvalues
+        let coeffs = biquad::BiquadCoefficients::from_config(samplerate, params);
+        filters.push(biquad::Biquad::new("", samplerate, coeffs));
     }
+    filters
+}
 
-    fn make_tilt(fs: usize, gain: PrcFmt) -> Vec<biquad::Biquad> {
-        let gain_low = -gain / 2.0;
-        let gain_high = gain / 2.0;
-        let lsconf = config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q {
-            freq: 110.0,
-            q: 0.35,
-            gain: gain_low,
-        });
-        let hsconf = config::BiquadParameters::Highshelf(config::ShelfSteepness::Q {
-            freq: 3500.0,
-            q: 0.35,
-            gain: gain_high,
-        });
-        let mut filters = Vec::with_capacity(2);
-        let lscoeffs = biquad::BiquadCoefficients::from_config(fs, lsconf);
-        let lsfilt = biquad::Biquad::new("", fs, lscoeffs);
-        filters.push(lsfilt);
-        let hscoeffs = biquad::BiquadCoefficients::from_config(fs, hsconf);
-        let hsfilt = biquad::Biquad::new("", fs, hscoeffs);
-        filters.push(hsfilt);
-        filters
-    }
+fn make_graphic(
+    samplerate: usize,
+    freq_min: f32,
+    freq_max: f32,
+    gains: &[f32],
+) -> Vec<biquad::Biquad> {
+    let bands = gains.len();
+    let mut filters = Vec::with_capacity(bands);
 
-    fn make_peq5(
-        samplerate: usize,
-        f_all: [PrcFmt; 5],
-        q_all: [PrcFmt; 5],
-        g_all: [PrcFmt; 5],
-    ) -> Vec<biquad::Biquad> {
-        let mut filters = Vec::with_capacity(5);
-        for (n, ((f, q), g)) in f_all.iter().zip(q_all).zip(g_all).enumerate() {
-            if q.abs() > 0.001 {
-                let filtconf = match n {
-                    0 => config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q {
-                        freq: *f,
-                        q,
-                        gain: g,
-                    }),
-                    4 => config::BiquadParameters::Highshelf(config::ShelfSteepness::Q {
-                        freq: *f,
-                        q,
-                        gain: g,
-                    }),
-                    _ => config::BiquadParameters::Peaking(config::PeakingWidth::Q {
-                        freq: *f,
-                        q,
-                        gain: g,
-                    }),
-                };
-                let coeffs = biquad::BiquadCoefficients::from_config(samplerate, filtconf);
-                let filt = biquad::Biquad::new("", samplerate, coeffs);
-                filters.push(filt);
-            }
+    let f_min_log = freq_min.log2();
+    let f_max_log = freq_max.log2();
+    let bw = (f_max_log - f_min_log) / bands as f32;
+    for (band, gain) in gains.iter().enumerate() {
+        if gain.abs() > 0.001 {
+            let freq_log = f_min_log + (band as f32 + 0.5) * bw;
+            let freq = 2.0_f32.powf(freq_log);
+            let filtconf = config::BiquadParameters::Peaking(config::PeakingWidth::Bandwidth {
+                freq: freq as f64,
+                bandwidth: bw as f64,
+                gain: *gain as f64,
+            });
+            let coeffs = biquad::BiquadCoefficients::from_config(samplerate, filtconf);
+            let filt = biquad::Biquad::new("", samplerate, coeffs);
+            filters.push(filt);
         }
-        filters
     }
+    filters
+}
 
-    fn make_graphic(
-        samplerate: usize,
-        freq_min: f32,
-        freq_max: f32,
-        gains: &[f32],
-    ) -> Vec<biquad::Biquad> {
-        let bands = gains.len();
-        let mut filters = Vec::with_capacity(bands);
-
-        let f_min_log = freq_min.log2();
-        let f_max_log = freq_max.log2();
-        let bw = (f_max_log - f_min_log) / bands as f32;
-        for (band, gain) in gains.iter().enumerate() {
-            if gain.abs() > 0.001 {
-                let freq_log = f_min_log + (band as f32 + 0.5) * bw;
-                let freq = 2.0_f32.powf(freq_log);
-                let filtconf = config::BiquadParameters::Peaking(config::PeakingWidth::Bandwidth {
-                    freq: freq as PrcFmt,
-                    bandwidth: bw as PrcFmt,
-                    gain: *gain as PrcFmt,
-                });
-                let coeffs = biquad::BiquadCoefficients::from_config(samplerate, filtconf);
-                let filt = biquad::Biquad::new("", samplerate, coeffs);
-                filters.push(filt);
-            }
+/// The biquad stages this combo expands to.
+///
+/// The count depends on the parameters, and can be zero: `make_graphic`
+/// drops any band that is flat. It also changes on reload, since
+/// `config_diff` only rebuilds the pipeline when a filter changes type.
+pub fn stages(samplerate: usize, parameters: config::BiquadComboParameters) -> Vec<biquad::Biquad> {
+    match parameters {
+        config::BiquadComboParameters::LinkwitzRileyHighpass { order, freq } => {
+            let qvalues = linkwitzriley_q(order);
+            make_highpass(samplerate, freq, qvalues)
         }
-        filters
+        config::BiquadComboParameters::LinkwitzRileyLowpass { order, freq } => {
+            let qvalues = linkwitzriley_q(order);
+            make_lowpass(samplerate, freq, qvalues)
+        }
+        config::BiquadComboParameters::ButterworthHighpass { order, freq } => {
+            let qvalues = butterworth_q(order);
+            make_highpass(samplerate, freq, qvalues)
+        }
+        config::BiquadComboParameters::ButterworthLowpass { order, freq } => {
+            let qvalues = butterworth_q(order);
+            make_lowpass(samplerate, freq, qvalues)
+        }
+        config::BiquadComboParameters::Tilt { gain } => make_tilt(samplerate, gain),
+        config::BiquadComboParameters::NPointPeq { bands } => make_npeq(samplerate, &bands),
+        config::BiquadComboParameters::GraphicEqualizer(params) => make_graphic(
+            samplerate,
+            params.freq_min(),
+            params.freq_max(),
+            &params.gains,
+        ),
     }
+}
 
-    pub fn from_config(
-        name: &str,
-        samplerate: usize,
-        parameters: config::BiquadComboParameters,
-    ) -> Self {
-        let name = name.to_string();
-        match parameters {
-            config::BiquadComboParameters::LinkwitzRileyHighpass { order, freq } => {
-                let qvalues = BiquadCombo::linkwitzriley_q(order);
-                let filters = BiquadCombo::make_highpass(samplerate, freq, qvalues);
-                BiquadCombo {
-                    samplerate,
-                    name,
-                    filters,
-                }
-            }
-            config::BiquadComboParameters::LinkwitzRileyLowpass { order, freq } => {
-                let qvalues = BiquadCombo::linkwitzriley_q(order);
-                let filters = BiquadCombo::make_lowpass(samplerate, freq, qvalues);
-                BiquadCombo {
-                    samplerate,
-                    name,
-                    filters,
-                }
-            }
-            config::BiquadComboParameters::ButterworthHighpass { order, freq } => {
-                let qvalues = BiquadCombo::butterworth_q(order);
-                let filters = BiquadCombo::make_highpass(samplerate, freq, qvalues);
-                BiquadCombo {
-                    samplerate,
-                    name,
-                    filters,
-                }
-            }
-            config::BiquadComboParameters::ButterworthLowpass { order, freq } => {
-                let qvalues = BiquadCombo::butterworth_q(order);
-                let filters = BiquadCombo::make_lowpass(samplerate, freq, qvalues);
-                BiquadCombo {
-                    samplerate,
-                    name,
-                    filters,
-                }
-            }
-            config::BiquadComboParameters::Tilt { gain } => {
-                let filters = BiquadCombo::make_tilt(samplerate, gain);
-                BiquadCombo {
-                    samplerate,
-                    name,
-                    filters,
-                }
-            }
-            config::BiquadComboParameters::FivePointPeq {
-                fls,
-                qls,
-                gls,
-                fp1,
-                qp1,
-                gp1,
-                fp2,
-                qp2,
-                gp2,
-                fp3,
-                qp3,
-                gp3,
-                fhs,
-                qhs,
-                ghs,
-            } => {
-                let filters = BiquadCombo::make_peq5(
-                    samplerate,
-                    [fls, fp1, fp2, fp3, fhs],
-                    [qls, qp1, qp2, qp3, qhs],
-                    [gls, gp1, gp2, gp3, ghs],
-                );
-                BiquadCombo {
-                    samplerate,
-                    name,
-                    filters,
-                }
-            }
-            config::BiquadComboParameters::GraphicEqualizer(params) => {
-                let filters = BiquadCombo::make_graphic(
-                    samplerate,
-                    params.freq_min(),
-                    params.freq_max(),
-                    &params.gains,
-                );
-                BiquadCombo {
-                    samplerate,
-                    name,
-                    filters,
-                }
-            }
+/// A combo as a filter of its own, rather than compiled into the cascade of
+/// its step.
+///
+/// It is still a cascade, so it runs as its own canon. It only misses the
+/// depth it would have gained from the biquads either side of it, and the
+/// channel axis, which needs a step that reaches several channels at once.
+///
+/// Nothing in `Pipeline::from_config` builds one: a combo is biquad-based, so
+/// it always lands in a run that compiles, and the per-channel chains that
+/// would hold this are only built for runs that do not. It exists because
+/// `FilterGroup::from_config` is public and a library user can hand it a combo
+/// directly. Do not read its presence as a pipeline path that is still taken.
+#[derive(Clone, Debug)]
+pub struct Combo {
+    name: String,
+    samplerate: usize,
+    stages: Vec<biquad::Biquad>,
+}
+
+impl Combo {
+    pub fn new(name: &str, samplerate: usize, stages: Vec<biquad::Biquad>) -> Self {
+        Combo {
+            name: name.to_string(),
+            samplerate,
+            stages,
         }
     }
 }
 
-impl Filter for BiquadCombo {
+impl Filter for Combo {
     fn name(&self) -> &str {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
-        for filter in self.filters.iter_mut() {
-            filter.process_waveform(waveform)?;
-        }
-        Ok(())
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
+        biquad::process_mono_cascade(&mut self.stages, waveform);
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
@@ -291,8 +230,7 @@ impl Filter for BiquadCombo {
             parameters: conf, ..
         } = conf
         {
-            let name = self.name.clone();
-            *self = BiquadCombo::from_config(&name, self.samplerate, conf);
+            self.stages = stages(self.samplerate, conf);
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
@@ -300,9 +238,30 @@ impl Filter for BiquadCombo {
     }
 }
 
+/// Expand the bands of an NPointPeq into biquad parameters.
+/// The first band becomes a low shelf and the last a high shelf,
+/// with the ones in between as peaking filters.
+fn npeq_sections(bands: &[config::PeqBand]) -> Vec<config::BiquadParameters> {
+    let last = bands.len().saturating_sub(1);
+    bands
+        .iter()
+        .enumerate()
+        .map(|(n, band)| {
+            let config::PeqBand { freq, q, gain } = *band;
+            if n == 0 {
+                config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { freq, q, gain })
+            } else if n == last {
+                config::BiquadParameters::Highshelf(config::ShelfSteepness::Q { freq, q, gain })
+            } else {
+                config::BiquadParameters::Peaking(config::PeakingWidth::Q { freq, q, gain })
+            }
+        })
+        .collect()
+}
+
 /// Validate a BiquadCombo convolution config.
 pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) -> Res<()> {
-    let maxfreq = samplerate as PrcFmt / 2.0;
+    let maxfreq = samplerate as f64 / 2.0;
     match conf {
         config::BiquadComboParameters::LinkwitzRileyHighpass { freq, order }
         | config::BiquadComboParameters::LinkwitzRileyLowpass { freq, order } => {
@@ -340,28 +299,25 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
             }
             Ok(())
         }
-        config::BiquadComboParameters::FivePointPeq {
-            fls,
-            qls,
-            fp1,
-            qp1,
-            fp2,
-            qp2,
-            fp3,
-            qp3,
-            fhs,
-            qhs,
-            ..
-        } => {
-            if *qls <= 0.0 || *qhs <= 0.0 || *qp1 <= 0.0 || *qp2 <= 0.0 || *qp3 <= 0.0 {
-                return Err(config::ConfigError::new("All Q-values must be > 0").into());
-            } else if *fls >= maxfreq
-                || *fhs >= maxfreq
-                || *fp1 >= maxfreq
-                || *fp2 >= maxfreq
-                || *fp3 >= maxfreq
-            {
-                return Err(config::ConfigError::new("All frequencies must be > 0").into());
+        config::BiquadComboParameters::NPointPeq { bands } => {
+            if bands.len() < 2 {
+                return Err(config::ConfigError::new(
+                    "At least two bands are needed, for the low and high shelves",
+                )
+                .into());
+            }
+            for params in npeq_sections(bands).iter() {
+                biquad::validate_config(samplerate, params)?;
+            }
+            // The first band becomes the low shelf and the last the high shelf,
+            // so the bands have to be listed with rising frequency.
+            for pair in bands.windows(2) {
+                if pair[1].freq < pair[0].freq {
+                    return Err(config::ConfigError::new(
+                        "Band frequencies must not decrease along the list",
+                    )
+                    .into());
+                }
             }
             Ok(())
         }
@@ -395,16 +351,17 @@ pub fn validate_config(samplerate: usize, conf: &config::BiquadComboParameters) 
 
 #[cfg(test)]
 mod tests {
-    use crate::PrcFmt;
     use crate::config;
+    use crate::filters::Filter;
+    use crate::filters::biquad;
     use crate::filters::biquadcombo;
 
-    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
+    fn is_close(left: f64, right: f64, maxdiff: f64) -> bool {
         println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 
-    fn compare_vecs(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
+    fn compare_vecs(left: Vec<f64>, right: Vec<f64>, maxdiff: f64) -> bool {
         for (val_l, val_r) in left.iter().zip(right.iter()) {
             if !is_close(*val_l, *val_r, maxdiff) {
                 return false;
@@ -414,7 +371,7 @@ mod tests {
     }
     #[test]
     fn make_butterworth_2() {
-        let q = biquadcombo::BiquadCombo::butterworth_q(2);
+        let q = biquadcombo::butterworth_q(2);
         let expect = vec![0.707];
         assert!(q.len() == 1);
         assert!(compare_vecs(q, expect, 0.01));
@@ -422,7 +379,7 @@ mod tests {
 
     #[test]
     fn make_butterworth_5() {
-        let q = biquadcombo::BiquadCombo::butterworth_q(5);
+        let q = biquadcombo::butterworth_q(5);
         let expect = vec![1.62, 0.62, -1.0];
         assert!(q.len() == 3);
         assert!(compare_vecs(q, expect, 0.01));
@@ -430,7 +387,7 @@ mod tests {
 
     #[test]
     fn make_butterworth_8() {
-        let q = biquadcombo::BiquadCombo::butterworth_q(8);
+        let q = biquadcombo::butterworth_q(8);
         let expect = vec![2.56, 0.9, 0.6, 0.51];
         assert!(q.len() == 4);
         assert!(compare_vecs(q, expect, 0.01));
@@ -438,7 +395,7 @@ mod tests {
 
     #[test]
     fn make_lr4() {
-        let q = biquadcombo::BiquadCombo::linkwitzriley_q(4);
+        let q = biquadcombo::linkwitzriley_q(4);
         let expect = vec![0.707, 0.707];
         assert!(q.len() == 2);
         assert!(compare_vecs(q, expect, 0.01));
@@ -446,7 +403,7 @@ mod tests {
 
     #[test]
     fn make_lr6() {
-        let q = biquadcombo::BiquadCombo::linkwitzriley_q(10);
+        let q = biquadcombo::linkwitzriley_q(10);
         let expect = vec![1.62, 0.62, 1.62, 0.62, 0.5];
         assert!(q.len() == 5);
         assert!(compare_vecs(q, expect, 0.01));
@@ -510,5 +467,212 @@ mod tests {
             order: 2,
         };
         assert!(biquadcombo::validate_config(fs, &badconf4).is_err());
+    }
+
+    fn band(freq: f64, gain: f64) -> config::PeqBand {
+        config::PeqBand { freq, q: 0.7, gain }
+    }
+
+    fn npeq(bands: Vec<config::PeqBand>) -> config::BiquadComboParameters {
+        config::BiquadComboParameters::NPointPeq { bands }
+    }
+
+    #[test]
+    fn npeq_band_roles() {
+        // First band is a low shelf, last is a high shelf, the rest are peaking.
+        let bands = vec![
+            band(100.0, 1.0),
+            band(400.0, 1.0),
+            band(1000.0, 1.0),
+            band(8000.0, 1.0),
+        ];
+        let sections = biquadcombo::npeq_sections(&bands);
+        assert!(matches!(
+            sections[0],
+            config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { freq: 100.0, .. })
+        ));
+        assert!(matches!(
+            sections[1],
+            config::BiquadParameters::Peaking(config::PeakingWidth::Q { freq: 400.0, .. })
+        ));
+        assert!(matches!(
+            sections[2],
+            config::BiquadParameters::Peaking(config::PeakingWidth::Q { freq: 1000.0, .. })
+        ));
+        assert!(matches!(
+            sections[3],
+            config::BiquadParameters::Highshelf(config::ShelfSteepness::Q { freq: 8000.0, .. })
+        ));
+    }
+
+    #[test]
+    fn npeq_two_bands_are_both_shelves() {
+        let sections = biquadcombo::npeq_sections(&[band(100.0, 1.0), band(8000.0, 1.0)]);
+        assert_eq!(sections.len(), 2);
+        assert!(matches!(sections[0], config::BiquadParameters::Lowshelf(_)));
+        assert!(matches!(
+            sections[1],
+            config::BiquadParameters::Highshelf(_)
+        ));
+    }
+
+    #[test]
+    fn npeq_section_count() {
+        let conf = npeq(vec![
+            band(100.0, 1.0),
+            band(400.0, -0.5),
+            band(1000.0, 1.5),
+            band(2500.0, -0.25),
+            band(8000.0, 0.5),
+        ]);
+        assert_eq!(biquadcombo::stages(44100, conf).len(), 5);
+    }
+
+    #[test]
+    fn npeq_skips_zero_gain_bands() {
+        let conf = npeq(vec![
+            band(100.0, 0.0),
+            band(400.0, -0.5),
+            // Below the 0.001 dB threshold, so this one is dropped as well.
+            band(1000.0, 0.0005),
+            band(8000.0, 0.0),
+        ]);
+        assert_eq!(biquadcombo::stages(44100, conf).len(), 1);
+    }
+
+    #[test]
+    fn npeq_zero_gain_band_keeps_the_roles_of_the_others() {
+        // Dropping a zero gain band must not promote its neighbour to a shelf.
+        let bands = vec![band(100.0, 1.0), band(1000.0, 1.0), band(8000.0, 0.0)];
+        let with_zero = biquadcombo::stages(44100, npeq(bands));
+        // The same two active bands, but now the peak really is the last band.
+        let as_listed = biquadcombo::stages(44100, npeq(vec![band(100.0, 1.0), band(1000.0, 1.0)]));
+        assert_eq!(with_zero.len(), 2);
+        assert_eq!(as_listed.len(), 2);
+        let mut with_zero = biquadcombo::Combo::new("a", 44100, with_zero);
+        let mut as_listed = biquadcombo::Combo::new("b", 44100, as_listed);
+        let mut wave_a = vec![0.0; 256];
+        wave_a[0] = 1.0;
+        let mut wave_b = wave_a.clone();
+        with_zero.process_waveform(&mut wave_a);
+        as_listed.process_waveform(&mut wave_b);
+        // In the first the 1 kHz band is peaking, in the second it is a high shelf.
+        assert_ne!(wave_a, wave_b);
+    }
+
+    #[test]
+    fn npeq_all_zero_gain_is_passthrough() {
+        let conf = npeq(vec![
+            band(100.0, 0.0),
+            band(1000.0, -0.0),
+            band(8000.0, 0.0),
+        ]);
+        let built = biquadcombo::stages(44100, conf);
+        assert!(built.is_empty());
+        let mut combo = biquadcombo::Combo::new("test", 44100, built);
+        let mut wave = vec![1.0, 0.5, -0.25, 0.0];
+        let expected = wave.clone();
+        combo.process_waveform(&mut wave);
+        assert_eq!(wave, expected);
+    }
+
+    #[test]
+    fn npeq_matches_separate_biquads() {
+        let fs = 44100;
+        let conf = npeq(vec![
+            band(125.0, 1.0),
+            band(400.0, -0.5),
+            band(1000.0, 1.5),
+            band(2500.0, -0.25),
+            band(8000.0, 0.5),
+        ]);
+        let mut combo = biquadcombo::Combo::new("test", fs, biquadcombo::stages(fs, conf));
+        // The same equalizer, spelled out as separate biquads in the same order.
+        let separate = [
+            config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q {
+                freq: 125.0,
+                q: 0.7,
+                gain: 1.0,
+            }),
+            config::BiquadParameters::Peaking(config::PeakingWidth::Q {
+                freq: 400.0,
+                q: 0.7,
+                gain: -0.5,
+            }),
+            config::BiquadParameters::Peaking(config::PeakingWidth::Q {
+                freq: 1000.0,
+                q: 0.7,
+                gain: 1.5,
+            }),
+            config::BiquadParameters::Peaking(config::PeakingWidth::Q {
+                freq: 2500.0,
+                q: 0.7,
+                gain: -0.25,
+            }),
+            config::BiquadParameters::Highshelf(config::ShelfSteepness::Q {
+                freq: 8000.0,
+                q: 0.7,
+                gain: 0.5,
+            }),
+        ];
+        // An impulse, so the two are compared over their full responses.
+        let mut wave_combo = vec![0.0; 1024];
+        wave_combo[0] = 1.0;
+        let mut wave_separate = wave_combo.clone();
+        combo.process_waveform(&mut wave_combo);
+        for params in separate {
+            let coeffs = biquad::BiquadCoefficients::from_config(fs, params);
+            let mut filt = biquad::Biquad::new("", fs, coeffs);
+            filt.process_waveform(&mut wave_separate);
+        }
+        assert_eq!(wave_combo, wave_separate);
+    }
+
+    #[test]
+    fn check_npeq_band_count() {
+        let fs = 44100;
+        assert!(biquadcombo::validate_config(fs, &npeq(vec![])).is_err());
+        assert!(biquadcombo::validate_config(fs, &npeq(vec![band(1000.0, 1.0)])).is_err());
+        let two = npeq(vec![band(100.0, 1.0), band(8000.0, 1.0)]);
+        assert!(biquadcombo::validate_config(fs, &two).is_ok());
+    }
+
+    #[test]
+    fn check_npeq_frequency_order() {
+        let fs = 44100;
+        let rising = npeq(vec![
+            band(100.0, 1.0),
+            band(400.0, 1.0),
+            band(1000.0, 1.0),
+            band(8000.0, 1.0),
+        ]);
+        assert!(biquadcombo::validate_config(fs, &rising).is_ok());
+        // Equal frequencies are allowed, the list only has to not decrease.
+        let equal = npeq(vec![band(400.0, 1.0), band(400.0, 1.0), band(400.0, 1.0)]);
+        assert!(biquadcombo::validate_config(fs, &equal).is_ok());
+        let falling = npeq(vec![band(100.0, 1.0), band(2000.0, 1.0), band(500.0, 1.0)]);
+        assert!(biquadcombo::validate_config(fs, &falling).is_err());
+        let shelves_swapped = npeq(vec![band(8000.0, 1.0), band(100.0, 1.0)]);
+        assert!(biquadcombo::validate_config(fs, &shelves_swapped).is_err());
+    }
+
+    #[test]
+    fn check_npeq_bands() {
+        let fs = 44100;
+        // Bands are checked even when their gain is zero and they get skipped.
+        let bad_freq = npeq(vec![band(-5.0, 0.0), band(8000.0, 1.0)]);
+        assert!(biquadcombo::validate_config(fs, &bad_freq).is_err());
+        let bad_q = npeq(vec![
+            band(100.0, 1.0),
+            config::PeqBand {
+                freq: 1000.0,
+                q: 0.0,
+                gain: 1.0,
+            },
+            band(8000.0, 1.0),
+        ]);
+        assert!(biquadcombo::validate_config(fs, &bad_q).is_err());
+        let above_nyquist = npeq(vec![band(100.0, 1.0), band(30000.0, 1.0)]);
+        assert!(biquadcombo::validate_config(fs, &above_nyquist).is_err());
     }
 }

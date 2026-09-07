@@ -16,7 +16,7 @@
 
 // RACE, recursive ambiophonic crosstalk eliminator
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
@@ -33,8 +33,8 @@ pub struct RACE {
     pub channels: usize,
     pub channel_a: usize,
     pub channel_b: usize,
-    pub feedback_a: PrcFmt,
-    pub feedback_b: PrcFmt,
+    pub feedback_a: CamillaFloat,
+    pub feedback_b: CamillaFloat,
     pub delay_a: Delay,
     pub delay_b: Delay,
     pub gain: Gain,
@@ -44,16 +44,17 @@ pub struct RACE {
 fn delay_config(config: &config::RACEParameters, samplerate: usize) -> DelayParameters {
     // compensate the delay by subtracting one sample period from the delay, clamp at zero
     let sample_period_in_delay_unit = match config.delay_unit() {
-        config::TimeUnit::Microseconds => 1000000.0 / samplerate as PrcFmt,
-        config::TimeUnit::Milliseconds => 1000.0 / samplerate as PrcFmt,
-        config::TimeUnit::Millimetres => 343.0 * 1000.0 / samplerate as PrcFmt,
-        config::TimeUnit::Samples => 1.0,
+        config::DelayUnit::Microseconds => 1000000.0 / samplerate as f64,
+        config::DelayUnit::Milliseconds => 1000.0 / samplerate as f64,
+        config::DelayUnit::Seconds => 1.0 / samplerate as f64,
+        config::DelayUnit::Millimetres => 343.0 * 1000.0 / samplerate as f64,
+        config::DelayUnit::Samples => 1.0,
     };
     let compensated_delay = (config.delay - sample_period_in_delay_unit).max(0.0);
 
     config::DelayParameters {
         delay: compensated_delay,
-        unit: config.delay_unit,
+        delay_unit: config.delay_unit,
         subsample: config.subsample_delay,
     }
 }
@@ -116,12 +117,12 @@ impl Processor for RACE {
     }
 
     /// Apply a RACE processor to an AudioChunk, modifying it in-place.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
         let (first, second) = input.waveforms.split_at_mut(self.channel_b);
         let channel_a = &mut first[self.channel_a];
         let channel_b = &mut second[0];
         if channel_a.is_empty() || channel_b.is_empty() {
-            return Ok(());
+            return;
         }
         for (value_a, value_b) in channel_a.iter_mut().zip(channel_b.iter_mut()) {
             // todo math
@@ -134,7 +135,6 @@ impl Processor for RACE {
             *value_a = added_a;
             *value_b = added_b;
         }
-        Ok(())
     }
 
     fn update_parameters(&mut self, config: config::Processor) {

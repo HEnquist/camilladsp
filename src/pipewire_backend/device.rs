@@ -14,8 +14,9 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::ToF32;
 use crate::utils::ringbuffer::fill_playback_output_from_ringbuffer;
-use audio_thread_priority::{
+use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 use pipewire as pw;
@@ -44,7 +45,6 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 
 use crate::CommandMessage;
-use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::ProcessingState;
 use crate::Res;
@@ -80,6 +80,16 @@ impl MainLoopQuitter {
             pw::sys::pw_main_loop_quit(self.raw as *mut pw::sys::pw_main_loop);
         }
     }
+}
+
+/// Add the properties that make PipeWire connect a stream to the node given as `autoconnect_to`.
+fn insert_autoconnect_props(props: &mut pw::properties::PropertiesBox, target: &str) {
+    props.insert(*pw::keys::TARGET_OBJECT, target);
+    // Leave the node unconnected when the target cannot be found, instead of falling back to
+    // the default device, and connect it later if the target shows up.
+    // Neither key exists in pw::keys.
+    props.insert("node.dont-fallback", "true");
+    props.insert("node.linger", "true");
 }
 
 #[derive(Debug)]
@@ -127,13 +137,15 @@ pub struct PipeWireCaptureDevice {
     pub node_description: Option<String>,
     pub node_group_name: Option<String>,
     pub autoconnect_to: Option<String>,
+    pub loopback: bool,
     pub samplerate: usize,
     pub resampler_config: Option<config::Resampler>,
     pub capture_samplerate: usize,
     pub chunksize: usize,
     pub channels: usize,
-    pub silence_threshold: PrcFmt,
-    pub silence_timeout: PrcFmt,
+    pub silence_threshold: f64,
+    pub silence_timeout: f64,
+    pub rate_measure_interval: f32,
 }
 
 /// Build audio format POD for stream parameters
@@ -329,8 +341,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     *pw::keys::NODE_GROUP => node_group_name,
                 };
                 if let Some(ref target) = autoconnect_to {
-                    // the key PW_KEY_TARGET_OBJECT doesn not (yet?) exist in pw::keys
-                    props.insert("target.object", target.as_str());
+                    insert_autoconnect_props(&mut props, target);
                 }
 
                 let stream = match pw::stream::StreamBox::new(&core, "CamillaDSP-Playback", props) {
@@ -411,17 +422,15 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                             stride,
                             chunksize,
                         );
-                        if !logged_playback_quantum {
-                            if let Some((quantum_frames, quantum_bytes)) =
+                        if !logged_playback_quantum
+                            && let Some((quantum_frames, quantum_bytes)) =
                                 pipewire_logged_quantum(&[requested_bytes, callback_bytes, max_bytes], stride)
-                            {
-                                debug!(
-                                    "PipeWire playback callback quantum is {} frames ({} bytes)",
-                                    quantum_frames,
-                                    quantum_bytes
-                                );
-                                logged_playback_quantum = true;
-                            }
+                        {
+                            debug!(
+                                "PipeWire playback callback quantum is {} frames ({} bytes)",
+                                quantum_frames, quantum_bytes
+                            );
+                            logged_playback_quantum = true;
                         }
                         xtrace!(
                             "PW playback callback with {} bytes due (chunk {} / max {})",
@@ -600,7 +609,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                                     }
                                 }
                                 chunk.update_stats(&mut chunk_stats);
-
+                                crate::push_playback_audio_buffer(&playback_status_clone, &chunk);
                                 conversion_result = chunk_to_buffer_rawbytes(
                                     chunk,
                                     &mut raw_buffer,
@@ -740,6 +749,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
             .clone()
             .unwrap_or("camilladsp".to_string());
         let autoconnect_to = self.autoconnect_to.clone();
+        let loopback = self.loopback;
         let samplerate = self.samplerate;
         let capture_samplerate = self.capture_samplerate;
         let chunksize = self.chunksize;
@@ -750,6 +760,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
         let async_src = resampler_is_async(&resampler_config);
         let silence_timeout = self.silence_timeout;
         let silence_threshold = self.silence_threshold;
+        let rate_measure_interval_ms = (1000.0 * self.rate_measure_interval) as u64;
 
         let handle = thread::Builder::new()
             .name("PipeWireCapture".to_string())
@@ -809,9 +820,14 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     *pw::keys::NODE_LATENCY => latency_str,
                     *pw::keys::NODE_GROUP => node_group_name,
                 };
+                if loopback {
+                    // Capture from the monitor of a sink instead of from a source.
+                    // WirePlumber only considers sources when it resolves a target by name,
+                    // so this is also what makes a sink name match at all.
+                    props.insert(*pw::keys::STREAM_CAPTURE_SINK, "true");
+                }
                 if let Some(ref target) = autoconnect_to {
-                    // the key PW_KEY_TARGET_OBJECT doesn not (yet?) exist in pw::keys
-                    props.insert("target.object", target.as_str());
+                    insert_autoconnect_props(&mut props, target);
                 }
 
                 let stream = match pw::stream::StreamBox::new(&core, "CamillaDSP-Capture", props) {
@@ -877,17 +893,15 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         let offset = chunk_data.offset() as usize;
                         let size = chunk_data.size() as usize;
                         let available_bytes = data.data().map(|slice| slice.len()).unwrap_or_default();
-                        if !logged_capture_quantum {
-                            if let Some((quantum_frames, quantum_bytes)) =
+                        if !logged_capture_quantum
+                            && let Some((quantum_frames, quantum_bytes)) =
                                 pipewire_logged_quantum(&[size, available_bytes], stride)
-                            {
-                                debug!(
-                                    "PipeWire capture callback quantum is {} frames ({} bytes)",
-                                    quantum_frames,
-                                    quantum_bytes
-                                );
-                                logged_capture_quantum = true;
-                            }
+                        {
+                            debug!(
+                                "PipeWire capture callback quantum is {} frames ({} bytes)",
+                                quantum_frames, quantum_bytes
+                            );
+                            logged_capture_quantum = true;
                         }
                         xtrace!("PW capture callback with data size {} bytes", size);
 
@@ -1006,6 +1020,10 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         }
                     };
                     let mut averager = countertimer::TimeAverage::new();
+                    let mut watcher_averager = countertimer::TimeAverage::new();
+                    // Sample rate measured over the last completed `rate_measure_interval`
+                    // window, kept separate from the short update cadence.
+                    let mut measured_rate = 0.0;
                     let mut silence_counter = countertimer::SilenceCounter::new(
                         silence_threshold,
                         silence_timeout,
@@ -1048,7 +1066,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                                 debug!("Requested to adjust capture speed to {speed}");
                                 if let Some(resampl) = &mut resampler {
                                     if async_src {
-                                        if resampl.resampler.set_resample_ratio_relative(speed, true).is_err() {
+                                        if resampl.set_resample_ratio_relative(speed, true).is_err() {
                                             debug!("Failed to set resampling speed to {}", speed);
                                         }
                                     } else {
@@ -1091,6 +1109,14 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         // Pop exactly the needed bytes into pre-allocated buffer
                         rb_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
                         averager.add_value(capture_bytes);
+                        watcher_averager.add_value(capture_bytes);
+                        if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
+                            let bytes_per_sec = watcher_averager.average();
+                            watcher_averager.restart();
+                            measured_rate =
+                                bytes_per_sec / (channels * store_bytes_per_sample) as f64;
+                            trace!("Measured sample rate is {measured_rate:.1} Hz");
+                        }
 
                         // Update channel mask from capture status
                         {
@@ -1114,19 +1140,12 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         // Update capture status
                         if let Some(capture_status) = capture_status_clone.try_upgradable_read() {
                             if averager.larger_than_millis(capture_status.update_interval as u64) {
-                                let bytes_per_sec = averager.average();
                                 averager.restart();
-                                let measured_rate_f = bytes_per_sec / (channels * store_bytes_per_sample) as f64;
-                                trace!(
-                                    "Measured sample rate is {:.1} Hz, signal RMS is {:?}",
-                                    measured_rate_f,
-                                    capture_status.signal_rms.last_sqrt(),
-                                );
                                 if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
-                                    capture_status.measured_samplerate = measured_rate_f as usize;
-                                    capture_status.signal_range = value_range as f32;
+                                    capture_status.measured_samplerate = measured_rate as usize;
+                                    capture_status.signal_range = value_range.to_f32();
                                     capture_status.rate_adjust = rate_adjust as f32;
-                                    capture_status.state = state;
+                                    crate::update_capture_state(&mut capture_status, state);
                                 }
                                 else {
                                     xtrace!("Capture status upgrade blocked, skip update.");
@@ -1182,7 +1201,10 @@ impl CaptureDevice for PipeWireCaptureDevice {
                             }
                         };
                     }
-                    capture_status_clone.write().state = ProcessingState::Inactive;
+                    crate::set_capture_state(
+                        &capture_status_clone,
+                        ProcessingState::Inactive,
+                    );
                     // Signal mainloop to quit - pw_main_loop_quit is thread-safe
                     quitter.quit();
                 });

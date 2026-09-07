@@ -254,7 +254,7 @@ Add this filter definition:
     type: Delay
     parameters:
       delay: 0.5
-      unit: ms
+      delay_unit: ms
 ```
 
 Now we add this to the tweeter channels:
@@ -359,7 +359,7 @@ filters:
     description: "Time alignment for tweeters"
     parameters:
       delay: 0.5
-      unit: ms
+      delay_unit: ms
 
 pipeline:
   - type: Filter

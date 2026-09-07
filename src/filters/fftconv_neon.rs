@@ -14,7 +14,6 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
 use num_complex::Complex;
 
 // NEON SIMD kernels for complex multiply/multiply-add on aarch64.
@@ -30,15 +29,20 @@ use num_complex::Complex;
 //   result = acc + prod                     (via vaddq)
 //
 // 4x-register unrolled main loop + 1x cleanup + scalar tail (f32 only).
+//
+// Both precisions are always compiled, regardless of which one `CamillaFloat` is set
+// to. The unused one is dead code that the linker drops, and in exchange both
+// stay under the compiler's eye and are covered by the tests below on every
+// build.
 
 // f64: each 128-bit NEON register holds 1 Complex<f64>; 4x unroll = 4 complex per iter.
 
-#[cfg(all(target_arch = "aarch64", not(feature = "32bit")))]
+#[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
-pub(super) unsafe fn multiply_elements_neon(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+pub(super) unsafe fn multiply_elements_neon_f64(
+    result: &mut [Complex<f64>],
+    slice_a: &[Complex<f64>],
+    slice_b: &[Complex<f64>],
 ) {
     use std::arch::aarch64::*;
 
@@ -121,12 +125,12 @@ pub(super) unsafe fn multiply_elements_neon(
     }
 }
 
-#[cfg(all(target_arch = "aarch64", not(feature = "32bit")))]
+#[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
-pub(super) unsafe fn multiply_add_elements_neon(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+pub(super) unsafe fn multiply_add_elements_neon_f64(
+    result: &mut [Complex<f64>],
+    slice_a: &[Complex<f64>],
+    slice_b: &[Complex<f64>],
 ) {
     use std::arch::aarch64::*;
 
@@ -209,12 +213,12 @@ pub(super) unsafe fn multiply_add_elements_neon(
 
 // f32: each 128-bit NEON register holds 2 Complex<f32>; 4x unroll = 8 complex per iter.
 
-#[cfg(all(target_arch = "aarch64", feature = "32bit"))]
+#[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
-pub(super) unsafe fn multiply_elements_neon(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+pub(super) unsafe fn multiply_elements_neon_f32(
+    result: &mut [Complex<f32>],
+    slice_a: &[Complex<f32>],
+    slice_b: &[Complex<f32>],
 ) {
     use std::arch::aarch64::*;
 
@@ -295,12 +299,12 @@ pub(super) unsafe fn multiply_elements_neon(
     }
 }
 
-#[cfg(all(target_arch = "aarch64", feature = "32bit"))]
+#[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
-pub(super) unsafe fn multiply_add_elements_neon(
-    result: &mut [Complex<PrcFmt>],
-    slice_a: &[Complex<PrcFmt>],
-    slice_b: &[Complex<PrcFmt>],
+pub(super) unsafe fn multiply_add_elements_neon_f32(
+    result: &mut [Complex<f32>],
+    slice_a: &[Complex<f32>],
+    slice_b: &[Complex<f32>],
 ) {
     use std::arch::aarch64::*;
 
@@ -382,481 +386,206 @@ pub(super) unsafe fn multiply_add_elements_neon(
         }
     }
 }
-
-#[cfg(test)]
+#[cfg(all(test, target_arch = "aarch64"))]
 mod tests {
-    use crate::PrcFmt;
+    use super::super::{multiply_add_elements_scalar, multiply_elements_scalar};
+    use super::{
+        multiply_add_elements_neon_f32, multiply_add_elements_neon_f64, multiply_elements_neon_f32,
+        multiply_elements_neon_f64,
+    };
     use num_complex::Complex;
 
-    fn make_test_vectors(len: usize) -> (Vec<Complex<PrcFmt>>, Vec<Complex<PrcFmt>>) {
-        let a = (0..len)
-            .map(|i| Complex::new((i + 1) as PrcFmt * 0.5, i as PrcFmt * 0.3 - 0.1))
-            .collect();
-        let b = (0..len)
-            .map(|i| Complex::new(i as PrcFmt * 0.7 - 0.2, (i + 2) as PrcFmt * 0.4))
-            .collect();
-        (a, b)
-    }
+    // Both precisions are tested on every build. FMA rounds differently from the
+    // scalar reference, so results are compared with a tolerance that scales with
+    // the magnitude of the operands: max(ABS_TOL, REL_TOL * max(|expected|, |got|)).
+    macro_rules! kernel_tests {
+        ($modname:ident, $t:ty, $mul:ident, $mul_add:ident, $abs_tol:expr, $rel_tol:expr) => {
+            mod $modname {
+                use super::*;
 
-    // FMA rounds differently from scalar; SIMD results may differ by a few ULPs.
-    #[cfg(not(feature = "32bit"))]
-    const SIMD_TOL: PrcFmt = 1e-9;
-    #[cfg(feature = "32bit")]
-    const SIMD_TOL: PrcFmt = 1e-5;
+                const ABS_TOL: $t = $abs_tol;
+                const REL_TOL: $t = $rel_tol;
 
-    // Relative tolerance helper: for large-magnitude values the absolute FMA
-    // rounding difference can exceed SIMD_TOL, so we use
-    //   max(SIMD_TOL, SIMD_REL_TOL * max(|expected|, |got|))
-    // to scale the tolerance with the magnitude of the operands.
-    #[cfg(all(target_arch = "aarch64", not(feature = "32bit")))]
-    const SIMD_REL_TOL: PrcFmt = 1e-14;
-    #[cfg(all(target_arch = "aarch64", feature = "32bit"))]
-    const SIMD_REL_TOL: PrcFmt = 1e-6;
+                // Covers every tail shape of both kernels: the f64 main loop steps by 4
+                // complex, the f32 one by 8, with a 2-wide cleanup and a 1-element scalar
+                // tail in the f32 case.
+                const LENGTHS: [usize; 21] = [
+                    0, 1, 2, 3, 4, 5, 7, 8, 9, 13, 15, 16, 17, 24, 25, 32, 33, 48, 49, 100, 1025,
+                ];
 
-    #[cfg(target_arch = "aarch64")]
-    fn simd_tol_for(a: PrcFmt, b: PrcFmt) -> PrcFmt {
-        let mag = a.abs().max(b.abs());
-        SIMD_TOL.max(SIMD_REL_TOL * mag)
-    }
+                // 4097: large FFT spectrum, main loop plus remainder.
+                // 8192: power of two, main loop with no remainder.
+                // 8193: one past, exercises the cleanup path.
+                const LARGE_LENGTHS: [usize; 3] = [4097, 8192, 8193];
 
-    // ---- f64 tests ----
+                fn make_test_vectors(len: usize) -> (Vec<Complex<$t>>, Vec<Complex<$t>>) {
+                    let a = (0..len)
+                        .map(|i| Complex::new((i + 1) as $t * 0.5, i as $t * 0.3 - 0.1))
+                        .collect();
+                    let b = (0..len)
+                        .map(|i| Complex::new(i as $t * 0.7 - 0.2, (i + 2) as $t * 0.4))
+                        .collect();
+                    (a, b)
+                }
 
-    #[cfg(all(target_arch = "aarch64", not(feature = "32bit")))]
-    #[test]
-    fn multiply_elements_neon_matches_scalar_all_lengths() {
-        use super::super::multiply_elements_scalar;
-        use super::multiply_elements_neon;
-        // Cover all f64 tail lengths: mod 4 (main loop) and individual cleanup.
-        for len in [
-            0usize, 1, 2, 3, 4, 5, 7, 8, 9, 13, 15, 16, 17, 24, 25, 100, 1025,
-        ] {
-            let (a, b) = make_test_vectors(len);
-            let mut expected = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
-            let mut result = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
+                fn make_accumulator(len: usize) -> Vec<Complex<$t>> {
+                    (0..len)
+                        .map(|i| Complex::new(i as $t * 0.1, -(i as $t) * 0.2))
+                        .collect()
+                }
 
-            multiply_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON is mandatory on all AArch64 implementations.
-            unsafe { multiply_elements_neon(&mut result, &a, &b) };
+                fn tol_for(a: $t, b: $t) -> $t {
+                    ABS_TOL.max(REL_TOL * a.abs().max(b.abs()))
+                }
 
-            for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
-                assert!(
-                    (e.re - r.re).abs() < SIMD_TOL,
-                    "multiply_elements len={len} i={j}: re expected={} got={}",
-                    e.re,
-                    r.re
-                );
-                assert!(
-                    (e.im - r.im).abs() < SIMD_TOL,
-                    "multiply_elements len={len} i={j}: im expected={} got={}",
-                    e.im,
-                    r.im
-                );
+                fn assert_close(expected: &[Complex<$t>], result: &[Complex<$t>], ctx: &str) {
+                    for (i, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
+                        assert!(
+                            (e.re - r.re).abs() < tol_for(e.re, r.re),
+                            "{ctx} i={i}: re expected={} got={} diff={}",
+                            e.re,
+                            r.re,
+                            (e.re - r.re).abs()
+                        );
+                        assert!(
+                            (e.im - r.im).abs() < tol_for(e.im, r.im),
+                            "{ctx} i={i}: im expected={} got={} diff={}",
+                            e.im,
+                            r.im,
+                            (e.im - r.im).abs()
+                        );
+                    }
+                }
+
+                #[test]
+                fn multiply_matches_scalar_all_lengths() {
+                    for len in LENGTHS {
+                        let (a, b) = make_test_vectors(len);
+                        let mut expected = vec![Complex::new(0.0 as $t, 0.0); len];
+                        let mut result = vec![Complex::new(0.0 as $t, 0.0); len];
+
+                        multiply_elements_scalar(&mut expected, &a, &b);
+                        // SAFETY: NEON is mandatory on all AArch64 implementations.
+                        unsafe { $mul(&mut result, &a, &b) };
+
+                        assert_close(&expected, &result, &format!("multiply len={len}"));
+                    }
+                }
+
+                #[test]
+                fn multiply_add_matches_scalar_all_lengths() {
+                    for len in LENGTHS {
+                        let (a, b) = make_test_vectors(len);
+                        // Non-zero accumulator, so the accumulate path is exercised.
+                        let mut expected = make_accumulator(len);
+                        let mut result = expected.clone();
+
+                        multiply_add_elements_scalar(&mut expected, &a, &b);
+                        // SAFETY: NEON is mandatory on all AArch64 implementations.
+                        unsafe { $mul_add(&mut result, &a, &b) };
+
+                        assert_close(&expected, &result, &format!("multiply_add len={len}"));
+                    }
+                }
+
+                #[test]
+                fn multiply_large_buffers() {
+                    for len in LARGE_LENGTHS {
+                        let (a, b) = make_test_vectors(len);
+                        let mut expected = vec![Complex::new(0.0 as $t, 0.0); len];
+                        let mut result = vec![Complex::new(0.0 as $t, 0.0); len];
+
+                        multiply_elements_scalar(&mut expected, &a, &b);
+                        // SAFETY: NEON is mandatory on all AArch64 implementations.
+                        unsafe { $mul(&mut result, &a, &b) };
+
+                        assert_close(&expected, &result, &format!("large multiply len={len}"));
+                    }
+                }
+
+                #[test]
+                fn multiply_add_large_buffers() {
+                    for len in LARGE_LENGTHS {
+                        let (a, b) = make_test_vectors(len);
+                        let mut expected = make_accumulator(len);
+                        let mut result = expected.clone();
+
+                        multiply_add_elements_scalar(&mut expected, &a, &b);
+                        // SAFETY: NEON is mandatory on all AArch64 implementations.
+                        unsafe { $mul_add(&mut result, &a, &b) };
+
+                        assert_close(&expected, &result, &format!("large multiply_add len={len}"));
+                    }
+                }
+
+                // Mimics the convolution inner loop: one overwriting multiply followed by
+                // repeated accumulates, so rounding differences have a chance to build up.
+                #[test]
+                fn multiply_add_multi_round_matches_scalar() {
+                    let nsegments = 16;
+                    let len = 1025; // typical FFT spectrum size for chunksize=1024
+
+                    #[allow(clippy::type_complexity)]
+                    let segments: Vec<(Vec<Complex<$t>>, Vec<Complex<$t>>)> = (0..nsegments)
+                        .map(|s| {
+                            let a = (0..len)
+                                .map(|i| {
+                                    Complex::new(
+                                        ((s * len + i + 1) as $t) * 0.001,
+                                        ((s * len + i) as $t) * 0.002 - 0.5,
+                                    )
+                                })
+                                .collect();
+                            let b = (0..len)
+                                .map(|i| {
+                                    Complex::new(
+                                        ((s * len + i) as $t) * 0.003 + 0.1,
+                                        ((s * len + i + 2) as $t) * 0.004,
+                                    )
+                                })
+                                .collect();
+                            (a, b)
+                        })
+                        .collect();
+
+                    let mut expected = vec![Complex::new(0.0 as $t, 0.0); len];
+                    let mut result = vec![Complex::new(0.0 as $t, 0.0); len];
+
+                    // First segment overwrites, the rest accumulate.
+                    multiply_elements_scalar(&mut expected, &segments[0].0, &segments[0].1);
+                    // SAFETY: NEON is mandatory on all AArch64 implementations.
+                    unsafe { $mul(&mut result, &segments[0].0, &segments[0].1) };
+
+                    for (a, b) in &segments[1..] {
+                        multiply_add_elements_scalar(&mut expected, a, b);
+                        // SAFETY: NEON is mandatory on all AArch64 implementations.
+                        unsafe { $mul_add(&mut result, a, b) };
+                    }
+
+                    assert_close(
+                        &expected,
+                        &result,
+                        &format!("multi-round len={len} nseg={nsegments}"),
+                    );
+                }
             }
-        }
+        };
     }
 
-    #[cfg(all(target_arch = "aarch64", not(feature = "32bit")))]
-    #[test]
-    fn multiply_add_elements_neon_matches_scalar_all_lengths() {
-        use super::super::multiply_add_elements_scalar;
-        use super::multiply_add_elements_neon;
-        for len in [
-            0usize, 1, 2, 3, 4, 5, 7, 8, 9, 13, 15, 16, 17, 24, 25, 100, 1025,
-        ] {
-            let (a, b) = make_test_vectors(len);
-            // Initialize with non-zero accumulators to exercise the accumulate path.
-            let init: Vec<Complex<PrcFmt>> = (0..len)
-                .map(|i| Complex::new(i as PrcFmt * 0.1, -(i as PrcFmt) * 0.2))
-                .collect();
-
-            let mut expected = init.clone();
-            let mut result = init.clone();
-
-            multiply_add_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON is mandatory on all AArch64 implementations.
-            unsafe { multiply_add_elements_neon(&mut result, &a, &b) };
-
-            for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
-                assert!(
-                    (e.re - r.re).abs() < SIMD_TOL,
-                    "multiply_add_elements len={len} i={j}: re expected={} got={}",
-                    e.re,
-                    r.re
-                );
-                assert!(
-                    (e.im - r.im).abs() < SIMD_TOL,
-                    "multiply_add_elements len={len} i={j}: im expected={} got={}",
-                    e.im,
-                    r.im
-                );
-            }
-        }
-    }
-
-    // ---- f32 tests ----
-
-    #[cfg(all(target_arch = "aarch64", feature = "32bit"))]
-    #[test]
-    fn multiply_elements_neon_f32_matches_scalar_all_lengths() {
-        use super::super::multiply_elements_scalar;
-        use super::multiply_elements_neon;
-        // Cover all f32 tail lengths: mod 2 (cleanup) and mod 8 (main loop).
-        for len in [
-            0usize, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 32, 33, 48, 49, 100, 1025,
-        ] {
-            let (a, b) = make_test_vectors(len);
-            let mut expected = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
-            let mut result = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
-
-            multiply_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON is mandatory on all AArch64 implementations.
-            unsafe { multiply_elements_neon(&mut result, &a, &b) };
-
-            for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
-                assert!(
-                    (e.re - r.re).abs() < simd_tol_for(e.re, r.re),
-                    "multiply_elements(f32) len={len} i={j}: re expected={} got={}",
-                    e.re,
-                    r.re
-                );
-                assert!(
-                    (e.im - r.im).abs() < simd_tol_for(e.im, r.im),
-                    "multiply_elements(f32) len={len} i={j}: im expected={} got={}",
-                    e.im,
-                    r.im
-                );
-            }
-        }
-    }
-
-    #[cfg(all(target_arch = "aarch64", feature = "32bit"))]
-    #[test]
-    fn multiply_add_elements_neon_f32_matches_scalar_all_lengths() {
-        use super::super::multiply_add_elements_scalar;
-        use super::multiply_add_elements_neon;
-        for len in [
-            0usize, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 32, 33, 48, 49, 100, 1025,
-        ] {
-            let (a, b) = make_test_vectors(len);
-            let init: Vec<Complex<PrcFmt>> = (0..len)
-                .map(|i| Complex::new(i as PrcFmt * 0.1, -(i as PrcFmt) * 0.2))
-                .collect();
-
-            let mut expected = init.clone();
-            let mut result = init.clone();
-
-            multiply_add_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON is mandatory on all AArch64 implementations.
-            unsafe { multiply_add_elements_neon(&mut result, &a, &b) };
-
-            for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
-                assert!(
-                    (e.re - r.re).abs() < simd_tol_for(e.re, r.re),
-                    "multiply_add_elements(f32) len={len} i={j}: re expected={} got={}",
-                    e.re,
-                    r.re
-                );
-                assert!(
-                    (e.im - r.im).abs() < simd_tol_for(e.im, r.im),
-                    "multiply_add_elements(f32) len={len} i={j}: im expected={} got={}",
-                    e.im,
-                    r.im
-                );
-            }
-        }
-    }
-
-    // ---- Stress tests ----
-
-    #[cfg(all(target_arch = "aarch64", not(feature = "32bit")))]
-    #[test]
-    fn multiply_add_multi_round_neon_matches_scalar() {
-        use super::super::{multiply_add_elements_scalar, multiply_elements_scalar};
-        use super::{multiply_add_elements_neon, multiply_elements_neon};
-        let nsegments = 16;
-        let len = 1025; // typical FFT spectrum size for chunksize=1024
-
-        #[allow(clippy::type_complexity)]
-        let segments: Vec<(Vec<Complex<PrcFmt>>, Vec<Complex<PrcFmt>>)> = (0..nsegments)
-            .map(|s| {
-                let a = (0..len)
-                    .map(|i| {
-                        Complex::new(
-                            ((s * len + i + 1) as PrcFmt) * 0.001,
-                            ((s * len + i) as PrcFmt) * 0.002 - 0.5,
-                        )
-                    })
-                    .collect();
-                let b = (0..len)
-                    .map(|i| {
-                        Complex::new(
-                            ((s * len + i) as PrcFmt) * 0.003 + 0.1,
-                            ((s * len + i + 2) as PrcFmt) * 0.004,
-                        )
-                    })
-                    .collect();
-                (a, b)
-            })
-            .collect();
-
-        let mut expected = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
-        let mut result = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
-
-        // First segment: overwrite.
-        multiply_elements_scalar(&mut expected, &segments[0].0, &segments[0].1);
-        unsafe { multiply_elements_neon(&mut result, &segments[0].0, &segments[0].1) };
-
-        // Remaining segments: accumulate.
-        for (a, b) in &segments[1..] {
-            multiply_add_elements_scalar(&mut expected, a, b);
-            unsafe { multiply_add_elements_neon(&mut result, a, b) };
-        }
-
-        for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
-            let tol_re = simd_tol_for(e.re, r.re);
-            let tol_im = simd_tol_for(e.im, r.im);
-            assert!(
-                (e.re - r.re).abs() < tol_re,
-                "multi-round len={len} nseg={nsegments} i={j}: re expected={} got={}, diff={}",
-                e.re,
-                r.re,
-                (e.re - r.re).abs()
-            );
-            assert!(
-                (e.im - r.im).abs() < tol_im,
-                "multi-round len={len} nseg={nsegments} i={j}: im expected={} got={}, diff={}",
-                e.im,
-                r.im,
-                (e.im - r.im).abs()
-            );
-        }
-    }
-
-    #[cfg(all(target_arch = "aarch64", not(feature = "32bit")))]
-    #[test]
-    fn multiply_elements_neon_large_buffers() {
-        use super::super::multiply_elements_scalar;
-        use super::multiply_elements_neon;
-        // 4097: typical large FFT spectrum, exercises 4x body + remainder.
-        // 8192: power-of-two, exercises 4x body with no remainder.
-        // 8193: one past power-of-two, exercises cleanup (1 element).
-        for len in [4097usize, 8192, 8193] {
-            let (a, b) = make_test_vectors(len);
-            let mut expected = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
-            let mut result = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
-
-            multiply_elements_scalar(&mut expected, &a, &b);
-            unsafe { multiply_elements_neon(&mut result, &a, &b) };
-
-            for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
-                let tol_re = simd_tol_for(e.re, r.re);
-                let tol_im = simd_tol_for(e.im, r.im);
-                assert!(
-                    (e.re - r.re).abs() < tol_re,
-                    "large multiply len={len} i={j}: re expected={} got={}, diff={}, tol={}",
-                    e.re,
-                    r.re,
-                    (e.re - r.re).abs(),
-                    tol_re
-                );
-                assert!(
-                    (e.im - r.im).abs() < tol_im,
-                    "large multiply len={len} i={j}: im expected={} got={}, diff={}, tol={}",
-                    e.im,
-                    r.im,
-                    (e.im - r.im).abs(),
-                    tol_im
-                );
-            }
-        }
-    }
-
-    #[cfg(all(target_arch = "aarch64", not(feature = "32bit")))]
-    #[test]
-    fn multiply_add_elements_neon_large_buffers() {
-        use super::super::multiply_add_elements_scalar;
-        use super::multiply_add_elements_neon;
-        for len in [4097usize, 8192, 8193] {
-            let (a, b) = make_test_vectors(len);
-            let init: Vec<Complex<PrcFmt>> = (0..len)
-                .map(|i| Complex::new(i as PrcFmt * 0.1, -(i as PrcFmt) * 0.2))
-                .collect();
-
-            let mut expected = init.clone();
-            let mut result = init.clone();
-
-            multiply_add_elements_scalar(&mut expected, &a, &b);
-            unsafe { multiply_add_elements_neon(&mut result, &a, &b) };
-
-            for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
-                let tol_re = simd_tol_for(e.re, r.re);
-                let tol_im = simd_tol_for(e.im, r.im);
-                assert!(
-                    (e.re - r.re).abs() < tol_re,
-                    "large multiply_add len={len} i={j}: re expected={} got={}, diff={}, tol={}",
-                    e.re,
-                    r.re,
-                    (e.re - r.re).abs(),
-                    tol_re
-                );
-                assert!(
-                    (e.im - r.im).abs() < tol_im,
-                    "large multiply_add len={len} i={j}: im expected={} got={}, diff={}, tol={}",
-                    e.im,
-                    r.im,
-                    (e.im - r.im).abs(),
-                    tol_im
-                );
-            }
-        }
-    }
-
-    // ---- f32 stress tests ----
-
-    #[cfg(all(target_arch = "aarch64", feature = "32bit"))]
-    #[test]
-    fn multiply_add_multi_round_neon_f32_matches_scalar() {
-        use super::super::{multiply_add_elements_scalar, multiply_elements_scalar};
-        use super::{multiply_add_elements_neon, multiply_elements_neon};
-        let nsegments = 16;
-        let len = 1025;
-
-        #[allow(clippy::type_complexity)]
-        let segments: Vec<(Vec<Complex<PrcFmt>>, Vec<Complex<PrcFmt>>)> = (0..nsegments)
-            .map(|s| {
-                let a = (0..len)
-                    .map(|i| {
-                        Complex::new(
-                            ((s * len + i + 1) as PrcFmt) * 0.001,
-                            ((s * len + i) as PrcFmt) * 0.002 - 0.5,
-                        )
-                    })
-                    .collect();
-                let b = (0..len)
-                    .map(|i| {
-                        Complex::new(
-                            ((s * len + i) as PrcFmt) * 0.003 + 0.1,
-                            ((s * len + i + 2) as PrcFmt) * 0.004,
-                        )
-                    })
-                    .collect();
-                (a, b)
-            })
-            .collect();
-
-        let mut expected = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
-        let mut result = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
-
-        // First segment: overwrite.
-        multiply_elements_scalar(&mut expected, &segments[0].0, &segments[0].1);
-        // SAFETY: NEON is mandatory on all AArch64 implementations.
-        unsafe { multiply_elements_neon(&mut result, &segments[0].0, &segments[0].1) };
-
-        // Remaining segments: accumulate.
-        for (a, b) in &segments[1..] {
-            multiply_add_elements_scalar(&mut expected, a, b);
-            // SAFETY: NEON is mandatory on all AArch64 implementations.
-            unsafe { multiply_add_elements_neon(&mut result, a, b) };
-        }
-
-        for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
-            let tol_re = simd_tol_for(e.re, r.re);
-            let tol_im = simd_tol_for(e.im, r.im);
-            assert!(
-                (e.re - r.re).abs() < tol_re,
-                "multi-round(f32) len={len} nseg={nsegments} i={j}: re expected={} got={}, diff={}",
-                e.re,
-                r.re,
-                (e.re - r.re).abs()
-            );
-            assert!(
-                (e.im - r.im).abs() < tol_im,
-                "multi-round(f32) len={len} nseg={nsegments} i={j}: im expected={} got={}, diff={}",
-                e.im,
-                r.im,
-                (e.im - r.im).abs()
-            );
-        }
-    }
-
-    #[cfg(all(target_arch = "aarch64", feature = "32bit"))]
-    #[test]
-    fn multiply_elements_neon_f32_large_buffers() {
-        use super::super::multiply_elements_scalar;
-        use super::multiply_elements_neon;
-        // 4097: exercises 4x body + remainder.
-        // 8192: power-of-two, no remainder.
-        // 8193: one past power-of-two, exercises scalar tail (1 element).
-        for len in [4097usize, 8192, 8193] {
-            let (a, b) = make_test_vectors(len);
-            let mut expected = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
-            let mut result = vec![Complex::new(0.0 as PrcFmt, 0.0); len];
-
-            multiply_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON is mandatory on all AArch64 implementations.
-            unsafe { multiply_elements_neon(&mut result, &a, &b) };
-
-            for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
-                let tol_re = simd_tol_for(e.re, r.re);
-                let tol_im = simd_tol_for(e.im, r.im);
-                assert!(
-                    (e.re - r.re).abs() < tol_re,
-                    "large multiply(f32) len={len} i={j}: re expected={} got={}, diff={}, tol={}",
-                    e.re,
-                    r.re,
-                    (e.re - r.re).abs(),
-                    tol_re
-                );
-                assert!(
-                    (e.im - r.im).abs() < tol_im,
-                    "large multiply(f32) len={len} i={j}: im expected={} got={}, diff={}, tol={}",
-                    e.im,
-                    r.im,
-                    (e.im - r.im).abs(),
-                    tol_im
-                );
-            }
-        }
-    }
-
-    #[cfg(all(target_arch = "aarch64", feature = "32bit"))]
-    #[test]
-    fn multiply_add_elements_neon_f32_large_buffers() {
-        use super::super::multiply_add_elements_scalar;
-        use super::multiply_add_elements_neon;
-        for len in [4097usize, 8192, 8193] {
-            let (a, b) = make_test_vectors(len);
-            let init: Vec<Complex<PrcFmt>> = (0..len)
-                .map(|i| Complex::new(i as PrcFmt * 0.1, -(i as PrcFmt) * 0.2))
-                .collect();
-
-            let mut expected = init.clone();
-            let mut result = init.clone();
-
-            multiply_add_elements_scalar(&mut expected, &a, &b);
-            // SAFETY: NEON is mandatory on all AArch64 implementations.
-            unsafe { multiply_add_elements_neon(&mut result, &a, &b) };
-
-            for (j, (e, r)) in expected.iter().zip(result.iter()).enumerate() {
-                let tol_re = simd_tol_for(e.re, r.re);
-                let tol_im = simd_tol_for(e.im, r.im);
-                assert!(
-                    (e.re - r.re).abs() < tol_re,
-                    "large multiply_add(f32) len={len} i={j}: re expected={} got={}, diff={}, tol={}",
-                    e.re,
-                    r.re,
-                    (e.re - r.re).abs(),
-                    tol_re
-                );
-                assert!(
-                    (e.im - r.im).abs() < tol_im,
-                    "large multiply_add(f32) len={len} i={j}: im expected={} got={}, diff={}, tol={}",
-                    e.im,
-                    r.im,
-                    (e.im - r.im).abs(),
-                    tol_im
-                );
-            }
-        }
-    }
+    kernel_tests!(
+        f64_kernels,
+        f64,
+        multiply_elements_neon_f64,
+        multiply_add_elements_neon_f64,
+        1e-9,
+        1e-14
+    );
+    kernel_tests!(
+        f32_kernels,
+        f32,
+        multiply_elements_neon_f32,
+        multiply_add_elements_neon_f32,
+        1e-5,
+        1e-6
+    );
 }
