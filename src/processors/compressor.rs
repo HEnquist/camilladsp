@@ -254,6 +254,12 @@ pub fn validate_compressor(config: &config::CompressorParameters) -> Res<()> {
         let msg = "Release value must be larger than zero.";
         return Err(config::ConfigError::new(msg).into());
     }
+    // A factor of zero divides by zero in `calculate_linear_gain`, giving every sample above the
+    // threshold an infinite gain. A factor below one is legitimate upward expansion.
+    if config.factor <= 0.0 {
+        let msg = "Factor must be larger than zero.";
+        return Err(config::ConfigError::new(msg).into());
+    }
     for ch in config.monitor_channels().iter() {
         if *ch >= channels {
             let msg = format!(

@@ -16,7 +16,11 @@
 
 mod utils;
 
-use self::utils::validate_nonzero_usize;
+use self::utils::{
+    validate_finite_f32, validate_finite_f32_option, validate_finite_f32_vec, validate_finite_f64,
+    validate_finite_f64_option, validate_finite_f64_vec, validate_finite_f64_vec_option,
+    validate_nonzero_usize, validate_nonzero_usize_option,
+};
 use crate::utils::wavtools::{WavParams, find_data_in_wav_stream};
 use serde::{Deserialize, Serialize};
 //use serde_with;
@@ -307,11 +311,24 @@ impl AlsaSampleFormat {
 #[serde(tag = "type")]
 pub enum Signal {
     /// Sine wave at `freq` Hz and `level` dBFS.
-    Sine { freq: f64, level: f64 },
+    Sine {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
+        level: f64,
+    },
     /// Square wave at `freq` Hz and `level` dBFS.
-    Square { freq: f64, level: f64 },
+    Square {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
+        level: f64,
+    },
     /// White noise at `level` dBFS.
-    WhiteNoise { level: f64 },
+    WhiteNoise {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        level: f64,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -694,15 +711,16 @@ impl PlaybackDeviceCA {
 #[serde(deny_unknown_fields)]
 pub struct Devices {
     /// Output sample rate in Hz.
+    #[serde(deserialize_with = "validate_nonzero_usize")]
     pub samplerate: usize,
     /// Number of frames per processing chunk.
     #[serde(deserialize_with = "validate_nonzero_usize")]
     pub chunksize: usize,
     #[serde(default)]
     pub queuelimit: Option<usize>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64_option")]
     pub silence_threshold: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64_option")]
     pub silence_timeout_s: Option<f64>,
     pub capture: CaptureDevice,
     pub playback: PlaybackDevice,
@@ -710,19 +728,19 @@ pub struct Devices {
     pub enable_rate_adjust: Option<bool>,
     #[serde(default)]
     pub target_level: Option<usize>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f32_option")]
     pub adjust_interval_s: Option<f32>,
     #[serde(default)]
     pub resampler: Option<Resampler>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_nonzero_usize_option")]
     pub capture_samplerate: Option<usize>,
     #[serde(default)]
     pub stop_on_rate_change: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f32_option")]
     pub rate_measure_interval_s: Option<f32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f32_option")]
     pub volume_ramp_time_ms: Option<f32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f32_option")]
     pub volume_limit: Option<f32>,
     #[serde(default)]
     pub multithreaded: Option<bool>,
@@ -815,7 +833,7 @@ pub enum AsyncSincParameters {
         sinc_len: usize,
         interpolation: AsyncSincInterpolation,
         window: AsyncSincWindow,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "validate_finite_f32_option")]
         f_cutoff: Option<f32>,
         oversampling_factor: usize,
     },
@@ -933,6 +951,7 @@ pub enum ConvParameters {
     Raw(ConvParametersRaw),
     Wav(ConvParametersWav),
     Values {
+        #[serde(deserialize_with = "validate_finite_f64_vec")]
         values: Vec<f64>,
     },
     Dummy {
@@ -987,8 +1006,22 @@ impl ConvParametersWav {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum ShelfSteepness {
-    Q { freq: f64, q: f64, gain: f64 },
-    Slope { freq: f64, slope: f64, gain: f64 },
+    Q {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
+        q: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
+        gain: f64,
+    },
+    Slope {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
+        slope: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
+        gain: f64,
+    },
 }
 
 /// Peaking filter width specified either as a Q factor or a bandwidth in octaves.
@@ -996,13 +1029,19 @@ pub enum ShelfSteepness {
 #[serde(untagged)]
 pub enum PeakingWidth {
     Q {
+        #[serde(deserialize_with = "validate_finite_f64")]
         freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         q: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         gain: f64,
     },
     Bandwidth {
+        #[serde(deserialize_with = "validate_finite_f64")]
         freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         bandwidth: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         gain: f64,
     },
 }
@@ -1011,16 +1050,29 @@ pub enum PeakingWidth {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum NotchWidth {
-    Q { freq: f64, q: f64 },
-    Bandwidth { freq: f64, bandwidth: f64 },
+    Q {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
+        q: f64,
+    },
+    Bandwidth {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
+        bandwidth: f64,
+    },
 }
 
 /// Parameters for the general (asymmetric pole/zero) notch biquad.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GeneralNotchParams {
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub freq_p: f64,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub freq_z: f64,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub q_p: f64,
     #[serde(default)]
     pub normalize_at_dc: Option<bool>,
@@ -1039,48 +1091,68 @@ impl GeneralNotchParams {
 #[serde(deny_unknown_fields)]
 pub enum BiquadParameters {
     Free {
+        #[serde(deserialize_with = "validate_finite_f64")]
         a1: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         a2: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         b0: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         b1: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         b2: f64,
     },
     Highpass {
+        #[serde(deserialize_with = "validate_finite_f64")]
         freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         q: f64,
     },
     Lowpass {
+        #[serde(deserialize_with = "validate_finite_f64")]
         freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         q: f64,
     },
     Peaking(PeakingWidth),
     Highshelf(ShelfSteepness),
     HighshelfFO {
+        #[serde(deserialize_with = "validate_finite_f64")]
         freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         gain: f64,
     },
     Lowshelf(ShelfSteepness),
     LowshelfFO {
+        #[serde(deserialize_with = "validate_finite_f64")]
         freq: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         gain: f64,
     },
     HighpassFO {
+        #[serde(deserialize_with = "validate_finite_f64")]
         freq: f64,
     },
     LowpassFO {
+        #[serde(deserialize_with = "validate_finite_f64")]
         freq: f64,
     },
     Allpass(NotchWidth),
     AllpassFO {
+        #[serde(deserialize_with = "validate_finite_f64")]
         freq: f64,
     },
     Bandpass(NotchWidth),
     Notch(NotchWidth),
     GeneralNotch(GeneralNotchParams),
     LinkwitzTransform {
+        #[serde(deserialize_with = "validate_finite_f64")]
         freq_act: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         q_act: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         freq_target: f64,
+        #[serde(deserialize_with = "validate_finite_f64")]
         q_target: f64,
     },
 }
@@ -1090,12 +1162,33 @@ pub enum BiquadParameters {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum BiquadComboParameters {
-    LinkwitzRileyHighpass { freq: f64, order: usize },
-    LinkwitzRileyLowpass { freq: f64, order: usize },
-    ButterworthHighpass { freq: f64, order: usize },
-    ButterworthLowpass { freq: f64, order: usize },
-    Tilt { gain: f64 },
-    NPointPeq { bands: Vec<PeqBand> },
+    LinkwitzRileyHighpass {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        freq: f64,
+        order: usize,
+    },
+    LinkwitzRileyLowpass {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        freq: f64,
+        order: usize,
+    },
+    ButterworthHighpass {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        freq: f64,
+        order: usize,
+    },
+    ButterworthLowpass {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        freq: f64,
+        order: usize,
+    },
+    Tilt {
+        #[serde(deserialize_with = "validate_finite_f64")]
+        gain: f64,
+    },
+    NPointPeq {
+        bands: Vec<PeqBand>,
+    },
     GraphicEqualizer(GraphicEqualizerParameters),
 }
 
@@ -1106,8 +1199,11 @@ pub enum BiquadComboParameters {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PeqBand {
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub freq: f64,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub q: f64,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub gain: f64,
 }
 
@@ -1115,10 +1211,11 @@ pub struct PeqBand {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GraphicEqualizerParameters {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f32_option")]
     freq_min: Option<f32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f32_option")]
     freq_max: Option<f32>,
+    #[serde(deserialize_with = "validate_finite_f32_vec")]
     pub gains: Vec<f32>,
 }
 
@@ -1145,10 +1242,10 @@ pub enum VolumeFader {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VolumeParameters {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f32_option")]
     pub ramp_time_ms: Option<f32>,
     pub fader: VolumeFader,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f32_option")]
     pub limit: Option<f32>,
 }
 
@@ -1176,18 +1273,19 @@ pub enum LoudnessFader {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LoudnessParameters {
+    #[serde(deserialize_with = "validate_finite_f32")]
     pub reference_level: f32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f32_option")]
     pub high_boost: Option<f32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f32_option")]
     pub low_boost: Option<f32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64_option")]
     pub high_freq: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64_option")]
     pub low_freq: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64_option")]
     pub high_q: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64_option")]
     pub low_q: Option<f64>,
     #[serde(default)]
     pub fader: Option<LoudnessFader>,
@@ -1235,6 +1333,7 @@ impl LoudnessParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GainParameters {
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub gain: f64,
     #[serde(default)]
     pub inverted: Option<bool>,
@@ -1271,6 +1370,7 @@ impl GainParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct DelayParameters {
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub delay: f64,
     pub delay_unit: DelayUnit,
     #[serde(default)]
@@ -1322,37 +1422,83 @@ pub enum DelayUnit {
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
 pub enum DitherParameters {
-    None { bits: usize },
-    Flat { bits: usize, amplitude: f64 },
-    Highpass { bits: usize },
-    Fweighted441 { bits: usize },
-    FweightedLong441 { bits: usize },
-    FweightedShort441 { bits: usize },
-    Gesemann441 { bits: usize },
-    Gesemann48 { bits: usize },
-    Lipshitz441 { bits: usize },
-    LipshitzLong441 { bits: usize },
-    Shibata441 { bits: usize },
-    ShibataHigh441 { bits: usize },
-    ShibataLow441 { bits: usize },
-    Shibata48 { bits: usize },
-    ShibataHigh48 { bits: usize },
-    ShibataLow48 { bits: usize },
-    Shibata882 { bits: usize },
-    ShibataLow882 { bits: usize },
-    Shibata96 { bits: usize },
-    ShibataLow96 { bits: usize },
-    Shibata192 { bits: usize },
-    ShibataLow192 { bits: usize },
+    None {
+        bits: usize,
+    },
+    Flat {
+        bits: usize,
+        #[serde(deserialize_with = "validate_finite_f64")]
+        amplitude: f64,
+    },
+    Highpass {
+        bits: usize,
+    },
+    Fweighted441 {
+        bits: usize,
+    },
+    FweightedLong441 {
+        bits: usize,
+    },
+    FweightedShort441 {
+        bits: usize,
+    },
+    Gesemann441 {
+        bits: usize,
+    },
+    Gesemann48 {
+        bits: usize,
+    },
+    Lipshitz441 {
+        bits: usize,
+    },
+    LipshitzLong441 {
+        bits: usize,
+    },
+    Shibata441 {
+        bits: usize,
+    },
+    ShibataHigh441 {
+        bits: usize,
+    },
+    ShibataLow441 {
+        bits: usize,
+    },
+    Shibata48 {
+        bits: usize,
+    },
+    ShibataHigh48 {
+        bits: usize,
+    },
+    ShibataLow48 {
+        bits: usize,
+    },
+    Shibata882 {
+        bits: usize,
+    },
+    ShibataLow882 {
+        bits: usize,
+    },
+    Shibata96 {
+        bits: usize,
+    },
+    ShibataLow96 {
+        bits: usize,
+    },
+    Shibata192 {
+        bits: usize,
+    },
+    ShibataLow192 {
+        bits: usize,
+    },
 }
 
 /// Parameters for the difference-equation (IIR) filter: `a` (feedback) and `b` (feedforward) coefficients.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct DiffEqParameters {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64_vec_option")]
     pub a: Option<Vec<f64>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64_vec_option")]
     pub b: Option<Vec<f64>>,
 }
 
@@ -1381,7 +1527,7 @@ pub struct MixerChannels {
 #[serde(deny_unknown_fields)]
 pub struct MixerSource {
     pub channel: usize,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64_option")]
     pub gain: Option<f64>,
     #[serde(default)]
     pub inverted: Option<bool>,
@@ -1473,17 +1619,21 @@ pub struct CompressorParameters {
     pub monitor_channels: Option<Vec<usize>>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub attack: f64,
     pub attack_unit: TimeUnit,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub release: f64,
     pub release_unit: TimeUnit,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub threshold: f64,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub factor: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64_option")]
     pub makeup_gain: Option<f64>,
     #[serde(default)]
     pub soft_clip: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64_option")]
     pub clip_limit: Option<f64>,
 }
 
@@ -1514,11 +1664,15 @@ pub struct NoiseGateParameters {
     pub monitor_channels: Option<Vec<usize>>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub attack: f64,
     pub attack_unit: TimeUnit,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub release: f64,
     pub release_unit: TimeUnit,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub threshold: f64,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub attenuation: f64,
 }
 
@@ -1541,10 +1695,12 @@ pub struct LookaheadLimiterProcessorParameters {
     pub monitor_channels: Option<Vec<usize>>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64")]
     pub limit: f64,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub attack: f64,
     pub attack_unit: TimeUnit,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub release: f64,
     pub release_unit: TimeUnit,
     #[serde(default)]
@@ -1572,10 +1728,12 @@ pub struct RACEParameters {
     pub channels: usize,
     pub channel_a: usize,
     pub channel_b: usize,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub delay: f64,
     #[serde(default)]
     pub subsample_delay: Option<bool>,
     pub delay_unit: DelayUnit,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub attenuation: f64,
 }
 
@@ -1595,7 +1753,7 @@ impl RACEParameters {
 pub struct ClipperParameters {
     #[serde(default)]
     pub soft_clip: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64")]
     pub clip_limit: f64,
 }
 
@@ -1608,10 +1766,12 @@ impl ClipperParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LookaheadLimiterParameters {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "validate_finite_f64")]
     pub limit: f64,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub attack: f64,
     pub attack_unit: TimeUnit,
+    #[serde(deserialize_with = "validate_finite_f64")]
     pub release: f64,
     pub release_unit: TimeUnit,
 }
@@ -1728,6 +1888,7 @@ pub enum ConfigChange {
 }
 
 pub use self::utils::capture_channel_labels;
+pub use self::utils::check_all_finite;
 pub use self::utils::config_diff;
 pub use self::utils::load_config;
 pub use self::utils::load_validate_config;

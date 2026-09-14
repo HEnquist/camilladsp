@@ -17,6 +17,18 @@ New features:
   it resolves a capture target by name.
 
 Bugfixes:
+- Stricter validation of numeric config values. `devices.samplerate` and `devices.capture_samplerate`
+  must now be larger than zero, previously `samplerate: 0` reached the coefficient math and
+  `capture_samplerate: 0` made the process hang or panic once the resampler was built.
+- The free `AsyncSinc` resampler parameters are now validated. `sinc_len` must be larger than zero,
+  `oversampling_factor` must be large enough for the chosen interpolation, and `f_cutoff` must be
+  larger than 0 and no larger than 1.0. These previously panicked inside the resampler on the first
+  chunk, rather than being reported when the config was loaded.
+- `rate_measure_interval_s` must now be larger than zero, matching `adjust_interval_s`.
+- The `Compressor` now rejects a `factor` of zero, which previously gave every sample above the
+  threshold an infinite gain. Values below 1.0 are still allowed, for upward expansion.
+- No numeric config value accepts `.nan`, `.inf` or `-.inf` any more. The range tests were written
+  so that every comparison against NaN passed, and one-sided tests let infinities through.
 - PipeWire: an `autoconnect_to` target that cannot be found now leaves the node unconnected,
   instead of falling back to the default device and capturing from or playing to the wrong node.
   The node is connected automatically if the target appears later.

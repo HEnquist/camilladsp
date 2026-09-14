@@ -98,6 +98,193 @@ where
     Ok(value)
 }
 
+/// The same as [`validate_nonzero_usize`], for an optional field.
+///
+/// A missing field is handled by `#[serde(default)]` and never reaches this, but an
+/// explicit `null` does, and is left alone like any other unset value.
+pub(crate) fn validate_nonzero_usize_option<'de, D>(d: D) -> Result<Option<usize>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let value = Option::<usize>::deserialize(d)?;
+    if let Some(number) = value
+        && number < 1
+    {
+        return Err(de::Error::invalid_value(
+            de::Unexpected::Unsigned(number as u64),
+            &"a value > 0",
+        ));
+    }
+    Ok(value)
+}
+
+/// Reject a non-finite value at parse time.
+///
+/// No config value has a meaningful `.nan` or `.inf` setting. The range tests in the validators
+/// are written as `<= 0.0` and similar, and every comparison against NaN is false, so a NaN
+/// passes all of them. An infinity passes any test that is bounded on one side only. Rejecting
+/// both while deserializing keeps those range tests as they are, and reports the problem with
+/// the line and column it came from.
+macro_rules! finite_deserializer {
+    ($name:ident, $ty:ty) => {
+        pub(crate) fn $name<'de, D>(d: D) -> Result<$ty, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            let value = <$ty>::deserialize(d)?;
+            if !value.is_finite() {
+                return Err(de::Error::invalid_value(
+                    de::Unexpected::Float(value as f64),
+                    &"a finite number",
+                ));
+            }
+            Ok(value)
+        }
+    };
+}
+
+/// The same, for an optional field. A missing field is handled by `#[serde(default)]` and never
+/// reaches this, but an explicit `null` does, and is left alone like any other unset value.
+macro_rules! finite_deserializer_option {
+    ($name:ident, $ty:ty) => {
+        pub(crate) fn $name<'de, D>(d: D) -> Result<Option<$ty>, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            let value = Option::<$ty>::deserialize(d)?;
+            if let Some(number) = value
+                && !number.is_finite()
+            {
+                return Err(de::Error::invalid_value(
+                    de::Unexpected::Float(number as f64),
+                    &"a finite number",
+                ));
+            }
+            Ok(value)
+        }
+    };
+}
+
+/// The same, for a list. The expectation message names the offending index.
+macro_rules! finite_deserializer_vec {
+    ($name:ident, $ty:ty) => {
+        pub(crate) fn $name<'de, D>(d: D) -> Result<Vec<$ty>, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            let values = Vec::<$ty>::deserialize(d)?;
+            check_list_finite(&values)?;
+            Ok(values)
+        }
+    };
+}
+
+/// The same, for an optional list.
+macro_rules! finite_deserializer_vec_option {
+    ($name:ident, $ty:ty) => {
+        pub(crate) fn $name<'de, D>(d: D) -> Result<Option<Vec<$ty>>, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            let values = Option::<Vec<$ty>>::deserialize(d)?;
+            if let Some(values) = &values {
+                check_list_finite(values)?;
+            }
+            Ok(values)
+        }
+    };
+}
+
+fn check_list_finite<E, T>(values: &[T]) -> Result<(), E>
+where
+    E: de::Error,
+    T: Copy + Into<f64>,
+{
+    for (index, value) in values.iter().enumerate() {
+        let value: f64 = (*value).into();
+        if !value.is_finite() {
+            return Err(de::Error::invalid_value(
+                de::Unexpected::Float(value),
+                &format!("all values finite, the one at index {index} is not").as_str(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+finite_deserializer!(validate_finite_f64, f64);
+finite_deserializer!(validate_finite_f32, f32);
+finite_deserializer_option!(validate_finite_f64_option, f64);
+finite_deserializer_option!(validate_finite_f32_option, f32);
+finite_deserializer_vec!(validate_finite_f64_vec, f64);
+finite_deserializer_vec!(validate_finite_f32_vec, f32);
+finite_deserializer_vec_option!(validate_finite_f64_vec_option, f64);
+
+/// Reject a non-finite value that did not come from the config file.
+///
+/// Coefficients read from a raw or wav file cannot be checked while deserializing, since they
+/// never pass through serde. This is the equivalent check for them.
+pub fn check_all_finite<T: Into<f64> + Copy>(name: &str, values: &[T]) -> Res<()> {
+    for (index, value) in values.iter().enumerate() {
+        let value: f64 = (*value).into();
+        if !value.is_finite() {
+            let msg = format!(
+                "Value for '{name}' at index {index} must be a finite number, got {value}."
+            );
+            return Err(ConfigError::new(&msg).into());
+        }
+    }
+    Ok(())
+}
+
+/// Validate the resampler parameters that rubato does not check itself.
+///
+/// Only the free `AsyncSinc` parameters can be wrong, the profiles are fixed and the other
+/// resamplers take no parameters of their own.
+fn validate_resampler(resampler: &Option<Resampler>) -> Res<()> {
+    let Some(Resampler::AsyncSinc(AsyncSincParameters::Free {
+        sinc_len,
+        interpolation,
+        f_cutoff,
+        oversampling_factor,
+        ..
+    })) = resampler
+    else {
+        return Ok(());
+    };
+    // Checked here rather than with `validate_nonzero_usize`, since `AsyncSincParameters` is
+    // untagged and a rejected field there only reports that no variant matched.
+    if *sinc_len == 0 {
+        let msg = "sinc_len must be larger than zero, 64 to 256 are typical values.";
+        return Err(ConfigError::new(msg).into());
+    }
+    // Rubato fits a polynomial through a number of neighbouring sincs, and wraps an index that
+    // runs past the end of the table only once. Fitting n points therefore needs a table of at
+    // least n - 1, and anything smaller indexes out of bounds and panics.
+    let min_oversampling = match interpolation {
+        AsyncSincInterpolation::Nearest | AsyncSincInterpolation::Linear => 1,
+        AsyncSincInterpolation::Quadratic => 2,
+        AsyncSincInterpolation::Cubic => 3,
+    };
+    if *oversampling_factor < min_oversampling {
+        let msg = format!(
+            "oversampling_factor must be at least {min_oversampling} for {interpolation:?} interpolation, got {oversampling_factor}. \
+             Values in the hundreds are normal, see the profiles for typical settings."
+        );
+        return Err(ConfigError::new(&msg).into());
+    }
+    if let Some(cutoff) = f_cutoff
+        && !(0.0 < *cutoff && *cutoff <= 1.0)
+    {
+        let msg = format!(
+            "f_cutoff must be larger than 0 and no larger than 1.0, got {cutoff}. \
+             It is relative to the Nyquist limit, useful values are in the range 0.9 - 0.99."
+        );
+        return Err(ConfigError::new(&msg).into());
+    }
+    Ok(())
+}
+
 /// Parse a YAML configuration file and apply any active [`OVERRIDES`].
 pub fn load_config(filename: &str) -> Res<Configuration> {
     let file = match File::open(filename) {
@@ -489,6 +676,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     if let Some(fname) = filename {
         replace_relative_paths_in_config(conf, fname);
     }
+    validate_resampler(&conf.devices.resampler)?;
     #[cfg(target_os = "linux")]
     let target_level_limit = if matches!(conf.devices.playback, PlaybackDevice::Alsa { .. }) {
         (4 + conf.devices.queuelimit()) * conf.devices.chunksize
@@ -506,6 +694,11 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         && interval <= 0.0
     {
         return Err(ConfigError::new("adjust_interval_s must be positive and > 0").into());
+    }
+    if let Some(interval) = conf.devices.rate_measure_interval_s
+        && interval <= 0.0
+    {
+        return Err(ConfigError::new("rate_measure_interval_s must be positive and > 0").into());
     }
     if let Some(threshold) = conf.devices.silence_threshold
         && threshold > 0.0
@@ -842,5 +1035,167 @@ pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opt
         conf.devices.capture.labels()
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{check_all_finite, validate_resampler};
+    use crate::config::{AsyncSincInterpolation, AsyncSincParameters, AsyncSincWindow, Resampler};
+
+    fn free_sinc(
+        sinc_len: usize,
+        interpolation: AsyncSincInterpolation,
+        oversampling_factor: usize,
+        f_cutoff: Option<f32>,
+    ) -> Option<Resampler> {
+        Some(Resampler::AsyncSinc(AsyncSincParameters::Free {
+            sinc_len,
+            interpolation,
+            window: AsyncSincWindow::Blackman2,
+            f_cutoff,
+            oversampling_factor,
+        }))
+    }
+
+    fn parse(yaml: &str) -> Result<crate::config::Configuration, yaml_serde::Error> {
+        yaml_serde::from_str(yaml)
+    }
+
+    const BASE: &str = r#"
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  capture: {type: Stdin, channels: 2, format: S16_LE}
+  playback: {type: Stdout, channels: 2, format: S16_LE}
+"#;
+
+    fn with_filter(params: &str) -> String {
+        format!(
+            "{BASE}filters:\n  f:\n    {params}\npipeline:\n  - type: Filter\n    channels: [0]\n    names: [f]\n"
+        )
+    }
+
+    #[test]
+    fn non_finite_rejected_while_parsing() {
+        // A plain f64 field.
+        assert!(parse(&with_filter("type: Gain\n    parameters: {gain: 3.0}")).is_ok());
+        assert!(parse(&with_filter("type: Gain\n    parameters: {gain: .nan}")).is_err());
+        assert!(parse(&with_filter("type: Gain\n    parameters: {gain: .inf}")).is_err());
+        assert!(parse(&with_filter("type: Gain\n    parameters: {gain: -.inf}")).is_err());
+        // An optional field, where an explicit null must still be accepted.
+        assert!(
+            parse(&with_filter(
+                "type: Volume\n    parameters: {fader: Aux1, limit: null}"
+            ))
+            .is_ok()
+        );
+        assert!(
+            parse(&with_filter(
+                "type: Volume\n    parameters: {fader: Aux1, limit: .nan}"
+            ))
+            .is_err()
+        );
+        // A list field.
+        assert!(
+            parse(&with_filter(
+                "type: Conv\n    parameters: {type: Values, values: [0.5, 0.5]}"
+            ))
+            .is_ok()
+        );
+        assert!(
+            parse(&with_filter(
+                "type: Conv\n    parameters: {type: Values, values: [0.5, .nan]}"
+            ))
+            .is_err()
+        );
+        // An optional list field.
+        assert!(
+            parse(&with_filter(
+                "type: DiffEq\n    parameters: {a: [1.0], b: [1.0]}"
+            ))
+            .is_ok()
+        );
+        assert!(
+            parse(&with_filter(
+                "type: DiffEq\n    parameters: {a: [1.0], b: [1.0, .inf]}"
+            ))
+            .is_err()
+        );
+        // A devices field.
+        assert!(
+            parse(&BASE.replace("chunksize: 1024", "chunksize: 1024\n  volume_limit: .nan"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn check_all_finite_covers_file_coefficients() {
+        assert!(check_all_finite("x", &[1.0, 2.0, 3.0]).is_ok());
+        assert!(check_all_finite::<f64>("x", &[]).is_ok());
+        assert!(check_all_finite("x", &[1.0, f64::NAN]).is_err());
+        assert!(check_all_finite("x", &[1.0f32, f32::INFINITY]).is_err());
+        let err = check_all_finite("x", &[1.0, 2.0, f64::INFINITY])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("index 2"), "{err}");
+    }
+
+    #[test]
+    fn resampler_profile_and_none_are_accepted() {
+        assert!(validate_resampler(&None).is_ok());
+        assert!(validate_resampler(&Some(Resampler::Synchronous)).is_ok());
+        assert!(validate_resampler(&Some(Resampler::Slip)).is_ok());
+        assert!(
+            validate_resampler(&Some(Resampler::AsyncSinc(AsyncSincParameters::Profile {
+                profile: crate::config::AsyncSincProfile::Balanced,
+            })))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn resampler_sinc_len_must_be_nonzero() {
+        assert!(
+            validate_resampler(&free_sinc(0, AsyncSincInterpolation::Cubic, 256, None)).is_err()
+        );
+        assert!(
+            validate_resampler(&free_sinc(1, AsyncSincInterpolation::Cubic, 256, None)).is_ok()
+        );
+    }
+
+    /// Rubato fits the interpolation polynomial through neighbouring sincs and wraps a
+    /// running index only once, so a table smaller than the number of fitted points panics.
+    #[test]
+    fn resampler_oversampling_minimum_follows_interpolation() {
+        for (interpolation, minimum) in [
+            (AsyncSincInterpolation::Nearest, 1),
+            (AsyncSincInterpolation::Linear, 1),
+            (AsyncSincInterpolation::Quadratic, 2),
+            (AsyncSincInterpolation::Cubic, 3),
+        ] {
+            assert!(
+                validate_resampler(&free_sinc(64, interpolation, minimum, None)).is_ok(),
+                "{interpolation:?} should accept {minimum}"
+            );
+            assert!(
+                validate_resampler(&free_sinc(64, interpolation, minimum - 1, None)).is_err(),
+                "{interpolation:?} should reject {}",
+                minimum - 1
+            );
+        }
+    }
+
+    #[test]
+    fn resampler_cutoff_range() {
+        let cubic = AsyncSincInterpolation::Cubic;
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, None)).is_ok());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(0.95))).is_ok());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(1.0))).is_ok());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(0.0))).is_err());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(-0.5))).is_err());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(1.5))).is_err());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(f32::NAN))).is_err());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(f32::INFINITY))).is_err());
     }
 }

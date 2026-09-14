@@ -639,14 +639,14 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }
-            Ok(())
+            config::check_all_finite("coefficients", &coeffs)
         }
         config::ConvParameters::Wav(params) => {
             let coeffs = filters::read_wav(&params.filename, params.channel())?;
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }
-            Ok(())
+            config::check_all_finite("coefficients", &coeffs)
         }
     }
 }
