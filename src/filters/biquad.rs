@@ -27,6 +27,7 @@ use crate::filters::Filter;
 use crate::CamillaFloat;
 use crate::Res;
 use crate::ToCamillaFloat;
+use crate::ToF64;
 
 /// Struct to hold the biquad coefficients
 #[derive(Clone, Copy, Debug)]
@@ -426,6 +427,52 @@ impl From<BiquadCoefficients> for RuntimeCoefficients {
     }
 }
 
+impl RuntimeCoefficients {
+    /// Estimates the peak excursion the stored state will produce on its own.
+    ///
+    /// With the input removed, the state rings out through the denominator
+    /// alone, starting at `out[0] = s1`, `out[1] = -a1 * s1 + s2` and
+    /// continuing as `out[n] = -a1 * out[n-1] - a2 * out[n-2]`. That response
+    /// is `s1 * h[n] + s2 * h[n-1]`, with `h` the impulse response of the all
+    /// pole part, so its energy is `R0 * (s1^2 + s2^2) + 2 * R1 * s1 * s2`
+    /// where `R0` and `R1` are the autocorrelations of `h`. Yule-Walker gives
+    /// `R1 / R0 = -a1 / (1 + a2)` and
+    /// `R0 = (1 + a2) / ((1 - a2) * ((1 + a2)^2 - a1^2))`. Reading the response
+    /// as an envelope decaying at `r^n` with `r^2 = a2`, so that the energy is
+    /// `A^2 / (2 * (1 - r^2))`, the `(1 - a2)` cancels and leaves
+    ///
+    /// ```text
+    /// A^2 = (2 * (1 + a2) * (s1^2 + s2^2) - 4 * a1 * s1 * s2) / ((1 + a2)^2 - a1^2)
+    /// ```
+    ///
+    /// The closed forms that give the exact peak rather than this estimate all
+    /// divide by either `sin(theta)` or `p1 - p2`, both of which vanish at the
+    /// repeated pole boundary while the true response stays perfectly bounded.
+    /// A lowpass at Q 0.5 sits exactly there. The energy form has no such
+    /// singularity: the denominator factors as
+    /// `(1 + a2 - a1) * (1 + a2 + a1)`, which is the stability triangle and so
+    /// is strictly positive for any stable biquad. It overestimates by at most
+    /// a factor of about three, never under, and mostly by a per filter
+    /// constant that cancels in the ratio it is used for.
+    ///
+    /// Done in `f64` regardless of processing precision. It runs once per
+    /// reload, so the cost is irrelevant, and the subtractions cancel hard for
+    /// the poles near the unit circle that matter most here.
+    fn state_ring_estimate(&self, s1: f64, s2: f64) -> f64 {
+        let a1 = self.a1.to_f64();
+        let a2 = self.a2.to_f64();
+        // Factored rather than as a difference of squares, which loses most of
+        // its significant digits when the two are nearly equal.
+        let denom = (1.0 + a2 - a1) * (1.0 + a2 + a1);
+        if denom <= 0.0 {
+            // Outside the stability triangle, so the state does not decay.
+            return f64::INFINITY;
+        }
+        let num = 2.0 * (1.0 + a2) * (s1 * s1 + s2 * s2) - 4.0 * a1 * s1 * s2;
+        (num.max(0.0) / denom).sqrt()
+    }
+}
+
 /// Computes `a * b + c`, fused into a single instruction where the hardware
 /// has fused multiply-add.
 ///
@@ -475,8 +522,36 @@ impl Biquad {
     ///
     /// A compiled cascade reloads through this so the coefficients are computed
     /// once for the step rather than once per channel.
+    ///
+    /// The state is carried over, but scaled down first if the new
+    /// coefficients would ring louder from it than the old ones would have.
+    /// Without that, a state that was perfectly ordinary for the old filter can
+    /// be wildly out of range for the new one: a pole near DC amplifies
+    /// inherited state by a factor of roughly `1 / theta`, which is several
+    /// hundred for a rumble filter at 48 kHz and worse at higher rates. Swapping
+    /// a peaking EQ for a 25 Hz highpass mid-signal measures at sixteen times
+    /// full scale otherwise. Scaling by the ratio of the two estimates makes
+    /// the new filter ring no louder than the old one was already ringing,
+    /// which leaves an ordinary filter change untouched because the ratio comes
+    /// out at or below one.
     pub fn set_coefficients(&mut self, coefficients: BiquadCoefficients) {
-        self.coeffs = coefficients.into();
+        let new: RuntimeCoefficients = coefficients.into();
+        let s1 = self.s1.to_f64();
+        let s2 = self.s2.to_f64();
+        // Both estimates are linear in the state, so scaling by their ratio
+        // brings the new filter's ring down to match the old one's exactly.
+        let scale = self.coeffs.state_ring_estimate(s1, s2) / new.state_ring_estimate(s1, s2);
+        // Only ever shrinks. Also skips the NaN from a zero or unstable state
+        // on both sides, where there is nothing to scale.
+        if scale.is_finite() && scale < 1.0 {
+            debug!(
+                "Biquad filter '{}', scaling state by {scale} to avoid a switching transient",
+                self.name
+            );
+            self.s1 *= scale.to_camilla_float();
+            self.s2 *= scale.to_camilla_float();
+        }
+        self.coeffs = new;
     }
 
     /// Process a single sample.
@@ -1125,13 +1200,14 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 #[cfg(test)]
 mod tests {
     use crate::CamillaFloat;
+    use crate::ToF64;
     use crate::config::{
         BiquadParameters, GeneralNotchParams, NotchWidth, PeakingWidth, ShelfSteepness,
     };
     use crate::filters::Filter;
     use crate::filters::biquad::{
-        Biquad, BiquadCoefficients, MAX_CHANNELS, MAX_DEPTH, WIDTH_BUDGET, choose_split,
-        process_cascades, process_cascades_with_split, validate_config,
+        Biquad, BiquadCoefficients, MAX_CHANNELS, MAX_DEPTH, RuntimeCoefficients, WIDTH_BUDGET,
+        choose_split, process_cascades, process_cascades_with_split, validate_config,
     };
     use num_complex::Complex;
 
@@ -1852,6 +1928,205 @@ mod tests {
                     "{channels} by {depth} gave {group} by {stages}"
                 );
             }
+        }
+    }
+
+    /// A coefficient swap that the new filter has no business amplifying gets
+    /// the state scaled down. Mirrors the worst case found in the Python
+    /// experiment: a peaking EQ handing its state to a subsonic highpass, where
+    /// the near DC pole turns an ordinary state into sixteen times full scale.
+    #[test]
+    fn state_guard_tames_subsonic_takeover() {
+        let fs = 48000;
+        let old = BiquadCoefficients::from_config(
+            fs,
+            BiquadParameters::Peaking(PeakingWidth::Q {
+                freq: 1000.0,
+                q: 4.0,
+                gain: 12.0,
+            }),
+        );
+        let new =
+            BiquadCoefficients::from_config(fs, BiquadParameters::Highpass { freq: 25.0, q: 3.0 });
+
+        // Settle the old filter on a sine well inside its passband.
+        let mut guarded = Biquad::new("test", fs, old);
+        for n in 0..fs {
+            let t = n as CamillaFloat / fs as CamillaFloat;
+            guarded.process_single(
+                0.5 * (2.0 * std::f64::consts::PI as CamillaFloat * 800.0 * t).sin(),
+            );
+        }
+
+        // An unguarded reference, holding the same state.
+        let mut unguarded = guarded.clone();
+        unguarded.coeffs = new.into();
+        guarded.set_coefficients(new);
+
+        assert!(
+            guarded.s1.abs() < unguarded.s1.abs(),
+            "the state should have been scaled down"
+        );
+
+        // Ring both out on silence and compare the excursions.
+        let peak = |bq: &mut Biquad| {
+            (0..fs)
+                .map(|_| bq.process_single(0.0).abs())
+                .fold(0.0 as CamillaFloat, CamillaFloat::max)
+        };
+        let unguarded_peak = peak(&mut unguarded);
+        let guarded_peak = peak(&mut guarded);
+        assert!(
+            unguarded_peak > 4.0,
+            "the unguarded swap should blow up, got {unguarded_peak}"
+        );
+        assert!(
+            guarded_peak < 1.0,
+            "the guarded swap should stay bounded, got {guarded_peak}"
+        );
+    }
+
+    /// An ordinary filter change must not lose a meaningful part of its state.
+    ///
+    /// Never bit exact unless the poles hold still. Moving them at all changes
+    /// how much the filter rings from a given state, and the guard tracks that,
+    /// so lowering a crossover from 80 to 60 Hz legitimately shaves the state
+    /// back by about a quarter. The estimate also overestimates by a per filter
+    /// constant, which adds a few percent on top where the two filters sit in
+    /// different parts of the range. Both are small and neither introduces a
+    /// discontinuity, so the assertion is a floor rather than equality.
+    #[test]
+    fn state_guard_leaves_ordinary_changes_alone() {
+        let fs = 48000;
+        let changes = [
+            (
+                BiquadParameters::Highpass {
+                    freq: 200.0,
+                    q: 0.7,
+                },
+                BiquadParameters::Lowpass {
+                    freq: 200.0,
+                    q: 0.7,
+                },
+            ),
+            (
+                BiquadParameters::Lowpass {
+                    freq: 500.0,
+                    q: 10.0,
+                },
+                BiquadParameters::Lowpass {
+                    freq: 500.0,
+                    q: 0.5,
+                },
+            ),
+            (
+                BiquadParameters::Peaking(PeakingWidth::Q {
+                    freq: 1000.0,
+                    q: 4.0,
+                    gain: 12.0,
+                }),
+                BiquadParameters::Peaking(PeakingWidth::Q {
+                    freq: 1000.0,
+                    q: 4.0,
+                    gain: -12.0,
+                }),
+            ),
+            (
+                BiquadParameters::Lowpass { freq: 80.0, q: 0.7 },
+                BiquadParameters::Lowpass { freq: 60.0, q: 0.7 },
+            ),
+        ];
+        for (from, to) in changes {
+            let old = BiquadCoefficients::from_config(fs, from.clone());
+            let mut bq = Biquad::new("test", fs, old);
+            for n in 0..fs {
+                let t = n as CamillaFloat / fs as CamillaFloat;
+                bq.process_single(
+                    0.5 * (2.0 * std::f64::consts::PI as CamillaFloat * 200.0 * t).sin(),
+                );
+            }
+            let (s1, s2) = (bq.s1, bq.s2);
+            bq.set_coefficients(BiquadCoefficients::from_config(fs, to.clone()));
+            let kept = bq.s1 / s1;
+            assert!(
+                kept > 0.7 && kept <= 1.0,
+                "{from:?} -> {to:?} kept {kept} of its state"
+            );
+            assert!(is_close((bq.s2 / s2).to_f64(), kept.to_f64(), 1e-6));
+        }
+    }
+
+    /// A highpass and a lowpass at the same frequency and Q share a denominator
+    /// exactly, so the two estimates are identical and nothing is scaled at all.
+    #[test]
+    fn state_guard_is_exact_when_the_poles_do_not_move() {
+        let fs = 48000;
+        let mut bq = Biquad::new(
+            "test",
+            fs,
+            BiquadCoefficients::from_config(
+                fs,
+                BiquadParameters::Highpass {
+                    freq: 200.0,
+                    q: 0.7,
+                },
+            ),
+        );
+        for n in 0..fs {
+            let t = n as CamillaFloat / fs as CamillaFloat;
+            bq.process_single(0.5 * (2.0 * std::f64::consts::PI as CamillaFloat * 100.0 * t).sin());
+        }
+        let (s1, s2) = (bq.s1, bq.s2);
+        bq.set_coefficients(BiquadCoefficients::from_config(
+            fs,
+            BiquadParameters::Lowpass {
+                freq: 200.0,
+                q: 0.7,
+            },
+        ));
+        assert_eq!(bq.s1, s1);
+        assert_eq!(bq.s2, s2);
+    }
+
+    /// A fresh filter has no state, so the estimates are zero on both sides and
+    /// their ratio is a NaN that must not reach the state.
+    #[test]
+    fn state_guard_handles_zero_state() {
+        let fs = 48000;
+        let mut bq = Biquad::new(
+            "test",
+            fs,
+            BiquadCoefficients::from_config(
+                fs,
+                BiquadParameters::Lowpass {
+                    freq: 1000.0,
+                    q: 0.7,
+                },
+            ),
+        );
+        bq.set_coefficients(BiquadCoefficients::from_config(
+            fs,
+            BiquadParameters::Highpass { freq: 25.0, q: 3.0 },
+        ));
+        assert_eq!(bq.s1, 0.0);
+        assert_eq!(bq.s2, 0.0);
+    }
+
+    /// The estimate must stay finite at the repeated pole boundary, which is
+    /// where the exact closed forms divide by zero. A lowpass at Q 0.5 sits
+    /// exactly on it.
+    #[test]
+    fn state_ring_estimate_survives_repeated_poles() {
+        let fs = 48000;
+        for q in [0.4, 0.49, 0.5, 0.51, 0.6] {
+            let coeffs: RuntimeCoefficients =
+                BiquadCoefficients::from_config(fs, BiquadParameters::Lowpass { freq: 500.0, q })
+                    .into();
+            let estimate = coeffs.state_ring_estimate(0.3, 0.2);
+            assert!(
+                estimate.is_finite() && estimate < 100.0,
+                "Q {q} gave {estimate}"
+            );
         }
     }
 }

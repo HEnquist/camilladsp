@@ -26,7 +26,8 @@
 
 // Full-precision `f64` literals, correct for the default build, hold more digits
 // than an `f32` build can represent. Silence that only in the f32 build.
-// Conversions go through `ToCamillaFloat` and `ToF32` rather than `as` casts, so
+// Conversions go through `ToCamillaFloat`, `ToF32` and `ToF64` rather than `as`
+// casts, so
 // no cast lint needs suppressing.
 #![cfg_attr(camillafloat_f32, allow(clippy::excessive_precision))]
 
@@ -148,6 +149,32 @@ impl ToF32 for f64 {
 impl ToF32 for f32 {
     #[inline]
     fn to_f32(self) -> f32 {
+        self
+    }
+}
+
+/// Conversion from the processing precision up to `f64`.
+///
+/// Analysis that must stay numerically robust whatever [`CamillaFloat`] is,
+/// such as the biquad state guard, works in `f64` throughout. Written as a
+/// method rather than an `as` cast for the same reason as [`ToF32`]: the
+/// direction that is a no-op in a given build would otherwise need a blanket
+/// `clippy::unnecessary_cast` allow over a whole file.
+pub trait ToF64 {
+    /// Convert up to `f64` for analysis.
+    fn to_f64(self) -> f64;
+}
+
+impl ToF64 for f32 {
+    #[inline]
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
+}
+
+impl ToF64 for f64 {
+    #[inline]
+    fn to_f64(self) -> f64 {
         self
     }
 }

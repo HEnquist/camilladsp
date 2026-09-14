@@ -30,6 +30,11 @@ Bugfixes:
 - The `DiffEq` filter now scales its coefficients so that a0 becomes unity. The first `a`
   coefficient was previously ignored, so any value other than 1.0 gave a filter with the wrong
   gain compared to the documented transfer function.
+- Changing the parameters of a `Biquad` filter on the fly no longer produces a large transient.
+  The filter state is kept as before, but is now scaled down when the new coefficients would ring
+  louder from it than the old ones would have. A pole near DC amplifies inherited state by a factor
+  of several hundred, so swapping a peaking EQ for a 25 Hz highpass while audio was playing
+  previously peaked at sixteen times full scale.
 - `chunksize` must now be larger than zero. A `chunksize` of zero was accepted as a valid
   configuration and then hung on startup without producing any audio. A samplerate override that
   would scale a small `chunksize` down to zero now keeps one frame instead.
