@@ -1712,10 +1712,9 @@ pub struct Configuration {
 /// pipeline must be rebuilt on a hot-reload.
 #[derive(Debug)]
 pub enum ConfigChange {
-    /// Only filter/mixer/processor coefficients changed; names in each vec were affected.
+    /// Only filter/processor coefficients changed; names in each vec were affected.
     FilterParameters {
         filters: Vec<String>,
-        mixers: Vec<String>,
         processors: Vec<String>,
     },
     /// Mixer routing changed but the pipeline topology is the same.

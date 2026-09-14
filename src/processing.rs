@@ -179,11 +179,10 @@ fn processing(
                 }
                 config::ConfigChange::FilterParameters {
                     filters,
-                    mixers,
                     processors,
                 } => {
-                    debug!("Updating parameters of filters: {filters:?}, mixers: {mixers:?}.");
-                    pipeline.update_parameters(new_config, &filters, &mixers, &processors);
+                    debug!("Updating parameters of filters: {filters:?}.");
+                    pipeline.update_parameters(new_config, &filters, &processors);
                 }
                 config::ConfigChange::Devices => {
                     let msg = AudioMessage::EndOfStream;

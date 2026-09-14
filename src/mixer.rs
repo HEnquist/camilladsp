@@ -77,29 +77,6 @@ impl Mixer {
         }
     }
 
-    pub fn update_parameters(&mut self, config: config::Mixer) {
-        let ch_in = config.channels.r#in;
-        let ch_out = config.channels.out;
-        let mut mapping = vec![Vec::<MixerSource>::new(); ch_out];
-        for cfg_mapping in config.mapping {
-            let dest = cfg_mapping.dest;
-            for cfg_src in cfg_mapping.sources {
-                let gain_value = cfg_src.gain();
-                let inverted = cfg_src.is_inverted();
-                let linear = cfg_src.scale() == config::GainScale::Linear;
-                let gain = gain_from_value(gain_value, linear, inverted, false).to_camilla_float();
-                let src = MixerSource {
-                    channel: cfg_src.channel,
-                    gain,
-                };
-                mapping[dest].push(src);
-            }
-        }
-        self.channels_in = ch_in;
-        self.channels_out = ch_out;
-        self.mapping = mapping;
-    }
-
     /// Apply a Mixer to an AudioChunk, yielding a new AudioChunk with a possibly different number of channels.
     pub fn process_chunk(&mut self, input: AudioChunk) -> AudioChunk {
         let mut waveforms = container_from_stash(self.channels_out);

@@ -580,12 +580,11 @@ impl Pipeline {
         }
     }
 
-    /// Hot-reload changed filters, mixers, and processors without rebuilding the pipeline.
+    /// Hot-reload changed filters and processors without rebuilding the pipeline.
     pub fn update_parameters(
         &mut self,
         conf: config::Configuration,
         filters: &[String],
-        mixers: &[String],
         processors: &[String],
     ) {
         debug!("Updating parameters");
@@ -595,11 +594,8 @@ impl Pipeline {
         let mut coeff_cache = ConvCoeffCache::new();
         for mut step in &mut self.steps {
             match &mut step {
-                PipelineStep::MixerStep(mix) => {
-                    if mixers.iter().any(|n| n == &mix.name) {
-                        mix.update_parameters(conf.mixers.as_ref().unwrap()[&mix.name].clone());
-                    }
-                }
+                // Mixer changes always trigger a pipeline rebuild, never a parameter update.
+                PipelineStep::MixerStep(_) => {}
                 PipelineStep::FilterStep(flt) => {
                     flt.update_parameters(
                         conf.filters.as_ref().unwrap().clone(),
@@ -1013,7 +1009,7 @@ parameters:
             )
             .unwrap(),
         );
-        pipeline.update_parameters(newconf, &["geq".to_string()], &[], &[]);
+        pipeline.update_parameters(newconf, &["geq".to_string()], &[]);
 
         let PipelineStep::BiquadStep(step) = &pipeline.steps[0] else {
             panic!("expected a compiled step");

@@ -424,7 +424,6 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
         return ConfigChange::MixerParameters;
     }
     let mut filters = Vec::<String>::new();
-    let mut mixers = Vec::<String>::new();
     let mut processors = Vec::<String>::new();
     if let (Some(newfilters), Some(oldfilters)) = (&newconf.filters, &currentconf.filters) {
         for (filter, params) in newfilters {
@@ -454,16 +453,6 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
             }
         }
     }
-    if let (Some(newmixers), Some(oldmixers)) = (&newconf.mixers, &currentconf.mixers) {
-        for (mixer, params) in newmixers {
-            // The pipeline didn't change, any added mixer isn't included and can be skipped
-            if let Some(current_mixer) = oldmixers.get(mixer)
-                && params != current_mixer
-            {
-                mixers.push(mixer.to_string());
-            }
-        }
-    }
     if let (Some(newprocs), Some(oldprocs)) = (&newconf.processors, &currentconf.processors) {
         for (proc, params) in newprocs {
             // The pipeline didn't change, any added processor isn't included and can be skipped
@@ -488,7 +477,6 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     }
     ConfigChange::FilterParameters {
         filters,
-        mixers,
         processors,
     }
 }
